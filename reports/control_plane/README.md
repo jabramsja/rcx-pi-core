@@ -28,4 +28,5 @@ Relationship to other lanes:
 Current tracked packets:
 
 - `meta_bridge_rollout_2026-03-20.md`
+- `post_merge_supervisor_plan_2026-03-21.md`
 - `post_redteam_structural_queue_2026-03-20.md`

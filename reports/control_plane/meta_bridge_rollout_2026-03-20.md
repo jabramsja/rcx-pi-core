@@ -49,8 +49,9 @@ touch in this lane:
    Live Codex routing confirmed working: `NEEDS_PHASE_B` returned on stale package,
    no supervisor defects. Routing fix (PR #653) confirmed: failed-validation packages
    reach Codex, commit-capable decisions blocked, routing decisions pass through.
-2. **Active next step:** Keep the pre-commit supervisor as the standing gate before any commit flow.
-3. Design and implement the post-merge supervisor follow-on.
+2. **Standing invariant:** Keep the pre-commit supervisor as the standing gate before any commit flow. *(not a discrete wave — verified continuously)*
+3. **Active next step:** Design and implement the post-merge supervisor follow-on.
+   Tracked packet: `reports/control_plane/post_merge_supervisor_plan_2026-03-21.md`.
 4. Introduce real repo-local executors for:
    - Phase A
    - Phase B
@@ -78,8 +79,10 @@ touch in this lane:
 - `META-BRIDGE-S1` **implemented and merged** (PRs #641-#644):
   `mu/tools/agents/meta_bridge_supervisor.py` + `mu/tools/agents/templates/meta_bridge_task.txt`
 - **Seeded-package verification: complete** (2026-03-21). Live Codex routing confirmed.
-- **Active next step:** keep pre-commit supervisor as standing gate for commit flows
-- the post-merge supervisor is not implemented yet
+- **Standing invariant:** pre-commit supervisor remains standing gate for commit flows
+- **Active next step:** post-merge supervisor Phase A plan complete
+  (`reports/control_plane/post_merge_supervisor_plan_2026-03-21.md`);
+  Phase-A-Lock: UNLOCKED, pending founder GO to proceed to Phase B
 - real repo-local executors for Phase A / Phase B / commit do not exist yet
 - Claude memory still duplicates protocol truth
 
