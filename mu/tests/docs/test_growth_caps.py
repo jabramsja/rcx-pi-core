@@ -19,8 +19,8 @@ BASELINE_TOOL_SCRIPTS = 68  # .py + .sh in mu/tools/ (67 + sync_native_agents.sh
 BASELINE_CORE_DOCS = 48  # .md in mu/docs/ (all subdirs) — bumped for P6 TypedNumericEnvelopes.v0.md
 
 # Per-wave caps from DocGovernance.v0.md
-CAP_TEST_FILES = 96  # 40 core + 30 fuzzer + 5 deep-scan headroom + 5 P7 gates + 1 GPT findings gate + 1 JS security parity gate + 1 wave5 cleanup gate + 1 wave8 docstring accuracy gate + 1 wave9 stage0 flag removal gate + 1 wave11 hardening gate + 1 host-authority inventory ratchet test + 1 Wave3B subst VM unification gate + 1 Wave3C match VM staged dispatch gate + 1 Wave3D-A bounded VM helper gate + 1 Wave3D-B classify VM unification gate + 1 Wave4A engine transition gate + 1 Wave5A step monotonicity gate + 1 W6A trusted path gate (2026-03-19) + 1 meta-bridge supervisor routing tests + 1 pre-commit receipt tests. Wave15: freed 12 slots.
-CAP_TOOL_SCRIPTS = 15  # 2 runners + 3 checks + 1 host-authority inventory ratchet + 1 merge_pr.sh hook + 1 lower_stage0.py compiler + 1 json_to_dag.py compiler + 1 founder_session_heartbeat.sh + 1 check_stale_next_items.sh + 1 check_js_debt.sh (compat shim) + 1 derive_wave_id.sh (CI dedup) + 1 meta_bridge_supervisor.py (pre-commit convergence gate) + 1 verify_pre_commit_receipt.py (receipt verifier)
+CAP_TEST_FILES = 97  # 96 prior + 1 executor dispatch tests (Slice 1+2)
+CAP_TOOL_SCRIPTS = 18  # 15 prior + 1 executor_dispatch.py + 1 commit_executor.py + 1 executor_config.json
 CAP_CORE_DOCS = 10  # 5 core + 3 other + 1 A11 contract + 1 AgentBridgeProtocol
 
 
