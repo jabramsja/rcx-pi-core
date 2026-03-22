@@ -80,9 +80,10 @@ touch in this lane:
   `mu/tools/agents/meta_bridge_supervisor.py` + `mu/tools/agents/templates/meta_bridge_task.txt`
 - **Seeded-package verification: complete** (2026-03-21). Live Codex routing confirmed.
 - **Standing invariant:** pre-commit supervisor remains standing gate for commit flows
-- **Active next step:** post-merge supervisor Phase A plan complete
-  (`reports/control_plane/post_merge_supervisor_plan_2026-03-21.md`);
-  Phase-A-Lock: UNLOCKED, pending founder GO to proceed to Phase B
+- **META-BRIDGE-S2:** post-merge supervisor Slice 1 implemented (Phase B complete,
+  bridge-converged). Phase-A-Lock: LOCKED.
+  Tracked packet: `reports/control_plane/post_merge_supervisor_plan_2026-03-21.md`.
+  PR pending.
 - real repo-local executors for Phase A / Phase B / commit do not exist yet
 - Claude memory still duplicates protocol truth
 

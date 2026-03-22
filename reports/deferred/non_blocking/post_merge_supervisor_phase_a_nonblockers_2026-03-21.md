@@ -38,3 +38,53 @@ different ordering. Should be consolidated into a single
 `TRANSIENT_PATH_PREFIXES` constant with a canonical ordering.
 **Classification:** Code quality improvement. Can land in the post-merge
 implementation wave or as a separate follow-on.
+
+## Pre-Existing: TASKS Authorization Prose-Match
+
+**Source:** Bridge R4 (Phase B implementation review)
+**File:** `mu/tools/agents/meta_bridge_supervisor.py:check_tasks_authorization`
+**Issue:** `check_tasks_authorization` uses regex to find bracketed task IDs in
+NOW/NEXT text. A prose mention of `[TASK-ID]` anywhere in those sections
+passes the check, even if it's not a task bullet. Both pre-commit and
+post-merge modes are affected.
+**Impact:** Pre-existing in the pre-commit supervisor. Not introduced by
+post-merge implementation.
+**Recommended fix:** Parse TASKS.md bullet structure and match only on
+task-entry-level `**[ID]**` patterns at line start.
+**Classification:** Pre-existing, separate follow-on.
+
+## Phase B Bridge Non-Blockers (R1-R5)
+
+### Gate 5: Shell Variable Resolution Edge Case
+
+**Source:** Bridge R4-R5 (persisting)
+**File:** `mu/tools/agents/meta_bridge_supervisor.py:check_pre_commit_gate`
+**Issue:** Gate 5 cannot resolve `$SCRIPT_DIR` from shell text. An exec target
+like `/tmp/malicious/hooks/pre-commit-doc-check` passes if the canonical hook
+file also exists in the repo. Static text analysis cannot evaluate shell
+variable expansion.
+**Mitigation:** Gate 5 is SOFT (Codex-informed, not blocking). The actual
+enforcement is the pre-commit hook itself at commit time. Gate 5 is
+defense-in-depth for post-merge routing context.
+**Classification:** Trust-boundary limitation. Hardening requires shell
+execution or symlink resolution beyond static analysis.
+
+### Gate 1: Same-SHA Feature Branch Edge Case
+
+**Source:** Bridge R5
+**File:** `mu/tools/agents/meta_bridge_supervisor.py:check_merge_verification`
+**Issue:** If a feature branch points to the same SHA as `refs/heads/dev`,
+Gate 1 passes even though the branch name is not `dev`. This is technically
+correct (the state IS dev's state) but doesn't enforce the branch-name
+invariant strictly.
+**Classification:** Low-risk edge case. Post-merge supervisor is manually
+invoked; the operator knows what branch they're on.
+
+### Test Count Discrepancy
+
+**Source:** Bridge R3-R5 (persisting)
+**Issue:** Codex measures 40 tests in `mu/tests/tools/test_meta_bridge_supervisor.py`,
+package claims 55. The 55 count includes `test_pre_commit_receipt.py` (15 tests)
+in the same pytest invocation. The targeted file alone has 40 pre-existing +
+15 new = 55 tests when both files are included.
+**Classification:** Evidence presentation issue, not a code defect.
