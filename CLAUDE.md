@@ -107,7 +107,7 @@ RCX is a native structural substrate pursuing self-hosting and meta-circularity.
 
 **Branching:** `dev` is primary. All PRs target `dev`. No `main` in active use.
 
-**PR merge:** Bot auto-reviews. READ comments before resolving. Use `merge_pr.sh <PR#> --sweep` for thread resolution + merge.
+**PR merge:** Bot auto-reviews. READ comments before resolving. Use `bash mu/tools/hooks/merge_pr.sh <PR#> --sweep` for thread resolution + merge.
 
 **Audit tiers:**
 
