@@ -38,3 +38,4 @@ Current active inventory:
 - `non_blocking/wave-i-non-blocking-findings_2026-03-09.md`
 - `non_blocking/wave1_canonical_step_nonblockers_2026-03-16.md`
 - `non_blocking/hook_soft_gate_residue.md`
+- `non_blocking/post_merge_supervisor_phase_a_nonblockers_2026-03-21.md`

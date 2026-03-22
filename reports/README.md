@@ -4,6 +4,7 @@ Active top-level lanes:
 
 - `reports/archive/`: canonical archive for completed, stale, or superseded report artifacts
 - `reports/codex/`: active Codex design packets, synthesis work, and audit support material
+- `reports/control_plane/`: tracked founder-facing control-plane packets referenced by TASKS.md
 - `reports/deferred/`: active founder-facing blocker and advisory lanes, split into `blocking/` and `non_blocking/`
 - `reports/l4_wave_indicators/`: canonical wave evidence/provenance artifacts
 
