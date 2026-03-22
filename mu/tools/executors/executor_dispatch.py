@@ -36,7 +36,7 @@ ROUTING_DISPATCH = {
 STOP_TOKENS = {"STOP_FOR_FOUNDER", "STOP_FOR_TRIAGE_DISCUSSION"}
 
 # Available executor scripts
-AVAILABLE_EXECUTORS = {"commit_executor", "phase_b_executor", "phase_a_executor"}
+AVAILABLE_EXECUTORS = {"commit_executor", "phase_b_executor", "phase_a_executor", "dialectic_executor"}
 
 DEFAULT_CONFIG_PATH = SCRIPT_DIR / "executor_config.json"
 ROUTING_RECORD_PATH = Path(".agent_bus/meta/post_merge_routing.json")

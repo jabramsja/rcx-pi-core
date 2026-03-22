@@ -37,6 +37,10 @@ phase_a_mod = _load_module(
     "phase_a_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "phase_a_executor.py",
 )
+dialectic_mod = _load_module(
+    "dialectic_executor",
+    REPO_ROOT / "mu" / "tools" / "executors" / "dialectic_executor.py",
+)
 phase_b_mod = _load_module(
     "phase_b_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "phase_b_executor.py",
@@ -96,10 +100,9 @@ class TestDispatcherNotImplemented:
         """Phase B executor is available since Slice 3."""
         assert "phase_b_executor" in dispatch_mod.AVAILABLE_EXECUTORS
 
-    def test_dialectic_not_implemented(self):
-        record = {"decision": "CONTINUE_DIALECTIC", "summary": "narrow"}
-        result = dispatch_mod.dispatch(record, skip_freshness=True)
-        assert result["status"] == "not_implemented"
+    def test_dialectic_is_now_implemented(self):
+        """Dialectic executor is available since Slice 5."""
+        assert "dialectic_executor" in dispatch_mod.AVAILABLE_EXECUTORS
 
 
 class TestDispatcherConfig:
@@ -390,3 +393,61 @@ class TestPhaseAScopeExtraction:
         scope = phase_a_mod.extract_plan_scope(record)
         assert scope["request"] == "Create plan for phase_a_executor"
         assert scope["summary"] == "Next step is executor implementation"
+
+
+# ===========================================================================
+# Dialectic executor tests (Slice 5)
+# ===========================================================================
+
+
+class TestDialecticProposalExtraction:
+    """Dialectic executor extracts unbounded proposals."""
+
+    def test_extract_unbounded_proposal(self):
+        record = {
+            "next_candidates": [
+                {"candidate": "broad thing", "bounded": False},
+                {"candidate": "narrow thing", "bounded": True},
+            ]
+        }
+        proposal = dialectic_mod.extract_proposal(record)
+        assert proposal["candidate"] == "broad thing"
+        assert not proposal["bounded"]
+
+    def test_extract_first_when_all_bounded(self):
+        record = {
+            "next_candidates": [
+                {"candidate": "first", "bounded": True},
+                {"candidate": "second", "bounded": True},
+            ]
+        }
+        proposal = dialectic_mod.extract_proposal(record)
+        assert proposal["candidate"] == "first"
+
+    def test_empty_candidates(self):
+        proposal = dialectic_mod.extract_proposal({"next_candidates": []})
+        assert proposal["candidate"] == ""
+
+
+class TestDialecticEnvelopeParsing:
+    """Dialectic envelope parsing."""
+
+    def test_valid_envelope(self):
+        output = 'text\nBEGIN_DIALECTIC_ENVELOPE\n{"candidate": "narrowed", "bounded": true}\nEND_DIALECTIC_ENVELOPE\nmore'
+        result = dialectic_mod.parse_dialectic_envelope(output)
+        assert result["candidate"] == "narrowed"
+        assert result["bounded"] is True
+
+    def test_missing_envelope_raises(self):
+        with pytest.raises(dialectic_mod.DialecticExecutorError, match="missing"):
+            dialectic_mod.parse_dialectic_envelope("no envelope here")
+
+
+class TestDialecticDispatcherIntegration:
+    """Dispatcher correctly routes to dialectic_executor."""
+
+    def test_route_dialectic_dispatches(self):
+        assert dispatch_mod.resolve_executor("CONTINUE_DIALECTIC") == "dialectic_executor"
+
+    def test_dialectic_now_available(self):
+        assert "dialectic_executor" in dispatch_mod.AVAILABLE_EXECUTORS
