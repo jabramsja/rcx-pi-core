@@ -91,7 +91,6 @@ class TestDispatcherNotImplemented:
     def test_phase_a_is_now_implemented(self):
         """Phase A executor is available since Slice 4."""
         assert "phase_a_executor" in dispatch_mod.AVAILABLE_EXECUTORS
-        assert result["executor"] == "phase_a_executor"
 
     def test_phase_b_is_now_implemented(self):
         """Phase B executor is available since Slice 3."""
