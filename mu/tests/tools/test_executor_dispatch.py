@@ -33,6 +33,10 @@ commit_mod = _load_module(
     "commit_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "commit_executor.py",
 )
+phase_b_mod = _load_module(
+    "phase_b_executor",
+    REPO_ROOT / "mu" / "tools" / "executors" / "phase_b_executor.py",
+)
 
 
 # ===========================================================================
@@ -86,10 +90,9 @@ class TestDispatcherNotImplemented:
         assert result["status"] == "not_implemented"
         assert result["executor"] == "phase_a_executor"
 
-    def test_phase_b_not_implemented(self):
-        record = {"decision": "ROUTE_PHASE_B", "summary": "implement"}
-        result = dispatch_mod.dispatch(record, skip_freshness=True)
-        assert result["status"] == "not_implemented"
+    def test_phase_b_is_now_implemented(self):
+        """Phase B executor is available since Slice 3."""
+        assert "phase_b_executor" in dispatch_mod.AVAILABLE_EXECUTORS
 
     def test_dialectic_not_implemented(self):
         record = {"decision": "CONTINUE_DIALECTIC", "summary": "narrow"}
@@ -240,3 +243,90 @@ class TestCommitPipelineValidation:
         result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
         assert result["status"] == "error"
         assert result["step"] == "receipt_check"
+
+
+# ===========================================================================
+# Phase B executor tests (Slice 3)
+# ===========================================================================
+
+
+class TestPhaseBPlanLoading:
+    """Phase B executor loads and validates plan packets."""
+
+    def test_load_valid_plan(self, tmp_path):
+        plan = tmp_path / "plan.md"
+        plan.write_text("# Plan\n\nDate: 2026-03-22\nStatus: Phase B\nPhase-A-Lock: LOCKED\n")
+        result = phase_b_mod.load_plan_packet(tmp_path, "plan.md")
+        assert result["phase_a_lock"] == "LOCKED"
+        assert result["path"] == "plan.md"
+
+    def test_load_missing_plan_raises(self, tmp_path):
+        with pytest.raises(phase_b_mod.PhaseBExecutorError, match="not found"):
+            phase_b_mod.load_plan_packet(tmp_path, "missing.md")
+
+    def test_validate_wrong_decision(self):
+        record = {"decision": "ROUTE_PHASE_A"}
+        plan = {"phase_a_lock": "LOCKED"}
+        valid, errors = phase_b_mod.validate_inputs(record, plan)
+        assert not valid
+        assert any("ROUTE_PHASE_B" in e for e in errors)
+
+    def test_validate_unlocked_plan(self):
+        record = {"decision": "ROUTE_PHASE_B"}
+        plan = {"phase_a_lock": "UNLOCKED"}
+        valid, errors = phase_b_mod.validate_inputs(record, plan)
+        assert not valid
+        assert any("LOCKED" in e for e in errors)
+
+    def test_validate_correct_inputs(self):
+        record = {"decision": "ROUTE_PHASE_B"}
+        plan = {"phase_a_lock": "LOCKED"}
+        valid, errors = phase_b_mod.validate_inputs(record, plan)
+        assert valid
+
+
+class TestPhaseBCommitHandoff:
+    """Phase B executor prepares commit handoffs."""
+
+    def test_prepare_handoff(self, tmp_path):
+        path = phase_b_mod.prepare_commit_handoff(
+            tmp_path,
+            staged_files=["a.py"],
+            commit_message="feat: test",
+            pr_title="feat: test",
+            pr_body="## Summary\ntest",
+            head_branch="jabramsja/test",
+            task_id="[TEST]",
+            wave_name="test",
+        )
+        assert path.exists()
+        handoff = json.loads(path.read_text())
+        assert handoff["caller"] == "phase_b"
+        assert handoff["staged_files"] == ["a.py"]
+        assert handoff["pre_commit_receipt_path"] == ".agent_bus/meta/pre_commit_receipt.json"
+
+
+class TestPhaseBDispatcherIntegration:
+    """Dispatcher correctly routes to phase_b_executor."""
+
+    def test_route_phase_b_dispatches(self):
+        assert dispatch_mod.resolve_executor("ROUTE_PHASE_B") == "phase_b_executor"
+
+    def test_phase_b_now_available(self):
+        assert "phase_b_executor" in dispatch_mod.AVAILABLE_EXECUTORS
+
+
+class TestPhaseBRunPhaseB:
+    """Integration: run_phase_b with a real plan packet."""
+
+    def test_ready_with_locked_plan(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        plan = repo / "reports" / "control_plane" / "test_plan.md"
+        plan.write_text("# Plan\n\nDate: 2026-03-22\nStatus: Phase B\nPhase-A-Lock: LOCKED\n")
+
+        result = phase_b_mod.run_phase_b(
+            repo, "reports/control_plane/test_plan.md", verbose=True
+        )
+        assert result["status"] == "ready"

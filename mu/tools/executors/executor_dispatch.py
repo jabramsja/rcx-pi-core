@@ -35,8 +35,8 @@ ROUTING_DISPATCH = {
 # Tokens that stop and require human intervention
 STOP_TOKENS = {"STOP_FOR_FOUNDER", "STOP_FOR_TRIAGE_DISCUSSION"}
 
-# Available executor scripts (Slice 1+2: only commit_executor exists)
-AVAILABLE_EXECUTORS = {"commit_executor"}
+# Available executor scripts
+AVAILABLE_EXECUTORS = {"commit_executor", "phase_b_executor"}
 
 DEFAULT_CONFIG_PATH = SCRIPT_DIR / "executor_config.json"
 ROUTING_RECORD_PATH = Path(".agent_bus/meta/post_merge_routing.json")
