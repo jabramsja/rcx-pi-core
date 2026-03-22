@@ -473,15 +473,15 @@ Once executors exist:
 - Claude memory becomes pointers: "executor exists at X, run it for Y"
   instead of "here's the entire protocol to follow manually"
 
-### Deferred follow-on (rollout step 6)
+### Follow-on (rollout steps 5+6 — DONE)
 
-Broad CLAUDE.md/memory slimming is explicitly deferred until executors exist
-and are proven. This plan captures the dependency but does not implement the
-slimming. The rollout order is:
-- Step 4: executors (this plan)
-- Step 5: transition period with fallback skills
-- Step 6: slim CLAUDE.md/memory to pointer layer
-- Step 7: unpark structural queue
+Steps 5+6 combined (founder-authorized 2026-03-22). Executors validated via
+context optimization wave. CLAUDE.md slimmed 601→201 lines. Memory consolidated
+19→6 files. Manual wave protocol archived to `reports/archive/`.
+- Step 4: executors (this plan) — DONE
+- Step 5: transition + validation — DONE (combined with step 6)
+- Step 6: CLAUDE.md/memory pointer layer — DONE
+- Step 7: unpark structural queue — READY
 
 ---
 
@@ -572,8 +572,8 @@ Implementation is proven when:
 1. Post-merge supervisor never executes Phase A/B — only routes
 2. Executors never modify supervisor routing decisions
 3. Pre-commit supervisor remains the standing commit gate
-4. Structural queue stays parked until rollout steps 1-6 complete
-5. CLAUDE.md/memory slimming deferred until executors exist (step 6)
+4. Structural queue awaiting separate founder GO to unpark (rollout steps 1-6 complete)
+5. CLAUDE.md/memory slimmed to pointer layer (step 6 done, 2026-03-22)
 6. Founder-only: VECTOR/SINK promotion, queue unparking, rollout override
 7. All executor state is runtime (untracked) and state-bound
 8. Config-driven backend selection, not hardcoded
