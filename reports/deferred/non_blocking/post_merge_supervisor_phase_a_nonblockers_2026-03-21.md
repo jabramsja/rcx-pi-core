@@ -88,3 +88,42 @@ package claims 55. The 55 count includes `test_pre_commit_receipt.py` (15 tests)
 in the same pytest invocation. The targeted file alone has 40 pre-existing +
 15 new = 55 tests when both files are included.
 **Classification:** Evidence presentation issue, not a code defect.
+
+## Pre-Existing: merge_pr.sh --admin Bypass
+
+**Source:** Bridge Phase B R1 for executor surfaces (2026-03-22)
+**File:** `mu/tools/hooks/merge_pr.sh:162`
+**Issue:** merge_pr.sh uses `gh pr merge --admin` unconditionally. The executor
+plan documents a fail-closed policy (admin forbidden by default), but the
+existing merge script doesn't implement that policy. The commit executor
+delegates to merge_pr.sh as-is.
+**Classification:** Pre-existing in merge_pr.sh. Not introduced by executor
+implementation. Hardening of merge_pr.sh to support non-admin merge is a
+separate follow-on.
+
+## Executor Slice 1+2 Phase B Bridge Non-Blockers (2026-03-22)
+
+### UPDATE_TRACKER_ONLY Handoff Path
+
+**Source:** Bridge Phase B R2 for executor surfaces
+**Issue:** The dispatcher returns `needs_handoff` for commit_executor when
+UPDATE_TRACKER_ONLY routes to it. The full handoff preparation path requires
+the dispatcher or a dedicated tracker executor to stage files and prepare
+the handoff. This is Slice 3+ scope.
+**Classification:** Not blocked for Slice 1+2 proof. Required for full loop.
+
+### Post-Merge Supervisor Trigger After Merge
+
+**Source:** Bridge Phase B R1+R2 for executor surfaces
+**Issue:** commit_executor verifies dev checkout but does not trigger the
+post-merge supervisor. The full loop (merge → post-merge → route → executor)
+requires the post-merge supervisor to be invoked from the commit executor.
+This is integration scope (Slice 6).
+**Classification:** Not blocked for Slice 1+2 proof.
+
+### Commit State Persistence / Resume
+
+**Source:** Bridge Phase B R2 for executor surfaces
+**Issue:** If commit_executor fails mid-pipeline (e.g., CI timeout), there is
+no persisted state to resume from. The executor must be re-run from scratch.
+**Classification:** Quality improvement. Not blocked for Slice 1+2 proof.

@@ -8,12 +8,11 @@ current control-surface/meta-bridge rollout order
 ## Current operating truth
 
 - the active lane remains hooks / agents / bridge control-surface work
-- the immediate implementation target is `META-BRIDGE-S1`, not broad
-  remediation of every historical hook/control-surface finding
-- the previously produced hook-hardening/control-surface summary package is the
-  seeded corpus currently being used to exercise the pre-commit supervisor
-- pre-existing hook/validator findings remain queued background truth and must
-  not be forgotten, but they are not the immediate implementation target
+- `META-BRIDGE-S1` (pre-commit supervisor) and `META-BRIDGE-S2` (post-merge
+  supervisor) are both implemented and merged
+- the immediate implementation target is `EXECUTOR-SURFACES` (rollout step 4):
+  repo-local executor automation for Phase A, Phase B, commit, and dialectic
+- pre-existing hook/validator findings remain queued background truth
 
 ## Seeded test corpus
 
@@ -52,10 +51,10 @@ touch in this lane:
 2. **Standing invariant:** Keep the pre-commit supervisor as the standing gate before any commit flow. *(not a discrete wave — verified continuously)*
 3. ~~Design and implement the post-merge supervisor follow-on~~ **(done — PR #657 merged)**.
    Tracked packet: `reports/control_plane/post_merge_supervisor_plan_2026-03-21.md`.
-4. **Active next step:** Introduce real repo-local executors for:
-   - Phase A
-   - Phase B
-   - commit / merge flow
+4. **Active next step:** Introduce real repo-local executors for Phase A, Phase B,
+   commit/merge flow, and dialectic narrowing.
+   Tracked packet: `reports/control_plane/executor_surfaces_plan_2026-03-22.md`.
+   Phase B Slice 1+2 (bridge-converged, non-blockers filed, PR pending).
 5. During transition only, allow `/wave`, `/bridge`, `/checkpoint`, hook
    scripts, and `merge_pr.sh` as explicit fallback surfaces.
 6. Reduce Claude memory to a pointer layer only after the tracked packets and

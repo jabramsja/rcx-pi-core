@@ -1,0 +1,23 @@
+{
+  "backends": {
+    "post_merge_supervisor": "codex",
+    "dialectic_executor": "codex",
+    "phase_a_executor": "codex",
+    "phase_b_executor": "codex",
+    "commit_executor": null
+  },
+  "model_overrides": {
+    "phase_b_executor": "sonnet"
+  },
+  "timeouts": {
+    "dialectic_executor": 600,
+    "phase_a_executor": 1200,
+    "phase_b_executor": 1200,
+    "commit_executor": 300
+  },
+  "bridge_loop_limits": {
+    "phase_a": 15,
+    "phase_b": 10,
+    "dialectic": 3
+  }
+}
