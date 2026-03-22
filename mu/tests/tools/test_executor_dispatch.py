@@ -88,10 +88,9 @@ class TestDispatcherStopTokens:
 class TestDispatcherNotImplemented:
     """Unimplemented executors return not_implemented status."""
 
-    def test_phase_a_not_implemented(self):
-        record = {"decision": "ROUTE_PHASE_A", "summary": "plan needed"}
-        result = dispatch_mod.dispatch(record, skip_freshness=True)
-        assert result["status"] == "not_implemented"
+    def test_phase_a_is_now_implemented(self):
+        """Phase A executor is available since Slice 4."""
+        assert "phase_a_executor" in dispatch_mod.AVAILABLE_EXECUTORS
         assert result["executor"] == "phase_a_executor"
 
     def test_phase_b_is_now_implemented(self):
