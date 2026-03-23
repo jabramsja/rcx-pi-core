@@ -354,11 +354,14 @@ class TestPhaseAPlanCreation:
         assert "create executors" in content
 
     def test_existing_plan_not_overwritten(self, tmp_path):
+        from datetime import datetime, timezone
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         (tmp_path / "reports" / "control_plane").mkdir(parents=True)
-        existing = tmp_path / "reports" / "control_plane" / "test_plan_2026-03-22.md"
+        existing = tmp_path / "reports" / "control_plane" / f"test_plan_{date_str}.md"
         existing.write_text("# existing plan")
         scope = {"request": "new content"}
         path = phase_a_mod.create_plan_draft(tmp_path, "test_plan", scope)
+        assert path == existing
         assert path.read_text() == "# existing plan"
 
     def test_lock_plan(self, tmp_path):
