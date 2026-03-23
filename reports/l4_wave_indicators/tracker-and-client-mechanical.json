@@ -1,0 +1,24 @@
+{
+  "wave_id": "tracker-and-client-mechanical",
+  "repeat_run_speedup_ratio": 1.024357,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.38518,
+  "repeat_run_raw_seconds": [
+    0.394562,
+    0.38518
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.394562
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.779742
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-23T07:12:38Z",
+  "collector_version": "2.2.0"
+}
