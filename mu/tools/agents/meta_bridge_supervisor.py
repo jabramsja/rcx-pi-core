@@ -899,16 +899,35 @@ def write_pre_commit_receipt(
 
     staged_sha = compute_staged_sha(repo_root)
 
+    # Derive package digest for binding
+    package_digest = ""
+    if package_path and package_path.exists():
+        package_digest = hashlib.sha256(
+            package_path.read_bytes()
+        ).hexdigest()[:16]
+
     receipt = {
         "decision": response.decision,
         "staged_sha": staged_sha,
         "timestamp_utc": utc_now(),
+        "package_digest": package_digest,
+        "package_path": str(package_path) if package_path else "",
     }
 
     receipt_dir = repo_root / META_BUS_DIR_NAME
     receipt_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write canonical hook-compatible receipt (backward compat)
     receipt_path = receipt_dir / PRE_COMMIT_RECEIPT_NAME
     receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+
+    # Write per-invocation receipt for audit trail
+    receipts_dir = receipt_dir / "pre_commit_receipts"
+    receipts_dir.mkdir(parents=True, exist_ok=True)
+    ts_slug = utc_now().replace(":", "-").replace("+", "p")
+    per_invocation_path = receipts_dir / f"receipt_{ts_slug}.json"
+    per_invocation_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+
     return receipt_path
 
 
