@@ -132,10 +132,27 @@ def run_meta_bridge_package(
     # Validate the decision is real, not a template placeholder
     _validate_decision(response.decision)
 
-    # Build receipt path
+    # Get actual receipt path from supervisor response
+    # The supervisor writes the receipt and returns the path
     receipt_path = ""
     if response.decision in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
-        receipt_path = ".agent_bus/meta/pre_commit_receipt.json"
+        # Check if the canonical receipt was written
+        import subprocess as _sp
+        try:
+            toplevel = _sp.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, check=True,
+                cwd=str(package_path.resolve().parent),
+            ).stdout.strip()
+            canonical = Path(toplevel) / ".agent_bus" / "meta" / "pre_commit_receipt.json"
+            if canonical.exists():
+                receipt_path = str(canonical.relative_to(Path(toplevel)))
+            else:
+                raise MetaBridgeClientError(
+                    f"Supervisor returned {response.decision} but no receipt written at {canonical}"
+                )
+        except _sp.CalledProcessError:
+            receipt_path = ".agent_bus/meta/pre_commit_receipt.json"
 
     return SupervisorResult(
         decision=response.decision,

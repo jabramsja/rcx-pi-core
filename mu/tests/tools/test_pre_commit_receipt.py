@@ -63,7 +63,7 @@ class TestReceiptWriting:
         assert data["decision"] == "COMMIT_GO"
         assert data["staged_sha"] == "abc123"
         assert "timestamp_utc" in data
-        assert len(data) == 3  # minimal schema: decision, staged_sha, timestamp_utc
+        assert len(data) == 5  # decision, staged_sha, timestamp_utc, package_digest, package_path
 
     def test_receipt_written_on_commit_go_hold_push(self, tmp_path):
         response = meta.MetaBridgeResponse(
@@ -209,5 +209,6 @@ class TestClaudeMdPreCommitCommand:
 
     def test_claude_md_has_pre_commit_step(self):
         claude_md = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-        assert "meta_bridge_supervisor.py" in claude_md
-        assert "step_1b" in claude_md or "pre-commit supervisor" in claude_md.lower()
+        # CLAUDE.md should reference the structured client or the commit executor
+        assert "meta_bridge_client" in claude_md or "commit_executor" in claude_md
+        assert "commit protocol" in claude_md.lower() or "pre-commit" in claude_md.lower()

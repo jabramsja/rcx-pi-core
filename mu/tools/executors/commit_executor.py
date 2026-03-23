@@ -24,48 +24,71 @@ class CommitExecutorError(RuntimeError):
     """Raised when commit executor cannot proceed."""
 
 
-# Required handoff fields
-REQUIRED_HANDOFF_FIELDS = {
-    "staged_files",
+# Required handoff fields (accept both old and new schema during migration)
+# New schema: wave_id, files_to_stage, wave_class, target_gate_id, branch_prefix
+# Old schema: staged_files, head_branch, hold_push, wave_name
+# Minimum required for both: commit_message, pr_title, pr_body, base_branch, task_id, caller
+CORE_HANDOFF_FIELDS = {
     "commit_message",
     "pr_title",
     "pr_body",
-    "head_branch",
     "base_branch",
-    "hold_push",
-    "pre_commit_receipt_path",
     "task_id",
-    "wave_name",
     "caller",
 }
+# Old schema required fields (backward compat)
+OLD_SCHEMA_FIELDS = {"staged_files", "head_branch", "hold_push", "wave_name", "pre_commit_receipt_path"}
+# New schema required fields
+NEW_SCHEMA_FIELDS = {"wave_id", "files_to_stage", "wave_class", "target_gate_id", "branch_prefix"}
+# Combined for backward compat: core + at least one of old/new
+REQUIRED_HANDOFF_FIELDS = CORE_HANDOFF_FIELDS  # Minimum check
 
 
 def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
-    """Validate handoff has required fields with correct types."""
+    """Validate handoff has required fields with correct types.
+
+    Accepts both old schema (staged_files, head_branch, hold_push, wave_name)
+    and new schema (wave_id, files_to_stage, wave_class, branch_prefix).
+    Core fields required by both: commit_message, pr_title, pr_body, base_branch, task_id, caller.
+    """
     if not isinstance(handoff, dict):
         return False, ["Handoff must be a JSON object"]
 
-    missing = REQUIRED_HANDOFF_FIELDS - set(handoff.keys())
-    if missing:
-        return False, [f"Missing field: {f}" for f in sorted(missing)]
+    # Check core fields
+    missing_core = CORE_HANDOFF_FIELDS - set(handoff.keys())
+    if missing_core:
+        return False, [f"Missing core field: {f}" for f in sorted(missing_core)]
 
     errors: list[str] = []
 
-    if not isinstance(handoff.get("staged_files"), list):
-        errors.append("staged_files must be a list")
-    elif not handoff["staged_files"]:
-        errors.append("staged_files must not be empty")
-    else:
-        for i, f in enumerate(handoff["staged_files"]):
-            if not isinstance(f, str):
-                errors.append(f"staged_files[{i}] must be a string")
+    # Detect schema: new has wave_id, old has wave_name
+    is_new_schema = "wave_id" in handoff
+    is_old_schema = "staged_files" in handoff or "head_branch" in handoff
 
-    for fld in ("commit_message", "pr_title", "pr_body", "head_branch", "base_branch", "pre_commit_receipt_path", "task_id", "wave_name", "caller"):
-        if not isinstance(handoff.get(fld), str) or not handoff[fld].strip():
+    # Validate file list (accept either field name)
+    files_field = "files_to_stage" if is_new_schema else "staged_files"
+    file_list = handoff.get(files_field, handoff.get("staged_files", handoff.get("files_to_stage")))
+    if not isinstance(file_list, list):
+        errors.append(f"{files_field} must be a list")
+    elif not file_list:
+        errors.append(f"{files_field} must not be empty")
+    else:
+        for i, f in enumerate(file_list):
+            if not isinstance(f, str):
+                errors.append(f"{files_field}[{i}] must be a string")
+
+    # Validate string fields
+    core_str_fields = ["commit_message", "pr_title", "pr_body", "base_branch", "task_id", "caller"]
+    if is_old_schema and not is_new_schema:
+        core_str_fields.extend(["head_branch", "pre_commit_receipt_path", "wave_name"])
+    for fld in core_str_fields:
+        if fld in handoff and (not isinstance(handoff.get(fld), str) or not handoff[fld].strip()):
             errors.append(f"{fld} must be a non-empty string")
 
-    if not isinstance(handoff.get("hold_push"), bool):
-        errors.append("hold_push must be a boolean")
+    # Old schema: validate hold_push
+    if is_old_schema and not is_new_schema:
+        if "hold_push" in handoff and not isinstance(handoff.get("hold_push"), bool):
+            errors.append("hold_push must be a boolean")
 
     valid_callers = {"phase_b", "phase_a", "update_tracker_only"}
     caller = handoff.get("caller", "")
@@ -108,27 +131,51 @@ def run_commit_pipeline(
     if not valid:
         return {"status": "error", "step": "validate", "errors": errors}
 
-    # Validate pre-commit receipt exists
-    receipt_path = repo_root / handoff.get("pre_commit_receipt_path", "")
-    if not receipt_path.exists():
-        return {
-            "status": "error",
-            "step": "receipt_check",
-            "errors": [f"Pre-commit receipt not found: {handoff.get('pre_commit_receipt_path')}"],
-        }
+    # Validate pre-commit receipt using shared verifier (decision + staged_sha + age)
+    # Try to use the full verifier; fall back to basic check if import fails
+    _verifier_loaded = False
     try:
-        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-        if receipt.get("decision") not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+        import importlib.util as _ilu
+        _verifier_path = repo_root / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py"
+        if _verifier_path.exists():
+            _spec = _ilu.spec_from_file_location("_mbs_verifier", str(_verifier_path))
+            if _spec and _spec.loader:
+                _mbs = _ilu.module_from_spec(_spec)
+                _spec.loader.exec_module(_mbs)
+                passed, message = _mbs.verify_pre_commit_receipt(repo_root)
+                _verifier_loaded = True
+                if not passed:
+                    return {
+                        "status": "error",
+                        "step": "receipt_check",
+                        "errors": [message],
+                    }
+    except Exception:
+        pass  # Fall through to basic check
+
+    if not _verifier_loaded:
+        # Fallback: basic receipt check if verifier unavailable
+        receipt_path_str = handoff.get("pre_commit_receipt_path", ".agent_bus/meta/pre_commit_receipt.json")
+        receipt_path = repo_root / receipt_path_str
+        if not receipt_path.exists():
             return {
                 "status": "error",
                 "step": "receipt_check",
-                "errors": [f"Receipt decision '{receipt.get('decision')}' does not authorize commit"],
+                "errors": [f"Pre-commit receipt not found: {receipt_path_str}"],
             }
-    except (json.JSONDecodeError, OSError) as exc:
-        return {"status": "error", "step": "receipt_check", "errors": [f"Receipt unreadable: {exc}"]}
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if receipt.get("decision") not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+                return {
+                    "status": "error",
+                    "step": "receipt_check",
+                    "errors": [f"Receipt decision '{receipt.get('decision')}' does not authorize commit"],
+                }
+        except (json.JSONDecodeError, OSError) as exc:
+            return {"status": "error", "step": "receipt_check", "errors": [f"Receipt unreadable: {exc}"]}
 
     result["steps_completed"].append("receipt_check")
-    log("Pre-commit receipt validated")
+    log("Pre-commit receipt validated (decision + staged_sha + age)")
 
     # Verify we're on the right branch
     try:

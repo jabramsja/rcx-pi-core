@@ -49,11 +49,7 @@ This file is read by Claude Code at session start.
 
 Executors in `mu/tools/executors/` own the Phase A/B/commit pipeline. See `mu/docs/agents/AgentBridgeProtocol.v0.md` for bridge details. Manual protocol archived in `reports/archive/manual_wave_protocol_2026-03-22.md`.
 
-**Commit protocol (step 1b):** Before `git commit`, run pre-commit supervisor explicitly:
-```
-python3 mu/tools/agents/meta_bridge_supervisor.py --package <path> --json
-```
-Hook verifies receipt — it does NOT auto-run supervisor. One orchestrator (Claude), fail-closed verification (hook).
+**Commit protocol:** Use `commit_executor.py` for commit-through-merge. Use `meta_bridge_client.py` for supervisor calls (not raw subprocess). Use `tracker_sync_note.py` for tracker notes (not freeform prose). Hook verifies receipt — fail-closed verification. See `protocol_wave_execution.md` in memory for exact commands.
 
 **Bridge bootstrap:** Every bridge invocation requires Codex to read `FOUNDER_SESSION_BOOTSTRAP.md` first. Injected automatically via `bridge_reviewer_prompt.txt` template.
 

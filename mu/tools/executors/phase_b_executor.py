@@ -155,33 +155,44 @@ def run_pre_commit_supervisor(
     verbose: bool = False,
     timeout: int = 1200,
 ) -> dict[str, Any]:
-    """Run pre-commit supervisor on a package."""
-    supervisor = repo_root / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py"
-    cmd = [
-        sys.executable, str(supervisor),
-        "--package", str(package_path),
-        "--json",
-    ]
-    if verbose:
-        cmd.append("-v")
+    """Run pre-commit supervisor via structured meta_bridge_client.
+
+    Uses the Python API — no subprocess, no shell, no grep.
+    Returns dict with 'parsed' containing structured result and 'receipt_path'.
+    """
+    try:
+        agents_dir = str(repo_root / "mu" / "tools" / "agents")
+        if agents_dir not in sys.path:
+            sys.path.insert(0, agents_dir)
+        from meta_bridge_client import run_meta_bridge_package, MetaBridgeClientError
+    except ImportError:
+        # Fallback: try direct import
+        script_dir = Path(__file__).resolve().parent.parent / "agents"
+        if str(script_dir) not in sys.path:
+            sys.path.insert(0, str(script_dir))
+        from meta_bridge_client import run_meta_bridge_package, MetaBridgeClientError
 
     try:
-        result = subprocess.run(
-            cmd, cwd=repo_root, capture_output=True, text=True,
-            check=False, timeout=timeout,
+        result = run_meta_bridge_package(
+            package_path,
+            wait_for_lock_seconds=30,
+            verbose=verbose,
         )
-        try:
-            parsed = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            parsed = {"decision": "ERROR_INTERNAL", "summary": result.stdout[:500]}
         return {
-            "exit_code": result.returncode,
-            "parsed": parsed,
+            "exit_code": 0 if not result.is_error else 1,
+            "parsed": {
+                "decision": result.decision,
+                "summary": result.summary,
+                "status": result.status,
+                "findings": result.findings,
+            },
+            "receipt_path": result.receipt_path,
         }
-    except subprocess.TimeoutExpired:
+    except MetaBridgeClientError as exc:
         return {
             "exit_code": -1,
-            "parsed": {"decision": "ERROR_CODEX_TIMEOUT", "summary": "Pre-commit supervisor timed out"},
+            "parsed": {"decision": "ERROR_INTERNAL", "summary": str(exc)[:500]},
+            "receipt_path": "",
         }
 
 
