@@ -188,29 +188,50 @@ def run_pre_commit_supervisor(
 def prepare_commit_handoff(
     repo_root: Path,
     *,
-    staged_files: list[str],
-    commit_message: str,
-    pr_title: str,
-    pr_body: str,
-    head_branch: str,
+    wave_id: str,
     task_id: str,
-    wave_name: str,
+    wave_class: str,
+    target_gate_id: str,
+    caller: str = "phase_b",
+    branch_prefix: str = "jabramsja",
+    tracker_sync: dict[str, str] | None = None,
+    fixes_implemented: list[str] | None = None,
+    files_to_stage: list[str] | None = None,
+    force_add_files: list[str] | None = None,
+    commit_message: str = "",
+    pr_title: str = "",
+    pr_body: str = "",
+    # Legacy fields (deprecated — kept for backward compat during migration)
+    staged_files: list[str] | None = None,
+    head_branch: str = "",
+    wave_name: str = "",
     hold_push: bool = False,
 ) -> Path:
-    """Prepare a commit executor handoff file."""
-    handoff = {
-        "staged_files": staged_files,
+    """Prepare a commit executor handoff file.
+
+    New schema (R16+): uses wave_id, structured tracker_sync, files_to_stage.
+    Legacy fields accepted for backward compatibility but ignored if new fields present.
+    """
+    handoff: dict[str, Any] = {
+        "wave_id": wave_id,
+        "task_id": task_id,
+        "wave_class": wave_class,
+        "target_gate_id": target_gate_id,
+        "caller": caller,
+        "branch_prefix": branch_prefix,
+        "fixes_implemented": fixes_implemented or [],
+        "files_to_stage": files_to_stage or staged_files or [],
+        "force_add_files": force_add_files or [],
         "commit_message": commit_message,
         "pr_title": pr_title,
         "pr_body": pr_body,
-        "head_branch": head_branch,
         "base_branch": "dev",
-        "hold_push": hold_push,
         "pre_commit_receipt_path": ".agent_bus/meta/pre_commit_receipt.json",
-        "task_id": task_id,
-        "wave_name": wave_name,
-        "caller": "phase_b",
     }
+
+    # Structured tracker sync (new path — replaces freeform tracker_note_text)
+    if tracker_sync is not None:
+        handoff["tracker_sync"] = tracker_sync
 
     handoff_dir = repo_root / ".agent_bus" / "executors"
     handoff_dir.mkdir(parents=True, exist_ok=True)
@@ -230,10 +251,13 @@ def run_phase_b(
 
     This is the main entry point. It orchestrates:
     1. Plan loading + validation
-    2. SDK agent review
-    3. Bridge convergence loop
-    4. Pre-commit supervisor
-    5. Commit handoff preparation
+    2. Invoke implementer agent (separate code-writing actor)
+    3. SDK agent review (once)
+    4. Bridge convergence loop (bridge only, not agents again)
+    5. Non-blockers to reports/deferred/non_blocking/
+    6. On convergence: prepare pre-commit package + run supervisor
+    7. On COMMIT_GO: prepare handoff for commit_executor
+    8. On NEEDS_PHASE_B: re-enter bridge loop (not agents)
 
     Returns a result dict with status and details.
     """
@@ -242,6 +266,7 @@ def run_phase_b(
         "plan_path": plan_path,
         "bridge_rounds": 0,
         "agent_review_ran": False,
+        "implementer_invoked": False,
         "pre_commit_decision": None,
         "handoff_path": None,
     }
@@ -250,12 +275,11 @@ def run_phase_b(
         if verbose:
             print(f"[phase-b] {msg}")
 
-    # Load and validate
+    # Step 1: Load and validate
     try:
         routing_record = load_routing_record(repo_root)
     except PhaseBExecutorError as exc:
         log(f"Routing record load failed: {exc}")
-        # Proceed without routing record if plan path is provided directly
         routing_record = {"decision": "ROUTE_PHASE_B", "summary": "Direct invocation"}
 
     try:
@@ -266,14 +290,122 @@ def run_phase_b(
     log(f"Plan loaded: {plan_path}")
     log(f"Phase-A-Lock: {plan.get('phase_a_lock', 'unknown')}")
 
-    # Note: validation is advisory — Phase B can proceed with a LOCKED plan
-    # even if invoked directly (not through post-merge supervisor)
     valid, errors = validate_inputs(routing_record, plan)
     if not valid:
         log(f"Input validation warnings: {errors}")
-        # Don't fail on validation — allow direct invocation for testing
 
-    result["status"] = "ready"
+    # Step 2: Load executor config for backend/model/timeout
+    try:
+        from phase_b_implementer import (
+            build_implementation_prompt,
+            invoke_implementer,
+            load_executor_config,
+        )
+    except ImportError:
+        # Fallback: try relative import
+        script_dir = Path(__file__).resolve().parent
+        if str(script_dir) not in sys.path:
+            sys.path.insert(0, str(script_dir))
+        from phase_b_implementer import (
+            build_implementation_prompt,
+            invoke_implementer,
+            load_executor_config,
+        )
+
+    config = load_executor_config(repo_root)
+    backend = config.get("backends", {}).get("phase_b_executor", "codex")
+    model = config.get("model_overrides", {}).get("phase_b_executor")
+    timeout = config.get("timeouts", {}).get("phase_b_executor", 1200)
+
+    # Step 3: Invoke implementer agent
+    log(f"Invoking implementer (backend={backend}, timeout={timeout}s)...")
+    impl_prompt = build_implementation_prompt(
+        plan.get("content", ""),
+        repo_root=repo_root,
+        wave_id=plan_path.replace("reports/control_plane/", "").replace(".md", ""),
+    )
+    impl_result = invoke_implementer(
+        repo_root, impl_prompt,
+        backend=backend,
+        model_override=model,
+        timeout=timeout,
+        verbose=verbose,
+    )
+    result["implementer_invoked"] = True
+    result["implementer_status"] = impl_result["status"]
+    log(f"Implementer: {impl_result['status']} (exit={impl_result['exit_code']})")
+
+    if impl_result["status"] == "timeout":
+        return {"status": "error", "step": "implementer", "errors": ["Implementer timed out"]}
+
+    # Step 4: Run SDK agents ONCE on changed files
+    log("Running SDK agent review...")
+    agent_result = run_sdk_agents(repo_root, [], verbose=verbose)
+    result["agent_review_ran"] = True
+    result["agent_exit_code"] = agent_result["exit_code"]
+    log(f"Agent review exit code: {agent_result['exit_code']}")
+
+    # Step 5: Bridge convergence loop (bridge only — agents already ran)
+    for round_num in range(1, max_bridge_rounds + 1):
+        log(f"Bridge review round {round_num}/{max_bridge_rounds}...")
+        result["bridge_rounds"] = round_num
+
+        bridge_result = run_bridge_review(
+            repo_root,
+            f"Phase B implementation review R{round_num} for {plan_path}",
+            verbose=verbose,
+        )
+        log(f"Bridge exit code: {bridge_result['exit_code']}")
+
+        # Check rendered output for decision
+        rendered_dir = repo_root / ".agent_bus" / "rendered"
+        if rendered_dir.exists():
+            renders = sorted(rendered_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+            if renders:
+                latest = renders[0].read_text(encoding="utf-8")
+                if "Decision: GO" in latest:
+                    log("Bridge converged: GO")
+                    result["status"] = "converged"
+                    break
+                elif "Decision: REQUEST_CHANGES" in latest or "Decision: NO_GO" in latest:
+                    log("Bridge: REQUEST_CHANGES — fix blockers, non-blockers to deferred/non_blocking/")
+                    # Non-blockers should be filed by the bridge reviewer
+                    continue
+
+    if result.get("status") != "converged":
+        if round_num >= max_bridge_rounds:
+            result["status"] = "max_rounds_reached"
+            log(f"Max bridge rounds ({max_bridge_rounds}) reached without convergence")
+            return result
+
+    # Step 6: Run pre-commit supervisor via structured client
+    log("Running pre-commit supervisor...")
+    supervisor_result = run_pre_commit_supervisor(
+        repo_root,
+        # Package path will be built by the caller or a helper
+        repo_root / ".scratch" / "phase_b_supervisor_package.json",
+        verbose=verbose,
+    )
+    result["pre_commit_decision"] = supervisor_result.get("parsed", {}).get("decision")
+    log(f"Supervisor decision: {result['pre_commit_decision']}")
+
+    decision = result["pre_commit_decision"]
+    if decision == "NEEDS_PHASE_B":
+        # Re-enter bridge loop (not agents) per protocol
+        log("NEEDS_PHASE_B — re-entering bridge loop")
+        result["status"] = "needs_phase_b"
+        return result
+
+    if decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+        result["status"] = "supervisor_rejected"
+        result["errors"] = [f"Supervisor returned {decision}, not COMMIT_GO"]
+        return result
+
+    # Step 7: Prepare commit handoff
+    log("Preparing commit handoff...")
+    # The handoff is prepared by the caller with structured fields
+    result["status"] = "commit_ready"
+    result["pre_commit_decision"] = decision
     return result
 
 
