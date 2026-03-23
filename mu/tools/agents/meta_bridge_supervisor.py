@@ -934,13 +934,21 @@ def write_pre_commit_receipt(
 def verify_pre_commit_receipt(
     repo_root: Path,
     *,
+    receipt_path: Path | None = None,
     max_age_seconds: int = 1800,
 ) -> tuple[bool, str]:
     """Verify that a valid pre-commit receipt exists for current staged state.
 
+    Args:
+        repo_root: Repository root.
+        receipt_path: Explicit receipt path to verify (for executor flow).
+            If None, uses the canonical hook-compatible path.
+        max_age_seconds: Maximum receipt age in seconds.
+
     Returns (passed, message). The hook calls this — it never runs the supervisor.
     """
-    receipt_path = repo_root / META_BUS_DIR_NAME / PRE_COMMIT_RECEIPT_NAME
+    if receipt_path is None:
+        receipt_path = repo_root / META_BUS_DIR_NAME / PRE_COMMIT_RECEIPT_NAME
     if not receipt_path.exists():
         return False, (
             "No pre-commit receipt found. Run the meta-bridge supervisor before commit:\n"

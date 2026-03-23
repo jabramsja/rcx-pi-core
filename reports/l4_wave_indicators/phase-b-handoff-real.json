@@ -1,0 +1,24 @@
+{
+  "wave_id": "phase-b-handoff-real",
+  "repeat_run_speedup_ratio": 1.302162,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.371682,
+  "repeat_run_raw_seconds": [
+    0.48399,
+    0.371682
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.48399
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.855672
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-23T10:13:47Z",
+  "collector_version": "2.2.0"
+}
