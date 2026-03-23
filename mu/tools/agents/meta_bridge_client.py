@@ -54,13 +54,30 @@ class SupervisorResult:
         return self.decision == "COMMIT_GO_HOLD_PUSH"
 
 
+# Valid concrete decisions from the Decision enum in meta_bridge_supervisor.py
+VALID_DECISIONS = frozenset({
+    "COMMIT_GO", "COMMIT_GO_HOLD_PUSH", "NO_ACTION",
+    "NEEDS_PHASE_A", "NEEDS_PHASE_B",
+    "STOP_FOR_FOUNDER", "STOP_FOR_TRIAGE_DISCUSSION",
+    "CONTINUE_DIALECTIC", "ROUTE_PHASE_A", "ROUTE_PHASE_B", "UPDATE_TRACKER_ONLY",
+    "ERROR_PACKAGE_INVALID", "ERROR_CODEX_TIMEOUT", "ERROR_CODEX_ABORT",
+    "ERROR_VALIDATION_FAILED", "ERROR_REPO_CHANGED", "ERROR_MERGE_NOT_FOUND",
+    "ERROR_INTERNAL", "RETRY_SUGGESTED",
+})
+
+
 def _validate_decision(decision: str) -> None:
-    """Reject template enum placeholders and empty decisions."""
+    """Reject invalid decisions using positive allowlist."""
     if not decision:
         raise MetaBridgeClientError("Supervisor returned empty decision")
     if _TEMPLATE_ENUM_PATTERN in decision:
         raise MetaBridgeClientError(
             f"Supervisor returned pipe-delimited template enum, not a real decision: {decision[:100]}"
+        )
+    if decision not in VALID_DECISIONS:
+        raise MetaBridgeClientError(
+            f"Supervisor returned unknown decision '{decision}'. "
+            f"Valid: {sorted(VALID_DECISIONS)}"
         )
 
 
@@ -132,11 +149,19 @@ def run_meta_bridge_package(
     # Validate the decision is real, not a template placeholder
     _validate_decision(response.decision)
 
+    # Write receipt for commit-capable decisions (Python API doesn't do this itself)
+    if response.decision in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+        try:
+            from meta_bridge_supervisor import write_pre_commit_receipt
+            write_pre_commit_receipt(response, package_path)
+        except Exception as exc:
+            raise MetaBridgeClientError(
+                f"Supervisor returned {response.decision} but receipt write failed: {exc}"
+            ) from exc
+
     # Get actual receipt path from supervisor response
-    # The supervisor writes the receipt and returns the path
     receipt_path = ""
     if response.decision in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
-        # Check if the canonical receipt was written
         import subprocess as _sp
         try:
             toplevel = _sp.run(
@@ -144,15 +169,29 @@ def run_meta_bridge_package(
                 capture_output=True, text=True, check=True,
                 cwd=str(package_path.resolve().parent),
             ).stdout.strip()
-            canonical = Path(toplevel) / ".agent_bus" / "meta" / "pre_commit_receipt.json"
-            if canonical.exists():
-                receipt_path = str(canonical.relative_to(Path(toplevel)))
-            else:
-                raise MetaBridgeClientError(
-                    f"Supervisor returned {response.decision} but no receipt written at {canonical}"
-                )
+            repo = Path(toplevel)
+
+            # Prefer per-invocation receipt (sorted by filename, deterministic)
+            per_inv_dir = repo / ".agent_bus" / "meta" / "pre_commit_receipts"
+            if per_inv_dir.exists():
+                receipts = sorted(per_inv_dir.iterdir(), key=lambda p: p.name, reverse=True)
+                if receipts:
+                    receipt_path = str(receipts[0].relative_to(repo))
+
+            # Fall back to canonical if no per-invocation found
+            if not receipt_path:
+                canonical = repo / ".agent_bus" / "meta" / "pre_commit_receipt.json"
+                if canonical.exists():
+                    receipt_path = str(canonical.relative_to(repo))
+                else:
+                    raise MetaBridgeClientError(
+                        f"Supervisor returned {response.decision} but no receipt written"
+                    )
         except _sp.CalledProcessError:
-            receipt_path = ".agent_bus/meta/pre_commit_receipt.json"
+            # Fail closed — do not silently fall back to hardcoded path
+            raise MetaBridgeClientError(
+                "Cannot determine repo root for receipt path resolution"
+            )
 
     return SupervisorResult(
         decision=response.decision,

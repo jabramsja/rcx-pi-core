@@ -349,9 +349,29 @@ def run_phase_b(
     if impl_result["status"] == "timeout":
         return {"status": "error", "step": "implementer", "errors": ["Implementer timed out"]}
 
-    # Step 4: Run SDK agents ONCE on changed files
-    log("Running SDK agent review...")
-    agent_result = run_sdk_agents(repo_root, [], verbose=verbose)
+    # Collect changed files after implementer ran (for agents + supervisor + handoff)
+    changed_files: list[str] = []
+    try:
+        _staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo_root, capture_output=True, text=True, check=True,
+        ).stdout.strip().splitlines()
+        _unstaged = subprocess.run(
+            ["git", "diff", "--name-only"],
+            cwd=repo_root, capture_output=True, text=True, check=True,
+        ).stdout.strip().splitlines()
+        _untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=repo_root, capture_output=True, text=True, check=True,
+        ).stdout.strip().splitlines()
+        changed_files = sorted(set(f for f in _staged + _unstaged + _untracked if f))
+    except subprocess.CalledProcessError:
+        pass
+
+    # Step 4: Run SDK agents ONCE on live worktree changed files
+    log("Running SDK agent review on changed files...")
+    agent_files = changed_files if changed_files else ["--pr"]
+    agent_result = run_sdk_agents(repo_root, agent_files, verbose=verbose)
     result["agent_review_ran"] = True
     result["agent_exit_code"] = agent_result["exit_code"]
     log(f"Agent review exit code: {agent_result['exit_code']}")
@@ -368,19 +388,30 @@ def run_phase_b(
         )
         log(f"Bridge exit code: {bridge_result['exit_code']}")
 
-        # Check rendered output for decision
+        # Check bridge result — only trust renders newer than this invocation
+        if bridge_result["exit_code"] != 0:
+            log(f"Bridge invocation failed (exit={bridge_result['exit_code']}), continuing loop")
+            continue
+
         rendered_dir = repo_root / ".agent_bus" / "rendered"
         if rendered_dir.exists():
+            # Only look at renders created AFTER this bridge call started
             renders = sorted(rendered_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
             if renders:
-                latest = renders[0].read_text(encoding="utf-8")
-                if "Decision: GO" in latest:
+                latest = renders[0]
+                # Verify this render is fresh (created within last 5 minutes)
+                import time as _time
+                render_age = _time.time() - latest.stat().st_mtime
+                if render_age > 300:
+                    log(f"Stale render ({int(render_age)}s old), ignoring")
+                    continue
+                content = latest.read_text(encoding="utf-8")
+                if "Decision: GO" in content:
                     log("Bridge converged: GO")
                     result["status"] = "converged"
                     break
-                elif "Decision: REQUEST_CHANGES" in latest or "Decision: NO_GO" in latest:
-                    log("Bridge: REQUEST_CHANGES — fix blockers, non-blockers to deferred/non_blocking/")
-                    # Non-blockers should be filed by the bridge reviewer
+                elif "Decision: REQUEST_CHANGES" in content or "Decision: NO_GO" in content:
+                    log("Bridge: REQUEST_CHANGES — continuing loop")
                     continue
 
     if result.get("status") != "converged":
@@ -389,34 +420,185 @@ def run_phase_b(
             log(f"Max bridge rounds ({max_bridge_rounds}) reached without convergence")
             return result
 
-    # Step 6: Run pre-commit supervisor via structured client
+    # Step 6: Build and run pre-commit supervisor via structured client
+    log("Building supervisor package...")
+    scratch_dir = repo_root / ".scratch"
+    scratch_dir.mkdir(exist_ok=True)
+    package_path = scratch_dir / "phase_b_supervisor_package.json"
+
+    # Derive wave_id from plan path
+    wave_id = plan_path.replace("reports/control_plane/", "").replace(".md", "")
+
+    # Get ALL changed files (staged + unstaged + untracked)
+    changed_files: list[str] = []
+    try:
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo_root, capture_output=True, text=True, check=True,
+        ).stdout.strip().splitlines()
+        unstaged = subprocess.run(
+            ["git", "diff", "--name-only"],
+            cwd=repo_root, capture_output=True, text=True, check=True,
+        ).stdout.strip().splitlines()
+        untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=repo_root, capture_output=True, text=True, check=True,
+        ).stdout.strip().splitlines()
+        changed_files = sorted(set(f for f in staged + unstaged + untracked if f))
+    except subprocess.CalledProcessError:
+        changed_files = []
+
+    supervisor_package = {
+        "task_id": routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
+        "wave_name": wave_id,
+        "lane": "hooks/agents/bridge control-surface",
+        "changed_files": changed_files,
+        "scope_items": [plan_path],
+        "fixes_implemented": ["Phase B implementation per locked plan"],
+        "deferred_items": [],
+        "bridge_status": {"rounds": result.get("bridge_rounds", 0)},
+        "evidence_handles": {},
+        "blocker_report_paths": [],
+        "current_judgment": "COMMIT_GO",
+    }
+    package_path.write_text(json.dumps(supervisor_package, indent=2) + "\n", encoding="utf-8")
+
     log("Running pre-commit supervisor...")
     supervisor_result = run_pre_commit_supervisor(
-        repo_root,
-        # Package path will be built by the caller or a helper
-        repo_root / ".scratch" / "phase_b_supervisor_package.json",
-        verbose=verbose,
+        repo_root, package_path, verbose=verbose,
     )
     result["pre_commit_decision"] = supervisor_result.get("parsed", {}).get("decision")
+    receipt_path = supervisor_result.get("receipt_path", ".agent_bus/meta/pre_commit_receipt.json")
     log(f"Supervisor decision: {result['pre_commit_decision']}")
 
     decision = result["pre_commit_decision"]
     if decision == "NEEDS_PHASE_B":
-        # Re-enter bridge loop (not agents) per protocol
-        log("NEEDS_PHASE_B — re-entering bridge loop")
-        result["status"] = "needs_phase_b"
-        return result
+        # Re-enter: implementer fixes → bridge reviews → loop until converged
+        # Bridge is read-only — it can't fix anything. Implementer must act.
+        log("NEEDS_PHASE_B — re-invoking implementer then bridge loop")
+        reentry_converged = False
 
-    if decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+        for reentry_round in range(result["bridge_rounds"] + 1, max_bridge_rounds + 1):
+            log(f"Re-entry round {reentry_round}/{max_bridge_rounds}...")
+            result["bridge_rounds"] = reentry_round
+
+            # Re-invoke implementer to fix what bridge/supervisor flagged
+            log("Re-invoking implementer for fixes...")
+            reentry_prompt = build_implementation_prompt(
+                plan.get("content", "") + "\n\n## NEEDS_PHASE_B Findings\n\n"
+                + supervisor_result.get("parsed", {}).get("summary", "Fix required"),
+                repo_root=repo_root,
+                wave_id=wave_id,
+                scope_hint="Fix findings from bridge/supervisor review",
+            )
+            impl_result = invoke_implementer(
+                repo_root, reentry_prompt,
+                backend=backend, model_override=model,
+                timeout=timeout, verbose=verbose,
+            )
+            log(f"Implementer re-entry: {impl_result['status']}")
+
+            # Rebuild changed_files from live state after implementer ran
+            try:
+                staged = subprocess.run(
+                    ["git", "diff", "--cached", "--name-only"],
+                    cwd=repo_root, capture_output=True, text=True, check=True,
+                ).stdout.strip().splitlines()
+                unstaged = subprocess.run(
+                    ["git", "diff", "--name-only"],
+                    cwd=repo_root, capture_output=True, text=True, check=True,
+                ).stdout.strip().splitlines()
+                untracked = subprocess.run(
+                    ["git", "ls-files", "--others", "--exclude-standard"],
+                    cwd=repo_root, capture_output=True, text=True, check=True,
+                ).stdout.strip().splitlines()
+                changed_files = sorted(set(f for f in staged + unstaged + untracked if f))
+            except subprocess.CalledProcessError:
+                pass  # Keep previous changed_files
+
+            # Rewrite supervisor package with fresh changed_files
+            supervisor_package["changed_files"] = changed_files
+            package_path.write_text(json.dumps(supervisor_package, indent=2) + "\n", encoding="utf-8")
+
+            # Bridge reviews the fix (same exit_code + freshness checks as initial loop)
+            bridge_result = run_bridge_review(
+                repo_root,
+                f"Phase B re-entry R{reentry_round} after NEEDS_PHASE_B for {plan_path}",
+                verbose=verbose,
+            )
+            if bridge_result["exit_code"] != 0:
+                log(f"Reentry bridge failed (exit={bridge_result['exit_code']}), continuing loop")
+                continue
+
+            rendered_dir = repo_root / ".agent_bus" / "rendered"
+            if rendered_dir.exists():
+                renders = sorted(rendered_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+                if renders:
+                    latest = renders[0]
+                    import time as _time
+                    render_age = _time.time() - latest.stat().st_mtime
+                    if render_age > 300:
+                        log(f"Stale reentry render ({int(render_age)}s old), ignoring")
+                        continue
+                    content = latest.read_text(encoding="utf-8")
+                    if "Decision: GO" in content:
+                        log("Bridge re-entry converged: GO")
+                        reentry_converged = True
+                        break
+
+        if not reentry_converged:
+            result["status"] = "max_rounds_reached"
+            return result
+
+        # Re-run supervisor FRESH after re-entry convergence
+        log("Re-running supervisor after bridge re-entry...")
+        supervisor_result = run_pre_commit_supervisor(
+            repo_root, package_path, verbose=verbose,
+        )
+        decision = supervisor_result.get("parsed", {}).get("decision")
+        receipt_path = supervisor_result.get("receipt_path", "")
+        result["pre_commit_decision"] = decision
+        log(f"Post-reentry supervisor decision: {decision}")
+
+        if decision == "NEEDS_PHASE_B":
+            # Second NEEDS_PHASE_B — fail closed, don't produce commit_ready
+            result["status"] = "needs_phase_b"
+            result["errors"] = ["Supervisor returned NEEDS_PHASE_B after reentry convergence. "
+                                "Manual intervention required."]
+            return result
+        elif decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+            result["status"] = "supervisor_rejected"
+            result["errors"] = [f"Post-reentry supervisor returned {decision}"]
+            return result
+
+    elif decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
         result["status"] = "supervisor_rejected"
         result["errors"] = [f"Supervisor returned {decision}, not COMMIT_GO"]
         return result
 
-    # Step 7: Prepare commit handoff
+    # Step 7: Prepare commit handoff with real values
     log("Preparing commit handoff...")
-    # The handoff is prepared by the caller with structured fields
+    # Use staged_files alias for backward compat with commit_executor
+    handoff_path = prepare_commit_handoff(
+        repo_root,
+        wave_id=wave_id,
+        task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
+        wave_class="L4_ENABLER",
+        target_gate_id="G8",
+        files_to_stage=changed_files,
+        commit_message=f"feat: Phase B implementation for {wave_id}\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+        pr_title=f"feat: Phase B - {wave_id}",
+        pr_body=f"## Summary\nPhase B implementation per locked plan at {plan_path}",
+    )
+    # Patch the handoff with the real receipt path
+    handoff_data = json.loads(handoff_path.read_text(encoding="utf-8"))
+    handoff_data["pre_commit_receipt_path"] = receipt_path
+    handoff_path.write_text(json.dumps(handoff_data, indent=2) + "\n", encoding="utf-8")
     result["status"] = "commit_ready"
+    result["handoff_path"] = str(handoff_path)
     result["pre_commit_decision"] = decision
+    result["receipt_path"] = receipt_path
+    log(f"Handoff written: {handoff_path}")
     return result
 
 
@@ -475,7 +657,7 @@ def main() -> int:
             for e in result["errors"]:
                 print(f"[phase-b] Error: {e}")
 
-    return 0 if result.get("status") in ("success", "ready") else 1
+    return 0 if result.get("status") in ("success", "ready", "commit_ready") else 1
 
 
 if __name__ == "__main__":

@@ -65,6 +65,16 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
     is_new_schema = "wave_id" in handoff
     is_old_schema = "staged_files" in handoff or "head_branch" in handoff
 
+    # New schema: require key fields
+    if is_new_schema:
+        for fld in ("branch_prefix", "wave_id"):
+            if not isinstance(handoff.get(fld), str) or not handoff[fld].strip():
+                errors.append(f"New schema requires {fld} as non-empty string")
+        if handoff.get("base_branch") != "dev":
+            errors.append(f"base_branch must be 'dev', got '{handoff.get('base_branch')}'")
+    elif not is_old_schema:
+        errors.append("Handoff must provide either new schema (wave_id) or old schema (staged_files/head_branch)")
+
     # Validate file list (accept either field name)
     files_field = "files_to_stage" if is_new_schema else "staged_files"
     file_list = handoff.get(files_field, handoff.get("staged_files", handoff.get("files_to_stage")))
@@ -131,6 +141,27 @@ def run_commit_pipeline(
     if not valid:
         return {"status": "error", "step": "validate", "errors": errors}
 
+    # For new schema: stage files FIRST so receipt staged_sha matches
+    _is_new = "wave_id" in handoff
+    if _is_new:
+        expected_files = handoff.get("files_to_stage", [])
+        force_files = handoff.get("force_add_files", [])
+        if expected_files or force_files:
+            log("New schema: staging files before receipt validation...")
+            try:
+                if expected_files:
+                    run_cmd(["git", "add", *expected_files], cwd=repo_root)
+                if force_files:
+                    run_cmd(["git", "add", "-f", *force_files], cwd=repo_root)
+                result["steps_completed"].append("staging")
+            except subprocess.CalledProcessError as exc:
+                return {
+                    "status": "error",
+                    "step": "staging",
+                    "errors": [f"git add failed: {exc.stderr.strip()}"],
+                    "steps_completed": result["steps_completed"],
+                }
+
     # Validate pre-commit receipt using shared verifier (decision + staged_sha + age)
     # Try to use the full verifier; fall back to basic check if import fails
     _verifier_loaded = False
@@ -141,8 +172,18 @@ def run_commit_pipeline(
             _spec = _ilu.spec_from_file_location("_mbs_verifier", str(_verifier_path))
             if _spec and _spec.loader:
                 _mbs = _ilu.module_from_spec(_spec)
+                sys.modules["_mbs_verifier"] = _mbs  # Required for @dataclass on Python 3.13
                 _spec.loader.exec_module(_mbs)
-                passed, message = _mbs.verify_pre_commit_receipt(repo_root)
+                # Use explicit receipt path from handoff if available
+                _explicit_receipt = None
+                _receipt_str = handoff.get("pre_commit_receipt_path", "")
+                if _receipt_str:
+                    _explicit_receipt = repo_root / _receipt_str
+                    if not _explicit_receipt.exists():
+                        _explicit_receipt = None  # Fall back to canonical
+                passed, message = _mbs.verify_pre_commit_receipt(
+                    repo_root, receipt_path=_explicit_receipt
+                )
                 _verifier_loaded = True
                 if not passed:
                     return {
@@ -150,10 +191,18 @@ def run_commit_pipeline(
                         "step": "receipt_check",
                         "errors": [message],
                     }
-    except Exception:
-        pass  # Fall through to basic check
+    except Exception as _exc:
+        # Verifier failed to load — for new schema, fail closed
+        if _is_new:
+            return {
+                "status": "error",
+                "step": "receipt_check",
+                "errors": [f"Receipt verifier failed to load: {_exc}"],
+                "steps_completed": result["steps_completed"],
+            }
+        # Old schema: fall through to basic check
 
-    if not _verifier_loaded:
+    if not _verifier_loaded and not _is_new:
         # Fallback: basic receipt check if verifier unavailable
         receipt_path_str = handoff.get("pre_commit_receipt_path", ".agent_bus/meta/pre_commit_receipt.json")
         receipt_path = repo_root / receipt_path_str
@@ -177,6 +226,14 @@ def run_commit_pipeline(
     result["steps_completed"].append("receipt_check")
     log("Pre-commit receipt validated (decision + staged_sha + age)")
 
+    # Derive head_branch from new schema if available, fall back to old
+    if "wave_id" in handoff and "branch_prefix" in handoff:
+        expected_branch = f"{handoff['branch_prefix']}/{handoff['wave_id']}"
+    elif "head_branch" in handoff:
+        expected_branch = handoff["head_branch"]
+    else:
+        return {"status": "error", "step": "branch_check", "errors": ["No head_branch or wave_id+branch_prefix in handoff"]}
+
     # Verify we're on the right branch
     try:
         current_branch = run_cmd(
@@ -185,14 +242,16 @@ def run_commit_pipeline(
     except subprocess.CalledProcessError:
         return {"status": "error", "step": "branch_check", "errors": ["Cannot determine current branch"]}
 
-    if current_branch != handoff["head_branch"]:
+    if current_branch != expected_branch:
         return {
             "status": "error",
             "step": "branch_check",
-            "errors": [f"Expected branch {handoff['head_branch']}, got {current_branch}"],
+            "errors": [f"Expected branch {expected_branch}, got {current_branch}"],
         }
 
-    # Verify staged files match
+    # Verify staged files match (staging already done above for new schema)
+    expected_files = handoff.get("files_to_stage", handoff.get("staged_files", []))
+    force_files = handoff.get("force_add_files", [])
     try:
         staged = run_cmd(
             ["git", "diff", "--cached", "--name-only"], cwd=repo_root
@@ -200,9 +259,9 @@ def run_commit_pipeline(
     except subprocess.CalledProcessError:
         staged = []
 
-    expected = set(handoff["staged_files"])
+    expected = set(expected_files) | set(force_files)
     actual = set(staged)
-    if expected != actual:
+    if expected and expected != actual:
         missing = expected - actual
         extra = actual - expected
         errs = []
@@ -232,8 +291,17 @@ def run_commit_pipeline(
             "steps_completed": result["steps_completed"],
         }
 
-    # Step 3: Hold if COMMIT_GO_HOLD_PUSH
-    if handoff.get("hold_push", False):
+    # Step 3: Hold if receipt says COMMIT_GO_HOLD_PUSH (or legacy hold_push field)
+    # New schema: receipt-driven. Old schema: handoff.hold_push boolean.
+    receipt_path_str = handoff.get("pre_commit_receipt_path", ".agent_bus/meta/pre_commit_receipt.json")
+    _hold = handoff.get("hold_push", False)  # Old schema fallback
+    try:
+        _receipt_data = json.loads((repo_root / receipt_path_str).read_text(encoding="utf-8"))
+        if _receipt_data.get("decision") == "COMMIT_GO_HOLD_PUSH":
+            _hold = True
+    except (json.JSONDecodeError, OSError, FileNotFoundError):
+        pass  # Use handoff fallback
+    if _hold:
         try:
             sha = run_cmd(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
         except subprocess.CalledProcessError:
@@ -249,7 +317,7 @@ def run_commit_pipeline(
     log("Pushing...")
     try:
         run_cmd(
-            ["git", "push", "-u", "origin", handoff["head_branch"]],
+            ["git", "push", "-u", "origin", expected_branch],
             cwd=repo_root, timeout=300,
         )
         result["steps_completed"].append("push")
@@ -269,7 +337,7 @@ def run_commit_pipeline(
             [
                 "gh", "pr", "create",
                 "--base", handoff["base_branch"],
-                "--head", handoff["head_branch"],
+                "--head", expected_branch,
                 "--title", handoff["pr_title"],
                 "--body", handoff["pr_body"],
             ],

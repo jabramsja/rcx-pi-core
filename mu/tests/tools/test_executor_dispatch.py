@@ -233,7 +233,8 @@ class TestCommitPipelineValidation:
         handoff = _make_valid_handoff(staged_files=["nonexistent.py"])
         result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
         assert result["status"] == "error"
-        assert result["step"] == "staged_check"
+        # Old schema: fails at staged_check. New schema (if detected): may fail at staging.
+        assert result["step"] in ("staged_check", "staging")
 
     def test_missing_receipt_fails(self, tmp_path):
         import subprocess
