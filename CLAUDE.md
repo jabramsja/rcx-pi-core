@@ -118,7 +118,7 @@ RCX is a native structural substrate pursuing self-hosting and meta-circularity.
 | 3 | CI green gate | Push/PR to dev (~2 min) |
 | 4-5 | CI nightly/weekly | Scheduled |
 
-**IMPORTANT:** Always run `./tools/audit_all.sh` locally before pushing.
+**Per-commit gate:** `pre-push-fast` runs automatically during push (audit_fast + L4 contract). `audit_all.sh` is for thorough pre-release validation, not per-commit.
 
 ---
 
