@@ -149,20 +149,23 @@ def run_meta_bridge_package(
     # Validate the decision is real, not a template placeholder
     _validate_decision(response.decision)
 
-    # Write receipt for commit-capable decisions (Python API doesn't do this itself)
+    # Write receipt for commit-capable decisions and capture the exact path.
+    # write_pre_commit_receipt returns the per-invocation receipt path directly —
+    # no heuristic discovery needed.
+    receipt_path = ""
     if response.decision in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+        import subprocess as _sp
         try:
             from meta_bridge_supervisor import write_pre_commit_receipt
-            write_pre_commit_receipt(response, package_path)
+            exact_receipt_path = write_pre_commit_receipt(response, package_path)
         except Exception as exc:
             raise MetaBridgeClientError(
                 f"Supervisor returned {response.decision} but receipt write failed: {exc}"
             ) from exc
 
-    # Get actual receipt path from supervisor response
-    receipt_path = ""
-    if response.decision in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
-        import subprocess as _sp
+        # Convert absolute path to repo-relative for handoff portability.
+        # FAIL CLOSED if conversion fails — absolute paths are never safe
+        # for downstream executors.
         try:
             toplevel = _sp.run(
                 ["git", "rev-parse", "--show-toplevel"],
@@ -170,38 +173,30 @@ def run_meta_bridge_package(
                 cwd=str(package_path.resolve().parent),
             ).stdout.strip()
             repo = Path(toplevel)
-
-            # Prefer per-invocation receipt (sorted by filename, deterministic)
-            per_inv_dir = repo / ".agent_bus" / "meta" / "pre_commit_receipts"
-            if per_inv_dir.exists():
-                receipts = sorted(per_inv_dir.iterdir(), key=lambda p: p.name, reverse=True)
-                if receipts:
-                    receipt_path = str(receipts[0].relative_to(repo))
-
-            # Fall back to canonical if no per-invocation found
-            if not receipt_path:
-                canonical = repo / ".agent_bus" / "meta" / "pre_commit_receipt.json"
-                if canonical.exists():
-                    receipt_path = str(canonical.relative_to(repo))
-                else:
-                    raise MetaBridgeClientError(
-                        f"Supervisor returned {response.decision} but no receipt written"
-                    )
-        except _sp.CalledProcessError:
-            # Fail closed — do not silently fall back to hardcoded path
+            receipt_path = str(exact_receipt_path.relative_to(repo))
+        except (_sp.CalledProcessError, ValueError) as exc:
             raise MetaBridgeClientError(
-                "Cannot determine repo root for receipt path resolution"
+                f"Cannot convert receipt path to repo-relative — fail closed. "
+                f"absolute={exact_receipt_path}, error={exc}"
+            ) from exc
+
+    # Validate envelope has required fields before constructing result
+    _required_attrs = ("decision", "summary", "status")
+    for attr in _required_attrs:
+        if not hasattr(response, attr) or getattr(response, attr) is None:
+            raise MetaBridgeClientError(
+                f"Supervisor response missing required field: {attr}"
             )
 
     return SupervisorResult(
         decision=response.decision,
         summary=response.summary,
         status=response.status,
-        validations_passed=response.validations_passed,
-        validations_failed=response.validations_failed,
-        findings=response.findings,
-        request_for_claude=response.request_for_claude,
-        error_code=response.error_code,
-        error_detail=response.error_detail,
+        validations_passed=getattr(response, "validations_passed", []) or [],
+        validations_failed=getattr(response, "validations_failed", []) or [],
+        findings=getattr(response, "findings", []) or [],
+        request_for_claude=getattr(response, "request_for_claude", "") or "",
+        error_code=getattr(response, "error_code", "") or "",
+        error_detail=getattr(response, "error_detail", "") or "",
         receipt_path=receipt_path,
     )

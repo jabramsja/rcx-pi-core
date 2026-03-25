@@ -99,6 +99,56 @@ AGENT_DEFAULT_MODELS = {
 # Keep this constrained to avoid silent typos in CLI overrides.
 SUPPORTED_AGENT_MODELS = {"opus", "sonnet"}
 
+# Import canonical control-surface file set from single source of truth.
+try:
+    _checks_dir = str(Path(__file__).resolve().parent.parent / "checks")
+    if _checks_dir not in sys.path:
+        sys.path.insert(0, _checks_dir)
+    from check_control_surface_invariants import CONTROL_SURFACE_FILES
+except ImportError:
+    # Fallback: hardcoded set if checker not importable (should not happen in repo)
+    CONTROL_SURFACE_FILES = frozenset({
+        "mu/tools/executors/phase_b_executor.py",
+        "mu/tools/executors/phase_b_implementer.py",
+        "mu/tools/executors/commit_executor.py",
+        "mu/tools/agents/meta_bridge_supervisor.py",
+        "mu/tools/agents/meta_bridge_client.py",
+    })
+
+
+def build_control_surface_context(files: list[str]) -> str:
+    """Build control-surface review context if relevant files are in scope.
+
+    Returns a prompt section with proof obligations for Phase B / commit
+    authority chain files. Returns empty string for non-control-surface files.
+    """
+    normalized = {f.replace("\\", "/").removeprefix("./") for f in files}
+    # Also strip absolute repo root if present
+    try:
+        _toplevel = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        normalized = {
+            p[len(_toplevel):].lstrip("/") if p.startswith(_toplevel) else p
+            for p in normalized
+        }
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+    if not normalized & CONTROL_SURFACE_FILES:
+        return ""
+    return """
+---
+CONTROL-SURFACE REVIEW MODE: These files are part of the Phase B / commit authority chain.
+When reviewing, inspect these cross-file invariants:
+1. Implementer must use bridge_adapters.run_adapter(), NOT bridge_supervisor review mode.
+2. Bridge loop must re-invoke implementer on REQUEST_CHANGES/NO_GO. QUESTION must fail closed.
+3. Receipt authority: write_pre_commit_receipt() returns per-invocation path. Client captures it directly.
+4. Canonical hook receipt must still be written. Executor flow uses per-invocation receipt.
+5. Protocol docs must not present manual git push/PR/merge as normal commit path.
+If any obligation is unverifiable, list it under NOT_CHECKED.
+---"""
+
 AGENT_PASS_VERDICTS = {
     "verifier": {"APPROVE"},
     "adversary": {"SECURE"},

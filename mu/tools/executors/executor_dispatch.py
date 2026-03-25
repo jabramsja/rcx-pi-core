@@ -21,6 +21,18 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent  # mu/tools/executors -> repo root
 
+# Import canonical load_routing_record from shared module
+try:
+    from executor_common import load_routing_record as _common_load_routing_record, ExecutorCommonError
+except ImportError:
+    import importlib.util as _ilu
+    _common_path = SCRIPT_DIR / "executor_common.py"
+    _spec = _ilu.spec_from_file_location("executor_common", str(_common_path))
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    _common_load_routing_record = _mod.load_routing_record
+    ExecutorCommonError = _mod.ExecutorCommonError
+
 # Routing token → executor mapping
 ROUTING_DISPATCH = {
     "CONTINUE_DIALECTIC": "dialectic_executor",
@@ -60,22 +72,15 @@ def load_config(config_path: Path | None = None) -> dict[str, Any]:
 
 
 def load_routing_record(repo_root: Path) -> dict[str, Any]:
-    """Load and validate the post-merge routing record."""
-    record_path = repo_root / ROUTING_RECORD_PATH
-    if not record_path.exists():
-        raise DispatchError(f"Routing record not found: {record_path}")
+    """Load and validate the post-merge routing record.
 
+    Delegates to executor_common.load_routing_record (canonical implementation).
+    Wraps ExecutorCommonError as DispatchError for backward compatibility.
+    """
     try:
-        record = json.loads(record_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise DispatchError(f"Routing record is not valid JSON: {exc}") from exc
-
-    required = {"decision", "summary"}
-    missing = required - set(record.keys())
-    if missing:
-        raise DispatchError(f"Routing record missing keys: {sorted(missing)}")
-
-    return record
+        return _common_load_routing_record(repo_root)
+    except ExecutorCommonError as exc:
+        raise DispatchError(str(exc)) from exc
 
 
 def validate_routing_record_freshness(record: dict[str, Any], repo_root: Path) -> tuple[bool, str]:

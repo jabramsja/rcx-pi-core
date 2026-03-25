@@ -752,6 +752,162 @@ def run_validation_gates(
     r8 = check_tasks_authorization(repo_root, package.get("task_id", ""))
     results.append(r8)
 
+    # Gate 9: Control-surface invariants (only when control-surface files touched)
+    if verbose:
+        print("[meta-bridge] Gate 9: control-surface invariants...")
+    cs_checker = repo_root / "tools" / "checks" / "check_control_surface_invariants.py"
+    if cs_checker.exists():
+        changed = package.get("changed_files", [])
+        exit_code, output = run_validation_command(
+            repo_root,
+            ["python3", str(cs_checker), "--files"] + changed + ["--json"]
+        )
+        if exit_code == 0:
+            results.append(ValidationResult("control_surface_invariants", True))
+        else:
+            results.append(ValidationResult("control_surface_invariants", False, output[:300]))
+    else:
+        results.append(ValidationResult("control_surface_invariants", True))
+
+    # Gate 10: Closeout attestation (control-surface waves must have authorized attestation)
+    changed = package.get("changed_files", [])
+    att_checker = repo_root / "tools" / "checks" / "check_closeout_attestation.py"
+    try:
+        _cs_import_dir2 = str(repo_root / "tools" / "checks")
+        if _cs_import_dir2 not in sys.path:
+            sys.path.insert(0, _cs_import_dir2)
+        from check_control_surface_invariants import CONTROL_SURFACE_FILES as _cs_gate_files
+        is_cs_wave = bool(set(changed) & _cs_gate_files)
+    except Exception:
+        is_cs_wave = False
+    if is_cs_wave and att_checker.exists():
+        try:
+            if verbose:
+                print("[meta-bridge] Gate 10: closeout attestation (control-surface wave)...")
+            # Collect validation results from earlier gates to pass as BEHAVIORAL proof
+            validation_commands_for_att: list[dict] = []
+            for r in results:
+                validation_commands_for_att.append({
+                    "command": f"gate:{r.name}",
+                    "exit_code": 0 if r.passed else 1,
+                    "output": r.error or ("passed" if r.passed else "failed"),
+                })
+            # Receipt-chain behavioral proof: when receipt-chain files are touched,
+            # run the receipt chain end-to-end test to emit a receipt_chain proof
+            # that check_closeout_attestation.py requires for GO authorization.
+            _receipt_chain_files = {
+                "mu/tools/executors/commit_executor.py",
+                "mu/tools/executors/phase_b_executor.py",
+                "mu/tools/agents/meta_bridge_client.py",
+                "mu/tools/agents/meta_bridge_supervisor.py",
+            }
+            if set(changed) & _receipt_chain_files:
+                rc_test = repo_root / "mu" / "tests" / "tools" / "test_commit_executor_receipt.py"
+                if rc_test.exists():
+                    rc_exit, rc_output = run_validation_command(
+                        repo_root,
+                        ["python3", "-m", "pytest", str(rc_test), "-q", "--tb=short"],
+                    )
+                    validation_commands_for_att.append({
+                        "command": "receipt_chain: phase_b_to_commit_executor",
+                        "exit_code": rc_exit,
+                        "output": rc_output[:300] if rc_output else ("passed" if rc_exit == 0 else "failed"),
+                    })
+                    if verbose:
+                        print(f"[meta-bridge] Gate 10: receipt_chain test exit={rc_exit}")
+                else:
+                    validation_commands_for_att.append({
+                        "command": "receipt_chain: phase_b_to_commit_executor",
+                        "exit_code": 1,
+                        "output": "receipt chain test file not found",
+                    })
+            # Non-receipt-chain control-surface waves still need a BEHAVIORAL
+            # validation proof (gate-style "gate:..." proofs are filtered out by
+            # the attestation checker).  Run control-surface invariant tests to
+            # provide a qualifying proof for ANY control-surface wave.
+            if not (set(changed) & _receipt_chain_files):
+                cs_test = repo_root / "mu" / "tests" / "tools" / "test_control_surface_review.py"
+                if cs_test.exists():
+                    cs_exit, cs_output = run_validation_command(
+                        repo_root,
+                        ["python3", "-m", "pytest", str(cs_test), "-q", "--tb=short"],
+                    )
+                    validation_commands_for_att.append({
+                        "command": "control_surface: invariant_tests",
+                        "exit_code": cs_exit,
+                        "output": cs_output[:300] if cs_output else ("passed" if cs_exit == 0 else "failed"),
+                    })
+                    if verbose:
+                        print(f"[meta-bridge] Gate 10: control_surface invariant test exit={cs_exit}")
+                else:
+                    # Fallback: run the checker script directly as behavioral proof
+                    cs_checker_script = repo_root / "tools" / "checks" / "check_control_surface_invariants.py"
+                    if cs_checker_script.exists():
+                        cs_exit, cs_output = run_validation_command(
+                            repo_root,
+                            ["python3", str(cs_checker_script), "--files"] + list(changed) + ["--json"],
+                        )
+                        validation_commands_for_att.append({
+                            "command": "control_surface: invariant_checker",
+                            "exit_code": cs_exit,
+                            "output": cs_output[:300] if cs_output else ("passed" if cs_exit == 0 else "failed"),
+                        })
+                        if verbose:
+                            print(f"[meta-bridge] Gate 10: control_surface checker exit={cs_exit}")
+                    else:
+                        validation_commands_for_att.append({
+                            "command": "control_surface: invariant_tests",
+                            "exit_code": 1,
+                            "output": "no control-surface test or checker found",
+                        })
+
+            # Write validation commands to temp file for attestation generator
+            val_cmds_path = repo_root / ".scratch" / "gate10_validation_commands.json"
+            val_cmds_path.parent.mkdir(parents=True, exist_ok=True)
+            val_cmds_path.write_text(json.dumps(validation_commands_for_att, indent=2), encoding="utf-8")
+            # Let attestation generator derive changed files from git (BEHAVIORAL proof).
+            # Do NOT pass --files with caller-declared changed_files — that produces
+            # DECLARED proof class, which check_closeout_attestation rejects for GO.
+            att_cmd = [
+                "python3", str(att_checker), "--generate", "--json",
+                "--validation-commands", str(val_cmds_path),
+            ]
+            exit_code, output = run_validation_command(repo_root, att_cmd)
+            # Parse JSON on both success AND failure exits to preserve actionable details
+            att_data = None
+            try:
+                att_data = json.loads(output) if output.strip() else None
+            except (json.JSONDecodeError, TypeError):
+                pass
+            if exit_code == 0 and att_data is not None:
+                if att_data.get("authorized"):
+                    results.append(ValidationResult("closeout_attestation", True))
+                else:
+                    att_inner = att_data.get("attestation", {})
+                    results.append(ValidationResult(
+                        "closeout_attestation", False,
+                        f"Attestation unauthorized: {att_inner.get('blockers', [])[:2]}"[:300]
+                    ))
+            elif att_data is not None:
+                # Nonzero exit but parseable JSON — surface structured issues
+                att_inner = att_data.get("attestation", {})
+                blockers = att_inner.get("blockers", [])
+                issues = att_data.get("issues", [])
+                detail = blockers[:2] if blockers else issues[:2]
+                results.append(ValidationResult(
+                    "closeout_attestation", False,
+                    f"Attestation failed (exit={exit_code}): {detail}"[:300]
+                ))
+            else:
+                results.append(ValidationResult("closeout_attestation", False, output[:300]))
+        except Exception as exc:
+            results.append(ValidationResult(
+                "closeout_attestation", False,
+                f"Gate 10 error (non-crash): {type(exc).__name__}: {str(exc)[:200]}"
+            ))
+    else:
+        results.append(ValidationResult("closeout_attestation", True))
+
     all_passed = all(r.passed for r in results)
     return results, all_passed
 
@@ -795,10 +951,37 @@ def build_meta_reviewer_prompt(
     else:
         validation_failure_routing = ""
 
+    # Build control-surface proof obligations when relevant files are touched.
+    # Import canonical set from single source of truth.
+    control_surface_obligations = ""
+    changed = package.get("changed_files", [])
+    try:
+        _cs_import_dir = str(Path(repo_root) / "tools" / "checks")
+        if _cs_import_dir not in sys.path:
+            sys.path.insert(0, _cs_import_dir)
+        from check_control_surface_invariants import CONTROL_SURFACE_FILES as _cs_files
+    except ImportError:
+        _cs_files = {"mu/tools/executors/phase_b_executor.py", "mu/tools/agents/meta_bridge_supervisor.py"}
+    if set(changed) & _cs_files:
+        control_surface_obligations = (
+            "## CONTROL-SURFACE REVIEW MODE\n\n"
+            "This wave touches Phase B / commit authority chain files. You MUST inspect:\n\n"
+            "1. **Implementer surface**: `phase_b_implementer.py` must use `bridge_adapters.run_adapter()` directly, "
+            "NOT `bridge_supervisor.py review`.\n"
+            "2. **Bridge loop**: `phase_b_executor.py` must re-invoke implementer on `REQUEST_CHANGES`/`NO_GO`. "
+            "`QUESTION` must fail closed.\n"
+            "3. **Receipt authority**: `write_pre_commit_receipt()` must return per-invocation path. "
+            "`meta_bridge_client` must capture it directly, not discover by directory sort.\n"
+            "4. **Canonical hook receipt**: Must still be written for hook compatibility.\n"
+            "5. **No manual fallback**: Protocol docs must not present manual git push/PR/merge as normal.\n\n"
+            "If you cannot verify any obligation, emit a CRITICAL finding. Do not skip."
+        )
+
     payload = {
         "package_json": json.dumps(package, indent=2),
         "validation_summary": validation_summary,
         "validation_failure_routing": validation_failure_routing,
+        "control_surface_obligations": control_surface_obligations,
         "repo_root": str(repo_root),
         "task_id": package.get("task_id", "unknown"),
         "wave_name": package.get("wave_name", "unknown"),
@@ -917,18 +1100,23 @@ def write_pre_commit_receipt(
     receipt_dir = repo_root / META_BUS_DIR_NAME
     receipt_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write canonical hook-compatible receipt (backward compat)
-    receipt_path = receipt_dir / PRE_COMMIT_RECEIPT_NAME
-    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    # Write canonical hook-compatible receipt (backward compat for git hooks)
+    canonical_path = receipt_dir / PRE_COMMIT_RECEIPT_NAME
+    canonical_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
 
-    # Write per-invocation receipt for audit trail
+    # Write per-invocation receipt — this is the exact artifact for executor flow
     receipts_dir = receipt_dir / "pre_commit_receipts"
     receipts_dir.mkdir(parents=True, exist_ok=True)
     ts_slug = utc_now().replace(":", "-").replace("+", "p")
-    per_invocation_path = receipts_dir / f"receipt_{ts_slug}.json"
+    # Add short UUID to guarantee uniqueness even within the same second
+    import uuid as _uuid
+    unique_suffix = _uuid.uuid4().hex[:8]
+    per_invocation_path = receipts_dir / f"receipt_{ts_slug}_{unique_suffix}.json"
     per_invocation_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
 
-    return receipt_path
+    # Return the per-invocation path — callers get the exact receipt for this invocation.
+    # Hook flow uses canonical_path independently (verify_pre_commit_receipt defaults to it).
+    return per_invocation_path
 
 
 def verify_pre_commit_receipt(

@@ -25,23 +25,29 @@ import argparse
 import json
 import subprocess
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
+# Import canonical load_routing_record from shared module
+try:
+    from executor_common import load_routing_record, ExecutorCommonError, run_bridge_subprocess
+except ImportError:
+    import importlib.util as _ilu
+    _common_path = SCRIPT_DIR / "executor_common.py"
+    _spec = _ilu.spec_from_file_location("executor_common", str(_common_path))
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    load_routing_record = _mod.load_routing_record
+    ExecutorCommonError = _mod.ExecutorCommonError
+    run_bridge_subprocess = _mod.run_bridge_subprocess
+
 
 class PhaseAExecutorError(RuntimeError):
     """Raised when Phase A executor cannot proceed."""
-
-
-def load_routing_record(repo_root: Path) -> dict[str, Any]:
-    """Load the post-merge routing record."""
-    record_path = repo_root / ".agent_bus" / "meta" / "post_merge_routing.json"
-    if not record_path.exists():
-        raise PhaseAExecutorError(f"Routing record not found: {record_path}")
-    return json.loads(record_path.read_text(encoding="utf-8"))
 
 
 def extract_plan_scope(routing_record: dict[str, Any]) -> dict[str, str]:
@@ -115,6 +121,7 @@ def run_bridge_design_review(
     plan_path: str,
     round_num: int,
     *,
+    job_id: str | None = None,
     timeout: int = 1200,
 ) -> dict[str, Any]:
     """Run bridge design review (--no-diff) on a plan packet."""
@@ -137,13 +144,12 @@ def run_bridge_design_review(
         "--reviewer", "codex",
         "-v", "--no-diff",
     ]
+    if job_id:
+        cmd.extend(["--job-id", job_id])
     try:
-        result = subprocess.run(
-            cmd, cwd=repo_root, capture_output=True, text=True,
-            check=False, timeout=timeout,
-        )
+        result = run_bridge_subprocess(cmd, cwd=repo_root, timeout=timeout)
         return {"exit_code": result.returncode, "stdout": result.stdout, "stderr": result.stderr}
-    except subprocess.TimeoutExpired:
+    except ExecutorCommonError:
         return {"exit_code": -1, "stdout": "", "stderr": "Bridge review timed out"}
 
 
@@ -186,7 +192,7 @@ def run_phase_a(
     try:
         routing_record = load_routing_record(repo_root)
         scope = extract_plan_scope(routing_record)
-    except PhaseAExecutorError:
+    except (PhaseAExecutorError, ExecutorCommonError):
         scope = {"request": "", "summary": "", "decision": "ROUTE_PHASE_A"}
 
     # Create or load plan draft
@@ -195,46 +201,86 @@ def run_phase_a(
     result["plan_path"] = rel_plan_path
     log(f"Plan draft: {rel_plan_path}")
 
-    # Run SDK agent review on the plan
+    # Run SDK agent review on the plan — FAIL CLOSED on nonzero exit
     log("Running SDK agent review on plan...")
     agent_result = run_sdk_agents(repo_root, [rel_plan_path])
     result["agent_review_ran"] = True
     result["agent_exit_code"] = agent_result["exit_code"]
     log(f"Agent review exit code: {agent_result['exit_code']}")
 
+    if agent_result["exit_code"] != 0:
+        result["status"] = "error"
+        result["error"] = (
+            f"SDK agent review failed (exit={agent_result['exit_code']}). "
+            "Hard gate: agents must pass before bridge review. "
+            f"stderr: {agent_result.get('stderr', '')[:500]}"
+        )
+        return result
+
     # Bridge convergence loop (design review, --no-diff)
     for round_num in range(1, max_bridge_rounds + 1):
-        log(f"Bridge design review round {round_num}/{max_bridge_rounds}...")
+        bridge_job_id = f"phase-a-r{round_num}-{uuid.uuid4().hex[:8]}"
+        log(f"Bridge design review round {round_num}/{max_bridge_rounds} (job={bridge_job_id})...")
         result["bridge_rounds"] = round_num
 
         bridge_result = run_bridge_design_review(
             repo_root, rel_plan_path, round_num,
+            job_id=bridge_job_id,
         )
         log(f"Bridge exit code: {bridge_result['exit_code']}")
 
-        # Check rendered output for GO
-        rendered_dir = repo_root / ".agent_bus" / "rendered"
-        if rendered_dir.exists():
-            renders = sorted(rendered_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
-            if renders:
-                latest = renders[0].read_text(encoding="utf-8")
-                if "Decision: GO" in latest:
-                    log("Bridge converged: GO")
-                    result["status"] = "converged"
-                    break
-                elif "Decision: REQUEST_CHANGES" in latest or "Decision: NO_GO" in latest:
-                    log("Bridge: REQUEST_CHANGES — continuing loop")
-                    continue
+        # Check rendered output for GO — bound to exact job_id
+        rendered_path = repo_root / ".agent_bus" / "rendered" / f"{bridge_job_id}.md"
+        if rendered_path.exists():
+            render_content = rendered_path.read_text(encoding="utf-8")
+            if "Decision: GO" in render_content:
+                log("Bridge converged: GO")
+                result["status"] = "converged"
+                break
+            elif "Decision: REQUEST_CHANGES" in render_content or "Decision: NO_GO" in render_content:
+                log("Bridge: REQUEST_CHANGES — continuing loop")
+                continue
+            elif "Decision: QUESTION" in render_content:
+                log("Bridge: QUESTION — fail-closed (unresolved question)")
+                result["status"] = "error"
+                result["error"] = "Bridge returned QUESTION decision — requires human resolution"
+                result["rendered_path"] = str(rendered_path)
+                return result
+            else:
+                # Unrecognized decision — fail closed, do not burn rounds
+                log("Bridge: unrecognized decision — fail-closed")
+                result["status"] = "error"
+                result["error"] = "Bridge returned unrecognized decision — cannot proceed"
+                result["rendered_path"] = str(rendered_path)
+                return result
+        else:
+            # No rendered output — fail closed (bridge did not produce output)
+            if bridge_result["exit_code"] != 0:
+                log(f"Bridge failed (exit {bridge_result['exit_code']}) with no rendered output")
+                result["status"] = "error"
+                result["error"] = f"Bridge subprocess failed with exit code {bridge_result['exit_code']}"
+                return result
 
         if round_num >= max_bridge_rounds:
             result["status"] = "max_rounds_reached"
             log(f"Max bridge rounds ({max_bridge_rounds}) reached")
             return result
 
+    # If the bridge loop exhausted without converging (e.g. all rounds were
+    # REQUEST_CHANGES which `continue` past the max-rounds guard), the status
+    # is still the initial "success" — which is a false positive.  Fail closed.
+    if result.get("status") != "converged":
+        result["status"] = "max_rounds_reached"
+        result["error"] = (
+            f"Bridge did not converge after {max_bridge_rounds} rounds. "
+            "Plan was never locked."
+        )
+        log(f"Max bridge rounds ({max_bridge_rounds}) reached without convergence")
+        return result
+
     # Lock the plan
-    if result.get("status") == "converged":
-        lock_plan(repo_root, rel_plan_path)
-        log(f"Phase-A-Lock: LOCKED in {rel_plan_path}")
+    lock_plan(repo_root, rel_plan_path)
+    log(f"Phase-A-Lock: LOCKED in {rel_plan_path}")
 
     return result
 

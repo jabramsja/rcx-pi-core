@@ -3,17 +3,19 @@
     "post_merge_supervisor": "codex",
     "dialectic_executor": "codex",
     "phase_a_executor": "codex",
-    "phase_b_executor": "codex",
+    "phase_b_executor": "claude",
     "commit_executor": null
   },
   "model_overrides": {
-    "phase_b_executor": "sonnet"
+    "_NOTE": "Model override only honored when backend supports it. codex backend ignores model_override (uses its own model). claude backend honors --model flag. Set backend=claude + model_override=sonnet for Sonnet implementer.",
+    "phase_b_executor": null
   },
   "timeouts": {
     "dialectic_executor": 600,
     "phase_a_executor": 1200,
     "phase_b_executor": 1200,
-    "commit_executor": 300
+    "commit_executor": 300,
+    "agent_review": 900
   },
   "bridge_loop_limits": {
     "phase_a": 15,

@@ -21,22 +21,28 @@ import argparse
 import json
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
+# Import canonical load_routing_record from shared module
+try:
+    from executor_common import load_routing_record, ExecutorCommonError, run_bridge_subprocess
+except ImportError:
+    import importlib.util as _ilu
+    _common_path = SCRIPT_DIR / "executor_common.py"
+    _spec = _ilu.spec_from_file_location("executor_common", str(_common_path))
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    load_routing_record = _mod.load_routing_record
+    ExecutorCommonError = _mod.ExecutorCommonError
+    run_bridge_subprocess = _mod.run_bridge_subprocess
+
 
 class DialecticExecutorError(RuntimeError):
     """Raised when dialectic executor cannot proceed."""
-
-
-def load_routing_record(repo_root: Path) -> dict[str, Any]:
-    """Load the post-merge routing record."""
-    record_path = repo_root / ".agent_bus" / "meta" / "post_merge_routing.json"
-    if not record_path.exists():
-        raise DialecticExecutorError(f"Routing record not found: {record_path}")
-    return json.loads(record_path.read_text(encoding="utf-8"))
 
 
 def extract_proposal(routing_record: dict[str, Any]) -> dict[str, Any]:
@@ -131,7 +137,7 @@ def parse_dialectic_envelope(output: str) -> dict[str, Any]:
 def run_dialectic(
     repo_root: Path,
     *,
-    max_rounds: int = 3,
+    max_rounds: int = 1,  # Currently single-pass; multi-round narrowing not yet implemented
     verbose: bool = False,
     timeout: int = 600,
 ) -> dict[str, Any]:
@@ -152,7 +158,7 @@ def run_dialectic(
     # Load routing record
     try:
         routing_record = load_routing_record(repo_root)
-    except DialecticExecutorError as exc:
+    except (DialecticExecutorError, ExecutorCommonError) as exc:
         return {"status": "error", "errors": [str(exc)]}
 
     if routing_record.get("decision") != "CONTINUE_DIALECTIC":
@@ -172,6 +178,8 @@ def run_dialectic(
     task_path = scratch_dir / "dialectic_task.md"
     task_path.write_text(prompt, encoding="utf-8")
 
+    dialectic_job_id = f"dialectic-{uuid.uuid4().hex[:8]}"
+
     bridge_script = repo_root / "tools" / "agents" / "bridge_supervisor.py"
     cmd = [
         sys.executable, str(bridge_script),
@@ -180,52 +188,43 @@ def run_dialectic(
         "--summary", "Dialectic narrowing",
         "--reviewer", "codex",
         "-v", "--no-diff",
+        "--job-id", dialectic_job_id,
     ]
 
     log("Sending to Codex for dialectic narrowing...")
     try:
-        bridge_result = subprocess.run(
-            cmd, cwd=repo_root, capture_output=True, text=True,
-            check=False, timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
+        bridge_result = run_bridge_subprocess(cmd, cwd=repo_root, timeout=timeout)
+    except ExecutorCommonError:
         return {"status": "timeout", "errors": ["Codex dialectic timed out"]}
 
     result["rounds"] = 1
 
-    # Try to find and parse the rendered output
-    rendered_dir = repo_root / ".agent_bus" / "rendered"
-    if rendered_dir.exists():
-        renders = sorted(rendered_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
-        for render in renders[:3]:
-            content = render.read_text(encoding="utf-8")
-            try:
-                narrowed = parse_dialectic_envelope(content)
-                result["narrowed_proposal"] = narrowed
-                result["status"] = "narrowed"
-                log(f"Narrowed: {narrowed.get('candidate', '(none)')}")
-                break
-            except DialecticExecutorError:
-                continue
+    # Try to find and parse the rendered output — bound to exact job_id
+    rendered_path = repo_root / ".agent_bus" / "rendered" / f"{dialectic_job_id}.md"
+    if rendered_path.exists():
+        content = rendered_path.read_text(encoding="utf-8")
+        try:
+            narrowed = parse_dialectic_envelope(content)
+            result["narrowed_proposal"] = narrowed
+            result["status"] = "narrowed"
+            log(f"Narrowed: {narrowed.get('candidate', '(none)')}")
+        except DialecticExecutorError:
+            pass
 
     if result["status"] != "narrowed":
-        # Check raw output
-        raw_dir = repo_root / ".agent_bus" / "raw"
-        if raw_dir.exists():
-            for raw_subdir in sorted(raw_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[:3]:
-                if raw_subdir.is_dir():
-                    for raw_file in raw_subdir.iterdir():
-                        try:
-                            content = raw_file.read_text(encoding="utf-8")
-                            narrowed = parse_dialectic_envelope(content)
-                            result["narrowed_proposal"] = narrowed
-                            result["status"] = "narrowed"
-                            log(f"Narrowed (from raw): {narrowed.get('candidate', '(none)')}")
-                            break
-                        except (DialecticExecutorError, OSError):
-                            continue
-                if result["status"] == "narrowed":
+        # Check raw output for this job_id
+        raw_job_dir = repo_root / ".agent_bus" / "raw" / dialectic_job_id
+        if raw_job_dir.is_dir():
+            for raw_file in raw_job_dir.iterdir():
+                try:
+                    content = raw_file.read_text(encoding="utf-8")
+                    narrowed = parse_dialectic_envelope(content)
+                    result["narrowed_proposal"] = narrowed
+                    result["status"] = "narrowed"
+                    log(f"Narrowed (from raw): {narrowed.get('candidate', '(none)')}")
                     break
+                except (DialecticExecutorError, OSError):
+                    continue
 
     if result["status"] != "narrowed":
         result["status"] = "no_envelope"
@@ -253,8 +252,8 @@ def main() -> int:
     parser.add_argument(
         "--max-rounds",
         type=int,
-        default=3,
-        help="Max narrowing rounds (default: 3)",
+        default=1,
+        help="Max narrowing rounds (default: 1, multi-round not yet implemented)",
     )
     parser.add_argument(
         "-v", "--verbose",

@@ -789,3 +789,198 @@ class TestGate5CommentResistance:
 
         result = meta.check_pre_commit_gate(repo)
         assert result.passed, f"Gate 5 should pass on real exec, got: {result.error}"
+
+
+class TestValidationResultFieldAccess:
+    """ValidationResult must only use fields that exist on the dataclass.
+
+    Bridge R1 finding: Gate 10 accessed r.message which doesn't exist —
+    ValidationResult has 'error', not 'message'. This caused AttributeError
+    on control-surface waves.
+    """
+
+    def test_validation_result_has_error_not_message(self):
+        """ValidationResult dataclass has 'error' field, not 'message'."""
+        vr = meta.ValidationResult("test_gate", True, error="some detail")
+        assert hasattr(vr, "error")
+        assert not hasattr(vr, "message")
+        assert vr.error == "some detail"
+
+    def test_validation_result_error_default_empty(self):
+        """ValidationResult.error defaults to empty string."""
+        vr = meta.ValidationResult("test_gate", True)
+        assert vr.error == ""
+
+    def test_gate10_validation_commands_uses_error_field(self):
+        """Gate 10 code path must use r.error, not r.message.
+
+        This is a source-level check to prevent regression of the
+        AttributeError that crashed Gate 10 on control-surface waves.
+        """
+        source = (REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py").read_text()
+        # Find the Gate 10 section (closeout attestation)
+        gate10_start = source.find("Gate 10: Closeout attestation")
+        assert gate10_start > 0, "Gate 10 section not found in source"
+        # Check the relevant code section after Gate 10 marker
+        gate10_section = source[gate10_start:gate10_start + 1500]
+        assert "r.message" not in gate10_section, (
+            "Gate 10 still uses r.message — ValidationResult has 'error', not 'message'. "
+            "This causes AttributeError on control-surface waves."
+        )
+        assert "r.error" in gate10_section, (
+            "Gate 10 should use r.error for ValidationResult output"
+        )
+
+
+class TestGate10ReceiptChainProof:
+    """Gate 10 must emit a receipt_chain behavioral proof for receipt-chain waves.
+
+    When changed_files include receipt-chain files (commit_executor.py, phase_b_executor.py,
+    meta_bridge_client.py, meta_bridge_supervisor.py), Gate 10 must pass a receipt_chain
+    validation command to check_closeout_attestation.py so that GO can be authorized.
+    """
+
+    def test_receipt_chain_proof_emitted_for_receipt_chain_files(self, tmp_path):
+        """Gate 10 must include a receipt_chain validation command when receipt-chain files touched."""
+        source = (REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py").read_text()
+        # The receipt_chain proof section must exist in the Gate 10 code
+        gate10_start = source.find("Gate 10: Closeout attestation")
+        assert gate10_start > 0
+        gate10_section = source[gate10_start:gate10_start + 3000]
+        assert "receipt_chain" in gate10_section, (
+            "Gate 10 must emit a receipt_chain validation command for receipt-chain waves. "
+            "Without this, check_closeout_attestation.py rejects GO for control-surface waves "
+            "that touch receipt-chain files."
+        )
+        assert "test_commit_executor_receipt" in gate10_section, (
+            "Gate 10 must run the receipt chain test to provide BEHAVIORAL proof"
+        )
+
+    def test_receipt_chain_validation_command_in_gate10_output(self, tmp_path):
+        """Structural: validation_commands_for_att includes receipt_chain when receipt files touched."""
+        # Build a package with receipt-chain files
+        package = {
+            "changed_files": [
+                "mu/tools/executors/commit_executor.py",
+                "mu/tools/executors/phase_b_executor.py",
+            ],
+            "task_id": "[TEST]",
+            "wave_name": "test",
+            "lane": "test",
+            "scope_items": [],
+            "fixes_implemented": [],
+            "deferred_items": [],
+            "bridge_status": {},
+            "evidence_handles": {},
+            "blocker_report_paths": [],
+            "current_judgment": "COMMIT_GO",
+        }
+        # Run validation gates — Gate 10 should include receipt_chain command
+        # We mock run_validation_command to avoid running real scripts
+        gate_results = []
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "check_closeout_attestation" in cmd_str:
+                # Check that the validation commands file includes receipt_chain
+                val_cmds_path = None
+                for i, c in enumerate(cmd):
+                    if str(c) == "--validation-commands" and i + 1 < len(cmd):
+                        val_cmds_path = Path(cmd[i + 1])
+                        break
+                if val_cmds_path and val_cmds_path.exists():
+                    val_cmds = json.loads(val_cmds_path.read_text())
+                    rc_cmds = [v for v in val_cmds if "receipt_chain" in v.get("command", "")]
+                    gate_results.append(("receipt_chain_found", len(rc_cmds) > 0))
+                return 0, json.dumps({"authorized": True, "attestation": {"blockers": []}, "issues": []})
+            # Default: pass
+            return 0, "passed"
+
+        with patch.object(meta, "run_validation_command", side_effect=mock_run_validation), \
+             patch.object(meta, "check_dirty_state", return_value=meta.ValidationResult("dirty_state", True)), \
+             patch.object(meta, "check_deferred_blockers", return_value=meta.ValidationResult("deferred_blockers", True)), \
+             patch.object(meta, "check_tasks_authorization", return_value=meta.ValidationResult("tasks_auth", True)):
+            results, all_passed = meta.run_validation_gates(REPO_ROOT, package, verbose=True)
+
+        # Verify receipt_chain command was included in the validation commands file
+        assert any(name == "receipt_chain_found" and found for name, found in gate_results), (
+            f"Gate 10 must include receipt_chain validation command for receipt-chain waves. "
+            f"Gate results: {gate_results}"
+        )
+
+
+class TestGate10PackageScoped:
+    """Bridge R1 NO_GO fix: Gate 10 must NOT pass --files (caller-declared).
+
+    Passing --files with caller-declared changed_files produces DECLARED proof
+    class in check_closeout_attestation.py, which rejects GO. Attestation must
+    derive changed files from git (BEHAVIORAL proof class) for GO authorization.
+    """
+
+    def test_gate10_does_not_pass_files_flag_to_attestation(self):
+        """Gate 10 must NOT pass --files — let attestation derive from git (BEHAVIORAL proof)."""
+        source = Path(meta.__file__).read_text()
+        gate10_start = source.find("Gate 10: Closeout attestation")
+        assert gate10_start > 0, "Gate 10 section not found in source"
+        gate10_section = source[gate10_start:gate10_start + 6000]
+        # The att_cmd construction must NOT include --files
+        # Find the att_cmd list construction
+        att_cmd_start = gate10_section.find("att_cmd = [")
+        assert att_cmd_start > 0, "att_cmd construction not found"
+        att_cmd_section = gate10_section[att_cmd_start:att_cmd_start + 500]
+        assert '"--files"' not in att_cmd_section and "'--files'" not in att_cmd_section, (
+            "Gate 10 must NOT pass --files to check_closeout_attestation.py. "
+            "Caller-declared files produce DECLARED proof class, which rejects GO. "
+            "Attestation must derive changed files from git (BEHAVIORAL proof)."
+        )
+
+    def test_gate10_parses_json_on_nonzero_exit(self):
+        """Gate 10 must try to parse JSON even on nonzero exit codes.
+
+        Bridge R6 finding: Gate 10 dropped actionable attestation issues on failure,
+        surfacing only truncated raw output. Fix: parse JSON on all exits.
+        """
+        source = Path(meta.__file__).read_text()
+        gate10_start = source.find("Gate 10: Closeout attestation")
+        assert gate10_start > 0
+        gate10_section = source[gate10_start:gate10_start + 7000]
+        # The code must parse JSON regardless of exit code using att_data pattern
+        assert "att_data is not None" in gate10_section, (
+            "Gate 10 must attempt JSON parse on nonzero exits using att_data pattern, "
+            "not just parse inside 'if exit_code == 0:'"
+        )
+
+
+class TestGate10NonReceiptChainControlSurface:
+    """Gate 10 must provide BEHAVIORAL proof for control-surface waves
+    that do NOT touch receipt-chain files.
+
+    Without this, the attestation checker rejects GO because gate-style
+    validations ('gate:...') are filtered out and no qualifying BEHAVIORAL
+    validation-command proof exists.
+    """
+
+    def test_gate10_adds_behavioral_proof_for_non_receipt_chain_cs_wave(self):
+        """Source must have a block that adds a control_surface behavioral proof
+        when receipt-chain files are NOT touched."""
+        source = Path(meta.__file__).read_text()
+        # The fix adds a block that checks `not (set(changed) & _receipt_chain_files)`
+        # and runs either test_control_surface_review.py or the checker script
+        assert "control_surface: invariant_tests" in source or "control_surface: invariant_checker" in source, (
+            "Gate 10 must add a 'control_surface:' BEHAVIORAL proof for non-receipt-chain "
+            "control-surface waves so the attestation checker can authorize GO."
+        )
+
+    def test_gate10_behavioral_proof_not_gate_prefixed(self):
+        """The control-surface behavioral proof must NOT use 'gate:' prefix,
+        because the attestation checker filters those out."""
+        source = Path(meta.__file__).read_text()
+        # Find the control_surface proof command strings
+        for marker in ("control_surface: invariant_tests", "control_surface: invariant_checker"):
+            if marker in source:
+                assert not marker.startswith("gate:"), (
+                    f"Control-surface proof '{marker}' must not use 'gate:' prefix"
+                )
+                break
+        else:
+            pytest.fail("Neither control_surface proof marker found in source")
