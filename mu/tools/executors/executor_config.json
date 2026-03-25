@@ -7,7 +7,6 @@
     "commit_executor": null
   },
   "model_overrides": {
-    "_NOTE": "Model override only honored when backend supports it. codex backend ignores model_override (uses its own model). claude backend honors --model flag. Set backend=claude + model_override=sonnet for Sonnet implementer.",
     "phase_b_executor": null
   },
   "timeouts": {
