@@ -233,6 +233,8 @@ GROUNDING_HIGH_RISK_PATTERNS = (
     "mu/",
 )
 
+from tools.runners.shared_agent_utils import build_control_surface_context as _build_control_surface_context
+
 
 def should_include_grounding(files: list[str]) -> bool:
     """Run grounding only on high-risk changes unless explicitly forced."""
@@ -542,11 +544,15 @@ Please address these issues in your response. Ensure you:
 ---
 """
 
+        # Inject control-surface review context when high-risk files are in scope
+        cs_context = _build_control_surface_context(self.files)
+
         prompt = f"""You are the RCX {agent_name.replace('-', ' ').title()} Agent.
 
 {agent_def.prompt}
 {memory_context}
 {retry_section}
+{cs_context}
 ---
 
 Now review these files: {file_list}

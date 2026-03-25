@@ -6,6 +6,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -130,6 +131,7 @@ def _run_adapter_buffered(
             text=True,
             cwd=repo_root,
             env=env,
+            start_new_session=True,  # Own process group for clean child cleanup
         )
     except FileNotFoundError as exc:
         if raw_fh is not None:
@@ -156,17 +158,20 @@ def _run_adapter_buffered(
     )
     stderr_thread.start()
 
-    # Watchdog timer: kill the process if it exceeds timeout_s.
-    # This covers the case where the process hangs without producing output
-    # (the `for line in proc.stdout` loop blocks until stdout closes).
+    # Watchdog timer: kill the ENTIRE process group if it exceeds timeout_s.
+    # This prevents orphaned children (e.g., codex exec spawning sub-processes).
     timed_out = threading.Event()
 
     def _kill_after_timeout() -> None:
         timed_out.set()
         try:
-            proc.kill()
-        except OSError:
-            pass
+            # Kill entire process group to clean up children
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
 
     watchdog = threading.Timer(spec.timeout_s, _kill_after_timeout)
     watchdog.daemon = True
@@ -188,7 +193,10 @@ def _run_adapter_buffered(
         watchdog.cancel()
     except subprocess.TimeoutExpired as exc:
         watchdog.cancel()
-        proc.kill()
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            proc.kill()
         proc.wait()
         stderr_thread.join(timeout=5)
         if raw_fh is not None:
@@ -197,9 +205,15 @@ def _run_adapter_buffered(
             f"Adapter '{spec.name}' timed out after {spec.timeout_s}s"
         ) from exc
 
-    if timed_out.is_set() and proc.returncode is None:
-        # Timer fired AND process hasn't completed — genuine timeout
-        proc.wait()
+    if timed_out.is_set():
+        # Timer fired — genuine timeout regardless of returncode
+        # (SIGKILL sets returncode to -9, not None)
+        if proc.returncode is None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                proc.kill()
+            proc.wait()
         stderr_thread.join(timeout=5)
         if raw_fh is not None:
             raw_fh.close()
@@ -248,6 +262,7 @@ def _run_adapter_streaming(
             text=True,
             cwd=repo_root,
             env=env,
+            start_new_session=True,  # Own process group for clean child cleanup
         )
     except FileNotFoundError as exc:
         if raw_fh is not None:
@@ -287,8 +302,13 @@ def _run_adapter_streaming(
                 pass  # Process exited early; continue to wait for remaining output
         proc.wait(timeout=spec.timeout_s)
     except subprocess.TimeoutExpired as exc:
-        proc.kill()
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            proc.kill()
         proc.wait()
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
         if raw_fh is not None:
             raw_fh.close()
         raise BridgeAdapterError(

@@ -24,11 +24,34 @@ Rules:
 - Every finding must be evidence-first. Run tests and commands to validate claims.
 - If no blocking findings remain, emit decision GO.
 - If founder input is required, emit decision QUESTION.
+- DISPOSITION: Every finding MUST include a "disposition" field set to "blocking" or "non_blocking".
+  Apply the classification contract below (shared with phase_b_executor.py via executor_common.py):
+
+  BLOCKING (must fix before merge):
+  - Causes runtime failure, crash, or data loss in the live pipeline
+  - Violates a hard invariant (receipt authority, fail-closed behavior, process cleanup)
+  - Security bypass or privilege escalation
+  - Breaks an existing test or causes test regression
+  - Makes a pipeline step silently skip or produce wrong output
+
+  NON_BLOCKING (improvement, can be deferred):
+  - Hardening improvement that does not affect current correctness
+  - Theoretical edge case that requires synthetic/adversarial setup to trigger
+  - Code quality, style, or naming suggestion
+  - Defense-in-depth addition
+  - Documentation accuracy without behavioral impact
+  - Performance optimization
+
+  - When ALL remaining findings are "non_blocking", emit decision GO.
+  - If "disposition" is omitted, the executor infers it from content keywords and severity,
+    with fail-closed default (unrecognized findings treated as blocking).
 
 Required JSON envelope:
 BEGIN_AGENT_ENVELOPE
 $json_schema_stub
 END_AGENT_ENVELOPE
+
+NOTE: Each object in the "findings" array must include "disposition": "blocking"|"non_blocking" alongside the existing fields (class, severity, title, file, etc.).
 
 Footer:
 Questions? Concerns? Thoughts? -- Think hard

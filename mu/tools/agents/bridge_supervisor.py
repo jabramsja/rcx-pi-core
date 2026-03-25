@@ -80,6 +80,48 @@ ENVELOPE_RE = re.compile(
 )
 
 
+# Import canonical control-surface file set from single source of truth.
+try:
+    _cs_checks_dir = str(Path(__file__).resolve().parent.parent / "checks")
+    if _cs_checks_dir not in sys.path:
+        sys.path.insert(0, _cs_checks_dir)
+    from check_control_surface_invariants import CONTROL_SURFACE_FILES as _CONTROL_SURFACE_FILES
+except ImportError:
+    _CONTROL_SURFACE_FILES = frozenset({
+        "mu/tools/executors/phase_b_executor.py",
+        "mu/tools/executors/commit_executor.py",
+        "mu/tools/agents/meta_bridge_supervisor.py",
+    })
+
+_CONTROL_SURFACE_PROOF_OBLIGATIONS = """\
+
+## CONTROL-SURFACE REVIEW MODE (activated — touched files are in the Phase B / commit authority chain)
+
+You MUST inspect the following cross-file invariants. Do NOT greenlight on summary/diff evidence alone.
+
+Proof obligations:
+1. **Implementer surface**: Read `mu/tools/executors/phase_b_implementer.py`. Verify it uses `bridge_adapters.run_adapter()` directly. It must NOT invoke `bridge_supervisor.py review` (that is review-only).
+2. **Bridge loop mechanics**: Read the bridge convergence loop in `mu/tools/executors/phase_b_executor.py`. Verify that `REQUEST_CHANGES` / `NO_GO` re-invoke the implementer with findings BEFORE the next bridge round. `QUESTION` must fail closed (not loop).
+3. **Receipt authority chain**: Trace the path: `meta_bridge_supervisor.write_pre_commit_receipt()` → return value → `meta_bridge_client.run_meta_bridge_package()` → `receipt_path` field → `prepare_commit_handoff()` → `commit_executor` verification. The per-invocation receipt path must be exact, not discovered by sorting a directory.
+4. **Canonical hook receipt preserved**: `write_pre_commit_receipt` must still write the canonical receipt for hook compatibility. But the EXECUTOR flow must use the per-invocation receipt, not canonical.
+5. **No manual fallback in docs**: Protocol docs must not present manual git push/PR/merge as a normal commit path. Only narrow BOOTSTRAP_PHASE_B_EXCEPTION is allowed.
+
+Adjacent files you MUST read (not just the diff):
+- `mu/tools/executors/phase_b_executor.py` (bridge loop + handoff)
+- `mu/tools/executors/phase_b_implementer.py` (invocation surface)
+- `mu/tools/agents/meta_bridge_client.py` (receipt capture)
+- `mu/tools/agents/meta_bridge_supervisor.py` (receipt writer + validation gates)
+- `mu/tools/executors/commit_executor.py` (receipt verifier)
+
+If you cannot verify any obligation from the available evidence, emit it as a CRITICAL finding — do not skip it."""
+
+
+def _touches_control_surface(changed_files_str: str) -> bool:
+    """Check if any changed file is a control-surface file."""
+    files = [f.strip() for f in changed_files_str.split(",") if f.strip()]
+    return bool(set(files) & _CONTROL_SURFACE_FILES)
+
+
 def _build_code_review_instructions(
     changed_actual: str,
     staged: str,
@@ -88,6 +130,11 @@ def _build_code_review_instructions(
     reader_summary: str,
     diff_text: str,
 ) -> str:
+    # Activate control-surface review mode when relevant files are touched
+    cs_section = ""
+    if _touches_control_surface(changed_actual):
+        cs_section = _CONTROL_SURFACE_PROOF_OBLIGATIONS
+
     return f"""\
 Review actual live candidate state, not the reader summary.
 
@@ -111,7 +158,7 @@ Exhaustive enumeration requirement:
 - For state machines / control flow: trace every state transition and check what happens if a crash occurs before, during, and after each transition.
 - For recovery paths: verify idempotency, primary key conflicts, format compatibility, and missing data.
 - For new APIs: verify error handling, edge cases, and backward compatibility.
-- Issue NO_GO only after you have listed every finding you can identify, not after finding just one."""
+- Issue NO_GO only after you have listed every finding you can identify, not after finding just one.{cs_section}"""
 
 
 def _build_design_deliberation_instructions(
@@ -530,9 +577,13 @@ def run_validations(
                 text=True,
                 capture_output=True,
                 check=False,
+                timeout=300,
             )
             exit_code = proc.returncode
             output = (proc.stdout or "") + ("\n[stderr]\n" + proc.stderr if proc.stderr else "")
+        except subprocess.TimeoutExpired:
+            exit_code = -1
+            output = f"[error] validation command timed out after 300s: {command}"
         except FileNotFoundError:
             exit_code = 127
             output = f"[error] command not found: {argv[0]}"

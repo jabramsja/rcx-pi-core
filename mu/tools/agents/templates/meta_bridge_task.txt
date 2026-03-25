@@ -27,6 +27,8 @@ $validation_summary
 
 $validation_failure_routing
 
+$control_surface_obligations
+
 ## Your Task
 
 1. Read FOUNDER_SESSION_BOOTSTRAP.md first

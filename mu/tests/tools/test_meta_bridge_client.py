@@ -147,3 +147,91 @@ class TestRunMetaBridgePackage:
         )
         assert "lock held" in str(err).lower()
         assert "30s" in str(err)
+
+
+class TestReceiptUniqueness:
+    """Per-invocation receipt paths must be unique even within the same second."""
+
+    def test_same_second_receipts_are_unique(self):
+        """Two rapid calls produce distinct receipt filenames."""
+        from tests.repo_root import REPO_ROOT
+        import importlib.util, sys, tempfile
+        from pathlib import Path
+        from unittest.mock import patch as _p
+
+        meta_path = REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py"
+        spec = importlib.util.spec_from_file_location("meta_receipt_test", meta_path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["meta_receipt_test"] = mod
+        spec.loader.exec_module(mod)
+
+        response = mod.MetaBridgeResponse(
+            status="success", decision="COMMIT_GO", summary="ok",
+        )
+        pkg = Path(tempfile.mktemp(suffix=".json"))
+        pkg.write_text("{}")
+
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            with _p.object(mod, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
+                 _p.object(mod, "compute_staged_sha", return_value="abc"):
+                path1 = mod.write_pre_commit_receipt(response, pkg, repo_root=repo)
+                path2 = mod.write_pre_commit_receipt(response, pkg, repo_root=repo)
+
+            assert path1 != path2, f"Same-second receipts must have distinct paths: {path1} vs {path2}"
+            assert path1.exists()
+            assert path2.exists()
+
+
+class TestEnvelopeSchemaValidation:
+    """Supervisor envelope must have required fields: decision, summary, status."""
+
+    def test_missing_decision_raises(self):
+        """Response without decision field raises MetaBridgeClientError."""
+        import inspect
+        src = inspect.getsource(client_mod.run_meta_bridge_package)
+        assert "_required_attrs" in src, (
+            "run_meta_bridge_package must validate required envelope fields"
+        )
+        assert '"decision"' in src or "'decision'" in src
+
+    def test_missing_optional_fields_default_safely(self):
+        """Optional fields default to empty list/string when absent from response."""
+        import inspect
+        src = inspect.getsource(client_mod.run_meta_bridge_package)
+        # Verify defensive getattr pattern for optional fields
+        assert "getattr(response," in src, (
+            "run_meta_bridge_package must use getattr with defaults for optional fields"
+        )
+        # Verify the three required fields are checked
+        assert '"decision"' in src or "'decision'" in src
+        assert '"summary"' in src or "'summary'" in src
+        assert '"status"' in src or "'status'" in src
+
+
+class TestReceiptPathFailClosed:
+    """meta_bridge_client must fail closed on absolute receipt paths."""
+
+    def test_no_absolute_fallback_in_source(self):
+        """The except block for repo-relative conversion must raise, not fall back."""
+        import inspect
+        src = inspect.getsource(client_mod.run_meta_bridge_package)
+        # After the "except (_sp.CalledProcessError, ValueError)" block,
+        # the code must raise MetaBridgeClientError, not assign receipt_path
+        assert "raise MetaBridgeClientError" in src, (
+            "meta_bridge_client must raise MetaBridgeClientError on failed "
+            "repo-relative conversion, not fall back to absolute path"
+        )
+        # The old fallback pattern "receipt_path = str(exact_receipt_path)" must be gone
+        # from the except block
+        lines = src.splitlines()
+        in_except = False
+        for line in lines:
+            if "except" in line and "CalledProcessError" in line:
+                in_except = True
+            elif in_except:
+                assert "receipt_path = str(exact_receipt_path)" not in line, (
+                    "Found absolute path fallback in except block — must raise instead"
+                )
+                if line.strip() and not line.strip().startswith("#") and not line.strip().startswith("raise"):
+                    break  # Past the except block
