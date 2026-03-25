@@ -879,7 +879,7 @@ class TestEnsureFeatureBranch:
         handoff = _make_new_handoff()
 
         # Mock _run to intercept ls-remote (return remote collision)
-        orig_run = commit_mod._run
+        orig_run = commit_mod._run  # ANTICHEAT_OK: testing internal executor functions
 
         def mock_run(args, **kwargs):
             if len(args) >= 3 and args[0] == "git" and args[1] == "ls-remote":

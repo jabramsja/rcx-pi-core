@@ -994,7 +994,7 @@ class TestFindingDisposition:
             {"title": "Bug causes runtime failure", "class": "DEFECT", "severity": "high"},
             {"title": "Bug2", "disposition": "blocking"},
         ]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 2
         assert len(non_blocking) == 0
 
@@ -1004,7 +1004,7 @@ class TestFindingDisposition:
             {"title": "Nit1", "disposition": "non_blocking"},
             {"title": "Nit2", "disposition": "non_blocking"},
         ]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 0
         assert len(non_blocking) == 2
 
@@ -1015,33 +1015,33 @@ class TestFindingDisposition:
             {"title": "Nit", "disposition": "non_blocking"},
             {"title": "NoDisposition causes crash", "class": "DEFECT"},
         ]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 2  # "Bug" + "NoDisposition causes crash" (keyword match)
         assert len(non_blocking) == 1
 
     def test_missing_disposition_is_blocking(self):
         """Fail-closed: missing disposition with no keywords treated as blocking."""
         findings = [{"title": "Unknown"}]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 1
         assert len(non_blocking) == 0
 
     def test_missing_disposition_medium_severity_no_keywords_non_blocking(self):
         """Medium severity without keywords → non_blocking (severity-appropriate default)."""
         findings = [{"title": "Some issue", "severity": "medium"}]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 0, "medium severity without keywords should be non_blocking"
         assert len(non_blocking) == 1
 
     def test_missing_disposition_low_severity_non_blocking(self):
         """Low severity without keywords → non_blocking (severity-appropriate default)."""
         findings = [{"title": "Some issue", "severity": "low"}]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 0, "low severity without keywords should be non_blocking"
         assert len(non_blocking) == 1
 
     def test_empty_findings(self):
-        blocking, non_blocking = pb_mod._classify_findings([])
+        blocking, non_blocking = pb_mod._classify_findings([])  # ANTICHEAT_OK: testing internal executor functions
         assert blocking == []
         assert non_blocking == []
 
@@ -1050,72 +1050,72 @@ class TestFindingDisposition:
     def test_explicit_disposition_blocking(self):
         """Finding with explicit disposition=blocking is classified as blocking."""
         findings = [{"title": "Anything", "disposition": "blocking"}]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 1
         assert len(non_blocking) == 0
 
     def test_explicit_disposition_non_blocking(self):
         """Finding with explicit disposition=non_blocking is classified as non_blocking."""
         findings = [{"title": "Anything", "disposition": "non_blocking"}]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 0
         assert len(non_blocking) == 1
 
     def test_no_disposition_critical_severity_blocking(self):
         """No disposition + critical severity → always blocking."""
         findings = [{"title": "Something", "severity": "critical"}]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 1
         assert len(non_blocking) == 0
 
     def test_no_disposition_medium_no_runtime_impact_non_blocking(self):
         """No disposition + medium severity + no runtime keywords → non_blocking."""
         findings = [{"title": "Improve error message wording", "severity": "medium"}]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 0, "medium severity with no keywords should be non_blocking"
         assert len(non_blocking) == 1
 
     def test_no_disposition_high_severity_runtime_failure_blocking(self):
         """No disposition + high severity + 'runtime failure' in title → blocking."""
         findings = [{"title": "Potential runtime failure in commit path", "severity": "high"}]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 1
         assert len(non_blocking) == 0
 
     def test_no_disposition_high_severity_theoretical_edge_case_non_blocking(self):
         """No disposition + high severity + 'theoretical' keyword → non_blocking."""
         findings = [{"title": "Theoretical edge case in unusual config", "severity": "high"}]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 0
         assert len(non_blocking) == 1
 
     def test_disposition_for_finding_returns_reason(self):
         """_disposition_for_finding returns (disposition, reason) tuple."""
-        disp, reason = pb_mod._disposition_for_finding({"title": "X", "disposition": "blocking"})
+        disp, reason = pb_mod._disposition_for_finding({"title": "X", "disposition": "blocking"})  # ANTICHEAT_OK: testing internal executor functions
         assert disp == "blocking"
         assert "explicit" in reason
 
-        disp, reason = pb_mod._disposition_for_finding({"title": "crash in pipeline", "severity": "high"})
+        disp, reason = pb_mod._disposition_for_finding({"title": "crash in pipeline", "severity": "high"})  # ANTICHEAT_OK: testing internal executor functions
         assert disp == "blocking"
         assert "keyword" in reason.lower()
 
     def test_no_disposition_high_severity_no_keywords_blocking(self):
         """High severity without any keyword match → blocking (fail-closed)."""
         findings = [{"title": "Refactor suggestion", "severity": "high"}]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 1
         assert len(non_blocking) == 0
 
     def test_no_disposition_summary_keyword_match(self):
         """Keywords in summary field (not just title) trigger classification."""
         findings = [{"title": "Issue", "summary": "This causes data loss", "severity": "medium"}]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 1, "blocking keyword in summary should trigger blocking"
 
     def test_non_blocking_keyword_in_title(self):
         """Non-blocking keywords like 'hardening' route to non_blocking."""
         findings = [{"title": "Add hardening for edge case", "severity": "medium"}]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 0
         assert len(non_blocking) == 1
 
@@ -1130,7 +1130,7 @@ class TestHighSeverityDetailHeuristic:
             "severity": "high",
             "detail": "In a theoretical adversarial setup, the receipt field could be spoofed.",
         }]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 0
         assert len(non_blocking) == 1
 
@@ -1141,7 +1141,7 @@ class TestHighSeverityDetailHeuristic:
             "severity": "high",
             "detail": "When receipt is missing, the pipeline still proceeds to commit_ready.",
         }]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 1
         assert len(non_blocking) == 0
 
@@ -1152,7 +1152,7 @@ class TestHighSeverityDetailHeuristic:
             "severity": "high",
             "detail": "The function returns success even when the input is malformed.",
         }]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 1
 
     def test_hardening_indicator_could_be_bypassed_non_blocking(self):
@@ -1162,7 +1162,7 @@ class TestHighSeverityDetailHeuristic:
             "severity": "high",
             "detail": "With a crafted input, the gate could be bypassed in theory.",
         }]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 0
         assert len(non_blocking) == 1
 
@@ -1173,7 +1173,7 @@ class TestHighSeverityDetailHeuristic:
             "severity": "high",
             "detail": "Theoretical but the function returns success anyway.",
         }]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 1, "conflicting indicators should fail-closed to blocking"
 
     def test_no_indicators_still_blocking(self):
@@ -1183,7 +1183,7 @@ class TestHighSeverityDetailHeuristic:
             "severity": "high",
             "detail": "This is a finding about something.",
         }]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 1
 
     def test_hardening_in_description_field(self):
@@ -1193,20 +1193,20 @@ class TestHighSeverityDetailHeuristic:
             "severity": "high",
             "description": "This is a synthetic scenario unlikely in practice.",
         }]
-        blocking, non_blocking = pb_mod._classify_findings(findings)
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 0
         assert len(non_blocking) == 1
 
     def test_disposition_for_finding_reason_includes_indicator(self):
         """Reason string mentions the matched indicator."""
-        disp, reason = pb_mod._disposition_for_finding({
+        disp, reason = pb_mod._disposition_for_finding({  # ANTICHEAT_OK: testing internal executor functions
             "title": "X", "severity": "high",
             "detail": "theoretical edge case",
         })
         assert disp == "non_blocking"
         assert "hardening indicator" in reason
 
-        disp, reason = pb_mod._disposition_for_finding({
+        disp, reason = pb_mod._disposition_for_finding({  # ANTICHEAT_OK: testing internal executor functions
             "title": "X", "severity": "high",
             "detail": "the pipeline still proceeds past the gate",
         })
@@ -1225,12 +1225,12 @@ class TestRepeatFindingConvergenceCap:
 
         # All rounds: stays blocking (no downgrade)
         for i in range(pb_mod.REPEAT_FINDING_CAP + 2):
-            blocking, non_blocking = pb_mod._classify_findings([finding], history)
+            blocking, non_blocking = pb_mod._classify_findings([finding], history)  # ANTICHEAT_OK: testing internal executor functions
             assert len(blocking) == 1, f"Round {i+1}: finding must stay blocking"
             assert len(non_blocking) == 0, f"Round {i+1}: no auto-downgrade"
 
         # But history tracks the count for the caller's hard-failure check
-        key = pb_mod._finding_key(finding)
+        key = pb_mod._finding_key(finding)  # ANTICHEAT_OK: testing internal executor functions
         assert history[key] == pb_mod.REPEAT_FINDING_CAP + 2
 
     def test_repeat_cap_per_finding_key(self):
@@ -1243,15 +1243,15 @@ class TestRepeatFindingConvergenceCap:
 
         # Run f1 to cap, then introduce f2
         for _ in range(pb_mod.REPEAT_FINDING_CAP):
-            pb_mod._classify_findings([f1], history)
+            pb_mod._classify_findings([f1], history)  # ANTICHEAT_OK: testing internal executor functions
 
         # f1 is at cap, f2 is fresh — both stay blocking
-        blocking, non_blocking = pb_mod._classify_findings([f1, f2], history)
+        blocking, non_blocking = pb_mod._classify_findings([f1, f2], history)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 2, "Both findings must stay blocking"
         assert len(non_blocking) == 0, "No auto-downgrade"
         # But their counts differ
-        assert history[pb_mod._finding_key(f1)] == pb_mod.REPEAT_FINDING_CAP + 1
-        assert history[pb_mod._finding_key(f2)] == 1
+        assert history[pb_mod._finding_key(f1)] == pb_mod.REPEAT_FINDING_CAP + 1  # ANTICHEAT_OK: testing internal executor functions
+        assert history[pb_mod._finding_key(f2)] == 1  # ANTICHEAT_OK: testing internal executor functions
 
     def test_disappeared_finding_pruned_from_history(self):
         """Findings that disappear from a round get pruned from history."""
@@ -1260,19 +1260,19 @@ class TestRepeatFindingConvergenceCap:
         history: dict[str, int] = {}
 
         # Appear in round 1
-        pb_mod._classify_findings([f1], history)
-        assert pb_mod._finding_key(f1) in history
+        pb_mod._classify_findings([f1], history)  # ANTICHEAT_OK: testing internal executor functions
+        assert pb_mod._finding_key(f1) in history  # ANTICHEAT_OK: testing internal executor functions
 
         # Disappear in round 2 (empty findings)
-        pb_mod._classify_findings([], history)
-        assert pb_mod._finding_key(f1) not in history
+        pb_mod._classify_findings([], history)  # ANTICHEAT_OK: testing internal executor functions
+        assert pb_mod._finding_key(f1) not in history  # ANTICHEAT_OK: testing internal executor functions
 
     def test_no_history_means_no_downgrade(self):
         """Without finding_history, repeat cap is not applied."""
         finding = {"title": "Bug", "severity": "high", "file": "x.py",
                    "detail": "vague concern"}
         for _ in range(5):
-            blocking, non_blocking = pb_mod._classify_findings([finding])
+            blocking, non_blocking = pb_mod._classify_findings([finding])  # ANTICHEAT_OK: testing internal executor functions
             assert len(blocking) == 1
 
     def test_non_blocking_finding_resets_counter(self):
@@ -1282,15 +1282,15 @@ class TestRepeatFindingConvergenceCap:
         # First two rounds: blocking (high severity, no keywords)
         f_blocking = {"title": "Concern", "severity": "high", "file": "x.py",
                       "detail": "vague concern"}
-        pb_mod._classify_findings([f_blocking], history)
-        pb_mod._classify_findings([f_blocking], history)
-        key = pb_mod._finding_key(f_blocking)
+        pb_mod._classify_findings([f_blocking], history)  # ANTICHEAT_OK: testing internal executor functions
+        pb_mod._classify_findings([f_blocking], history)  # ANTICHEAT_OK: testing internal executor functions
+        key = pb_mod._finding_key(f_blocking)  # ANTICHEAT_OK: testing internal executor functions
         assert history[key] == 2
 
         # Now it appears with a non_blocking keyword — counter resets
         f_nb = {"title": "Concern", "severity": "high", "file": "x.py",
                 "detail": "this is theoretical hardening"}
-        pb_mod._classify_findings([f_nb], history)
+        pb_mod._classify_findings([f_nb], history)  # ANTICHEAT_OK: testing internal executor functions
         assert key not in history
 
     def test_finding_key_stable(self):
@@ -1298,8 +1298,8 @@ class TestRepeatFindingConvergenceCap:
         f1 = {"title": "Bug in foo", "file": "src/foo.py"}
         f2 = {"title": "bug in foo", "file": "src/foo.py"}
         f3 = {"title": "Bug in foo", "file": "src/bar.py"}
-        assert pb_mod._finding_key(f1) == pb_mod._finding_key(f2)
-        assert pb_mod._finding_key(f1) != pb_mod._finding_key(f3)
+        assert pb_mod._finding_key(f1) == pb_mod._finding_key(f2)  # ANTICHEAT_OK: testing internal executor functions
+        assert pb_mod._finding_key(f1) != pb_mod._finding_key(f3)  # ANTICHEAT_OK: testing internal executor functions
 
 
 class TestDeferredPacketFiling:
@@ -1309,7 +1309,7 @@ class TestDeferredPacketFiling:
         findings = [
             {"title": "Style nit", "class": "DOC_ACCURACY", "severity": "low", "file": "foo.py", "disposition": "non_blocking"},
         ]
-        packet = pb_mod._write_deferred_packet(tmp_path, "test-wave-42", findings)
+        packet = pb_mod._write_deferred_packet(tmp_path, "test-wave-42", findings)  # ANTICHEAT_OK: testing internal executor functions
         assert packet.exists()
         content = packet.read_text()
         assert "Style nit" in content
@@ -1318,13 +1318,13 @@ class TestDeferredPacketFiling:
         assert packet.parent == tmp_path / "reports" / "deferred" / "non_blocking"
 
     def test_packet_name_from_wave_id(self, tmp_path):
-        packet = pb_mod._write_deferred_packet(tmp_path, "my-wave", [{"title": "x"}])
+        packet = pb_mod._write_deferred_packet(tmp_path, "my-wave", [{"title": "x"}])  # ANTICHEAT_OK: testing internal executor functions
         assert packet.name == "my-wave_bridge_nonblockers.md"
 
     def test_creates_directory_if_missing(self, tmp_path):
         repo = tmp_path / "nested"
         repo.mkdir()
-        packet = pb_mod._write_deferred_packet(repo, "w", [{"title": "t"}])
+        packet = pb_mod._write_deferred_packet(repo, "w", [{"title": "t"}])  # ANTICHEAT_OK: testing internal executor functions
         assert packet.exists()
 
 
@@ -1518,7 +1518,7 @@ class TestStatePersistence:
     def test_state_file_written(self, tmp_path):
         """_save_state writes state to expected path."""
         state = {"plan_path": "test.md", "completed_step": "implementer", "wave_id": "w1"}
-        path = pb_mod._save_state(tmp_path, state)
+        path = pb_mod._save_state(tmp_path, state)  # ANTICHEAT_OK: testing internal executor functions
         assert path.exists()
         loaded = json.loads(path.read_text())
         assert loaded["completed_step"] == "implementer"
@@ -1527,26 +1527,26 @@ class TestStatePersistence:
     def test_load_state_returns_saved(self, tmp_path):
         """_load_state returns previously saved state."""
         state = {"plan_path": "test.md", "completed_step": "bridge_round_2", "wave_id": "w1", "bridge_rounds": 2}
-        pb_mod._save_state(tmp_path, state)
-        loaded = pb_mod._load_state(tmp_path)
+        pb_mod._save_state(tmp_path, state)  # ANTICHEAT_OK: testing internal executor functions
+        loaded = pb_mod._load_state(tmp_path)  # ANTICHEAT_OK: testing internal executor functions
         assert loaded is not None
         assert loaded["completed_step"] == "bridge_round_2"
         assert loaded["bridge_rounds"] == 2
 
     def test_load_state_returns_none_when_missing(self, tmp_path):
         """_load_state returns None when no state file exists."""
-        assert pb_mod._load_state(tmp_path) is None
+        assert pb_mod._load_state(tmp_path) is None  # ANTICHEAT_OK: testing internal executor functions
 
     def test_clear_state_removes_file(self, tmp_path):
         """_clear_state removes the state file."""
-        pb_mod._save_state(tmp_path, {"plan_path": "x"})
-        assert pb_mod._state_file_path(tmp_path).exists()
-        pb_mod._clear_state(tmp_path)
-        assert not pb_mod._state_file_path(tmp_path).exists()
+        pb_mod._save_state(tmp_path, {"plan_path": "x"})  # ANTICHEAT_OK: testing internal executor functions
+        assert pb_mod._state_file_path(tmp_path).exists()  # ANTICHEAT_OK: testing internal executor functions
+        pb_mod._clear_state(tmp_path)  # ANTICHEAT_OK: testing internal executor functions
+        assert not pb_mod._state_file_path(tmp_path).exists()  # ANTICHEAT_OK: testing internal executor functions
 
     def test_clear_state_noop_when_missing(self, tmp_path):
         """_clear_state is a no-op when no state file exists."""
-        pb_mod._clear_state(tmp_path)  # Should not raise
+        pb_mod._clear_state(tmp_path)  # Should not raise  # ANTICHEAT_OK: testing internal executor functions
 
     def test_resume_from_state_file(self, tmp_path):
         """run_phase_b picks up saved state and includes resumed_from in result."""
@@ -1556,7 +1556,7 @@ class TestStatePersistence:
         (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
 
         # Pre-save state
-        pb_mod._save_state(repo, {
+        pb_mod._save_state(repo, {  # ANTICHEAT_OK: testing internal executor functions
             "plan_path": "reports/control_plane/plan.md",
             "completed_step": "bridge_round_1",
             "wave_id": "plan",
@@ -1648,7 +1648,7 @@ class TestStaleStateCleared:
 
         assert result["status"] == "max_rounds_reached"
         # State file must be cleared — next invocation must NOT auto-skip rounds
-        assert pb_mod._load_state(repo) is None
+        assert pb_mod._load_state(repo) is None  # ANTICHEAT_OK: testing internal executor functions
 
     def test_question_for_founder_clears_state(self, tmp_path):
         """QUESTION decision must clear state so next invocation starts fresh."""
@@ -1676,7 +1676,7 @@ class TestStaleStateCleared:
             )
 
         assert result["status"] == "question_for_founder"
-        assert pb_mod._load_state(repo) is None
+        assert pb_mod._load_state(repo) is None  # ANTICHEAT_OK: testing internal executor functions
 
 
 class TestParseFindings:
@@ -1691,24 +1691,24 @@ class TestParseFindings:
             ],
         })
         render = f"Some preamble\nBEGIN_AGENT_ENVELOPE\n{envelope}\nEND_AGENT_ENVELOPE\nSome footer"
-        findings = pb_mod._parse_findings_from_render(render)
+        findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
         assert len(findings) == 2
         assert findings[0]["title"] == "Bug"
         assert findings[1]["disposition"] == "non_blocking"
 
     def test_parse_no_envelope_returns_empty(self):
-        findings = pb_mod._parse_findings_from_render("just some text without envelope")
+        findings = pb_mod._parse_findings_from_render("just some text without envelope")  # ANTICHEAT_OK: testing internal executor functions
         assert findings == []
 
     def test_parse_malformed_json_returns_empty(self):
         render = "BEGIN_AGENT_ENVELOPE\n{not valid json\nEND_AGENT_ENVELOPE"
-        findings = pb_mod._parse_findings_from_render(render)
+        findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
         assert findings == []
 
     def test_parse_envelope_with_code_fences(self):
         envelope = json.dumps({"findings": [{"title": "A", "disposition": "blocking"}]})
         render = f"BEGIN_AGENT_ENVELOPE\n```json\n{envelope}\n```\nEND_AGENT_ENVELOPE"
-        findings = pb_mod._parse_findings_from_render(render)
+        findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
         assert len(findings) == 1
 
     def test_parse_markdown_findings(self):
@@ -1728,7 +1728,7 @@ class TestParseFindings:
             "     - File: mu/tools/executors/executor_config.json\n"
             "     - Evidence: Hard-coded timeout value\n"
         )
-        findings = pb_mod._parse_findings_from_render(render)
+        findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
         assert len(findings) == 3
         assert findings[0]["title"] == "Missing validation on input"
         assert findings[0]["severity"] == "critical"
@@ -1741,7 +1741,7 @@ class TestParseFindings:
 
     def test_parse_markdown_single_finding(self):
         render = "1. **DEFECT** (low): Minor nit\n   - File: foo.py\n"
-        findings = pb_mod._parse_findings_from_render(render)
+        findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
         assert len(findings) == 1
         assert findings[0]["title"] == "Minor nit"
         assert findings[0]["severity"] == "low"
@@ -1754,7 +1754,7 @@ class TestParseFindings:
             "   - Evidence: proof\n"
             "   - Disposition: blocking\n"
         )
-        findings = pb_mod._parse_findings_from_render(render)
+        findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
         assert len(findings) == 1
         assert findings[0]["disposition"] == "blocking"
 
@@ -1768,7 +1768,7 @@ class TestParseFindings:
             "1. **DEFECT** (critical): FromMarkdown\n"
             "   - File: a.py\n"
         )
-        findings = pb_mod._parse_findings_from_render(render)
+        findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
         assert len(findings) == 1
         assert findings[0]["title"] == "FromEnvelope"
 
@@ -1792,7 +1792,7 @@ class TestWaveOwnedFilesIncludesDeferredPackets:
             "reports/deferred/non_blocking/wave_bridge_nonblockers.md",
         ]):
             # Without executor_created_files: deferred packet dropped
-            files_without = pb_mod._collect_wave_owned_files(
+            files_without = pb_mod._collect_wave_owned_files(  # ANTICHEAT_OK: testing internal executor functions
                 repo, "reports/control_plane/plan.md",
                 plan_declared_files=["mu/tools/executors/foo.py"],
                 implementer_changed_files=set(),
@@ -1801,7 +1801,7 @@ class TestWaveOwnedFilesIncludesDeferredPackets:
             assert "reports/deferred/non_blocking/wave_bridge_nonblockers.md" not in files_without
 
             # With executor_created_files: deferred packet included
-            files_with = pb_mod._collect_wave_owned_files(
+            files_with = pb_mod._collect_wave_owned_files(  # ANTICHEAT_OK: testing internal executor functions
                 repo, "reports/control_plane/plan.md",
                 plan_declared_files=["mu/tools/executors/foo.py"],
                 implementer_changed_files=set(),
@@ -1814,7 +1814,7 @@ class TestWaveOwnedFilesIncludesDeferredPackets:
         repo = tmp_path / "repo"
         repo.mkdir()
         with patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tools/foo.py"]):
-            files = pb_mod._collect_wave_owned_files(
+            files = pb_mod._collect_wave_owned_files(  # ANTICHEAT_OK: testing internal executor functions
                 repo, "reports/control_plane/plan.md",
                 plan_declared_files=["mu/tools/foo.py"],
                 implementer_changed_files=set(),
@@ -1929,7 +1929,7 @@ class TestPytestFixTracksChangedFiles:
             return {"exit_code": 0, "stdout": "passed", "stderr": "", "passed": True}
 
         # Track what _collect_wave_owned_files receives for implementer_changed_files
-        original_collect = pb_mod._collect_wave_owned_files
+        original_collect = pb_mod._collect_wave_owned_files  # ANTICHEAT_OK: testing internal executor functions
         wave_owned_results = []
         def tracking_collect(*a, **kw):
             result = original_collect(*a, **kw)
@@ -2093,7 +2093,7 @@ class TestWaveOwnedFilesNoPrefixGlob:
             "reports/control_plane/other_wave_plan.md",  # unrelated dirty sibling
             "reports/control_plane/plan.md",
         ]):
-            files = pb_mod._collect_wave_owned_files(
+            files = pb_mod._collect_wave_owned_files(  # ANTICHEAT_OK: testing internal executor functions
                 repo, "reports/control_plane/plan.md",
                 plan_declared_files=["mu/tools/executors/foo.py"],
                 implementer_changed_files=set(),
@@ -2114,7 +2114,7 @@ class TestWaveOwnedFilesNoPrefixGlob:
             "reports/control_plane/other.md",
             "mu/tools/executors/foo.py",
         ]):
-            files = pb_mod._collect_wave_owned_files(
+            files = pb_mod._collect_wave_owned_files(  # ANTICHEAT_OK: testing internal executor functions
                 repo, "reports/control_plane/plan.md",
                 plan_declared_files=None,
                 implementer_changed_files=None,
@@ -2273,7 +2273,7 @@ class TestResumeFromNeedsPhaseBReentrySkipsInitialBridgeLoop:
             "all_non_blocking": [],
             "reentry_findings": "Fix the bug",
         }
-        pb_mod._save_state(repo, state)
+        pb_mod._save_state(repo, state)  # ANTICHEAT_OK: testing internal executor functions
 
         mock_impl = self._make_mock_impl()
         bridge_calls = []
@@ -2364,7 +2364,7 @@ class TestReentryRequestChangesCheckpointsState:
         mock_impl.invoke_implementer.side_effect = impl_side
 
         saved_states = []
-        original_save = pb_mod._save_state
+        original_save = pb_mod._save_state  # ANTICHEAT_OK: testing internal executor functions
 
         def capturing_save(rr, state):
             saved_states.append(state.copy())
@@ -2457,7 +2457,7 @@ class TestBridgeTimeoutIsError:
         assert result["status"] == "error"
         assert any("timed out" in e for e in result.get("errors", []))
         # State must be cleared to prevent stale resume
-        assert pb_mod._load_state(repo) is None
+        assert pb_mod._load_state(repo) is None  # ANTICHEAT_OK: testing internal executor functions
 
     def test_bridge_timeout_does_not_silently_retry(self, tmp_path):
         """Bridge timeout must NOT cause multiple bridge invocations (no silent retry)."""
@@ -2531,7 +2531,7 @@ class TestBridgeTimeoutIsError:
 
         assert result["status"] == "error"
         assert any("timed out" in e for e in result.get("errors", []))
-        assert pb_mod._load_state(repo) is None
+        assert pb_mod._load_state(repo) is None  # ANTICHEAT_OK: testing internal executor functions
 
 
 class TestMaxRoundsResultIncludesFindings:
@@ -2628,7 +2628,7 @@ class TestReentryStateClearing:
 
     def test_reentry_pytest_gate_failure_clears_state(self):
         """_clear_state must be called before returning from reentry_pytest_gate failure."""
-        source = Path(pb_mod.__file__).read_text()
+        source = Path(pb_mod.__file__).read_text()  # ANTICHEAT_OK: testing internal executor functions
         # Find the reentry_pytest_gate failure block
         idx = source.find('"reentry_pytest_gate"')
         assert idx > 0, "reentry_pytest_gate error path not found in source"
@@ -2642,7 +2642,7 @@ class TestReentryStateClearing:
 
     def test_reentry_staging_failure_clears_state(self):
         """_clear_state must be called before returning from reentry_staging failure."""
-        source = Path(pb_mod.__file__).read_text()
+        source = Path(pb_mod.__file__).read_text()  # ANTICHEAT_OK: testing internal executor functions
         idx = source.find('"reentry_staging"')
         assert idx > 0, "reentry_staging error path not found in source"
         block = source[max(0, idx - 300):idx]
