@@ -145,7 +145,7 @@ def test_streaming_progress_resets_stale_timer(tmp_path):
             for tick in range(2):
                 await asyncio.sleep(0.6)
                 progress_ticks.append(tick)
-                orchestrator._mark_progress(f"{agent_name} streaming tick {tick}")
+                orchestrator._mark_progress(f"{agent_name} streaming tick {tick}")  # ANTICHEAT_OK: exercising orchestrator progress heartbeat
             return _result(agent_name, verdict="SECURE")
 
         orchestrator.run_single_agent = fake_run_single_agent  # type: ignore[method-assign]
@@ -362,7 +362,7 @@ def test_bridge_escalation_runs_with_review_mode_marker(monkeypatch):
         results=[types.SimpleNamespace(name="verifier", output="x", verdict="REQUEST_CHANGES")]
     )
 
-    rr_mod._maybe_escalate_to_bridge(orch)
+    rr_mod._maybe_escalate_to_bridge(orch)  # ANTICHEAT_OK: testing review-to-bridge escalation helper
 
     assert seen["env"]["RCX_AGENT_REVIEW_MODE"] == "run_review"
     assert "RCX_AGENT_REVIEW_MODE" not in rr_mod.os.environ

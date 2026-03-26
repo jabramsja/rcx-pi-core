@@ -266,9 +266,9 @@ class TestParseMetaEnvelope:
 
     def test_bounded_timeout_env_invalid_or_out_of_range_uses_default(self):
         with patch.dict(meta.os.environ, {"RCX_META_GIT_TIMEOUT_S": "not-int"}, clear=False):
-            assert meta._read_bounded_timeout_env("RCX_META_GIT_TIMEOUT_S", 30, minimum=1, maximum=300) == 30
+            assert meta._read_bounded_timeout_env("RCX_META_GIT_TIMEOUT_S", 30, minimum=1, maximum=300) == 30  # ANTICHEAT_OK: testing bounded timeout env helper
         with patch.dict(meta.os.environ, {"RCX_META_GIT_TIMEOUT_S": "999999"}, clear=False):
-            assert meta._read_bounded_timeout_env("RCX_META_GIT_TIMEOUT_S", 30, minimum=1, maximum=300) == 30
+            assert meta._read_bounded_timeout_env("RCX_META_GIT_TIMEOUT_S", 30, minimum=1, maximum=300) == 30  # ANTICHEAT_OK: testing bounded timeout env helper
 
     def test_run_meta_bridge_blocked_in_agent_review_mode(self, tmp_path):
         package = tmp_path / "package.json"

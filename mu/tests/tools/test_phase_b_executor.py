@@ -755,7 +755,7 @@ class TestBridgeReviewMonitoring:
              patch.object(pb_mod, "_terminate_bridge_subprocess") as mock_terminate, \
              patch.object(pb_mod.time, "sleep", return_value=None), \
              patch.object(pb_mod.time, "monotonic", side_effect=lambda: next(monotonic_values)):
-            result = pb_mod._run_bridge_review_subprocess(
+            result = pb_mod._run_bridge_review_subprocess(  # ANTICHEAT_OK: testing internal bridge subprocess supervision helper
                 tmp_path,
                 [sys.executable, "-c", "print('hi')"],
                 job_id="stale-job",

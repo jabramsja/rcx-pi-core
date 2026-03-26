@@ -307,16 +307,16 @@ class TestWaveIdBounds:
 
     def test_decode_untrusted_path_returns_none_on_malformed_percent_escape(self):
         """Regression: %FF%FE is invalid UTF-8; must return None, not True."""
-        result = commit_mod._decode_untrusted_path("%FF%FE")
+        result = commit_mod._decode_untrusted_path("%FF%FE")  # ANTICHEAT_OK: testing malformed percent-escape decoding helper
         assert result is None, f"Expected None for malformed percent escape, got {result!r}"
 
     def test_is_absolute_rejects_malformed_percent_escape(self):
         """Regression: malformed percent-escaped path must not raise TypeError."""
-        assert commit_mod._is_absolute_untrusted_path("%FF%FE") is True
+        assert commit_mod._is_absolute_untrusted_path("%FF%FE") is True  # ANTICHEAT_OK: testing malformed percent-escape absolute-path helper
 
     def test_has_path_traversal_rejects_malformed_percent_escape(self):
         """Regression: malformed percent-escaped path must not raise TypeError."""
-        assert commit_mod._has_path_traversal("%FF%FE") is True
+        assert commit_mod._has_path_traversal("%FF%FE") is True  # ANTICHEAT_OK: testing malformed percent-escape traversal helper
 
     def test_validate_handoff_rejects_malformed_percent_escape_in_files_to_stage(self):
         """Regression: validate_handoff must fail closed on malformed percent escapes."""
