@@ -35,9 +35,11 @@ from enforce_l4_execution_contract import (
     VALID_WAVE_CLASSES,
     WORKLOAD_TARGET_EVIDENCE,
     _check_proof_binding,
+    bind_note_from_touched_wave_ids,
     check_consecutive_maintenance,
     compute_runtime_host_marker_delta,
     enforce,
+    extract_touched_tracker_wave_ids,
     filter_to_tracked_files,
     validate_indicator_artifact_json,
     validate_indicator_with_ratchet,
@@ -1107,6 +1109,29 @@ class TestWaveBinding:
         files = ["tools/checks/foo.py", "TASKS.md"]
         passed, errors = enforce("L4_STRUCTURAL", files, notes=notes)
         assert not passed  # No runtime files for STRUCTURAL
+
+    def test_extract_touched_tracker_wave_ids_uses_added_tracker_lines(self) -> None:
+        tasks_diff = (
+            "@@ -385,0 +386,2 @@\n"
+            "+- Tracker sync note (2026-03-24, prior-wave): **PRIOR — old.** "
+            "Class: L4_ENABLER. indicator_artifact_ref: reports/l4_wave_indicators/prior-wave.json.\n"
+            "+- Tracker sync note (2026-03-25, current-wave): **CURRENT — new.** "
+            "Class: L4_ENABLER. indicator_artifact_ref: reports/l4_wave_indicators/current-wave.json.\n"
+        )
+
+        assert extract_touched_tracker_wave_ids(tasks_diff) == ["prior-wave", "current-wave"]
+
+    def test_bind_note_from_touched_wave_ids_prefers_last_added_wave(self) -> None:
+        notes = [
+            {"wave_id": "older-top-note", "wave_class": "L4_ENABLER"},
+            {"wave_id": "current-wave", "wave_class": "L4_ENABLER"},
+            {"wave_id": "prior-wave", "wave_class": "L4_ENABLER"},
+        ]
+
+        bound = bind_note_from_touched_wave_ids(notes, ["prior-wave", "current-wave"])
+
+        assert bound is not None
+        assert bound["wave_id"] == "current-wave"
 
 
 # =============================================================================

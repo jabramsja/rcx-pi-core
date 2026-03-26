@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import subprocess
 import sys
 import uuid
@@ -34,20 +36,43 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 # Import canonical load_routing_record from shared module
 try:
-    from executor_common import load_routing_record, ExecutorCommonError, run_bridge_subprocess
+    from executor_common import (
+        load_executor_config,
+        load_routing_record,
+        ensure_not_agent_review_mode,
+        ExecutorCommonError,
+        run_bridge_subprocess,
+    )
 except ImportError:
     import importlib.util as _ilu
     _common_path = SCRIPT_DIR / "executor_common.py"
     _spec = _ilu.spec_from_file_location("executor_common", str(_common_path))
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
+    load_executor_config = _mod.load_executor_config
     load_routing_record = _mod.load_routing_record
+    ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
     run_bridge_subprocess = _mod.run_bridge_subprocess
 
 
 class PhaseAExecutorError(RuntimeError):
     """Raised when Phase A executor cannot proceed."""
+
+
+PLAN_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
+ALLOWED_REVIEW_DEPTHS = {"quick", "full", "founder", "all"}
+
+
+def resolve_review_depth(config: dict[str, Any], phase_key: str, default: str = "quick") -> str:
+    """Resolve review depth from executor config and fail closed on invalid values."""
+    depth = config.get("review_depths", {}).get(phase_key, default)
+    if depth not in ALLOWED_REVIEW_DEPTHS:
+        raise PhaseAExecutorError(
+            f"Invalid review depth {depth!r} for {phase_key}; "
+            f"expected one of {sorted(ALLOWED_REVIEW_DEPTHS)}"
+        )
+    return depth
 
 
 def extract_plan_scope(routing_record: dict[str, Any]) -> dict[str, str]:
@@ -59,14 +84,65 @@ def extract_plan_scope(routing_record: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _find_tracked_packet(plan_dir: Path, plan_name: str) -> Path | None:
+    """Find an existing tracked/canonical packet matching plan_name.
+
+    Searches for files matching `{plan_name}_*.md` in the plan directory,
+    sorted by name (most recent date last). Returns the best match, or
+    None if no tracked packet exists.
+
+    A tracked packet is one that is already LOCKED or has meaningful content
+    beyond a placeholder stub.
+    """
+    if not plan_dir.exists():
+        return None
+
+    candidates = sorted(plan_dir.glob(f"{plan_name}_*.md"))
+    if not candidates:
+        return None
+
+    # Prefer locked packets over unlocked ones
+    for c in reversed(candidates):
+        content = c.read_text(encoding="utf-8")
+        if "Phase-A-Lock: LOCKED" in content:
+            return c
+
+    # Fall back to the most recent (by filename date) existing packet
+    # but only if it has real content (not just a stub header)
+    for c in reversed(candidates):
+        content = c.read_text(encoding="utf-8")
+        # A packet with more than just the header template has real content
+        if len(content.strip().splitlines()) > 10:
+            return c
+
+    # Return the most recent candidate even if it's a stub —
+    # still better than creating a new dated duplicate
+    return candidates[-1]
+
+
 def create_plan_draft(
     repo_root: Path,
     plan_name: str,
     scope: dict[str, str],
 ) -> Path:
-    """Create an initial plan packet draft."""
+    """Create an initial plan packet draft, or reuse an existing tracked packet.
+
+    If a tracked/canonical packet already exists for this plan_name, reuse it
+    instead of creating a new dated placeholder. New dated drafts are only
+    created when no matching tracked packet exists.
+    """
+    if not isinstance(plan_name, str) or not PLAN_NAME_RE.fullmatch(plan_name):
+        raise PhaseAExecutorError(f"Unsafe plan_name: {plan_name!r}")
+    if Path(plan_name).name != plan_name or "/" in plan_name or "\\" in plan_name:
+        raise PhaseAExecutorError(f"Path traversal in plan_name: {plan_name!r}")
+
     plan_dir = repo_root / "reports" / "control_plane"
     plan_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check for existing tracked packet first
+    existing = _find_tracked_packet(plan_dir, plan_name)
+    if existing is not None:
+        return existing
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     plan_path = plan_dir / f"{plan_name}_{date_str}.md"
@@ -97,19 +173,20 @@ def run_sdk_agents(
     repo_root: Path,
     files: list[str],
     *,
-    depth: str = "full",
+    depth: str = "quick",
     timeout: int = 600,
 ) -> dict[str, Any]:
     """Run SDK agent review."""
     cmd = [
         sys.executable, "tools/runners/run_review.py",
         *files, "--depth", depth,
+        "--no-memory",
     ]
     try:
         result = subprocess.run(
             cmd, cwd=repo_root, capture_output=True, text=True,
             check=False, timeout=timeout,
-            env={**__import__("os").environ, "PYTHONHASHSEED": "0"},
+            env={**os.environ, "PYTHONHASHSEED": "0"},
         )
         return {"exit_code": result.returncode, "stdout": result.stdout, "stderr": result.stderr}
     except subprocess.TimeoutExpired:
@@ -157,10 +234,19 @@ def lock_plan(repo_root: Path, plan_path: str) -> None:
     """Set Phase-A-Lock: LOCKED in a plan packet."""
     full_path = repo_root / plan_path
     content = full_path.read_text(encoding="utf-8")
-    content = content.replace("Phase-A-Lock: UNLOCKED", "Phase-A-Lock: LOCKED")
-    content = content.replace(
-        "not yet agent-reviewed or bridge-converged",
-        "bridge-converged"
+    content, lock_replacements = re.subn(
+        r"(?m)^Phase-A-Lock:\s*UNLOCKED\s*$",
+        "Phase-A-Lock: LOCKED",
+        content,
+        count=1,
+    )
+    if lock_replacements != 1:
+        raise PhaseAExecutorError(f"Expected one unlock line in {plan_path}, found {lock_replacements}")
+    content = re.sub(
+        r"not yet agent-reviewed or bridge-converged",
+        "bridge-converged",
+        content,
+        count=1,
     )
     full_path.write_text(content, encoding="utf-8")
 
@@ -176,6 +262,18 @@ def run_phase_a(
 
     Returns a result dict with status and plan path.
     """
+    try:
+        ensure_not_agent_review_mode("phase_a_executor.run_phase_a")
+    except ExecutorCommonError as exc:
+        return {
+            "status": "error",
+            "plan_name": plan_name,
+            "plan_path": None,
+            "bridge_rounds": 0,
+            "agent_review_ran": False,
+            "error": str(exc),
+        }
+
     result: dict[str, Any] = {
         "status": "success",
         "plan_name": plan_name,
@@ -187,6 +285,8 @@ def run_phase_a(
     def log(msg: str) -> None:
         if verbose:
             print(f"[phase-a] {msg}")
+
+    config = load_executor_config(repo_root)
 
     # Load routing record for scope context
     try:
@@ -202,8 +302,9 @@ def run_phase_a(
     log(f"Plan draft: {rel_plan_path}")
 
     # Run SDK agent review on the plan — FAIL CLOSED on nonzero exit
-    log("Running SDK agent review on plan...")
-    agent_result = run_sdk_agents(repo_root, [rel_plan_path])
+    review_depth = resolve_review_depth(config, "phase_a")
+    log(f"Running SDK agent review on plan (depth={review_depth})...")
+    agent_result = run_sdk_agents(repo_root, [rel_plan_path], depth=review_depth)
     result["agent_review_ran"] = True
     result["agent_exit_code"] = agent_result["exit_code"]
     log(f"Agent review exit code: {agent_result['exit_code']}")

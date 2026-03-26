@@ -11,32 +11,22 @@ Covers:
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import subprocess
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from mu.tests.tools.module_loader import load_module
 from tests.repo_root import REPO_ROOT
 
 
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-_adapters = _load_module(
+_adapters = load_module(
     "bridge_adapters",
     REPO_ROOT / "mu" / "tools" / "agents" / "bridge_adapters.py",
 )
-meta = _load_module(
+meta = load_module(
     "meta_bridge_supervisor",
     REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py",
 )
@@ -98,6 +88,58 @@ class TestReceiptWriting:
         )
         with pytest.raises(meta.MetaBridgeError, match="Cannot write receipt"):
             meta.write_pre_commit_receipt(response, Path("/fake"))
+
+    def test_receipt_refused_when_staged_sha_changed_after_review(self, tmp_path):
+        """Receipt must not bind to post-review staged state (finding 2: rebinding attack)."""
+        response = meta.MetaBridgeResponse(
+            status="success",
+            decision="COMMIT_GO",
+            summary="All clear",
+            reviewed_staged_sha="reviewed_sha_abc123",
+        )
+        pkg_path = tmp_path / "pkg.json"
+        pkg_path.write_text("{}", encoding="utf-8")
+
+        # Current staged SHA differs from what was reviewed
+        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
+             patch.object(meta, "compute_staged_sha", return_value="different_sha_xyz789"):
+            with pytest.raises(meta.MetaBridgeError, match="Receipt authority violation"):
+                meta.write_pre_commit_receipt(response, pkg_path, repo_root=tmp_path)
+
+    def test_receipt_written_when_staged_sha_matches_reviewed(self, tmp_path):
+        """Receipt succeeds when staged SHA matches reviewed SHA."""
+        response = meta.MetaBridgeResponse(
+            status="success",
+            decision="COMMIT_GO",
+            summary="All clear",
+            reviewed_staged_sha="matching_sha",
+        )
+        pkg_path = tmp_path / "pkg.json"
+        pkg_path.write_text("{}", encoding="utf-8")
+
+        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
+             patch.object(meta, "compute_staged_sha", return_value="matching_sha"):
+            path = meta.write_pre_commit_receipt(response, pkg_path, repo_root=tmp_path)
+
+        assert path.exists()
+        data = json.loads(path.read_text())
+        assert data["staged_sha"] == "matching_sha"
+
+    def test_receipt_allowed_when_no_reviewed_sha(self, tmp_path):
+        """Backward compat: receipt succeeds when response has no reviewed_staged_sha."""
+        response = meta.MetaBridgeResponse(
+            status="success",
+            decision="COMMIT_GO",
+            summary="All clear",
+        )
+        pkg_path = tmp_path / "pkg.json"
+        pkg_path.write_text("{}", encoding="utf-8")
+
+        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
+             patch.object(meta, "compute_staged_sha", return_value="any_sha"):
+            path = meta.write_pre_commit_receipt(response, pkg_path, repo_root=tmp_path)
+
+        assert path.exists()
 
 
 class TestReceiptVerification:

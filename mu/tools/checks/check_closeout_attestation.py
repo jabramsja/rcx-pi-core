@@ -37,11 +37,15 @@ try:
     if str(_SCRIPT_DIR) not in sys.path:
         sys.path.insert(0, str(_SCRIPT_DIR))
     from check_control_surface_invariants import CONTROL_SURFACE_FILES as _CS_FILES
+    from check_control_surface_invariants import normalize_repo_relative_path
 except ImportError:
     _CS_FILES = frozenset({
         "mu/tools/executors/phase_b_executor.py",
         "mu/tools/agents/meta_bridge_supervisor.py",
     })
+
+    def normalize_repo_relative_path(path: str) -> str:
+        return path.replace("\\", "/").removeprefix("./")
 
 
 def generate_attestation(
@@ -75,6 +79,8 @@ def generate_attestation(
         except subprocess.CalledProcessError:
             changed_files = []
     # else: caller-supplied — files_from_git stays False
+
+    changed_files = [normalize_repo_relative_path(f) for f in changed_files]
 
     # Determine if this is a control-surface wave
     is_control_surface = bool(set(changed_files) & _CS_FILES)
@@ -235,7 +241,10 @@ def validate_attestation(attestation: dict[str, Any]) -> tuple[bool, list[str]]:
             "mu/tools/agents/meta_bridge_client.py",
             "mu/tools/agents/meta_bridge_supervisor.py",
         }
-        changed_set = set(attestation.get("changed_files", []))
+        changed_set = {
+            normalize_repo_relative_path(p)
+            for p in attestation.get("changed_files", [])
+        }
         if changed_set & receipt_chain_files:
             has_receipt_chain_proof = any(
                 p.get("proof_class") == "BEHAVIORAL"

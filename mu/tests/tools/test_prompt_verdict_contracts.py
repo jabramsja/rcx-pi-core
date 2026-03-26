@@ -2,22 +2,15 @@
 
 from pathlib import Path
 import re
-import importlib.util
+
+from mu.tests.tools.module_loader import load_module
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROMPTS_DIR = PROJECT_ROOT / "tools" / "agents"
 TOOLS_DIR = PROJECT_ROOT / "tools"
 
 
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
-
-shared_agent_utils = _load_module("shared_agent_utils", TOOLS_DIR / "runners" / "shared_agent_utils.py")
+shared_agent_utils = load_module("shared_agent_utils", TOOLS_DIR / "runners" / "shared_agent_utils.py")
 AGENT_VERDICTS = shared_agent_utils.AGENT_VERDICTS
 
 

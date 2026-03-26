@@ -53,6 +53,8 @@ import json
 import subprocess
 import asyncio
 import argparse
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -72,7 +74,15 @@ except Exception as _sdk_import_error:
     SDK_IMPORT_ERROR = _sdk_import_error
     query = None  # type: ignore[assignment]
     ClaudeAgentOptions = None  # type: ignore[assignment]
-    AgentDefinition = Any  # type: ignore[assignment]
+
+    @dataclass
+    class AgentDefinition:  # type: ignore[no-redef]
+        """SDK-free fallback used by import-only tests and CI without Claude SDK."""
+
+        description: str
+        prompt: str
+        tools: list[str]
+        model: str | None = None
 
 # Import agent memory for persistent finding storage
 try:
@@ -289,6 +299,62 @@ def build_query_options(agent_def: AgentDefinition, max_turns: int) -> ClaudeAge
 INFRA_FAILURE_EXIT_CODE = 4
 
 
+def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int | None = None) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    if value < minimum:
+        return default
+    if maximum is not None and value > maximum:
+        return default
+    return value
+
+
+DEFAULT_REVIEW_HEARTBEAT_INTERVAL_S = _env_int(
+    "RCX_REVIEW_HEARTBEAT_INTERVAL",
+    30,
+    minimum=1,
+    maximum=300,
+)
+DEFAULT_REVIEW_AGENT_TIMEOUT_S = _env_int(
+    "RCX_REVIEW_AGENT_TIMEOUT",
+    360,
+    minimum=30,
+    maximum=1800,
+)
+DEFAULT_REVIEW_SINGLE_TAIL_TIMEOUT_S = _env_int(
+    "RCX_REVIEW_SINGLE_TAIL_TIMEOUT",
+    180,
+    minimum=30,
+    maximum=1800,
+)
+DEFAULT_REVIEW_GROUP_STALE_TIMEOUT_S = _env_int(
+    "RCX_REVIEW_GROUP_STALE_TIMEOUT",
+    420,
+    minimum=30,
+    maximum=3600,
+)
+DEFAULT_REVIEW_STATUS_PATH = os.getenv("RCX_REVIEW_STATUS_PATH", "").strip()
+
+
+@contextmanager
+def agent_review_mode_env() -> Any:
+    """Mark child Claude processes as review-only control-plane consumers."""
+    previous = os.environ.get("RCX_AGENT_REVIEW_MODE")
+    os.environ["RCX_AGENT_REVIEW_MODE"] = previous or "run_review"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("RCX_AGENT_REVIEW_MODE", None)
+        else:
+            os.environ["RCX_AGENT_REVIEW_MODE"] = previous
+
+
 async def run_agent_preflight(
     timeout_seconds: int = 20,
     model_override: str | None = None,
@@ -450,7 +516,12 @@ class ReviewOrchestrator:
                  force_grounding: bool = False,
                  model_override: str | None = None,
                  agent_max_turns: dict | None = None,
-                 output_path: Path | None = None):
+                 output_path: Path | None = None,
+                 status_path: Path | None = None,
+                 heartbeat_interval_s: int = DEFAULT_REVIEW_HEARTBEAT_INTERVAL_S,
+                 agent_timeout_s: int = DEFAULT_REVIEW_AGENT_TIMEOUT_S,
+                 single_tail_timeout_s: int = DEFAULT_REVIEW_SINGLE_TAIL_TIMEOUT_S,
+                 group_stale_timeout_s: int = DEFAULT_REVIEW_GROUP_STALE_TIMEOUT_S):
         self.files = files
         self.depth = depth
         self.verbose = verbose
@@ -462,6 +533,11 @@ class ReviewOrchestrator:
         self.model_override = model_override
         self.agent_max_turns = agent_max_turns or dict(AGENT_MAX_TURNS)
         self.output_path = output_path
+        self.status_path = status_path
+        self.heartbeat_interval_s = max(1, heartbeat_interval_s)
+        self.agent_timeout_s = max(self.heartbeat_interval_s, agent_timeout_s)
+        self.single_tail_timeout_s = max(self.heartbeat_interval_s, single_tail_timeout_s)
+        self.group_stale_timeout_s = max(self.single_tail_timeout_s, group_stale_timeout_s)
         self.agents_to_run = self._resolve_agents_to_run(depth)
         self.agent_definitions = create_agent_definitions(model_override=model_override)
         self.results: list[AgentResult] = []
@@ -469,6 +545,12 @@ class ReviewOrchestrator:
         self.soft_warnings: list[dict] = []  # Non-hard-gate failures
         self.total_findings_stored: int = 0
         self._hard_gate_failed: bool = False
+        self._running_agents: set[str] = set()
+        self._completed_agents: dict[str, dict[str, Any]] = {}
+        self._last_progress_label: str = "initialized"
+        self._last_progress_timestamp: str = datetime.now().isoformat()
+        self._last_progress_monotonic: float = time.monotonic()
+        self._current_phase_label: str = "startup"
         if self.use_memory and not AGENT_MEMORY_AVAILABLE:
             self.use_memory = False
             if self.verbose:
@@ -476,6 +558,34 @@ class ReviewOrchestrator:
                     "⚠️  Agent memory disabled: "
                     f"{AGENT_MEMORY_IMPORT_ERROR}"
                 )
+
+    def _mark_progress(self, label: str) -> None:
+        self._last_progress_label = label
+        self._last_progress_timestamp = datetime.now().isoformat()
+        self._last_progress_monotonic = time.monotonic()
+        self._write_status()
+
+    def _finalize_status(self, status: str) -> None:
+        self._last_progress_timestamp = datetime.now().isoformat()
+        self._last_progress_monotonic = time.monotonic()
+        self._write_status(status=status)
+
+    def _write_status(self, *, status: str = "running") -> None:
+        if not self.status_path:
+            return
+        payload = {
+            "status": status,
+            "depth": self.depth,
+            "files": self.files,
+            "phase_label": self._current_phase_label,
+            "running_agents": sorted(self._running_agents),
+            "completed_agents": self._completed_agents,
+            "last_progress_label": self._last_progress_label,
+            "last_progress_timestamp": self._last_progress_timestamp,
+            "updated_at": datetime.now().isoformat(),
+        }
+        self.status_path.parent.mkdir(parents=True, exist_ok=True)
+        self.status_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
     def _resolve_agents_to_run(self, depth: str) -> list[str]:
         """Resolve depth agent set with runtime policy adjustments.
@@ -570,26 +680,33 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
         result_text = ""
         last_error = None
         was_cancelled = False
+        timed_out = False
         message_text_fragments: list[str] = []
         max_turns = self.agent_max_turns.get(agent_name, 12)
 
         try:
-            async for message in query(
-                prompt=prompt,
-                options=build_query_options(agent_def, max_turns)
-            ):
-                # Check for API errors on AssistantMessage
-                if hasattr(message, 'error') and message.error:
-                    last_error = message.error
+            async def _consume_query() -> None:
+                nonlocal result_text, last_error
+                async for message in query(
+                    prompt=prompt,
+                    options=build_query_options(agent_def, max_turns)
+                ):
+                    # Check for API errors on AssistantMessage
+                    if hasattr(message, 'error') and message.error:
+                        last_error = message.error
 
-                # Capture any text-like content as backup (SDK shape can vary)
-                extracted = extract_text_from_message(message)
-                if extracted:
-                    message_text_fragments.append(extracted)
+                    # Capture any text-like content as backup (SDK shape can vary)
+                    extracted = extract_text_from_message(message)
+                    if extracted:
+                        message_text_fragments.append(extracted)
+                        self._mark_progress(f"{agent_name} streamed output")
 
-                # Primary: get result from ResultMessage
-                if hasattr(message, 'result') and message.result:
-                    result_text = message.result
+                    # Primary: get result from ResultMessage
+                    if hasattr(message, 'result') and message.result:
+                        result_text = message.result
+                        self._mark_progress(f"{agent_name} produced final result")
+
+            await asyncio.wait_for(_consume_query(), timeout=self.agent_timeout_s)
         except asyncio.CancelledError:
             # CancelledError is BaseException (not Exception) in Python 3.9+.
             # Capture partial output and return a proper AgentResult instead of
@@ -605,6 +722,16 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                 result_text += "\n\nAGENT CANCELLED (partial output above)"
             else:
                 result_text = f"AGENT CANCELLED: {agent_name} was cancelled by asyncio"
+        except asyncio.TimeoutError:
+            timed_out = True
+            last_error = f"agent timed out after {self.agent_timeout_s}s"
+            if result_text:
+                result_text += f"\n\nAGENT TIMEOUT: {agent_name} exceeded {self.agent_timeout_s}s"
+            elif message_text_fragments:
+                result_text = "\n".join(dict.fromkeys(message_text_fragments))
+                result_text += f"\n\nAGENT TIMEOUT: {agent_name} exceeded {self.agent_timeout_s}s"
+            else:
+                result_text = f"AGENT TIMEOUT: {agent_name} exceeded {self.agent_timeout_s}s"
         except Exception as e:
             # Preserve any text fragments collected before the error
             if message_text_fragments and not result_text:
@@ -647,7 +774,7 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
 
         # Cancelled agents: mark compliant to skip retry (cancellation ≠ format failure)
         # but override verdict to CANCELLED so partial output can't falsely pass a gate.
-        if was_cancelled:
+        if was_cancelled or timed_out:
             is_compliant = True
             compliance_error = None
 
@@ -659,15 +786,19 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
         # an extracted APPROVE/SECURE is not trustworthy.
         if was_cancelled:
             verdict = "CANCELLED"
+        elif timed_out:
+            verdict = "UNKNOWN"
 
         passed = agent_passed(agent_name, verdict) and is_compliant
         is_hard_gate = agent_name in HARD_GATE_AGENTS
         blocks_merge = is_hard_gate and not passed
+        infra_error = "AGENT ERROR" in result_text or "AGENT API ERROR" in result_text
 
         # Evidence-gated adversary blocking: failing adversary verdicts only block
         # when output is compliant and contains machine-checkable proof markers.
-        # Skip for cancelled agents: cancelled = fail-closed (blocks merge by default).
-        if agent_name == "adversary" and blocks_merge and not was_cancelled:
+        # Skip for cancelled/timed-out/infra-failure agents: all three are
+        # fail-closed and must not be downgraded into warning-only residue.
+        if agent_name == "adversary" and blocks_merge and not was_cancelled and not timed_out and not infra_error:
             blocks_merge = adversary_blocks_merge(
                 verdict=verdict,
                 output=result_text,
@@ -678,7 +809,7 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
         # Skip memory storage for cancelled agents — partial output is unreliable
         # and would pollute finding history with incomplete analysis.
         findings_stored = 0
-        if self.use_memory and result_text and not was_cancelled:
+        if self.use_memory and is_compliant and result_text and not was_cancelled:
             findings = extract_findings_from_output(agent_name, result_text, verdict)
             for finding in findings:
                 try:
@@ -726,9 +857,36 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
         if not agents_in_scope:
             return []
 
+        async def _run_retry_agent(agent_name: str, retry_feedback: str) -> AgentResult:
+            self._running_agents.add(agent_name)
+            self._current_phase_label = f"retry:{agent_name}"
+            self._mark_progress(f"{agent_name} retry started")
+            try:
+                result = await self.run_single_agent(agent_name, retry_feedback=retry_feedback)
+            finally:
+                self._running_agents.discard(agent_name)
+            self._completed_agents[agent_name] = {
+                "verdict": result.verdict,
+                "passed": result.passed,
+                "completed_at": datetime.now().isoformat(),
+            }
+            self._mark_progress(f"{agent_name} retry completed ({result.verdict})")
+            return result
+
         # Wrap each agent to report completion immediately (per-agent progressive output)
         async def _run_and_report(agent_name: str) -> AgentResult:
-            result = await self.run_single_agent(agent_name)
+            self._running_agents.add(agent_name)
+            self._current_phase_label = f"group:{','.join(agents_in_scope)}"
+            self._mark_progress(f"{agent_name} started")
+            try:
+                result = await self.run_single_agent(agent_name)
+            finally:
+                self._running_agents.discard(agent_name)
+            self._completed_agents[agent_name] = {
+                "verdict": result.verdict,
+                "passed": result.passed,
+                "completed_at": datetime.now().isoformat(),
+            }
             self.results.append(result)
             # Isolate reporting so a write failure doesn't abort the group
             # or create a synthetic duplicate result in the error handler.
@@ -737,19 +895,87 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
             except Exception as e:
                 if self.verbose:
                     print(f"    Warning: report write failed for {agent_name}: {e}")
+            self._mark_progress(f"{agent_name} completed ({result.verdict})")
             return result
 
-        tasks = [_run_and_report(agent) for agent in agents_in_scope]
-        # return_exceptions=True: one agent failure must NOT cancel others.
-        # Without this, CancelledError (BaseException) from rate-limited or
-        # timed-out agents kills the entire gather, losing all pending results.
-        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+        task_map = {
+            asyncio.create_task(_run_and_report(agent)): agent
+            for agent in agents_in_scope
+        }
+        raw_results: list[tuple[str, AgentResult | BaseException]] = []
+        pending = set(task_map)
+        last_heartbeat_at = asyncio.get_running_loop().time()
+        self._last_progress_monotonic = last_heartbeat_at
+
+        while pending:
+            done, pending = await asyncio.wait(
+                pending,
+                timeout=self.heartbeat_interval_s,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            now = asyncio.get_running_loop().time()
+
+            if done:
+                self._last_progress_monotonic = now
+                for task in done:
+                    agent_name = task_map[task]
+                    try:
+                        payload: AgentResult | BaseException
+                        payload = task.result() if not task.cancelled() else asyncio.CancelledError()
+                    except BaseException as exc:
+                        payload = exc
+                    raw_results.append((agent_name, payload))
+            else:
+                if self.verbose:
+                    print(
+                        "  ⏳ review heartbeat: "
+                        f"pending={sorted(task_map[task] for task in pending)} "
+                        f"last_progress={self._last_progress_timestamp}",
+                    )
+                self._write_status()
+
+            if now - last_heartbeat_at >= self.heartbeat_interval_s:
+                self._write_status()
+                last_heartbeat_at = now
+
+            idle_for = now - self._last_progress_monotonic
+            completed_count = len(agents_in_scope) - len(pending)
+            pending_names = sorted(task_map[task] for task in pending)
+            if pending and completed_count > 0 and len(pending) == 1 and idle_for >= self.single_tail_timeout_s:
+                stale_agent = pending_names[0]
+                if self.verbose:
+                    print(
+                        f"  ⚠️  Cancelling stale tail agent {stale_agent} "
+                        f"after {int(idle_for)}s with all peers completed"
+                    )
+                pending_list = list(pending)
+                for task in pending_list:
+                    task.cancel()
+                gathered = await asyncio.gather(*pending_list, return_exceptions=True)
+                raw_results.extend((task_map[task], result) for task, result in zip(pending_list, gathered))
+                pending = set()
+                self._mark_progress(f"cancelled stale tail agent {stale_agent}")
+                break
+
+            if pending and idle_for >= self.group_stale_timeout_s:
+                if self.verbose:
+                    print(
+                        "  ⚠️  Cancelling stale review group after "
+                        f"{int(idle_for)}s without progress: {pending_names}"
+                    )
+                pending_list = list(pending)
+                for task in pending_list:
+                    task.cancel()
+                gathered = await asyncio.gather(*pending_list, return_exceptions=True)
+                raw_results.extend((task_map[task], result) for task, result in zip(pending_list, gathered))
+                pending = set()
+                self._mark_progress("cancelled stale review group")
+                break
 
         # Separate successful results from exceptions
         results: list[AgentResult] = []
-        for i, raw in enumerate(raw_results):
+        for agent_name, raw in raw_results:
             if isinstance(raw, BaseException):
-                agent_name = agents_in_scope[i]
                 error_msg = f"AGENT EXCEPTION: {type(raw).__name__}: {raw}"
                 print(f"  ⚠️  {agent_name}: {error_msg}")
                 # Create a synthetic failure result so the agent appears in the report.
@@ -765,6 +991,11 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                     passed=False,
                     findings_stored=0,
                 )
+                self._completed_agents[agent_name] = {
+                    "verdict": fallback.verdict,
+                    "passed": fallback.passed,
+                    "completed_at": datetime.now().isoformat(),
+                }
                 if fallback not in self.results:
                     self.results.append(fallback)
                 try:
@@ -782,10 +1013,7 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
             if not result.is_compliant and result.compliance_error and result.output:
                 if self.verbose:
                     print(f"  ↻ Retrying {result.name} (format compliance failure)")
-                retry = await self.run_single_agent(
-                    result.name,
-                    retry_feedback=result.compliance_error,
-                )
+                retry = await _run_retry_agent(result.name, result.compliance_error)
                 # Replace in self.results
                 try:
                     idx = self.results.index(result)
@@ -895,43 +1123,12 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
             sys.stdout.flush()
             group_results = await self.run_agent_group(group_agents)
 
-            # Check hard gate failures - retry compliance failures once, then stop if still failing
+            # Check hard gate failures after run_agent_group() has already
+            # exhausted the single allowed compliance retry for this group.
             hard_gate_failures = [r for r in group_results if r.blocks_merge]
             if hard_gate_failures and i == 0:  # Only stop after first group
-                # Separate compliance failures from verdict failures
-                compliance_failures = [r for r in hard_gate_failures if not r.is_compliant]
-                verdict_failures = [r for r in hard_gate_failures if r.is_compliant]
-
-                # Retry compliance failures with explicit feedback about what went wrong
-                if compliance_failures:
-                    print(f"\n🔄 Retrying {len(compliance_failures)} agent(s) with compliance failures...")
-                    for r in compliance_failures:
-                        error_preview = (r.compliance_error or "unknown")[:100]
-                        print(f"   - {r.name}: {error_preview}")
-
-                    retry_results = []
-                    for r in compliance_failures:
-                        print(f"   Retrying {r.name}...")
-                        # Pass the compliance error as feedback so agent knows what to fix
-                        retry_feedback = r.compliance_error or "Unknown compliance failure"
-                        retry = await self.run_single_agent(r.name, retry_feedback=retry_feedback)
-                        retry_results.append(retry)
-
-                        if retry.is_compliant:
-                            print(f"   ✓ {r.name}: Retry passed compliance")
-                            # Replace in self.results
-                            idx = self.results.index(r)
-                            self.results[idx] = retry
-                        else:
-                            print(f"   ✗ {r.name}: Retry still non-compliant")
-                            error_preview = (retry.compliance_error or "unknown")[:100]
-                            print(f"     └─ {error_preview}")
-
-                # Re-check hard gate failures after retry
-                hard_gate_failures = [r for r in self.results if r.blocks_merge]
-
                 if hard_gate_failures:
-                    print(f"\n⚠️  Hard gate failure(s) after retry:")
+                    print(f"\n⚠️  Hard gate failure(s) after group review:")
                     for r in hard_gate_failures:
                         reason = "verdict" if r.is_compliant else "compliance"
                         print(f"   - {r.name}: {r.verdict} ({reason} failure)")
@@ -943,6 +1140,7 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                     if not self.continue_on_hard_gate:
                         self._sort_results()
                         self.total_findings_stored = sum(r.findings_stored for r in self.results)
+                        self._finalize_status("hard_gate_failed")
                         return self.results
                     print("\n⚠️  Continuing despite hard gate failure (diagnostic mode)")
 
@@ -991,6 +1189,7 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                 sev_summary = ", ".join(parts) if parts else "all low"
                 print(f"\n⚠️  {total_warnings} warning(s) ({sev_summary}) — use --show-warnings for details")
 
+        self._finalize_status("completed")
         return self.results
 
     def synthesize_report(self) -> str:
@@ -1122,9 +1321,13 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
 
     def get_exit_code(self) -> int:
         """Get appropriate exit code based on results."""
-        # Check compliance failures
-        compliance_failures = [r for r in self.results if not r.is_compliant]
-        if compliance_failures:
+        # Check compliance failures on hard-gate agents first. These remain
+        # fail-closed because bridge should never receive malformed blocker
+        # evidence from verifier/adversary/structural-proof.
+        hard_gate_compliance_failures = [
+            r for r in self.results if r.is_hard_gate and not r.is_compliant
+        ]
+        if hard_gate_compliance_failures:
             return 3
 
         # Check hard gate failures
@@ -1132,7 +1335,9 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
         if hard_gate_failures:
             return 1
 
-        # Check soft failures
+        # Check soft failures, including non-hard-gate compliance residue.
+        # Phase B can carry these findings into bridge classification instead
+        # of aborting before convergence starts.
         soft_failures = [r for r in self.results if not r.blocks_merge and not r.passed]
         if soft_failures:
             return 2
@@ -1236,14 +1441,18 @@ def _maybe_escalate_to_bridge(orchestrator) -> None:
         return
 
     try:
-        result = subprocess.run(
-            [sys.executable, str(bridge_script), "review",
-             "--task", task_text,
-             "--summary", f"Bridge escalation: {len(high_findings)} high-severity agent findings",
-             "--reviewer", "codex", "--no-diff", "-v"],
-            capture_output=True, text=True, timeout=300,
-            cwd=Path(__file__).resolve().parents[3],
-        )
+        with agent_review_mode_env():
+            result = subprocess.run(
+                [sys.executable, str(bridge_script), "review",
+                 "--task", task_text,
+                 "--summary", f"Bridge escalation: {len(high_findings)} high-severity agent findings",
+                 "--reviewer", "codex", "--no-diff", "-v"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                cwd=Path(__file__).resolve().parents[3],
+                env=dict(os.environ),
+            )
         if result.stdout:
             print(result.stdout)
         if result.returncode == 0:
@@ -1420,165 +1629,171 @@ Examples:
         print(f"Max turns override: {args.max_turns} for all agents")
 
     # Run orchestrator
-    orchestrator = ReviewOrchestrator(
-        files,
-        depth=depth,
-        verbose=args.verbose,
-        use_memory=not args.no_memory,
-        pr_number=args.pr_number,
-        show_warnings=args.show_warnings,
-        continue_on_hard_gate=(not args.fail_fast_hard_gate),
-        force_grounding=args.force_grounding,
-        model_override=args.model,
-        agent_max_turns=agent_max_turns,
-        output_path=args.output,
-    )
-    await orchestrator.run_all()
-
-    # Reasoning validation and skeptic challenge are rigorous-only.
-    hard_gate_failed = getattr(orchestrator, "_hard_gate_failed", False)
-    approvals_to_challenge: list[AgentResult] = []
-    if args.rigorous:
-        if hard_gate_failed:
-            print("\n⚠️  Hard gate failures detected — running rigorous checks anyway")
-
-        print("\n📋 Validating reasoning quality...")
-        try:
-            from tools.runners.validate_agent_reasoning import validate_reasoning
-        except ModuleNotFoundError:
-            from validate_agent_reasoning import validate_reasoning
-
-        reasoning_failures: list[tuple[AgentResult, str]] = []
-        for result in orchestrator.results:
-            reasoning = validate_reasoning(result.output)
-            if not reasoning.is_valid:
-                reasoning_failures.append((result, reasoning.violations[0]))
-                print(f"  ⚠️ {result.name}: Reasoning invalid - {reasoning.violations[0]}")
-            elif reasoning.requires_challenge:
-                approvals_to_challenge.append(result)
-                print(f"  🔍 {result.name}: APPROVAL - will challenge with skeptic")
-            else:
-                print(f"  ✓ {result.name}: Reasoning valid")
-
-        # Retry hard-gate agents with invalid reasoning only in rigorous mode.
-        if reasoning_failures:
-            hard_gate_failures = [(r, v) for r, v in reasoning_failures if r.blocks_merge]
-            if hard_gate_failures:
-                print(f"\n🔄 Retrying {len(hard_gate_failures)} hard gate agent(s) with format reminder...")
-                for result, violation in hard_gate_failures:
-                    print(f"  Retrying {result.name}...")
-                    retry_feedback = f"Reasoning validation failed: {violation}"
-                    retry_result = await orchestrator.run_single_agent(
-                        result.name,
-                        retry_feedback=retry_feedback,
-                    )
-                    retry_reasoning = validate_reasoning(retry_result.output)
-                    if retry_reasoning.is_valid:
-                        print(f"  ✓ {result.name}: Retry successful")
-                        idx = orchestrator.results.index(result)
-                        orchestrator.results[idx] = retry_result
-                    else:
-                        print(f"  ✗ {result.name}: Retry still invalid - {retry_reasoning.violations[0]}")
-                        result.passed = False
-                        if result.is_hard_gate:
-                            result.blocks_merge = True
-
-        if not approvals_to_challenge:
-            print("\n🔍 RIGOROUS: no approvals to challenge")
-
-        # Progressive write after reasoning validation
-        orchestrator.write_progressive_report("reasoning validation complete, awaiting skeptic")
-
-    # Rigorous mode: consolidated skeptic challenge.
-    if args.rigorous and approvals_to_challenge:
-        print(f"\n🔍 RIGOROUS: Consolidated skeptic challenging {len(approvals_to_challenge)} approval(s)...")
-        try:
-            from tools.runners.run_skeptic import run_consolidated_skeptic
-        except ModuleNotFoundError:
-            from run_skeptic import run_consolidated_skeptic
-
-        agent_outputs = {result.name: result.output for result in approvals_to_challenge}
-        skeptic_result = await run_consolidated_skeptic(
-            agent_outputs=agent_outputs,
-            files=files,
+    with agent_review_mode_env():
+        orchestrator = ReviewOrchestrator(
+            files,
+            depth=depth,
+            verbose=args.verbose,
+            use_memory=not args.no_memory,
+            pr_number=args.pr_number,
+            show_warnings=args.show_warnings,
+            continue_on_hard_gate=(not args.fail_fast_hard_gate),
+            force_grounding=args.force_grounding,
             model_override=args.model,
+            agent_max_turns=agent_max_turns,
+            output_path=args.output,
+            status_path=Path(DEFAULT_REVIEW_STATUS_PATH) if DEFAULT_REVIEW_STATUS_PATH else None,
+            heartbeat_interval_s=DEFAULT_REVIEW_HEARTBEAT_INTERVAL_S,
+            agent_timeout_s=DEFAULT_REVIEW_AGENT_TIMEOUT_S,
+            single_tail_timeout_s=DEFAULT_REVIEW_SINGLE_TAIL_TIMEOUT_S,
+            group_stale_timeout_s=DEFAULT_REVIEW_GROUP_STALE_TIMEOUT_S,
         )
+        await orchestrator.run_all()
 
-        if not skeptic_result.get("is_compliant", False):
-            print(f"  ⚠️  Skeptic output failed compliance: {skeptic_result.get('compliance_error', 'unknown')}")
-            print("      Treating as UNKNOWN (fail-closed)")
-            skeptic_result["verdict"] = "UNKNOWN"
+        # Reasoning validation and skeptic challenge are rigorous-only.
+        hard_gate_failed = getattr(orchestrator, "_hard_gate_failed", False)
+        approvals_to_challenge: list[AgentResult] = []
+        if args.rigorous:
+            if hard_gate_failed:
+                print("\n⚠️  Hard gate failures detected — running rigorous checks anyway")
 
-        per_agent = skeptic_result.get("verdict_per_agent", {})
-        for result in approvals_to_challenge:
-            agent_verdict = per_agent.get(result.name, "UNKNOWN")
-            if agent_verdict == "OVERRIDE":
-                print(f"  ❌ Skeptic OVERRIDES {result.name}'s approval")
-                result.passed = False
-                result.verdict = f"{result.verdict} (SKEPTIC OVERRIDE)"
-            elif agent_verdict == "CONCERNS":
-                print(f"  ⚠️ Skeptic has CONCERNS about {result.name}'s approval")
-            elif agent_verdict == "UNKNOWN":
-                print(f"  ❓ Skeptic did not evaluate {result.name} — fail-closed")
-                result.passed = False
-                result.verdict = f"{result.verdict} (SKEPTIC_NOT_EVALUATED)"
-            else:
-                print(f"  ✅ Skeptic CONFIRMS {result.name}'s approval")
+            print("\n📋 Validating reasoning quality...")
+            try:
+                from tools.runners.validate_agent_reasoning import validate_reasoning
+            except ModuleNotFoundError:
+                from validate_agent_reasoning import validate_reasoning
 
-        global_concerns = skeptic_result.get("global_concerns", [])
-        if global_concerns:
-            print(f"\n  🎯 GLOBAL BLIND SPOTS (AGENT: ALL): {len(global_concerns)} found")
-            for concern in global_concerns:
-                print(f"    - {concern[:120]}")
-            for result in approvals_to_challenge:
-                result.verdict = f"{result.verdict} (GLOBAL_BLIND_SPOT)"
+            reasoning_failures: list[tuple[AgentResult, str]] = []
+            for result in orchestrator.results:
+                reasoning = validate_reasoning(result.output)
+                if not reasoning.is_valid:
+                    reasoning_failures.append((result, reasoning.violations[0]))
+                    print(f"  ⚠️ {result.name}: Reasoning invalid - {reasoning.violations[0]}")
+                elif reasoning.requires_challenge:
+                    approvals_to_challenge.append(result)
+                    print(f"  🔍 {result.name}: APPROVAL - will challenge with skeptic")
+                else:
+                    print(f"  ✓ {result.name}: Reasoning valid")
 
-        # Fail-closed: if global concerns exist AND there are HIGH severity
-        # findings, block all challenged approvals.
-        global_high = skeptic_result.get("high_severity_count", 0)
-        if global_concerns and global_high > 0:
-            print(f"  ❌ Skeptic GLOBAL HIGH concerns ({global_high}) — fail-closed blocking all approvals")
-            enforce_global_high_fail_closed(approvals_to_challenge, global_high)
+            # Retry hard-gate agents with invalid reasoning only in rigorous mode.
+            if reasoning_failures:
+                hard_gate_failures = [(r, v) for r, v in reasoning_failures if r.blocks_merge]
+                if hard_gate_failures:
+                    print(f"\n🔄 Retrying {len(hard_gate_failures)} hard gate agent(s) with format reminder...")
+                    for result, violation in hard_gate_failures:
+                        print(f"  Retrying {result.name}...")
+                        retry_feedback = f"Reasoning validation failed: {violation}"
+                        retry_result = await orchestrator.run_single_agent(
+                            result.name,
+                            retry_feedback=retry_feedback,
+                        )
+                        retry_reasoning = validate_reasoning(retry_result.output)
+                        if retry_reasoning.is_valid:
+                            print(f"  ✓ {result.name}: Retry successful")
+                            idx = orchestrator.results.index(result)
+                            orchestrator.results[idx] = retry_result
+                        else:
+                            print(f"  ✗ {result.name}: Retry still invalid - {retry_reasoning.violations[0]}")
+                            result.passed = False
+                            if result.is_hard_gate:
+                                result.blocks_merge = True
 
-        untagged = skeptic_result.get("untagged_warnings", [])
-        if untagged:
-            print(f"\n  ⚠️  UNTAGGED CONCERNS: {len(untagged)} concern(s) missing AGENT: marker")
-            for warning in untagged:
-                print(f"    - {warning}")
+            if not approvals_to_challenge:
+                print("\n🔍 RIGOROUS: no approvals to challenge")
 
-        if skeptic_result["verdict"] == "OVERRIDE":
-            print("  ❌ Skeptic OVERALL OVERRIDE — significant blind spots")
-            for result in approvals_to_challenge:
-                agent_v = per_agent.get(result.name, "CONFIRMED")
-                if agent_v != "CONFIRMED":
-                    result.passed = False
-                    result.verdict = f"{result.verdict} (SKEPTIC: {skeptic_result['high_severity_count']} HIGH)"
-        elif skeptic_result["verdict"] == "CONCERNS":
-            print(
-                f"  ⚠️ Skeptic has CONCERNS — "
-                f"{skeptic_result['high_severity_count']} HIGH, {skeptic_result['medium_severity_count']} MEDIUM"
+            # Progressive write after reasoning validation
+            orchestrator.write_progressive_report("reasoning validation complete, awaiting skeptic")
+
+        # Rigorous mode: consolidated skeptic challenge.
+        if args.rigorous and approvals_to_challenge:
+            print(f"\n🔍 RIGOROUS: Consolidated skeptic challenging {len(approvals_to_challenge)} approval(s)...")
+            try:
+                from tools.runners.run_skeptic import run_consolidated_skeptic
+            except ModuleNotFoundError:
+                from run_skeptic import run_consolidated_skeptic
+
+            agent_outputs = {result.name: result.output for result in approvals_to_challenge}
+            skeptic_result = await run_consolidated_skeptic(
+                agent_outputs=agent_outputs,
+                files=files,
+                model_override=args.model,
             )
-            if skeptic_result["high_severity_count"] > 0:
+
+            if not skeptic_result.get("is_compliant", False):
+                print(f"  ⚠️  Skeptic output failed compliance: {skeptic_result.get('compliance_error', 'unknown')}")
+                print("      Treating as UNKNOWN (fail-closed)")
+                skeptic_result["verdict"] = "UNKNOWN"
+
+            per_agent = skeptic_result.get("verdict_per_agent", {})
+            for result in approvals_to_challenge:
+                agent_verdict = per_agent.get(result.name, "UNKNOWN")
+                if agent_verdict == "OVERRIDE":
+                    print(f"  ❌ Skeptic OVERRIDES {result.name}'s approval")
+                    result.passed = False
+                    result.verdict = f"{result.verdict} (SKEPTIC OVERRIDE)"
+                elif agent_verdict == "CONCERNS":
+                    print(f"  ⚠️ Skeptic has CONCERNS about {result.name}'s approval")
+                elif agent_verdict == "UNKNOWN":
+                    print(f"  ❓ Skeptic did not evaluate {result.name} — fail-closed")
+                    result.passed = False
+                    result.verdict = f"{result.verdict} (SKEPTIC_NOT_EVALUATED)"
+                else:
+                    print(f"  ✅ Skeptic CONFIRMS {result.name}'s approval")
+
+            global_concerns = skeptic_result.get("global_concerns", [])
+            if global_concerns:
+                print(f"\n  🎯 GLOBAL BLIND SPOTS (AGENT: ALL): {len(global_concerns)} found")
+                for concern in global_concerns:
+                    print(f"    - {concern[:120]}")
+                for result in approvals_to_challenge:
+                    result.verdict = f"{result.verdict} (GLOBAL_BLIND_SPOT)"
+
+            # Fail-closed: if global concerns exist AND there are HIGH severity
+            # findings, block all challenged approvals.
+            global_high = skeptic_result.get("high_severity_count", 0)
+            if global_concerns and global_high > 0:
+                print(f"  ❌ Skeptic GLOBAL HIGH concerns ({global_high}) — fail-closed blocking all approvals")
+                enforce_global_high_fail_closed(approvals_to_challenge, global_high)
+
+            untagged = skeptic_result.get("untagged_warnings", [])
+            if untagged:
+                print(f"\n  ⚠️  UNTAGGED CONCERNS: {len(untagged)} concern(s) missing AGENT: marker")
+                for warning in untagged:
+                    print(f"    - {warning}")
+
+            if skeptic_result["verdict"] == "OVERRIDE":
+                print("  ❌ Skeptic OVERALL OVERRIDE — significant blind spots")
                 for result in approvals_to_challenge:
                     agent_v = per_agent.get(result.name, "CONFIRMED")
-                    if agent_v in ("CONCERNS", "OVERRIDE"):
+                    if agent_v != "CONFIRMED":
                         result.passed = False
-                        result.verdict = (
-                            f"{result.verdict} (SKEPTIC_CONCERNS: {skeptic_result['high_severity_count']} HIGH)"
-                        )
-        elif skeptic_result["verdict"] == "UNKNOWN":
-            print("  ❓ Skeptic returned UNKNOWN verdict — fail-closed, blocking approvals")
+                        result.verdict = f"{result.verdict} (SKEPTIC: {skeptic_result['high_severity_count']} HIGH)"
+            elif skeptic_result["verdict"] == "CONCERNS":
+                print(
+                    f"  ⚠️ Skeptic has CONCERNS — "
+                    f"{skeptic_result['high_severity_count']} HIGH, {skeptic_result['medium_severity_count']} MEDIUM"
+                )
+                if skeptic_result["high_severity_count"] > 0:
+                    for result in approvals_to_challenge:
+                        agent_v = per_agent.get(result.name, "CONFIRMED")
+                        if agent_v in ("CONCERNS", "OVERRIDE"):
+                            result.passed = False
+                            result.verdict = (
+                                f"{result.verdict} (SKEPTIC_CONCERNS: {skeptic_result['high_severity_count']} HIGH)"
+                            )
+            elif skeptic_result["verdict"] == "UNKNOWN":
+                print("  ❓ Skeptic returned UNKNOWN verdict — fail-closed, blocking approvals")
+                for result in approvals_to_challenge:
+                    result.passed = False
+                    result.verdict = f"{result.verdict} (SKEPTIC_INCONCLUSIVE)"
+            elif skeptic_result["verdict"] == "CONFIRMED":
+                print("  ✅ Skeptic CONFIRMS all approvals — no blind spots")
+
             for result in approvals_to_challenge:
-                result.passed = False
-                result.verdict = f"{result.verdict} (SKEPTIC_INCONCLUSIVE)"
-        elif skeptic_result["verdict"] == "CONFIRMED":
-            print("  ✅ Skeptic CONFIRMS all approvals — no blind spots")
+                result.blocks_merge = result.is_hard_gate and (not result.passed)
 
-        for result in approvals_to_challenge:
-            result.blocks_merge = result.is_hard_gate and (not result.passed)
-
-        # Progressive write after skeptic challenge
-        orchestrator.write_progressive_report("skeptic challenge complete, generating final report")
+            # Progressive write after skeptic challenge
+            orchestrator.write_progressive_report("skeptic challenge complete, generating final report")
 
     # Generate report
     report = orchestrator.synthesize_report()

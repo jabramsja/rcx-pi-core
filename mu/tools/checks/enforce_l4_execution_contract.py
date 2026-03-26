@@ -1019,6 +1019,48 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
     return notes
 
 
+def extract_touched_tracker_wave_ids(tasks_diff: str) -> list[str]:
+    """Extract ordered unique wave_ids from added TASKS tracker-note lines."""
+    touched_wave_ids: list[str] = []
+    seen: set[str] = set()
+    for line in tasks_diff.splitlines():
+        if not line.startswith("+") or line.startswith("+++"):
+            continue
+        added_line = line[1:]
+        if "Tracker sync note" not in added_line:
+            continue
+        header_match = _NOTE_HEADER_RE.match(added_line)
+        if not header_match:
+            continue
+        wave_id = header_match.group(2).strip()
+        if wave_id in seen:
+            continue
+        seen.add(wave_id)
+        touched_wave_ids.append(wave_id)
+    return touched_wave_ids
+
+
+def bind_note_from_touched_wave_ids(
+    notes: list[dict[str, str | None]],
+    touched_wave_ids: list[str],
+) -> dict[str, str | None] | None:
+    """Return the most recent touched tracker note from TASKS diff wave_ids."""
+    if not touched_wave_ids:
+        return None
+    touched = set(touched_wave_ids)
+    selected_wave_id = None
+    for wave_id in reversed(touched_wave_ids):
+        if wave_id in touched:
+            selected_wave_id = wave_id
+            break
+    if selected_wave_id is None:
+        return None
+    for note in notes:
+        if note["wave_id"] == selected_wave_id:
+            return note
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Anti-stagnation checks
 # ---------------------------------------------------------------------------
@@ -2115,6 +2157,7 @@ def main() -> int:
     # Planning commits that add NEXT/VECTOR items without tracker notes must
     # not inherit the latest wave's class — that causes false positives.
     tracker_note_touched = False
+    touched_wave_ids: list[str] = []
     if "TASKS.md" in changed_files:
         # Scope check to TASKS.md diff only — the full diff_text includes all
         # files and would false-positive on code that mentions the string
@@ -2134,10 +2177,12 @@ def main() -> int:
                 tasks_diff = ""
         except subprocess.CalledProcessError:
             tasks_diff = ""
-        for line in tasks_diff.splitlines():
-            if line.startswith("+") and "Tracker sync note" in line:
-                tracker_note_touched = True
-                break
+        touched_wave_ids = extract_touched_tracker_wave_ids(tasks_diff)
+        tracker_note_touched = bool(touched_wave_ids)
+        if not bound_note and touched_wave_ids:
+            bound_note = bind_note_from_touched_wave_ids(all_notes, touched_wave_ids)
+            if bound_note:
+                notes = [bound_note] + [n for n in all_notes if n["wave_id"] != bound_note["wave_id"]]
     wave_class = args.wave_class
     if not wave_class and notes and (bound_note or tracker_note_touched):
         wave_class = notes[0]["wave_class"] if notes else None

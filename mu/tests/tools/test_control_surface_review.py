@@ -11,27 +11,17 @@ Covers:
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mu.tests.tools.module_loader import load_module
 from tests.repo_root import REPO_ROOT
 
 
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-cs_mod = _load_module(
+cs_mod = load_module(
     "check_control_surface_invariants",
     REPO_ROOT / "tools" / "checks" / "check_control_surface_invariants.py",
 )
@@ -99,6 +89,9 @@ class TestControlSurfaceDetection:
     def test_dotslash_prefix_activates(self):
         assert self._tc(["./mu/tools/executors/phase_b_executor.py"])
 
+    def test_dot_segment_activates(self):
+        assert self._tc(["mu/tools/executors/./phase_b_executor.py"])
+
     def test_mixed_list_detects_control_surface(self):
         assert cs_mod._touches_control_surface([  # ANTICHEAT_OK: testing checker internal API
             "README.md",
@@ -138,10 +131,10 @@ class TestInvariantChecksOnRealRepo:
         assert "fallback" not in msg.lower() or "no manual" in msg.lower()
 
     def test_inv6_commit_executor_receipt_authority(self):
-        """INV-6: commit_executor step 7 reads from supervisor receipt, not handoff."""
+        """INV-6: commit_executor step 7 verifies both handoff and supervisor receipts."""
         passed, msg = cs_mod.check_commit_executor_receipt_authority(REPO_ROOT)
         assert passed, f"INV-6 failed: {msg}"
-        assert "supervisor" in msg.lower()
+        assert "both receipts" in msg.lower()
 
 
 class TestINV5RepoOnlyDocs:
@@ -179,18 +172,33 @@ class TestINV5RepoOnlyDocs:
 
     def test_inv5_passes_on_clean_content(self, tmp_path):
         """INV-5 must pass when commit section has no manual steps."""
-        mem_dir = tmp_path / "memory"
-        mem_dir.mkdir()
-        proto = mem_dir / "protocol_wave_execution.md"
-        proto.write_text(
-            "### Commit Protocol\n\n"
-            "# 5. USE COMMIT EXECUTOR\n"
-            "# 6. If commit_executor cannot be used:\n"
-            "#    State the exact blocker.\n"
+        (tmp_path / "CLAUDE.md").write_text(
+            "## Workflow\n\n"
+            "Use `commit_executor.py` for the full pipeline.\n"
         )
-        with patch.object(cs_mod, "_find_protocol_memory_file", return_value=proto):
-            passed, msg = cs_mod.check_docs_no_manual_commit_fallback(tmp_path)
+        template_path = tmp_path / "mu" / "tools" / "agents" / "templates" / "meta_bridge_task.txt"
+        template_path.parent.mkdir(parents=True)
+        template_path.write_text("Use `commit_executor.py` for the full commit path.\n")
+        passed, msg = cs_mod.check_docs_no_manual_commit_fallback(tmp_path)
         assert passed, f"INV-5 should pass on clean content: {msg}"
+
+    def test_normalize_path_caches_git_toplevel_lookup(self):
+        """_normalize_path should not shell out once per path."""
+        cs_mod._git_toplevel.cache_clear()  # ANTICHEAT_OK: cache behavior is the subject under test
+        completed = MagicMock(stdout="/repo\n")
+        with patch.object(cs_mod.subprocess, "run", return_value=completed) as mock_run:
+            assert cs_mod._normalize_path("/repo/mu/tools/executors/phase_b_executor.py") == "mu/tools/executors/phase_b_executor.py"  # ANTICHEAT_OK: normalize helper is the subject under test
+            assert cs_mod._normalize_path("/repo/CLAUDE.md") == "CLAUDE.md"  # ANTICHEAT_OK: normalize helper is the subject under test
+        assert mock_run.call_count == 1
+        cs_mod._git_toplevel.cache_clear()  # ANTICHEAT_OK: test cleanup for module-level cache
+
+    def test_normalize_path_collapses_dot_segments(self):
+        cs_mod._git_toplevel.cache_clear()  # ANTICHEAT_OK: cache behavior is the subject under test
+        completed = MagicMock(stdout="/repo\n")
+        with patch.object(cs_mod.subprocess, "run", return_value=completed):
+            assert cs_mod._normalize_path("mu/tools/executors/./phase_b_executor.py") == "mu/tools/executors/phase_b_executor.py"  # ANTICHEAT_OK: normalize helper is the subject under test
+            assert cs_mod._normalize_path("/repo/mu/tools/agents/../executors/phase_b_executor.py") == "mu/tools/executors/phase_b_executor.py"  # ANTICHEAT_OK: normalize helper is the subject under test
+        cs_mod._git_toplevel.cache_clear()  # ANTICHEAT_OK: test cleanup for module-level cache
 
 
 class TestCheckerSkipsNonControlSurface:
@@ -250,6 +258,20 @@ class TestCheckerDetectsViolations:
         passed, msg = cs_mod.check_receipt_writer_returns_per_invocation(tmp_path)
         assert not passed
 
+    def test_detects_ambiguous_per_invocation_metadata_return(self, tmp_path):
+        """INV-3 must fail on metadata names that only mention per_invocation."""
+        agents_dir = tmp_path / "mu" / "tools" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "meta_bridge_supervisor.py").write_text(
+            'def write_pre_commit_receipt(response, pkg, repo_root=None):\n'
+            '    canonical_path = "receipt.json"\n'
+            '    canonical_path.write_text("x")\n'
+            '    per_invocation_metadata = {"path": canonical_path}\n'
+            '    return per_invocation_metadata["path"]\n'
+        )
+        passed, msg = cs_mod.check_receipt_writer_returns_per_invocation(tmp_path)
+        assert not passed
+
     def test_detects_heuristic_receipt_discovery(self, tmp_path):
         """INV-4: client that sorts directory for receipt fails."""
         agents_dir = tmp_path / "mu" / "tools" / "agents"
@@ -259,6 +281,23 @@ class TestCheckerDetectsViolations:
             'receipt_path = receipts[0]\n'
         )
         passed, msg = cs_mod.check_client_no_heuristic_discovery(tmp_path)
+        assert not passed
+
+    def test_detects_missing_handoff_receipt_authority(self, tmp_path):
+        """INV-6 must fail when step 7 checks only the supervisor receipt."""
+        exe_dir = tmp_path / "mu" / "tools" / "executors"
+        exe_dir.mkdir(parents=True)
+        (exe_dir / "commit_executor.py").write_text(
+            'def run_commit_pipeline(handoff, repo_root):\n'
+            '    # Step 7: validate_receipt\n'
+            '    receipt_path_from_supervisor = ".scratch/receipt.json"\n'
+            '    receipt_file = repo_root / receipt_path_from_supervisor\n'
+            '    if not receipt_file.exists():\n'
+            '        return False\n'
+            '    # Step 8: next\n'
+            '    return True\n'
+        )
+        passed, msg = cs_mod.check_commit_executor_receipt_authority(tmp_path)
         assert not passed
 
     def test_detects_listdir_receipt_discovery(self, tmp_path):
@@ -291,7 +330,7 @@ class TestBridgeReviewerPromptActivation:
         """When control-surface files are in changed_actual, proof obligations appear."""
         # Import the bridge_supervisor module's detection function
         bs_path = REPO_ROOT / "tools" / "agents" / "bridge_supervisor.py"
-        bs_mod = _load_module("bridge_supervisor_test", bs_path)
+        bs_mod = load_module("bridge_supervisor_test", bs_path)
 
         assert bs_mod._touches_control_surface("mu/tools/executors/phase_b_executor.py")  # ANTICHEAT_OK: testing bridge reviewer detection
 
@@ -312,7 +351,7 @@ class TestBridgeReviewerPromptActivation:
     def test_control_surface_mode_does_not_activate_for_regular_files(self):
         """Regular files do not trigger control-surface review."""
         bs_path = REPO_ROOT / "tools" / "agents" / "bridge_supervisor.py"
-        bs_mod = _load_module("bridge_supervisor_test2", bs_path)
+        bs_mod = load_module("bridge_supervisor_test2", bs_path)
 
         instructions = bs_mod._build_code_review_instructions(  # ANTICHEAT_OK: testing bridge prompt builder
             changed_actual="mu/host/python/rcx_pi/selfhost/step_mu.py",
@@ -330,12 +369,12 @@ class TestBridgeReviewerMuPathActivation:
 
     def test_mu_bridge_supervisor_activates_bridge_review(self):
         bs_path = REPO_ROOT / "tools" / "agents" / "bridge_supervisor.py"
-        bs_mod = _load_module("bridge_supervisor_test_mu", bs_path)
+        bs_mod = load_module("bridge_supervisor_test_mu", bs_path)
         assert bs_mod._touches_control_surface("mu/tools/agents/bridge_supervisor.py")  # ANTICHEAT_OK: testing bridge reviewer detection
 
     def test_mu_bridge_supervisor_in_prompt(self):
         bs_path = REPO_ROOT / "tools" / "agents" / "bridge_supervisor.py"
-        bs_mod = _load_module("bridge_supervisor_test_mu2", bs_path)
+        bs_mod = load_module("bridge_supervisor_test_mu2", bs_path)
         instructions = bs_mod._build_code_review_instructions(  # ANTICHEAT_OK: testing bridge prompt builder
             changed_actual="mu/tools/agents/bridge_supervisor.py",
             staged="mu/tools/agents/bridge_supervisor.py",
@@ -385,7 +424,7 @@ class TestRunnerControlSurfaceContext:
     def test_runner_builds_context_for_control_files(self):
         """build_control_surface_context returns obligations for control-surface files."""
         sau_path = REPO_ROOT / "tools" / "runners" / "shared_agent_utils.py"
-        sau_mod = _load_module("shared_agent_utils_test_cs", sau_path)
+        sau_mod = load_module("shared_agent_utils_test_cs", sau_path)
         ctx = sau_mod.build_control_surface_context(["mu/tools/executors/phase_b_executor.py"])
         assert "CONTROL-SURFACE REVIEW MODE" in ctx
         assert "bridge_adapters" in ctx
@@ -393,15 +432,22 @@ class TestRunnerControlSurfaceContext:
     def test_runner_returns_empty_for_regular_files(self):
         """build_control_surface_context returns empty for non-control files."""
         sau_path = REPO_ROOT / "tools" / "runners" / "shared_agent_utils.py"
-        sau_mod = _load_module("shared_agent_utils_test_cs2", sau_path)
+        sau_mod = load_module("shared_agent_utils_test_cs2", sau_path)
         ctx = sau_mod.build_control_surface_context(["README.md"])
         assert ctx == ""
 
     def test_runner_detects_mu_bridge_supervisor(self):
         """build_control_surface_context activates for mu/ bridge path."""
         sau_path = REPO_ROOT / "tools" / "runners" / "shared_agent_utils.py"
-        sau_mod = _load_module("shared_agent_utils_test_cs3", sau_path)
+        sau_mod = load_module("shared_agent_utils_test_cs3", sau_path)
         ctx = sau_mod.build_control_surface_context(["mu/tools/agents/bridge_supervisor.py"])
+        assert "CONTROL-SURFACE REVIEW MODE" in ctx
+
+    def test_runner_detects_dot_segment_control_surface(self):
+        """build_control_surface_context normalizes dot-segment control-surface paths."""
+        sau_path = REPO_ROOT / "tools" / "runners" / "shared_agent_utils.py"
+        sau_mod = load_module("shared_agent_utils_test_cs4", sau_path)
+        ctx = sau_mod.build_control_surface_context(["mu/tools/executors/./phase_b_executor.py"])
         assert "CONTROL-SURFACE REVIEW MODE" in ctx
 
 
@@ -421,8 +467,13 @@ class TestRegressionGuard:
         assert supervisor_idx > stage_idx
 
     def test_no_freshness_matching_in_executor(self):
+        """Executor must not use render-age freshness matching on bridge outputs.
+
+        st_mtime_ns / getmtime usage for SDK gate supervision (heartbeat,
+        stale-run detection) is approved per the supervision design.
+        render_age freshness matching on bridge renders remains forbidden.
+        """
         src = (REPO_ROOT / "mu" / "tools" / "executors" / "phase_b_executor.py").read_text()
-        assert "st_mtime" not in src
         assert "render_age" not in src
 
 

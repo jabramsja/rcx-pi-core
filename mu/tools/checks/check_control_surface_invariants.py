@@ -21,9 +21,12 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import ast
 import json
+import posixpath
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 # SINGLE SOURCE OF TRUTH: Files that constitute the Phase B / commit control surface.
@@ -66,23 +69,39 @@ CONTROL_SURFACE_FILES = frozenset({
 })
 
 
-def _normalize_path(p: str) -> str:
-    """Normalize a file path to repo-relative form for matching."""
-    # Strip leading ./ prefix (not character-level lstrip)
-    if p.startswith("./"):
-        p = p[2:]
-    # Handle absolute paths: strip repo root prefix if present
+@lru_cache(maxsize=1)
+def _git_toplevel() -> str | None:
     try:
-        import subprocess
-        toplevel = subprocess.run(
+        result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        if p.startswith(toplevel):
-            p = p[len(toplevel):].lstrip("/")
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        pass
-    return p
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    toplevel = result.stdout.strip()
+    return toplevel or None
+
+
+def normalize_repo_relative_path(p: str) -> str:
+    """Normalize a path to canonical repo-relative form for membership checks."""
+    p = p.replace("\\", "/")
+    toplevel = _git_toplevel()
+    if toplevel:
+        normalized_root = toplevel.replace("\\", "/").rstrip("/")
+        if p == normalized_root:
+            p = ""
+        elif p.startswith(normalized_root + "/"):
+            p = p[len(normalized_root) + 1:]
+    normalized = posixpath.normpath(p)
+    return "" if normalized == "." else normalized
+
+
+def _normalize_path(p: str) -> str:
+    """Backwards-compatible wrapper for tests and existing callers."""
+    return normalize_repo_relative_path(p)
 
 
 def _touches_control_surface(changed_files: list[str]) -> bool:
@@ -162,33 +181,16 @@ def check_bridge_loop_reinvokes_implementer(repo_root: Path) -> tuple[bool, str]
 
     def _if_tests_variable_against(test_node: ast.AST, var_name: str, values: set[str]) -> bool:
         """Check if an If test compares `var_name` to string constants in `values` (AST-structural)."""
-        # Handle: bridge_decision in ("REQUEST_CHANGES", "NO_GO")
         if isinstance(test_node, ast.Compare):
-            # Left side should be Name(var_name)
             if isinstance(test_node.left, ast.Name) and test_node.left.id == var_name:
                 for op, comparator in zip(test_node.ops, test_node.comparators):
-                    if isinstance(op, ast.In) and isinstance(comparator, ast.Tuple):
+                    if isinstance(op, ast.In) and isinstance(comparator, (ast.Tuple, ast.List)):
                         const_vals = {
                             e.value for e in comparator.elts
                             if isinstance(e, ast.Constant) and isinstance(e.value, str)
                         }
                         if values <= const_vals:
                             return True
-            # Right side: ("X", "Y") contains var
-            for op, comparator in zip(test_node.ops, test_node.comparators):
-                if isinstance(op, ast.In):
-                    if isinstance(test_node.left, ast.Name) and test_node.left.id == var_name:
-                        if isinstance(comparator, (ast.Tuple, ast.List)):
-                            const_vals = {
-                                e.value for e in comparator.elts
-                                if isinstance(e, ast.Constant) and isinstance(e.value, str)
-                            }
-                            if values <= const_vals:
-                                return True
-        # Handle: bridge_decision == "REQUEST_CHANGES"
-        if isinstance(test_node, ast.Compare):
-            if isinstance(test_node.left, ast.Name) and test_node.left.id == var_name:
-                for op, comparator in zip(test_node.ops, test_node.comparators):
                     if isinstance(op, ast.Eq) and isinstance(comparator, ast.Constant):
                         if comparator.value in values:
                             return True
@@ -289,18 +291,47 @@ def check_receipt_writer_returns_per_invocation(repo_root: Path) -> tuple[bool, 
     if not path.exists():
         return True, "meta_bridge_supervisor.py not found (skip)"
     src = path.read_text(encoding="utf-8")
-    # Find write_pre_commit_receipt function and check its return
-    in_func = False
-    for line in src.splitlines():
-        if "def write_pre_commit_receipt" in line:
-            in_func = True
-        if in_func and line.strip().startswith("return "):
-            if "per_invocation" in line:
-                return True, "receipt writer returns per-invocation path"
-            if "canonical" in line or "receipt_path" == line.strip().split()[-1]:
-                return False, f"receipt writer returns canonical/ambiguous path: {line.strip()}"
-            return True, f"receipt writer returns: {line.strip()}"
-    return False, "write_pre_commit_receipt return statement not found"
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as exc:
+        return False, f"meta_bridge_supervisor.py parse error: {exc}"
+
+    func = next(
+        (
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "write_pre_commit_receipt"
+        ),
+        None,
+    )
+    if func is None:
+        return False, "write_pre_commit_receipt function not found"
+
+    canonical_written = False
+    per_invocation_assigned = False
+    per_invocation_written = False
+    returns_per_invocation = False
+
+    for node in ast.walk(func):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "per_invocation_path":
+                    per_invocation_assigned = True
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            owner = node.func.value
+            if isinstance(owner, ast.Name) and node.func.attr == "write_text":
+                if owner.id == "canonical_path":
+                    canonical_written = True
+                if owner.id == "per_invocation_path":
+                    per_invocation_written = True
+        if isinstance(node, ast.Return):
+            if isinstance(node.value, ast.Name) and node.value.id == "per_invocation_path":
+                returns_per_invocation = True
+
+    if returns_per_invocation and per_invocation_assigned and per_invocation_written:
+        return True, "receipt writer returns exact per-invocation path"
+    if canonical_written and not returns_per_invocation:
+        return False, "receipt writer returns canonical or ambiguous path instead of per-invocation artifact"
+    return False, "write_pre_commit_receipt does not prove exact per-invocation return path"
 
 
 def check_client_no_heuristic_discovery(repo_root: Path) -> tuple[bool, str]:
@@ -329,48 +360,6 @@ def check_client_no_heuristic_discovery(repo_root: Path) -> tuple[bool, str]:
     if "receipts[0]" in src or "receipts[-1]" in src:
         return False, "meta_bridge_client.py picks receipt by index from directory listing"
     return True, "client captures exact receipt path from writer, no heuristic"
-
-
-def _find_protocol_memory_file(repo_root: Path) -> Path | None:
-    """Find the protocol_wave_execution.md file in Claude memory.
-
-    Claude Code stores project memory under ~/.claude/projects/-<path-slug>/memory/.
-    The slug replaces '/' with '-' and strips the leading slash, plus '_' becomes '-'.
-    Try multiple resolution strategies since the exact slug can vary.
-    """
-    memory_base = Path.home() / ".claude" / "projects"
-    if not memory_base.exists():
-        return None
-
-    target = "protocol_wave_execution.md"
-    repo_str = str(repo_root)
-
-    # Strategy 1: scan project dirs for one whose suffix matches our repo path
-    for project_dir in memory_base.iterdir():
-        if not project_dir.is_dir():
-            continue
-        mem_file = project_dir / "memory" / target
-        if mem_file.exists():
-            # Verify this project dir relates to our repo by checking if
-            # the dir name contains key path components
-            dir_name = project_dir.name
-            # Extract last 2 meaningful path components from repo_root
-            parts = [p for p in repo_root.parts if p not in ("/", "Users")]
-            if len(parts) >= 2 and parts[-1].replace("_", "-") in dir_name.replace("_", "-"):
-                return mem_file
-
-    # Strategy 2: direct construction with known slug patterns
-    # Pattern: strip leading /, replace / with -, replace _ with -
-    slug = repo_str.lstrip("/").replace("/", "-")
-    candidates = [
-        memory_base / f"-{slug}" / "memory" / target,
-        memory_base / f"-{slug.replace('_', '-')}" / "memory" / target,
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-
-    return None
 
 
 def _check_single_doc_no_manual_fallback(path: Path, label: str) -> tuple[bool, str]:
@@ -429,19 +418,23 @@ def check_docs_no_manual_commit_fallback(repo_root: Path) -> tuple[bool, str]:
 
 
 def check_commit_executor_receipt_authority(repo_root: Path) -> tuple[bool, str]:
-    """INV-6: commit_executor step 7 must read from supervisor receipt, not handoff path.
+    """INV-6: commit_executor step 7 must verify both receipts in the authority chain.
 
-    The supervisor at step 6 produces a fresh receipt against the actual staged
-    state.  Step 7 must use that receipt (receipt_path_from_supervisor), NOT the
-    stale handoff pre_commit_receipt_path.  Reading the handoff path breaks the
-    authority chain because it was minted before steps 3-5 modified staging.
+    The corrected receipt-chain model requires step 7 to:
+    1. Verify the Phase B handoff receipt for continuity/provenance (it was the
+       authority that authorized the commit pipeline to begin).
+    2. Read the fresh supervisor receipt (from step 6) for the final commit
+       decision — this is the only receipt minted after steps 3-5 mutated staging.
+
+    Both must be present. The supervisor receipt is the commit-decision authority.
+    The handoff receipt is the provenance proof that Phase B authorized entry.
     """
     path = repo_root / "mu" / "tools" / "executors" / "commit_executor.py"
     if not path.exists():
         return True, "commit_executor.py not found (skip)"
     src = path.read_text(encoding="utf-8")
 
-    # Step 7 section: look for the receipt file source
+    # Step 7 section: look for the receipt file sources
     in_step7 = False
     uses_supervisor_path = False
     uses_handoff_path = False
@@ -452,17 +445,19 @@ def check_commit_executor_receipt_authority(repo_root: Path) -> tuple[bool, str]
             break
         if in_step7:
             stripped = line.strip()
-            # Check what path is used to open the receipt
+            # Check what paths are used to open receipts
             if "receipt_path_from_supervisor" in stripped and ("repo_root" in stripped or "receipt_file" in stripped):
                 uses_supervisor_path = True
             if 'handoff["pre_commit_receipt_path"]' in stripped or "handoff['pre_commit_receipt_path']" in stripped:
                 if not stripped.startswith("#"):
                     uses_handoff_path = True
 
-    if uses_handoff_path:
-        return False, "commit_executor step 7 reads from handoff receipt path (stale), not supervisor receipt"
-    if uses_supervisor_path:
-        return True, "commit_executor step 7 reads from supervisor receipt path (correct authority chain)"
+    if uses_supervisor_path and uses_handoff_path:
+        return True, "commit_executor step 7 verifies both receipts (handoff provenance + supervisor authority)"
+    if uses_supervisor_path and not uses_handoff_path:
+        return False, "commit_executor step 7 reads only supervisor receipt (missing handoff provenance check)"
+    if uses_handoff_path and not uses_supervisor_path:
+        return False, "commit_executor step 7 reads only handoff receipt (missing supervisor authority)"
     return False, "commit_executor step 7 receipt source could not be determined"
 
 

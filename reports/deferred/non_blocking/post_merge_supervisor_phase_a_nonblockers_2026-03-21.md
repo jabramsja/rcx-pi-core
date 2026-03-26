@@ -103,14 +103,15 @@ separate follow-on.
 
 ## Executor Slice 1+2 Phase B Bridge Non-Blockers (2026-03-22)
 
-### UPDATE_TRACKER_ONLY Handoff Path
+### UPDATE_TRACKER_ONLY Handoff Path — RESOLVED (2026-03-25)
 
 **Source:** Bridge Phase B R2 for executor surfaces
-**Issue:** The dispatcher returns `needs_handoff` for commit_executor when
-UPDATE_TRACKER_ONLY routes to it. The full handoff preparation path requires
-the dispatcher or a dedicated tracker executor to stage files and prepare
-the handoff. This is Slice 3+ scope.
-**Classification:** Not blocked for Slice 1+2 proof. Required for full loop.
+**Issue:** The dispatcher returned `needs_handoff` for commit_executor when
+UPDATE_TRACKER_ONLY routed to it.
+**Resolution:** Dispatcher now passes `--routing-record` to commit_executor,
+which internally prepares the handoff via `prepare_handoff_from_routing_record()`.
+For UPDATE_TRACKER_ONLY, defaults to `files_to_stage: ["TASKS.md"]` and
+`caller: "update_tracker_only"`. Resolved in wave `commit_pipeline_automation_plan_2026-03-25`.
 
 ### Post-Merge Supervisor Trigger After Merge
 

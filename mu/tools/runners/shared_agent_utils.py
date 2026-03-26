@@ -104,7 +104,10 @@ try:
     _checks_dir = str(Path(__file__).resolve().parent.parent / "checks")
     if _checks_dir not in sys.path:
         sys.path.insert(0, _checks_dir)
-    from check_control_surface_invariants import CONTROL_SURFACE_FILES
+    from check_control_surface_invariants import (
+        CONTROL_SURFACE_FILES,
+        normalize_repo_relative_path,
+    )
 except ImportError:
     # Fallback: hardcoded set if checker not importable (should not happen in repo)
     CONTROL_SURFACE_FILES = frozenset({
@@ -115,6 +118,9 @@ except ImportError:
         "mu/tools/agents/meta_bridge_client.py",
     })
 
+    def normalize_repo_relative_path(path: str) -> str:
+        return path.replace("\\", "/").removeprefix("./")
+
 
 def build_control_surface_context(files: list[str]) -> str:
     """Build control-surface review context if relevant files are in scope.
@@ -122,19 +128,7 @@ def build_control_surface_context(files: list[str]) -> str:
     Returns a prompt section with proof obligations for Phase B / commit
     authority chain files. Returns empty string for non-control-surface files.
     """
-    normalized = {f.replace("\\", "/").removeprefix("./") for f in files}
-    # Also strip absolute repo root if present
-    try:
-        _toplevel = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        normalized = {
-            p[len(_toplevel):].lstrip("/") if p.startswith(_toplevel) else p
-            for p in normalized
-        }
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        pass
+    normalized = {normalize_repo_relative_path(f) for f in files}
     if not normalized & CONTROL_SURFACE_FILES:
         return ""
     return """
@@ -146,6 +140,9 @@ When reviewing, inspect these cross-file invariants:
 3. Receipt authority: write_pre_commit_receipt() returns per-invocation path. Client captures it directly.
 4. Canonical hook receipt must still be written. Executor flow uses per-invocation receipt.
 5. Protocol docs must not present manual git push/PR/merge as normal commit path.
+6. Do NOT invoke live control-plane surfaces from Bash while reviewing.
+   That includes Phase A/B executors, executor_dispatch, commit_executor,
+   and meta_bridge_supervisor. Inspect them read-only or with focused tests only.
 If any obligation is unverifiable, list it under NOT_CHECKED.
 ---"""
 
@@ -205,6 +202,41 @@ FINDING_BLOCK_PATTERN = r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?(?:\#{1,3}\s*)?\s*FINDIN
 # Includes U+2028 (Line Separator), U+2029 (Paragraph Separator), VT (U+000B),
 # FF (U+000C), and NEL (U+0085) which act as line separators in various contexts.
 _ZERO_WIDTH_RE = re.compile(r'[\u000b\u000c\u0085\u200b\u200c\u200d\u2028\u2029\u2060\ufeff]')
+_KEYWORD_CONFUSABLE_TRANSLATION = str.maketrans({
+    "Α": "A",
+    "А": "A",
+    "Β": "B",
+    "В": "B",
+    "С": "C",
+    "Ε": "E",
+    "Е": "E",
+    "Η": "H",
+    "І": "I",
+    "Ι": "I",
+    "Κ": "K",
+    "М": "M",
+    "Ν": "N",
+    "Ο": "O",
+    "О": "O",
+    "Ρ": "P",
+    "Р": "P",
+    "Ѕ": "S",
+    "Τ": "T",
+    "Т": "T",
+    "Υ": "Y",
+    "Χ": "X",
+    "а": "a",
+    "е": "e",
+    "і": "i",
+    "ј": "j",
+    "ο": "o",
+    "о": "o",
+    "р": "p",
+    "ѕ": "s",
+    "с": "c",
+    "х": "x",
+    "у": "y",
+})
 
 
 def agent_passed(agent_name: str, verdict: str) -> bool:
@@ -435,6 +467,59 @@ def validate_compliance(
 # Secure Verdict Extraction
 # =============================================================================
 
+# Fenced code block pattern: ```<optional-lang>\n...\n```
+# Must strip these before verdict extraction so that verdict-like tokens
+# inside reviewed code samples cannot spoof the parser.
+_FENCED_CODE_BLOCK_RE = re.compile(
+    r'```[^\n]*\n.*?```',
+    re.DOTALL,
+)
+
+def _strip_code_blocks(text: str) -> str:
+    """Remove fenced and indented code blocks from text to prevent verdict spoofing.
+
+    Agent output often quotes reviewed code that may contain verdict-like
+    tokens (e.g., ``Verdict: APPROVE`` inside a code sample). Stripping
+    code blocks before verdict extraction ensures only the agent's own
+    prose is parsed.
+
+    Handles both triple-backtick fenced blocks and CommonMark indented
+    code blocks (lines indented 4+ spaces beyond the text's base indent).
+    """
+    text = _FENCED_CODE_BLOCK_RE.sub('', text)
+
+    # Detect the base (minimum) indentation of non-blank lines.
+    # Lines indented 4+ spaces beyond this base are CommonMark indented code.
+    lines = text.split('\n')
+    min_indent = None
+    for line in lines:
+        stripped = line.lstrip(' \t')
+        if not stripped:
+            continue
+        indent = len(line) - len(stripped)
+        if min_indent is None or indent < min_indent:
+            min_indent = indent
+    if min_indent is None:
+        min_indent = 0
+
+    threshold = min_indent + 4
+    result_lines = []
+    for line in lines:
+        stripped = line.lstrip(' \t')
+        if stripped:
+            # Check if line uses tabs (any tab = code) or spaces beyond threshold
+            leading = line[:len(line) - len(stripped)]
+            if '\t' in leading and (len(line) - len(stripped)) > min_indent:
+                result_lines.append('')
+                continue
+            indent = len(line) - len(stripped)
+            if indent >= threshold:
+                result_lines.append('')
+                continue
+        result_lines.append(line)
+    return '\n'.join(result_lines)
+
+
 def extract_verdict_secure(
     output: str,
     agent_name: Optional[str] = None,
@@ -442,8 +527,9 @@ def extract_verdict_secure(
 ) -> str:
     """Extract verdict from agent output using secure marker parsing.
 
-    Security: Only looks for explicit VERDICT: markers to prevent spoofing
-    via incidental mentions like "This code is NOT ROBUST".
+    Security: Strips fenced code blocks first, then looks for explicit
+    VERDICT: markers to prevent spoofing via code samples or incidental
+    mentions like "This code is NOT ROBUST".
 
     Args:
         output: Agent output text
@@ -455,6 +541,9 @@ def extract_verdict_secure(
     """
     if not output:
         return "UNKNOWN"
+
+    # Strip fenced code blocks so reviewed code cannot spoof verdicts.
+    output = _strip_code_blocks(output)
 
     # Determine valid verdicts
     if valid_verdicts is None and agent_name:
@@ -469,35 +558,39 @@ def extract_verdict_secure(
         # Tier 1: Colon format — "Verdict: TOKEN" or "**Verdict:** TOKEN"
         # Allows emojis/symbols between colon and token (e.g., "Verdict: ✅ **VALID**")
         # Also handles "Final Verdict:", "L3 Verdict:", etc.
+        # LAST match wins — agents may revise verdicts during analysis.
         specific_pattern = rf'(?:^|\n)[^\n]*[Vv]erdict[^\n]*:\s*[^\n]*?\b({verdict_options})\b'
-        match = re.search(specific_pattern, output, re.MULTILINE | re.IGNORECASE)
-        if match:
-            return match.group(1).upper()
+        matches = list(re.finditer(specific_pattern, output, re.MULTILINE | re.IGNORECASE))
+        if matches:
+            return matches[-1].group(1).upper()
 
         # Tier 2: Multi-line — "### Verdict" then next line "**TOKEN**" or "TOKEN"
+        # LAST match wins.
         multiline_specific_pattern = rf'(?:^|\n)[^\n]*[Vv]erdict[^\n]*\n+\s*(?:\*\*)?({verdict_options})(?:\*\*)?\b'
-        match = re.search(multiline_specific_pattern, output, re.MULTILINE | re.IGNORECASE)
-        if match:
-            return match.group(1).upper()
+        matches = list(re.finditer(multiline_specific_pattern, output, re.MULTILINE | re.IGNORECASE))
+        if matches:
+            return matches[-1].group(1).upper()
 
         # Tier 3: Bracket format — "### Verdict\n[TOKEN / TOKEN2 / ...]"
         # Agents produce this when prompts show options as [A / B / C]
+        # LAST match wins.
         bracket_pattern = rf'(?:^|\n)[^\n]*[Vv]erdict[^\n]*\n+\s*\[\s*({verdict_options})\b'
-        match = re.search(bracket_pattern, output, re.MULTILINE | re.IGNORECASE)
-        if match:
-            return match.group(1).upper()
+        matches = list(re.finditer(bracket_pattern, output, re.MULTILINE | re.IGNORECASE))
+        if matches:
+            return matches[-1].group(1).upper()
 
     # Tier 4: Search lines near a "Verdict" header for embedded tokens.
     # Catches: "## Final Verdict\n\nAll claims are **VALID**."
     # Handles "Final Verdict", "L3 Verdict", etc. — any line containing "Verdict".
     # Security: only matches tokens from agent's allowlist as whole words.
+    # LAST header wins — agents may revise verdicts during analysis.
     if valid_verdicts:
-        verdict_header = re.search(
+        verdict_headers = list(re.finditer(
             r'(?:^|\n)[^\n]*[Vv]erdict',
             output, re.MULTILINE,
-        )
-        if verdict_header:
-            after_header = output[verdict_header.end():]
+        ))
+        if verdict_headers:
+            after_header = output[verdict_headers[-1].end():]
             lines_after = after_header.split('\n')[:8]
             for line in lines_after:
                 for v in valid_verdicts:
@@ -505,10 +598,11 @@ def extract_verdict_secure(
                         return v.upper()
 
     # Generic verdict pattern (fallback) — requires colon
+    # LAST match wins.
     generic_pattern = r'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:###?\s*)?(?:\*\*)?[Vv]erdict(?:\*\*)?\s*:\s*(?:\*\*)?\s*([A-Z_]+)'
-    match = re.search(generic_pattern, output, re.MULTILINE)
-    if match:
-        found = match.group(1).upper()
+    generic_matches = list(re.finditer(generic_pattern, output, re.MULTILINE))
+    if generic_matches:
+        found = generic_matches[-1].group(1).upper()
         # Only return if it looks like a verdict (not random word)
         if found in GOOD_VERDICTS or (valid_verdicts and found in [v.upper() for v in valid_verdicts]):
             return found
@@ -618,6 +712,11 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
     # Unicode normalization first - converts lookalikes (Greek omicron -> Latin o)
     text = unicodedata.normalize('NFKC', text)
 
+    # Normalize a small set of visually confusable Greek/Cyrillic characters
+    # before keyword redaction so VERDICT/instruction markers cannot hide in
+    # mixed-script near-matches.
+    text = text.translate(_KEYWORD_CONFUSABLE_TRANSLATION)
+
     # Strip zero-width characters that could hide injection payloads
     text = _ZERO_WIDTH_RE.sub('', text)
 
@@ -643,13 +742,14 @@ def sanitize_for_prompt(text: str, max_len: int = 4000) -> str:
     for pattern in word_patterns:
         text = re.sub(r'\b' + pattern + r'\b', '[REDACTED]', text, flags=re.IGNORECASE)
 
-    # Verdict patterns — leading \b only (trailing : is non-word, so \b after : fails)
+    # Verdict patterns: redact any visible marker occurrence, even if a removed
+    # line-separator collapsed it into a larger token like prefixVERDICT:.
     verdict_patterns = [
         r'VERDICT\s*:',
         r'OVERALL_VERDICT\s*:',
     ]
     for pattern in verdict_patterns:
-        text = re.sub(r'\b' + pattern, '[REDACTED]', text, flags=re.IGNORECASE)
+        text = re.sub(pattern, '[REDACTED]', text, flags=re.IGNORECASE)
 
     # Truncate AFTER sanitization to prevent smuggling payloads past the truncation boundary
     text = text[:max_len]

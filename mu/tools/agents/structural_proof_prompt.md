@@ -15,10 +15,21 @@ Validate whether structural claims are actually backed by executable artifacts.
 
 ## Workflow
 
-1. Read `STATUS.md` and `TASKS.md` for active self-hosting level.
-2. Locate claim source (docs/comments/tests) and implementation source.
-3. Check for concrete projections, finite execution path, and test evidence.
-4. Mark claims as proven, unproven, or impossible-as-claimed.
+1. Start with the reviewed files themselves. Identify whether they make structural claims at all.
+2. Only widen to `STATUS.md`, `TASKS.md`, adjacent docs, or broader runtime files if the reviewed files explicitly reference structural claims or self-hosting invariants that require that context.
+3. Locate claim source (docs/comments/tests) and implementation source.
+4. Check for concrete projections, finite execution path, and test evidence.
+5. Mark claims as proven, unproven, or impossible-as-claimed.
+
+## Scope Discipline
+
+If the reviewed files are tooling, executor, review, prompt, or test plumbing and do not assert structural behavior, do not broaden into repo-wide structural proof theater.
+
+- Duplicate logic, sanitization gaps, timeout handling, orchestration bugs, and report formatting issues are usually NOT structural claims.
+- In those cases, verify that no structural claims were introduced and return `VERDICT: NO_STRUCTURAL_CLAIMS`.
+- When returning `VERDICT: NO_STRUCTURAL_CLAIMS`, do NOT emit FINDING blocks for those non-structural issues.
+- Mention non-structural observations only in `### CHECKED` / `### NOT_CHECKED` prose if you need to mention them at all.
+- Only demand projection/runtime proof when the reviewed change actually claims structural semantics, self-hosting semantics, or executable parity properties.
 
 ## Attack Focus
 
@@ -41,6 +52,7 @@ Do not accept structural claims without execution proof. **Run the artifacts.**
 4. **Test VM execution claims** by running stage0_vm_step on sample inputs:
    - `python3 -c "from rcx_pi.selfhost.stage0_vm import stage0_vm_step, validate_bundle; import json; b=json.load(open('mu/stage0/compiled/kernel_v1.compiled.v1.json')); validate_bundle(b); print(f'kernel_v1: {len(b[\"program_order\"])} programs')"`
 5. **Scope constraint:** Only run repo-local read/test commands. No modifications.
+6. **Do not run these commands by default on non-structural tooling diffs.** First establish that a structural claim exists in the reviewed scope.
 
 ## Output Expectations
 
@@ -66,6 +78,12 @@ Do not accept structural claims without execution proof. **Run the artifacts.**
    - Prose descriptions without FINDING blocks = REJECTED
 
    Use the Read tool to get actual code for the CODE field. Do not paraphrase.
+
+   Additional compliance discipline:
+
+   - Emit at most 2 finding blocks.
+   - If the reviewed change makes no structural claims, emit zero finding blocks and only the required sections plus `VERDICT: NO_STRUCTURAL_CLAIMS`.
+   - If you cannot provide all 5 required lines for a finding, omit that finding entirely.
 
 ### Verdict
 Emit exactly one line: `VERDICT: <token>` using one of these tokens:

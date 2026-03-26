@@ -26,17 +26,43 @@ See: reports/control_plane/commit_pipeline_automation_plan_2026-03-22.md
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import re
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
-WAVE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
+SCRIPT_DIR = Path(__file__).resolve().parent
 
-FORCE_ADD_DENYLIST = (".git/", ".env", ".agent_bus/meta/")
+try:
+    from executor_common import (
+        MAX_WAVE_ID_LEN,
+        WAVE_ID_RE,
+        normalize_wave_id,
+        ensure_not_agent_review_mode,
+        ExecutorCommonError,
+    )
+except ImportError:
+    import importlib.util as _ilu
+    _common_path = SCRIPT_DIR / "executor_common.py"
+    _spec = _ilu.spec_from_file_location("executor_common", str(_common_path))
+    _mod = _ilu.module_from_spec(_spec)
+    assert _spec.loader is not None
+    _spec.loader.exec_module(_mod)
+    MAX_WAVE_ID_LEN = _mod.MAX_WAVE_ID_LEN
+    WAVE_ID_RE = _mod.WAVE_ID_RE
+    normalize_wave_id = _mod.normalize_wave_id
+    ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
+    ExecutorCommonError = _mod.ExecutorCommonError
+
+BRANCH_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+
+FORCE_ADD_DENYLIST = (".git/", ".env", ".agent_bus/")
 
 REQUIRED_HANDOFF_FIELDS = {
     "wave_id", "wave_class", "target_gate_id", "branch_prefix",
@@ -96,10 +122,173 @@ def _run(
     )
 
 
+def _decode_untrusted_path(path_str: str) -> str | None:
+    """Decode percent escapes and normalize compatibility characters."""
+    normalized = path_str.replace("\\", "/")
+    for _ in range(4):
+        if "%" not in normalized:
+            break
+        try:
+            next_normalized = unquote(normalized, errors="strict")
+        except UnicodeDecodeError:
+            return None
+        if next_normalized == normalized:
+            break
+        normalized = next_normalized
+    return unicodedata.normalize("NFKC", normalized)
+
+
+def _is_absolute_untrusted_path(path_str: str) -> bool:
+    """Reject absolute POSIX, UNC, or Windows drive-rooted paths."""
+    normalized = _decode_untrusted_path(path_str)
+    if normalized is None:
+        return True
+    if "\x00" in normalized:
+        return True
+    normalized = normalized.replace("\\", "/")
+    if normalized.startswith("//"):
+        return True
+    if normalized.startswith("/"):
+        return True
+    return bool(re.match(r"^[A-Za-z]:/", normalized))
+
+
 def _has_path_traversal(path_str: str) -> bool:
-    """Check for path traversal components."""
-    parts = Path(path_str).parts
+    """Check for decoded traversal components and hostile separators."""
+    normalized = _decode_untrusted_path(path_str)
+    if normalized is None:
+        return True
+    if "\x00" in normalized:
+        return True
+    parts = Path(normalized.replace("\\", "/")).parts
     return ".." in parts
+
+
+def _count_exact_wave_id_mentions(text: str, wave_id: str) -> int:
+    """Count exact wave_id mentions without substring false positives."""
+    pattern = re.compile(rf"(?<![a-z0-9-]){re.escape(wave_id)}(?![a-z0-9-])")
+    return len(pattern.findall(text))
+
+
+def _force_add_denied_match(path_str: str) -> str | None:
+    """Return the denylist token matched by a force-add path, if any."""
+    normalized = path_str.replace("\\", "/")
+    lowered = normalized.lower()
+    parts = [part.lower() for part in Path(normalized).parts]
+    if ".git" in parts:
+        return ".git/"
+    if any(
+        part == ".env"
+        or part == ".envrc"
+        or part.startswith(".env.")
+        or part.startswith(".envrc.")
+        for part in parts
+    ):
+        return ".env*"
+    if ".agent_bus" in parts:
+        return ".agent_bus/"
+    for denied in FORCE_ADD_DENYLIST:
+        if lowered.startswith(denied.lower()):
+            return denied
+    return None
+
+
+def prepare_handoff_from_routing_record(
+    record: dict[str, Any],
+    repo_root: Path,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Prepare a commit handoff from a routing record.
+
+    Used when the dispatcher routes UPDATE_TRACKER_ONLY or COMMIT_GO
+    to commit_executor without a pre-prepared handoff file.
+
+    The routing record must contain enough information to build a valid
+    handoff. Returns (handoff_dict, errors). If errors is non-empty,
+    handoff_dict is None.
+    """
+    errors: list[str] = []
+
+    wave_name = record.get("wave_name") or record.get("wave_id", "")
+    if not wave_name:
+        errors.append("Routing record missing wave_name/wave_id")
+
+    summary = record.get("summary", "")
+    if not summary:
+        errors.append("Routing record missing summary")
+
+    decision = record.get("decision", "")
+
+    # Look for handoff fields in the record itself (supervisor may embed them)
+    embedded_handoff = record.get("handoff")
+    if isinstance(embedded_handoff, dict):
+        embedded_copy = copy.deepcopy(embedded_handoff)
+        valid, handoff_errors = validate_handoff(embedded_copy)
+        if valid:
+            return embedded_copy, []
+        return None, [f"Embedded handoff invalid: {err}" for err in handoff_errors]
+
+    # COMMIT_GO / COMMIT_GO_HOLD_PUSH require a pre-prepared handoff with
+    # an exact Phase B receipt chain.  Synthesizing one here would point at
+    # the canonical hook receipt instead of the per-invocation Phase B
+    # receipt, breaking the authority chain.  Only embedded handoffs
+    # (validated above) are accepted for these decisions.
+    if decision in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+        return None, [
+            f"{decision} requires a pre-prepared Phase B handoff (or valid "
+            f"embedded handoff). Cannot synthesize a handoff from a routing "
+            f"record — the receipt chain would be broken."
+        ]
+
+    # For UPDATE_TRACKER_ONLY: construct a minimal tracker-only handoff
+    candidates = record.get("next_candidates", [])
+    files_to_stage = record.get("files_to_stage", [])
+    tracker_note = record.get("tracker_note_text", "")
+
+    # Try to derive files_to_stage from candidates if not directly provided
+    if not files_to_stage:
+        for c in candidates:
+            cf = c.get("files", [])
+            if cf:
+                files_to_stage.extend(cf)
+
+    # For UPDATE_TRACKER_ONLY, at minimum we need the tracker note
+    if decision == "UPDATE_TRACKER_ONLY" and not tracker_note:
+        # Try to derive from summary
+        wave_id_safe = wave_name.replace(" ", "-").lower()
+        tracker_note = f"- Tracker sync note ({wave_id_safe}): {summary}"
+
+    if not files_to_stage:
+        # Default to TASKS.md for tracker-only updates
+        if decision == "UPDATE_TRACKER_ONLY":
+            files_to_stage = ["TASKS.md"]
+        else:
+            errors.append("Cannot derive files_to_stage from routing record")
+
+    if errors:
+        return None, errors
+
+    # Normalize wave_id for branch naming
+    wave_id = normalize_wave_id(wave_name)
+
+    handoff = {
+        "wave_id": wave_id,
+        "task_id": record.get("task_id", f"[{wave_name}]"),
+        "wave_class": record.get("wave_class", "MAINTENANCE"),
+        "target_gate_id": record.get("target_gate_id", "NONE"),
+        "caller": "update_tracker_only" if decision == "UPDATE_TRACKER_ONLY" else "phase_b",
+        "branch_prefix": "jabramsja",
+        "tracker_note_text": tracker_note,
+        "fixes_implemented": record.get("fixes_implemented", [summary]),
+        "files_to_stage": files_to_stage,
+        "force_add_files": record.get("force_add_files", []),
+        "commit_message": record.get("commit_message", f"chore: {summary}\n\nCo-Authored-By: Claude <noreply@anthropic.com>"),
+        "pr_title": record.get("pr_title", f"chore: {summary}"[:70]),
+        "pr_body": record.get("pr_body", f"## Summary\n\n- {summary}"),
+        "base_branch": "dev",
+        "pre_commit_receipt_path": ".agent_bus/meta/pre_commit_receipt.json",
+    }
+
+    return handoff, []
 
 
 def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
@@ -108,6 +297,10 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
         return False, ["Handoff must be a JSON object"]
 
     errors: list[str] = []
+
+    unexpected = sorted(set(handoff.keys()) - REQUIRED_HANDOFF_FIELDS)
+    if unexpected:
+        errors.extend(f"Unexpected field: {field}" for field in unexpected)
 
     # Required fields
     missing = REQUIRED_HANDOFF_FIELDS - set(handoff.keys())
@@ -121,7 +314,7 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
 
     # wave_id regex
     wave_id = handoff.get("wave_id", "")
-    if not isinstance(wave_id, str) or not WAVE_ID_RE.match(wave_id):
+    if not isinstance(wave_id, str) or not WAVE_ID_RE.fullmatch(wave_id):
         errors.append(f"wave_id must match {WAVE_ID_RE.pattern}, got '{wave_id}'")
 
     # pre_commit_receipt_path: must be string, relative, within repo
@@ -133,6 +326,8 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
     else:
         if os.path.isabs(receipt_path_val):
             errors.append(f"pre_commit_receipt_path must be relative, got absolute: {receipt_path_val}")
+        elif _is_absolute_untrusted_path(receipt_path_val):
+            errors.append(f"pre_commit_receipt_path must stay within repo, got absolute-like path: {receipt_path_val}")
         if _has_path_traversal(receipt_path_val):
             errors.append(f"Path traversal in pre_commit_receipt_path: {receipt_path_val}")
 
@@ -144,6 +339,8 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
         errors.append("files_to_stage entries must be strings")
     else:
         for f in fts:
+            if _is_absolute_untrusted_path(f):
+                errors.append(f"Absolute path in files_to_stage: {f}")
             if _has_path_traversal(f):
                 errors.append(f"Path traversal in files_to_stage: {f}")
 
@@ -156,12 +353,13 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
             if not isinstance(f, str):
                 errors.append("force_add_files entries must be strings")
                 continue
+            if _is_absolute_untrusted_path(f):
+                errors.append(f"Absolute path in force_add_files: {f}")
             if _has_path_traversal(f):
                 errors.append(f"Path traversal in force_add_files: {f}")
-            f_lower = f.lower()
-            for denied in FORCE_ADD_DENYLIST:
-                if f_lower.startswith(denied.lower()):
-                    errors.append(f"force_add_files denied: {f} (matches {denied})")
+            denied = _force_add_denied_match(f)
+            if denied:
+                errors.append(f"force_add_files denied: {f} (matches {denied})")
 
     # tracker_note_text must be non-empty string
     tnt = handoff.get("tracker_note_text", "")
@@ -182,6 +380,10 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
         if not isinstance(val, str) or not val.strip():
             errors.append(f"{fld} must be a non-empty string")
 
+    branch_prefix = handoff.get("branch_prefix", "")
+    if isinstance(branch_prefix, str) and branch_prefix and not BRANCH_PREFIX_RE.fullmatch(branch_prefix):
+        errors.append(f"branch_prefix contains unsafe characters: {branch_prefix}")
+
     # Caller validation
     caller = handoff.get("caller", "")
     if caller and caller not in VALID_CALLERS:
@@ -200,6 +402,16 @@ def run_commit_pipeline(
 
     Same command every time. No resume mode. No special flags.
     """
+    try:
+        ensure_not_agent_review_mode("commit_executor.run_commit_pipeline")
+    except ExecutorCommonError as exc:
+        return {
+            "status": "error",
+            "step": "review_mode_guard",
+            "errors": [str(exc)],
+            "steps_completed": [],
+        }
+
     result: dict[str, Any] = {
         "status": "success",
         "steps_completed": [],
@@ -286,7 +498,7 @@ def run_commit_pipeline(
                 "steps_completed": result["steps_completed"]}
 
     tasks_content = tasks_path.read_text(encoding="utf-8")
-    wave_id_count = tasks_content.count(wave_id)
+    wave_id_count = _count_exact_wave_id_mentions(tasks_content, wave_id)
 
     if wave_id_count > 1:
         return {"status": "error", "step": "ensure_tracker_note",
@@ -327,7 +539,7 @@ def run_commit_pipeline(
 
         # Verify
         verify_content = tasks_path.read_text(encoding="utf-8")
-        if wave_id not in verify_content:
+        if _count_exact_wave_id_mentions(verify_content, wave_id) == 0:
             return {"status": "error", "step": "ensure_tracker_note",
                     "errors": ["wave_id not found in TASKS.md after write"],
                     "steps_completed": result["steps_completed"]}
@@ -471,8 +683,9 @@ def run_commit_pipeline(
                     "errors": [f"Path traversal in supervisor receipt_path — fail closed: {receipt_path_from_supervisor}"],
                     "steps_completed": result["steps_completed"]}
         # Verify the receipt resolves inside repo_root
+        resolved_repo = repo_root.resolve()
         resolved_receipt = (repo_root / receipt_path_from_supervisor).resolve()
-        if not str(resolved_receipt).startswith(str(repo_root.resolve())):
+        if not resolved_receipt.is_relative_to(resolved_repo):
             return {"status": "error", "step": "build_and_run_supervisor",
                     "errors": [f"Supervisor receipt_path escapes repo — fail closed: {receipt_path_from_supervisor}"],
                     "steps_completed": result["steps_completed"]}
@@ -493,14 +706,39 @@ def run_commit_pipeline(
                 "steps_completed": result["steps_completed"]}
 
     # ── Step 7: validate_receipt ──────────────────────────────────────
-    # Read the SUPERVISOR's receipt (from step 6), NOT the handoff's
-    # pre_commit_receipt_path. The supervisor at step 6 reviewed the actual
-    # staged state and produced a fresh receipt — that is the authority.
-    # The handoff receipt is stale (minted by Phase B before commit_executor
-    # staged TASKS.md at step 3 and the indicator at step 5).
-    #
-    # Authority chain: Step 6 supervisor → receipt_path_from_supervisor
-    # → step 7 reads decision → step 9 hook verifies staged state.
+    # Preserve the exact Phase B receipt chain first, then read the fresh
+    # step-6 supervisor receipt for the final commit decision. The handoff
+    # receipt path remains required authority provenance even though the
+    # supervisor receipt is the only receipt minted after tracker/indicator
+    # mutations in steps 3-5.
+    handoff_receipt_rel = handoff["pre_commit_receipt_path"]
+    # Containment check: handoff receipt must resolve inside the repo root.
+    # Reject path traversal and symlinks that escape the repo boundary.
+    if _has_path_traversal(handoff_receipt_rel):
+        return {"status": "error", "step": "validate_receipt",
+                "errors": [f"Path traversal in handoff receipt path: {handoff_receipt_rel}"],
+                "steps_completed": result["steps_completed"]}
+    handoff_receipt_file = (repo_root / handoff_receipt_rel).resolve()
+    if not handoff_receipt_file.is_relative_to(repo_root.resolve()):
+        return {"status": "error", "step": "validate_receipt",
+                "errors": [f"Handoff receipt escapes repo root: {handoff_receipt_rel}"],
+                "steps_completed": result["steps_completed"]}
+    if not handoff_receipt_file.exists():
+        return {"status": "error", "step": "validate_receipt",
+                "errors": [f"Phase B handoff receipt not found at: {handoff_receipt_rel}"],
+                "steps_completed": result["steps_completed"]}
+
+    try:
+        handoff_receipt_data = json.loads(handoff_receipt_file.read_text(encoding="utf-8"))
+        handoff_receipt_decision = handoff_receipt_data.get("decision", "")
+        if handoff_receipt_decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+            return {"status": "error", "step": "validate_receipt",
+                    "errors": [f"Phase B handoff receipt decision '{handoff_receipt_decision}' does not authorize commit"],
+                    "steps_completed": result["steps_completed"]}
+    except (json.JSONDecodeError, OSError) as exc:
+        return {"status": "error", "step": "validate_receipt",
+                "errors": [f"Phase B handoff receipt unreadable: {exc}"],
+                "steps_completed": result["steps_completed"]}
 
     receipt_file = repo_root / receipt_path_from_supervisor
     if not receipt_file.exists():
@@ -520,8 +758,13 @@ def run_commit_pipeline(
                 "errors": [f"Supervisor receipt unreadable: {exc}"],
                 "steps_completed": result["steps_completed"]}
 
+    result["handoff_receipt_path"] = handoff_receipt_rel
+    result["handoff_receipt_decision"] = handoff_receipt_decision
     result["steps_completed"].append("validate_receipt")
-    log(f"Step 7: receipt validated, decision={receipt_decision}")
+    log(
+        "Step 7: receipt chain verified "
+        f"(handoff={handoff_receipt_decision}, supervisor={receipt_decision})"
+    )
 
     # ── Step 8: run_pre_commit_script ─────────────────────────────────
     pre_commit_script = repo_root / "mu" / "tools" / "hooks" / "pre-commit-doc-check"
@@ -841,6 +1084,11 @@ def main() -> int:
         help="Path to handoff JSON file",
     )
     parser.add_argument(
+        "--routing-record",
+        type=str,
+        help="Routing record JSON string — commit_executor prepares handoff internally",
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
     )
@@ -860,15 +1108,26 @@ def main() -> int:
         print("[error] Not in a git repository", file=sys.stderr)
         return 1
 
-    if not args.handoff:
-        print("[error] Provide --handoff <path>", file=sys.stderr)
+    if not args.handoff and not args.routing_record:
+        print("[error] Provide --handoff <path> or --routing-record <json>", file=sys.stderr)
         return 1
 
-    try:
-        handoff = json.loads(args.handoff.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        print(f"[error] Cannot load handoff: {exc}", file=sys.stderr)
-        return 1
+    if args.handoff:
+        try:
+            handoff = json.loads(args.handoff.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"[error] Cannot load handoff: {exc}", file=sys.stderr)
+            return 1
+    else:
+        try:
+            record = json.loads(args.routing_record)
+        except json.JSONDecodeError as exc:
+            print(f"[error] Invalid routing record JSON: {exc}", file=sys.stderr)
+            return 1
+        handoff, prep_errors = prepare_handoff_from_routing_record(record, repo_root)
+        if prep_errors or handoff is None:
+            print(f"[error] Cannot prepare handoff from routing record: {prep_errors}", file=sys.stderr)
+            return 1
 
     result = run_commit_pipeline(handoff, repo_root=repo_root, verbose=args.verbose)
 

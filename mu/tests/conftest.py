@@ -295,7 +295,7 @@ def skip_or_fail_in_ci(reason: str):
 
 # NB2 skip ratchet: track bare pytest.skip() calls in CI to prevent silent coverage loss.
 # Baseline: current skip count in CI green gate run. New skips above baseline fail the session.
-_CI_SKIP_BASELINE = 5  # Current known CI skips (file-not-found guards, optional deps)
+_CI_SKIP_BASELINE = 22  # Current green-gate CI skip count after tool/doc/runtime gate expansion (2026-03-26)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):

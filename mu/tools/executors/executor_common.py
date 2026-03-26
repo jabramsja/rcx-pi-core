@@ -8,14 +8,47 @@ dialectic_executor.py.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
+import re
 import signal
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
 ROUTING_RECORD_PATH = Path(".agent_bus/meta/post_merge_routing.json")
+MAX_WAVE_ID_LEN = 80
+WAVE_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$")
+REVIEW_MODE_ENV_VARS = ("RCX_AGENT_REVIEW_MODE", "RCX_REVIEW_MODE")
+
+DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
+    "backends": {
+        "post_merge_supervisor": "codex",
+        "dialectic_executor": "codex",
+        "phase_a_executor": "codex",
+        "phase_b_executor": "codex",
+        "commit_executor": None,
+    },
+    "model_overrides": {},
+    "review_depths": {
+        "phase_a": "quick",
+        "phase_b": "quick",
+    },
+    "timeouts": {
+        "dialectic_executor": 600,
+        "phase_a_executor": 600,
+        "phase_b_executor": 1200,
+        "commit_executor": 300,
+        "agent_review": 900,
+    },
+    "bridge_loop_limits": {
+        "phase_a": 15,
+        "phase_b": 10,
+        "dialectic": 3,
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Finding disposition classification contract
@@ -87,6 +120,144 @@ REPEAT_FINDING_CAP = 3
 
 class ExecutorCommonError(RuntimeError):
     """Raised when a shared executor utility fails."""
+
+
+def current_review_mode_reason() -> str | None:
+    """Return the first active agent-review mode marker, if any."""
+    for name in REVIEW_MODE_ENV_VARS:
+        raw = os.getenv(name, "").strip()
+        if raw and raw.lower() not in {"0", "false", "no", "off"}:
+            return f"{name}={raw}"
+    return None
+
+
+def ensure_not_agent_review_mode(surface: str) -> None:
+    """Fail closed when live control-plane surfaces are invoked from review mode."""
+    reason = current_review_mode_reason()
+    if reason is None:
+        return
+    raise ExecutorCommonError(
+        f"{surface} cannot run inside agent review mode ({reason}). "
+        "Review agents may inspect control-plane code, diffs, and tests, but "
+        "must not invoke live executor/supervisor paths."
+    )
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Merge nested config dicts without discarding default subkeys."""
+    merged = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def merge_executor_config_overrides(overrides: dict[str, Any]) -> dict[str, Any]:
+    """Apply config overrides on top of the canonical executor defaults."""
+    if not isinstance(overrides, dict):
+        raise ExecutorCommonError("executor config overrides must be a JSON object")
+    return _deep_merge(DEFAULT_EXECUTOR_CONFIG, overrides)
+
+
+def load_executor_config(repo_root: Path) -> dict[str, Any]:
+    """Load executor config, preserving default nested keys when partially set."""
+    config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    if not config_path.exists():
+        return copy.deepcopy(DEFAULT_EXECUTOR_CONFIG)
+    loaded = json.loads(config_path.read_text(encoding="utf-8"))
+    return merge_executor_config_overrides(loaded)
+
+
+def normalize_wave_id(raw: str) -> str:
+    """Normalize arbitrary routing-record text into a bounded safe wave_id."""
+    wave_id = re.sub(r"[^a-z0-9-]", "-", (raw or "").lower())
+    wave_id = re.sub(r"-{2,}", "-", wave_id).strip("-")
+    if not wave_id:
+        wave_id = "wave-unknown"
+    if len(wave_id) > MAX_WAVE_ID_LEN:
+        wave_id = wave_id[:MAX_WAVE_ID_LEN].strip("-")
+    if not WAVE_ID_RE.fullmatch(wave_id):
+        prefixed = f"wave-{wave_id}".strip("-")
+        if len(prefixed) > MAX_WAVE_ID_LEN:
+            prefixed = prefixed[:MAX_WAVE_ID_LEN].strip("-")
+        wave_id = prefixed or "wave-unknown"
+    if not WAVE_ID_RE.fullmatch(wave_id):
+        wave_id = "wave-unknown"
+    return wave_id
+
+
+def process_descendants(root_pid: int, *, cwd: Path | None = None) -> set[int]:
+    """Return descendant PIDs for a live root process."""
+    if root_pid <= 0:
+        return set()
+    try:
+        os.kill(root_pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return set()
+
+    try:
+        proc = subprocess.run(
+            ["ps", "-axo", "pid=,ppid="],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return set()
+
+    children_by_parent: dict[int, set[int]] = {}
+    for raw in proc.stdout.splitlines():
+        parts = raw.split()
+        if len(parts) != 2:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+        except ValueError:
+            continue
+        children_by_parent.setdefault(ppid, set()).add(pid)
+
+    descendants: set[int] = set()
+    stack = list(children_by_parent.get(root_pid, set()))
+    while stack:
+        pid = stack.pop()
+        if pid in descendants:
+            continue
+        descendants.add(pid)
+        stack.extend(children_by_parent.get(pid, set()))
+    return descendants
+
+
+def artifact_size_mtime_ns(path: Path) -> tuple[int, int | None]:
+    """Return artifact size and nanosecond mtime, or a missing sentinel."""
+    if not path.exists():
+        return 0, None
+    stat = path.stat()
+    return stat.st_size, stat.st_mtime_ns
+
+
+def terminate_process_tree(
+    root_pid: int,
+    *,
+    cwd: Path | None = None,
+    settle_seconds: float = 0.2,
+) -> None:
+    """Best-effort terminate a process tree rooted at root_pid."""
+    pids = sorted(process_descendants(root_pid, cwd=cwd), reverse=True)
+    for pid in pids + [root_pid]:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            continue
+    time.sleep(settle_seconds)
+    for pid in pids + [root_pid]:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            continue
 
 
 def load_routing_record(repo_root: Path) -> dict[str, Any]:

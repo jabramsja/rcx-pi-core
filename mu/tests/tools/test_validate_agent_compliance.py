@@ -742,6 +742,73 @@ def fn():
         assert "def fn()" in (blocks[0].code or "")
         assert blocks[0].verified == "Yes"
 
+    def test_inline_code_field_extraction(self):
+        """Single-line CODE fields should count as complete evidence."""
+        from validate_agent_compliance import extract_finding_blocks
+
+        text = """
+FINDING: Inline code issue
+FILE: /path/to/file.py
+LINES: 75
+CODE: ROUTING_RECORD_PATH = Path(".agent_bus/meta/post_merge_routing.json")
+VERIFIED: Yes
+"""
+        blocks = extract_finding_blocks(text)
+        assert len(blocks) == 1
+        assert blocks[0].code == 'ROUTING_RECORD_PATH = Path(".agent_bus/meta/post_merge_routing.json")'
+
+    def test_inline_code_field_passes_full_compliance(self):
+        """Inline CODE evidence should not trigger incomplete-block compliance failures."""
+        import inspect
+
+        line_no = inspect.currentframe().f_lineno + 1
+        inline_code_sentinel = "inline-code-sentinel"
+        file_path = os.path.abspath(__file__)
+        output = f"""
+STATUS.md reviewed.
+
+FINDING: Inline code issue
+FILE: {file_path}
+LINES: {line_no}
+CODE: inline_code_sentinel = "inline-code-sentinel"
+VERIFIED: Yes
+"""
+        result = check_compliance(
+            output,
+            verify_files=True,
+            verify_code=True,
+            strict=True,
+        )
+        assert result["compliant"] is True
+        assert result["blocks_with_code"] == 1
+        assert result["incomplete_blocks"] == 0
+
+    def test_ellipsis_excerpt_passes_code_verification(self):
+        """Ellipsis-truncated excerpts should verify when cited segments appear in order."""
+        import inspect
+
+        start_line = inspect.currentframe().f_lineno + 1
+        ellipsis_alpha = "alpha"
+        bridge_middle_noise = "middle"
+        ellipsis_omega = "omega"
+        end_line = inspect.currentframe().f_lineno
+        file_path = os.path.abspath(__file__)
+        output = f"""
+STATUS.md reviewed.
+
+FINDING: Ellipsis excerpt
+FILE: {file_path}
+LINES: {start_line}-{end_line}
+CODE:
+    ellipsis_alpha = "alpha"
+    ...
+    ellipsis_omega = "omega"
+VERIFIED: Yes
+"""
+        result = check_compliance(output, verify_files=True, verify_code=True, strict=True)
+        assert result["compliant"] is True
+        assert result["fabrications"] == 0
+
 
 class TestApprovalWithoutFindingsEvidence:
     """Approval verdicts without findings should pass with explicit CHECKED evidence."""

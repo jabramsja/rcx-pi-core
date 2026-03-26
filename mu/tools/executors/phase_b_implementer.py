@@ -25,6 +25,25 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+try:
+    from executor_common import (
+        ensure_not_agent_review_mode,
+        ExecutorCommonError,
+        load_executor_config,
+    )
+except ImportError:
+    import importlib.util as _ilu
+    _common_path = SCRIPT_DIR / "executor_common.py"
+    _spec = _ilu.spec_from_file_location("executor_common", str(_common_path))
+    _mod = _ilu.module_from_spec(_spec)
+    assert _spec.loader is not None
+    _spec.loader.exec_module(_mod)
+    ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
+    ExecutorCommonError = _mod.ExecutorCommonError
+    load_executor_config = _mod.load_executor_config
+
 # Import bridge_adapters at module level for testability (patchable).
 # Guarded because bridge_adapters may not be on sys.path until runtime.
 _bridge_adapters = None
@@ -55,7 +74,7 @@ def build_implementation_prompt(
     The prompt instructs the implementer to:
     1. Read the plan
     2. Implement the specified changes
-    3. Run validation commands
+    3. Run only the Phase B-local validation commands
     4. Report results as structured JSON
     """
     return f"""You are a code implementation agent. Your job is to implement
@@ -70,7 +89,7 @@ you write code.
 
 1. Read the plan carefully.
 2. Implement ALL specified changes.
-3. Run the validation commands listed in the plan.
+3. Run only the Phase B-local validation commands listed in the plan.
 4. Report your results.
 
 ## Constraints
@@ -78,6 +97,13 @@ you write code.
 - Do NOT modify files outside the plan's scope.
 - Do NOT create new subsystems not described in the plan.
 - Do NOT bypass any gates (--no-verify, etc.).
+- Do NOT run commit/push governance commands from inside this Phase B implementer.
+  Specifically: do NOT run `./tools/pre-push-fast`, `./tools/audit_fast.sh`,
+  `./dev.sh`, `git push`, `gh pr`, or merge scripts as part of Phase B-local
+  validation. Those belong to commit/pre-push execution, not the implementer.
+- If the plan includes broader governance or closeout commands, treat them as
+  executor/closeout-owned surfaces unless the plan explicitly says they are
+  required as Phase B-local validation.
 - If you encounter a blocker, report it — do not work around it.
 
 ## Wave Context
@@ -150,6 +176,18 @@ def invoke_implementer(
       - job_id: unique job identifier for this invocation
       - model_override_applied: whether model override was actually honored
     """
+    try:
+        ensure_not_agent_review_mode("phase_b_implementer.invoke_implementer")
+    except ExecutorCommonError as exc:
+        return {
+            "status": "error",
+            "output": "",
+            "stderr": str(exc),
+            "exit_code": -1,
+            "job_id": "",
+            "model_override_applied": False,
+        }
+
     # Use module-level bridge_adapters import, with runtime fallback
     global _bridge_adapters, _bridge_import_error
     if _bridge_adapters is None:
@@ -261,15 +299,3 @@ def invoke_implementer(
             "job_id": job_id,
             "model_override_applied": model_applied,
         }
-
-
-def load_executor_config(repo_root: Path) -> dict[str, Any]:
-    """Load executor config for backend/model/timeout settings."""
-    config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
-    if not config_path.exists():
-        return {
-            "backends": {"phase_b_executor": "codex"},
-            "model_overrides": {},
-            "timeouts": {"phase_b_executor": 1200},
-        }
-    return json.loads(config_path.read_text(encoding="utf-8"))

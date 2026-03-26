@@ -30,8 +30,12 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
+EXECUTORS_DIR = SCRIPT_DIR.parent / "executors"
+if str(EXECUTORS_DIR) not in sys.path:
+    sys.path.insert(0, str(EXECUTORS_DIR))
 
 from bridge_adapters import get_adapter, load_bridge_config, run_adapter
+from executor_common import ensure_not_agent_review_mode, ExecutorCommonError
 
 # Namespace isolation: meta-bridge uses .agent_bus/meta/ subdirectory
 META_BUS_DIR_NAME = ".agent_bus/meta"
@@ -52,6 +56,32 @@ TRANSIENT_PATH_PREFIXES = (
 
 # These were previously two separate near-identical constants.
 # All existing references now use TRANSIENT_PATH_PREFIXES directly.
+
+def _read_bounded_timeout_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    if value < minimum or value > maximum:
+        return default
+    return value
+
+
+GIT_COMMAND_TIMEOUT_S = _read_bounded_timeout_env(
+    "RCX_META_GIT_TIMEOUT_S",
+    30,
+    minimum=1,
+    maximum=300,
+)
+VALIDATION_COMMAND_TIMEOUT_S = _read_bounded_timeout_env(
+    "RCX_META_VALIDATION_TIMEOUT_S",
+    1200,
+    minimum=1,
+    maximum=7200,
+)
 
 
 class MetaBridgeState(Enum):
@@ -180,6 +210,7 @@ class MetaBridgeResponse:
     error_code: str = ""
     error_detail: str = ""
     recovery_hint: str = ""
+    reviewed_staged_sha: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -192,6 +223,8 @@ class MetaBridgeResponse:
             d["validations_failed"] = self.validations_failed
             d["findings"] = self.findings
             d["request_for_claude"] = self.request_for_claude
+            if self.reviewed_staged_sha:
+                d["reviewed_staged_sha"] = self.reviewed_staged_sha
         if self.status == "error":
             d["error_code"] = self.error_code
             d["error_detail"] = self.error_detail
@@ -238,8 +271,30 @@ def ensure_runtime_dirs(paths: MetaBridgePaths) -> None:
     paths.bus_dir.mkdir(parents=True, exist_ok=True)
 
 
+def _decode_process_text(payload: Any) -> str:
+    if payload is None:
+        return ""
+    if isinstance(payload, bytes):
+        return payload.decode("utf-8", errors="replace")
+    return str(payload)
+
+
 def git_output(repo_root: Path, args: list[str], *, text: bool = True) -> str | bytes:
-    result = subprocess.run(["git", *args], cwd=repo_root, capture_output=True, check=False)
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            capture_output=True,
+            check=False,
+            timeout=GIT_COMMAND_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise MetaBridgeError(
+            f"git {' '.join(args)} timed out after {GIT_COMMAND_TIMEOUT_S}s: "
+            f"{_decode_process_text(exc.stderr).strip()}"
+        ) from exc
+    except FileNotFoundError as exc:
+        raise MetaBridgeError("git executable not found") from exc
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace")
         raise MetaBridgeError(f"git {' '.join(args)} failed: {stderr.strip()}")
@@ -363,6 +418,9 @@ def validate_package_schema(package: Any) -> tuple[bool, list[str]]:
 
     # Validate field types for all 11 required fields
     errors = []
+    unexpected = sorted(set(package.keys()) - REQUIRED_PACKAGE_FIELDS)
+    if unexpected:
+        errors.append(f"Unexpected field(s): {unexpected}")
 
     # String fields that must be non-empty
     string_fields = ["task_id", "wave_name", "lane", "current_judgment"]
@@ -410,21 +468,9 @@ def validate_package_schema(package: Any) -> tuple[bool, list[str]]:
 
 def check_tasks_authorization(repo_root: Path, task_id: str) -> ValidationResult:
     """Gate 8: Check task_id is in active NOW or NEXT section of TASKS.md."""
-    tasks_path = repo_root / "TASKS.md"
-    if not tasks_path.exists():
-        return ValidationResult("TASKS.md auth", False, "TASKS.md not found")
-
-    content = tasks_path.read_text(encoding="utf-8")
-
-    # Extract NOW and NEXT sections (sections may have parenthetical descriptions)
-    now_match = re.search(r"## NOW.*?\n(.*?)(?=\n## |\Z)", content, re.DOTALL)
-    next_match = re.search(r"## NEXT.*?\n(.*?)(?=\n## |\Z)", content, re.DOTALL)
-
-    active_section = ""
-    if now_match:
-        active_section += now_match.group(1)
-    if next_match:
-        active_section += next_match.group(1)
+    active_section, error = _extract_now_next_text(repo_root)
+    if error:
+        return ValidationResult("TASKS.md auth", False, error)
 
     # Filter out struck-through lines
     # Format: ~~**[TASK-ID] description...**~~ (struck-through task with bold)
@@ -499,15 +545,14 @@ def check_deferred_blockers(repo_root: Path, blocker_report_paths: list[str]) ->
     # the immediate implementation target
     for bf in blocking_files:
         rel_path = bf.relative_to(repo_root).as_posix()
+        if rel_path not in acknowledged_paths:
+            continue
         content = bf.read_text(encoding="utf-8")
-
-        # Check if this is an ACTIVE BLOCKERS packet with OPEN items
-        if "**Status:** ACTIVE BLOCKERS" in content:
-            open_count = content.count("**Status:** OPEN")
-            if open_count > 0:
-                warnings.append(
-                    f"Blocking packet {rel_path} has {open_count} OPEN items (acknowledged, not blocking)"
-                )
+        open_count = _count_open_blocker_items(content)
+        if open_count > 0:
+            warnings.append(
+                f"Blocking packet {rel_path} has {open_count} OPEN items (acknowledged, not blocking)"
+            )
 
     # Only fail on unacknowledged packets, not on OPEN items in acknowledged packets
     if errors:
@@ -517,6 +562,27 @@ def check_deferred_blockers(repo_root: Path, blocker_report_paths: list[str]) ->
     if warnings:
         return ValidationResult("deferred_blockers", True, "; ".join(warnings))
     return ValidationResult("deferred_blockers", True)
+
+
+def _count_open_blocker_items(content: str) -> int:
+    """Count acknowledged open blocker items across the active packet formats in repo."""
+    if "**Status:** ACTIVE BLOCKERS" in content:
+        count = len(re.findall(r"(?m)^\*\*Status:\*\*\s+OPEN\b", content))
+        if count > 0:
+            return count
+
+    header_match = re.search(r"(?mi)^Status:\s*OPEN\s*\((\d+)\s+remaining\)\s*$", content)
+    if header_match:
+        return int(header_match.group(1))
+
+    if re.search(r"(?mi)^##\s+OPEN Items\s*$", content):
+        section_match = re.search(r"(?mis)^##\s+OPEN Items\s*(.*?)(?=^##\s|\Z)", content)
+        if section_match:
+            count = len(re.findall(r"(?m)^###\s+(?!~~)", section_match.group(1)))
+            if count > 0:
+                return count
+
+    return 0
 
 
 def check_dirty_state(repo_root: Path, claimed_files: list[str], *, verbose: bool = False) -> ValidationResult:
@@ -641,9 +707,19 @@ def run_validation_command(repo_root: Path, command: list[str]) -> tuple[int, st
             text=True,
             capture_output=True,
             check=False,
+            timeout=VALIDATION_COMMAND_TIMEOUT_S,
         )
         output = (proc.stdout or "") + ("\n[stderr]\n" + proc.stderr if proc.stderr else "")
         return proc.returncode, output
+    except subprocess.TimeoutExpired as exc:
+        stdout = _decode_process_text(exc.stdout)
+        stderr = _decode_process_text(exc.stderr)
+        output = f"[error] command timed out after {VALIDATION_COMMAND_TIMEOUT_S}s: {' '.join(command)}"
+        if stdout:
+            output += f"\n[stdout]\n{stdout}"
+        if stderr:
+            output += f"\n[stderr]\n{stderr}"
+        return 124, output
     except FileNotFoundError:
         return 127, f"[error] command not found: {command[0]}"
     except OSError as exc:
@@ -776,10 +852,15 @@ def run_validation_gates(
         _cs_import_dir2 = str(repo_root / "tools" / "checks")
         if _cs_import_dir2 not in sys.path:
             sys.path.insert(0, _cs_import_dir2)
-        from check_control_surface_invariants import CONTROL_SURFACE_FILES as _cs_gate_files
-        is_cs_wave = bool(set(changed) & _cs_gate_files)
+        from check_control_surface_invariants import (
+            CONTROL_SURFACE_FILES as _cs_gate_files,
+            normalize_repo_relative_path as _normalize_repo_relative_path,
+        )
+        normalized_changed = {_normalize_repo_relative_path(p) for p in changed}
+        is_cs_wave = bool(normalized_changed & _cs_gate_files)
     except Exception:
         is_cs_wave = False
+        normalized_changed = {p.replace("\\", "/").removeprefix("./") for p in changed}
     if is_cs_wave and att_checker.exists():
         try:
             if verbose:
@@ -801,7 +882,7 @@ def run_validation_gates(
                 "mu/tools/agents/meta_bridge_client.py",
                 "mu/tools/agents/meta_bridge_supervisor.py",
             }
-            if set(changed) & _receipt_chain_files:
+            if normalized_changed & _receipt_chain_files:
                 rc_test = repo_root / "mu" / "tests" / "tools" / "test_commit_executor_receipt.py"
                 if rc_test.exists():
                     rc_exit, rc_output = run_validation_command(
@@ -825,7 +906,7 @@ def run_validation_gates(
             # validation proof (gate-style "gate:..." proofs are filtered out by
             # the attestation checker).  Run control-surface invariant tests to
             # provide a qualifying proof for ANY control-surface wave.
-            if not (set(changed) & _receipt_chain_files):
+            if not (normalized_changed & _receipt_chain_files):
                 cs_test = repo_root / "mu" / "tests" / "tools" / "test_control_surface_review.py"
                 if cs_test.exists():
                     cs_exit, cs_output = run_validation_command(
@@ -879,25 +960,34 @@ def run_validation_gates(
                 att_data = json.loads(output) if output.strip() else None
             except (json.JSONDecodeError, TypeError):
                 pass
-            if exit_code == 0 and att_data is not None:
-                if att_data.get("authorized"):
-                    results.append(ValidationResult("closeout_attestation", True))
-                else:
+            if att_data is not None:
+                # Support both legacy wrapper shape:
+                #   {"authorized": bool, "attestation": {...}, "issues": [...]}
+                # and the current --generate --json shape:
+                #   {"go_authorized": bool, "blockers": [...], "validation_issues": [...]}
+                if isinstance(att_data.get("attestation"), dict):
                     att_inner = att_data.get("attestation", {})
+                    authorized = bool(att_data.get("authorized", att_inner.get("go_authorized")))
+                    issues = att_data.get("issues", att_inner.get("validation_issues", []))
+                else:
+                    att_inner = att_data
+                    authorized = bool(att_data.get("go_authorized", att_data.get("authorized")))
+                    issues = att_data.get("validation_issues", att_data.get("issues", []))
+                blockers = att_inner.get("blockers", [])
+                detail = blockers[:2] if blockers else issues[:2]
+                if exit_code == 0 and authorized:
+                    results.append(ValidationResult("closeout_attestation", True))
+                elif exit_code == 0:
                     results.append(ValidationResult(
                         "closeout_attestation", False,
-                        f"Attestation unauthorized: {att_inner.get('blockers', [])[:2]}"[:300]
+                        f"Attestation unauthorized: {detail}"[:300]
                     ))
-            elif att_data is not None:
-                # Nonzero exit but parseable JSON — surface structured issues
-                att_inner = att_data.get("attestation", {})
-                blockers = att_inner.get("blockers", [])
-                issues = att_data.get("issues", [])
-                detail = blockers[:2] if blockers else issues[:2]
-                results.append(ValidationResult(
-                    "closeout_attestation", False,
-                    f"Attestation failed (exit={exit_code}): {detail}"[:300]
-                ))
+                else:
+                    # Nonzero exit but parseable JSON — surface structured issues
+                    results.append(ValidationResult(
+                        "closeout_attestation", False,
+                        f"Attestation failed (exit={exit_code}): {detail}"[:300]
+                    ))
             else:
                 results.append(ValidationResult("closeout_attestation", False, output[:300]))
         except Exception as exc:
@@ -959,10 +1049,14 @@ def build_meta_reviewer_prompt(
         _cs_import_dir = str(Path(repo_root) / "tools" / "checks")
         if _cs_import_dir not in sys.path:
             sys.path.insert(0, _cs_import_dir)
-        from check_control_surface_invariants import CONTROL_SURFACE_FILES as _cs_files
+        from check_control_surface_invariants import (
+            CONTROL_SURFACE_FILES as _cs_files,
+            normalize_repo_relative_path as _normalize_repo_relative_path,
+        )
     except ImportError:
         _cs_files = {"mu/tools/executors/phase_b_executor.py", "mu/tools/agents/meta_bridge_supervisor.py"}
-    if set(changed) & _cs_files:
+        _normalize_repo_relative_path = lambda p: p.replace("\\", "/").removeprefix("./")
+    if {_normalize_repo_relative_path(p) for p in changed} & _cs_files:
         control_surface_obligations = (
             "## CONTROL-SURFACE REVIEW MODE\n\n"
             "This wave touches Phase B / commit authority chain files. You MUST inspect:\n\n"
@@ -991,8 +1085,7 @@ def build_meta_reviewer_prompt(
 
 
 META_ENVELOPE_RE = re.compile(
-    r"BEGIN_META_ENVELOPE\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?END_META_ENVELOPE",
-    re.DOTALL,
+    r"(?ms)^BEGIN_META_ENVELOPE\s*$\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?^END_META_ENVELOPE\s*$",
 )
 
 
@@ -1014,30 +1107,60 @@ TEMPLATE_AUTHORIZED_DECISIONS = {
 COMMIT_CAPABLE_DECISIONS = {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH", "NO_ACTION"}
 
 
-def parse_meta_envelope(output: str) -> dict[str, Any]:
-    """Parse the meta-reviewer's JSON envelope."""
-    match = META_ENVELOPE_RE.search(output)
-    if not match:
-        raise MetaBridgeError("Meta-reviewer output missing BEGIN_META_ENVELOPE / END_META_ENVELOPE block")
-    try:
-        envelope = json.loads(match.group(1))
-    except json.JSONDecodeError as exc:
-        raise MetaBridgeError(f"Meta-envelope is not valid JSON: {exc}") from exc
+def _parse_authoritative_envelope(
+    output: str,
+    *,
+    label: str,
+    authorized_decisions: set[str],
+    invalid_decision_message: str,
+) -> dict[str, Any]:
+    matches = list(META_ENVELOPE_RE.finditer(output))
+    if not matches:
+        raise MetaBridgeError(f"{label} output missing BEGIN_META_ENVELOPE / END_META_ENVELOPE block")
 
-    required = {"decision", "summary"}
-    missing = required - set(envelope.keys())
-    if missing:
-        raise MetaBridgeError(f"Meta-envelope missing keys: {sorted(missing)}")
+    envelopes: list[dict[str, Any]] = []
+    canonical_payloads: set[str] = set()
+    for index, match in enumerate(matches, start=1):
+        try:
+            envelope = json.loads(match.group(1))
+        except json.JSONDecodeError as exc:
+            raise MetaBridgeError(f"{label} envelope #{index} is not valid JSON: {exc}") from exc
 
-    # Validate decision is in template-authorized vocabulary only
-    # (ERROR_* and RETRY_SUGGESTED are internal supervisor tokens, not Codex-emittable)
-    if envelope["decision"] not in TEMPLATE_AUTHORIZED_DECISIONS:
+        required = {"decision", "summary"}
+        missing = required - set(envelope.keys())
+        if missing:
+            raise MetaBridgeError(f"{label} envelope missing keys: {sorted(missing)}")
+
+        if envelope["decision"] not in authorized_decisions:
+            raise MetaBridgeError(
+                invalid_decision_message.format(
+                    decision=envelope["decision"],
+                    authorized=sorted(authorized_decisions),
+                )
+            )
+
+        envelopes.append(envelope)
+        canonical_payloads.add(json.dumps(envelope, sort_keys=True, separators=(",", ":")))
+
+    if len(canonical_payloads) > 1:
         raise MetaBridgeError(
-            f"Invalid decision token: {envelope['decision']}. "
-            f"Template-authorized tokens: {sorted(TEMPLATE_AUTHORIZED_DECISIONS)}"
+            f"{label} output contains multiple differing envelope blocks; refusing ambiguous output"
         )
 
-    return envelope
+    return envelopes[-1]
+
+
+def parse_meta_envelope(output: str) -> dict[str, Any]:
+    """Parse the meta-reviewer's JSON envelope."""
+    return _parse_authoritative_envelope(
+        output,
+        label="Meta-reviewer",
+        authorized_decisions=TEMPLATE_AUTHORIZED_DECISIONS,
+        invalid_decision_message=(
+            "Invalid decision token: {decision}. "
+            "Template-authorized tokens: {authorized}"
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1081,6 +1204,18 @@ def write_pre_commit_receipt(
         repo_root = Path(toplevel)
 
     staged_sha = compute_staged_sha(repo_root)
+
+    # FAIL CLOSED: if the response carries a reviewed_staged_sha, the current
+    # staged state must match what was reviewed.  A mismatch means files were
+    # staged (or unstaged) between the review and the receipt write — the
+    # receipt would bind to state the reviewer never saw.
+    reviewed_sha = getattr(response, "reviewed_staged_sha", "") or ""
+    if reviewed_sha and staged_sha != reviewed_sha:
+        raise MetaBridgeError(
+            f"Receipt authority violation: staged SHA changed after review. "
+            f"reviewed={reviewed_sha[:12]}, current={staged_sha[:12]}. "
+            f"Re-run the supervisor on the current staged state."
+        )
 
     # Derive package digest for binding
     package_digest = ""
@@ -1583,27 +1718,15 @@ def extract_rollout_order(repo_root: Path, rollout_packet_path: str) -> str:
 
 def parse_post_merge_envelope(output: str) -> dict[str, Any]:
     """Parse Codex meta-reviewer output for post-merge mode (mode-scoped tokens)."""
-    match = META_ENVELOPE_RE.search(output)
-    if not match:
-        raise MetaBridgeError("Meta-reviewer output missing BEGIN_META_ENVELOPE / END_META_ENVELOPE block")
-    try:
-        envelope = json.loads(match.group(1))
-    except json.JSONDecodeError as exc:
-        raise MetaBridgeError(f"Meta-envelope is not valid JSON: {exc}") from exc
-
-    required = {"decision", "summary"}
-    missing = required - set(envelope.keys())
-    if missing:
-        raise MetaBridgeError(f"Meta-envelope missing keys: {sorted(missing)}")
-
-    # Validate against post-merge vocabulary ONLY (mode-scoped, no cross-mode leakage)
-    if envelope["decision"] not in POST_MERGE_AUTHORIZED_DECISIONS:
-        raise MetaBridgeError(
-            f"Invalid post-merge decision token: {envelope['decision']}. "
-            f"Authorized tokens: {sorted(POST_MERGE_AUTHORIZED_DECISIONS)}"
-        )
-
-    return envelope
+    return _parse_authoritative_envelope(
+        output,
+        label="Post-merge reviewer",
+        authorized_decisions=POST_MERGE_AUTHORIZED_DECISIONS,
+        invalid_decision_message=(
+            "Invalid post-merge decision token: {decision}. "
+            "Authorized tokens: {authorized}"
+        ),
+    )
 
 
 def build_post_merge_prompt(
@@ -1816,6 +1939,18 @@ def run_post_merge_bridge(
     verbose: bool = False,
 ) -> MetaBridgeResponse:
     """Main entry point for post-merge mode."""
+    try:
+        ensure_not_agent_review_mode("meta_bridge_supervisor.run_post_merge_bridge")
+    except ExecutorCommonError as exc:
+        return MetaBridgeResponse(
+            status="error",
+            decision=Decision.ERROR_INTERNAL.value,
+            summary="Meta-bridge blocked in agent review mode",
+            error_code="REVIEW_MODE_BLOCKED",
+            error_detail=str(exc),
+            recovery_hint="Run post-merge supervisor outside SDK review mode",
+        )
+
     package_dir = package_path.resolve().parent
     try:
         toplevel = subprocess.run(
@@ -2076,6 +2211,18 @@ def run_meta_bridge(
 
     Returns MetaBridgeResponse with decision and details.
     """
+    try:
+        ensure_not_agent_review_mode("meta_bridge_supervisor.run_meta_bridge")
+    except ExecutorCommonError as exc:
+        return MetaBridgeResponse(
+            status="error",
+            decision=Decision.ERROR_INTERNAL.value,
+            summary="Meta-bridge blocked in agent review mode",
+            error_code="REVIEW_MODE_BLOCKED",
+            error_detail=str(exc),
+            recovery_hint="Run pre-commit supervisor outside SDK review mode",
+        )
+
     # Resolve repo_root from git toplevel, anchored to the package file location
     # Fail-closed: package must be inside a git repository
     package_dir = package_path.resolve().parent
@@ -2255,6 +2402,10 @@ def run_meta_bridge(
             "supervisor blocked it. Fix validation failures and re-run."
         )
 
+    # Bind the reviewed staged SHA into the response so that receipt writers
+    # can verify no staging happened between review and receipt write.
+    reviewed_sha = state_start.staged_sha if state_start else ""
+
     return MetaBridgeResponse(
         status="success" if all_passed else "partial",
         decision=decision,
@@ -2263,6 +2414,7 @@ def run_meta_bridge(
         validations_failed=failed,
         findings=envelope.get("findings", []),
         request_for_claude=envelope.get("request_for_claude", ""),
+        reviewed_staged_sha=reviewed_sha,
     )
 
 
