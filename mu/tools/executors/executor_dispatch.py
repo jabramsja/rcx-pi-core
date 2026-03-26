@@ -20,6 +20,7 @@ from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent  # mu/tools/executors -> repo root
+AGENTS_DIR = SCRIPT_DIR.parent / "agents"
 
 # Import canonical load_routing_record from shared module
 try:
@@ -72,12 +73,23 @@ STOP_TOKENS = {"STOP_FOR_FOUNDER", "STOP_FOR_TRIAGE_DISCUSSION"}
 
 # Available executor scripts
 AVAILABLE_EXECUTORS = {"commit_executor", "phase_b_executor", "phase_a_executor", "dialectic_executor"}
+SURFACE_COMMANDS = {
+    "phase-a",
+    "phase-b",
+    "pre-commit-supervisor",
+    "commit",
+    "post-merge-supervisor",
+}
 
 DEFAULT_CONFIG_PATH = SCRIPT_DIR / "executor_config.json"
 
 
 class DispatchError(RuntimeError):
     """Raised when dispatch cannot proceed."""
+
+
+class ControlSurfaceError(RuntimeError):
+    """Raised when a modular surface invocation is malformed."""
 
 
 def load_config(config_path: Path | None = None) -> dict[str, Any]:
@@ -136,6 +148,150 @@ def _sanitize_plan_name(candidate_text: str, fallback: str = "plan_unknown") -> 
         tokens = re.findall(r"[a-z0-9]+", fallback.lower())
     slug = "_".join(tokens).strip("_")
     return (slug or "plan_unknown")[:50]
+
+
+def _load_routing_record_payload(
+    *,
+    path_value: Path | None,
+    json_value: str | None,
+) -> str | None:
+    if path_value and json_value:
+        raise ControlSurfaceError("Provide only one of --routing-record-path or --routing-record-json")
+    if path_value:
+        try:
+            return path_value.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ControlSurfaceError(f"Cannot read routing record: {exc}") from exc
+    return json_value
+
+
+def build_surface_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Modular control-plane entrypoint for executors and supervisors",
+    )
+    sub = parser.add_subparsers(dest="surface", required=True)
+
+    phase_a = sub.add_parser("phase-a", help="Run Phase A executor")
+    phase_a.add_argument("--plan-name", required=True, help="Plan packet slug")
+    phase_a.add_argument("--max-rounds", type=int, default=15)
+    phase_a.add_argument("-v", "--verbose", action="store_true")
+    phase_a.add_argument("--json", action="store_true")
+
+    phase_b = sub.add_parser("phase-b", help="Run Phase B executor")
+    phase_b.add_argument("--plan", default=None, help="Locked plan packet path")
+    phase_b.add_argument("--routing-record-path", type=Path, help="Path to routing record JSON")
+    phase_b.add_argument("--routing-record-json", help="Routing record JSON string")
+    phase_b.add_argument("--max-rounds", type=int, default=10)
+    phase_b.add_argument("--bootstrap-exception", action="store_true")
+    phase_b.add_argument("-v", "--verbose", action="store_true")
+    phase_b.add_argument("--json", action="store_true")
+
+    pre_commit = sub.add_parser("pre-commit-supervisor", help="Run pre-commit supervisor")
+    pre_commit.add_argument("--package", type=Path, required=True)
+    pre_commit.add_argument("--dry-run", action="store_true")
+    pre_commit.add_argument("-v", "--verbose", action="store_true")
+    pre_commit.add_argument("--json", action="store_true")
+
+    commit = sub.add_parser("commit", help="Run commit executor")
+    commit.add_argument("--handoff", type=Path, help="Path to handoff JSON")
+    commit.add_argument("--routing-record-path", type=Path, help="Path to routing record JSON")
+    commit.add_argument("--routing-record-json", help="Routing record JSON string")
+    commit.add_argument("-v", "--verbose", action="store_true")
+    commit.add_argument("--json", action="store_true")
+
+    post_merge = sub.add_parser("post-merge-supervisor", help="Run post-merge supervisor")
+    post_merge.add_argument("--package", type=Path, required=True)
+    post_merge.add_argument("-v", "--verbose", action="store_true")
+    post_merge.add_argument("--json", action="store_true")
+
+    return parser
+
+
+def build_surface_command(args: argparse.Namespace) -> list[str]:
+    if args.surface == "phase-a":
+        cmd = [
+            sys.executable,
+            str(SCRIPT_DIR / "phase_a_executor.py"),
+            "--plan-name",
+            args.plan_name,
+            "--max-rounds",
+            str(args.max_rounds),
+        ]
+    elif args.surface == "phase-b":
+        cmd = [
+            sys.executable,
+            str(SCRIPT_DIR / "phase_b_executor.py"),
+            "--max-rounds",
+            str(args.max_rounds),
+        ]
+        if args.plan:
+            cmd.extend(["--plan", args.plan])
+        routing_payload = _load_routing_record_payload(
+            path_value=args.routing_record_path,
+            json_value=args.routing_record_json,
+        )
+        if routing_payload:
+            cmd.extend(["--routing-record", routing_payload])
+        if args.bootstrap_exception:
+            cmd.append("--bootstrap-exception")
+    elif args.surface == "pre-commit-supervisor":
+        cmd = [
+            sys.executable,
+            str(AGENTS_DIR / "meta_bridge_supervisor.py"),
+            "--package",
+            str(args.package),
+        ]
+        if args.dry_run:
+            cmd.append("--dry-run")
+    elif args.surface == "commit":
+        cmd = [
+            sys.executable,
+            str(SCRIPT_DIR / "commit_executor.py"),
+        ]
+        routing_payload = _load_routing_record_payload(
+            path_value=args.routing_record_path,
+            json_value=args.routing_record_json,
+        )
+        if args.handoff:
+            if routing_payload:
+                raise ControlSurfaceError("Provide either --handoff or a routing record, not both")
+            cmd.extend(["--handoff", str(args.handoff)])
+        elif routing_payload:
+            cmd.extend(["--routing-record", routing_payload])
+        else:
+            raise ControlSurfaceError("commit requires --handoff or a routing record")
+    elif args.surface == "post-merge-supervisor":
+        cmd = [
+            sys.executable,
+            str(AGENTS_DIR / "meta_bridge_supervisor.py"),
+            "--mode",
+            "post-merge",
+            "--package",
+            str(args.package),
+        ]
+    else:
+        raise ControlSurfaceError(f"Unsupported surface: {args.surface}")
+
+    if getattr(args, "verbose", False):
+        cmd.append("--verbose")
+    if getattr(args, "json", False):
+        cmd.append("--json")
+    return cmd
+
+
+def run_surface_command(cmd: list[str], *, repo_root: Path) -> int:
+    result = subprocess.run(
+        cmd,
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.stdout:
+        sys.stdout.write(result.stdout)
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    return result.returncode
 
 
 def _validate_phase_b_handoff_identity(handoff_path: Path, record: dict[str, Any]) -> tuple[bool, str]:
@@ -371,7 +527,26 @@ def dispatch(
         }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in SURFACE_COMMANDS:
+        parser = build_surface_parser()
+        args = parser.parse_args(argv)
+        try:
+            repo_root = Path(subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, check=True,
+            ).stdout.strip())
+        except subprocess.CalledProcessError:
+            print("[error] Not in a git repository", file=sys.stderr)
+            return 1
+        try:
+            cmd = build_surface_command(args)
+        except ControlSurfaceError as exc:
+            print(f"[executor-dispatch] Error: {exc}", file=sys.stderr)
+            return 1
+        return run_surface_command(cmd, repo_root=repo_root)
+
     parser = argparse.ArgumentParser(
         description="Executor dispatcher: reads routing record and invokes executor",
     )
@@ -399,7 +574,7 @@ def main() -> int:
         action="store_true",
         help="Output as JSON",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     try:
         repo_root = Path(subprocess.run(

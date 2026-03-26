@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Commit executor: 15-step mechanical commit pipeline.
 
-Same command every time. Script infers state. No caller memory. No resume mode.
+Same command every time. Script infers state. No caller memory.
+Bounded post-commit continuation only; no separate caller-managed resume mode.
 
 Steps:
  1  validate_inputs           All handoff fields present + correct types
@@ -27,11 +28,13 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import time
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -88,6 +91,8 @@ query($owner: String!, $repo: String!, $number: Int!) {
         nodes {
           author { login }
           state
+          submittedAt
+          commit { oid }
         }
       }
       reviewThreads(first: 100) {
@@ -108,6 +113,13 @@ query($owner: String!, $repo: String!, $number: Int!) {
 }
 """
 
+BOT_REVIEW_LOGIN = "chatgpt-codex-connector"
+BOT_REVIEW_WAIT_SECONDS = 210
+BOT_REVIEW_POLL_SECONDS = 15
+COMMIT_CONTINUATION_VERSION = 1
+CONTINUATION_ACTIVE_STATUS = "post_commit_pending"
+TRANSIENT_STATUS_PREFIXES = (".agent_bus/", ".scratch/")
+
 
 def _run(
     args: list[str],
@@ -125,6 +137,108 @@ def _run(
         args, cwd=cwd, capture_output=True, text=True, check=check,
         timeout=timeout, env=run_env,
     )
+
+
+def _handoff_sha(handoff: dict[str, Any]) -> str:
+    canonical = json.dumps(handoff, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _continuation_record_path(repo_root: Path, wave_id: str) -> Path:
+    return repo_root / ".agent_bus" / "executors" / f"commit_executor_{wave_id}.json"
+
+
+def _write_continuation_record(
+    path: Path,
+    *,
+    handoff_sha: str,
+    target_branch: str,
+    commit_sha: str,
+    receipt_decision: str,
+    steps_completed: list[str],
+    pr_number: str | None = None,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "version": COMMIT_CONTINUATION_VERSION,
+        "status": CONTINUATION_ACTIVE_STATUS,
+        "handoff_sha": handoff_sha,
+        "target_branch": target_branch,
+        "commit_sha": commit_sha,
+        "receipt_decision": receipt_decision,
+        "steps_completed": list(steps_completed),
+        "updated_at_unix": int(time.time()),
+    }
+    if pr_number:
+        payload["pr_number"] = pr_number
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _clear_continuation_record(path: Path) -> None:
+    if path.exists():
+        path.unlink()
+
+
+def _load_post_commit_continuation(
+    path: Path,
+    *,
+    repo_root: Path,
+    handoff_sha: str,
+    target_branch: str,
+) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("version") != COMMIT_CONTINUATION_VERSION:
+        return None
+    if payload.get("status") != CONTINUATION_ACTIVE_STATUS:
+        return None
+    if payload.get("handoff_sha") != handoff_sha:
+        return None
+    if payload.get("target_branch") != target_branch:
+        return None
+
+    commit_sha = payload.get("commit_sha")
+    if not isinstance(commit_sha, str) or not commit_sha.strip():
+        return None
+    receipt_decision = payload.get("receipt_decision")
+    if receipt_decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+        return None
+    steps_completed = payload.get("steps_completed")
+    if not isinstance(steps_completed, list) or "git_commit" not in steps_completed:
+        return None
+
+    try:
+        head_sha = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+        branch_name = _run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_root,
+        ).stdout.strip()
+        status_output = _run(["git", "status", "--short"], cwd=repo_root).stdout.splitlines()
+    except subprocess.CalledProcessError:
+        return None
+
+    if branch_name != target_branch:
+        return None
+    if head_sha != commit_sha:
+        return None
+    non_transient_status = []
+    for line in status_output:
+        path_text = line[3:] if len(line) > 3 else line
+        if " -> " in path_text:
+            path_text = path_text.split(" -> ", 1)[1]
+        if path_text.startswith(TRANSIENT_STATUS_PREFIXES):
+            continue
+        non_transient_status.append(line)
+    if non_transient_status:
+        return None
+
+    return payload
 
 
 def _decode_untrusted_path(path_str: str) -> str | None:
@@ -196,6 +310,87 @@ def _force_add_denied_match(path_str: str) -> str | None:
         if lowered.startswith(denied.lower()):
             return denied
     return None
+
+
+def _parse_origin_owner_repo(repo_root: Path) -> tuple[str, str]:
+    remote_url = _run(
+        ["git", "remote", "get-url", "origin"],
+        cwd=repo_root,
+    ).stdout.strip()
+    if remote_url.endswith(".git"):
+        remote_url = remote_url[:-4]
+    parts = remote_url.rstrip("/").split("/")
+    repo_owner = parts[-2]
+    repo_name = parts[-1]
+    if ":" in repo_owner:
+        repo_owner = repo_owner.split(":")[-1]
+    return repo_owner, repo_name
+
+
+def _query_pr_review_state(
+    repo_root: Path,
+    *,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: str,
+) -> dict[str, Any]:
+    review_result = _run(
+        ["gh", "api", "graphql", "-f",
+         f"query={PR_REVIEW_QUERY}",
+         "-F", f"owner={repo_owner}",
+         "-F", f"repo={repo_name}",
+         "-F", f"number={pr_number}"],
+        cwd=repo_root,
+        timeout=30,
+    )
+    review_data = json.loads(review_result.stdout)
+    pr_data = review_data.get("data", {}).get("repository", {}).get("pullRequest", {})
+    if not isinstance(pr_data, dict):
+        raise ValueError("PR review query returned no pullRequest object")
+    return pr_data
+
+
+def _has_fresh_bot_review(pr_data: dict[str, Any], head_sha: str) -> bool:
+    latest_reviews = pr_data.get("latestReviews", {}).get("nodes", [])
+    if not isinstance(latest_reviews, list):
+        return False
+    for review in latest_reviews:
+        if not isinstance(review, dict):
+            continue
+        author = review.get("author", {}).get("login", "")
+        commit_oid = review.get("commit", {}).get("oid", "")
+        if author == BOT_REVIEW_LOGIN and commit_oid == head_sha:
+            return True
+    return False
+
+
+def _wait_for_bot_review_freshness(
+    query_pr_state: Any,
+    *,
+    head_sha: str,
+    wait_seconds: int = BOT_REVIEW_WAIT_SECONDS,
+    poll_interval: int = BOT_REVIEW_POLL_SECONDS,
+    log: Any = None,
+) -> dict[str, Any]:
+    deadline = time.time() + wait_seconds
+    last_pr_data: dict[str, Any] | None = None
+    while True:
+        pr_data = query_pr_state()
+        last_pr_data = pr_data
+        if _has_fresh_bot_review(pr_data, head_sha):
+            if log is not None:
+                log(f"Fresh {BOT_REVIEW_LOGIN} review observed for {head_sha[:8]}")
+            return pr_data
+        if time.time() >= deadline:
+            raise TimeoutError(
+                f"No current-head {BOT_REVIEW_LOGIN} review for {head_sha[:8]} within {wait_seconds}s"
+            )
+        if log is not None:
+            log(
+                f"Waiting for {BOT_REVIEW_LOGIN} review on {head_sha[:8]} "
+                f"({poll_interval}s poll)"
+            )
+        time.sleep(poll_interval)
 
 
 def prepare_handoff_from_routing_record(
@@ -421,6 +616,280 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
     return len(errors) == 0, errors
 
 
+def _run_post_commit_pipeline(
+    *,
+    handoff: dict[str, Any],
+    repo_root: Path,
+    result: dict[str, Any],
+    target_branch: str,
+    base_branch: str,
+    continuation_path: Path,
+    log: Any,
+) -> dict[str, Any]:
+    pr_number = str(result.get("pr_number") or "")
+
+    # ── Step 11: run_pre_push_script ──────────────────────────────────
+    pre_push_script = repo_root / "mu" / "tools" / "hooks" / "pre-push-fast"
+    if pre_push_script.exists():
+        try:
+            _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=300)
+        except subprocess.CalledProcessError as exc:
+            return {"status": "error", "step": "run_pre_push_script",
+                    "errors": [f"pre-push-fast failed: {exc.stderr.strip()[:500]}"],
+                    "steps_completed": result["steps_completed"]}
+        except subprocess.TimeoutExpired:
+            return {"status": "error", "step": "run_pre_push_script",
+                    "errors": ["pre-push-fast timed out"],
+                    "steps_completed": result["steps_completed"]}
+    if "run_pre_push_script" not in result["steps_completed"]:
+        result["steps_completed"].append("run_pre_push_script")
+    log("Step 11: pre-push script passed")
+
+    # ── Step 12: git_push ─────────────────────────────────────────────
+    try:
+        _run(
+            ["git", "push", "-u", "origin", target_branch],
+            cwd=repo_root, timeout=300,
+        )
+        if "git_push" not in result["steps_completed"]:
+            result["steps_completed"].append("git_push")
+        log(f"Step 12: pushed to origin/{target_branch}")
+    except subprocess.CalledProcessError as exc:
+        return {"status": "error", "step": "git_push",
+                "errors": [f"git push failed: {exc.stderr.strip()}"],
+                "steps_completed": result["steps_completed"]}
+    except subprocess.TimeoutExpired:
+        return {"status": "error", "step": "git_push",
+                "errors": ["git push timed out"],
+                "steps_completed": result["steps_completed"]}
+
+    # ── Step 13: ensure_pr ────────────────────────────────────────────
+    try:
+        existing_prs = _run(
+            ["gh", "pr", "list", "--head", target_branch, "--base", base_branch,
+             "--state", "open", "--json", "number"],
+            cwd=repo_root, timeout=30,
+        ).stdout.strip()
+        pr_list = json.loads(existing_prs) if existing_prs else []
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        pr_list = []
+
+    if len(pr_list) > 1:
+        return {"status": "error", "step": "ensure_pr",
+                "errors": [f"Multiple open PRs for {target_branch}: {[p['number'] for p in pr_list]}"],
+                "steps_completed": result["steps_completed"]}
+
+    if len(pr_list) == 1:
+        pr_number = str(pr_list[0]["number"])
+        if not pr_number.isdigit():
+            return {"status": "error", "step": "ensure_pr",
+                    "errors": [f"PR number non-numeric: {pr_number}"],
+                    "steps_completed": result["steps_completed"]}
+        try:
+            _run(
+                ["gh", "pr", "edit", pr_number,
+                 "--title", handoff["pr_title"],
+                 "--body", handoff["pr_body"]],
+                cwd=repo_root, timeout=30,
+            )
+            log(f"Step 13: reused PR #{pr_number}, synced metadata")
+        except subprocess.CalledProcessError as exc:
+            log(f"Step 13: PR edit warning: {exc.stderr.strip()[:200]}")
+    else:
+        try:
+            pr_create_result = _run(
+                ["gh", "pr", "create",
+                 "--base", base_branch,
+                 "--head", target_branch,
+                 "--title", handoff["pr_title"],
+                 "--body", handoff["pr_body"]],
+                cwd=repo_root, timeout=30,
+            )
+            pr_url = pr_create_result.stdout.strip()
+            pr_number = pr_url.rstrip("/").split("/")[-1]
+            if not pr_number.isdigit():
+                return {"status": "error", "step": "ensure_pr",
+                        "errors": [f"PR number non-numeric from URL: {pr_url}"],
+                        "steps_completed": result["steps_completed"]}
+            log(f"Step 13: created PR #{pr_number}")
+        except subprocess.CalledProcessError as exc:
+            return {"status": "error", "step": "ensure_pr",
+                    "errors": [f"gh pr create failed: {exc.stderr.strip()}"],
+                    "steps_completed": result["steps_completed"]}
+        except subprocess.TimeoutExpired:
+            return {"status": "error", "step": "ensure_pr",
+                    "errors": ["gh pr create timed out"],
+                    "steps_completed": result["steps_completed"]}
+
+    result["pr_number"] = pr_number
+    if "ensure_pr" not in result["steps_completed"]:
+        result["steps_completed"].append("ensure_pr")
+
+    if result.get("commit_sha") and result.get("handoff_sha") and result.get("receipt_decision"):
+        _write_continuation_record(
+            continuation_path,
+            handoff_sha=result["handoff_sha"],
+            target_branch=target_branch,
+            commit_sha=result["commit_sha"],
+            receipt_decision=result["receipt_decision"],
+            steps_completed=result["steps_completed"],
+            pr_number=pr_number,
+        )
+
+    # ── Step 14: wait_ci ──────────────────────────────────────────────
+    log(f"Step 14: waiting for CI on PR #{pr_number}...")
+    try:
+        _run(
+            ["gh", "pr", "checks", pr_number, "--watch", "--required"],
+            cwd=repo_root, timeout=600,
+        )
+        if "wait_ci" not in result["steps_completed"]:
+            result["steps_completed"].append("wait_ci")
+        log("Step 14: CI passed")
+    except subprocess.CalledProcessError as exc:
+        return {"status": "error", "step": "wait_ci",
+                "errors": [f"CI checks failed: {exc.stderr.strip()}"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number}
+    except subprocess.TimeoutExpired:
+        return {"status": "error", "step": "wait_ci",
+                "errors": ["CI wait timed out after 600s"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number}
+
+    # ── Step 15: ensure_review_clear_and_merge ────────────────────────
+    log(f"Step 15: checking review state for PR #{pr_number}...")
+
+    try:
+        repo_owner, repo_name = _parse_origin_owner_repo(repo_root)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, IndexError):
+        return {"status": "error", "step": "ensure_review_clear_and_merge",
+                "errors": ["Cannot determine repo owner/name from git remote"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number}
+
+    try:
+        head_sha_before_merge = _run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+        ).stdout.strip()
+        pr_data = _wait_for_bot_review_freshness(
+            lambda: _query_pr_review_state(
+                repo_root,
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                pr_number=pr_number,
+            ),
+            head_sha=head_sha_before_merge,
+            log=log,
+        )
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        json.JSONDecodeError,
+        ValueError,
+        TimeoutError,
+    ) as exc:
+        return {"status": "error", "step": "ensure_review_clear_and_merge",
+                "errors": [f"Review query failed: {exc}"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number}
+
+    review_decision = pr_data.get("reviewDecision", "")
+    if review_decision == "CHANGES_REQUESTED":
+        return {"status": "error", "step": "ensure_review_clear_and_merge",
+                "errors": ["reviewDecision is CHANGES_REQUESTED"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number}
+
+    latest_reviews = pr_data.get("latestReviews", {}).get("nodes", [])
+    for review in latest_reviews:
+        author = review.get("author", {}).get("login", "")
+        state = review.get("state", "")
+        is_bot = author.endswith("[bot]") or author.endswith("-bot")
+        if not is_bot and state == "CHANGES_REQUESTED":
+            return {"status": "error", "step": "ensure_review_clear_and_merge",
+                    "errors": [f"Human reviewer {author} requested changes"],
+                    "steps_completed": result["steps_completed"],
+                    "pr_number": pr_number}
+
+    threads = pr_data.get("reviewThreads", {}).get("nodes", [])
+    bot_findings = []
+    for thread in threads:
+        if thread.get("isResolved"):
+            continue
+        comments = thread.get("comments", {}).get("nodes", [])
+        if not comments:
+            continue
+        author = comments[0].get("author", {}).get("login", "")
+        is_bot = author.endswith("[bot]") or author.endswith("-bot")
+        if not is_bot:
+            return {"status": "error", "step": "ensure_review_clear_and_merge",
+                    "errors": [f"Unresolved human review thread from {author}"],
+                    "steps_completed": result["steps_completed"],
+                    "pr_number": pr_number}
+        bot_findings.append({
+            "author": author,
+            "body": comments[0].get("body", "")[:500],
+            "path": comments[0].get("path", ""),
+            "line": comments[0].get("line"),
+        })
+
+    if bot_findings:
+        return {
+            "status": "bot_findings_pending",
+            "bot_findings": bot_findings,
+            "pr_number": pr_number,
+            "steps_completed": result["steps_completed"],
+        }
+
+    merge_script = repo_root / "mu" / "tools" / "hooks" / "merge_pr.sh"
+    if not merge_script.exists():
+        return {"status": "error", "step": "ensure_review_clear_and_merge",
+                "errors": ["merge_pr.sh not found"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number}
+
+    try:
+        _run(
+            ["bash", str(merge_script), pr_number, "--sweep"],
+            cwd=repo_root, timeout=120,
+        )
+    except subprocess.CalledProcessError as exc:
+        return {"status": "error", "step": "ensure_review_clear_and_merge",
+                "errors": [f"merge_pr.sh failed: {exc.stderr.strip()}"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number}
+
+    try:
+        current_after = _run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root
+        ).stdout.strip()
+        if current_after != base_branch:
+            _run(["git", "checkout", base_branch], cwd=repo_root)
+            _run(["git", "pull"], cwd=repo_root, timeout=60)
+
+        head_sha = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+        status_output = _run(["git", "status", "--short"], cwd=repo_root).stdout.strip()
+        if status_output:
+            return {"status": "error", "step": "ensure_review_clear_and_merge",
+                    "errors": [f"Post-merge working tree is dirty:\n{status_output}"],
+                    "steps_completed": result["steps_completed"],
+                    "pr_number": pr_number}
+        result["merge_sha"] = head_sha
+        if "ensure_review_clear_and_merge" not in result["steps_completed"]:
+            result["steps_completed"].append("ensure_review_clear_and_merge")
+        _clear_continuation_record(continuation_path)
+        log(f"Step 15: merged, HEAD={head_sha[:8]}, clean tree verified")
+    except subprocess.CalledProcessError as exc:
+        return {"status": "error", "step": "ensure_review_clear_and_merge",
+                "errors": [f"Post-merge verify failed: {exc.stderr.strip()}"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number}
+
+    return result
+
+
 def run_commit_pipeline(
     handoff: dict[str, Any],
     *,
@@ -429,7 +898,8 @@ def run_commit_pipeline(
 ) -> dict[str, Any]:
     """Execute the 15-step commit pipeline.
 
-    Same command every time. No resume mode. No special flags.
+    Same command every time. Automatic bounded continuation after a local
+    commit is allowed; no extra resume flags.
     """
     try:
         ensure_not_agent_review_mode("commit_executor.run_commit_pipeline")
@@ -463,6 +933,22 @@ def run_commit_pipeline(
     branch_prefix = handoff["branch_prefix"]
     target_branch = f"{branch_prefix}/{wave_id}"
     base_branch = handoff["base_branch"]
+    handoff_sha = _handoff_sha(handoff)
+    continuation_path = _continuation_record_path(repo_root, wave_id)
+    continuation = _load_post_commit_continuation(
+        continuation_path,
+        repo_root=repo_root,
+        handoff_sha=handoff_sha,
+        target_branch=target_branch,
+    )
+    if continuation:
+        result["steps_completed"] = list(continuation.get("steps_completed", []))
+        result["commit_sha"] = continuation["commit_sha"]
+        result["pr_number"] = continuation.get("pr_number")
+        log(
+            "Resuming post-commit pipeline from local commit "
+            f"{continuation['commit_sha'][:8]}"
+        )
 
     # ── Step 2: ensure_feature_branch ────────────────────────────────
     try:
@@ -516,7 +1002,29 @@ def run_commit_pipeline(
                 "errors": [f"On branch {current}, expected {base_branch} or {target_branch}"],
                 "steps_completed": result["steps_completed"]}
 
-    result["steps_completed"].append("ensure_feature_branch")
+    if "ensure_feature_branch" not in result["steps_completed"]:
+        result["steps_completed"].append("ensure_feature_branch")
+
+    if continuation:
+        result["receipt_decision"] = continuation["receipt_decision"]
+        if continuation["receipt_decision"] == "COMMIT_GO_HOLD_PUSH":
+            _clear_continuation_record(continuation_path)
+            return {
+                "status": "held",
+                "commit_sha": continuation["commit_sha"],
+                "steps_completed": result["steps_completed"],
+                "message": "Committed locally. Pipeline held before push per COMMIT_GO_HOLD_PUSH.",
+            }
+        log("Continuation record valid; skipping steps 3-10 and resuming at push")
+        return _run_post_commit_pipeline(
+            handoff=handoff,
+            repo_root=repo_root,
+            result=result,
+            target_branch=target_branch,
+            base_branch=base_branch,
+            continuation_path=continuation_path,
+            log=log,
+        )
 
     # ── Step 3: ensure_tracker_note ──────────────────────────────────
     tracker_note_text = handoff["tracker_note_text"]
@@ -789,6 +1297,8 @@ def run_commit_pipeline(
 
     result["handoff_receipt_path"] = handoff_receipt_rel
     result["handoff_receipt_decision"] = handoff_receipt_decision
+    result["receipt_decision"] = receipt_decision
+    result["handoff_sha"] = handoff_sha
     result["steps_completed"].append("validate_receipt")
     log(
         "Step 7: receipt chain verified "
@@ -817,7 +1327,17 @@ def run_commit_pipeline(
             ["git", "commit", "-m", handoff["commit_message"]],
             cwd=repo_root, timeout=60,
         )
+        commit_sha = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+        result["commit_sha"] = commit_sha
         result["steps_completed"].append("git_commit")
+        _write_continuation_record(
+            continuation_path,
+            handoff_sha=handoff_sha,
+            target_branch=target_branch,
+            commit_sha=commit_sha,
+            receipt_decision=receipt_decision,
+            steps_completed=result["steps_completed"],
+        )
         log(f"Step 9: committed")
     except subprocess.CalledProcessError as exc:
         return {"status": "error", "step": "git_commit",
@@ -830,11 +1350,9 @@ def run_commit_pipeline(
 
     # ── Step 10: hold_check ───────────────────────────────────────────
     if receipt_decision == "COMMIT_GO_HOLD_PUSH":
-        try:
-            sha = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
-        except subprocess.CalledProcessError:
-            sha = "unknown"
+        sha = result.get("commit_sha", "unknown")
         result["steps_completed"].append("hold_check")
+        _clear_continuation_record(continuation_path)
         return {
             "status": "held",
             "commit_sha": sha,
@@ -844,263 +1362,15 @@ def run_commit_pipeline(
 
     result["steps_completed"].append("hold_check")
     log("Step 10: COMMIT_GO, continuing to push")
-
-    # ── Step 11: run_pre_push_script ──────────────────────────────────
-    pre_push_script = repo_root / "mu" / "tools" / "hooks" / "pre-push-fast"
-    if pre_push_script.exists():
-        try:
-            _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=300)
-        except subprocess.CalledProcessError as exc:
-            return {"status": "error", "step": "run_pre_push_script",
-                    "errors": [f"pre-push-fast failed: {exc.stderr.strip()[:500]}"],
-                    "steps_completed": result["steps_completed"]}
-        except subprocess.TimeoutExpired:
-            return {"status": "error", "step": "run_pre_push_script",
-                    "errors": ["pre-push-fast timed out"],
-                    "steps_completed": result["steps_completed"]}
-    result["steps_completed"].append("run_pre_push_script")
-    log("Step 11: pre-push script passed")
-
-    # ── Step 12: git_push ─────────────────────────────────────────────
-    try:
-        _run(
-            ["git", "push", "-u", "origin", target_branch],
-            cwd=repo_root, timeout=300,
-        )
-        result["steps_completed"].append("git_push")
-        log(f"Step 12: pushed to origin/{target_branch}")
-    except subprocess.CalledProcessError as exc:
-        return {"status": "error", "step": "git_push",
-                "errors": [f"git push failed: {exc.stderr.strip()}"],
-                "steps_completed": result["steps_completed"]}
-    except subprocess.TimeoutExpired:
-        return {"status": "error", "step": "git_push",
-                "errors": ["git push timed out"],
-                "steps_completed": result["steps_completed"]}
-
-    # ── Step 13: ensure_pr ────────────────────────────────────────────
-    try:
-        existing_prs = _run(
-            ["gh", "pr", "list", "--head", target_branch, "--base", base_branch,
-             "--state", "open", "--json", "number"],
-            cwd=repo_root, timeout=30,
-        ).stdout.strip()
-        pr_list = json.loads(existing_prs) if existing_prs else []
-    except (subprocess.CalledProcessError, json.JSONDecodeError):
-        pr_list = []
-
-    if len(pr_list) > 1:
-        return {"status": "error", "step": "ensure_pr",
-                "errors": [f"Multiple open PRs for {target_branch}: {[p['number'] for p in pr_list]}"],
-                "steps_completed": result["steps_completed"]}
-
-    if len(pr_list) == 1:
-        # Reuse existing PR, sync metadata
-        pr_number = str(pr_list[0]["number"])
-        if not pr_number.isdigit():
-            return {"status": "error", "step": "ensure_pr",
-                    "errors": [f"PR number non-numeric: {pr_number}"],
-                    "steps_completed": result["steps_completed"]}
-        try:
-            _run(
-                ["gh", "pr", "edit", pr_number,
-                 "--title", handoff["pr_title"],
-                 "--body", handoff["pr_body"]],
-                cwd=repo_root, timeout=30,
-            )
-            log(f"Step 13: reused PR #{pr_number}, synced metadata")
-        except subprocess.CalledProcessError as exc:
-            log(f"Step 13: PR edit warning: {exc.stderr.strip()[:200]}")
-    else:
-        # Create new PR
-        try:
-            pr_create_result = _run(
-                ["gh", "pr", "create",
-                 "--base", base_branch,
-                 "--head", target_branch,
-                 "--title", handoff["pr_title"],
-                 "--body", handoff["pr_body"]],
-                cwd=repo_root, timeout=30,
-            )
-            pr_url = pr_create_result.stdout.strip()
-            pr_number = pr_url.rstrip("/").split("/")[-1]
-            if not pr_number.isdigit():
-                return {"status": "error", "step": "ensure_pr",
-                        "errors": [f"PR number non-numeric from URL: {pr_url}"],
-                        "steps_completed": result["steps_completed"]}
-            log(f"Step 13: created PR #{pr_number}")
-        except subprocess.CalledProcessError as exc:
-            return {"status": "error", "step": "ensure_pr",
-                    "errors": [f"gh pr create failed: {exc.stderr.strip()}"],
-                    "steps_completed": result["steps_completed"]}
-        except subprocess.TimeoutExpired:
-            return {"status": "error", "step": "ensure_pr",
-                    "errors": ["gh pr create timed out"],
-                    "steps_completed": result["steps_completed"]}
-
-    result["pr_number"] = pr_number
-    result["steps_completed"].append("ensure_pr")
-
-    # ── Step 14: wait_ci ──────────────────────────────────────────────
-    log(f"Step 14: waiting for CI on PR #{pr_number}...")
-    try:
-        _run(
-            ["gh", "pr", "checks", pr_number, "--watch", "--required"],
-            cwd=repo_root, timeout=600,
-        )
-        result["steps_completed"].append("wait_ci")
-        log("Step 14: CI passed")
-    except subprocess.CalledProcessError as exc:
-        return {"status": "error", "step": "wait_ci",
-                "errors": [f"CI checks failed: {exc.stderr.strip()}"],
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number}
-    except subprocess.TimeoutExpired:
-        return {"status": "error", "step": "wait_ci",
-                "errors": ["CI wait timed out after 600s"],
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number}
-
-    # ── Step 15: ensure_review_clear_and_merge ────────────────────────
-    log(f"Step 15: checking review state for PR #{pr_number}...")
-
-    # Get repo owner/name
-    try:
-        remote_url = _run(
-            ["git", "remote", "get-url", "origin"], cwd=repo_root
-        ).stdout.strip()
-        # Parse owner/repo from URL
-        if remote_url.endswith(".git"):
-            remote_url = remote_url[:-4]
-        parts = remote_url.rstrip("/").split("/")
-        repo_owner = parts[-2]
-        repo_name = parts[-1]
-        # Handle ssh URLs (git@github.com:owner/repo)
-        if ":" in repo_owner:
-            repo_owner = repo_owner.split(":")[-1]
-    except (subprocess.CalledProcessError, IndexError):
-        return {"status": "error", "step": "ensure_review_clear_and_merge",
-                "errors": ["Cannot determine repo owner/name from git remote"],
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number}
-
-    try:
-        review_result = _run(
-            ["gh", "api", "graphql", "-f",
-             f"query={PR_REVIEW_QUERY}",
-             "-F", f"owner={repo_owner}",
-             "-F", f"repo={repo_name}",
-             "-F", f"number={pr_number}"],
-            cwd=repo_root, timeout=30,
-        )
-        review_data = json.loads(review_result.stdout)
-        pr_data = review_data.get("data", {}).get("repository", {}).get("pullRequest", {})
-    except (subprocess.CalledProcessError, json.JSONDecodeError, subprocess.TimeoutExpired) as exc:
-        return {"status": "error", "step": "ensure_review_clear_and_merge",
-                "errors": [f"Review query failed: {exc}"],
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number}
-
-    # Check reviewDecision
-    review_decision = pr_data.get("reviewDecision", "")
-    if review_decision == "CHANGES_REQUESTED":
-        return {"status": "error", "step": "ensure_review_clear_and_merge",
-                "errors": ["reviewDecision is CHANGES_REQUESTED"],
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number}
-
-    # Check individual reviews (exclude bots)
-    latest_reviews = pr_data.get("latestReviews", {}).get("nodes", [])
-    for review in latest_reviews:
-        author = review.get("author", {}).get("login", "")
-        state = review.get("state", "")
-        is_bot = author.endswith("[bot]") or author.endswith("-bot")
-        if not is_bot and state == "CHANGES_REQUESTED":
-            return {"status": "error", "step": "ensure_review_clear_and_merge",
-                    "errors": [f"Human reviewer {author} requested changes"],
-                    "steps_completed": result["steps_completed"],
-                    "pr_number": pr_number}
-
-    # Check review threads
-    threads = pr_data.get("reviewThreads", {}).get("nodes", [])
-    bot_findings = []
-    for thread in threads:
-        if thread.get("isResolved"):
-            continue
-        comments = thread.get("comments", {}).get("nodes", [])
-        if not comments:
-            continue
-        author = comments[0].get("author", {}).get("login", "")
-        is_bot = author.endswith("[bot]") or author.endswith("-bot")
-        if not is_bot:
-            # Unresolved human thread blocks
-            return {"status": "error", "step": "ensure_review_clear_and_merge",
-                    "errors": [f"Unresolved human review thread from {author}"],
-                    "steps_completed": result["steps_completed"],
-                    "pr_number": pr_number}
-        else:
-            # Unresolved bot thread — collect as finding
-            bot_findings.append({
-                "author": author,
-                "body": comments[0].get("body", "")[:500],
-                "path": comments[0].get("path", ""),
-                "line": comments[0].get("line"),
-            })
-
-    if bot_findings:
-        return {
-            "status": "bot_findings_pending",
-            "bot_findings": bot_findings,
-            "pr_number": pr_number,
-            "steps_completed": result["steps_completed"],
-        }
-
-    # Review state is clear — merge
-    merge_script = repo_root / "mu" / "tools" / "hooks" / "merge_pr.sh"
-    if not merge_script.exists():
-        return {"status": "error", "step": "ensure_review_clear_and_merge",
-                "errors": [f"merge_pr.sh not found"],
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number}
-
-    try:
-        _run(
-            ["bash", str(merge_script), pr_number, "--sweep"],
-            cwd=repo_root, timeout=120,
-        )
-    except subprocess.CalledProcessError as exc:
-        return {"status": "error", "step": "ensure_review_clear_and_merge",
-                "errors": [f"merge_pr.sh failed: {exc.stderr.strip()}"],
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number}
-
-    # Post-merge verify: checkout dev, pull, verify HEAD and clean tree
-    try:
-        current_after = _run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root
-        ).stdout.strip()
-        if current_after != base_branch:
-            _run(["git", "checkout", base_branch], cwd=repo_root)
-            _run(["git", "pull"], cwd=repo_root, timeout=60)
-
-        head_sha = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
-        status_output = _run(["git", "status", "--short"], cwd=repo_root).stdout.strip()
-        if status_output:
-            return {"status": "error", "step": "ensure_review_clear_and_merge",
-                    "errors": [f"Post-merge working tree is dirty:\n{status_output}"],
-                    "steps_completed": result["steps_completed"],
-                    "pr_number": pr_number}
-        result["merge_sha"] = head_sha
-        result["steps_completed"].append("ensure_review_clear_and_merge")
-        log(f"Step 15: merged, HEAD={head_sha[:8]}, clean tree verified")
-    except subprocess.CalledProcessError as exc:
-        # FAIL-CLOSED on verify failure
-        return {"status": "error", "step": "ensure_review_clear_and_merge",
-                "errors": [f"Post-merge verify failed: {exc.stderr.strip()}"],
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number}
-
-    return result
+    return _run_post_commit_pipeline(
+        handoff=handoff,
+        repo_root=repo_root,
+        result=result,
+        target_branch=target_branch,
+        base_branch=base_branch,
+        continuation_path=continuation_path,
+        log=log,
+    )
 
 
 def main() -> int:

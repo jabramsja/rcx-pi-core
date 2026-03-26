@@ -2,6 +2,19 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-03-26
+
+### Pipeline Continuation Hardening
+
+- `commit_executor.py` now persists a bounded post-commit continuation record keyed to the exact handoff, target branch, and local commit, so reruns after step-11+ failures continue honestly without a separate resume flag
+- Final merge clearance now waits for a current-head `chatgpt-codex-connector` review before evaluating `reviewDecision` and unresolved review threads
+- `commit_executor.py` now also fails closed when the Step 15 PR review GraphQL query times out, returning a structured `ensure_review_clear_and_merge` error instead of crashing the mechanical pipeline
+- `meta_bridge_supervisor.py` now rejects stderr-only authoritative envelopes during recovery parsing
+- `mu/tools/executors/executor_dispatch.py` now also acts as the thin modular entrypoint for `phase-a`, `phase-b`, `pre-commit-supervisor`, `commit`, and `post-merge-supervisor`
+- `mu/tests/tools/test_executor_dispatch.py` now carries a behavioral regression that forces the timed-out review-query path through `_run_post_commit_pipeline()`
+- Control-plane packets and TASKS tracker truth updated to reflect bounded continuation, the structured review-timeout follow-on, the modular operator surface, and the remaining simple-route pipeline smoke target
+- **L4_ENABLER** wave targeting G8. No runtime/substrate or host-semantics delta.
+
 ## 2026-03-19
 
 ### Wave W6A: Stage0 VM Trusted Path Optimization

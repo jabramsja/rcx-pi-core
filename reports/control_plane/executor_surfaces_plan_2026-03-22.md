@@ -19,7 +19,8 @@ fallback/escalation surface, not the workflow owner.
 - Rollout step 4 is "Introduce real repo-local executors"
 - Post-merge routing now hands off to repo-local executors; Claude is not the
   normal workflow owner for routing decisions
-- `/wave` and `/bridge` skills are Claude-owned thin wrappers
+- `/wave` and `/bridge` skills are Claude-owned thin wrappers; repo-local
+  modular entry can also flow through `mu/tools/executors/executor_dispatch.py`
 - Claude memory (16 files, 35KB) + CLAUDE.md (601 lines) consume excessive
   context before any work begins
 
@@ -443,18 +444,19 @@ If any validation fails, executor emits structured error and stops.
 
 ## G. Interaction with Existing Surfaces
 
-### `/wave` and `/bridge` skills
+### Modular Operator Entry
 
-After executor implementation, these become thin wrappers:
-- `/wave plan <name>` → invokes `phase_a_executor.py`
-- `/wave implement` → invokes `phase_b_executor.py`
-- `/bridge review` → invokes bridge_supervisor.py (unchanged)
-- `/bridge plan` → invokes `bridge_supervisor.py review --no-diff` (unchanged)
+After executor implementation, the repo-local modular entry surface is:
+- `python3 mu/tools/executors/executor_dispatch.py phase-a --plan-name <name>` → `phase_a_executor.py`
+- `python3 mu/tools/executors/executor_dispatch.py phase-b ...` → `phase_b_executor.py`
+- `python3 mu/tools/executors/executor_dispatch.py pre-commit-supervisor --package <path>` → `meta_bridge_supervisor.py` (pre-commit)
+- `python3 mu/tools/executors/executor_dispatch.py commit --handoff <path>` → `commit_executor.py`
+- `python3 mu/tools/executors/executor_dispatch.py post-merge-supervisor --package <path>` → `meta_bridge_supervisor.py --mode post-merge`
 
-The skills remain available as operator entry points, but they are no longer
-the normal manual fallback path for executor-owned routing/implementation. They
-now dispatch into the executor and bridge surfaces above; deprecation can be
-decided later.
+`/wave` and `/bridge` skills remain thin operator wrappers, but they are no
+longer the only ergonomic entrypoints. The wrapper above keeps the authority
+chain in the existing executors/supervisors instead of inventing a parallel
+manual path.
 
 ### Pre-commit supervisor
 
@@ -571,9 +573,10 @@ Implementation is proven when:
 - Tests: mock Codex narrowing responses
 - Proves: scope narrowing can be structured
 
-### Slice 6: /wave skill wrapper update + end-to-end integration
+### Slice 6: modular wrapper + end-to-end integration
 
-- `/wave` skill dispatches to executors
+- `executor_dispatch.py` dispatches to the existing executors/supervisors
+- `/wave` skill can remain a higher-level alias over the same surfaces
 - End-to-end integration tests for full control flow
 - Deprecation path for manual Claude workflow
 
