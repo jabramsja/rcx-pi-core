@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Pending simple-route execution (2026-03-26 prereq hardening s1+s2 landed; run still not started)
+Status: First live post-merge attempt stopped at routing triage on 2026-03-26; queue truth-sync active, rerun pending
 Phase-A-Lock: UNLOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -33,6 +33,30 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
 - This packet exists to test pipeline mechanics, not to advance RCX runtime work.
 - Non-blocking observations may be logged only if the clean run actually gets
   through to merge.
+
+## Canonical rollout order
+
+1. ~~Truth-sync the active control-plane queue so `[PIPELINE-TEST-RUN]` is the
+   first unambiguous next proof item after continuation hardening `s1+s2`.~~
+   **(done 2026-03-26)**
+2. Run the deliberately boring control-plane smoke through post-merge ->
+   Phase A -> Phase B -> pre-commit -> commit/merge.
+3. If the run stops, record the exact stage and reason in this packet before
+   any corrective follow-up.
+4. Only after a clean boring-path pass should `[COMMIT-EXECUTOR-E2E]` run on a
+   disposable branch.
+5. Only after both execution proofs are green should latency optimization
+   proceed aggressively.
+
+## First Live Stop (2026-03-26)
+
+- `post-merge-supervisor` passed all 6 validation gates and then returned
+  `STOP_FOR_TRIAGE_DISCUSSION`.
+- Exact stop reason: this packet had no canonical rollout order section, and
+  `TASKS.md` still placed `[COMMIT-EXECUTOR-E2E]` ahead of this item with stale
+  blocker/packet truth.
+- Result: the smoke run did not reach Phase A or Phase B. Rerun only after the
+  tracker/packet truth sync is in repo-tracked form.
 
 ## Prereqs Landed (2026-03-26)
 
