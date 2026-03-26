@@ -1124,14 +1124,15 @@ META_ENVELOPE_RE = re.compile(
 _STDERR_SENTINEL = "\n[stderr]\n"
 
 
-def _preferred_authoritative_output(output: str, envelope_re: re.Pattern[str]) -> str:
-    """Prefer stdout over replayed stderr transcripts when stdout has envelopes."""
+def _preferred_authoritative_output(output: str) -> str:
+    """Prefer stdout and reject stderr-only envelopes as authoritative output."""
     stdout_only = output
     if _STDERR_SENTINEL in output:
         stdout_only, _, _ = output.partition(_STDERR_SENTINEL)
-    elif output.startswith("[stderr]\n"):
-        stdout_only = ""
-    return stdout_only if envelope_re.search(stdout_only) else output
+        return stdout_only
+    if output.startswith("[stderr]\n"):
+        return ""
+    return output
 
 
 # Template-authorized decisions (what Codex can emit via the template)
@@ -1159,7 +1160,7 @@ def _parse_authoritative_envelope(
     authorized_decisions: set[str],
     invalid_decision_message: str,
 ) -> dict[str, Any]:
-    output = _preferred_authoritative_output(output, META_ENVELOPE_RE)
+    output = _preferred_authoritative_output(output)
     matches = list(META_ENVELOPE_RE.finditer(output))
     if not matches:
         raise MetaBridgeError(f"{label} output missing BEGIN_META_ENVELOPE / END_META_ENVELOPE block")

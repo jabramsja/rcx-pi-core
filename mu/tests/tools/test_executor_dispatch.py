@@ -227,6 +227,16 @@ def _compute_staged_sha(repo):
     return hashlib.sha256(staged_diff).hexdigest()
 
 
+def _commit_post_commit_source() -> str:
+    """Return combined source for the main pipeline and extracted post-commit helper."""
+    import inspect
+    return (
+        inspect.getsource(commit_mod.run_commit_pipeline)
+        + "\n"
+        + inspect.getsource(commit_mod._run_post_commit_pipeline)
+    )
+
+
 # ===========================================================================
 # Commit executor tests (Slice 2)
 # ===========================================================================
@@ -1698,8 +1708,7 @@ class TestReceiptAndCommit:
         The plan says: FAIL-CLOSED on verify failure.
         We verify by checking the code returns error status on CalledProcessError.
         """
-        import inspect
-        source = inspect.getsource(commit_mod.run_commit_pipeline)
+        source = _commit_post_commit_source()
         # The code should return error on post-merge verify failure
         assert "Post-merge verify failed" in source
 
@@ -1724,8 +1733,7 @@ class TestPRAndReview:
 
         The plan says: validate PR number is numeric (isdigit).
         """
-        import inspect
-        source = inspect.getsource(commit_mod.run_commit_pipeline)
+        source = _commit_post_commit_source()
         assert "isdigit" in source
 
     def test_30_ensure_pr_no_pr_creates(self):
@@ -1733,39 +1741,33 @@ class TestPRAndReview:
 
         Verified by code structure: pr_list empty → gh pr create path.
         """
-        import inspect
-        source = inspect.getsource(commit_mod.run_commit_pipeline)
+        source = _commit_post_commit_source()
         assert "gh pr create" in source or "pr create" in source
 
     def test_31_ensure_pr_existing_reuses_and_syncs(self):
         """Test 31: Existing PR → reuses + syncs via gh pr edit."""
-        import inspect
-        source = inspect.getsource(commit_mod.run_commit_pipeline)
+        source = _commit_post_commit_source()
         # The code builds command lists like ["gh", "pr", "edit", ...]
         assert '"gh", "pr", "edit"' in source or "pr edit" in source
 
     def test_32_ensure_pr_multiple_errors(self):
         """Test 32: Multiple open PRs → error."""
-        import inspect
-        source = inspect.getsource(commit_mod.run_commit_pipeline)
+        source = _commit_post_commit_source()
         assert "Multiple" in source or "multiple" in source
 
     def test_33_human_changes_requested_errors(self):
         """Test 33: Human CHANGES_REQUESTED → error."""
-        import inspect
-        source = inspect.getsource(commit_mod.run_commit_pipeline)
+        source = _commit_post_commit_source()
         assert "CHANGES_REQUESTED" in source
 
     def test_34_unresolved_human_thread_errors(self):
         """Test 34: Unresolved human thread → error."""
-        import inspect
-        source = inspect.getsource(commit_mod.run_commit_pipeline)
+        source = _commit_post_commit_source()
         assert "Unresolved human" in source or "unresolved human" in source.lower()
 
     def test_35_unresolved_bot_thread_returns_bot_findings(self):
         """Test 35: Unresolved bot thread → bot_findings_pending."""
-        import inspect
-        source = inspect.getsource(commit_mod.run_commit_pipeline)
+        source = _commit_post_commit_source()
         assert "bot_findings_pending" in source
 
     def test_36_resolved_bot_threads_clear(self):
@@ -1773,14 +1775,12 @@ class TestPRAndReview:
 
         Verified by code: isResolved threads are skipped (continue).
         """
-        import inspect
-        source = inspect.getsource(commit_mod.run_commit_pipeline)
+        source = _commit_post_commit_source()
         assert "isResolved" in source
 
     def test_37_merge_pr_exit_1_errors(self):
         """Test 37: merge_pr.sh exit 1 → error."""
-        import inspect
-        source = inspect.getsource(commit_mod.run_commit_pipeline)
+        source = _commit_post_commit_source()
         assert "merge_pr.sh failed" in source
 
 
@@ -1916,6 +1916,255 @@ class TestIntegrationScenarios:
         assert "stage_files" in steps
         # git_commit: new commit
         assert "git_commit" in steps
+
+
+class TestCommitContinuationAndBotFreshness:
+    """Regression coverage for bounded post-commit continuation and bot freshness."""
+
+    def test_valid_post_commit_continuation_resumes_at_post_commit_helper(self, tmp_path):
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "wave commit"], cwd=repo, capture_output=True, env=env)
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+        handoff = _make_new_handoff()
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(json.dumps({
+            "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+            "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+            "handoff_sha": commit_mod._handoff_sha(handoff),
+            "target_branch": "jabramsja/test-wave-id",
+            "commit_sha": head_sha,
+            "receipt_decision": "COMMIT_GO",
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "ensure_tracker_note",
+                "stage_files",
+                "collect_and_stage_indicator",
+                "build_and_run_supervisor",
+                "validate_receipt",
+                "run_pre_commit_script",
+                "git_commit",
+                "hold_check",
+            ],
+        }))
+
+        captured: dict[str, object] = {}
+
+        def fake_post_commit_pipeline(**kwargs):
+            captured["result"] = kwargs["result"].copy()
+            return {"status": "continued", "steps_completed": kwargs["result"]["steps_completed"]}
+
+        with patch.object(commit_mod, "_run_post_commit_pipeline", side_effect=fake_post_commit_pipeline) as mock_helper:
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "continued"
+        assert mock_helper.call_count == 1
+        resumed = captured["result"]
+        assert resumed["commit_sha"] == head_sha
+        assert resumed["receipt_decision"] == "COMMIT_GO"
+        assert resumed["steps_completed"][-1] == "hold_check"
+
+    def test_hold_continuation_returns_held_and_clears_record(self, tmp_path):
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "wave commit"], cwd=repo, capture_output=True, env=env)
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+        handoff = _make_new_handoff()
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(json.dumps({
+            "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+            "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+            "handoff_sha": commit_mod._handoff_sha(handoff),
+            "target_branch": "jabramsja/test-wave-id",
+            "commit_sha": head_sha,
+            "receipt_decision": "COMMIT_GO_HOLD_PUSH",
+            "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
+        }))
+
+        with patch.object(commit_mod, "_run_post_commit_pipeline") as mock_helper:
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "held"
+        assert result["commit_sha"] == head_sha
+        assert not continuation_path.exists()
+        mock_helper.assert_not_called()
+
+    def test_has_fresh_bot_review_requires_current_head_commit(self):
+        pr_data = {
+            "latestReviews": {
+                "nodes": [
+                    {
+                        "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                        "state": "COMMENTED",
+                        "commit": {"oid": "abc123"},
+                    },
+                    {
+                        "author": {"login": "human-reviewer"},
+                        "state": "APPROVED",
+                        "commit": {"oid": "abc123"},
+                    },
+                ]
+            }
+        }
+        assert commit_mod._has_fresh_bot_review(pr_data, "abc123") is True
+        assert commit_mod._has_fresh_bot_review(pr_data, "def456") is False
+
+    def test_wait_for_bot_review_freshness_polls_until_current_head_review(self):
+        calls = {"count": 0}
+
+        def query_state():
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return {"latestReviews": {"nodes": []}}
+            return {
+                "latestReviews": {
+                    "nodes": [
+                        {
+                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                            "state": "COMMENTED",
+                            "commit": {"oid": "abc123"},
+                        }
+                    ]
+                }
+            }
+
+        with patch.object(commit_mod.time, "sleep", return_value=None):
+            pr_data = commit_mod._wait_for_bot_review_freshness(
+                query_state,
+                head_sha="abc123",
+                wait_seconds=1,
+                poll_interval=0,
+            )
+
+        assert calls["count"] == 2
+        assert commit_mod._has_fresh_bot_review(pr_data, "abc123") is True
+
+    def test_wait_for_bot_review_freshness_times_out_fail_closed(self):
+        with patch.object(commit_mod.time, "sleep", return_value=None):
+            with pytest.raises(TimeoutError, match="No current-head"):
+                commit_mod._wait_for_bot_review_freshness(
+                    lambda: {"latestReviews": {"nodes": []}},
+                    head_sha="abc123",
+                    wait_seconds=0,
+                    poll_interval=0,
+                )
+
+
+class TestModularSurfaceEntrypoints:
+    """executor_dispatch.py also acts as the modular control-plane entrypoint."""
+
+    def test_phase_a_surface_builds_phase_a_executor_command(self):
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["phase-a", "--plan-name", "executor_surfaces_plan", "--max-rounds", "7", "--json"]
+        )
+        cmd = dispatch_mod.build_surface_command(args)
+        assert cmd[:2] == [dispatch_mod.sys.executable, str(dispatch_mod.SCRIPT_DIR / "phase_a_executor.py")]
+        assert "--plan-name" in cmd
+        assert "executor_surfaces_plan" in cmd
+        assert "--max-rounds" in cmd
+        assert "7" in cmd
+        assert "--json" in cmd
+
+    def test_phase_b_surface_reads_routing_record_path(self, tmp_path):
+        routing_path = tmp_path / "routing.json"
+        routing_path.write_text('{"decision":"ROUTE_PHASE_B","summary":"test"}', encoding="utf-8")
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-b",
+                "--plan", "reports/control_plane/example.md",
+                "--routing-record-path", str(routing_path),
+                "--bootstrap-exception",
+                "--verbose",
+            ]
+        )
+        cmd = dispatch_mod.build_surface_command(args)
+        assert cmd[:2] == [dispatch_mod.sys.executable, str(dispatch_mod.SCRIPT_DIR / "phase_b_executor.py")]
+        assert "--plan" in cmd
+        assert "reports/control_plane/example.md" in cmd
+        assert "--routing-record" in cmd
+        assert '{"decision":"ROUTE_PHASE_B","summary":"test"}' in cmd
+        assert "--bootstrap-exception" in cmd
+        assert "--verbose" in cmd
+
+    def test_pre_commit_surface_builds_supervisor_command(self, tmp_path):
+        package_path = tmp_path / "package.json"
+        package_path.write_text("{}", encoding="utf-8")
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["pre-commit-supervisor", "--package", str(package_path), "--dry-run", "--json"]
+        )
+        cmd = dispatch_mod.build_surface_command(args)
+        assert cmd[:2] == [dispatch_mod.sys.executable, str(dispatch_mod.AGENTS_DIR / "meta_bridge_supervisor.py")]
+        assert "--dry-run" in cmd
+        assert "--mode" not in cmd
+        assert "--json" in cmd
+
+    def test_post_merge_surface_builds_supervisor_mode_command(self, tmp_path):
+        package_path = tmp_path / "package.json"
+        package_path.write_text("{}", encoding="utf-8")
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["post-merge-supervisor", "--package", str(package_path), "--verbose"]
+        )
+        cmd = dispatch_mod.build_surface_command(args)
+        assert cmd[:2] == [dispatch_mod.sys.executable, str(dispatch_mod.AGENTS_DIR / "meta_bridge_supervisor.py")]
+        assert "--mode" in cmd
+        assert "post-merge" in cmd
+        assert "--verbose" in cmd
+
+    def test_commit_surface_requires_exactly_one_handoff_or_routing_record(self, tmp_path):
+        handoff_path = tmp_path / "handoff.json"
+        handoff_path.write_text("{}", encoding="utf-8")
+        routing_path = tmp_path / "routing.json"
+        routing_path.write_text("{}", encoding="utf-8")
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "commit",
+                "--handoff", str(handoff_path),
+                "--routing-record-path", str(routing_path),
+            ]
+        )
+        with pytest.raises(dispatch_mod.ControlSurfaceError, match="either --handoff or a routing record"):
+            dispatch_mod.build_surface_command(args)
+
+    def test_commit_surface_builds_handoff_command(self, tmp_path):
+        handoff_path = tmp_path / "handoff.json"
+        handoff_path.write_text("{}", encoding="utf-8")
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["commit", "--handoff", str(handoff_path), "--json"]
+        )
+        cmd = dispatch_mod.build_surface_command(args)
+        assert cmd[:2] == [dispatch_mod.sys.executable, str(dispatch_mod.SCRIPT_DIR / "commit_executor.py")]
+        assert "--handoff" in cmd
+        assert str(handoff_path) in cmd
+        assert "--json" in cmd
+
+    def test_main_surface_mode_runs_forwarded_command(self):
+        with patch.object(dispatch_mod, "run_surface_command", return_value=0) as mock_run, \
+             patch.object(dispatch_mod.subprocess, "run") as mock_subprocess_run:
+            mock_subprocess_run.return_value = subprocess.CompletedProcess(
+                args=["git"], returncode=0, stdout=str(REPO_ROOT), stderr=""
+            )
+            exit_code = dispatch_mod.main(["phase-a", "--plan-name", "example"])
+        assert exit_code == 0
+        mock_run.assert_called_once()
 
 
 # --- Phase B handoff new schema test ---

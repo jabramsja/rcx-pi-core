@@ -286,6 +286,16 @@ class TestParseMetaEnvelope:
         assert envelope["decision"] == "COMMIT_GO"
         assert envelope["summary"] == "current"
 
+    def test_stderr_only_envelope_is_rejected(self):
+        output = (
+            "[stderr]\n"
+            "BEGIN_META_ENVELOPE\n"
+            '{"decision": "COMMIT_GO", "summary": "stderr only"}\n'
+            "END_META_ENVELOPE\n"
+        )
+        with pytest.raises(meta.MetaBridgeError, match="missing BEGIN_META_ENVELOPE"):
+            meta.parse_meta_envelope(output)
+
     def test_run_validation_command_timeout_returns_124(self):
         with patch.object(meta.subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd=["python3"], timeout=1)):
             exit_code, output = meta.run_validation_command(REPO_ROOT, ["python3", "-c", "print('x')"])
@@ -683,6 +693,29 @@ def test_run_meta_review_recovers_authoritative_envelope_from_raw_output(pkg_in_
     assert envelope["summary"] == "Recovered"
 
 
+def test_run_meta_review_rejects_stderr_only_recovery_envelope(pkg_in_repo):
+    pkg_path, isolated_paths = pkg_in_repo
+    validation_results = _make_validation_results(["dirty_state"], [])
+    package = json.loads(pkg_path.read_text(encoding="utf-8"))
+    stderr_only = (
+        "[stderr]\n"
+        "BEGIN_META_ENVELOPE\n"
+        '{"decision": "COMMIT_GO", "summary": "stderr only", "findings": [], "request_for_claude": "Proceed"}\n'
+        "END_META_ENVELOPE\n"
+    )
+
+    def _failing_adapter(*args, **kwargs):
+        raw_output_path = kwargs["raw_output_path"]
+        raw_output_path.write_text(stderr_only, encoding="utf-8")
+        raise _adapters.BridgeAdapterError("Adapter 'codex' exited 1", output=stderr_only)
+
+    with patch.object(meta, "load_bridge_config", return_value={"agents": {}}), \
+         patch.object(meta, "get_adapter", return_value=MagicMock()), \
+         patch.object(meta, "run_adapter", side_effect=_failing_adapter):
+        with pytest.raises(meta.MetaBridgeError, match="recovery also failed"):
+            meta.run_meta_review(isolated_paths, package, validation_results)
+
+
 def test_run_post_merge_review_recovers_authoritative_envelope_from_raw_output(tmp_path):
     bus_dir = tmp_path / "meta_bus"
     bus_dir.mkdir(parents=True, exist_ok=True)
@@ -730,6 +763,54 @@ def test_run_post_merge_review_recovers_authoritative_envelope_from_raw_output(t
 
     assert envelope["decision"] == "CONTINUE_DIALECTIC"
     assert envelope["summary"] == "Recovered post-merge"
+
+
+def test_run_post_merge_review_rejects_stderr_only_recovery_envelope(tmp_path):
+    bus_dir = tmp_path / "meta_bus"
+    bus_dir.mkdir(parents=True, exist_ok=True)
+    paths = meta.MetaBridgePaths(
+        repo_root=REPO_ROOT,
+        bus_dir=bus_dir,
+        db_path=bus_dir / "meta_bridge.db",
+        lock_path=bus_dir / "meta_bridge.lock",
+    )
+    package = {
+        "task_id": "[POST-MERGE]",
+        "wave_name": "wave",
+        "lane": "hooks/agents/bridge control-surface",
+        "merged_pr": 1,
+        "merge_sha": "abc1234",
+        "rollout_packet_path": "reports/control_plane/post_merge_supervisor_plan_2026-03-21.md",
+        "deferred_items": [],
+        "next_candidates": [],
+        "tracker_state_summary": "stable",
+        "blocker_report_paths": [],
+    }
+    validation_results = _make_validation_results(["gate1"], [])
+    stderr_only = (
+        "[stderr]\n"
+        "BEGIN_META_ENVELOPE\n"
+        '{"decision": "CONTINUE_DIALECTIC", "summary": "stderr only", "findings": [], "request_for_claude": "Continue"}\n'
+        "END_META_ENVELOPE\n"
+    )
+
+    def _failing_adapter(*args, **kwargs):
+        raw_output_path = kwargs["raw_output_path"]
+        raw_output_path.write_text(stderr_only, encoding="utf-8")
+        raise _adapters.BridgeAdapterError("Adapter 'codex' exited 1", output=stderr_only)
+
+    with patch.object(meta, "build_post_merge_prompt", return_value="prompt"), \
+         patch.object(meta, "load_bridge_config", return_value={"agents": {}}), \
+         patch.object(meta, "get_adapter", return_value=MagicMock()), \
+         patch.object(meta, "run_adapter", side_effect=_failing_adapter):
+        with pytest.raises(meta.MetaBridgeError, match="recovery also failed"):
+            meta.run_post_merge_review(
+                paths,
+                package,
+                validation_results,
+                derived_files=["TASKS.md"],
+                rollout_order="1. Continue",
+            )
 
 
 # ===========================================================================

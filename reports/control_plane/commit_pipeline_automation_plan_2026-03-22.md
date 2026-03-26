@@ -70,7 +70,9 @@ Claude Code subagents CAN call GitHub MCP tools (all 4 succeeded on PR #662). BU
 
 ## State Machine Pipeline (15 steps)
 
-Every invocation runs the same pipeline. No resume mode. No special flags.
+Every invocation runs the same pipeline. No extra resume flag. A bounded
+post-commit continuation is automatic when the exact handoff, target branch,
+and local commit still match.
 
 ```
 STEP  NAME                      WHAT THE SCRIPT DOES                              FAIL
@@ -188,7 +190,8 @@ STEP  NAME                      WHAT THE SCRIPT DOES                            
 
 15    ensure_review_clear       Query via gh api graphql:                           Stop/Error
       _and_merge                  reviewDecision on PR
-                                  latestReviews (exclude bot)
+                                  latestReviews (require current-head bot review
+                                  before thread evaluation)
                                   reviewThreads (all — human and bot)
                                 Block if reviewDecision == CHANGES_REQUESTED
                                 Block if any human review CHANGES_REQUESTED
@@ -209,7 +212,7 @@ STEP  NAME                      WHAT THE SCRIPT DOES                            
                                   FAIL-CLOSED on verify failure
 ```
 
-**15 steps. All script-owned. Same command every time. No resume mode.**
+**15 steps. All script-owned. Same command every time. No extra resume flag.**
 
 ---
 
@@ -248,6 +251,24 @@ If the founder later wants to continue:
 - Step 4 fails: "nothing staged (nothing to commit)"
 - Step 5 (indicator collection) never runs — pipeline stopped at step 4
 - No fake diff is manufactured. The pipeline stops honestly.
+
+### After a post-commit failure — bounded continuation only
+
+If steps 9-15 already produced a local commit and a later step fails, the same
+command may be re-run without a separate resume flag. `commit_executor.py`
+reloads a bounded continuation record only when all of these still hold:
+
+1. the new invocation's handoff hashes identically to the original handoff
+2. `HEAD` is still the recorded local commit on the same target branch
+3. the worktree is clean aside from transient `.agent_bus/` / `.scratch/`
+   residue
+4. the recorded receipt decision is still `COMMIT_GO` or
+   `COMMIT_GO_HOLD_PUSH`
+
+If those checks fail, the continuation is ignored and the pipeline starts from
+normal step 1 behavior. This is not an unrestricted resume path: it does not
+skip authoring new work, it does not override `COMMIT_GO_HOLD_PUSH`, and it
+does not permit replay against a different handoff or branch.
 
 ---
 
