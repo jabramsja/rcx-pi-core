@@ -63,6 +63,13 @@ When claiming dead code or unused abstractions, **verify with execution.**
 
    Use the Read tool to get actual code for the CODE field. Do not paraphrase.
 
+   Additional compliance discipline:
+
+   - Emit at most 3 finding blocks. Prefer the highest-value simplifications only.
+   - If you cannot provide all 5 required lines for a candidate finding, omit that finding entirely.
+   - Do not emit placeholder or partial FINDING blocks.
+   - Put extra ideas in `### CHECKED` / `### NOT_CHECKED`, not in malformed findings.
+
 ### Verdict
 Emit exactly one line: `VERDICT: <token>` using one of these tokens:
 

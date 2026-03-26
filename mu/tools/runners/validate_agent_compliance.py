@@ -109,38 +109,48 @@ def extract_finding_blocks(text: str) -> list[FindingBlock]:
         lines = lines_match.group(1) if lines_match else None
 
         # Extract CODE: block (handles **CODE:** variations)
-        # Accepts THREE formats:
-        # 1. Markdown code blocks (```python or ```) - most specific
-        # 2. Indented code (tabs or 2+ spaces)
-        # 3. Non-indented code blocks ending at next marker (VERIFIED, EXPLOIT, PROPOSED_FIX)
-        # Try markdown format first (most specific)
-        markdown_code_match = re.search(
-            r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?CODE(?:\*\*)?\s*:\s*(?:\*\*)?\s*\n```(?:\w+)?\n(.*?)```',
-            part, re.MULTILINE | re.DOTALL
+        # Accepts FOUR formats:
+        # 1. Inline single-line code: CODE: foo()
+        # 2. Markdown code blocks (```python or ```) - most specific multi-line form
+        # 3. Indented code (tabs or 2+ spaces)
+        # 4. Non-indented code blocks ending at next marker (VERIFIED, EXPLOIT, PROPOSED_FIX)
+        inline_code_match = re.search(
+            r'^(?:[ \t]*(?:[-*][ \t]+)?)?(?:\*\*)?CODE(?:\*\*)?[ \t]*:[ \t]*(?:\*\*)?[ \t]+'
+            r'(\S[^\n]*(?:\n(?:(?!^(?:\s*(?:[-*]\s+)?)?(?:VERIFIED|EXPLOIT|PROPOSED_FIX|FINDING)[ :])[^\n]*))*)',
+            part,
+            re.MULTILINE,
         )
-        if markdown_code_match:
-            code = markdown_code_match.group(1)
+        if inline_code_match:
+            code = inline_code_match.group(1).rstrip()
         else:
-            # Fall back to indented format
-            indent_code_match = re.search(
-                r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?CODE(?:\*\*)?\s*:\s*(?:\*\*)?\s*\n((?:\t|[ ]{2,})[^\n]+(?:\n(?:(?:\t|[ ]{2,})[^\n]*|[ \t]*))*)',
-                part, re.MULTILINE
+            # Try markdown format first (most specific multi-line form)
+            markdown_code_match = re.search(
+                r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?CODE(?:\*\*)?\s*:\s*(?:\*\*)?\s*\n```(?:\w+)?\n(.*?)```',
+                part, re.MULTILINE | re.DOTALL
             )
-            if indent_code_match:
-                code = indent_code_match.group(1)
+            if markdown_code_match:
+                code = markdown_code_match.group(1)
             else:
-                # Fall back to non-indented code ending at next marker
-                # This handles agents that don't indent their code blocks
-                # Captures everything from CODE:\n until VERIFIED:, EXPLOIT:, PROPOSED_FIX:, or end
-                non_indent_match = re.search(
-                    r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?CODE(?:\*\*)?\s*:\s*(?:\*\*)?\s*\n((?:(?!^(?:\s*(?:[-*]\s+)?)?(?:VERIFIED|EXPLOIT|PROPOSED_FIX|FINDING)[ :])[^\n]*\n?)+)',
+                # Fall back to indented format
+                indent_code_match = re.search(
+                    r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?CODE(?:\*\*)?\s*:\s*(?:\*\*)?\s*\n((?:\t|[ ]{2,})[^\n]+(?:\n(?:(?:\t|[ ]{2,})[^\n]*|[ \t]*))*)',
                     part, re.MULTILINE
                 )
-                if non_indent_match:
-                    # Strip trailing whitespace but keep the code
-                    code = non_indent_match.group(1).rstrip()
+                if indent_code_match:
+                    code = indent_code_match.group(1)
                 else:
-                    code = None
+                    # Fall back to non-indented code ending at next marker
+                    # This handles agents that don't indent their code blocks
+                    # Captures everything from CODE:\n until VERIFIED:, EXPLOIT:, PROPOSED_FIX:, or end
+                    non_indent_match = re.search(
+                        r'^(?:\s*(?:[-*]\s+)?)?(?:\*\*)?CODE(?:\*\*)?\s*:\s*(?:\*\*)?\s*\n((?:(?!^(?:\s*(?:[-*]\s+)?)?(?:VERIFIED|EXPLOIT|PROPOSED_FIX|FINDING)[ :])[^\n]*\n?)+)',
+                        part, re.MULTILINE
+                    )
+                    if non_indent_match:
+                        # Strip trailing whitespace but keep the code
+                        code = non_indent_match.group(1).rstrip()
+                    else:
+                        code = None
 
         # Extract VERIFIED: (handles bullets + markdown variations)
         verified_match = re.search(
@@ -228,6 +238,45 @@ def extract_code_tokens(code: str) -> set[str]:
     # Filter out very short tokens and common keywords
     common = {'if', 'else', 'for', 'in', 'def', 'return', 'and', 'or', 'not', 'is', 'the', 'a', 'an'}
     return {t.lower() for t in tokens if len(t) > 2 and t.lower() not in common}
+
+
+def extract_ellipsis_segments(code: str) -> list[str]:
+    """Extract ordered code segments around ellipsis markers.
+
+    Agents often cite a prefix and suffix with `...` between them. Treat those
+    as ordered excerpt segments rather than a literal string that must appear
+    contiguously in source.
+    """
+    segments: list[str] = []
+    current_lines: list[str] = []
+
+    for raw_line in code.strip().split('\n'):
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+
+        if stripped in ('...', '…', '# ...', '// ...'):
+            if current_lines:
+                segments.append('\n'.join(current_lines))
+                current_lines = []
+            continue
+
+        line = ' '.join(stripped.split())
+        truncated = False
+        if line.endswith('...') or line.endswith('…'):
+            line = line.rstrip('.…').rstrip()
+            truncated = True
+
+        if line:
+            current_lines.append(line)
+        if truncated and current_lines:
+            segments.append('\n'.join(current_lines))
+            current_lines = []
+
+    if current_lines:
+        segments.append('\n'.join(current_lines))
+
+    return segments
 
 
 def verify_code_at_location(block: FindingBlock) -> tuple[bool, str, str | None]:
@@ -319,6 +368,26 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str, str | None]
                 identifiers_found = sum(1 for ident in claimed_identifiers if ident in actual_code)
                 if identifiers_found >= len(claimed_identifiers) * 0.8:
                     # 80%+ of claimed identifiers found - valid summary
+                    return True, "", None
+
+            # General excerpt handling: require the non-ellipsis segments to
+            # appear in order within the cited source.
+            claimed_segments = extract_ellipsis_segments(code_to_verify)
+            if claimed_segments:
+                actual_lines = file_lines[max(0, start_line - 1):min(len(file_lines), end_line)]
+                actual_normalized = normalize_code_for_comparison(''.join(actual_lines))
+                cursor = 0
+                all_found = True
+                for segment in claimed_segments:
+                    normalized_segment = normalize_code_for_comparison(segment)
+                    if not normalized_segment:
+                        continue
+                    next_index = actual_normalized.find(normalized_segment, cursor)
+                    if next_index == -1:
+                        all_found = False
+                        break
+                    cursor = next_index + len(normalized_segment)
+                if all_found:
                     return True, "", None
 
         # Try exact line range first, then with ±1, ±2 line tolerance

@@ -27,10 +27,16 @@ See: reports/control_plane/executor_surfaces_plan_2026-03-22.md Section B.3
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
+import re
+import signal
 import subprocess
 import sys
+import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,8 +47,13 @@ try:
     from executor_common import (
         load_routing_record, ExecutorCommonError,
         BLOCKING_KEYWORDS, NON_BLOCKING_KEYWORDS,
-        HARDENING_INDICATORS, DEFECT_INDICATORS,
         REPEAT_FINDING_CAP,
+        MAX_WAVE_ID_LEN, WAVE_ID_RE,
+        normalize_wave_id,
+        process_descendants,
+        artifact_size_mtime_ns,
+        terminate_process_tree,
+        ensure_not_agent_review_mode,
         run_bridge_subprocess,
     )
 except ImportError:
@@ -56,14 +67,29 @@ except ImportError:
     ExecutorCommonError = _mod.ExecutorCommonError
     BLOCKING_KEYWORDS = _mod.BLOCKING_KEYWORDS
     NON_BLOCKING_KEYWORDS = _mod.NON_BLOCKING_KEYWORDS
-    HARDENING_INDICATORS = _mod.HARDENING_INDICATORS
-    DEFECT_INDICATORS = _mod.DEFECT_INDICATORS
     REPEAT_FINDING_CAP = _mod.REPEAT_FINDING_CAP
+    MAX_WAVE_ID_LEN = _mod.MAX_WAVE_ID_LEN
+    WAVE_ID_RE = _mod.WAVE_ID_RE
+    normalize_wave_id = _mod.normalize_wave_id
+    process_descendants = _mod.process_descendants
+    artifact_size_mtime_ns = _mod.artifact_size_mtime_ns
+    terminate_process_tree = _mod.terminate_process_tree
+    ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     run_bridge_subprocess = _mod.run_bridge_subprocess
 
 
 class PhaseBExecutorError(RuntimeError):
     """Raised when Phase B executor cannot proceed."""
+
+
+ALLOWED_FINDING_DISPOSITIONS = {"blocking", "non_blocking"}
+BRIDGE_JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+RECOGNIZED_BRIDGE_DECISIONS = {"GO", "REQUEST_CHANGES", "NO_GO", "QUESTION"}
+ALLOWED_REVIEW_DEPTHS = {"quick", "full", "founder", "all"}
+BRIDGE_REVIEW_POLL_INTERVAL = 30.0
+BRIDGE_REVIEW_POLL_SLEEP = 5.0
+BRIDGE_REVIEW_STALE_TIMEOUT = 120.0
+BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT = 60.0
 
 
 # ---------------------------------------------------------------------------
@@ -76,60 +102,43 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
     Returns (disposition, reason) tuple for logging/auditability.
 
     Priority:
-    1. Explicit 'disposition' field — use as-is.
-    2. Severity 'critical' — always blocking.
-    3. High severity — blocking UNLESS explicit non-blocking keyword match.
-    4. Medium/low severity — non-blocking UNLESS blocking keyword match.
-    5. No severity — keyword match, then fail-closed blocking.
+    1. Severity 'critical'/'high' — always blocking unless an explicit valid
+       disposition is present.
+    2. Explicit 'disposition' field — use only if valid.
+    3. Medium/low severity — non-blocking UNLESS blocking keyword match.
+    4. No severity — keyword match, then fail-closed blocking.
     """
-    disposition = finding.get("disposition")
-    if disposition is not None:
-        return disposition, "explicit disposition field"
-
     severity = (finding.get("severity") or "").lower()
+    disposition = finding.get("disposition")
+
+    # Critical/high findings stay blocking even if an explicit disposition tries
+    # to soften them. This is the fail-closed floor for bridge feedback.
+    # IMPORTANT: this check runs BEFORE the generic disposition check so that
+    # an explicit disposition field cannot downgrade critical/high severity.
+    if severity == "critical":
+        if disposition == "non_blocking":
+            return "blocking", "critical severity overrides explicit non_blocking disposition"
+        return "blocking", "critical severity (always blocking)"
+
+    if severity == "high":
+        if disposition == "non_blocking":
+            return "blocking", "high severity overrides explicit non_blocking disposition"
+        return "blocking", "high severity (always blocking)"
+
+    if disposition is not None:
+        if disposition in ALLOWED_FINDING_DISPOSITIONS:
+            return disposition, "explicit disposition field"
+        return "blocking", f"invalid disposition {disposition!r} (fail-closed)"
+
     # Build searchable text from title + summary
     text = " ".join(filter(None, [
         finding.get("title", ""),
         finding.get("summary", ""),
     ])).lower()
 
-    # Critical severity is always blocking regardless of content
-    if severity == "critical":
-        return "blocking", "critical severity (always blocking)"
-
     # Check for keyword matches
     blocking_match = next((kw for kw in BLOCKING_KEYWORDS if kw in text), None)
     non_blocking_match = next((kw for kw in NON_BLOCKING_KEYWORDS if kw in text), None)
-
-    # High severity: blocking unless an explicit non-blocking keyword match
-    # or detail-text analysis reveals hardening vs defect signals.
-    if severity == "high":
-        if blocking_match:
-            return "blocking", f"high severity + blocking keyword: '{blocking_match}'"
-        if non_blocking_match:
-            return "non_blocking", f"high severity but non-blocking keyword: '{non_blocking_match}'"
-
-        # No primary keyword match — inspect detail text for hardening vs defect signals
-        detail = " ".join(filter(None, [
-            finding.get("title", ""),
-            finding.get("summary", ""),
-            finding.get("detail", ""),
-            finding.get("description", ""),
-        ])).lower()
-
-        hardening_hit = next((kw for kw in HARDENING_INDICATORS if kw in detail), None)
-        defect_hit = next((kw for kw in DEFECT_INDICATORS if kw in detail), None)
-
-        # Defect signal overrides hardening signal (fail-closed on conflict)
-        if defect_hit and not hardening_hit:
-            return "blocking", f"high severity + defect indicator: '{defect_hit}'"
-        if hardening_hit and not defect_hit:
-            return "non_blocking", f"high severity + hardening indicator: '{hardening_hit}'"
-        if defect_hit and hardening_hit:
-            return "blocking", f"high severity + conflicting indicators (defect: '{defect_hit}', hardening: '{hardening_hit}') — fail-closed"
-
-        # No signals at all: fail-closed
-        return "blocking", "high severity, no keyword match (fail-closed)"
 
     # Medium/low severity: non-blocking unless a blocking keyword match
     if severity in ("medium", "low"):
@@ -193,7 +202,7 @@ def _classify_findings(
             # Non-blocking findings reset the counter (resolved or already deferred)
             finding_history.pop(key, None)
 
-        print(f"  [classify] '{title}' → {disposition} ({reason})", file=__import__('sys').stderr)
+        print(f"  [classify] '{title}' → {disposition} ({reason})", file=sys.stderr)
         if disposition == "non_blocking":
             non_blocking.append(f)
         else:
@@ -219,7 +228,7 @@ def _write_deferred_packet(
     """
     deferred_dir = repo_root / "reports" / "deferred" / "non_blocking"
     deferred_dir.mkdir(parents=True, exist_ok=True)
-    safe_wave = wave_id.replace("/", "_").replace(" ", "_")
+    safe_wave = normalize_wave_id(wave_id)
     packet_path = deferred_dir / f"{safe_wave}_bridge_nonblockers.md"
 
     lines = [
@@ -242,6 +251,101 @@ def _write_deferred_packet(
     return packet_path
 
 
+def _record_non_blocking_findings(
+    repo_root: Path,
+    wave_id: str,
+    existing_findings: list[dict[str, Any]],
+    new_findings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], Path | None]:
+    """Merge non-blocking findings by stable key and refresh the deferred packet."""
+    if not new_findings:
+        return existing_findings, None
+    merged: dict[str, dict[str, Any]] = {
+        _finding_key(finding): finding
+        for finding in existing_findings
+    }
+    for finding in new_findings:
+        merged[_finding_key(finding)] = finding
+    merged_findings = list(merged.values())
+    return merged_findings, _write_deferred_packet(repo_root, wave_id, merged_findings)
+
+
+def _supervisor_reason_text(parsed: dict[str, Any]) -> str:
+    """Return the actionable supervisor reason instead of only the decision token."""
+    parts: list[str] = []
+    summary = str(parsed.get("summary", "") or "").strip()
+    if summary:
+        parts.append(summary)
+    error_detail = str(parsed.get("error_detail", "") or "").strip()
+    if error_detail and error_detail != summary:
+        parts.append(f"detail: {error_detail}")
+    request_for_claude = str(parsed.get("request_for_claude", "") or "").strip()
+    if request_for_claude and request_for_claude not in parts:
+        parts.append(f"next: {request_for_claude}")
+    return " | ".join(parts)
+
+
+def _collect_supervisor_deferred_items(
+    changed_files: list[str],
+    deferred_packet_path: str | None,
+) -> list[str]:
+    """Surface active wave-owned deferred non-blocking packets in supervisor packages."""
+    deferred_items = {
+        rel_path
+        for rel_path in changed_files
+        if rel_path.startswith("reports/deferred/non_blocking/")
+        and rel_path.endswith(".md")
+        and not rel_path.endswith("/README.md")
+    }
+    if deferred_packet_path:
+        deferred_items.add(deferred_packet_path)
+    return sorted(deferred_items)
+
+
+def _extract_agent_envelope_payloads(render_text: str) -> tuple[list[str], bool, bool]:
+    """Return payloads, whether markers were present, and whether nesting was seen."""
+    payloads: list[str] = []
+    current: list[str] = []
+    inside = False
+    saw_markers = False
+    saw_nested_markers = False
+
+    for line in render_text.splitlines():
+        stripped = line.strip()
+        if stripped == "BEGIN_AGENT_ENVELOPE":
+            saw_markers = True
+            if inside:
+                saw_nested_markers = True
+            inside = True
+            current = []
+            continue
+        if stripped == "END_AGENT_ENVELOPE":
+            saw_markers = True
+            if inside:
+                payloads.append("\n".join(current))
+                current = []
+                inside = False
+            continue
+        if inside:
+            current.append(line)
+    if inside:
+        saw_markers = True
+    return payloads, saw_markers, saw_nested_markers
+
+
+def _normalize_agent_envelope_payload(payload: str) -> str:
+    """Strip optional fenced-code wrapper around an AGENT_ENVELOPE payload."""
+    stripped = payload.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
 def _parse_findings_from_render(render_text: str) -> list[dict[str, Any]]:
     """Extract structured findings from bridge render text.
 
@@ -252,17 +356,45 @@ def _parse_findings_from_render(render_text: str) -> list[dict[str, Any]]:
             - File: path/to/file.py
             - Evidence: description of evidence
     """
-    import re
-
     # Strategy 1: JSON envelope
-    pattern = r"BEGIN_AGENT_ENVELOPE\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?END_AGENT_ENVELOPE"
-    match = re.search(pattern, render_text, re.DOTALL)
-    if match:
+    # Parse envelope blocks structurally so malformed markers cannot swallow
+    # later payloads, and fail closed if multiple conflicting valid envelopes
+    # appear in a single render.
+    envelope_payloads, saw_envelope_markers, saw_nested_markers = _extract_agent_envelope_payloads(render_text)
+    if saw_nested_markers:
+        return [{
+            "title": "Nested AGENT_ENVELOPE markers blocked structured bridge findings parsing",
+            "severity": "critical",
+            "type": "DEFECT",
+            "disposition": "blocking",
+            "detail": "Bridge render contained nested AGENT_ENVELOPE markers.",
+        }]
+    valid_envelopes: list[dict[str, Any]] = []
+    for payload in reversed(envelope_payloads):
         try:
-            envelope = json.loads(match.group(1))
-            return envelope.get("findings", [])
+            envelope = json.loads(_normalize_agent_envelope_payload(payload))
         except (json.JSONDecodeError, TypeError):
-            pass
+            continue
+        findings = envelope.get("findings")
+        # Only consider envelopes with non-empty findings lists.
+        # Empty-findings envelopes ({"findings": []}) are discarded so a
+        # prepended decoy cannot trigger a false "conflicting payloads" error.
+        if isinstance(findings, list) and findings:
+            valid_envelopes.append(envelope)
+    if valid_envelopes:
+        canonical_payloads = {
+            json.dumps(env.get("findings", []), sort_keys=True, separators=(",", ":"))
+            for env in valid_envelopes
+        }
+        if len(canonical_payloads) > 1:
+            return [{
+                "title": "Multiple conflicting AGENT_ENVELOPE payloads in bridge render",
+                "severity": "critical",
+                "type": "DEFECT",
+                "disposition": "blocking",
+                "detail": "Bridge render contained more than one distinct structured findings payload.",
+            }]
+        return valid_envelopes[0]["findings"]
 
     # Strategy 2: numbered markdown findings
     # Pattern: "  N. **TYPE** (severity): title"  with optional indented detail lines
@@ -298,6 +430,17 @@ def _parse_findings_from_render(render_text: str) -> list[dict[str, Any]]:
             findings.append(finding)
         else:
             i += 1
+    if findings:
+        return findings
+
+    if saw_envelope_markers and not valid_envelopes:
+        return [{
+            "title": "Malformed AGENT_ENVELOPE blocked structured bridge findings parsing",
+            "severity": "critical",
+            "type": "DEFECT",
+            "disposition": "blocking",
+            "detail": "Bridge render contained AGENT_ENVELOPE markers but no valid JSON findings payload.",
+        }]
     return findings
 
 
@@ -401,12 +544,293 @@ def validate_inputs(
     if decision != "ROUTE_PHASE_B":
         errors.append(f"Expected ROUTE_PHASE_B, got {decision}")
 
-    # Plan must be locked
+    # Plan must be locked (or ROUTING_RECORD_AUTHORITY for planless mode)
     lock = plan.get("phase_a_lock", "")
-    if lock != "LOCKED":
-        errors.append(f"Plan Phase-A-Lock must be LOCKED, got {lock}")
+    if lock not in ("LOCKED", "ROUTING_RECORD_AUTHORITY"):
+        errors.append(f"Plan Phase-A-Lock must be LOCKED (or ROUTING_RECORD_AUTHORITY for planless), got {lock}")
 
     return len(errors) == 0, errors
+
+
+def _parse_ps_time_seconds(value: str) -> float:
+    """Parse `ps` TIME output into seconds."""
+    text = value.strip()
+    if not text:
+        return 0.0
+    days = 0
+    if "-" in text:
+        day_text, text = text.split("-", 1)
+        try:
+            days = int(day_text)
+        except ValueError:
+            return 0.0
+    parts = text.split(":")
+    try:
+        seconds = float(parts[-1])
+    except (IndexError, ValueError):
+        return 0.0
+    minutes = int(parts[-2]) if len(parts) >= 2 else 0
+    hours = int(parts[-3]) if len(parts) >= 3 else 0
+    return (days * 86400) + (hours * 3600) + (minutes * 60) + seconds
+
+
+def _bridge_process_snapshot(root_pid: int, repo_root: Path) -> tuple[tuple[int, ...], tuple[tuple[int, float], ...]]:
+    """Return descendant PID list and CPU-time fingerprint for a bridge subprocess tree."""
+    if root_pid <= 0:
+        return (), ()
+    try:
+        os.kill(root_pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return (), ()
+
+    try:
+        proc = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,time="],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return (), ()
+
+    children_by_parent: dict[int, set[int]] = {}
+    cpu_by_pid: dict[int, float] = {}
+    for raw in proc.stdout.splitlines():
+        parts = raw.split(None, 2)
+        if len(parts) != 3:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+        except ValueError:
+            continue
+        children_by_parent.setdefault(ppid, set()).add(pid)
+        cpu_by_pid[pid] = _parse_ps_time_seconds(parts[2])
+
+    descendants: set[int] = set()
+    stack = list(children_by_parent.get(root_pid, set()))
+    while stack:
+        pid = stack.pop()
+        if pid in descendants:
+            continue
+        descendants.add(pid)
+        stack.extend(children_by_parent.get(pid, set()))
+
+    tracked = {root_pid, *descendants}
+    cpu_fingerprint = tuple(
+        sorted((pid, cpu_by_pid.get(pid, 0.0)) for pid in tracked)
+    )
+    return tuple(sorted(descendants)), cpu_fingerprint
+
+
+def _bridge_file_fingerprint(path: Path) -> tuple[bool, int, int | None]:
+    if not path.exists():
+        return (False, 0, None)
+    stat = path.stat()
+    return (True, stat.st_size, stat.st_mtime_ns)
+
+
+def _bridge_artifact_fingerprint(
+    repo_root: Path,
+    job_id: str,
+    stdout_path: Path,
+    stderr_path: Path,
+) -> tuple[Any, ...]:
+    rendered_path = repo_root / ".agent_bus" / "rendered" / f"{job_id}.md"
+    raw_dir = repo_root / ".agent_bus" / "raw" / job_id
+    raw_files: tuple[tuple[str, tuple[bool, int, int | None]], ...] = ()
+    if raw_dir.exists():
+        raw_files = tuple(
+            sorted(
+                (path.name, _bridge_file_fingerprint(path))
+                for path in raw_dir.iterdir()
+                if path.is_file()
+            )
+        )
+    return (
+        _bridge_file_fingerprint(stdout_path),
+        _bridge_file_fingerprint(stderr_path),
+        _bridge_file_fingerprint(rendered_path),
+        raw_files,
+    )
+
+
+def _bridge_progress_snapshot(
+    repo_root: Path,
+    job_id: str,
+    root_pid: int,
+    stdout_path: Path,
+    stderr_path: Path,
+) -> dict[str, Any]:
+    child_pids, cpu_fingerprint = _bridge_process_snapshot(root_pid, repo_root)
+    return {
+        "child_pids": child_pids,
+        "cpu_fingerprint": cpu_fingerprint,
+        "artifact_fingerprint": _bridge_artifact_fingerprint(
+            repo_root, job_id, stdout_path, stderr_path
+        ),
+    }
+
+
+def _terminate_bridge_subprocess(proc: subprocess.Popen[str]) -> None:
+    """Terminate a bridge subprocess and its process group."""
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (OSError, ProcessLookupError):
+        pgid = None
+
+    try:
+        if pgid is not None:
+            os.killpg(pgid, signal.SIGTERM)
+        else:
+            proc.terminate()
+    except (OSError, ProcessLookupError):
+        pass
+
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return
+        time.sleep(0.1)
+
+    try:
+        if pgid is not None:
+            os.killpg(pgid, signal.SIGKILL)
+        else:
+            proc.kill()
+    except (OSError, ProcessLookupError):
+        pass
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _run_bridge_review_subprocess(
+    repo_root: Path,
+    cmd: list[str],
+    *,
+    job_id: str,
+    timeout: int,
+    verbose: bool,
+    poll_interval: float = BRIDGE_REVIEW_POLL_INTERVAL,
+    stale_timeout: float = BRIDGE_REVIEW_STALE_TIMEOUT,
+    aggregation_hang_timeout: float = BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT,
+) -> dict[str, Any]:
+    """Run bridge review with active stale/aggregation monitoring."""
+    scratch_dir = repo_root / ".scratch"
+    scratch_dir.mkdir(exist_ok=True)
+    run_id = job_id or uuid.uuid4().hex[:8]
+    stdout_path = scratch_dir / f"phase_b_bridge_{run_id}.stdout.log"
+    stderr_path = scratch_dir / f"phase_b_bridge_{run_id}.stderr.log"
+    poll_sleep = min(BRIDGE_REVIEW_POLL_SLEEP, poll_interval)
+
+    with stdout_path.open("w", encoding="utf-8") as stdout_handle, \
+            stderr_path.open("w", encoding="utf-8") as stderr_handle:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=repo_root,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            text=True,
+            start_new_session=True,
+        )
+
+        def _read_logs() -> tuple[str, str]:
+            stdout_handle.flush()
+            stderr_handle.flush()
+            return (
+                stdout_path.read_text(encoding="utf-8"),
+                stderr_path.read_text(encoding="utf-8"),
+            )
+
+        last_snapshot = _bridge_progress_snapshot(
+            repo_root, job_id, proc.pid, stdout_path, stderr_path
+        )
+        last_progress_at = time.monotonic()
+        start_time = last_progress_at
+        last_heartbeat_at = 0.0
+
+        while True:
+            exit_code = proc.poll()
+            snapshot = _bridge_progress_snapshot(
+                repo_root, job_id, proc.pid, stdout_path, stderr_path
+            )
+            now = time.monotonic()
+            if snapshot != last_snapshot:
+                last_progress_at = now
+            idle_for = now - last_progress_at
+
+            if verbose and (now - last_heartbeat_at >= poll_interval):
+                stderr_bytes = snapshot["artifact_fingerprint"][1][1]
+                print(
+                    "[phase-b] Bridge heartbeat: "
+                    f"job={job_id} pid={proc.pid} child_pids={list(snapshot['child_pids'])} "
+                    f"idle_seconds={idle_for:.1f} stderr_bytes={stderr_bytes}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                last_heartbeat_at = now
+
+            if exit_code is not None:
+                stdout, stderr = _read_logs()
+                return {
+                    "exit_code": exit_code,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "stdout_path": str(stdout_path.relative_to(repo_root)),
+                    "stderr_path": str(stderr_path.relative_to(repo_root)),
+                }
+
+            if not snapshot["child_pids"] and idle_for >= aggregation_hang_timeout:
+                _terminate_bridge_subprocess(proc)
+                stdout, stderr = _read_logs()
+                return {
+                    "exit_code": -3,
+                    "stdout": stdout,
+                    "stderr": (
+                        f"Bridge review aggregation hang after {idle_for:.1f}s "
+                        f"(job_id={job_id}, stdout_log={stdout_path.name}, stderr_log={stderr_path.name}).\n"
+                        f"{stderr}"
+                    ).strip(),
+                    "stdout_path": str(stdout_path.relative_to(repo_root)),
+                    "stderr_path": str(stderr_path.relative_to(repo_root)),
+                }
+
+            if idle_for >= stale_timeout:
+                _terminate_bridge_subprocess(proc)
+                stdout, stderr = _read_logs()
+                return {
+                    "exit_code": -2,
+                    "stdout": stdout,
+                    "stderr": (
+                        f"Bridge review stale after {idle_for:.1f}s "
+                        f"(job_id={job_id}, child_pids={list(snapshot['child_pids'])}, "
+                        f"stdout_log={stdout_path.name}, stderr_log={stderr_path.name}).\n"
+                        f"{stderr}"
+                    ).strip(),
+                    "stdout_path": str(stdout_path.relative_to(repo_root)),
+                    "stderr_path": str(stderr_path.relative_to(repo_root)),
+                }
+
+            if now - start_time >= timeout:
+                _terminate_bridge_subprocess(proc)
+                stdout, stderr = _read_logs()
+                return {
+                    "exit_code": -1,
+                    "stdout": stdout,
+                    "stderr": (
+                        f"Bridge review timed out after {timeout}s "
+                        f"(job_id={job_id}, stdout_log={stdout_path.name}, stderr_log={stderr_path.name}).\n"
+                        f"{stderr}"
+                    ).strip(),
+                    "stdout_path": str(stdout_path.relative_to(repo_root)),
+                    "stderr_path": str(stderr_path.relative_to(repo_root)),
+                }
+
+            last_snapshot = snapshot
+            time.sleep(poll_sleep)
 
 
 def run_bridge_review(
@@ -442,33 +866,24 @@ def run_bridge_review(
     if verbose:
         cmd.append("-v")
 
-    try:
-        result = run_bridge_subprocess(cmd, cwd=repo_root, timeout=timeout)
-        # Parse decision from stdout (bridge_supervisor.py review prints it)
-        stdout_stripped = result.stdout.strip()
-        decision = ""
-        if stdout_stripped:
-            # Decision is the last non-empty line of stdout
-            for line in reversed(stdout_stripped.splitlines()):
-                line = line.strip()
-                if line in ("GO", "REQUEST_CHANGES", "NO_GO", "QUESTION"):
-                    decision = line
-                    break
-        return {
-            "exit_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "decision": decision,
-            "job_id": job_id or "",
-        }
-    except ExecutorCommonError:
-        return {
-            "exit_code": -1,
-            "stdout": "",
-            "stderr": f"Bridge review timed out after {timeout}s",
-            "decision": "",
-            "job_id": job_id or "",
-        }
+    result = _run_bridge_review_subprocess(
+        repo_root,
+        cmd,
+        job_id=job_id or "",
+        timeout=timeout,
+        verbose=verbose,
+    )
+    stdout_stripped = result["stdout"].strip()
+    decision = ""
+    if stdout_stripped:
+        for line in reversed(stdout_stripped.splitlines()):
+            line = line.strip()
+            if line in RECOGNIZED_BRIDGE_DECISIONS:
+                decision = line
+                break
+    result["decision"] = decision
+    result["job_id"] = job_id or ""
+    return result
 
 
 def _read_bridge_render(repo_root: Path, job_id: str) -> str:
@@ -477,6 +892,8 @@ def _read_bridge_render(repo_root: Path, job_id: str) -> str:
     Returns the rendered content, or empty string if not found.
     The rendered file is at .agent_bus/rendered/{job_id}.md.
     """
+    if not BRIDGE_JOB_ID_RE.fullmatch(job_id or ""):
+        return ""
     rendered_path = repo_root / ".agent_bus" / "rendered" / f"{job_id}.md"
     if rendered_path.exists():
         return rendered_path.read_text(encoding="utf-8")
@@ -487,30 +904,244 @@ def run_sdk_agents(
     repo_root: Path,
     files: list[str],
     *,
-    depth: str = "full",
+    depth: str = "quick",
     verbose: bool = False,
     timeout: int = 600,
 ) -> dict[str, Any]:
     """Run SDK agent review on implementation files."""
+    def _timestamp() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _read_status_snapshot(path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _status_fingerprint(snapshot: dict[str, Any]) -> tuple[Any, ...]:
+        """Ignore pure heartbeat rewrites; track only semantic status changes."""
+        return (
+            snapshot.get("status", ""),
+            snapshot.get("phase_label", ""),
+            tuple(snapshot.get("running_agents", []) or []),
+            json.dumps(snapshot.get("completed_agents", {}) or {}, sort_keys=True),
+            snapshot.get("last_progress_label", ""),
+            snapshot.get("last_progress_timestamp", ""),
+        )
+
     cmd = [
         sys.executable, "tools/runners/run_review.py",
         *files,
         "--depth", depth,
+        "--fail-fast-hard-gate",
+        "--no-memory",
     ]
+    scratch_dir = repo_root / ".scratch"
+    scratch_dir.mkdir(exist_ok=True)
+    run_id = uuid.uuid4().hex[:8]
+    stdout_path = scratch_dir / f"phase_b_agent_review_{run_id}.stdout.log"
+    stderr_path = scratch_dir / f"phase_b_agent_review_{run_id}.stderr.log"
+    status_path = scratch_dir / f"phase_b_agent_review_{run_id}.status.json"
+    report_path = scratch_dir / f"phase_b_agent_review_{run_id}.report.md"
+    cmd.extend(["--output", str(report_path)])
+    findings_path = repo_root / ".agent_memory" / "findings.json"
+    poll_interval = 30.0
+    stale_timeout = 300.0
+    aggregation_hang_timeout = 120.0
+    single_tail_timeout = 180
 
-    try:
-        result = subprocess.run(
-            cmd, cwd=repo_root, capture_output=True, text=True,
-            check=False, timeout=timeout,
-            env={**__import__("os").environ, "PYTHONHASHSEED": "0"},
+    with stdout_path.open("w", encoding="utf-8") as stdout_handle, \
+            stderr_path.open("w", encoding="utf-8") as stderr_handle:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=repo_root,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            text=True,
+            env={
+                **os.environ,
+                "PYTHONHASHSEED": "0",
+                "RCX_REVIEW_STATUS_PATH": str(status_path),
+                "RCX_REVIEW_HEARTBEAT_INTERVAL": str(int(poll_interval)),
+                "RCX_REVIEW_SINGLE_TAIL_TIMEOUT": str(single_tail_timeout),
+                "RCX_REVIEW_GROUP_STALE_TIMEOUT": str(int(stale_timeout)),
+            },
         )
+
+        last_stdout_size, _ = artifact_size_mtime_ns(stdout_path)
+        last_stderr_size, _ = artifact_size_mtime_ns(stderr_path)
+        last_findings_size, last_findings_mtime = artifact_size_mtime_ns(findings_path)
+        last_status_snapshot = _read_status_snapshot(status_path)
+        last_status_fingerprint = _status_fingerprint(last_status_snapshot)
+        last_children = process_descendants(proc.pid, cwd=repo_root)
+        last_progress_ts = _timestamp()
+        last_progress_at = time.monotonic()
+        start_time = last_progress_at
+        last_heartbeat_at = 0.0
+
+        def _read_logs() -> tuple[str, str]:
+            stdout_handle.flush()
+            stderr_handle.flush()
+            return (
+                stdout_path.read_text(encoding="utf-8"),
+                stderr_path.read_text(encoding="utf-8"),
+            )
+
+        while True:
+            exit_code = proc.poll()
+            child_pids = process_descendants(proc.pid, cwd=repo_root)
+            stdout_size, _ = artifact_size_mtime_ns(stdout_path)
+            stderr_size, _ = artifact_size_mtime_ns(stderr_path)
+            findings_size, findings_mtime = artifact_size_mtime_ns(findings_path)
+            status_snapshot = _read_status_snapshot(status_path)
+            status_fingerprint = _status_fingerprint(status_snapshot)
+            status_changed = status_fingerprint != last_status_fingerprint
+
+            output_growth = (
+                stdout_size != last_stdout_size
+                or stderr_size != last_stderr_size
+                or findings_size != last_findings_size
+                or findings_mtime != last_findings_mtime
+                or status_changed
+            )
+            child_state_changed = child_pids != last_children
+
+            if output_growth or child_state_changed:
+                last_progress_at = time.monotonic()
+                last_progress_ts = _timestamp()
+
+            now = time.monotonic()
+            if verbose and (now - last_heartbeat_at >= poll_interval):
+                pending_agents = status_snapshot.get("running_agents", [])
+                phase_label = status_snapshot.get("phase_label", "")
+                print(
+                    "[phase-b] SDK heartbeat: "
+                    f"step=agent_review pid={proc.pid} child_pids={sorted(child_pids)} "
+                    f"stdout_bytes={stdout_size} stderr_bytes={stderr_size} "
+                    f"findings_mtime_ns={findings_mtime} status_pending={pending_agents} "
+                    f"status_phase={phase_label} last_progress={last_progress_ts}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                last_heartbeat_at = now
+
+            if exit_code is not None:
+                break
+
+            idle_for = now - last_progress_at
+            if not child_pids and idle_for >= aggregation_hang_timeout:
+                terminate_process_tree(proc.pid, cwd=repo_root)
+                stdout_text, stderr_text = _read_logs()
+                status_detail = ""
+                if status_snapshot:
+                    status_detail = (
+                        f"\nstatus_phase={status_snapshot.get('phase_label', '')} "
+                        f"running_agents={status_snapshot.get('running_agents', [])} "
+                        f"last_progress={status_snapshot.get('last_progress_timestamp', '')}"
+                    )
+                return {
+                    "exit_code": -3,
+                    "stdout": stdout_text,
+                    "stderr": (
+                        "aggregation_hang: reviewer children exited but aggregator "
+                        f"remained alive for {int(idle_for)}s"
+                        + status_detail
+                        + (f"\n{stderr_text[:2000]}" if stderr_text else "")
+                    ).strip(),
+                    "stdout_path": str(stdout_path.relative_to(repo_root)),
+                    "stderr_path": str(stderr_path.relative_to(repo_root)),
+                    "status_path": str(status_path.relative_to(repo_root)),
+                    "report_path": str(report_path.relative_to(repo_root)),
+                    "last_progress_timestamp": last_progress_ts,
+                }
+            if idle_for >= stale_timeout:
+                terminate_process_tree(proc.pid, cwd=repo_root)
+                stdout_text, stderr_text = _read_logs()
+                status_detail = ""
+                if status_snapshot:
+                    status_detail = (
+                        f"\nstatus_phase={status_snapshot.get('phase_label', '')} "
+                        f"running_agents={status_snapshot.get('running_agents', [])} "
+                        f"last_progress={status_snapshot.get('last_progress_timestamp', '')}"
+                    )
+                return {
+                    "exit_code": -2,
+                    "stdout": stdout_text,
+                    "stderr": (
+                        "stale_run: no output growth, findings artifact change, or "
+                        f"child-state change for {int(idle_for)}s"
+                        + status_detail
+                        + (f"\n{stderr_text[:2000]}" if stderr_text else "")
+                    ).strip(),
+                    "stdout_path": str(stdout_path.relative_to(repo_root)),
+                    "stderr_path": str(stderr_path.relative_to(repo_root)),
+                    "status_path": str(status_path.relative_to(repo_root)),
+                    "report_path": str(report_path.relative_to(repo_root)),
+                    "last_progress_timestamp": last_progress_ts,
+                }
+            if now - start_time >= timeout:
+                terminate_process_tree(proc.pid, cwd=repo_root)
+                stdout_text, stderr_text = _read_logs()
+                status_detail = ""
+                if status_snapshot:
+                    status_detail = (
+                        f"\nstatus_phase={status_snapshot.get('phase_label', '')} "
+                        f"running_agents={status_snapshot.get('running_agents', [])} "
+                        f"last_progress={status_snapshot.get('last_progress_timestamp', '')}"
+                    )
+                return {
+                    "exit_code": -1,
+                    "stdout": stdout_text,
+                    "stderr": (
+                        f"Agent review timed out after {timeout}s "
+                        f"(last progress {last_progress_ts})"
+                        + status_detail
+                        + (f"\n{stderr_text[:2000]}" if stderr_text else "")
+                    ).strip(),
+                    "stdout_path": str(stdout_path.relative_to(repo_root)),
+                    "stderr_path": str(stderr_path.relative_to(repo_root)),
+                    "status_path": str(status_path.relative_to(repo_root)),
+                    "report_path": str(report_path.relative_to(repo_root)),
+                    "last_progress_timestamp": last_progress_ts,
+                }
+
+            last_stdout_size = stdout_size
+            last_stderr_size = stderr_size
+            last_findings_size = findings_size
+            last_findings_mtime = findings_mtime
+            last_status_snapshot = status_snapshot
+            last_status_fingerprint = status_fingerprint
+            last_children = child_pids
+            time.sleep(poll_interval)
+
+        stdout_text, stderr_text = _read_logs()
         return {
-            "exit_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
+            "exit_code": proc.returncode,
+            "stdout": stdout_text,
+            "stderr": stderr_text,
+            "stdout_path": str(stdout_path.relative_to(repo_root)),
+            "stderr_path": str(stderr_path.relative_to(repo_root)),
+            "status_path": str(status_path.relative_to(repo_root)),
+            "report_path": str(report_path.relative_to(repo_root)),
+            "last_progress_timestamp": last_progress_ts,
         }
-    except subprocess.TimeoutExpired:
-        return {"exit_code": -1, "stdout": "", "stderr": "Agent review timed out"}
+
+
+def _select_sdk_review_files(files: list[str]) -> list[str]:
+    """Prefer tool/runtime implementation files for the one-time SDK gate.
+
+    Test files stay mechanically validated in the wave, but they should not
+    consume the limited one-time SDK hard-gate budget unless no tool/runtime
+    surfaces remain.
+    """
+    implementation = [
+        f for f in files
+        if f.startswith(("mu/tools/", "tools/"))
+        or f in {"CLAUDE.md", "TASKS.md", "STATUS.md", "CHANGELOG.md"}
+    ]
+    return implementation
 
 
 def _collect_changed_files(repo_root: Path) -> list[str]:
@@ -551,12 +1182,86 @@ _WAVE_OWNED_PREFIXES = (
 )
 
 
+_DECLARED_PATH_EXTENSIONS = (".py", ".json", ".md", ".txt", ".sh")
+_DECLARED_ROOT_FILES = {"CLAUDE.md", "TASKS.md", "STATUS.md", "CHANGELOG.md"}
+_LINE_REF_RE = re.compile(r"^(?P<path>.+?):(?P<line>\d+)(?::(?P<col>\d+))?$")
+_INLINE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./-])([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+|(?:CLAUDE|TASKS|STATUS|CHANGELOG)\.md)(?![A-Za-z0-9_./-])")
+
+
+def _normalize_declared_path_token(token: str) -> str | None:
+    """Normalize markdown-ish path tokens from plan packets into repo-relative paths."""
+    candidate = token.strip().strip("`'\"*()[]{}<>")
+    candidate = candidate.rstrip(",;:.")
+    if not candidate:
+        return None
+    if candidate.startswith("./"):
+        candidate = candidate.removeprefix("./")
+    line_ref = _LINE_REF_RE.match(candidate)
+    if line_ref:
+        candidate = line_ref.group("path")
+    if not candidate or any(part == ".." for part in Path(candidate).parts):
+        return None
+    if candidate.startswith("/"):
+        return None
+    if candidate in _DECLARED_ROOT_FILES:
+        return candidate
+    if "/" not in candidate:
+        return candidate if candidate.endswith(_DECLARED_PATH_EXTENSIONS) else None
+    if candidate.endswith(_DECLARED_PATH_EXTENSIONS):
+        return candidate
+    return None
+
+
+def _parse_plan_declared_files(plan_content: str) -> list[str]:
+    """Extract repo-relative file paths from a locked plan packet."""
+    seen: set[str] = set()
+    parsed: list[str] = []
+
+    def _add(token: str) -> None:
+        normalized = _normalize_declared_path_token(token)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            parsed.append(normalized)
+
+    for line in plan_content.splitlines():
+        for token in re.findall(r"`([^`\n]+)`", line):
+            _add(token)
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            bullet_body = stripped[2:].strip()
+            if bullet_body:
+                _add(bullet_body.split()[0])
+        for token in _INLINE_PATH_RE.findall(line):
+            _add(token)
+
+    return parsed
+
+
+def _collect_baseline_wave_files(repo_root: Path, plan_path: str) -> list[str]:
+    """Capture the preserved dirty-wave baseline before implementer deltas are applied.
+
+    This preserves the caller-approved dirty wave on runs that intentionally start
+    from an already-dirty control-plane lane. Later implementer/executor deltas
+    are unioned on top of this baseline.
+    """
+    all_changed = _collect_changed_files(repo_root)
+    plan_prefix = plan_path.rsplit("/", 1)[0] + "/" if "/" in plan_path else ""
+    baseline: list[str] = []
+    for f in all_changed:
+        if any(f.startswith(p) or f == p for p in _WAVE_OWNED_PREFIXES):
+            baseline.append(f)
+        elif plan_prefix and f.startswith(plan_prefix):
+            baseline.append(f)
+    return sorted(set(baseline))
+
+
 def _collect_wave_owned_files(
     repo_root: Path,
     plan_path: str,
     plan_declared_files: list[str] | None = None,
     implementer_changed_files: set[str] | None = None,
     executor_created_files: set[str] | None = None,
+    baseline_wave_files: set[str] | None = None,
 ) -> list[str]:
     """Collect changed files scoped to plan-declared + implementer-tracked set only.
 
@@ -564,7 +1269,8 @@ def _collect_wave_owned_files(
       1. Declared in the plan (plan_declared_files), OR
       2. Actually changed by the implementer (implementer_changed_files), OR
       3. Created by the executor itself (executor_created_files — e.g. deferred packets), OR
-      4. Under the plan's directory prefix.
+      4. Part of the preserved dirty-wave baseline (baseline_wave_files), OR
+      5. Under the plan's directory prefix.
 
     When neither plan_declared_files nor implementer_changed_files are provided
     (both are None), falls back to prefix-based filtering as a degraded path.
@@ -579,6 +1285,7 @@ def _collect_wave_owned_files(
         allowed = set(plan_declared_files or [])
         allowed |= (implementer_changed_files or set())
         allowed |= (executor_created_files or set())
+        allowed |= (baseline_wave_files or set())
         # The plan file itself is always wave-owned
         allowed.add(plan_path)
         scoped = []
@@ -594,7 +1301,20 @@ def _collect_wave_owned_files(
             scoped.append(f)
         elif plan_prefix and f.startswith(plan_prefix):
             scoped.append(f)
-    return scoped
+        elif baseline_wave_files and f in baseline_wave_files:
+            scoped.append(f)
+    return sorted(scoped)
+
+
+def _resolve_review_depth(config: dict[str, Any], phase_key: str, default: str = "quick") -> str:
+    """Resolve review depth from executor config and fail closed on invalid values."""
+    depth = config.get("review_depths", {}).get(phase_key, default)
+    if depth not in ALLOWED_REVIEW_DEPTHS:
+        raise PhaseBExecutorError(
+            f"Invalid review depth {depth!r} for {phase_key}; "
+            f"expected one of {sorted(ALLOWED_REVIEW_DEPTHS)}"
+        )
+    return depth
 
 
 def _stage_files(repo_root: Path, files: list[str]) -> bool:
@@ -609,6 +1329,37 @@ def _stage_files(repo_root: Path, files: list[str]) -> bool:
         return True
     except subprocess.CalledProcessError:
         return False
+
+
+def _agent_review_scope_fingerprint(repo_root: Path, files: list[str], *, depth: str) -> str:
+    """Fingerprint the exact SDK review scope for safe resume."""
+    digest = hashlib.sha256()
+    digest.update(depth.encode("utf-8"))
+    for rel_path in sorted(files):
+        digest.update(b"\0path\0")
+        digest.update(rel_path.encode("utf-8", errors="surrogatepass"))
+        full_path = repo_root / rel_path
+        if not full_path.exists():
+            digest.update(b"\0missing")
+            continue
+        digest.update(b"\0present\0")
+        digest.update(full_path.read_bytes())
+    return digest.hexdigest()
+
+
+def _bridge_scope_fingerprint(repo_root: Path, files: list[str]) -> str:
+    """Fingerprint the exact bridge-reviewed scope for safe resume."""
+    digest = hashlib.sha256()
+    for rel_path in sorted(files):
+        digest.update(b"\0path\0")
+        digest.update(rel_path.encode("utf-8", errors="surrogatepass"))
+        full_path = repo_root / rel_path
+        if not full_path.exists():
+            digest.update(b"\0missing")
+            continue
+        digest.update(b"\0present\0")
+        digest.update(full_path.read_bytes())
+    return digest.hexdigest()
 
 
 def run_pre_commit_supervisor(
@@ -648,13 +1399,22 @@ def run_pre_commit_supervisor(
                 "summary": result.summary,
                 "status": result.status,
                 "findings": result.findings,
+                "request_for_claude": result.request_for_claude,
+                "error_code": result.error_code,
+                "error_detail": result.error_detail,
             },
             "receipt_path": result.receipt_path,
         }
     except MetaBridgeClientError as exc:
         return {
             "exit_code": -1,
-            "parsed": {"decision": "ERROR_INTERNAL", "summary": str(exc)[:500]},
+            "parsed": {
+                "decision": "ERROR_INTERNAL",
+                "status": "error",
+                "summary": "Pre-commit supervisor client error",
+                "findings": [],
+                "error_detail": str(exc)[:2000],
+            },
             "receipt_path": "",
         }
 
@@ -706,9 +1466,77 @@ def prepare_commit_handoff(
     return handoff_path
 
 
+def _derive_planless_context(
+    routing_record: dict[str, Any],
+    repo_root: Path,
+) -> dict[str, str]:
+    """Derive a bounded implementation context from a routing record.
+
+    Used when Phase B is invoked without --plan. The routing record must
+    contain enough information to bound the scope:
+    - wave_name or wave_id (task identity)
+    - summary (what to implement)
+    - next_candidates with at least one candidate (bounded scope)
+
+    Returns a synthetic plan dict compatible with the plan loading path.
+    Raises PhaseBExecutorError if the routing record is under-specified.
+    """
+    wave_id = routing_record.get("wave_name") or routing_record.get("wave_id", "")
+    summary = routing_record.get("summary", "")
+    request = routing_record.get("request_for_claude", "")
+    candidates = routing_record.get("next_candidates", [])
+
+    errors: list[str] = []
+    if not wave_id:
+        errors.append("Routing record missing wave_name/wave_id — cannot derive task identity")
+    if not summary:
+        errors.append("Routing record missing summary — cannot derive implementation scope")
+    if not candidates:
+        errors.append("Routing record missing next_candidates — scope is unbounded")
+
+    if errors:
+        raise PhaseBExecutorError(
+            f"Cannot derive planless Phase B context: {'; '.join(errors)}. "
+            f"Either provide --plan or enrich the routing record."
+        )
+
+    # Check for a tracked_packet in candidates — if one exists, the caller
+    # should have used --plan instead.
+    for c in candidates:
+        tp = c.get("tracked_packet")
+        if tp and (repo_root / tp).exists():
+            raise PhaseBExecutorError(
+                f"Routing record references tracked packet '{tp}' which exists. "
+                f"Use --plan {tp} instead of planless mode."
+            )
+
+    # Build a synthetic plan content from routing record scope
+    candidate_text = "\n".join(
+        f"- {c.get('candidate', 'unknown')}" for c in candidates
+    )
+    content = (
+        f"# Planless Phase B: {wave_id}\n\n"
+        f"Date: derived-from-routing-record\n"
+        f"Status: Phase B (planless — authority from routing record)\n"
+        f"Phase-A-Lock: ROUTING_RECORD_AUTHORITY\n\n"
+        f"## Summary\n\n{summary}\n\n"
+        f"## Request\n\n{request or '(none)'}\n\n"
+        f"## Candidates\n\n{candidate_text}\n"
+    )
+
+    return {
+        "path": f"<planless:{wave_id}>",
+        "content": content,
+        "phase_a_lock": "ROUTING_RECORD_AUTHORITY",
+        "status": "Phase B (planless)",
+        "planless": "true",
+        "wave_id": wave_id,
+    }
+
+
 def run_phase_b(
     repo_root: Path,
-    plan_path: str,
+    plan_path: str | None = None,
     *,
     max_bridge_rounds: int = 10,
     verbose: bool = False,
@@ -717,7 +1545,7 @@ def run_phase_b(
     """Execute the Phase B loop.
 
     This is the main entry point. It orchestrates:
-    1. Plan loading + validation
+    1. Plan loading + validation (or planless derivation from routing record)
     2. Invoke implementer agent (separate code-writing actor via bridge adapter)
     3. SDK agent review (once) — FAIL CLOSED on nonzero exit
     4. Bridge convergence loop — bound to exact job_id, not newest file
@@ -726,8 +1554,20 @@ def run_phase_b(
     7. On COMMIT_GO: prepare handoff with explicit receipt path
     8. On NEEDS_PHASE_B: re-enter bridge loop (not agents)
 
+    If plan_path is None, derives bounded context from routing record.
+    Fails closed on ambiguous or under-specified routing records.
+
     Returns a result dict with status and details.
     """
+    try:
+        ensure_not_agent_review_mode("phase_b_executor.run_phase_b")
+    except ExecutorCommonError as exc:
+        return {
+            "status": "error",
+            "step": "review_mode_guard",
+            "errors": [str(exc)],
+        }
+
     result: dict[str, Any] = {
         "status": "success",
         "plan_path": plan_path,
@@ -746,16 +1586,28 @@ def run_phase_b(
     # Check for resumable state
     saved_state = _load_state(repo_root)
     resume_after: str = ""
-    if saved_state and saved_state.get("plan_path") == plan_path:
-        completed_step = saved_state.get("completed_step", "")
-        log(f"Resuming from saved state (completed_step={completed_step})")
-        result["resumed_from"] = completed_step
-        resume_after = completed_step
-        # Restore key fields from saved state
-        if saved_state.get("bridge_rounds"):
-            result["bridge_rounds"] = saved_state["bridge_rounds"]
-        if saved_state.get("deferred_packet_path"):
-            result["deferred_packet_path"] = saved_state["deferred_packet_path"]
+    if saved_state:
+        saved_plan = saved_state.get("plan_path")
+        # For planless invocations (plan_path is None on entry), the saved
+        # state stores the derived "<planless:wave_id>" path.  Match if the
+        # saved path is a planless marker — the actual plan_path will be set
+        # after _derive_planless_context runs, so we match on the marker
+        # prefix here instead of requiring an exact None == None comparison.
+        plan_matches = (
+            saved_plan == plan_path  # explicit --plan case
+            or (plan_path is None and isinstance(saved_plan, str)
+                and saved_plan.startswith("<planless:"))
+        )
+        if plan_matches:
+            completed_step = saved_state.get("completed_step", "")
+            log(f"Resuming from saved state (completed_step={completed_step})")
+            result["resumed_from"] = completed_step
+            resume_after = completed_step
+            # Restore key fields from saved state
+            if saved_state.get("bridge_rounds"):
+                result["bridge_rounds"] = saved_state["bridge_rounds"]
+            if saved_state.get("deferred_packet_path"):
+                result["deferred_packet_path"] = saved_state["deferred_packet_path"]
 
     # Step 1: Load and validate
     # Routing validation is FATAL: wrong routing token → error (not silent rewrite).
@@ -783,12 +1635,24 @@ def run_phase_b(
             return {"status": "error", "step": "load_routing_record",
                     "errors": [f"Routing record load failed: {exc}. Use --bootstrap-exception to override."]}
 
-    try:
-        plan = load_plan_packet(repo_root, plan_path)
-    except PhaseBExecutorError as exc:
-        return {"status": "error", "step": "load_plan", "errors": [str(exc)]}
+    # Plan loading: either from --plan path or derived from routing record
+    if plan_path:
+        try:
+            plan = load_plan_packet(repo_root, plan_path)
+        except PhaseBExecutorError as exc:
+            return {"status": "error", "step": "load_plan", "errors": [str(exc)]}
+        log(f"Plan loaded: {plan_path}")
+    else:
+        # Planless mode: derive bounded context from routing record
+        try:
+            plan = _derive_planless_context(routing_record, repo_root)
+            plan_path = plan["path"]
+            result["plan_path"] = plan_path
+            result["planless"] = True
+            log(f"Planless mode: derived context from routing record (wave={plan.get('wave_id', '?')})")
+        except PhaseBExecutorError as exc:
+            return {"status": "error", "step": "derive_planless_context", "errors": [str(exc)]}
 
-    log(f"Plan loaded: {plan_path}")
     log(f"Phase-A-Lock: {plan.get('phase_a_lock', 'unknown')}")
 
     valid, errors = validate_inputs(routing_record, plan)
@@ -822,15 +1686,9 @@ def run_phase_b(
     model = config.get("model_overrides", {}).get("phase_b_executor")
     timeout = config.get("timeouts", {}).get("phase_b_executor", 1200)
 
-    # Parse plan-declared files from plan content (lines starting with "- " that look like paths)
+    # Parse plan-declared files from markdown/body content.
     plan_declared_files: list[str] | None = None
-    _parsed: list[str] = []
-    for line in plan.get("content", "").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("- ") and ("/" in stripped or stripped.endswith(".py") or stripped.endswith(".json")):
-            candidate = stripped[2:].strip().split()[0].rstrip(",;:")
-            if "/" in candidate or candidate.endswith((".py", ".json", ".md", ".txt")):
-                _parsed.append(candidate)
+    _parsed = _parse_plan_declared_files(plan.get("content", ""))
     # Only activate strict tracking when the plan actually declares files.
     # An empty parse means "plan has no file list" → use prefix fallback.
     if _parsed:
@@ -840,6 +1698,9 @@ def run_phase_b(
     implementer_changed: set[str] = set()
     # Track files created by the executor itself (e.g. deferred packets)
     executor_created: set[str] = set()
+    # Preserve the dirty-wave baseline so resumed packaging does not collapse to
+    # only the latest implementer delta.
+    baseline_wave_files: set[str] = set()
     # Track accumulated non-blocking findings across rounds (for deferred packet freshness)
     all_non_blocking: list[dict[str, Any]] = []
     # Track repeat-finding counts across bridge rounds (key → consecutive blocking count)
@@ -851,26 +1712,40 @@ def run_phase_b(
             implementer_changed = set(saved_state["implementer_changed"])
         if saved_state.get("executor_created"):
             executor_created = set(saved_state["executor_created"])
+        if saved_state.get("baseline_wave_files"):
+            baseline_wave_files = set(saved_state["baseline_wave_files"])
         if saved_state.get("all_non_blocking"):
             all_non_blocking = list(saved_state["all_non_blocking"])
         if saved_state.get("finding_history"):
             finding_history = dict(saved_state["finding_history"])
+    # Merge persisted dirty-wave scope with the current repo dirty baseline so
+    # late follow-up fixes made after a saved checkpoint are not silently dropped
+    # from supervisor packaging on resume.
+    baseline_wave_files |= set(_collect_baseline_wave_files(repo_root, plan_path))
 
     # Determine which steps to skip based on resume state
-    _RESUME_ORDER = ["implementer", "bridge_converged", "needs_phase_b_reentry"]
+    _RESUME_ORDER = ["implementer", "agent_review", "bridge_converged", "needs_phase_b_reentry"]
     _skip_to_reentry = resume_after == "needs_phase_b_reentry"
     _skip_through_bridge = (
         resume_after.startswith("bridge_round_") or resume_after == "bridge_converged"
         or _skip_to_reentry
     )
-    _skip_through_implementer = resume_after == "implementer" or _skip_through_bridge
+    _skip_through_implementer = resume_after in {"implementer", "agent_review"} or _skip_through_bridge
 
     # Step 3: Invoke implementer agent
-    wave_id = plan_path.replace("reports/control_plane/", "").replace(".md", "")
+    raw_wave_id = plan.get("wave_id") or plan_path.replace("reports/control_plane/", "").replace(".md", "")
+    wave_id = normalize_wave_id(raw_wave_id)
     if _skip_through_implementer:
         log(f"Step 3: SKIPPED (resume_after={resume_after})")
         result["implementer_invoked"] = True
-        changed_files = _collect_wave_owned_files(repo_root, plan_path, plan_declared_files, implementer_changed or None, executor_created or None)
+        changed_files = _collect_wave_owned_files(
+            repo_root,
+            plan_path,
+            plan_declared_files,
+            implementer_changed or None,
+            executor_created or None,
+            baseline_wave_files or None,
+        )
     else:
         # Snapshot dirty files before implementer runs
         pre_impl_files = set(_collect_changed_files(repo_root))
@@ -894,7 +1769,7 @@ def run_phase_b(
 
         # FAIL CLOSED: any implementer failure is fatal, not just timeout
         if impl_result["status"] != "success":
-            return {
+            result.update({
                 "status": "error",
                 "step": "implementer",
                 "errors": [
@@ -903,12 +1778,20 @@ def run_phase_b(
                 ],
                 "implementer_invoked": True,
                 "implementer_status": impl_result["status"],
-            }
+            })
+            return result
 
         # Collect changed files after implementer ran — track what implementer actually changed
         post_impl_files = set(_collect_changed_files(repo_root))
         implementer_changed = post_impl_files - pre_impl_files
-        changed_files = _collect_wave_owned_files(repo_root, plan_path, plan_declared_files, implementer_changed or None, executor_created or None)
+        changed_files = _collect_wave_owned_files(
+            repo_root,
+            plan_path,
+            plan_declared_files,
+            implementer_changed or None,
+            executor_created or None,
+            baseline_wave_files or None,
+        )
         log(f"Changed files after implementer: {len(changed_files)} (implementer touched {len(implementer_changed)})")
 
         # Persist state after implementer
@@ -919,9 +1802,32 @@ def run_phase_b(
             "bridge_rounds": 0,
             "implementer_changed": sorted(implementer_changed),
             "executor_created": sorted(executor_created),
+            "baseline_wave_files": sorted(baseline_wave_files),
             "all_non_blocking": all_non_blocking,
             "finding_history": finding_history,
         })
+
+    bridge_scope_fingerprint = _bridge_scope_fingerprint(repo_root, changed_files)
+    if (
+        saved_state is not None
+        and not _skip_to_reentry
+        and (
+            resume_after == "bridge_converged"
+            or resume_after.startswith("bridge_round_")
+        )
+    ):
+        saved_bridge_scope_fingerprint = saved_state.get("bridge_scope_fingerprint")
+        if saved_bridge_scope_fingerprint != bridge_scope_fingerprint:
+            log(
+                "Saved bridge checkpoint drifted or lacked scope fingerprint; "
+                "re-running SDK review and bridge"
+            )
+            _skip_through_bridge = False
+        else:
+            log(
+                f"Bridge checkpoint scope fingerprint matched "
+                f"(resume_after={resume_after})"
+            )
 
     # Step 4: Run SDK agents ONCE on live worktree changed files
     # FAIL CLOSED on nonzero exit (hard gate agents must pass)
@@ -929,26 +1835,104 @@ def run_phase_b(
         log(f"Step 4: SKIPPED (resume_after={resume_after})")
         result["agent_review_ran"] = True
     else:
-        log("Running SDK agent review on changed files...")
-        agent_files = changed_files if changed_files else ["--pr"]
-        agent_timeout = config.get("timeouts", {}).get("agent_review", 900)
-        agent_result = run_sdk_agents(repo_root, agent_files, verbose=verbose, timeout=agent_timeout)
-        result["agent_review_ran"] = True
-        result["agent_exit_code"] = agent_result["exit_code"]
-        log(f"Agent review exit code: {agent_result['exit_code']}")
+        review_depth = _resolve_review_depth(config, "phase_b")
+        log(f"Running SDK agent review on changed files (depth={review_depth})...")
+        agent_files = _select_sdk_review_files(changed_files) if changed_files else ["--pr"]
+        if changed_files and not agent_files:
+            log(
+                "Skipping SDK agent review: no implementation files remain in the wave-owned "
+                "changed set; report/doc residue will proceed to bridge without a second hard gate",
+            )
+            result["agent_review_skipped_reason"] = "no_implementation_files"
+            result["agent_review_scope"] = []
+        else:
+            agent_scope_fingerprint = _agent_review_scope_fingerprint(
+                repo_root,
+                agent_files,
+                depth=review_depth,
+            )
+            can_resume_agent_review = (
+                resume_after == "agent_review"
+                and saved_state is not None
+                and saved_state.get("agent_review_scope_fingerprint") == agent_scope_fingerprint
+                and saved_state.get("agent_exit_code") in (0, 1, 2)
+                and bool(saved_state.get("agent_review_report_path"))
+                and bool(saved_state.get("agent_review_status_path"))
+            )
+            if changed_files and agent_files != changed_files:
+                log(
+                    f"SDK review scope narrowed to {len(agent_files)} implementation file(s) "
+                    f"(excluded {len(changed_files) - len(agent_files)} report artifact(s))",
+                )
+            result["agent_review_ran"] = True
+            result["agent_review_scope"] = agent_files
+            if can_resume_agent_review:
+                result["agent_exit_code"] = int(saved_state["agent_exit_code"])
+                result["agent_review_report_path"] = saved_state.get("agent_review_report_path")
+                result["agent_review_status_path"] = saved_state.get("agent_review_status_path")
+                result["agent_review_stdout_path"] = saved_state.get("agent_review_stdout_path")
+                log("Step 4: SKIPPED (resume_after=agent_review, scope fingerprint matched)")
+                log(f"Agent review exit code: {result['agent_exit_code']} (resumed)")
+            else:
+                if resume_after == "agent_review":
+                    log(
+                        "Saved agent review checkpoint drifted or was incomplete; "
+                        "re-running SDK agent review"
+                    )
+                agent_timeout = config.get("timeouts", {}).get("agent_review", 900)
+                agent_result = run_sdk_agents(
+                    repo_root,
+                    agent_files,
+                    depth=review_depth,
+                    verbose=verbose,
+                    timeout=agent_timeout,
+                )
+                result["agent_exit_code"] = agent_result["exit_code"]
+                result["agent_review_report_path"] = agent_result.get("report_path")
+                result["agent_review_status_path"] = agent_result.get("status_path")
+                result["agent_review_stdout_path"] = agent_result.get("stdout_path")
+                log(f"Agent review exit code: {agent_result['exit_code']}")
 
-        if agent_result["exit_code"] != 0:
-            return {
-                "status": "error",
-                "step": "agent_review",
-                "errors": [
-                    f"SDK agent review failed (exit={agent_result['exit_code']}). "
-                    "Hard gate agents must pass before bridge review. "
-                    f"stderr: {agent_result.get('stderr', '')[:500]}"
-                ],
-                "agent_review_ran": True,
-                "agent_exit_code": agent_result["exit_code"],
-            }
+                if agent_result["exit_code"] not in (0, 1, 2):
+                    return {
+                        "status": "error",
+                        "step": "agent_review",
+                        "errors": [
+                            f"SDK agent review failed (exit={agent_result['exit_code']}). "
+                            "Hard gate agents and compliance must pass before bridge review. "
+                            f"stderr: {agent_result.get('stderr', '')[:500]}"
+                        ],
+                        "agent_review_ran": True,
+                        "agent_exit_code": agent_result["exit_code"],
+                    }
+
+                _save_state(repo_root, {
+                    "plan_path": plan_path,
+                    "completed_step": "agent_review",
+                    "wave_id": wave_id,
+                    "bridge_rounds": 0,
+                    "implementer_changed": sorted(implementer_changed),
+                    "executor_created": sorted(executor_created),
+                    "baseline_wave_files": sorted(baseline_wave_files),
+                    "all_non_blocking": all_non_blocking,
+                    "finding_history": finding_history,
+                    "agent_review_scope": agent_files,
+                    "agent_review_scope_fingerprint": agent_scope_fingerprint,
+                    "agent_exit_code": agent_result["exit_code"],
+                    "agent_review_report_path": agent_result.get("report_path"),
+                    "agent_review_status_path": agent_result.get("status_path"),
+                    "agent_review_stdout_path": agent_result.get("stdout_path"),
+                })
+
+            if result["agent_exit_code"] in (1, 2):
+                if result["agent_exit_code"] == 1:
+                    log(
+                        "Agent review returned semantic blocker findings exit=1; "
+                        "continuing to bridge for contextual blocking/non-blocking classification"
+                    )
+                else:
+                    log("Agent review returned warnings-only exit=2; continuing to bridge review")
+                result["agent_review_warning_only"] = True
 
     # Step 5: Bridge convergence loop (implementer-fix → bridge-review)
     # Each round: bridge reviews → if not GO, re-invoke implementer with findings → next round.
@@ -972,10 +1956,38 @@ def run_phase_b(
         log(f"Bridge review round {round_num}/{max_bridge_rounds} (job={bridge_job_id})...")
         result["bridge_rounds"] = round_num
 
+        changed_files = _collect_wave_owned_files(
+            repo_root,
+            plan_path,
+            plan_declared_files,
+            implementer_changed or None,
+            executor_created or None,
+            baseline_wave_files or None,
+        )
+        if changed_files:
+            log(f"Staging {len(changed_files)} wave-owned files before bridge review...")
+            if not _stage_files(repo_root, changed_files):
+                result["status"] = "error"
+                result["step"] = "bridge_staging"
+                result["errors"] = ["Failed to stage files before bridge review"]
+                _clear_state(repo_root)
+                return result
+
         # Build task summary — include deferred packet path if we have one
         task_summary = f"Phase B implementation review R{round_num} for {plan_path}"
         if deferred_packet_path:
             task_summary += f"\n\nAcknowledged deferred non-blocking findings: {deferred_packet_path}"
+        if result.get("agent_review_report_path"):
+            task_summary += (
+                "\n\nOne-time Phase B SDK review artifacts:"
+                f"\n- exit_code: {result.get('agent_exit_code')}"
+                f"\n- report: {result.get('agent_review_report_path')}"
+                f"\n- status: {result.get('agent_review_status_path')}"
+                f"\n- stdout: {result.get('agent_review_stdout_path')}"
+                "\nBridge must treat SDK findings as review inputs for contextual "
+                "blocking/non-blocking classification. Semantic SDK negatives are "
+                "not automatic current-step blockers by themselves."
+            )
 
         bridge_result = run_bridge_review(
             repo_root,
@@ -989,17 +2001,43 @@ def run_phase_b(
         bridge_decision = bridge_result.get("decision", "")
         log(f"Bridge decision: {bridge_decision!r} (exit={bridge_result['exit_code']})")
 
-        # Timeout is a hard error — do not silently retry
-        if bridge_result["exit_code"] == -1:
+        # Bridge supervision failures are hard errors — do not silently retry
+        if bridge_result["exit_code"] in (-1, -2, -3):
+            failure_label = {
+                -1: "timed out",
+                -2: "stale",
+                -3: "aggregation hang",
+            }[bridge_result["exit_code"]]
             result["status"] = "error"
             result["errors"] = [
-                f"Bridge review timed out in round {round_num} "
-                f"(timeout={timeout}s). {bridge_result.get('stderr', '')}"
+                f"Bridge review {failure_label} in round {round_num}. "
+                f"{bridge_result.get('stderr', '')}"
             ]
             _clear_state(repo_root)
             return result
 
         if bridge_result["exit_code"] == 0 and bridge_decision == "GO":
+            render = _read_bridge_render(repo_root, bridge_job_id)
+            parsed_findings = _parse_findings_from_render(render) if render else []
+            blocking_findings, non_blocking_findings = _classify_findings(parsed_findings)
+            if blocking_findings:
+                result["status"] = "error"
+                result["step"] = "bridge_decision"
+                result["errors"] = [
+                    f"Bridge returned GO in round {round_num} but rendered transcript still contains "
+                    f"{len(blocking_findings)} blocking finding(s). Fail closed."
+                ]
+                _clear_state(repo_root)
+                return result
+            if non_blocking_findings:
+                all_non_blocking, packet_path = _record_non_blocking_findings(
+                    repo_root, wave_id, all_non_blocking, non_blocking_findings
+                )
+                if packet_path is not None:
+                    deferred_packet_path = str(packet_path.relative_to(repo_root))
+                    executor_created.add(deferred_packet_path)
+                    result["deferred_packet_path"] = deferred_packet_path
+                    log(f"Filed {len(non_blocking_findings)} non-blocking finding(s) from GO to {deferred_packet_path}")
             log("Bridge converged: GO")
             bridge_converged = True
             break
@@ -1017,7 +2055,34 @@ def run_phase_b(
             _clear_state(repo_root)
             return result
 
+        if bridge_result["exit_code"] == 0 and bridge_decision not in RECOGNIZED_BRIDGE_DECISIONS:
+            result["status"] = "error"
+            result["step"] = "bridge_decision"
+            result["errors"] = [
+                f"Bridge returned unrecognized success decision in round {round_num}: "
+                f"{bridge_decision!r}. Fail closed."
+            ]
+            _clear_state(repo_root)
+            return result
+
         if bridge_decision in ("REQUEST_CHANGES", "NO_GO"):
+            # FAIL CLOSED if the bridge subprocess itself failed (nonzero exit).
+            # A nonzero exit with a REQUEST_CHANGES/NO_GO token in stdout means
+            # the bridge process crashed — do not treat as a recoverable review.
+            if bridge_result["exit_code"] != 0:
+                log(f"Bridge subprocess failed (exit={bridge_result['exit_code']}) "
+                    f"with decision {bridge_decision!r} — fail closed (not recoverable)")
+                result["status"] = "error"
+                result["step"] = "bridge_subprocess"
+                result["errors"] = [
+                    f"Bridge subprocess failed in round {round_num} "
+                    f"(exit={bridge_result['exit_code']}, decision={bridge_decision}). "
+                    f"Nonzero exit with {bridge_decision} is not recoverable. "
+                    f"stderr: {bridge_result.get('stderr', '')[:500]}"
+                ]
+                _clear_state(repo_root)
+                return result
+
             # Read findings from the exact bridge render for this job
             render = _read_bridge_render(repo_root, bridge_job_id)
             findings_text = render if render else bridge_result.get("stdout", "")
@@ -1048,12 +2113,14 @@ def run_phase_b(
 
             # Auto-file non-blocking findings to deferred packet
             if non_blocking_findings:
-                all_non_blocking.extend(non_blocking_findings)
-                packet_path = _write_deferred_packet(repo_root, wave_id, all_non_blocking)
-                deferred_packet_path = str(packet_path.relative_to(repo_root))
-                executor_created.add(deferred_packet_path)
-                result["deferred_packet_path"] = deferred_packet_path
-                log(f"Filed {len(non_blocking_findings)} non-blocking finding(s) to {deferred_packet_path}")
+                all_non_blocking, packet_path = _record_non_blocking_findings(
+                    repo_root, wave_id, all_non_blocking, non_blocking_findings
+                )
+                if packet_path is not None:
+                    deferred_packet_path = str(packet_path.relative_to(repo_root))
+                    executor_created.add(deferred_packet_path)
+                    result["deferred_packet_path"] = deferred_packet_path
+                    log(f"Filed {len(non_blocking_findings)} non-blocking finding(s) to {deferred_packet_path}")
 
             # If ALL findings are non-blocking, treat as converged
             if parsed_findings and not blocking_findings:
@@ -1108,7 +2175,14 @@ def run_phase_b(
             post_fix_files = set(_collect_changed_files(repo_root))
             implementer_changed |= (post_fix_files - pre_fix_files)
             # Recollect changed files after implementer fix (scoped to wave outputs)
-            changed_files = _collect_wave_owned_files(repo_root, plan_path, plan_declared_files, implementer_changed or None, executor_created or None)
+            changed_files = _collect_wave_owned_files(
+                repo_root,
+                plan_path,
+                plan_declared_files,
+                implementer_changed or None,
+                executor_created or None,
+                baseline_wave_files or None,
+            )
             log(f"Changed files after bridge fix: {len(changed_files)}")
 
             # Run pytest on changed test files mechanically
@@ -1144,7 +2218,14 @@ def run_phase_b(
                     # Track what the pytest-fix pass changed
                     post_pytest_fix_files = set(_collect_changed_files(repo_root))
                     implementer_changed |= (post_pytest_fix_files - pre_pytest_fix_files)
-                    changed_files = _collect_wave_owned_files(repo_root, plan_path, plan_declared_files, implementer_changed or None, executor_created or None)
+                    changed_files = _collect_wave_owned_files(
+                        repo_root,
+                        plan_path,
+                        plan_declared_files,
+                        implementer_changed or None,
+                        executor_created or None,
+                        baseline_wave_files or None,
+                    )
 
             # Persist state after each bridge round
             _save_state(repo_root, {
@@ -1153,9 +2234,11 @@ def run_phase_b(
                 "wave_id": wave_id,
                 "bridge_rounds": round_num,
                 "current_bridge_round": round_num,
+                "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
                 "deferred_packet_path": deferred_packet_path,
                 "implementer_changed": sorted(implementer_changed),
                 "executor_created": sorted(executor_created),
+                "baseline_wave_files": sorted(baseline_wave_files),
                 "all_non_blocking": all_non_blocking,
                 "finding_history": finding_history,
             })
@@ -1192,23 +2275,35 @@ def run_phase_b(
         "completed_step": "bridge_converged",
         "wave_id": wave_id,
         "bridge_rounds": result["bridge_rounds"],
+        "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
         "deferred_packet_path": deferred_packet_path,
         "implementer_changed": sorted(implementer_changed),
         "executor_created": sorted(executor_created),
+        "baseline_wave_files": sorted(baseline_wave_files),
         "all_non_blocking": all_non_blocking,
         "finding_history": finding_history,
     })
 
     # Resume from NEEDS_PHASE_B re-entry: skip pytest gate + staging + supervisor,
     # jump directly into the re-entry loop below.
+    supervisor_parsed: dict[str, Any] = {}
     if _skip_to_reentry:
         log("Resuming into NEEDS_PHASE_B re-entry (skipping supervisor)")
         findings_for_impl = (saved_state or {}).get("reentry_findings", "Fix required (resumed)")
+        result["pre_commit_summary"] = findings_for_impl
         decision = "NEEDS_PHASE_B"
         # Provide stubs for variables used in re-entry block
-        changed_files = _collect_wave_owned_files(repo_root, plan_path, plan_declared_files, implementer_changed or None, executor_created or None)
+        changed_files = _collect_wave_owned_files(
+            repo_root,
+            plan_path,
+            plan_declared_files,
+            implementer_changed or None,
+            executor_created or None,
+            baseline_wave_files or None,
+        )
         deferred_packet_path = result.get("deferred_packet_path")
         supervisor_result = {"parsed": {"summary": findings_for_impl}}
+        supervisor_parsed = supervisor_result["parsed"]
         scratch_dir = repo_root / ".scratch"
         scratch_dir.mkdir(exist_ok=True)
         package_path = scratch_dir / "phase_b_supervisor_package.json"
@@ -1223,6 +2318,7 @@ def run_phase_b(
                 for p in blocking_dir.iterdir()
                 if p.is_file() and p.suffix == ".md" and p.name != "README.md"
             )
+        deferred_items = _collect_supervisor_deferred_items(changed_files, deferred_packet_path)
         supervisor_package = {
             "task_id": routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
             "wave_name": wave_id,
@@ -1230,7 +2326,7 @@ def run_phase_b(
             "changed_files": changed_files,
             "scope_items": [plan_path],
             "fixes_implemented": ["Phase B implementation per locked plan (resumed from NEEDS_PHASE_B)"],
-            "deferred_items": [deferred_packet_path] if deferred_packet_path else [],
+            "deferred_items": deferred_items,
             "bridge_status": {"rounds": result.get("bridge_rounds", 0), "reentry": True},
             "evidence_handles": {},
             "blocker_report_paths": blocker_paths,
@@ -1242,7 +2338,14 @@ def run_phase_b(
 
     if not _skip_to_reentry:
         # Step 5b: Final pytest gate — failed tests MUST block commit_ready
-        changed_files = _collect_wave_owned_files(repo_root, plan_path, plan_declared_files, implementer_changed or None, executor_created or None)
+        changed_files = _collect_wave_owned_files(
+            repo_root,
+            plan_path,
+            plan_declared_files,
+            implementer_changed or None,
+            executor_created or None,
+            baseline_wave_files or None,
+        )
         final_test_files = [f for f in changed_files if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")]
         if final_test_files:
             log(f"Final pytest gate: running {len(final_test_files)} test file(s)...")
@@ -1288,6 +2391,7 @@ def run_phase_b(
             )
         if blocker_paths:
             log(f"Acknowledging {len(blocker_paths)} active blocking packet(s)")
+        deferred_items = _collect_supervisor_deferred_items(changed_files, deferred_packet_path)
 
         supervisor_package = {
             "task_id": routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
@@ -1296,7 +2400,7 @@ def run_phase_b(
             "changed_files": changed_files,
             "scope_items": [plan_path],
             "fixes_implemented": ["Phase B implementation per locked plan"],
-            "deferred_items": [deferred_packet_path] if deferred_packet_path else [],
+            "deferred_items": deferred_items,
             "bridge_status": {"rounds": result.get("bridge_rounds", 0)},
             "evidence_handles": {},
             "blocker_report_paths": blocker_paths,
@@ -1308,9 +2412,13 @@ def run_phase_b(
         supervisor_result = run_pre_commit_supervisor(
             repo_root, package_path, verbose=verbose,
         )
-        result["pre_commit_decision"] = supervisor_result.get("parsed", {}).get("decision")
+        supervisor_parsed = supervisor_result.get("parsed", {})
+        result["pre_commit_decision"] = supervisor_parsed.get("decision")
+        result["pre_commit_summary"] = _supervisor_reason_text(supervisor_parsed)
         receipt_path = supervisor_result.get("receipt_path", "")
         log(f"Supervisor decision: {result['pre_commit_decision']}, receipt: {receipt_path}")
+        if result.get("pre_commit_summary"):
+            log(f"Supervisor summary: {result['pre_commit_summary']}")
 
         decision = result["pre_commit_decision"]
     if decision == "NEEDS_PHASE_B":
@@ -1318,7 +2426,7 @@ def run_phase_b(
         log("NEEDS_PHASE_B — re-invoking implementer then bridge loop")
         reentry_converged = False
         # Initial findings come from supervisor; subsequent rounds use bridge findings
-        findings_for_impl = supervisor_result.get("parsed", {}).get("summary", "Fix required")
+        findings_for_impl = result.get("pre_commit_summary") or supervisor_parsed.get("summary", "Fix required")
 
         # Persist needs_phase_b_reentry state so crash-resume re-enters here
         _save_state(repo_root, {
@@ -1329,6 +2437,7 @@ def run_phase_b(
             "deferred_packet_path": deferred_packet_path,
             "implementer_changed": sorted(implementer_changed),
             "executor_created": sorted(executor_created),
+            "baseline_wave_files": sorted(baseline_wave_files),
             "all_non_blocking": all_non_blocking,
             "finding_history": finding_history,
             "reentry_findings": findings_for_impl,
@@ -1369,8 +2478,19 @@ def run_phase_b(
             changed_files = _collect_wave_owned_files(
                 repo_root, plan_path, plan_declared_files,
                 implementer_changed or None, executor_created or None,
+                baseline_wave_files or None,
             )
             log(f"Re-entry changed files: {len(changed_files)} (implementer touched {len(post_reentry_files - pre_reentry_files)})")
+
+            if changed_files:
+                log(f"Re-entry: staging {len(changed_files)} wave-owned files before bridge review...")
+                if not _stage_files(repo_root, changed_files):
+                    _clear_state(repo_root)
+                    return {
+                        "status": "error",
+                        "step": "reentry_bridge_staging",
+                        "errors": ["Failed to stage files before bridge review during re-entry"],
+                    }
 
             # Bridge reviews the fix (bound to exact job_id)
             bridge_job_id = f"phase-b-reentry-r{reentry_round}-{uuid.uuid4().hex[:8]}"
@@ -1384,17 +2504,43 @@ def run_phase_b(
             bridge_decision = bridge_result.get("decision", "")
             log(f"Reentry bridge decision: {bridge_decision!r}")
 
-            # Timeout is a hard error in re-entry too — do not silently retry
-            if bridge_result["exit_code"] == -1:
+            # Bridge supervision failures are hard errors in re-entry too
+            if bridge_result["exit_code"] in (-1, -2, -3):
+                failure_label = {
+                    -1: "timed out",
+                    -2: "stale",
+                    -3: "aggregation hang",
+                }[bridge_result["exit_code"]]
                 result["status"] = "error"
                 result["errors"] = [
-                    f"Bridge review timed out during re-entry round {reentry_round} "
-                    f"(timeout={timeout}s). {bridge_result.get('stderr', '')}"
+                    f"Bridge review {failure_label} during re-entry round {reentry_round}. "
+                    f"{bridge_result.get('stderr', '')}"
                 ]
                 _clear_state(repo_root)
                 return result
 
             if bridge_result["exit_code"] == 0 and bridge_decision == "GO":
+                render = _read_bridge_render(repo_root, bridge_job_id)
+                parsed_findings = _parse_findings_from_render(render) if render else []
+                blocking_findings, non_blocking_findings = _classify_findings(parsed_findings)
+                if blocking_findings:
+                    result["status"] = "error"
+                    result["step"] = "reentry_bridge_decision"
+                    result["errors"] = [
+                        f"Bridge returned GO during re-entry round {reentry_round} but rendered transcript still "
+                        f"contains {len(blocking_findings)} blocking finding(s). Fail closed."
+                    ]
+                    _clear_state(repo_root)
+                    return result
+                if non_blocking_findings:
+                    all_non_blocking, packet_path = _record_non_blocking_findings(
+                        repo_root, wave_id, all_non_blocking, non_blocking_findings
+                    )
+                    if packet_path is not None:
+                        deferred_packet_path = str(packet_path.relative_to(repo_root))
+                        executor_created.add(deferred_packet_path)
+                        result["deferred_packet_path"] = deferred_packet_path
+                        log(f"Re-entry GO: filed {len(non_blocking_findings)} non-blocking finding(s)")
                 log("Bridge re-entry converged: GO")
                 reentry_converged = True
                 break
@@ -1412,7 +2558,32 @@ def run_phase_b(
                 _clear_state(repo_root)
                 return result
 
+            if bridge_result["exit_code"] == 0 and bridge_decision not in RECOGNIZED_BRIDGE_DECISIONS:
+                result["status"] = "error"
+                result["step"] = "reentry_bridge_decision"
+                result["errors"] = [
+                    f"Bridge returned unrecognized success decision during re-entry round {reentry_round}: "
+                    f"{bridge_decision!r}. Fail closed."
+                ]
+                _clear_state(repo_root)
+                return result
+
             if bridge_decision in ("REQUEST_CHANGES", "NO_GO"):
+                # FAIL CLOSED if the bridge subprocess itself failed (nonzero exit).
+                if bridge_result["exit_code"] != 0:
+                    log(f"Re-entry bridge subprocess failed (exit={bridge_result['exit_code']}) "
+                        f"with decision {bridge_decision!r} — fail closed (not recoverable)")
+                    result["status"] = "error"
+                    result["step"] = "reentry_bridge_subprocess"
+                    result["errors"] = [
+                        f"Re-entry bridge subprocess failed in round {reentry_round} "
+                        f"(exit={bridge_result['exit_code']}, decision={bridge_decision}). "
+                        f"Nonzero exit with {bridge_decision} is not recoverable. "
+                        f"stderr: {bridge_result.get('stderr', '')[:500]}"
+                    ]
+                    _clear_state(repo_root)
+                    return result
+
                 # Mirror initial loop: classify findings, defer non-blockers
                 render = _read_bridge_render(repo_root, bridge_job_id)
                 findings_text = render if render else bridge_result.get("stdout", "")
@@ -1420,13 +2591,33 @@ def run_phase_b(
                 parsed_findings = _parse_findings_from_render(render) if render else []
                 blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
 
+                if blocking_findings and finding_history:
+                    unresolvable = [
+                        _finding_key(f) for f in blocking_findings
+                        if finding_history.get(_finding_key(f), 0) >= REPEAT_FINDING_CAP
+                    ]
+                    if unresolvable:
+                        log(f"HARD FAILURE: re-entry blocking finding(s) hit repeat cap "
+                            f"({REPEAT_FINDING_CAP} rounds) — implementer cannot resolve")
+                        result["status"] = "error"
+                        result["step"] = "reentry_bridge_convergence"
+                        result["errors"] = [
+                            f"Re-entry blocking finding(s) unresolvable after {REPEAT_FINDING_CAP} rounds: "
+                            + ", ".join(unresolvable[:5])
+                        ]
+                        result["unresolvable_findings"] = blocking_findings
+                        _clear_state(repo_root)
+                        return result
+
                 if non_blocking_findings:
-                    all_non_blocking.extend(non_blocking_findings)
-                    packet_path = _write_deferred_packet(repo_root, wave_id, all_non_blocking)
-                    deferred_packet_path = str(packet_path.relative_to(repo_root))
-                    executor_created.add(deferred_packet_path)
-                    result["deferred_packet_path"] = deferred_packet_path
-                    log(f"Re-entry: filed {len(non_blocking_findings)} non-blocking finding(s)")
+                    all_non_blocking, packet_path = _record_non_blocking_findings(
+                        repo_root, wave_id, all_non_blocking, non_blocking_findings
+                    )
+                    if packet_path is not None:
+                        deferred_packet_path = str(packet_path.relative_to(repo_root))
+                        executor_created.add(deferred_packet_path)
+                        result["deferred_packet_path"] = deferred_packet_path
+                        log(f"Re-entry: filed {len(non_blocking_findings)} non-blocking finding(s)")
 
                 if parsed_findings and not blocking_findings:
                     log(f"Re-entry: all {len(non_blocking_findings)} findings non-blocking — treating as GO")
@@ -1444,7 +2635,14 @@ def run_phase_b(
 
                 log(f"Reentry bridge: {bridge_decision} — {len(blocking_findings)} blocking, "
                     f"{len(non_blocking_findings)} non-blocking — will re-invoke implementer")
-                changed_files = _collect_wave_owned_files(repo_root, plan_path, plan_declared_files, implementer_changed or None, executor_created or None)
+                changed_files = _collect_wave_owned_files(
+                    repo_root,
+                    plan_path,
+                    plan_declared_files,
+                    implementer_changed or None,
+                    executor_created or None,
+                    baseline_wave_files or None,
+                )
 
                 # Checkpoint re-entry state so crash-resume picks up new findings and round
                 _save_state(repo_root, {
@@ -1455,6 +2653,7 @@ def run_phase_b(
                     "deferred_packet_path": deferred_packet_path,
                     "implementer_changed": sorted(implementer_changed),
                     "executor_created": sorted(executor_created),
+                    "baseline_wave_files": sorted(baseline_wave_files),
                     "all_non_blocking": all_non_blocking,
                     "finding_history": finding_history,
                     "reentry_findings": findings_for_impl,
@@ -1487,7 +2686,14 @@ def run_phase_b(
             return result
 
         # R7-3: mechanical pytest gate for re-entry path (mirrors initial path)
-        changed_files = _collect_wave_owned_files(repo_root, plan_path, plan_declared_files, implementer_changed or None, executor_created or None)
+        changed_files = _collect_wave_owned_files(
+            repo_root,
+            plan_path,
+            plan_declared_files,
+            implementer_changed or None,
+            executor_created or None,
+            baseline_wave_files or None,
+        )
         reentry_test_files = [f for f in changed_files if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")]
         if reentry_test_files:
             log(f"Re-entry pytest gate: running {len(reentry_test_files)} test file(s)...")
@@ -1534,26 +2740,43 @@ def run_phase_b(
         supervisor_result = run_pre_commit_supervisor(
             repo_root, package_path, verbose=verbose,
         )
-        decision = supervisor_result.get("parsed", {}).get("decision")
+        supervisor_parsed = supervisor_result.get("parsed", {})
+        decision = supervisor_parsed.get("decision")
         receipt_path = supervisor_result.get("receipt_path", "")
         result["pre_commit_decision"] = decision
+        result["pre_commit_summary"] = _supervisor_reason_text(supervisor_parsed)
         log(f"Post-reentry supervisor decision: {decision}")
+        if result.get("pre_commit_summary"):
+            log(f"Post-reentry supervisor summary: {result['pre_commit_summary']}")
 
         if decision == "NEEDS_PHASE_B":
             result["status"] = "needs_phase_b"
-            result["errors"] = ["Supervisor returned NEEDS_PHASE_B after reentry convergence. "
-                                "Manual intervention required."]
+            detail = result.get("pre_commit_summary", "")
+            message = "Supervisor returned NEEDS_PHASE_B after reentry convergence. Manual intervention required."
+            if detail:
+                message += f" {detail}"
+            result["errors"] = [message]
             _clear_state(repo_root)
             return result
         elif decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
             result["status"] = "supervisor_rejected"
-            result["errors"] = [f"Post-reentry supervisor returned {decision}"]
+            result["step"] = "post_reentry_supervisor"
+            detail = result.get("pre_commit_summary", "")
+            message = f"Post-reentry supervisor returned {decision}"
+            if detail:
+                message += f". {detail}"
+            result["errors"] = [message]
             _clear_state(repo_root)
             return result
 
     elif decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
         result["status"] = "supervisor_rejected"
-        result["errors"] = [f"Supervisor returned {decision}, not COMMIT_GO"]
+        result["step"] = "pre_commit_supervisor"
+        detail = result.get("pre_commit_summary", "")
+        message = f"Supervisor returned {decision}, not COMMIT_GO"
+        if detail:
+            message += f". {detail}"
+        result["errors"] = [message]
         _clear_state(repo_root)
         return result
 
@@ -1567,7 +2790,14 @@ def run_phase_b(
         }
 
     # Scope to wave-owned files only — do not sweep all dirty files
-    wave_owned_files = _collect_wave_owned_files(repo_root, plan_path, plan_declared_files, implementer_changed or None, executor_created or None)
+    wave_owned_files = _collect_wave_owned_files(
+        repo_root,
+        plan_path,
+        plan_declared_files,
+        implementer_changed or None,
+        executor_created or None,
+        baseline_wave_files or None,
+    )
     if not wave_owned_files:
         return {
             "status": "error",
@@ -1606,8 +2836,9 @@ def main() -> int:
     parser.add_argument(
         "--plan",
         type=str,
-        required=True,
-        help="Path to locked plan packet (relative to repo root)",
+        default=None,
+        help="Path to locked plan packet (relative to repo root). "
+             "If omitted, derives bounded context from routing record.",
     )
     parser.add_argument(
         "--routing-record",

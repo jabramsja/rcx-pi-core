@@ -10,32 +10,23 @@ Covers:
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mu.tests.tools.module_loader import load_module
 from tests.repo_root import REPO_ROOT
 
 
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 # Load bridge_adapters first (dependency)
-_adapters = _load_module(
+_adapters = load_module(
     "bridge_adapters",
     REPO_ROOT / "mu" / "tools" / "agents" / "bridge_adapters.py",
 )
-meta = _load_module(
+meta = load_module(
     "meta_bridge_supervisor",
     REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py",
 )
@@ -182,6 +173,21 @@ class TestTemplateValidationFailureRouting:
         prompt = meta.build_meta_reviewer_prompt(package, results, REPO_ROOT)
         assert "VALIDATION FAILURES DETECTED" not in prompt
 
+    def test_control_surface_obligations_activate_for_dot_segment_path(self):
+        """Dot-segment control-surface paths must still trigger review obligations."""
+        package = {
+            "task_id": "TEST-1",
+            "wave_name": "test-wave",
+            "lane": "test-lane",
+            "changed_files": ["mu/tools/executors/./phase_b_executor.py"],
+        }
+        results = _make_validation_results(
+            passed_names=["L4 contract", "dirty_state"],
+            failed_names_errors=[],
+        )
+        prompt = meta.build_meta_reviewer_prompt(package, results, REPO_ROOT)
+        assert "CONTROL-SURFACE REVIEW MODE" in prompt
+
 
 class TestDryRunBehavior:
     """Dry-run must be validation-only and say so explicitly."""
@@ -231,6 +237,48 @@ class TestParseMetaEnvelope:
         envelope = meta.parse_meta_envelope(output)
         assert envelope["decision"] == "COMMIT_GO"
 
+    def test_duplicate_identical_envelopes_are_accepted(self):
+        output = (
+            'BEGIN_META_ENVELOPE\n{"decision": "COMMIT_GO", "summary": "ok"}\nEND_META_ENVELOPE\n'
+            'BEGIN_META_ENVELOPE\n{"decision": "COMMIT_GO", "summary": "ok"}\nEND_META_ENVELOPE'
+        )
+        envelope = meta.parse_meta_envelope(output)
+        assert envelope["decision"] == "COMMIT_GO"
+
+    def test_conflicting_multiple_envelopes_rejected(self):
+        output = (
+            'BEGIN_META_ENVELOPE\n{"decision": "COMMIT_GO", "summary": "ok"}\nEND_META_ENVELOPE\n'
+            'BEGIN_META_ENVELOPE\n{"decision": "NEEDS_PHASE_B", "summary": "fix"}\nEND_META_ENVELOPE'
+        )
+        with pytest.raises(meta.MetaBridgeError, match="multiple differing envelope blocks"):
+            meta.parse_meta_envelope(output)
+
+    def test_run_validation_command_timeout_returns_124(self):
+        with patch.object(meta.subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd=["python3"], timeout=1)):
+            exit_code, output = meta.run_validation_command(REPO_ROOT, ["python3", "-c", "print('x')"])
+        assert exit_code == 124
+        assert "timed out" in output
+
+    def test_git_output_timeout_raises_metabridgeerror(self):
+        with patch.object(meta.subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd=["git"], timeout=1)):
+            with pytest.raises(meta.MetaBridgeError, match="timed out"):
+                meta.git_output(REPO_ROOT, ["status"])
+
+    def test_bounded_timeout_env_invalid_or_out_of_range_uses_default(self):
+        with patch.dict(meta.os.environ, {"RCX_META_GIT_TIMEOUT_S": "not-int"}, clear=False):
+            assert meta._read_bounded_timeout_env("RCX_META_GIT_TIMEOUT_S", 30, minimum=1, maximum=300) == 30
+        with patch.dict(meta.os.environ, {"RCX_META_GIT_TIMEOUT_S": "999999"}, clear=False):
+            assert meta._read_bounded_timeout_env("RCX_META_GIT_TIMEOUT_S", 30, minimum=1, maximum=300) == 30
+
+    def test_run_meta_bridge_blocked_in_agent_review_mode(self, tmp_path):
+        package = tmp_path / "package.json"
+        package.write_text("{}")
+        with patch.dict(meta.os.environ, {"RCX_AGENT_REVIEW_MODE": "run_review"}, clear=False):
+            response = meta.run_meta_bridge(package)
+        assert response.status == "error"
+        assert response.error_code == "REVIEW_MODE_BLOCKED"
+        assert "agent review mode" in response.error_detail
+
 
 # ---------------------------------------------------------------------------
 # Integration tests: call run_meta_bridge() with mocked collaborators
@@ -251,6 +299,17 @@ def _make_valid_package():
         "blocker_report_paths": [],
         "current_judgment": "COMMIT_GO",
     }
+
+
+class TestPreCommitPackageSchema:
+    """Schema validation for the 11-field pre-commit package."""
+
+    def test_rejects_unexpected_extra_top_level_field(self):
+        pkg = _make_valid_package()
+        pkg["surprise"] = {"oops": True}
+        valid, errors = meta.validate_package_schema(pkg)
+        assert not valid
+        assert any("Unexpected field" in e for e in errors)
 
 
 @pytest.fixture
@@ -572,6 +631,14 @@ class TestPostMergeModeScoping:
             envelope = meta.parse_post_merge_envelope(output)
             assert envelope["decision"] == token
 
+    def test_post_merge_conflicting_multiple_envelopes_rejected(self):
+        output = (
+            'BEGIN_META_ENVELOPE\n{"decision": "CONTINUE_DIALECTIC", "summary": "ok"}\nEND_META_ENVELOPE\n'
+            'BEGIN_META_ENVELOPE\n{"decision": "ROUTE_PHASE_B", "summary": "route"}\nEND_META_ENVELOPE'
+        )
+        with pytest.raises(meta.MetaBridgeError, match="multiple differing envelope blocks"):
+            meta.parse_post_merge_envelope(output)
+
 
 class TestPostMergeGate1:
     """Gate 1: merge verification (HARD)."""
@@ -832,6 +899,47 @@ class TestValidationResultFieldAccess:
         )
 
 
+class TestDeferredBlockerWarningFormats:
+    """Deferred-blocker warning summaries must count both active packet formats."""
+
+    def test_active_blockers_format_counts_open_items(self, tmp_path):
+        repo = tmp_path / "repo"
+        blocking_dir = repo / "reports" / "deferred" / "blocking"
+        blocking_dir.mkdir(parents=True)
+        packet = blocking_dir / "packet.md"
+        packet.write_text(
+            "# Packet\n"
+            "**Status:** ACTIVE BLOCKERS\n\n"
+            "## One\n**Status:** OPEN\n\n"
+            "## Two\n**Status:** OPEN\n",
+            encoding="utf-8",
+        )
+        result = meta.check_deferred_blockers(repo, ["reports/deferred/blocking/packet.md"])
+        assert result.passed is True
+        assert "2 OPEN items" in result.error
+
+    def test_status_open_remaining_format_counts_open_items(self, tmp_path):
+        repo = tmp_path / "repo"
+        blocking_dir = repo / "reports" / "deferred" / "blocking"
+        blocking_dir.mkdir(parents=True)
+        packet = blocking_dir / "packet.md"
+        packet.write_text(
+            "# Packet\n"
+            "Status: OPEN (2 remaining)\n\n"
+            "## OPEN Items\n\n"
+            "### 1. First open item\n"
+            "Body.\n\n"
+            "### ~~2. Fixed item~~\n"
+            "Resolved.\n\n"
+            "### 3. Second open item\n"
+            "Body.\n",
+            encoding="utf-8",
+        )
+        result = meta.check_deferred_blockers(repo, ["reports/deferred/blocking/packet.md"])
+        assert result.passed is True
+        assert "2 OPEN items" in result.error
+
+
 class TestGate10ReceiptChainProof:
     """Gate 10 must emit a receipt_chain behavioral proof for receipt-chain waves.
 
@@ -922,7 +1030,7 @@ class TestGate10PackageScoped:
         source = Path(meta.__file__).read_text()
         gate10_start = source.find("Gate 10: Closeout attestation")
         assert gate10_start > 0, "Gate 10 section not found in source"
-        gate10_section = source[gate10_start:gate10_start + 6000]
+        gate10_section = source[gate10_start:gate10_start + 10000]
         # The att_cmd construction must NOT include --files
         # Find the att_cmd list construction
         att_cmd_start = gate10_section.find("att_cmd = [")
@@ -984,3 +1092,69 @@ class TestGate10NonReceiptChainControlSurface:
                 break
         else:
             pytest.fail("Neither control_surface proof marker found in source")
+
+
+class TestGate10GeneratedAttestationShape:
+    """Gate 10 must understand the JSON shape emitted by --generate --json."""
+
+    def _package(self):
+        return {
+            "task_id": "[TEST]",
+            "wave_name": "test-wave",
+            "lane": "hooks/agents/bridge control-surface",
+            "changed_files": ["mu/tools/executors/phase_b_executor.py"],
+            "scope_items": [],
+            "fixes_implemented": [],
+            "deferred_items": [],
+            "bridge_status": {},
+            "evidence_handles": {},
+            "blocker_report_paths": [],
+            "current_judgment": "COMMIT_GO",
+        }
+
+    def test_gate10_accepts_go_authorized_generate_output(self):
+        package = self._package()
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "check_closeout_attestation" in cmd_str:
+                return 0, json.dumps({
+                    "go_authorized": True,
+                    "blockers": [],
+                    "validation_issues": [],
+                })
+            return 0, "passed"
+
+        with patch.object(meta, "run_validation_command", side_effect=mock_run_validation), \
+             patch.object(meta, "check_dirty_state", return_value=meta.ValidationResult("dirty_state", True)), \
+             patch.object(meta, "check_deferred_blockers", return_value=meta.ValidationResult("deferred_blockers", True)), \
+             patch.object(meta, "check_tasks_authorization", return_value=meta.ValidationResult("tasks_auth", True)):
+            results, all_passed = meta.run_validation_gates(REPO_ROOT, package, verbose=False)
+
+        gate10 = next(r for r in results if r.name == "closeout_attestation")
+        assert gate10.passed
+        assert all_passed
+
+    def test_gate10_surfaces_validation_issues_from_generate_output(self):
+        package = self._package()
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "check_closeout_attestation" in cmd_str:
+                return 1, json.dumps({
+                    "go_authorized": False,
+                    "blockers": [],
+                    "validation_issues": ["missing behavioral proof"],
+                })
+            return 0, "passed"
+
+        with patch.object(meta, "run_validation_command", side_effect=mock_run_validation), \
+             patch.object(meta, "check_dirty_state", return_value=meta.ValidationResult("dirty_state", True)), \
+             patch.object(meta, "check_deferred_blockers", return_value=meta.ValidationResult("deferred_blockers", True)), \
+             patch.object(meta, "check_tasks_authorization", return_value=meta.ValidationResult("tasks_auth", True)):
+            results, all_passed = meta.run_validation_gates(REPO_ROOT, package, verbose=False)
+
+        gate10 = next(r for r in results if r.name == "closeout_attestation")
+        assert not gate10.passed
+        assert "missing behavioral proof" in gate10.error
+        assert not all_passed

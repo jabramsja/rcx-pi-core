@@ -9,6 +9,10 @@
   "model_overrides": {
     "phase_b_executor": null
   },
+  "review_depths": {
+    "phase_a": "quick",
+    "phase_b": "quick"
+  },
   "timeouts": {
     "dialectic_executor": 600,
     "phase_a_executor": 1200,

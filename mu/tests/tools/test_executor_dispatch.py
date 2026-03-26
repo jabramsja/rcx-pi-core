@@ -6,7 +6,6 @@ and the 15-step state machine (commit pipeline automation plan).
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import signal
@@ -17,40 +16,31 @@ from unittest.mock import patch, MagicMock, PropertyMock
 
 import pytest
 
+from mu.tests.tools.module_loader import load_module
 from tests.repo_root import REPO_ROOT
 
-
-def _load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 # Load executor_common first (dependency)
-common_mod = _load_module(
+common_mod = load_module(
     "executor_common",
     REPO_ROOT / "mu" / "tools" / "executors" / "executor_common.py",
 )
-dispatch_mod = _load_module(
+dispatch_mod = load_module(
     "executor_dispatch",
     REPO_ROOT / "mu" / "tools" / "executors" / "executor_dispatch.py",
 )
-commit_mod = _load_module(
+commit_mod = load_module(
     "commit_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "commit_executor.py",
 )
-phase_a_mod = _load_module(
+phase_a_mod = load_module(
     "phase_a_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "phase_a_executor.py",
 )
-dialectic_mod = _load_module(
+dialectic_mod = load_module(
     "dialectic_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "dialectic_executor.py",
 )
-phase_b_mod = _load_module(
+phase_b_mod = load_module(
     "phase_b_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "phase_b_executor.py",
 )
@@ -137,6 +127,13 @@ class TestDispatcherConfig:
         config = dispatch_mod.load_config(tmp_path / "nonexistent.json")
         assert config["bridge_loop_limits"]["phase_a"] == 15
 
+    def test_load_partial_custom_config_merges_shared_defaults(self, tmp_path):
+        config_path = tmp_path / "executor_config.json"
+        config_path.write_text(json.dumps({"timeouts": {"commit_executor": 999}}))
+        config = dispatch_mod.load_config(config_path)
+        assert config["timeouts"]["commit_executor"] == 999
+        assert config["review_depths"]["phase_b"] == "quick"
+
 
 class TestDispatcherInputValidation:
     """Routing record validation."""
@@ -156,6 +153,13 @@ class TestDispatcherInputValidation:
         (tmp_path / ".agent_bus" / "meta" / "post_merge_routing.json").write_text('{"summary": "ok"}')
         with pytest.raises(dispatch_mod.DispatchError, match="missing keys"):
             dispatch_mod.load_routing_record(tmp_path)
+
+    def test_dispatch_fails_closed_in_agent_review_mode(self):
+        record = {"decision": "COMMIT_GO", "summary": "review-time probe"}
+        with patch.dict(os.environ, {"RCX_AGENT_REVIEW_MODE": "run_review"}, clear=False):
+            result = dispatch_mod.dispatch(record, skip_freshness=True)
+        assert result["status"] == "error"
+        assert "agent review mode" in result["message"]
 
 
 # ===========================================================================
@@ -223,11 +227,6 @@ def _compute_staged_sha(repo):
     return hashlib.sha256(staged_diff).hexdigest()
 
 
-def _make_valid_handoff(**overrides):
-    """Create a valid new-schema handoff for legacy test compat."""
-    return _make_new_handoff(**overrides)
-
-
 # ===========================================================================
 # Commit executor tests (Slice 2)
 # ===========================================================================
@@ -237,7 +236,7 @@ class TestCommitHandoffValidation:
     """Handoff schema validation (new schema)."""
 
     def test_valid_handoff_passes(self):
-        valid, errors = commit_mod.validate_handoff(_make_valid_handoff())
+        valid, errors = commit_mod.validate_handoff(_make_new_handoff())
         assert valid, errors
 
     def test_missing_fields_fails(self):
@@ -245,15 +244,49 @@ class TestCommitHandoffValidation:
         assert not valid
         assert any("Missing" in e for e in errors)
 
+    def test_unexpected_fields_fail(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_handoff(unexpected="surprise")
+        )
+        assert not valid
+        assert any("Unexpected field: unexpected" == e for e in errors)
+
     def test_empty_files_to_stage_fails(self):
-        valid, errors = commit_mod.validate_handoff(_make_valid_handoff(files_to_stage=[]))
+        valid, errors = commit_mod.validate_handoff(_make_new_handoff(files_to_stage=[]))
         assert not valid
         assert any("empty" in e.lower() or "non-empty" in e.lower() for e in errors)
 
     def test_invalid_caller_fails(self):
-        valid, errors = commit_mod.validate_handoff(_make_valid_handoff(caller="invalid"))
+        valid, errors = commit_mod.validate_handoff(_make_new_handoff(caller="invalid"))
         assert not valid
         assert any("caller" in e for e in errors)
+
+    def test_branch_prefix_with_slash_fails(self):
+        valid, errors = commit_mod.validate_handoff(_make_new_handoff(branch_prefix="../bad"))
+        assert not valid
+        assert any("branch_prefix" in e for e in errors)
+
+    def test_force_add_nested_env_path_fails(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_handoff(force_add_files=["reports/.env/secrets.txt"]),
+        )
+        assert not valid
+        assert any("force_add_files denied" in e for e in errors)
+
+    def test_force_add_dotenv_variants_fail(self):
+        for candidate in ["reports/.env.local", "reports/.envrc", "reports/.envrc.local"]:
+            valid, errors = commit_mod.validate_handoff(
+                _make_new_handoff(force_add_files=[candidate]),
+            )
+            assert not valid
+            assert any("force_add_files denied" in e for e in errors)
+
+    def test_force_add_backslash_git_path_fails(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_handoff(force_add_files=[".GIT\\config"]),
+        )
+        assert not valid
+        assert any("force_add_files denied" in e for e in errors)
 
     def test_non_dict_fails(self):
         valid, errors = commit_mod.validate_handoff("not a dict")
@@ -273,7 +306,7 @@ class TestCommitPipelineValidation:
         subprocess.run(["git", "commit", "--allow-empty", "-m", "init"], cwd=repo, capture_output=True, env=env)
         subprocess.run(["git", "checkout", "-b", "wrong-branch"], cwd=repo, capture_output=True, env=env)
 
-        handoff = _make_valid_handoff()
+        handoff = _make_new_handoff()
         result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
         assert result["status"] == "error"
         assert result["step"] == "ensure_feature_branch"
@@ -294,7 +327,7 @@ class TestCommitPipelineValidation:
         mock_result.summary = "ok"
 
         # Also need the handoff receipt path to not exist
-        handoff = _make_valid_handoff(
+        handoff = _make_new_handoff(
             pre_commit_receipt_path=".agent_bus/meta/nonexistent_receipt.json"
         )
 
@@ -444,6 +477,24 @@ class TestPhaseAPlanCreation:
         content = plan.read_text()
         assert "Phase-A-Lock: LOCKED" in content
         assert "bridge-converged" in content
+
+    def test_create_plan_draft_rejects_path_traversal(self, tmp_path):
+        scope = {"request": "create executors", "summary": "executor plan"}
+        with pytest.raises(phase_a_mod.PhaseAExecutorError, match="plan_name|Path traversal|Unsafe"):
+            phase_a_mod.create_plan_draft(tmp_path, "../../evil", scope)
+
+    def test_lock_plan_replaces_only_one_lock_line(self, tmp_path):
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text(
+            "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)\n"
+            "Phase-A-Lock: UNLOCKED\n"
+            "Notes mention Phase-A-Lock: UNLOCKED but are not the control line.\n"
+        )
+        phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+        content = plan.read_text()
+        assert content.count("Phase-A-Lock: LOCKED") == 1
+        assert "Notes mention Phase-A-Lock: UNLOCKED" in content
 
 
 class TestPhaseADispatcherIntegration:
@@ -973,6 +1024,57 @@ class TestEnsureTrackerNote:
         assert result["status"] == "error"
         assert result["step"] == "ensure_tracker_note"
 
+    def test_exact_wave_id_match_does_not_false_positive_substring(self, tmp_path):
+        """A similar wave_id like test-wave-id-extra must not block insertion for test-wave-id."""
+        repo, env = _init_git_repo(tmp_path)
+        tasks = repo / "TASKS.md"
+        content = tasks.read_text()
+        tasks.write_text(content.replace("old note.", "old note.\n- Tracker sync note (test-wave-id-extra): already here.\n"))
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "similar note"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        handoff = _make_new_handoff()
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+        assert "ensure_tracker_note" in result.get("steps_completed", [])
+        tasks_content = (repo / "TASKS.md").read_text()
+        assert "test-wave-id-extra" in tasks_content
+        assert "test-wave-id" in tasks_content
+
+
+class TestDispatcherPlanNameSanitization:
+    """Phase A dispatch must sanitize candidate text before passing --plan-name."""
+
+    def test_phase_a_candidate_text_is_sanitized(self, tmp_path, monkeypatch):
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "state_sha": "ignored",
+            "wave_name": "unsafe wave",
+            "next_candidates": [{"candidate": "../../Unsafe Plan (v1)"}],
+        }
+
+        captured: dict[str, list[str]] = {}
+
+        def fake_run(args, **kwargs):
+            captured["args"] = args
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "validate_routing_record_freshness", lambda *a, **k: (True, "fresh"))
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        result = dispatch_mod.dispatch(record, repo_root=tmp_path, skip_freshness=True)
+
+        assert result["status"] == "success"
+        assert "--plan-name" in captured["args"]
+        plan_name = captured["args"][captured["args"].index("--plan-name") + 1]
+        assert ".." not in plan_name
+        assert "/" not in plan_name
+        assert "\\" not in plan_name
+        assert plan_name == "unsafe_plan_v1"
+
 
 # --- Tests 16-19: stage_files (Step 4) and collect_indicator (Step 5) ---
 
@@ -1281,10 +1383,43 @@ class TestReceiptAndCommit:
         assert result["step"] == "build_and_run_supervisor"
         assert any("traversal" in e.lower() for e in result["errors"])
 
+    def test_step6_fails_closed_on_supervisor_receipt_prefix_confusion(self, tmp_path):
+        """Containment must use path ancestry, not naive string prefix matching."""
+        repo, env = _init_git_repo(tmp_path)
+        evil_repo = tmp_path / "repo-evil"
+        evil_repo.mkdir()
+        (evil_repo / "receipt.json").write_text(json.dumps({"decision": "COMMIT_GO"}))
+
+        tasks = repo / "TASKS.md"
+        content = tasks.read_text()
+        tasks.write_text(content.replace("old note.", "old note.\n- test-wave-id already\n"))
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "note"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+
+        mock_result = MagicMock()
+        mock_result.decision = "COMMIT_GO"
+        mock_result.receipt_path = "../repo-evil/receipt.json"
+        mock_result.summary = "ok"
+
+        with patch.object(commit_mod, "_has_path_traversal", return_value=False), \
+             patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
+            sys.modules["meta_bridge_client"].run_meta_bridge_package = MagicMock(return_value=mock_result)
+            sys.modules["meta_bridge_client"].MetaBridgeClientError = Exception
+            result = commit_mod.run_commit_pipeline(_make_new_handoff(), repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "build_and_run_supervisor"
+        assert any("escapes repo" in e.lower() for e in result["errors"])
+
     def test_step7_uses_supervisor_receipt_path(self, tmp_path):
-        """Step 7 reads from the supervisor's receipt_path (step 6 output),
-        NOT the handoff's pre_commit_receipt_path. The supervisor receipt is
-        the authority because it was minted against the actual staged state."""
+        """Step 7 validates the full receipt chain: both the Phase B handoff
+        receipt (from the handoff's pre_commit_receipt_path) AND the supervisor
+        receipt (from step 6 output). Both must exist and authorize commit."""
         repo, env = _init_git_repo(tmp_path)
         tasks = repo / "TASKS.md"
         content = tasks.read_text()
@@ -1305,15 +1440,20 @@ class TestReceiptAndCommit:
             json.dumps({"decision": "COMMIT_GO", "staged_sha": "x", "timestamp_utc": "2026-01-01T00:00:00Z"})
         )
 
-        # Handoff receipt path does NOT exist — but step 7 should NOT care
-        # because it reads from supervisor receipt path, not handoff path
+        # Handoff receipt must also exist — step 7 validates the full chain
+        handoff_receipt_dir = repo / ".agent_bus" / "meta"
+        handoff_receipt_dir.mkdir(parents=True, exist_ok=True)
+        (handoff_receipt_dir / "pre_commit_receipt.json").write_text(
+            json.dumps({"decision": "COMMIT_GO", "staged_sha": "x", "timestamp_utc": "2026-01-01T00:00:00Z"})
+        )
+
         mock_result = MagicMock()
         mock_result.decision = "COMMIT_GO"
-        mock_result.receipt_path = ".scratch/supervisor_receipt.json"  # EXISTS
+        mock_result.receipt_path = ".scratch/supervisor_receipt.json"
         mock_result.summary = "ok"
 
         handoff = _make_new_handoff(
-            pre_commit_receipt_path=".agent_bus/meta/pre_commit_receipt.json"  # does NOT exist — irrelevant
+            pre_commit_receipt_path=".agent_bus/meta/pre_commit_receipt.json"
         )
 
         with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
@@ -1321,13 +1461,13 @@ class TestReceiptAndCommit:
             sys.modules["meta_bridge_client"].MetaBridgeClientError = Exception
             result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
 
-        # Step 7 should PASS because it reads from supervisor receipt (which exists)
+        # Step 7 should PASS — both handoff and supervisor receipts exist and authorize
         assert "validate_receipt" in result.get("steps_completed", []), (
-            f"Step 7 should succeed reading supervisor receipt. Got: {result}"
+            f"Step 7 should succeed with full receipt chain. Got: {result}"
         )
 
     def test_step7_reads_supervisor_receipt_decision_only(self, tmp_path):
-        """Step 7 reads the supervisor receipt (from step 6) for decision ONLY.
+        """Step 7 validates the full receipt chain but does NOT check staged_sha.
 
         No staged_sha check at step 7 — the supervisor receipt was minted against
         the staged state AFTER steps 3-5 ran. The pre-commit hook at step 9
@@ -1346,11 +1486,18 @@ class TestReceiptAndCommit:
         )
         (repo / "file1.py").write_text("x = 1\n")
 
-        # Create receipt at the supervisor's path with valid decision.
-        # Step 7 reads this path (from sup_result.receipt_path).
+        # Create supervisor receipt with valid decision.
         sup_receipt_dir = repo / ".scratch"
         sup_receipt_dir.mkdir(parents=True, exist_ok=True)
         (sup_receipt_dir / "supervisor_receipt.json").write_text(
+            json.dumps({"decision": "COMMIT_GO", "staged_sha": "fresh_sha",
+                         "timestamp_utc": "2026-01-01T00:00:00Z"})
+        )
+
+        # Handoff receipt must also exist — step 7 validates the full chain
+        handoff_receipt_dir = repo / ".agent_bus" / "meta"
+        handoff_receipt_dir.mkdir(parents=True, exist_ok=True)
+        (handoff_receipt_dir / "pre_commit_receipt.json").write_text(
             json.dumps({"decision": "COMMIT_GO", "staged_sha": "fresh_sha",
                          "timestamp_utc": "2026-01-01T00:00:00Z"})
         )
@@ -1367,9 +1514,9 @@ class TestReceiptAndCommit:
             sys.modules["meta_bridge_client"].MetaBridgeClientError = Exception
             result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
 
-        # Should pass step 7 (validate_receipt)
+        # Should pass step 7 (validate_receipt) — no staged_sha check here
         assert "validate_receipt" in result.get("steps_completed", []), (
-            f"Step 7 should succeed reading supervisor receipt. Got: {result}"
+            f"Step 7 should succeed with full receipt chain. Got: {result}"
         )
 
     def test_24_pre_commit_script_failure_errors(self, tmp_path):
@@ -2117,3 +2264,385 @@ class TestBridgeR6Finding3PhaseARequestChangesSilentSuccess:
         result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
         assert result["status"] == "converged"
         assert call_count["n"] == 3
+
+
+# ===========================================================================
+# Phase A tracked-packet reuse (Slice 3 follow-on)
+# ===========================================================================
+
+
+class TestPhaseATrackedPacketReuse:
+    """Phase A reuses existing tracked packets instead of creating new dated stubs."""
+
+    def test_reuses_locked_packet(self, tmp_path):
+        """If a locked packet exists, create_plan_draft returns it."""
+        plan_dir = tmp_path / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        existing = plan_dir / "my_plan_2026-03-20.md"
+        existing.write_text("# My Plan\nPhase-A-Lock: LOCKED\n\nReal content here.\n")
+        scope = {"request": "new content"}
+        path = phase_a_mod.create_plan_draft(tmp_path, "my_plan", scope)
+        assert path == existing
+
+    def test_reuses_substantial_unlocked_packet(self, tmp_path):
+        """If a substantial (>10 lines) unlocked packet exists, reuse it."""
+        plan_dir = tmp_path / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        existing = plan_dir / "my_plan_2026-03-20.md"
+        content = "# My Plan\nPhase-A-Lock: UNLOCKED\n" + "\n".join(f"Line {i}" for i in range(20))
+        existing.write_text(content)
+        scope = {"request": "new content"}
+        path = phase_a_mod.create_plan_draft(tmp_path, "my_plan", scope)
+        assert path == existing
+
+    def test_creates_new_when_no_matching_packet(self, tmp_path):
+        """When no matching packet exists, creates a new one."""
+        scope = {"request": "create something", "summary": "test"}
+        path = phase_a_mod.create_plan_draft(tmp_path, "brand_new_plan", scope)
+        assert path.exists()
+        assert "brand_new_plan" in path.name
+        assert "Phase-A-Lock: UNLOCKED" in path.read_text()
+
+    def test_prefers_locked_over_unlocked(self, tmp_path):
+        """When both locked and unlocked exist, prefer the locked one."""
+        plan_dir = tmp_path / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        unlocked = plan_dir / "my_plan_2026-03-19.md"
+        unlocked.write_text("# Plan\nPhase-A-Lock: UNLOCKED\n" + "\n".join(f"L{i}" for i in range(20)))
+        locked = plan_dir / "my_plan_2026-03-20.md"
+        locked.write_text("# Plan\nPhase-A-Lock: LOCKED\n\nReal content.\n")
+        scope = {"request": "x"}
+        path = phase_a_mod.create_plan_draft(tmp_path, "my_plan", scope)
+        assert path == locked
+
+
+class TestFindTrackedPacket:
+    """_find_tracked_packet searches for existing packets by plan name."""
+
+    def test_returns_none_when_no_directory(self, tmp_path):
+        result = phase_a_mod._find_tracked_packet(tmp_path / "nonexistent", "test")  # ANTICHEAT_OK: testing tracked packet reuse
+        assert result is None
+
+    def test_returns_none_when_no_matches(self, tmp_path):
+        plan_dir = tmp_path / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / "other_plan_2026-03-20.md").write_text("# Other\n")
+        result = phase_a_mod._find_tracked_packet(plan_dir, "my_plan")  # ANTICHEAT_OK: testing tracked packet reuse
+        assert result is None
+
+    def test_returns_locked_packet(self, tmp_path):
+        plan_dir = tmp_path / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        locked = plan_dir / "my_plan_2026-03-20.md"
+        locked.write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+        result = phase_a_mod._find_tracked_packet(plan_dir, "my_plan")  # ANTICHEAT_OK: testing tracked packet reuse
+        assert result == locked
+
+
+# ===========================================================================
+# Dispatcher -> commit mechanical bridge (Slice 2 follow-on)
+# ===========================================================================
+
+
+class TestDispatcherCommitMechanicalBridge:
+    """Dispatcher routes to commit_executor mechanically instead of returning needs_handoff."""
+
+    def test_commit_go_with_handoff_file(self, tmp_path):
+        """When a handoff file exists, dispatcher passes --handoff."""
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text('{"wave_id": "test"}')
+
+        record = {"decision": "COMMIT_GO", "summary": "test"}
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="ok", stderr=""
+            )
+            result = dispatch_mod.dispatch(
+                record, repo_root=tmp_path, skip_freshness=True
+            )
+        assert result["status"] == "success"
+        # Verify --handoff was passed
+        call_args = mock_run.call_args[0][0]
+        assert "--handoff" in call_args
+
+    def test_update_tracker_without_handoff_passes_routing_record(self, tmp_path):
+        """When no handoff file exists, dispatcher passes --routing-record."""
+        record = {"decision": "UPDATE_TRACKER_ONLY", "summary": "update tracker"}
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="ok", stderr=""
+            )
+            result = dispatch_mod.dispatch(
+                record, repo_root=tmp_path, skip_freshness=True
+            )
+        assert result["status"] == "success"
+        call_args = mock_run.call_args[0][0]
+        assert "--routing-record" in call_args
+
+    def test_no_longer_returns_needs_handoff(self, tmp_path):
+        """Dispatcher must not return needs_handoff for mechanically preparable routes."""
+        # Use UPDATE_TRACKER_ONLY since COMMIT_GO now requires a handoff file
+        record = {"decision": "UPDATE_TRACKER_ONLY", "summary": "test"}
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="ok", stderr=""
+            )
+            result = dispatch_mod.dispatch(
+                record, repo_root=tmp_path, skip_freshness=True
+            )
+        assert result["status"] != "needs_handoff"
+
+
+class TestCommitExecutorRoutingRecordAcceptance:
+    """commit_executor accepts --routing-record and prepares handoff internally."""
+
+    def test_prepare_handoff_from_valid_record(self, tmp_path):
+        record = {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "update the tracker",
+            "wave_name": "tracker-update",
+            "next_candidates": [{"candidate": "update TASKS.md"}],
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert not errors
+        assert handoff is not None
+        assert handoff["caller"] == "update_tracker_only"
+        assert "TASKS.md" in handoff["files_to_stage"]
+        assert handoff["wave_id"] == "tracker-update"
+
+    def test_prepare_handoff_from_valid_embedded_handoff(self, tmp_path):
+        """Embedded handoffs are accepted only after full validation."""
+        embedded = _make_new_handoff(wave_id="embedded-test")
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "test",
+            "handoff": embedded,
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert not errors
+        assert handoff == embedded
+        assert handoff is not embedded
+
+    def test_prepare_handoff_from_invalid_embedded_handoff_fails(self, tmp_path):
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "test",
+            "handoff": {"wave_id": "embedded-test", "caller": "phase_b"},
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert handoff is None
+        assert any("Embedded handoff invalid" in err for err in errors)
+
+    def test_prepare_handoff_commit_go_without_embedded_fails(self, tmp_path):
+        """COMMIT_GO without embedded handoff must fail — cannot synthesize."""
+        record = {"decision": "COMMIT_GO", "summary": "test", "wave_name": "w"}
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert errors
+        assert handoff is None
+        assert any("receipt chain" in e for e in errors)
+
+    def test_prepare_handoff_commit_go_hold_push_without_embedded_fails(self, tmp_path):
+        """COMMIT_GO_HOLD_PUSH without embedded handoff must fail — cannot synthesize."""
+        record = {"decision": "COMMIT_GO_HOLD_PUSH", "summary": "test", "wave_name": "w"}
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert errors
+        assert handoff is None
+        assert any("receipt chain" in e for e in errors)
+
+    def test_prepare_handoff_missing_wave_fails(self, tmp_path):
+        record = {"decision": "UPDATE_TRACKER_ONLY", "summary": "test"}
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert errors
+        assert handoff is None
+
+    def test_prepare_handoff_missing_summary_fails(self, tmp_path):
+        record = {"decision": "UPDATE_TRACKER_ONLY", "wave_name": "w"}
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert errors
+        assert handoff is None
+
+
+class TestDispatcherPlanlessPhaseB:
+    """Dispatcher falls back to planless mode when no tracked_packet in candidates."""
+
+    def test_phase_b_planless_passes_routing_record(self, tmp_path):
+        """When no tracked_packet in candidates, dispatcher passes --routing-record."""
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "wave_name": "w",
+            "next_candidates": [{"candidate": "do it"}],
+        }
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="ok", stderr=""
+            )
+            result = dispatch_mod.dispatch(
+                record, repo_root=tmp_path, skip_freshness=True
+            )
+        call_args = mock_run.call_args[0][0]
+        assert "--routing-record" in call_args
+        assert "--plan" not in call_args
+
+    def test_phase_b_with_tracked_packet_passes_plan(self, tmp_path):
+        """When tracked_packet exists in candidates, dispatcher passes --plan."""
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "next_candidates": [{"candidate": "do", "tracked_packet": "reports/plan.md"}],
+        }
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="ok", stderr=""
+            )
+            result = dispatch_mod.dispatch(
+                record, repo_root=tmp_path, skip_freshness=True
+            )
+        call_args = mock_run.call_args[0][0]
+        assert "--plan" in call_args
+        assert "reports/plan.md" in call_args
+
+
+class TestTrackedPacketPathTraversal:
+    """Finding 964: tracked_packet path traversal must be blocked fail-closed."""
+
+    def test_tracked_packet_with_dotdot_blocked(self, tmp_path):
+        """Path traversal via .. in tracked_packet → error."""
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "next_candidates": [{"candidate": "do", "tracked_packet": "../../../etc/passwd"}],
+        }
+        result = dispatch_mod.dispatch(
+            record, repo_root=tmp_path, skip_freshness=True
+        )
+        assert result["status"] == "error"
+        assert "traversal" in result["message"].lower()
+
+    def test_tracked_packet_escaping_repo_root_blocked(self, tmp_path):
+        """Absolute-like path that resolves outside repo → error."""
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "next_candidates": [{"candidate": "do", "tracked_packet": "foo/../../.."}],
+        }
+        result = dispatch_mod.dispatch(
+            record, repo_root=tmp_path, skip_freshness=True
+        )
+        assert result["status"] == "error"
+
+    def test_tracked_packet_valid_path_passes(self, tmp_path):
+        """Valid relative path inside repo → proceeds normally."""
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "next_candidates": [{"candidate": "do", "tracked_packet": "reports/plan.md"}],
+        }
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="ok", stderr=""
+            )
+            result = dispatch_mod.dispatch(
+                record, repo_root=tmp_path, skip_freshness=True
+            )
+        assert result["status"] in ("success", "failed")
+        call_args = mock_run.call_args[0][0]
+        assert "--plan" in call_args
+
+
+class TestWaveIdExactMatchInCommitExecutor:
+    """Finding 965: wave_id verification uses exact match, not substring."""
+
+    def test_exact_match_does_not_false_positive_on_substring(self):
+        """wave_id 'abc' should not match 'abc-extra' via substring."""
+        text = "- Tracker sync note (abc-extra): something\n"
+        count = commit_mod._count_exact_wave_id_mentions(text, "abc")  # ANTICHEAT_OK: testing internal executor functions
+        assert count == 0, "substring 'abc' inside 'abc-extra' must not match"
+
+    def test_exact_match_finds_real_occurrence(self):
+        """wave_id 'abc' should match when bounded by non-wave chars."""
+        text = "- Tracker sync note (abc): something\n"
+        count = commit_mod._count_exact_wave_id_mentions(text, "abc")  # ANTICHEAT_OK: testing internal executor functions
+        assert count == 1
+
+    def test_exact_match_detects_duplicate(self):
+        """Two exact occurrences should count as 2."""
+        text = "- abc done\n- abc again\n"
+        count = commit_mod._count_exact_wave_id_mentions(text, "abc")  # ANTICHEAT_OK: testing internal executor functions
+        assert count == 2
+
+
+class TestDispatcherStaleHandoffOverride:
+    """Bridge R1 Finding: dispatcher must not prefer stale handoff over UPDATE_TRACKER_ONLY."""
+
+    def test_update_tracker_only_ignores_stale_handoff(self, tmp_path):
+        """UPDATE_TRACKER_ONLY must use --routing-record even if phase_b_handoff.json exists."""
+        # Create a stale handoff file
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text('{"stale": true}')
+
+        record = {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "just tracker",
+            "wave_name": "tracker-only-wave",
+        }
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="ok", stderr=""
+            )
+            result = dispatch_mod.dispatch(
+                record, repo_root=tmp_path, skip_freshness=True
+            )
+        call_args = mock_run.call_args[0][0]
+        assert "--routing-record" in call_args, (
+            "UPDATE_TRACKER_ONLY should pass --routing-record, not --handoff"
+        )
+        assert "--handoff" not in call_args
+
+    def test_commit_go_uses_handoff_when_present(self, tmp_path):
+        """COMMIT_GO should still use --handoff if the file exists."""
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text('{"real": true}')
+
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "ready to commit",
+        }
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="ok", stderr=""
+            )
+            result = dispatch_mod.dispatch(
+                record, repo_root=tmp_path, skip_freshness=True
+            )
+        call_args = mock_run.call_args[0][0]
+        assert "--handoff" in call_args, (
+            "COMMIT_GO should use --handoff when the file exists"
+        )
+
+    def test_commit_go_without_handoff_fails_closed(self, tmp_path):
+        """COMMIT_GO without handoff file must fail closed — no fallback to --routing-record."""
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "ready to commit",
+        }
+        result = dispatch_mod.dispatch(
+            record, repo_root=tmp_path, skip_freshness=True
+        )
+        assert result["status"] == "error"
+        assert "No Phase B handoff file" in result["message"]
+
+    def test_commit_go_hold_push_without_handoff_fails_closed(self, tmp_path):
+        """COMMIT_GO_HOLD_PUSH without handoff file must also fail closed."""
+        record = {
+            "decision": "COMMIT_GO_HOLD_PUSH",
+            "summary": "ready to commit",
+        }
+        result = dispatch_mod.dispatch(
+            record, repo_root=tmp_path, skip_freshness=True
+        )
+        assert result["status"] == "error"
+        assert "No Phase B handoff file" in result["message"]

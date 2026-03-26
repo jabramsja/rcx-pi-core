@@ -11,8 +11,8 @@ See: reports/control_plane/executor_surfaces_plan_2026-03-22.md
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -23,15 +23,36 @@ REPO_ROOT = SCRIPT_DIR.parent.parent.parent  # mu/tools/executors -> repo root
 
 # Import canonical load_routing_record from shared module
 try:
-    from executor_common import load_routing_record as _common_load_routing_record, ExecutorCommonError
+    from executor_common import (
+        load_executor_config as _common_load_executor_config,
+        load_routing_record as _common_load_routing_record,
+        merge_executor_config_overrides,
+        ensure_not_agent_review_mode,
+        ExecutorCommonError,
+    )
 except ImportError:
     import importlib.util as _ilu
     _common_path = SCRIPT_DIR / "executor_common.py"
     _spec = _ilu.spec_from_file_location("executor_common", str(_common_path))
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
+    _common_load_executor_config = _mod.load_executor_config
     _common_load_routing_record = _mod.load_routing_record
+    merge_executor_config_overrides = _mod.merge_executor_config_overrides
+    ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
+
+try:
+    from meta_bridge_supervisor import compute_repo_state as _compute_repo_state
+except ImportError:
+    import importlib.util as _ilu
+    _meta_path = REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py"
+    _meta_spec = _ilu.spec_from_file_location("meta_bridge_supervisor", str(_meta_path))
+    _meta_mod = _ilu.module_from_spec(_meta_spec)
+    assert _meta_spec.loader is not None
+    sys.modules["meta_bridge_supervisor"] = _meta_mod
+    _meta_spec.loader.exec_module(_meta_mod)
+    _compute_repo_state = _meta_mod.compute_repo_state
 
 # Routing token → executor mapping
 ROUTING_DISPATCH = {
@@ -51,7 +72,6 @@ STOP_TOKENS = {"STOP_FOR_FOUNDER", "STOP_FOR_TRIAGE_DISCUSSION"}
 AVAILABLE_EXECUTORS = {"commit_executor", "phase_b_executor", "phase_a_executor", "dialectic_executor"}
 
 DEFAULT_CONFIG_PATH = SCRIPT_DIR / "executor_config.json"
-ROUTING_RECORD_PATH = Path(".agent_bus/meta/post_merge_routing.json")
 
 
 class DispatchError(RuntimeError):
@@ -59,16 +79,14 @@ class DispatchError(RuntimeError):
 
 
 def load_config(config_path: Path | None = None) -> dict[str, Any]:
-    """Load executor config with defaults."""
+    """Load executor config using the canonical shared defaults/merge rules."""
     path = config_path or DEFAULT_CONFIG_PATH
+    if path == DEFAULT_CONFIG_PATH:
+        return _common_load_executor_config(REPO_ROOT)
     if not path.exists():
-        return {
-            "backends": {},
-            "model_overrides": {},
-            "timeouts": {},
-            "bridge_loop_limits": {"phase_a": 15, "phase_b": 10, "dialectic": 3},
-        }
-    return json.loads(path.read_text(encoding="utf-8"))
+        return merge_executor_config_overrides({})
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    return merge_executor_config_overrides(loaded)
 
 
 def load_routing_record(repo_root: Path) -> dict[str, Any]:
@@ -89,53 +107,10 @@ def validate_routing_record_freshness(record: dict[str, Any], repo_root: Path) -
     if not record_sha:
         return False, "Routing record has no state_sha — cannot verify freshness"
 
-    # Compute current state SHA (same algorithm as meta_bridge_supervisor)
     try:
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=repo_root, capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        staged = subprocess.run(
-            ["git", "diff", "--cached", "--binary"],
-            cwd=repo_root, capture_output=True, check=True,
-        ).stdout
-        unstaged = subprocess.run(
-            ["git", "diff", "--binary"],
-            cwd=repo_root, capture_output=True, check=True,
-        ).stdout
-    except subprocess.CalledProcessError as exc:
+        current_sha = _compute_repo_state(repo_root).state_sha
+    except Exception as exc:
         return False, f"Cannot compute repo state: {exc}"
-
-    staged_sha = hashlib.sha256(staged).hexdigest()
-    unstaged_sha = hashlib.sha256(unstaged).hexdigest()
-
-    # Compute untracked SHA (must match supervisor's compute_repo_state)
-    try:
-        untracked_output = subprocess.run(
-            ["git", "ls-files", "--others", "--exclude-standard"],
-            cwd=repo_root, capture_output=True, text=True, check=True,
-        ).stdout
-        ignore_prefixes = (".agent_bus/", ".git/", ".scratch/", "__pycache__/", ".venv/", "venv/", "node_modules/")
-        untracked_hasher = hashlib.sha256()
-        for raw in sorted(untracked_output.splitlines()):
-            raw = raw.strip()
-            if not raw:
-                continue
-            if any(raw.startswith(p) for p in ignore_prefixes):
-                continue
-            path = repo_root / raw
-            if path.is_file():
-                untracked_hasher.update(raw.encode("utf-8"))
-                untracked_hasher.update(b"\0")
-                untracked_hasher.update(path.read_bytes())
-                untracked_hasher.update(b"\0")
-        untracked_sha = untracked_hasher.hexdigest()
-    except (subprocess.CalledProcessError, OSError):
-        untracked_sha = hashlib.sha256(b"").hexdigest()
-
-    current_sha = hashlib.sha256(
-        f"{head}|{staged_sha}|{unstaged_sha}|{untracked_sha}".encode("utf-8")
-    ).hexdigest()
 
     if current_sha != record_sha:
         return False, (
@@ -151,6 +126,16 @@ def resolve_executor(decision: str) -> str | None:
     return ROUTING_DISPATCH.get(decision)
 
 
+def _sanitize_plan_name(candidate_text: str, fallback: str = "plan_unknown") -> str:
+    """Convert candidate text into a safe plan slug."""
+    raw = (candidate_text or "").lower()
+    tokens = re.findall(r"[a-z0-9]+", raw)
+    if not tokens:
+        tokens = re.findall(r"[a-z0-9]+", fallback.lower())
+    slug = "_".join(tokens).strip("_")
+    return (slug or "plan_unknown")[:50]
+
+
 def dispatch(
     record: dict[str, Any],
     *,
@@ -163,6 +148,15 @@ def dispatch(
 
     Returns a result dict with status, executor, and output.
     """
+    try:
+        ensure_not_agent_review_mode("executor_dispatch.dispatch")
+    except ExecutorCommonError as exc:
+        return {
+            "status": "error",
+            "decision": record.get("decision", ""),
+            "message": str(exc),
+        }
+
     repo = repo_root or REPO_ROOT
     cfg = config or load_config()
     decision = record.get("decision", "")
@@ -221,57 +215,88 @@ def dispatch(
         }
 
     # Invoke executor with appropriate interface
-    # commit_executor requires --handoff (not --routing-record)
-    # Other executors use --routing-record
     try:
         timeout = cfg.get("timeouts", {}).get(executor_name, 300)
-        if executor_name == "commit_executor":
-            # Commit executor needs a handoff file, not a routing record.
-            # When invoked from UPDATE_TRACKER_ONLY, the dispatcher must have
-            # a handoff prepared by the caller. For now, report that the caller
-            # must prepare the handoff.
-            return {
-                "status": "needs_handoff",
-                "decision": decision,
-                "executor": executor_name,
-                "message": "commit_executor requires a prepared --handoff file. "
-                           "The caller (phase_b, phase_a, or update_tracker_only) "
-                           "must stage files, run pre-commit supervisor, and prepare "
-                           "the handoff before dispatching to commit_executor.",
-            }
 
         # Build executor-specific CLI args
         executor_args = [sys.executable, str(executor_path)]
-        if executor_name == "phase_a_executor":
+        if executor_name == "commit_executor":
+            # Only use a pre-prepared handoff for decisions that come from
+            # Phase B/A (COMMIT_GO, COMMIT_GO_HOLD_PUSH).  UPDATE_TRACKER_ONLY
+            # must always go through --routing-record so the commit executor
+            # builds a tracker-only handoff from the live routing decision
+            # instead of replaying a stale Phase B handoff file.
+            handoff_path = repo / ".agent_bus" / "executors" / "phase_b_handoff.json"
+            if decision in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+                # COMMIT_GO/COMMIT_GO_HOLD_PUSH require a pre-prepared Phase B
+                # handoff.  Without one, the commit executor would synthesize a
+                # handoff that points at the canonical hook receipt instead of
+                # the exact per-invocation Phase B receipt — breaking the
+                # authority chain.  Fail closed.
+                if not handoff_path.exists():
+                    return {
+                        "status": "error",
+                        "decision": decision,
+                        "executor": executor_name,
+                        "message": (
+                            f"No Phase B handoff file at {handoff_path} for "
+                            f"{decision}. Cannot commit without a verified "
+                            f"Phase B receipt chain."
+                        ),
+                    }
+                executor_args.extend(["--handoff", str(handoff_path)])
+            else:
+                # UPDATE_TRACKER_ONLY: pass routing record so commit_executor
+                # can prepare a tracker-only handoff internally.
+                executor_args.extend(["--routing-record", json.dumps(record)])
+        elif executor_name == "phase_a_executor":
             # Phase A needs --plan-name
             candidates = record.get("next_candidates", [])
             plan_name = None
             for c in candidates:
                 candidate_text = c.get("candidate", "")
                 if candidate_text:
-                    plan_name = candidate_text.lower().replace(" ", "_").replace("(", "").replace(")", "")[:50]
+                    plan_name = _sanitize_plan_name(candidate_text)
                     break
             if not plan_name:
-                plan_name = f"plan_{record.get('wave_name', 'unknown')}"
+                plan_name = _sanitize_plan_name(
+                    f"plan_{record.get('wave_name', 'unknown')}",
+                )
             executor_args.extend(["--plan-name", plan_name])
         elif executor_name == "phase_b_executor":
-            # Phase B needs --plan from next_candidates tracked_packet
+            # Phase B: prefer --plan from next_candidates tracked_packet,
+            # fall back to planless mode (routing record as authority source)
             candidates = record.get("next_candidates", [])
             plan_path = None
             for c in candidates:
                 tp = c.get("tracked_packet")
-                if tp:
+                if tp and isinstance(tp, str):
+                    # Validate: no path traversal, must be relative, must
+                    # resolve inside repo root.
+                    tp_resolved = (repo / tp).resolve()
+                    if ".." in Path(tp).parts:
+                        return {
+                            "status": "error",
+                            "decision": decision,
+                            "executor": executor_name,
+                            "message": f"Path traversal in tracked_packet: {tp}",
+                        }
+                    if not tp_resolved.is_relative_to(repo.resolve()):
+                        return {
+                            "status": "error",
+                            "decision": decision,
+                            "executor": executor_name,
+                            "message": f"tracked_packet escapes repo root: {tp}",
+                        }
                     plan_path = tp
                     break
             if plan_path:
                 executor_args.extend(["--plan", plan_path])
             else:
-                return {
-                    "status": "error",
-                    "decision": decision,
-                    "executor": executor_name,
-                    "message": "Cannot find plan path in routing record for phase_b_executor",
-                }
+                # Planless mode: Phase B derives scope from routing record.
+                # The routing record must have wave_name, summary, and
+                # next_candidates for this to succeed (fail-closed in Phase B).
+                executor_args.extend(["--routing-record", json.dumps(record)])
         else:
             executor_args.extend(["--routing-record", json.dumps(record)])
 

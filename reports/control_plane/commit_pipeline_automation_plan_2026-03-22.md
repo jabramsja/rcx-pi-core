@@ -141,11 +141,15 @@ STEP  NAME                      WHAT THE SCRIPT DOES                            
                                   meta_bridge_supervisor.py --package <path> --json
                                 Verify decision == COMMIT_GO or COMMIT_GO_HOLD_PUSH
 
-7     validate_receipt          Receipt exists at pre_commit_receipt_path          Error+stop
-                                Read decision field from receipt JSON directly
+7     validate_receipt          Verify Phase B handoff receipt exists at          Error+stop
+                                 pre_commit_receipt_path and still authorizes
+                                 commit continuity
+                                Then read decision field from the fresh Step 6
+                                 supervisor receipt JSON directly
                                 (do NOT call verify_pre_commit_receipt() — see
                                  Receipt Truth section below)
-                                Decision must be COMMIT_GO or COMMIT_GO_HOLD_PUSH
+                                Final supervisor decision must be COMMIT_GO or
+                                 COMMIT_GO_HOLD_PUSH
 
 8     run_pre_commit_script     bash mu/tools/hooks/pre-commit-doc-check           Error+stop
                                 Explicit run (~5s). Hook re-runs at step 9.
@@ -290,6 +294,7 @@ Caller reads `bot_findings`, fixes real issues, prepares new handoff:
 - All structural fields unchanged
 
 Same command: `python3 mu/tools/executors/commit_executor.py --handoff <path> -v --json`
+Alternative (from dispatcher): `python3 mu/tools/executors/commit_executor.py --routing-record '<json>' -v --json`
 
 Full pipeline runs. Ensure-steps handle state:
 - `ensure_feature_branch` → already on target, continue
@@ -308,7 +313,7 @@ Full pipeline runs. Ensure-steps handle state:
 2. **Post-merge verify fail-closed** — error on failure, not success.
 3. **TimeoutExpired handling** — inline at each except block.
 4. **Env var sanitization** — clear RCX_SKIP_* at step 1.
-5. **Dead code removal** — CommitExecutorError (never raised), --routing-record (always fails).
+5. **Dead code removal** — CommitExecutorError (never raised). `--routing-record` now accepted as an alternative entry path (prepares handoff from routing record internally).
 6. **Path traversal** — component-level on ALL path fields.
 7. **PR number validation** — isdigit().
 8. **base_branch enforcement** — must be "dev".
@@ -318,15 +323,11 @@ Full pipeline runs. Ensure-steps handle state:
 
 ## Handoff Schema Migration
 
-**`prepare_commit_handoff()` in `phase_b_executor.py` (lines 188-219) uses the OLD schema:**
-- Has: `staged_files`, `head_branch`, `hold_push`, `wave_name`
-- Missing: `wave_id`, `wave_class`, `target_gate_id`, `branch_prefix`, `tracker_note_text`, `fixes_implemented`, `files_to_stage`, `force_add_files`
+**`prepare_commit_handoff()` in `phase_b_executor.py` has been updated to the new 15-field schema** (wave_id, wave_class, target_gate_id, branch_prefix, tracker_note_text, fixes_implemented, files_to_stage, force_add_files, etc.). Old fields (staged_files, head_branch, hold_push, wave_name) removed.
 
-**This must be updated in Phase B implementation** to produce the new schema. Explicitly listed as a required implementation slice:
+**`commit_executor.py` now also accepts `--routing-record`** as an alternative to `--handoff`, but the route is intentionally decision-scoped. `prepare_handoff_from_routing_record()` may synthesize tracker-only handoffs for `UPDATE_TRACKER_ONLY`, while `COMMIT_GO` and `COMMIT_GO_HOLD_PUSH` still require a pre-prepared or valid embedded Phase B handoff so the exact receipt chain is preserved. This means dispatcher→commit is mechanically closed for tracker-only routes, but commit-capable routes remain fail-closed without the explicit Phase B handoff.
 
-| File | Required Change |
-|------|----------------|
-| `mu/tools/executors/phase_b_executor.py` | Update `prepare_commit_handoff()` to produce new schema. Import `load_routing_record` from common. |
+**`phase_b_executor.py` now accepts planless invocation** (omit `--plan`). When no plan is provided, Phase B derives bounded context from the routing record (requires wave_name, summary, next_candidates). Fails closed on under-specified records.
 
 ---
 
