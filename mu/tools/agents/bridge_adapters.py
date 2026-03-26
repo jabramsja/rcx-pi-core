@@ -18,6 +18,17 @@ from typing import Any
 class BridgeAdapterError(RuntimeError):
     """Raised when bridge adapter configuration or execution fails."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        output: str | None = None,
+        returncode: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.output = output
+        self.returncode = returncode
+
 
 @dataclass(frozen=True)
 class AdapterSpec:
@@ -235,7 +246,9 @@ def _run_adapter_buffered(
     if proc.returncode != 0:
         snippet = output[-1000:]
         raise BridgeAdapterError(
-            f"Adapter '{spec.name}' exited {proc.returncode}. Output tail:\n{snippet}"
+            f"Adapter '{spec.name}' exited {proc.returncode}. Output tail:\n{snippet}",
+            output=output,
+            returncode=proc.returncode,
         )
     return output
 
@@ -330,7 +343,9 @@ def _run_adapter_streaming(
     if proc.returncode != 0:
         snippet = output[-1000:]
         raise BridgeAdapterError(
-            f"Adapter '{spec.name}' exited {proc.returncode}. Output tail:\n{snippet}"
+            f"Adapter '{spec.name}' exited {proc.returncode}. Output tail:\n{snippet}",
+            output=output,
+            returncode=proc.returncode,
         )
     return output
 

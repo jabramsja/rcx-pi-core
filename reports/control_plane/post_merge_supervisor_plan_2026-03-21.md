@@ -95,7 +95,7 @@ fields + 1 derived field (trimmed from initial 13 per expert + bridge review):
 | `wave_name` | string | yes | Name of the completed wave |
 | `lane` | string | yes | Current active lane |
 | `changed_files` | list[string] | no (derived) | **Derived by supervisor from `merge_sha`** via `git diff --name-only <merge_sha>^...<merge_sha>` (first-parent diff, merge-safe). Package-supplied value is IGNORED — git truth is authoritative. Field retained in schema for documentation but supervisor always overrides with derived value. |
-| `rollout_packet_path` | string | yes | Path to active rollout packet (must be under `reports/control_plane/`) |
+| `rollout_packet_path` | string | no (derived when absent) | Optional path to active rollout packet. When omitted, the supervisor derives the canonical packet from the matching task's `Tracked packet:` field in `TASKS.md`; any supplied value must still match that canonical packet and remain under `reports/control_plane/`. |
 | `deferred_items` | list[string] | yes | Items deferred during the wave |
 | `next_candidates` | list[object] | yes | Claude's proposed next steps |
 | `tracker_state_summary` | string | yes | Current TASKS.md NOW/NEXT summary |
@@ -112,7 +112,7 @@ Each candidate must declare:
 
 ### Path containment (adversary + bridge R6 finding fix)
 
-All path fields (`rollout_packet_path`, `next_candidates[].tracked_packet`)
+All path fields (`rollout_packet_path` when supplied, `next_candidates[].tracked_packet`)
 must satisfy THREE checks during schema validation:
 
 1. **Lexical prefix:** Must be a relative path starting with
@@ -201,7 +201,7 @@ routing decisions on validation state.
 |------|------|---------------|----------|
 | 1 | `merge_verification` | (a) Current HEAD is on `dev` branch (or detached at `refs/heads/dev` OID), AND (b) merge SHA reachable from HEAD (`git merge-base --is-ancestor`) | HARD (blocks all routing) |
 | 2 | `tracker_consistency` | TASKS.md contains task_id in NOW or NEXT (active or completed; struck-through entries accepted as normal completion markers) | SOFT (Codex informed) |
-| 3 | `rollout_packet_canonical` | Supplied `rollout_packet_path` is referenced as `Tracked packet:` in the TASKS.md entry matching `task_id`; packet exists and is readable | SOFT (Codex informed) |
+| 3 | `rollout_packet_canonical` | Supplied `rollout_packet_path`, or the canonical path derived from `TASKS.md` when omitted, matches the task's `Tracked packet:` entry; the canonical packet remains inside `reports/control_plane/`, is git-tracked, exists, and is readable | SOFT (Codex informed) |
 | 4 | `blocker_check` | All `reports/deferred/blocking/` packets acknowledged | SOFT (Codex informed) |
 | 5 | `pre_commit_gate_check` | Pre-commit hook installed AND `verify_pre_commit_receipt.py` exists (local-checkout assurance only, not repo-wide enforcement) | SOFT (Codex informed) |
 | 6 | `docs_consistency` | `check_docs_consistency.sh` passes | SOFT (Codex informed) |
@@ -221,11 +221,14 @@ commit flow. The post-merge supervisor is a routing advisor, not a blocker.
 **Gate 3 canonical verification (bridge R2+R7+R8 finding fix):** The
 supervisor does NOT trust the package-supplied `rollout_packet_path` blindly.
 Gate 3 locates the TASKS.md entry matching `task_id` (in NOW or NEXT), then
-extracts the `Tracked packet:` reference from that specific entry. The
-supplied `rollout_packet_path` must match that entry's tracked packet. This
-is task-bound, not a broad scan of all control-plane references in TASKS.md
-(bridge R8 finding: broad scan accepts unrelated packets). If no match,
-Gate 3 fails with a message identifying both the supplied and task-bound
+extracts the `Tracked packet:` reference from that specific entry. If the
+package omits `rollout_packet_path`, the supervisor derives that canonical
+path from TASKS.md directly. If the package supplies a path, it must match
+that task-bound canonical packet. In both cases the canonical packet must
+pass the control-plane containment and git-tracked checks before Gate 3 reads
+it. This is task-bound, not a broad scan of all control-plane references in
+TASKS.md (bridge R8 finding: broad scan accepts unrelated packets). If no
+match, Gate 3 fails with a message identifying both the supplied and task-bound
 canonical paths. `tracker_state_summary` is treated as Claude's advisory
 input — Gate 2 independently reads TASKS.md to verify tracker state.
 
@@ -374,12 +377,12 @@ auditability and staleness detection, not enforcement.
 - Both read the same rollout packet and TASKS.md for authorization.
 - Gate 5 independently verifies the pre-commit gate is installed.
 
-## Interaction with Future Phase A / Phase B / Commit Executors
+## Interaction with Phase A / Phase B / Commit Executors
 
-- Post-merge routing decisions will eventually point at repo-local executors.
-- Until those executors exist, Claude acts on routing decisions manually.
-- The routing vocabulary is designed to be machine-consumable so that future
-  executors can read the post-merge decision and dispatch automatically.
+- Post-merge routing decisions now point at repo-local executors via the
+  dispatcher/executor surfaces.
+- The routing vocabulary is machine-consumable and is the normal handoff
+  surface once the post-merge supervisor emits a decision.
 - Post-merge supervisor does NOT implement those executors — it only routes.
 
 ## Interaction with Parked Structural Queue
@@ -461,7 +464,8 @@ Slice 1 of the post-merge supervisor:
 ### Not in Slice 1
 
 - Phase A/B executor dispatch (routing only)
-- Automatic invocation (Claude runs manually after merge)
+- Automatic invocation from merge-time surfaces (current trigger remains a
+  separate operator-run step after merge)
 - Integration with `merge_pr.sh` (future)
 - Structural queue unparking logic (future, requires founder decision)
 - State persistence / crash recovery (same deferral as pre-commit Slice 1)

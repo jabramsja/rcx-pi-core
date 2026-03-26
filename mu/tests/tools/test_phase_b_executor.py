@@ -368,6 +368,26 @@ class TestPrepareCommitHandoff:
         handoff = json.loads(path.read_text())
         assert handoff["files_to_stage"] == ["new_file.py"]
 
+    def test_optional_supervisor_metadata_in_handoff(self, tmp_path):
+        path = pb_mod.prepare_commit_handoff(
+            tmp_path,
+            wave_id="test",
+            task_id="[T]",
+            wave_class="MAINTENANCE",
+            target_gate_id="G8",
+            files_to_stage=["new_file.py"],
+            commit_message="test",
+            pr_title="test",
+            pr_body="test",
+            supervisor_lane="hooks/agents/bridge control-surface",
+            deferred_items=["reports/deferred/non_blocking/example.md"],
+            bridge_status={"rounds": 2, "reentry": True},
+        )
+        handoff = json.loads(path.read_text())
+        assert handoff["supervisor_lane"] == "hooks/agents/bridge control-surface"
+        assert handoff["deferred_items"] == ["reports/deferred/non_blocking/example.md"]
+        assert handoff["bridge_status"] == {"rounds": 2, "reentry": True}
+
 
 class TestLoadPlanPacketPathTraversal:
     """load_plan_packet must block path traversal attacks."""

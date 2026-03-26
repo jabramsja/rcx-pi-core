@@ -251,6 +251,16 @@ class TestCommitHandoffValidation:
         assert not valid
         assert any("Unexpected field: unexpected" == e for e in errors)
 
+    def test_optional_phase_b_metadata_passes(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_handoff(
+                supervisor_lane="hooks/agents/bridge control-surface",
+                deferred_items=["reports/deferred/non_blocking/example.md"],
+                bridge_status={"rounds": 2, "reentry": True},
+            )
+        )
+        assert valid, errors
+
     def test_empty_files_to_stage_fails(self):
         valid, errors = commit_mod.validate_handoff(_make_new_handoff(files_to_stage=[]))
         assert not valid
@@ -973,7 +983,13 @@ class TestEnsureTrackerNote:
         # Pre-insert wave_id into TASKS.md
         tasks = repo / "TASKS.md"
         content = tasks.read_text()
-        content = content.replace("old note.", "old note.\n- Tracker sync note (test-wave-id): already here.\n")
+        content = content.replace(
+            "old note.",
+            "old note.\n"
+            "- Tracker sync note (2026-03-26, test-wave-id): already here. "
+            "FOUNDER_OVERRIDE:2026-03-26-test-wave-id. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json.\n",
+        )
         tasks.write_text(content)
         subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, env=env)
         subprocess.run(["git", "commit", "-m", "add note"], cwd=repo, capture_output=True, env=env)
@@ -1194,6 +1210,43 @@ class TestSupervisorPackage:
         assert "files_to_stage" in handoff  # maps to scope_items
         assert "fixes_implemented" in handoff
         assert len(expected_fields) == 11
+
+    def test_20b_phase_b_metadata_is_preserved_into_supervisor_package(self, tmp_path):
+        repo, env = _init_git_repo(tmp_path)
+        tasks = repo / "TASKS.md"
+        content = tasks.read_text()
+        tasks.write_text(content.replace("old note.", "old note.\n- test-wave-id already\n"))
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "note"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+
+        mock_result = MagicMock()
+        mock_result.decision = "NEEDS_PHASE_B"
+        mock_result.receipt_path = ".agent_bus/meta/pre_commit_receipt.json"
+        mock_result.summary = "re-enter phase b"
+
+        handoff = _make_new_handoff(
+            caller="phase_b",
+            supervisor_lane="hooks/agents/bridge control-surface",
+            deferred_items=["reports/deferred/non_blocking/example.md"],
+            bridge_status={"rounds": 2, "reentry": True},
+        )
+
+        with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
+            sys.modules["meta_bridge_client"].run_meta_bridge_package = MagicMock(return_value=mock_result)
+            sys.modules["meta_bridge_client"].MetaBridgeClientError = Exception
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "build_and_run_supervisor"
+        package = json.loads((repo / ".scratch" / "auto_supervisor_package.json").read_text())
+        assert package["lane"] == "hooks/agents/bridge control-surface"
+        assert package["deferred_items"] == ["reports/deferred/non_blocking/example.md"]
+        assert package["bridge_status"] == {"rounds": 2, "reentry": True}
 
     def test_21_changed_files_empty_errors(self, tmp_path):
         """Test 21: changed_files empty → error before supervisor.
@@ -2579,6 +2632,16 @@ class TestWaveIdExactMatchInCommitExecutor:
         text = "- abc done\n- abc again\n"
         count = commit_mod._count_exact_wave_id_mentions(text, "abc")  # ANTICHEAT_OK: testing internal executor functions
         assert count == 2
+
+    def test_exact_match_counts_multiple_same_line_mentions_once(self):
+        """A single tracker line may repeat the wave_id in metadata without becoming duplicate."""
+        text = (
+            "- Tracker sync note (2026-03-26, abc): already here. "
+            "FOUNDER_OVERRIDE:2026-03-26-abc. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/abc.json.\n"
+        )
+        count = commit_mod._count_exact_wave_id_mentions(text, "abc")  # ANTICHEAT_OK: testing internal executor functions
+        assert count == 1
 
 
 class TestDispatcherStaleHandoffOverride:

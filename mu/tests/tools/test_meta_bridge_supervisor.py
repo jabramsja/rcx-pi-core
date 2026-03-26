@@ -10,8 +10,11 @@ Covers:
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -253,6 +256,36 @@ class TestParseMetaEnvelope:
         with pytest.raises(meta.MetaBridgeError, match="multiple differing envelope blocks"):
             meta.parse_meta_envelope(output)
 
+    def test_prompt_template_echo_is_ignored_when_final_envelope_is_authoritative(self):
+        output = (
+            "Required output template follows.\n"
+            "BEGIN_META_ENVELOPE\n"
+            '{"decision": "COMMIT_GO|COMMIT_GO_HOLD_PUSH|NO_ACTION|NEEDS_PHASE_A|NEEDS_PHASE_B|STOP_FOR_FOUNDER|STOP_FOR_TRIAGE_DISCUSSION|ERROR_VALIDATION_FAILED", "summary": "template"}\n'
+            "END_META_ENVELOPE\n"
+            "Reviewer notes...\n"
+            "BEGIN_META_ENVELOPE\n"
+            '{"decision": "COMMIT_GO", "summary": "ok"}\n'
+            "END_META_ENVELOPE\n"
+            "Questions? Concerns? Thoughts? -- Think hard\n"
+        )
+        envelope = meta.parse_meta_envelope(output)
+        assert envelope["decision"] == "COMMIT_GO"
+
+    def test_replayed_stderr_envelope_is_ignored_when_stdout_is_authoritative(self):
+        output = (
+            "BEGIN_META_ENVELOPE\n"
+            '{"decision": "COMMIT_GO", "summary": "current"}\n'
+            "END_META_ENVELOPE\n"
+            "\n[stderr]\n"
+            "historical replay:\n"
+            "BEGIN_META_ENVELOPE\n"
+            '{"decision": "NEEDS_PHASE_B", "summary": "old"}\n'
+            "END_META_ENVELOPE\n"
+        )
+        envelope = meta.parse_meta_envelope(output)
+        assert envelope["decision"] == "COMMIT_GO"
+        assert envelope["summary"] == "current"
+
     def test_run_validation_command_timeout_returns_124(self):
         with patch.object(meta.subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd=["python3"], timeout=1)):
             exit_code, output = meta.run_validation_command(REPO_ROOT, ["python3", "-c", "print('x')"])
@@ -311,6 +344,15 @@ class TestPreCommitPackageSchema:
         assert not valid
         assert any("Unexpected field" in e for e in errors)
 
+    def test_rejects_non_string_scope_and_deferred_items(self):
+        pkg = _make_valid_package()
+        pkg["scope_items"] = ["routing fix", {"bad": True}]
+        pkg["deferred_items"] = [123]
+        valid, errors = meta.validate_package_schema(pkg)
+        assert not valid
+        assert "scope_items[1] must be a string, got dict" in errors
+        assert "deferred_items[0] must be a string, got int" in errors
+
 
 @pytest.fixture
 def pkg_in_repo(tmp_path):
@@ -353,11 +395,91 @@ _FAKE_STATE = meta.RepoState(
 )
 
 
+def test_meta_bridge_lock_keeps_inode_stable_for_waiter_contention(tmp_path):
+    lock_path = tmp_path / "meta_bridge.lock"
+    waiter = None
+    contender = None
+    waiter_script = """
+import fcntl
+import os
+import sys
+import time
+
+path = sys.argv[1]
+fp = open(path, "w")
+print(f"opened {os.fstat(fp.fileno()).st_ino}", flush=True)
+fcntl.flock(fp, fcntl.LOCK_EX)
+print(f"acquired {os.fstat(fp.fileno()).st_ino}", flush=True)
+time.sleep(1.0)
+"""
+    try:
+        with meta._MetaBridgeLock(lock_path):  # ANTICHEAT_OK: same-path contention proof
+            waiter = subprocess.Popen(
+                [sys.executable, "-c", waiter_script, str(lock_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            assert waiter.stdout is not None
+            assert waiter.stdout.readline().strip().startswith("opened ")
+
+        acquired = waiter.stdout.readline().strip()
+        assert acquired.startswith("acquired ")
+        waiter_inode = int(acquired.split()[1])
+
+        contender = open(lock_path, "w")
+        contender_inode = os.fstat(contender.fileno()).st_ino
+        assert contender_inode == waiter_inode
+        with pytest.raises(BlockingIOError):
+            fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        out, err = waiter.communicate(timeout=5)
+        assert waiter.returncode == 0, f"{out}\n{err}"
+    finally:
+        if contender is not None:
+            contender.close()
+        if waiter is not None and waiter.poll() is None:
+            waiter.kill()
+            waiter.communicate(timeout=5)
+
+
+def test_meta_bridge_lock_persists_owner_metadata(tmp_path):
+    lock_path = tmp_path / "meta_bridge.lock"
+
+    with meta._MetaBridgeLock(lock_path):  # ANTICHEAT_OK: lock metadata coverage
+        metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+
+    assert lock_path.stat().st_size > 0
+    assert metadata["holder"] == "meta_bridge_supervisor"
+    assert metadata["pid"] == os.getpid()
+    assert metadata["lock_path"] == str(lock_path)
+
+
+def test_meta_bridge_lock_error_clarifies_persistent_path(tmp_path):
+    lock_path = tmp_path / "meta_bridge.lock"
+    fp = open(lock_path, "w")
+    try:
+        fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(meta.MetaBridgeError, match="persists by design") as excinfo:
+            with meta._MetaBridgeLock(lock_path):  # ANTICHEAT_OK: lock error-path coverage
+                pass
+    finally:
+        fcntl.flock(fp, fcntl.LOCK_UN)
+        fp.close()
+
+    assert "if stale" not in str(excinfo.value)
+
+
 
 
 
 class TestRunMetaBridgeLiveRouting:
     """Integration: run_meta_bridge() with mocked validation + Codex."""
+
+    @pytest.fixture(autouse=True)
+    def _allow_live_run(self):
+        with patch.object(meta, "ensure_not_agent_review_mode", return_value=None):
+            yield
 
     def test_failed_validation_still_calls_run_meta_review(self, pkg_in_repo):
         """Live mode + failed validations must reach run_meta_review, not short-circuit."""
@@ -537,6 +659,79 @@ class TestRunMetaBridgeLiveRouting:
         assert "not exercised" in resp.summary
 
 
+def test_run_meta_review_recovers_authoritative_envelope_from_raw_output(pkg_in_repo):
+    pkg_path, isolated_paths = pkg_in_repo
+    validation_results = _make_validation_results(["dirty_state"], [])
+    package = json.loads(pkg_path.read_text(encoding="utf-8"))
+    recovered = (
+        "BEGIN_META_ENVELOPE\n"
+        '{"decision": "COMMIT_GO", "summary": "Recovered", "findings": [], "request_for_claude": "Proceed"}\n'
+        "END_META_ENVELOPE\n"
+    )
+
+    def _failing_adapter(*args, **kwargs):
+        raw_output_path = kwargs["raw_output_path"]
+        raw_output_path.write_text(recovered, encoding="utf-8")
+        raise _adapters.BridgeAdapterError("Adapter 'codex' exited 1")
+
+    with patch.object(meta, "load_bridge_config", return_value={"agents": {}}), \
+         patch.object(meta, "get_adapter", return_value=MagicMock()), \
+         patch.object(meta, "run_adapter", side_effect=_failing_adapter):
+        envelope = meta.run_meta_review(isolated_paths, package, validation_results)
+
+    assert envelope["decision"] == "COMMIT_GO"
+    assert envelope["summary"] == "Recovered"
+
+
+def test_run_post_merge_review_recovers_authoritative_envelope_from_raw_output(tmp_path):
+    bus_dir = tmp_path / "meta_bus"
+    bus_dir.mkdir(parents=True, exist_ok=True)
+    paths = meta.MetaBridgePaths(
+        repo_root=REPO_ROOT,
+        bus_dir=bus_dir,
+        db_path=bus_dir / "meta_bridge.db",
+        lock_path=bus_dir / "meta_bridge.lock",
+    )
+    package = {
+        "task_id": "[POST-MERGE]",
+        "wave_name": "wave",
+        "lane": "hooks/agents/bridge control-surface",
+        "merged_pr": 1,
+        "merge_sha": "abc1234",
+        "rollout_packet_path": "reports/control_plane/post_merge_supervisor_plan_2026-03-21.md",
+        "deferred_items": [],
+        "next_candidates": [],
+        "tracker_state_summary": "stable",
+        "blocker_report_paths": [],
+    }
+    validation_results = _make_validation_results(["gate1"], [])
+    recovered = (
+        "BEGIN_META_ENVELOPE\n"
+        '{"decision": "CONTINUE_DIALECTIC", "summary": "Recovered post-merge", "findings": [], "request_for_claude": "Continue"}\n'
+        "END_META_ENVELOPE\n"
+    )
+
+    def _failing_adapter(*args, **kwargs):
+        raw_output_path = kwargs["raw_output_path"]
+        raw_output_path.write_text(recovered, encoding="utf-8")
+        raise _adapters.BridgeAdapterError("Adapter 'codex' exited 1")
+
+    with patch.object(meta, "build_post_merge_prompt", return_value="prompt"), \
+         patch.object(meta, "load_bridge_config", return_value={"agents": {}}), \
+         patch.object(meta, "get_adapter", return_value=MagicMock()), \
+         patch.object(meta, "run_adapter", side_effect=_failing_adapter):
+        envelope = meta.run_post_merge_review(
+            paths,
+            package,
+            validation_results,
+            derived_files=["TASKS.md"],
+            rollout_order="1. Continue",
+        )
+
+    assert envelope["decision"] == "CONTINUE_DIALECTIC"
+    assert envelope["summary"] == "Recovered post-merge"
+
+
 # ===========================================================================
 # Post-merge supervisor tests
 # ===========================================================================
@@ -564,6 +759,23 @@ class TestPostMergePackageSchema:
             "wave_name": "test-wave",
             "lane": "test-lane",
             "rollout_packet_path": "reports/control_plane/rollout.md",
+            "deferred_items": [],
+            "next_candidates": [{"candidate": "next thing", "bounded": True, "tracked_packet": None}],
+            "tracker_state_summary": "NEXT: [TEST-1]",
+            "blocker_report_paths": [],
+        }
+        valid, errors = meta.validate_post_merge_package_schema(pkg, repo)
+        assert valid, errors
+
+    def test_valid_package_passes_without_rollout_packet_path(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        pkg = {
+            "task_id": "[TEST-1]",
+            "merged_pr": 100,
+            "merge_sha": "abc123",
+            "wave_name": "test-wave",
+            "lane": "test-lane",
             "deferred_items": [],
             "next_candidates": [{"candidate": "next thing", "bounded": True, "tracked_packet": None}],
             "tracker_state_summary": "NEXT: [TEST-1]",
@@ -740,6 +952,68 @@ class TestPostMergeIntegration:
         prompt = meta.build_post_merge_prompt(pkg, results, repo, ["f1.py"], "1. Step 1")
         assert "ROUTE_PHASE_A" in prompt
         assert "Step 1" in prompt
+
+    def test_check_rollout_packet_canonical_derives_when_path_missing(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        rollout = repo / "reports" / "control_plane" / "canonical.md"
+        rollout.write_text("# rollout\n")
+        (repo / "TASKS.md").write_text(
+            "## NOW\n\n## NEXT\n\n"
+            "- **[TASK-1]** Simple test. **Tracked packet:** `reports/control_plane/canonical.md`.\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True, check=True)
+        subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
+        env = {
+            **__import__("os").environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        }
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True, check=True, env=env)
+        result = meta.check_rollout_packet_canonical(repo, "", "[TASK-1]")
+        assert result.passed
+
+    def test_get_canonical_rollout_packet_for_task_reads_tasks_entry(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text(
+            "## NOW\n\n## NEXT\n\n"
+            "- **[TASK-1]** Simple test. **Tracked packet:** `reports/control_plane/canonical.md`.\n",
+            encoding="utf-8",
+        )
+
+        packet, err = meta.get_canonical_rollout_packet_for_task(repo, "[TASK-1]")
+        assert err is None
+        assert packet == "reports/control_plane/canonical.md"
+
+    def test_check_rollout_packet_canonical_derives_path_must_still_be_tracked(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "canonical.md").write_text("# rollout\n")
+        (repo / "TASKS.md").write_text(
+            "## NOW\n\n## NEXT\n\n"
+            "- **[TASK-1]** Simple test. **Tracked packet:** `reports/control_plane/canonical.md`.\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "init"], cwd=repo, capture_output=True, check=True)
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, check=True)
+        env = {
+            **__import__("os").environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        }
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True, check=True, env=env)
+
+        result = meta.check_rollout_packet_canonical(repo, "", "[TASK-1]")
+        assert not result.passed
+        assert "not a git-tracked file" in (result.error or "")
 
 
 class TestGate3TaskBound:
