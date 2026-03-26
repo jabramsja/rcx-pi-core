@@ -233,7 +233,7 @@ def _commit_post_commit_source() -> str:
     return (
         inspect.getsource(commit_mod.run_commit_pipeline)
         + "\n"
-        + inspect.getsource(commit_mod._run_post_commit_pipeline)
+        + inspect.getsource(commit_mod._run_post_commit_pipeline)  # ANTICHEAT_OK: testing extracted post-commit helper source
     )
 
 
@@ -1940,7 +1940,7 @@ class TestCommitContinuationAndBotFreshness:
         continuation_path.write_text(json.dumps({
             "version": commit_mod.COMMIT_CONTINUATION_VERSION,
             "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
-            "handoff_sha": commit_mod._handoff_sha(handoff),
+            "handoff_sha": commit_mod._handoff_sha(handoff),  # ANTICHEAT_OK: testing continuation binding helper
             "target_branch": "jabramsja/test-wave-id",
             "commit_sha": head_sha,
             "receipt_decision": "COMMIT_GO",
@@ -1993,7 +1993,7 @@ class TestCommitContinuationAndBotFreshness:
         continuation_path.write_text(json.dumps({
             "version": commit_mod.COMMIT_CONTINUATION_VERSION,
             "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
-            "handoff_sha": commit_mod._handoff_sha(handoff),
+            "handoff_sha": commit_mod._handoff_sha(handoff),  # ANTICHEAT_OK: testing continuation binding helper
             "target_branch": "jabramsja/test-wave-id",
             "commit_sha": head_sha,
             "receipt_decision": "COMMIT_GO_HOLD_PUSH",
@@ -2025,8 +2025,8 @@ class TestCommitContinuationAndBotFreshness:
                 ]
             }
         }
-        assert commit_mod._has_fresh_bot_review(pr_data, "abc123") is True
-        assert commit_mod._has_fresh_bot_review(pr_data, "def456") is False
+        assert commit_mod._has_fresh_bot_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing bot-review freshness helper
+        assert commit_mod._has_fresh_bot_review(pr_data, "def456") is False  # ANTICHEAT_OK: testing bot-review freshness helper
 
     def test_wait_for_bot_review_freshness_polls_until_current_head_review(self):
         calls = {"count": 0}
@@ -2048,7 +2048,7 @@ class TestCommitContinuationAndBotFreshness:
             }
 
         with patch.object(commit_mod.time, "sleep", return_value=None):
-            pr_data = commit_mod._wait_for_bot_review_freshness(
+            pr_data = commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: testing bot-review polling helper
                 query_state,
                 head_sha="abc123",
                 wait_seconds=1,
@@ -2056,12 +2056,12 @@ class TestCommitContinuationAndBotFreshness:
             )
 
         assert calls["count"] == 2
-        assert commit_mod._has_fresh_bot_review(pr_data, "abc123") is True
+        assert commit_mod._has_fresh_bot_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing bot-review freshness helper
 
     def test_wait_for_bot_review_freshness_times_out_fail_closed(self):
         with patch.object(commit_mod.time, "sleep", return_value=None):
             with pytest.raises(TimeoutError, match="No current-head"):
-                commit_mod._wait_for_bot_review_freshness(
+                commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: testing timeout fail-closed helper
                     lambda: {"latestReviews": {"nodes": []}},
                     head_sha="abc123",
                     wait_seconds=0,
