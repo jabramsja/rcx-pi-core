@@ -446,7 +446,7 @@ time.sleep(1.0)
 def test_meta_bridge_lock_persists_owner_metadata(tmp_path):
     lock_path = tmp_path / "meta_bridge.lock"
 
-    with meta._MetaBridgeLock(lock_path):
+    with meta._MetaBridgeLock(lock_path):  # ANTICHEAT_OK: lock metadata coverage
         metadata = json.loads(lock_path.read_text(encoding="utf-8"))
 
     assert lock_path.stat().st_size > 0
@@ -461,7 +461,7 @@ def test_meta_bridge_lock_error_clarifies_persistent_path(tmp_path):
     try:
         fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
         with pytest.raises(meta.MetaBridgeError, match="persists by design") as excinfo:
-            with meta._MetaBridgeLock(lock_path):
+            with meta._MetaBridgeLock(lock_path):  # ANTICHEAT_OK: lock error-path coverage
                 pass
     finally:
         fcntl.flock(fp, fcntl.LOCK_UN)

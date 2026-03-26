@@ -13,7 +13,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 # Enforce tracker sync for commits being pushed
 RANGE=""
-if git rev-parse --verify --quiet @{upstream} >/dev/null; then
+if git rev-parse --verify --quiet @{upstream} >/dev/null 2>&1; then
     RANGE="@{upstream}...HEAD"
 elif git show-ref --verify --quiet refs/remotes/origin/dev; then
     RANGE="origin/dev...HEAD"

@@ -492,7 +492,7 @@ time.sleep(1.0)
 def test_bridge_lock_persists_owner_metadata(tmp_path: Path) -> None:
     lock_path = tmp_path / "bridge.lock"
 
-    with bridge._BridgeLock(lock_path):
+    with bridge._BridgeLock(lock_path):  # ANTICHEAT_OK: lock metadata coverage
         metadata = json.loads(lock_path.read_text(encoding="utf-8"))
 
     assert lock_path.stat().st_size > 0
@@ -507,7 +507,7 @@ def test_bridge_lock_error_clarifies_persistent_path(tmp_path: Path) -> None:
     try:
         fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
         with pytest.raises(bridge.BridgeError, match="persists by design") as excinfo:
-            with bridge._BridgeLock(lock_path):
+            with bridge._BridgeLock(lock_path):  # ANTICHEAT_OK: lock error-path coverage
                 pass
     finally:
         fcntl.flock(fp, fcntl.LOCK_UN)
