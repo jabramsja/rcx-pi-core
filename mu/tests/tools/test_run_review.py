@@ -236,6 +236,36 @@ def test_adversary_timeout_blocks_merge(tmp_path):
     asyncio.run(_run())
 
 
+def test_adversary_sdk_unavailable_blocks_merge():
+    """Missing Claude SDK is a hard-gate infra failure for adversary."""
+
+    async def _run() -> None:
+        original_query = rr_mod.query
+        original_sdk_error = rr_mod.SDK_IMPORT_ERROR
+        original_options = rr_mod.ClaudeAgentOptions
+        rr_mod.query = lambda **kwargs: None
+        rr_mod.SDK_IMPORT_ERROR = ModuleNotFoundError("No module named 'claude_agent_sdk'")
+        rr_mod.ClaudeAgentOptions = None
+        try:
+            orchestrator = rr_mod.ReviewOrchestrator(
+                ["mu/tools/executors/phase_b_executor.py"],
+                depth="quick",
+                verbose=False,
+                use_memory=False,
+            )
+            result = await orchestrator.run_single_agent("adversary")
+            assert result.verdict == "UNKNOWN"
+            assert result.passed is False
+            assert result.blocks_merge is True
+            assert "claude_agent_sdk unavailable" in result.output
+        finally:
+            rr_mod.query = original_query
+            rr_mod.SDK_IMPORT_ERROR = original_sdk_error
+            rr_mod.ClaudeAgentOptions = original_options
+
+    asyncio.run(_run())
+
+
 def test_run_all_finalizes_status_on_fail_fast_hard_gate(tmp_path):
     async def _run() -> None:
         status_path = tmp_path / "status.json"

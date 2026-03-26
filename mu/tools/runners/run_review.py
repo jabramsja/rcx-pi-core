@@ -792,14 +792,13 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
         passed = agent_passed(agent_name, verdict) and is_compliant
         is_hard_gate = agent_name in HARD_GATE_AGENTS
         blocks_merge = is_hard_gate and not passed
+        infra_error = "AGENT ERROR" in result_text or "AGENT API ERROR" in result_text
 
         # Evidence-gated adversary blocking: failing adversary verdicts only block
         # when output is compliant and contains machine-checkable proof markers.
-        # Skip for cancelled/timed-out agents: both = fail-closed (blocks merge
-        # by default).  A timed-out adversary with verdict UNKNOWN must not have
-        # its blocks_merge downgraded by evidence gating — the timeout itself is
-        # the blocking signal.
-        if agent_name == "adversary" and blocks_merge and not was_cancelled and not timed_out:
+        # Skip for cancelled/timed-out/infra-failure agents: all three are
+        # fail-closed and must not be downgraded into warning-only residue.
+        if agent_name == "adversary" and blocks_merge and not was_cancelled and not timed_out and not infra_error:
             blocks_merge = adversary_blocks_merge(
                 verdict=verdict,
                 output=result_text,
