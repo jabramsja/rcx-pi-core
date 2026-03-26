@@ -762,7 +762,7 @@ def _run_post_commit_pipeline(
 
     try:
         repo_owner, repo_name = _parse_origin_owner_repo(repo_root)
-    except (subprocess.CalledProcessError, IndexError):
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, IndexError):
         return {"status": "error", "step": "ensure_review_clear_and_merge",
                 "errors": ["Cannot determine repo owner/name from git remote"],
                 "steps_completed": result["steps_completed"],
@@ -783,7 +783,13 @@ def _run_post_commit_pipeline(
             head_sha=head_sha_before_merge,
             log=log,
         )
-    except (subprocess.CalledProcessError, json.JSONDecodeError, ValueError, TimeoutError) as exc:
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        json.JSONDecodeError,
+        ValueError,
+        TimeoutError,
+    ) as exc:
         return {"status": "error", "step": "ensure_review_clear_and_merge",
                 "errors": [f"Review query failed: {exc}"],
                 "steps_completed": result["steps_completed"],

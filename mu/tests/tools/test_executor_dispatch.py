@@ -2068,6 +2068,63 @@ class TestCommitContinuationAndBotFreshness:
                     poll_interval=0,
                 )
 
+    def test_post_commit_pipeline_returns_structured_error_on_review_query_timeout(self, tmp_path):
+        repo, _ = _init_git_repo(tmp_path)
+        handoff = _make_new_handoff()
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        result = {
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "ensure_tracker_note",
+                "stage_files",
+                "collect_and_stage_indicator",
+                "build_and_run_supervisor",
+                "validate_receipt",
+                "run_pre_commit_script",
+                "git_commit",
+                "hold_check",
+            ],
+            "commit_sha": "abc123",
+            "handoff_sha": commit_mod._handoff_sha(handoff),  # ANTICHEAT_OK: testing continuation binding helper
+            "receipt_decision": "COMMIT_GO",
+        }
+
+        def fake_run(args, *, cwd, check=True, timeout=120, env=None):
+            if args[:3] == ["git", "push", "-u"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if args[:3] == ["gh", "pr", "list"]:
+                return subprocess.CompletedProcess(args, 0, "[]\n", "")
+            if args[:3] == ["gh", "pr", "create"]:
+                return subprocess.CompletedProcess(
+                    args, 0, "https://github.com/jabramsja/rcx-pi-core/pull/671\n", ""
+                )
+            if args[:3] == ["gh", "pr", "checks"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if args[:3] == ["git", "rev-parse", "HEAD"]:
+                return subprocess.CompletedProcess(args, 0, "abc123\n", "")
+            if args[:3] == ["gh", "api", "graphql"]:
+                raise subprocess.TimeoutExpired(cmd=args, timeout=30)
+            raise AssertionError(f"Unexpected command: {args}")
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run):
+            with patch.object(commit_mod, "_parse_origin_owner_repo", return_value=("jabramsja", "rcx-pi-core")):
+                post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising post-commit helper directly
+                    handoff=handoff,
+                    repo_root=repo,
+                    result=result,
+                    target_branch="jabramsja/test-wave-id",
+                    base_branch="dev",
+                    continuation_path=continuation_path,
+                    log=lambda _: None,
+                )
+
+        assert post_commit["status"] == "error"
+        assert post_commit["step"] == "ensure_review_clear_and_merge"
+        assert "Review query failed" in post_commit["errors"][0]
+        assert "timed out" in post_commit["errors"][0]
+        assert "wait_ci" in post_commit["steps_completed"]
+
 
 class TestModularSurfaceEntrypoints:
     """executor_dispatch.py also acts as the modular control-plane entrypoint."""
