@@ -4,6 +4,16 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-26
 
+### Pipeline Smoke Truth Sync
+
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` now records the first
+  live post-merge routing stop and defines a canonical rollout order for the
+  boring-path smoke
+- `TASKS.md` now makes `[PIPELINE-TEST-RUN]` the immediate next bounded
+  control-plane proof item and explicitly sequences `[COMMIT-EXECUTOR-E2E]`
+  after it with refreshed blocker wording
+- No runtime/substrate or host-semantics delta
+
 ### Pipeline Continuation Hardening
 
 - `commit_executor.py` now persists a bounded post-commit continuation record keyed to the exact handoff, target branch, and local commit, so reruns after step-11+ failures continue honestly without a separate resume flag
