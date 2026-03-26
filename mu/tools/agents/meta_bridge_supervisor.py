@@ -34,7 +34,7 @@ EXECUTORS_DIR = SCRIPT_DIR.parent / "executors"
 if str(EXECUTORS_DIR) not in sys.path:
     sys.path.insert(0, str(EXECUTORS_DIR))
 
-from bridge_adapters import get_adapter, load_bridge_config, run_adapter
+from bridge_adapters import BridgeAdapterError, get_adapter, load_bridge_config, run_adapter
 from executor_common import ensure_not_agent_review_mode, ExecutorCommonError
 
 # Namespace isolation: meta-bridge uses .agent_bus/meta/ subdirectory
@@ -56,6 +56,23 @@ TRANSIENT_PATH_PREFIXES = (
 
 # These were previously two separate near-identical constants.
 # All existing references now use TRANSIENT_PATH_PREFIXES directly.
+
+
+def _lock_metadata_payload(holder: str, lock_path: Path) -> dict[str, Any]:
+    return {
+        "holder": holder,
+        "pid": os.getpid(),
+        "lock_path": str(lock_path),
+        "acquired_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _write_lock_metadata(fp: Any, *, holder: str, lock_path: Path) -> None:
+    fp.seek(0)
+    json.dump(_lock_metadata_payload(holder, lock_path), fp, sort_keys=True)
+    fp.write("\n")
+    fp.truncate()
+    fp.flush()
 
 def _read_bounded_timeout_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
     raw = os.environ.get(name)
@@ -156,21 +173,35 @@ class _MetaBridgeLock:
 
     def __enter__(self) -> "_MetaBridgeLock":
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
-        self._fp = open(self._lock_path, "w")
+        fd = os.open(self._lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+        self._fp = os.fdopen(fd, "r+", encoding="utf-8")
         try:
             fcntl.flock(self._fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (IOError, OSError):
             self._fp.close()
             raise MetaBridgeError(
                 "Another meta-bridge supervisor is running. "
-                "Wait or remove .agent_bus/meta/meta_bridge.lock if stale."
+                "Wait for it to finish. The lockfile path persists by design; "
+                "only remove .agent_bus/meta/meta_bridge.lock if a lock probe "
+                "shows no process holds the flock."
             )
+        _write_lock_metadata(
+            self._fp,
+            holder="meta_bridge_supervisor",
+            lock_path=self._lock_path,
+        )
         return self
 
     def __exit__(self, *exc: object) -> bool:
         if self._fp:
-            fcntl.flock(self._fp, fcntl.LOCK_UN)
-            self._fp.close()
+            try:
+                fcntl.flock(self._fp, fcntl.LOCK_UN)
+            finally:
+                self._fp.close()
+                self._fp = None
+            # Keep the lock path stable. flock is inode-bound, so unlinking the
+            # file can let a blocked waiter keep the old inode while a new
+            # contender recreates the path and acquires a different inode.
         return False
 
 
@@ -441,8 +472,11 @@ def validate_package_schema(package: Any) -> tuple[bool, list[str]]:
         if not isinstance(val, list):
             errors.append(f"{field} must be a list")
         else:
-            # Validate element types: changed_files and blocker_report_paths must be strings
-            if field in ("changed_files", "blocker_report_paths"):
+            # All list-valued package fields are sequences of repo-relative or
+            # descriptive strings. Reject nested/non-string elements early so
+            # prompt/rendering code never has to normalize caller-supplied
+            # arbitrary structures.
+            if field in ("changed_files", "scope_items", "deferred_items", "blocker_report_paths"):
                 for i, elem in enumerate(val):
                     if not isinstance(elem, str):
                         errors.append(f"{field}[{i}] must be a string, got {type(elem).__name__}")
@@ -1087,6 +1121,17 @@ def build_meta_reviewer_prompt(
 META_ENVELOPE_RE = re.compile(
     r"(?ms)^BEGIN_META_ENVELOPE\s*$\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?^END_META_ENVELOPE\s*$",
 )
+_STDERR_SENTINEL = "\n[stderr]\n"
+
+
+def _preferred_authoritative_output(output: str, envelope_re: re.Pattern[str]) -> str:
+    """Prefer stdout over replayed stderr transcripts when stdout has envelopes."""
+    stdout_only = output
+    if _STDERR_SENTINEL in output:
+        stdout_only, _, _ = output.partition(_STDERR_SENTINEL)
+    elif output.startswith("[stderr]\n"):
+        stdout_only = ""
+    return stdout_only if envelope_re.search(stdout_only) else output
 
 
 # Template-authorized decisions (what Codex can emit via the template)
@@ -1114,6 +1159,7 @@ def _parse_authoritative_envelope(
     authorized_decisions: set[str],
     invalid_decision_message: str,
 ) -> dict[str, Any]:
+    output = _preferred_authoritative_output(output, META_ENVELOPE_RE)
     matches = list(META_ENVELOPE_RE.finditer(output))
     if not matches:
         raise MetaBridgeError(f"{label} output missing BEGIN_META_ENVELOPE / END_META_ENVELOPE block")
@@ -1131,16 +1177,27 @@ def _parse_authoritative_envelope(
         if missing:
             raise MetaBridgeError(f"{label} envelope missing keys: {sorted(missing)}")
 
-        if envelope["decision"] not in authorized_decisions:
+        decision = envelope["decision"]
+        if decision not in authorized_decisions:
+            # The live adapter transcript can contain the prompt text before the
+            # model reply. Ignore only the prompt's pipe-delimited enum
+            # placeholder, but fail closed on any other unauthorized token.
+            if isinstance(decision, str) and "|" in decision:
+                continue
             raise MetaBridgeError(
                 invalid_decision_message.format(
-                    decision=envelope["decision"],
+                    decision=decision,
                     authorized=sorted(authorized_decisions),
                 )
             )
 
         envelopes.append(envelope)
         canonical_payloads.add(json.dumps(envelope, sort_keys=True, separators=(",", ":")))
+
+    if not envelopes:
+        raise MetaBridgeError(
+            f"{label} output contained only non-authoritative template envelope blocks"
+        )
 
     if len(canonical_payloads) > 1:
         raise MetaBridgeError(
@@ -1161,6 +1218,37 @@ def parse_meta_envelope(output: str) -> dict[str, Any]:
             "Template-authorized tokens: {authorized}"
         ),
     )
+
+
+def _recover_adapter_envelope(
+    exc: BridgeAdapterError,
+    raw_output_path: Path,
+    *,
+    parser: Any,
+    label: str,
+) -> dict[str, Any]:
+    candidates: list[tuple[str, str]] = []
+    if exc.output:
+        candidates.append(("adapter output", exc.output))
+    try:
+        raw_output = raw_output_path.read_text(encoding="utf-8")
+    except OSError:
+        raw_output = ""
+    if raw_output and all(raw_output != existing for _, existing in candidates):
+        candidates.append(("raw output file", raw_output))
+
+    parse_errors: list[str] = []
+    for source, output in candidates:
+        try:
+            return parser(output)
+        except MetaBridgeError as parse_exc:
+            parse_errors.append(f"{source}: {parse_exc}")
+
+    if parse_errors:
+        raise MetaBridgeError(
+            f"Codex adapter failed: {exc}. {label} recovery also failed: {'; '.join(parse_errors)}"
+        ) from exc
+    raise MetaBridgeError(f"Codex adapter failed: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1323,14 +1411,15 @@ def verify_pre_commit_receipt(
 
 POST_MERGE_ROUTING_NAME = "post_merge_routing.json"
 
-# Post-merge required package fields (10 required + 1 derived)
+# Post-merge required package fields.
+# rollout_packet_path is optional in normal operation and can be derived from
+# TASKS.md via the task's canonical "Tracked packet:" entry.
 POST_MERGE_REQUIRED_FIELDS = {
     "task_id",
     "merged_pr",
     "merge_sha",
     "wave_name",
     "lane",
-    "rollout_packet_path",
     "deferred_items",
     "next_candidates",
     "tracker_state_summary",
@@ -1413,14 +1502,16 @@ def validate_post_merge_package_schema(package: Any, repo_root: Path) -> tuple[b
                     if tp_err:
                         errors.append(f"next_candidates[{i}].tracked_packet: {tp_err}")
 
-    # rollout_packet_path: path containment
-    rpp = package.get("rollout_packet_path", "")
-    if isinstance(rpp, str) and rpp:
-        rpp_err = _check_control_plane_path(rpp, repo_root)
-        if rpp_err:
-            errors.append(f"rollout_packet_path: {rpp_err}")
-    elif not isinstance(rpp, str) or not rpp:
-        errors.append("rollout_packet_path must be a non-empty string")
+    # rollout_packet_path: optional for normal operation, but if supplied it
+    # must still be a canonical tracked control-plane path.
+    rpp = package.get("rollout_packet_path")
+    if rpp is not None:
+        if not isinstance(rpp, str):
+            errors.append("rollout_packet_path must be a string when supplied")
+        elif rpp:
+            rpp_err = _check_control_plane_path(rpp, repo_root)
+            if rpp_err:
+                errors.append(f"rollout_packet_path: {rpp_err}")
 
     return len(errors) == 0, errors
 
@@ -1510,6 +1601,29 @@ def check_tracker_consistency_post_merge(repo_root: Path, task_id: str) -> Valid
     )
 
 
+def get_canonical_rollout_packet_for_task(
+    repo_root: Path,
+    task_id: str,
+) -> tuple[str | None, str | None]:
+    """Derive the canonical tracked packet path for a task from TASKS.md."""
+    active_text, err = _extract_now_next_text(repo_root)
+    if err:
+        return None, err
+
+    escaped_id = re.escape(task_id)
+    pattern = rf"^- (?:~~)?\*\*{escaped_id}\*\*.*?(?=\n- (?:~~)?\*\*\[|\Z)"
+    entry_match = re.search(pattern, active_text, re.DOTALL | re.MULTILINE)
+    if not entry_match:
+        return None, f"task_id {task_id} not found in TASKS.md NOW/NEXT"
+
+    entry_text = entry_match.group(0)
+    tp_match = re.search(r"\*\*Tracked packet:\*\*\s*`([^`]+)`", entry_text)
+    if not tp_match:
+        return None, f"No 'Tracked packet:' field found in {task_id} entry — cannot derive canonical packet"
+
+    return tp_match.group(1), None
+
+
 def check_rollout_packet_canonical(
     repo_root: Path, rollout_packet_path: str, task_id: str
 ) -> ValidationResult:
@@ -1518,53 +1632,42 @@ def check_rollout_packet_canonical(
     Task-bound: finds the TASKS.md entry for task_id and checks if the
     rollout_packet_path is referenced in THAT entry (not any entry).
     """
-    active_text, err = _extract_now_next_text(repo_root)
+    canonical_packet, err = get_canonical_rollout_packet_for_task(repo_root, task_id)
     if err:
         return ValidationResult("rollout_packet_canonical", False, err)
 
+    candidate_packet = rollout_packet_path or canonical_packet
+
+    # Reapply control-plane containment and tracked-file proof here even for
+    # TASKS-derived canonical paths. Gate 3 must remain fail-closed if reused
+    # directly outside run_post_merge_bridge's earlier schema/derivation checks.
+    candidate_path_err = _check_control_plane_path(candidate_packet, repo_root)
+    if candidate_path_err:
+        return ValidationResult(
+            "rollout_packet_canonical", False,
+            f"Canonical rollout packet invalid: {candidate_path_err}"
+        )
+
     # Check that rollout_packet_path exists AND is readable (fail closed)
-    rp_full = repo_root / rollout_packet_path
+    rp_full = repo_root / candidate_packet
     if not rp_full.exists():
         return ValidationResult(
             "rollout_packet_canonical", False,
-            f"Rollout packet not found: {rollout_packet_path}"
+            f"Rollout packet not found: {candidate_packet}"
         )
     try:
         rp_full.read_text(encoding="utf-8")
     except (OSError, PermissionError) as exc:
         return ValidationResult(
             "rollout_packet_canonical", False,
-            f"Rollout packet unreadable: {rollout_packet_path}: {exc}"
+            f"Rollout packet unreadable: {candidate_packet}: {exc}"
         )
 
-    # Find the specific TASKS entry for task_id at a bullet-point start
-    # Task entries start with "- **[TASK-ID]**" or "- ~~**[TASK-ID]**~~" (struck-through)
-    escaped_id = re.escape(task_id)
-    pattern = rf"^- (?:~~)?\*\*{escaped_id}\*\*.*?(?=\n- (?:~~)?\*\*\[|\Z)"
-    entry_match = re.search(pattern, active_text, re.DOTALL | re.MULTILINE)
-    if not entry_match:
-        return ValidationResult(
-            "rollout_packet_canonical", False,
-            f"task_id {task_id} not found in TASKS.md NOW/NEXT"
-        )
-
-    entry_text = entry_match.group(0)
-
-    # Extract the exact "Tracked packet:" value from this entry
-    tp_match = re.search(r"\*\*Tracked packet:\*\*\s*`([^`]+)`", entry_text)
-    if tp_match:
-        canonical_packet = tp_match.group(1)
-        if rollout_packet_path == canonical_packet:
-            return ValidationResult("rollout_packet_canonical", True)
-        return ValidationResult(
-            "rollout_packet_canonical", False,
-            f"Supplied {rollout_packet_path} does not match Tracked packet: {canonical_packet} in {task_id}"
-        )
-
-    # No "Tracked packet:" found — fail closed (bridge R2 fix)
+    if candidate_packet == canonical_packet:
+        return ValidationResult("rollout_packet_canonical", True)
     return ValidationResult(
         "rollout_packet_canonical", False,
-        f"No 'Tracked packet:' field found in {task_id} entry — cannot verify canonical packet"
+        f"Supplied {candidate_packet} does not match Tracked packet: {canonical_packet} in {task_id}"
     )
 
 
@@ -1927,6 +2030,13 @@ def run_post_merge_review(
             stream=True,
             raw_output_path=raw_output_path,
         )
+    except BridgeAdapterError as exc:
+        return _recover_adapter_envelope(
+            exc,
+            raw_output_path,
+            parser=parse_post_merge_envelope,
+            label="Post-merge review",
+        )
     except Exception as exc:
         raise MetaBridgeError(f"Codex adapter failed: {exc}") from exc
 
@@ -2011,7 +2121,8 @@ def run_post_merge_bridge(
             recovery_hint="Ensure package_path is a valid file path",
         )
 
-    # Schema validation (with path containment)
+    # Schema validation (rollout_packet_path optional; canonical path can be
+    # derived from TASKS.md after schema admission)
     valid, errors = validate_post_merge_package_schema(package, repo_root)
     if not valid:
         return MetaBridgeResponse(
@@ -2022,6 +2133,31 @@ def run_post_merge_bridge(
             error_detail="; ".join(errors),
             recovery_hint="Fix schema errors and resubmit",
         )
+
+    if not package.get("rollout_packet_path"):
+        canonical_packet, packet_err = get_canonical_rollout_packet_for_task(
+            repo_root, package.get("task_id", "")
+        )
+        if packet_err:
+            return MetaBridgeResponse(
+                status="error",
+                decision=Decision.ERROR_PACKAGE_INVALID.value,
+                summary="Package failed canonical rollout-packet derivation",
+                error_code="TASK_PACKET_DERIVATION_FAILED",
+                error_detail=packet_err,
+                recovery_hint="Add a valid task entry with **Tracked packet:** in TASKS.md or supply rollout_packet_path explicitly",
+            )
+        packet_path_err = _check_control_plane_path(canonical_packet, repo_root)
+        if packet_path_err:
+            return MetaBridgeResponse(
+                status="error",
+                decision=Decision.ERROR_PACKAGE_INVALID.value,
+                summary="Derived rollout packet failed control-plane validation",
+                error_code="TASK_PACKET_INVALID",
+                error_detail=packet_path_err,
+                recovery_hint="Fix the tracked packet path in TASKS.md or supply a valid canonical rollout_packet_path",
+            )
+        package["rollout_packet_path"] = canonical_packet
 
     # Derive changed_files from merge_sha (not self-reported — bridge R7+R8)
     derived_files, derive_err = derive_changed_files(repo_root, package.get("merge_sha", ""))
@@ -2194,6 +2330,13 @@ def run_meta_review(
             agent_role="meta-reviewer",
             stream=True,
             raw_output_path=raw_output_path,
+        )
+    except BridgeAdapterError as exc:
+        return _recover_adapter_envelope(
+            exc,
+            raw_output_path,
+            parser=parse_meta_envelope,
+            label="Meta-review",
         )
     except Exception as exc:
         raise MetaBridgeError(f"Codex adapter failed: {exc}") from exc

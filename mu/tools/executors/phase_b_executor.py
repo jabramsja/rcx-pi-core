@@ -1436,6 +1436,9 @@ def prepare_commit_handoff(
     pr_title: str = "",
     pr_body: str = "",
     pre_commit_receipt_path: str = ".agent_bus/meta/pre_commit_receipt.json",
+    supervisor_lane: str | None = None,
+    deferred_items: list[str] | None = None,
+    bridge_status: dict[str, Any] | None = None,
 ) -> Path:
     """Prepare a commit executor handoff file (new schema).
 
@@ -1458,6 +1461,12 @@ def prepare_commit_handoff(
         "base_branch": "dev",
         "pre_commit_receipt_path": pre_commit_receipt_path,
     }
+    if supervisor_lane is not None:
+        handoff["supervisor_lane"] = supervisor_lane
+    if deferred_items is not None:
+        handoff["deferred_items"] = deferred_items
+    if bridge_status is not None:
+        handoff["bridge_status"] = bridge_status
 
     handoff_dir = repo_root / ".agent_bus" / "executors"
     handoff_dir.mkdir(parents=True, exist_ok=True)
@@ -2810,6 +2819,14 @@ def run_phase_b(
             "step": "commit_handoff",
             "errors": ["files_to_stage is empty — cannot produce a commit_ready handoff with no files"],
         }
+    handoff_deferred_items = _collect_supervisor_deferred_items(
+        wave_owned_files, deferred_packet_path,
+    )
+    handoff_bridge_status: dict[str, Any] = {
+        "rounds": result.get("bridge_rounds", 0),
+    }
+    if "reentry_converged" in locals() and locals()["reentry_converged"]:
+        handoff_bridge_status["reentry"] = True
     log(f"Preparing commit handoff ({len(wave_owned_files)} wave-owned files)...")
     handoff_path = prepare_commit_handoff(
         repo_root,
@@ -2824,6 +2841,9 @@ def run_phase_b(
         commit_message=f"feat: Phase B implementation for {wave_id}\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
         pr_title=f"feat: Phase B - {wave_id}",
         pr_body=f"## Summary\nPhase B implementation per locked plan at {plan_path}",
+        supervisor_lane="hooks/agents/bridge control-surface",
+        deferred_items=handoff_deferred_items,
+        bridge_status=handoff_bridge_status,
     )
     result["status"] = "commit_ready"
     result["handoff_path"] = str(handoff_path)

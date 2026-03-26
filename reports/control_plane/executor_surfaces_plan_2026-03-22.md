@@ -17,7 +17,8 @@ fallback/escalation surface, not the workflow owner.
 - Post-merge supervisor: live, routing gate (META-BRIDGE-S2, PR #657)
 - Post-merge routing tested: `ROUTE_PHASE_A` emitted for rollout step 4
 - Rollout step 4 is "Introduce real repo-local executors"
-- Claude currently acts manually on routing decisions
+- Post-merge routing now hands off to repo-local executors; Claude is not the
+  normal workflow owner for routing decisions
 - `/wave` and `/bridge` skills are Claude-owned thin wrappers
 - Claude memory (16 files, 35KB) + CLAUDE.md (601 lines) consume excessive
   context before any work begins
@@ -110,9 +111,10 @@ agent review + bridge convergence loop.
 
 **Phase A re-entry contract (bridge R1 fix):**
 
-The post-merge supervisor's Gate 3 requires `rollout_packet_path` to be a
-git-tracked file matching the task's `Tracked packet:` reference. When Phase A
-creates a NEW plan packet:
+The post-merge supervisor's Gate 3 requires the canonical rollout packet to be
+a git-tracked file matching the task's `Tracked packet:` reference, whether
+that path is supplied in the package or derived from `TASKS.md` when the field
+is omitted. When Phase A creates a NEW plan packet:
 1. Phase A executor commits the plan packet (makes it git-tracked)
 2. Phase A executor updates TASKS.md with a new NEXT entry for the plan
 3. Phase A executor commits tracker sync
@@ -187,9 +189,17 @@ UPDATE_TRACKER_ONLY):
   "pre_commit_receipt_path": ".agent_bus/meta/pre_commit_receipt.json",
   "task_id": "[TASK-ID]",
   "wave_name": "wave-name",
-  "caller": "phase_b|phase_a|update_tracker_only"
+  "caller": "phase_b|phase_a|update_tracker_only",
+  "supervisor_lane": "hooks/agents/bridge control-surface",
+  "deferred_items": ["reports/deferred/non_blocking/wave_nonblockers.md"],
+  "bridge_status": {"rounds": 2, "reentry": true}
 }
 ```
+
+Optional carry-through fields:
+- `supervisor_lane` preserves the supervisor-facing lane label when the caller is `phase_b`.
+- `deferred_items` preserves the non-blocking deferred packet set already assembled by Phase B.
+- `bridge_status` preserves bridge convergence metadata so commit-local pre-commit review sees the actual Phase B path instead of tracker-only defaults.
 
 **What it does:**
 1. Validates handoff: receipt exists, staged files match, branch is correct
@@ -441,8 +451,10 @@ After executor implementation, these become thin wrappers:
 - `/bridge review` → invokes bridge_supervisor.py (unchanged)
 - `/bridge plan` → invokes `bridge_supervisor.py review --no-diff` (unchanged)
 
-The skills remain available as manual fallback during transition (rollout
-step 5). After executors are proven, the skills can be deprecated.
+The skills remain available as operator entry points, but they are no longer
+the normal manual fallback path for executor-owned routing/implementation. They
+now dispatch into the executor and bridge surfaces above; deprecation can be
+decided later.
 
 ### Pre-commit supervisor
 

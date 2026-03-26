@@ -78,6 +78,58 @@ ENVELOPE_RE = re.compile(
     r"BEGIN_AGENT_ENVELOPE\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?END_AGENT_ENVELOPE",
     re.DOTALL,
 )
+_STDERR_SENTINEL = "\n[stderr]\n"
+AUTHORIZED_DECISIONS = frozenset(
+    {"GO", "NO_GO", "REQUEST_CHANGES", "QUESTION", "STALE", "ERROR", "SYNTHETIC"}
+)
+
+
+def _lock_metadata_payload(holder: str, lock_path: Path) -> dict[str, Any]:
+    return {
+        "holder": holder,
+        "pid": os.getpid(),
+        "lock_path": str(lock_path),
+        "acquired_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _write_lock_metadata(fp: Any, *, holder: str, lock_path: Path) -> None:
+    fp.seek(0)
+    json.dump(_lock_metadata_payload(holder, lock_path), fp, sort_keys=True)
+    fp.write("\n")
+    fp.truncate()
+    fp.flush()
+
+
+def _read_lock_metadata(lock_path: Path) -> dict[str, Any] | None:
+    try:
+        raw = lock_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _describe_lock_metadata(lock_path: Path) -> str | None:
+    payload = _read_lock_metadata(lock_path)
+    if not payload:
+        return None
+    parts: list[str] = []
+    holder = payload.get("holder")
+    if isinstance(holder, str) and holder:
+        parts.append(f"holder={holder}")
+    pid = payload.get("pid")
+    if isinstance(pid, int):
+        parts.append(f"pid={pid}")
+    acquired_at = payload.get("acquired_at_utc")
+    if isinstance(acquired_at, str) and acquired_at:
+        parts.append(f"acquired_at_utc={acquired_at}")
+    return ", ".join(parts) if parts else None
 
 
 # Import canonical control-surface file set from single source of truth.
@@ -204,21 +256,38 @@ class _BridgeLock:
 
     def __enter__(self) -> "_BridgeLock":
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
-        self._fp = open(self._lock_path, "w")
+        fd = os.open(self._lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+        self._fp = os.fdopen(fd, "r+", encoding="utf-8")
         try:
             fcntl.flock(self._fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (IOError, OSError):
             self._fp.close()
+            detail = _describe_lock_metadata(self._lock_path)
+            detail_suffix = f" Lock metadata: {detail}." if detail else ""
             raise BridgeError(
                 "Another bridge supervisor is already running. "
-                "Wait for it to finish or remove .agent_bus/bridge.lock if stale."
+                f"Wait for it to finish.{detail_suffix} "
+                "The lockfile path persists by design; only remove "
+                ".agent_bus/bridge.lock if a lock probe shows no process "
+                "holds the flock."
             )
+        _write_lock_metadata(
+            self._fp,
+            holder="bridge_supervisor",
+            lock_path=self._lock_path,
+        )
         return self
 
     def __exit__(self, *exc: object) -> bool:
         if self._fp:
-            fcntl.flock(self._fp, fcntl.LOCK_UN)
-            self._fp.close()
+            try:
+                fcntl.flock(self._fp, fcntl.LOCK_UN)
+            finally:
+                self._fp.close()
+                self._fp = None
+            # Keep the lock path stable. flock is inode-bound, so unlinking the
+            # file can let a blocked waiter keep the old inode while a new
+            # contender recreates the path and acquires a different inode.
         return False
 
 
@@ -658,18 +727,51 @@ def write_raw_output(paths: BridgePaths, job_id: str, turn_id: str, content: str
 
 
 def parse_envelope(output: str) -> dict[str, Any]:
-    match = ENVELOPE_RE.search(output)
-    if not match:
+    stdout_only = output
+    if _STDERR_SENTINEL in output:
+        stdout_only, _, _ = output.partition(_STDERR_SENTINEL)
+    elif output.startswith("[stderr]\n"):
+        stdout_only = ""
+    if ENVELOPE_RE.search(stdout_only):
+        output = stdout_only
+    matches = list(ENVELOPE_RE.finditer(output))
+    if not matches:
         raise BridgeError("Agent output missing BEGIN_AGENT_ENVELOPE / END_AGENT_ENVELOPE block")
-    try:
-        envelope = json.loads(match.group(1))
-    except json.JSONDecodeError as exc:
-        raise BridgeError(f"Agent envelope is not valid JSON: {exc}") from exc
-    required = {"job_id", "turn_id", "agent_role", "decision", "summary", "touched_files_claimed", "findings", "validations_claimed", "request_for_next_agent"}
-    missing = required.difference(envelope)
-    if missing:
-        raise BridgeError(f"Agent envelope missing keys: {sorted(missing)}")
-    return envelope
+    envelopes: list[dict[str, Any]] = []
+    canonical_payloads: set[str] = set()
+    required = {
+        "job_id", "turn_id", "agent_role", "decision", "summary",
+        "touched_files_claimed", "findings", "validations_claimed",
+        "request_for_next_agent",
+    }
+    for index, match in enumerate(matches, start=1):
+        try:
+            envelope = json.loads(match.group(1))
+        except json.JSONDecodeError as exc:
+            raise BridgeError(f"Agent envelope #{index} is not valid JSON: {exc}") from exc
+        missing = required.difference(envelope)
+        if missing:
+            raise BridgeError(f"Agent envelope missing keys: {sorted(missing)}")
+        decision = envelope["decision"]
+        if decision not in AUTHORIZED_DECISIONS:
+            # The live adapter transcript can contain the prompt template before
+            # the model reply. Ignore only the pipe-delimited enum placeholder.
+            if isinstance(decision, str) and "|" in decision:
+                continue
+            raise BridgeError(
+                f"Agent envelope has invalid decision {decision!r}; "
+                f"authorized decisions: {sorted(AUTHORIZED_DECISIONS)}"
+            )
+        envelopes.append(envelope)
+        canonical_payloads.add(json.dumps(envelope, sort_keys=True, separators=(",", ":")))
+
+    if not envelopes:
+        raise BridgeError("Agent output contained only non-authoritative template envelope blocks")
+
+    if len(canonical_payloads) > 1:
+        raise BridgeError("Agent output contains multiple differing envelope blocks; refusing ambiguous output")
+
+    return envelopes[-1]
 
 
 def _format_list(items: list[str]) -> str:
@@ -1995,11 +2097,19 @@ def run_doctor(paths: BridgePaths, *, probe: bool = False) -> list[dict[str, Any
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 fcntl.flock(fd, fcntl.LOCK_UN)
+                detail = _describe_lock_metadata(lock_path)
                 checks.append({"check": "lock", "status": "OK",
-                               "detail": "Lock file exists but is not held"})
+                               "detail": (
+                                   "Lock file exists but is not held (persistent path by design)"
+                                   + (f"; {detail}" if detail else "")
+                               )})
             except OSError:
+                detail = _describe_lock_metadata(lock_path)
                 checks.append({"check": "lock", "status": "WARN",
-                               "detail": "Lock file is currently held (bridge running?)"})
+                               "detail": (
+                                   "Lock file is currently held (bridge running?)"
+                                   + (f"; {detail}" if detail else "")
+                               )})
             finally:
                 os.close(fd)
         except OSError as exc:

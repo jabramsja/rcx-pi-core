@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -38,6 +39,114 @@ def test_parse_envelope_from_mixed_output() -> None:
     envelope = bridge.parse_envelope(output)
     assert envelope["job_id"] == "job-1"
     assert envelope["decision"] == "REQUEST_CHANGES"
+
+
+def test_parse_envelope_duplicate_identical_blocks_are_accepted() -> None:
+    envelope = """BEGIN_AGENT_ENVELOPE
+{
+  "job_id": "job-1",
+  "turn_id": "r1-reader",
+  "agent_role": "reader",
+  "decision": "REQUEST_CHANGES",
+  "summary": "Need review",
+  "touched_files_claimed": [],
+  "findings": [],
+  "validations_claimed": [],
+  "request_for_next_agent": "review"
+}
+END_AGENT_ENVELOPE"""
+    parsed = bridge.parse_envelope(f"{envelope}\n{envelope}")
+    assert parsed["job_id"] == "job-1"
+
+
+def test_parse_envelope_conflicting_blocks_are_rejected() -> None:
+    output = """BEGIN_AGENT_ENVELOPE
+{
+  "job_id": "job-1",
+  "turn_id": "r1-reader",
+  "agent_role": "reader",
+  "decision": "GO",
+  "summary": "Looks good",
+  "touched_files_claimed": [],
+  "findings": [],
+  "validations_claimed": [],
+  "request_for_next_agent": ""
+}
+END_AGENT_ENVELOPE
+BEGIN_AGENT_ENVELOPE
+{
+  "job_id": "job-1",
+  "turn_id": "r1-reader",
+  "agent_role": "reader",
+  "decision": "NO_GO",
+  "summary": "Actually not good",
+  "touched_files_claimed": [],
+  "findings": [],
+  "validations_claimed": [],
+  "request_for_next_agent": ""
+}
+END_AGENT_ENVELOPE"""
+    with pytest.raises(bridge.BridgeError, match="multiple differing envelope blocks"):
+        bridge.parse_envelope(output)
+
+
+def test_parse_envelope_ignores_prompt_template_placeholder_block() -> None:
+    placeholder = (
+        "BEGIN_AGENT_ENVELOPE\n"
+        f"{bridge.JSON_SCHEMA_STUB}\n"
+        "END_AGENT_ENVELOPE"
+    )
+    authoritative = """BEGIN_AGENT_ENVELOPE
+{
+  "job_id": "job-1",
+  "turn_id": "r1-reviewer",
+  "agent_role": "reviewer",
+  "decision": "GO",
+  "summary": "Looks good",
+  "touched_files_claimed": [],
+  "findings": [],
+  "validations_claimed": [],
+  "request_for_next_agent": ""
+}
+END_AGENT_ENVELOPE"""
+    parsed = bridge.parse_envelope(f"{placeholder}\n{authoritative}")
+    assert parsed["decision"] == "GO"
+
+
+def test_parse_envelope_ignores_replayed_stderr_envelope() -> None:
+    output = (
+        "BEGIN_AGENT_ENVELOPE\n"
+        "{\n"
+        '  "job_id": "job-1",\n'
+        '  "turn_id": "r1-reviewer",\n'
+        '  "agent_role": "reviewer",\n'
+        '  "decision": "GO",\n'
+        '  "summary": "current",\n'
+        '  "touched_files_claimed": [],\n'
+        '  "findings": [],\n'
+        '  "validations_claimed": [],\n'
+        '  "request_for_next_agent": ""\n'
+        "}\n"
+        "END_AGENT_ENVELOPE\n"
+        "\n[stderr]\n"
+        "historical replay:\n"
+        "BEGIN_AGENT_ENVELOPE\n"
+        "{\n"
+        '  "job_id": "job-1",\n'
+        '  "turn_id": "r0-reviewer",\n'
+        '  "agent_role": "reviewer",\n'
+        '  "decision": "NO_GO",\n'
+        '  "summary": "old",\n'
+        '  "touched_files_claimed": [],\n'
+        '  "findings": [],\n'
+        '  "validations_claimed": [],\n'
+        '  "request_for_next_agent": ""\n'
+        "}\n"
+        "END_AGENT_ENVELOPE\n"
+    )
+    parsed = bridge.parse_envelope(output)
+    assert parsed["decision"] == "GO"
+    assert parsed["summary"] == "current"
 
 
 def test_init_db_creates_runtime_paths_and_config(tmp_path: Path) -> None:
@@ -330,6 +439,81 @@ def test_file_lock_blocks_concurrent_run(tmp_path: Path) -> None:
     finally:
         fcntl.flock(fp, fcntl.LOCK_UN)
         fp.close()
+
+
+def test_bridge_lock_keeps_inode_stable_for_waiter_contention(tmp_path: Path) -> None:
+    lock_path = tmp_path / "bridge.lock"
+    waiter = None
+    contender = None
+    waiter_script = """
+import fcntl
+import os
+import sys
+import time
+
+path = sys.argv[1]
+fp = open(path, "w")
+print(f"opened {os.fstat(fp.fileno()).st_ino}", flush=True)
+fcntl.flock(fp, fcntl.LOCK_EX)
+print(f"acquired {os.fstat(fp.fileno()).st_ino}", flush=True)
+time.sleep(1.0)
+"""
+    try:
+        with bridge._BridgeLock(lock_path):  # ANTICHEAT_OK: same-path contention proof
+            waiter = subprocess.Popen(
+                [sys.executable, "-c", waiter_script, str(lock_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            assert waiter.stdout is not None
+            assert waiter.stdout.readline().strip().startswith("opened ")
+
+        acquired = waiter.stdout.readline().strip()
+        assert acquired.startswith("acquired ")
+        waiter_inode = int(acquired.split()[1])
+
+        contender = open(lock_path, "w")
+        contender_inode = os.fstat(contender.fileno()).st_ino
+        assert contender_inode == waiter_inode
+        with pytest.raises(BlockingIOError):
+            fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        out, err = waiter.communicate(timeout=5)
+        assert waiter.returncode == 0, f"{out}\n{err}"
+    finally:
+        if contender is not None:
+            contender.close()
+        if waiter is not None and waiter.poll() is None:
+            waiter.kill()
+            waiter.communicate(timeout=5)
+
+
+def test_bridge_lock_persists_owner_metadata(tmp_path: Path) -> None:
+    lock_path = tmp_path / "bridge.lock"
+
+    with bridge._BridgeLock(lock_path):
+        metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+
+    assert lock_path.stat().st_size > 0
+    assert metadata["holder"] == "bridge_supervisor"
+    assert metadata["pid"] == os.getpid()
+    assert metadata["lock_path"] == str(lock_path)
+
+
+def test_bridge_lock_error_clarifies_persistent_path(tmp_path: Path) -> None:
+    lock_path = tmp_path / "bridge.lock"
+    fp = open(lock_path, "w")
+    try:
+        fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(bridge.BridgeError, match="persists by design") as excinfo:
+            with bridge._BridgeLock(lock_path):
+                pass
+    finally:
+        fcntl.flock(fp, fcntl.LOCK_UN)
+        fp.close()
+
+    assert "if stale" not in str(excinfo.value)
 
 
 # --- Pause / Continue / Interactive ---

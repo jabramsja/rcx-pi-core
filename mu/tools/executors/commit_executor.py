@@ -70,6 +70,11 @@ REQUIRED_HANDOFF_FIELDS = {
     "force_add_files", "commit_message", "pr_title", "pr_body",
     "base_branch", "pre_commit_receipt_path", "task_id", "caller",
 }
+OPTIONAL_HANDOFF_FIELDS = {
+    "supervisor_lane",
+    "deferred_items",
+    "bridge_status",
+}
 
 VALID_CALLERS = {"phase_b", "phase_a", "update_tracker_only"}
 
@@ -165,9 +170,9 @@ def _has_path_traversal(path_str: str) -> bool:
 
 
 def _count_exact_wave_id_mentions(text: str, wave_id: str) -> int:
-    """Count exact wave_id mentions without substring false positives."""
+    """Count lines containing an exact wave_id without substring false positives."""
     pattern = re.compile(rf"(?<![a-z0-9-]){re.escape(wave_id)}(?![a-z0-9-])")
-    return len(pattern.findall(text))
+    return sum(1 for line in text.splitlines() if pattern.search(line))
 
 
 def _force_add_denied_match(path_str: str) -> str | None:
@@ -298,7 +303,8 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
 
     errors: list[str] = []
 
-    unexpected = sorted(set(handoff.keys()) - REQUIRED_HANDOFF_FIELDS)
+    allowed_fields = REQUIRED_HANDOFF_FIELDS | OPTIONAL_HANDOFF_FIELDS
+    unexpected = sorted(set(handoff.keys()) - allowed_fields)
     if unexpected:
         errors.extend(f"Unexpected field: {field}" for field in unexpected)
 
@@ -360,6 +366,29 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
             denied = _force_add_denied_match(f)
             if denied:
                 errors.append(f"force_add_files denied: {f} (matches {denied})")
+
+    supervisor_lane = handoff.get("supervisor_lane")
+    if supervisor_lane is not None:
+        if not isinstance(supervisor_lane, str) or not supervisor_lane.strip():
+            errors.append("supervisor_lane must be a non-empty string when provided")
+
+    deferred_items = handoff.get("deferred_items")
+    if deferred_items is not None:
+        if not isinstance(deferred_items, list):
+            errors.append("deferred_items must be a list when provided")
+        else:
+            for item in deferred_items:
+                if not isinstance(item, str):
+                    errors.append("deferred_items entries must be strings")
+                    continue
+                if _is_absolute_untrusted_path(item):
+                    errors.append(f"Absolute path in deferred_items: {item}")
+                if _has_path_traversal(item):
+                    errors.append(f"Path traversal in deferred_items: {item}")
+
+    bridge_status = handoff.get("bridge_status")
+    if bridge_status is not None and not isinstance(bridge_status, dict):
+        errors.append("bridge_status must be an object when provided")
 
     # tracker_note_text must be non-empty string
     tnt = handoff.get("tracker_note_text", "")
@@ -637,12 +666,12 @@ def run_commit_pipeline(
     supervisor_package = {
         "task_id": handoff["task_id"],
         "wave_name": wave_id,
-        "lane": handoff["caller"],
+        "lane": handoff.get("supervisor_lane", handoff["caller"]),
         "changed_files": changed_files,
         "scope_items": handoff["files_to_stage"],
         "fixes_implemented": handoff["fixes_implemented"],
-        "deferred_items": [],
-        "bridge_status": {},
+        "deferred_items": handoff.get("deferred_items", []),
+        "bridge_status": handoff.get("bridge_status", {}),
         "evidence_handles": {"indicator": indicator_path} if "collect_and_stage_indicator" in result["steps_completed"] else {},
         "blocker_report_paths": blocker_paths,
         "current_judgment": "COMMIT_GO",
