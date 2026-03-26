@@ -1541,6 +1541,7 @@ def run_phase_b(
     max_bridge_rounds: int = 10,
     verbose: bool = False,
     force: bool = False,
+    routing_record_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute the Phase B loop.
 
@@ -1613,7 +1614,12 @@ def run_phase_b(
     # Routing validation is FATAL: wrong routing token → error (not silent rewrite).
     # Only --bootstrap-exception (force=True) bypasses this gate.
     try:
-        routing_record = load_routing_record(repo_root)
+        if routing_record_override is not None:
+            if not isinstance(routing_record_override, dict):
+                raise PhaseBExecutorError("routing_record_override must be a JSON object")
+            routing_record = routing_record_override
+        else:
+            routing_record = load_routing_record(repo_root)
         if routing_record.get("decision") != "ROUTE_PHASE_B":
             if force:
                 log(f"BOOTSTRAP_PHASE_B_EXCEPTION: Routing says {routing_record.get('decision')}, "
@@ -2886,11 +2892,31 @@ def main() -> int:
         print("[error] Not in a git repository", file=sys.stderr)
         return 1
 
+    routing_record_override = None
+    if args.routing_record:
+        try:
+            routing_record_override = json.loads(args.routing_record)
+        except json.JSONDecodeError as exc:
+            print(json.dumps({
+                "status": "error",
+                "step": "parse_routing_record",
+                "errors": [f"--routing-record is not valid JSON: {exc}"],
+            }, indent=2) if args.json else f"[phase-b] Error: --routing-record is not valid JSON: {exc}")
+            return 1
+        if not isinstance(routing_record_override, dict):
+            print(json.dumps({
+                "status": "error",
+                "step": "parse_routing_record",
+                "errors": ["--routing-record must decode to a JSON object"],
+            }, indent=2) if args.json else "[phase-b] Error: --routing-record must decode to a JSON object")
+            return 1
+
     result = run_phase_b(
         repo_root, args.plan,
         max_bridge_rounds=args.max_rounds,
         verbose=args.verbose,
         force=args.bootstrap_exception,
+        routing_record_override=routing_record_override,
     )
 
     if args.json:

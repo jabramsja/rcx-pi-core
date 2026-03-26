@@ -2351,9 +2351,17 @@ class TestDispatcherCommitMechanicalBridge:
         """When a handoff file exists, dispatcher passes --handoff."""
         handoff_dir = tmp_path / ".agent_bus" / "executors"
         handoff_dir.mkdir(parents=True)
-        (handoff_dir / "phase_b_handoff.json").write_text('{"wave_id": "test"}')
+        (handoff_dir / "phase_b_handoff.json").write_text(json.dumps({
+            "wave_id": "test",
+            "task_id": "[TEST-1]",
+        }))
 
-        record = {"decision": "COMMIT_GO", "summary": "test"}
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "test",
+            "wave_name": "test",
+            "task_id": "[TEST-1]",
+        }
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
@@ -2605,11 +2613,16 @@ class TestDispatcherStaleHandoffOverride:
         """COMMIT_GO should still use --handoff if the file exists."""
         handoff_dir = tmp_path / ".agent_bus" / "executors"
         handoff_dir.mkdir(parents=True)
-        (handoff_dir / "phase_b_handoff.json").write_text('{"real": true}')
+        (handoff_dir / "phase_b_handoff.json").write_text(json.dumps({
+            "wave_id": "ready-to-commit",
+            "task_id": "[EXECUTOR-SURFACES]",
+        }))
 
         record = {
             "decision": "COMMIT_GO",
             "summary": "ready to commit",
+            "wave_name": "ready-to-commit",
+            "task_id": "[EXECUTOR-SURFACES]",
         }
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
@@ -2622,6 +2635,27 @@ class TestDispatcherStaleHandoffOverride:
         assert "--handoff" in call_args, (
             "COMMIT_GO should use --handoff when the file exists"
         )
+
+    def test_commit_go_rejects_stale_handoff_identity(self, tmp_path):
+        """COMMIT_GO must fail closed if the handoff belongs to a different wave/task."""
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text(json.dumps({
+            "wave_id": "old-wave",
+            "task_id": "[OLD-TASK]",
+        }))
+
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "ready to commit",
+            "wave_name": "current-wave",
+            "task_id": "[EXECUTOR-SURFACES]",
+        }
+        result = dispatch_mod.dispatch(
+            record, repo_root=tmp_path, skip_freshness=True
+        )
+        assert result["status"] == "error"
+        assert "handoff validation failed" in result["message"]
 
     def test_commit_go_without_handoff_fails_closed(self, tmp_path):
         """COMMIT_GO without handoff file must fail closed — no fallback to --routing-record."""

@@ -3478,6 +3478,46 @@ class TestPlanlessPhaseB:
         assert result["status"] == "error"
         assert result["step"] == "derive_planless_context"
 
+    def test_main_passes_cli_routing_record_to_run_phase_b(self, tmp_path, monkeypatch):
+        """CLI --routing-record must override disk routing state when invoking run_phase_b."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        captured: dict[str, object] = {}
+        routing_record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "cli override",
+            "wave_name": "cli-wave",
+            "next_candidates": [{"candidate": "do something"}],
+        }
+
+        def fake_git_rev_parse(args, capture_output, text, check):
+            return SimpleNamespace(stdout=str(repo))
+
+        def fake_run_phase_b(repo_root, plan_path, **kwargs):
+            captured["repo_root"] = repo_root
+            captured["plan_path"] = plan_path
+            captured["routing_record_override"] = kwargs.get("routing_record_override")
+            return {"status": "ready"}
+
+        monkeypatch.setattr(pb_mod.subprocess, "run", fake_git_rev_parse)
+        monkeypatch.setattr(pb_mod, "run_phase_b", fake_run_phase_b)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "phase_b_executor.py",
+                "--routing-record",
+                json.dumps(routing_record),
+                "--json",
+            ],
+        )
+
+        exit_code = pb_mod.main()
+        assert exit_code == 0
+        assert captured["repo_root"] == repo
+        assert captured["plan_path"] is None
+        assert captured["routing_record_override"] == routing_record
+
 
 class TestSdkReviewDepthContract:
     """Phase A/B should use the 4-agent SDK gate by default."""

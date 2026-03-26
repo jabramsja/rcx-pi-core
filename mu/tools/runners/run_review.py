@@ -74,7 +74,15 @@ except Exception as _sdk_import_error:
     SDK_IMPORT_ERROR = _sdk_import_error
     query = None  # type: ignore[assignment]
     ClaudeAgentOptions = None  # type: ignore[assignment]
-    AgentDefinition = Any  # type: ignore[assignment]
+
+    @dataclass
+    class AgentDefinition:  # type: ignore[no-redef]
+        """SDK-free fallback used by import-only tests and CI without Claude SDK."""
+
+        description: str
+        prompt: str
+        tools: list[str]
+        model: str | None = None
 
 # Import agent memory for persistent finding storage
 try:

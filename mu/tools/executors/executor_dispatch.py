@@ -29,6 +29,7 @@ try:
         merge_executor_config_overrides,
         ensure_not_agent_review_mode,
         ExecutorCommonError,
+        normalize_wave_id,
     )
 except ImportError:
     import importlib.util as _ilu
@@ -41,6 +42,7 @@ except ImportError:
     merge_executor_config_overrides = _mod.merge_executor_config_overrides
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
+    normalize_wave_id = _mod.normalize_wave_id
 
 try:
     from meta_bridge_supervisor import compute_repo_state as _compute_repo_state
@@ -134,6 +136,35 @@ def _sanitize_plan_name(candidate_text: str, fallback: str = "plan_unknown") -> 
         tokens = re.findall(r"[a-z0-9]+", fallback.lower())
     slug = "_".join(tokens).strip("_")
     return (slug or "plan_unknown")[:50]
+
+
+def _validate_phase_b_handoff_identity(handoff_path: Path, record: dict[str, Any]) -> tuple[bool, str]:
+    """Fail closed if a stale handoff file does not match the current routing identity."""
+    try:
+        handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return False, f"Phase B handoff is not valid JSON: {exc}"
+    if not isinstance(handoff, dict):
+        return False, "Phase B handoff must decode to a JSON object"
+
+    wave_name = record.get("wave_name") or record.get("wave_id", "")
+    if not isinstance(wave_name, str) or not wave_name.strip():
+        return False, "Routing record missing wave_name/wave_id for handoff identity check"
+    expected_wave_id = normalize_wave_id(wave_name)
+    actual_wave_id = handoff.get("wave_id")
+    if actual_wave_id != expected_wave_id:
+        return False, (
+            f"Phase B handoff wave_id mismatch: expected {expected_wave_id}, got {actual_wave_id}"
+        )
+
+    expected_task_id = record.get("task_id")
+    actual_task_id = handoff.get("task_id")
+    if expected_task_id and actual_task_id != expected_task_id:
+        return False, (
+            f"Phase B handoff task_id mismatch: expected {expected_task_id}, got {actual_task_id}"
+        )
+
+    return True, "ok"
 
 
 def dispatch(
@@ -243,6 +274,14 @@ def dispatch(
                             f"{decision}. Cannot commit without a verified "
                             f"Phase B receipt chain."
                         ),
+                    }
+                valid_handoff, handoff_msg = _validate_phase_b_handoff_identity(handoff_path, record)
+                if not valid_handoff:
+                    return {
+                        "status": "error",
+                        "decision": decision,
+                        "executor": executor_name,
+                        "message": f"Phase B handoff validation failed: {handoff_msg}",
                     }
                 executor_args.extend(["--handoff", str(handoff_path)])
             else:
