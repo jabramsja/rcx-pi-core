@@ -338,6 +338,12 @@ DEFAULT_REVIEW_GROUP_STALE_TIMEOUT_S = _env_int(
     minimum=30,
     maximum=3600,
 )
+DEFAULT_AGENT_PREFLIGHT_RETRY_TIMEOUT_S = _env_int(
+    "RCX_AGENT_PREFLIGHT_RETRY_TIMEOUT",
+    45,
+    minimum=5,
+    maximum=300,
+)
 DEFAULT_REVIEW_STATUS_PATH = os.getenv("RCX_REVIEW_STATUS_PATH", "").strip()
 
 
@@ -358,6 +364,7 @@ def agent_review_mode_env() -> Any:
 async def run_agent_preflight(
     timeout_seconds: int = 20,
     model_override: str | None = None,
+    retry_timeout_seconds: int | None = None,
 ) -> tuple[bool, str]:
     """Validate SDK/runtime availability before launching review agents.
 
@@ -372,28 +379,50 @@ async def run_agent_preflight(
 
     try:
         verifier_def = create_agent_definitions(model_override=model_override)["verifier"]
-        saw_message = False
-        saw_result = False
+        effective_retry_timeout = retry_timeout_seconds
+        if effective_retry_timeout is None:
+            effective_retry_timeout = DEFAULT_AGENT_PREFLIGHT_RETRY_TIMEOUT_S
 
-        async def _ping() -> None:
-            nonlocal saw_message, saw_result
-            async for message in query(
-                prompt="Preflight check. Reply with exactly: PONG",
-                options=build_query_options(verifier_def, max_turns=1),
-            ):
-                saw_message = True
-                extracted = extract_text_from_message(message)
-                if extracted and extracted.strip():
-                    saw_result = True
-                if hasattr(message, "result") and message.result:
-                    saw_result = True
+        async def _ping_once(timeout_limit: float) -> tuple[bool, bool]:
+            saw_message = False
+            saw_result = False
 
-        await asyncio.wait_for(_ping(), timeout=timeout_seconds)
+            async def _ping() -> None:
+                nonlocal saw_message, saw_result
+                async for message in query(
+                    prompt="Preflight check. Reply with exactly: PONG",
+                    options=build_query_options(verifier_def, max_turns=1),
+                ):
+                    saw_message = True
+                    extracted = extract_text_from_message(message)
+                    if extracted and extracted.strip():
+                        saw_result = True
+                    if hasattr(message, "result") and message.result:
+                        saw_result = True
+
+            await asyncio.wait_for(_ping(), timeout=timeout_limit)
+            return saw_message, saw_result
+
+        try:
+            saw_message, saw_result = await _ping_once(timeout_seconds)
+        except asyncio.TimeoutError:
+            if effective_retry_timeout and effective_retry_timeout > timeout_seconds:
+                try:
+                    saw_message, saw_result = await _ping_once(effective_retry_timeout)
+                except asyncio.TimeoutError:
+                    return (
+                        False,
+                        f"SDK preflight timed out after {timeout_seconds}s "
+                        f"(retry {effective_retry_timeout}s also timed out)",
+                    )
+                except Exception as exc:
+                    return False, f"SDK preflight query failed after timeout retry: {exc}"
+            else:
+                return False, f"SDK preflight timed out after {timeout_seconds}s"
+
         if not saw_message and not saw_result:
             return False, "Preflight query returned no messages/results"
         return True, ""
-    except asyncio.TimeoutError:
-        return False, f"SDK preflight timed out after {timeout_seconds}s"
     except Exception as exc:
         return False, f"SDK preflight query failed: {exc}"
 

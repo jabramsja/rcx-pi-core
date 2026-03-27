@@ -127,6 +127,7 @@ _MODEL_OVERRIDE_SUPPORT: dict[str, str | None] = {
     "codex": None,   # Codex CLI does not support --model for cross-vendor models
     "claude": "--model",  # Claude Code CLI supports --model <name>
 }
+DEFAULT_IMPLEMENTER_STALE_TIMEOUT_S = 300.0
 
 
 def _apply_model_override(
@@ -209,6 +210,19 @@ def invoke_implementer(
             "model_override_applied": False,
         }
 
+    config = load_executor_config(repo_root)
+    raw_stale_timeout = config.get("timeouts", {}).get(
+        "phase_b_implementer_stale",
+        DEFAULT_IMPLEMENTER_STALE_TIMEOUT_S,
+    )
+    try:
+        stale_timeout_s = float(raw_stale_timeout)
+    except (TypeError, ValueError):
+        stale_timeout_s = DEFAULT_IMPLEMENTER_STALE_TIMEOUT_S
+    if stale_timeout_s <= 0:
+        stale_timeout_s = DEFAULT_IMPLEMENTER_STALE_TIMEOUT_S
+    stale_timeout_s = min(float(timeout), stale_timeout_s)
+
     AdapterSpec = _bridge_adapters.AdapterSpec
     BridgeAdapterError = _bridge_adapters.BridgeAdapterError
 
@@ -266,6 +280,7 @@ def invoke_implementer(
     if verbose:
         print(
             f"[implementer] Invoking {backend} (timeout={adapter_timeout}s, "
+            f"stale_timeout={stale_timeout_s}s, "
             f"model_override={model_override!r}, applied={model_applied})"
         )
 
@@ -279,6 +294,7 @@ def invoke_implementer(
             turn_id="impl",
             agent_role="implementer",
             raw_output_path=raw_output_path,
+            stale_timeout_s=stale_timeout_s,
         )
         return {
             "status": "success",
@@ -290,12 +306,14 @@ def invoke_implementer(
         }
     except BridgeAdapterError as exc:
         error_str = str(exc)
-        is_timeout = "timed out" in error_str.lower()
+        lowered = error_str.lower()
+        is_timeout = "timed out" in lowered
+        is_stale = "stalled after" in lowered
         return {
-            "status": "timeout" if is_timeout else "error",
+            "status": "timeout" if is_timeout else ("stale" if is_stale else "error"),
             "output": "",
             "stderr": error_str,
-            "exit_code": -1 if is_timeout else 1,
+            "exit_code": -1 if is_timeout else (-2 if is_stale else 1),
             "job_id": job_id,
             "model_override_applied": model_applied,
         }

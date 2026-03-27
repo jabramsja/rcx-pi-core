@@ -403,6 +403,10 @@ class TestMetaBridgePromptControlSurface:
         }
         prompt = mbs.build_meta_reviewer_prompt(package, [], REPO_ROOT)
         assert "CONTROL-SURFACE REVIEW MODE" in prompt
+        assert "mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()" in prompt
+        assert "mu/tools/agents/meta_bridge_client.py::run_meta_bridge_package()" in prompt
+        assert "mu/tools/executors/phase_b_executor.py::prepare_commit_handoff()" in prompt
+        assert "mu/tools/executors/commit_executor.py" in prompt
 
     def test_meta_bridge_prompt_builder_skips_for_regular_files(self):
         """build_meta_reviewer_prompt does not inject obligations for regular files."""
@@ -428,6 +432,10 @@ class TestRunnerControlSurfaceContext:
         ctx = sau_mod.build_control_surface_context(["mu/tools/executors/phase_b_executor.py"])
         assert "CONTROL-SURFACE REVIEW MODE" in ctx
         assert "bridge_adapters" in ctx
+        assert "mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()" in ctx
+        assert "mu/tools/agents/meta_bridge_client.py::run_meta_bridge_package()" in ctx
+        assert "mu/tools/hooks/pre_commit_receipt.py" not in ctx
+        assert "mu/tools/executors/meta_bridge_client.py" not in ctx
 
     def test_runner_returns_empty_for_regular_files(self):
         """build_control_surface_context returns empty for non-control files."""

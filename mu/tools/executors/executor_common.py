@@ -31,6 +31,14 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
         "phase_b_executor": "codex",
         "commit_executor": None,
     },
+    "bridge_reviewers": {
+        "phase_a": "claude",
+        "phase_b": "claude",
+    },
+    "bridge_turn_timeouts": {
+        "phase_a": 300,
+        "phase_b": 900,
+    },
     "model_overrides": {},
     "review_depths": {
         "phase_a": "quick",
@@ -40,6 +48,7 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
         "dialectic_executor": 600,
         "phase_a_executor": 600,
         "phase_b_executor": 1200,
+        "phase_b_implementer_stale": 300,
         "commit_executor": 300,
         "agent_review": 900,
     },

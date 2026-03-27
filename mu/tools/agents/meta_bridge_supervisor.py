@@ -99,6 +99,11 @@ VALIDATION_COMMAND_TIMEOUT_S = _read_bounded_timeout_env(
     minimum=1,
     maximum=7200,
 )
+META_STALE_TIMEOUT_S = 90.0
+
+
+def _bounded_watchdog_timeout(timeout_s: int, watchdog_s: float) -> float:
+    return min(float(timeout_s), watchdog_s)
 
 
 class MetaBridgeState(Enum):
@@ -1098,9 +1103,15 @@ def build_meta_reviewer_prompt(
             "NOT `bridge_supervisor.py review`.\n"
             "2. **Bridge loop**: `phase_b_executor.py` must re-invoke implementer on `REQUEST_CHANGES`/`NO_GO`. "
             "`QUESTION` must fail closed.\n"
-            "3. **Receipt authority**: `write_pre_commit_receipt()` must return per-invocation path. "
-            "`meta_bridge_client` must capture it directly, not discover by directory sort.\n"
-            "4. **Canonical hook receipt**: Must still be written for hook compatibility.\n"
+            "3. **Receipt authority**: Trace the canonical live chain only: "
+            "`mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()` -> "
+            "`mu/tools/agents/meta_bridge_client.py::run_meta_bridge_package()` -> "
+            "`mu/tools/executors/phase_b_executor.py::prepare_commit_handoff()` -> "
+            "`mu/tools/executors/commit_executor.py` receipt verification. "
+            "The per-invocation receipt path must be exact, not discovered by directory sort.\n"
+            "4. **Canonical hook receipt**: `mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()` "
+            "must still write the canonical hook receipt for compatibility while returning the per-invocation path. "
+            "Do not use legacy/nonexistent aliases when verifying this chain.\n"
             "5. **No manual fallback**: Protocol docs must not present manual git push/PR/merge as normal.\n\n"
             "If you cannot verify any obligation, emit a CRITICAL finding. Do not skip."
         )
@@ -2030,6 +2041,8 @@ def run_post_merge_review(
             agent_role="post-merge-reviewer",
             stream=True,
             raw_output_path=raw_output_path,
+            timeout_override_s=timeout_s,
+            stale_timeout_s=_bounded_watchdog_timeout(timeout_s, META_STALE_TIMEOUT_S),
         )
     except BridgeAdapterError as exc:
         return _recover_adapter_envelope(
@@ -2331,6 +2344,8 @@ def run_meta_review(
             agent_role="meta-reviewer",
             stream=True,
             raw_output_path=raw_output_path,
+            timeout_override_s=timeout_s,
+            stale_timeout_s=_bounded_watchdog_timeout(timeout_s, META_STALE_TIMEOUT_S),
         )
     except BridgeAdapterError as exc:
         return _recover_adapter_envelope(

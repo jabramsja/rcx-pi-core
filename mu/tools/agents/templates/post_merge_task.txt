@@ -39,6 +39,16 @@ $rollout_order
 
 $phase_a_lock_status
 
+## Bounded Review Contract
+
+- Treat the package JSON, derived changed files, validation gate results, rollout order, and Phase-A-Lock status as primary evidence. Re-run a passed gate only when you find a concrete contradiction.
+- Start with the merge SHA, rollout packet, and `next_candidates`; inspect extra files only as needed to resolve a specific doubt.
+- Keep the investigation bounded: prefer targeted `rg`, `git show --stat`, and short `sed` reads. Avoid broad repo sweeps or full-file dumps.
+- Use no more than 8 shell commands unless a specific contradiction requires one extra focused command to resolve it.
+- As soon as you have enough evidence for a decision, emit exactly one final `BEGIN_META_ENVELOPE ... END_META_ENVELOPE` block on stdout and stop.
+- Do not repeat the template envelope or continue exploring after you can decide.
+- If you cannot close within that budget, fail closed with `CONTINUE_DIALECTIC`, `STOP_FOR_FOUNDER`, or `STOP_FOR_TRIAGE_DISCUSSION` and say what prevented closure.
+
 ## Your Task
 
 1. Read FOUNDER_SESSION_BOOTSTRAP.md first

@@ -38,7 +38,7 @@ This file is read by Claude Code at session start.
 
 1. **Default: ask before commit/push/PR/merge.** Unless founder grants standing auth — then proceed autonomously, stop only for blockers or founder decisions.
 2. **Fix issues, don't classify them to avoid work.** "Pre-existing" / "out of scope" are not excuses. Quick fixes inline; larger ones get blocking entries.
-3. **NEVER use --no-verify or bypass gates.** Fix failures, don't skip them.
+3. **NEVER use --no-verify or bypass gates manually.** Fix failures, don't skip them. The only bounded executor exception is `commit_executor.py` Step 12 using `git push --no-verify` immediately after Step 11 has already run `pre-push-fast` against the same local HEAD.
 4. **ALWAYS prove your work.** Show the diff, run the test. If you can't prove it, it's not done.
 5. **Founder IS the override authority.** Present POLICY_BOUND issues and ask for the decision.
 6. **NEVER add host capabilities to the bootstrap.** The host loads seeds and executes projections. That's it. No debug timestamps, logging, observability, or convenience functions. Enforced by `tools/checks/check_bootstrap_purity_ratchet.py`. See `mu/docs/core/Why_RCX_PI_VM_EXISTS.md`.
@@ -116,7 +116,7 @@ RCX is a native structural substrate pursuing self-hosting and meta-circularity.
 | 3 | CI green gate | Push/PR to dev (~2 min) |
 | 4-5 | CI nightly/weekly | Scheduled |
 
-**Per-commit gate:** `pre-push-fast` runs automatically during push (audit_fast + L4 contract). `audit_all.sh` is for thorough pre-release validation, not per-commit.
+**Per-commit gate:** `pre-push-fast` runs automatically during push (audit_fast + L4 contract). In the automated `commit_executor.py` path, Step 11 runs `pre-push-fast` explicitly before Step 12, so Step 12 uses `git push --no-verify` only to avoid rerunning the same hook on the same local HEAD. Outside that bounded executor path, do not use `--no-verify`. `audit_all.sh` is for thorough pre-release validation, not per-commit.
 
 ---
 

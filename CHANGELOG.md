@@ -2,6 +2,194 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-03-27
+
+### Pipeline Test Run Review-Cycle Floor, Cleanup Wait, And Post-Commit Follow-Ups
+
+- `commit_executor.py` Step 15 now uses the fresher of the latest
+  `@codex review` request and the latest current-head connector review as the
+  review-cycle floor, and current-head connector issue-comment clearance uses
+  that same floor so older request-era comments or unresolved bot threads
+  cannot leak back in after a newer current-head review
+- `bridge_adapters.py` stale-timeout cleanup now waits for tracked PIDs to
+  disappear, not merely to stop being non-zombie, so zombie descendants are not
+  treated as fully cleaned up until they are actually reaped
+- `mu/tests/tools/test_executor_dispatch.py` and
+  `mu/tests/tools/test_agent_bridge_supervisor.py` now lock the current-head
+  review-floor regression and the zombie-presence cleanup regression directly
+- `mu/tests/tools/test_executor_dispatch.py` now also marks the direct
+  Step 15 issue-comment freshness helper regression with `# ANTICHEAT_OK`, so
+  the intentional private-helper proof survives the post-commit anti-cheat scan
+- `bridge_adapters.py` stale-timeout cleanup now kills tracked descendants
+  before the root process, reaps the root process when possible, and waits only
+  on live non-zombie descendants during stale-timeout cleanup
+- `mu/tests/tools/test_agent_bridge_supervisor.py` now locks the root-reap and
+  live-non-zombie wait semantics for stale-timeout cleanup
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Thirty-Third live stop honestly: head `5989b55` passed CI,
+  received a fresh current-head connector review, and then surfaced these two
+  remaining control-plane defects
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  also record the Thirty-Fourth live stop honestly: after automated local
+  commit `cfe94c6`, the next rerun stopped at Step 10 `pre-push-fast` only
+  because the new direct helper regression lacked the required anti-cheat
+  annotation
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  also record the Thirty-Fifth live stop honestly: after the anti-cheat
+  follow-up landed as `cc67c9a`, the next current-head review narrowed the
+  remaining blocker to stale-timeout cleanup waiting on zombie PID presence
+
+### Pipeline Test Run Review-Cycle Truth, Zombie Cleanup, And Canonical Receipt-Proof Paths
+
+- `commit_executor.py` now scopes unresolved bot-thread findings to the active
+  review cycle by requesting thread-comment timestamps, falling back to the
+  current-head connector review timestamp when needed, and ignoring stale prior
+  review-cycle bot threads that remained non-outdated on unchanged lines
+- `bridge_adapters.py` stale-timeout cleanup now treats zombie descendants as
+  exited instead of using `os.kill(pid, 0)` alone as the liveness probe
+- `meta_bridge_supervisor.py`, `bridge_supervisor.py`, and
+  `shared_agent_utils.py` now bind the receipt-authority proof contract to the
+  canonical live chain in `mu/tools/agents/meta_bridge_supervisor.py`,
+  `mu/tools/agents/meta_bridge_client.py`,
+  `mu/tools/executors/phase_b_executor.py`, and
+  `mu/tools/executors/commit_executor.py`, and explicitly reject legacy
+  aliases such as `mu/tools/executors/meta_bridge_client.py` and
+  `mu/tools/hooks/pre_commit_receipt.py`
+- `mu/tests/tools/test_executor_dispatch.py`,
+  `mu/tests/tools/test_agent_bridge_supervisor.py`,
+  `mu/tests/tools/test_meta_bridge_supervisor.py`, and
+  `mu/tests/tools/test_control_surface_review.py` now lock the active
+  review-cycle, zombie-aware cleanup, and canonical proof-path expectations
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Thirty-Second live stop honestly: the fresh per-invocation receipt
+  was present, but the next automated commit still failed closed because the
+  commit-local supervisor's focused proof script used dead legacy receipt-path
+  aliases
+
+### Pipeline Test Run Terminal Decision And Review-Binding Hardening
+
+- `phase_a_executor.py` now recognizes terminal `Decision: STALE|ERROR|SYNTHETIC`
+  bridge outputs, prefers the last non-synthetic rendered decision, and fails
+  closed when the final reviewer turn ends in one of those terminal outcomes
+- `commit_executor.py` now reuses a clear connector issue comment only when the
+  continuation record already proves that review request was made for the
+  current head SHA, so an older clear comment cannot suppress a required
+  current-head review
+- `mu/tests/tools/test_executor_dispatch.py` now locks both regressions:
+  terminal final bridge decisions fail closed, and stale clear issue comments
+  without current-head request binding still trigger a fresh `@codex review`
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Thirtieth live stop honestly: head `0335fe6` passed required CI,
+  received a fresh current-head connector review, and the remaining stop was
+  these two fail-closed gaps
+
+### Pipeline Test Run Final-Decision Parsing
+
+- `phase_a_executor.py` now takes the last valid `Decision:` line from rendered
+  bridge output, so multi-turn transcripts obey the final reviewer turn instead
+  of the first reader turn
+- `mu/tests/tools/test_executor_dispatch.py` now locks that regression with a
+  rendered multi-turn decision fixture where `REQUEST_CHANGES` is followed by
+  final `GO`
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Twenty-Ninth live stop honestly: head `a6fb234` passed required
+  CI and received a fresh current-head connector review, and the remaining stop
+  was the Phase A final-decision parser defect surfaced by that review
+
+### Pipeline Test Run CI Timing Hardening
+
+- `mu/tests/tools/test_executor_dispatch.py` now gives the Phase A
+  bridge-turn-budget watchdog regression a wider timing margin, so it still
+  proves that the configured bridge-turn budget overrides the smaller stale
+  watchdog threshold without flaking on Linux CI process-startup overhead
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Twenty-Eighth live stop honestly: commit `cd33a25` cleared
+  supervisor, local commit, pre-push, push, PR reuse, and CI registration, and
+  then stopped only because the required `test` workflow exposed that timing
+  race while `green-gate` still passed
+
+### Pipeline Test Run Step 15 Review-Thread Truth
+
+- `commit_executor.py` now restores `handoff_sha` before resuming the
+  post-commit helper, so bounded continuation checkpointing still works after a
+  restart instead of silently no-oping on resumed Steps 11-14
+- `commit_executor.py` Step 12 push now uses `git push --no-verify` because the
+  executor already ran `pre-push-fast` explicitly in Step 11 for the same head,
+  eliminating the duplicate hook rerun during automated pushes
+- `mu/tests/tools/test_executor_dispatch.py` now proves resumed post-commit
+  state keeps its continuation binding, that non-connector bot reviews cannot
+  satisfy current-head freshness, and that the resumed push path uses
+  `--no-verify`
+- `bridge_adapters.py` stale-timeout cleanup now waits for tracked descendants
+  to disappear before returning, while `mu/tests/tools/test_agent_bridge_supervisor.py`
+  keeps the separate fast stop-after-envelope contract green
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Twenty-Fourth live stop honestly: the code slice still closes the
+  Step 15 review-thread follow-up on `664be57`, but the latest automated rerun
+  failed earlier because the bounded supervisor packet did not expose the exact
+  implementer-path and no-manual-fallback proof surfaces
+- the active proof surface for the rerun now explicitly includes
+  `mu/tools/executors/phase_b_implementer.py`, `CLAUDE.md`,
+  `mu/tools/checks/check_control_surface_invariants.py`, and
+  `mu/tools/agents/templates/meta_bridge_task.txt` so the commit-local
+  supervisor can verify those obligations directly within budget
+- `CLAUDE.md` now makes the Step 11/Step 12 executor exception explicit: after
+  `pre-push-fast` passes on the same local HEAD, automated Step 12 may use
+  `git push --no-verify` only to avoid rerunning the same hook
+- `mu/tests/tools/test_agent_bridge_supervisor.py` now marks the direct
+  `_kill_process_group()` regression with `# ANTICHEAT_OK`, so `pre-push-fast`
+  treats that private-helper proof as an explicit allowed exception instead of a
+  policy violation
+- `commit_executor.py` now checks for an already-valid current-head no-issues
+  connector issue comment before posting a fresh `@codex review`, and
+  `mu/tests/tools/test_executor_dispatch.py` now proves Step 15 does not
+  invalidate its own clear issue-comment outcome
+
+### Pipeline Test Run Post-Commit Checkpointing
+
+- `commit_executor.py` now checkpoints post-commit continuation after
+  `run_pre_push_script`, `git_push`, `ensure_pr`, and `wait_ci`, and skips any
+  of those steps that are already recorded in the bounded continuation state
+- `mu/tests/tools/test_executor_dispatch.py` now covers the resumed
+  post-commit boundary directly: if `run_pre_push_script` is already
+  checkpointed, the helper must skip rerunning pre-push, attempt `git push`,
+  and preserve that new progress even if a later PR step fails
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Twenty-Second live stop honestly: the boring-path run creates the
+  new local commit `02fbc4b`, but repeated automated resumes wedge after
+  Step 11 unless post-commit continuation becomes step-aware
+
+### Pipeline Test Run Step 15 Commit-Bound Freshness
+
+- `commit_executor.py` Step 15 PR review GraphQL now also requests
+  `headRefOid`, asserts the PR head stays on the expected commit while waiting,
+  and rejects connector issue-comment clearance if the head drifts
+- `mu/tests/tools/test_executor_dispatch.py` now covers commit-bound
+  issue-comment acceptance, fail-closed PR-head drift, and the post-commit
+  current-head paths that depend on `headRefOid`
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Twenty-First live stop honestly: the boring-path run reaches a
+  fresh current-head connector review on `02b41d2`, and the remaining stop is
+  the commit-bound Step 15 freshness gap
+
+### Pipeline Test Run Current-Head Review Hardening
+
+- `commit_executor.py` now pins Step 15 freshness, no-issues issue-comment
+  clearance, and request-acknowledgement detection to the real
+  `chatgpt-codex-connector` identity instead of any generic bot account
+- `commit_executor.py` PR review GraphQL now requests `reviewThreads.isOutdated`,
+  and tracker-note repair is limited to the active `## Ra` section so archived
+  tracker history cannot be rewritten during closeout
+- `phase_a_executor.py` now honors the configured bridge-turn budget before its
+  stale watchdog fails a live reviewer turn closed
+- `bridge_adapters.py` now keys zero-output detection to explicit stdout
+  progress instead of inferred raw-file shape, while still failing closed on
+  stderr-only hangs
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Twentieth live stop honestly: the pipeline now receives a fresh
+  current-head connector review and the remaining stop is the review's concrete
+  control-plane findings, not review latency
+
 ## 2026-03-26
 
 ### Pipeline Smoke Truth Sync

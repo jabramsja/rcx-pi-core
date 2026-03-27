@@ -120,6 +120,8 @@ class TestDispatcherConfig:
     def test_load_default_config(self):
         config = dispatch_mod.load_config()
         assert "backends" in config
+        assert "bridge_reviewers" in config
+        assert "bridge_turn_timeouts" in config
         assert "timeouts" in config
         assert "bridge_loop_limits" in config
 
@@ -132,6 +134,7 @@ class TestDispatcherConfig:
         config_path.write_text(json.dumps({"timeouts": {"commit_executor": 999}}))
         config = dispatch_mod.load_config(config_path)
         assert config["timeouts"]["commit_executor"] == 999
+        assert config["bridge_turn_timeouts"]["phase_b"] == 900
         assert config["review_depths"]["phase_b"] == "quick"
 
 
@@ -267,6 +270,15 @@ class TestCommitHandoffValidation:
                 supervisor_lane="hooks/agents/bridge control-surface",
                 deferred_items=["reports/deferred/non_blocking/example.md"],
                 bridge_status={"rounds": 2, "reentry": True},
+            )
+        )
+        assert valid, errors
+
+    def test_optional_supervisor_context_passes(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_handoff(
+                scope_items=["reports/control_plane/test_plan.md", "file1.py"],
+                evidence_handles={"receipt_chain": "exact receipt path"},
             )
         )
         assert valid, errors
@@ -516,6 +528,40 @@ class TestPhaseAPlanCreation:
         assert content.count("Phase-A-Lock: LOCKED") == 1
         assert "Notes mention Phase-A-Lock: UNLOCKED" in content
 
+    def test_lock_plan_is_idempotent_for_reused_locked_packet(self, tmp_path):
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text(
+            "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)\n"
+            "Phase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+        content = plan.read_text(encoding="utf-8")
+        assert content.count("Phase-A-Lock: LOCKED") == 1
+        assert "bridge-converged" in content
+
+    def test_lock_plan_rejects_multiple_control_lines(self, tmp_path):
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text(
+            "Phase-A-Lock: UNLOCKED\n"
+            "Phase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(phase_a_mod.PhaseAExecutorError, match="exactly one Phase-A-Lock control line"):
+            phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+
+    def test_lock_plan_rejects_missing_control_line(self, tmp_path):
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text(
+            "# Some plan\nStatus: draft\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(phase_a_mod.PhaseAExecutorError, match="No Phase-A-Lock control line found"):
+            phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+
 
 class TestPhaseADispatcherIntegration:
     """Dispatcher correctly routes to phase_a_executor."""
@@ -564,10 +610,10 @@ class TestPhaseABridgeLoopFailClosed:
         rendered_dir = self._setup_phase_a(tmp_path)
         call_count = {"n": 0}
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             call_count["n"] += 1
             # Write rendered output with QUESTION decision
             rendered = rendered_dir / f"{job_id}.md"
@@ -588,10 +634,10 @@ class TestPhaseABridgeLoopFailClosed:
         rendered_dir = self._setup_phase_a(tmp_path)
         call_count = {"n": 0}
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             call_count["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: SOMETHING_UNKNOWN\n\nWeird output\n")
@@ -609,10 +655,10 @@ class TestPhaseABridgeLoopFailClosed:
         """GO decision converges normally (regression check)."""
         rendered_dir = self._setup_phase_a(tmp_path)
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: GO\n\nLooks good.\n")
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -623,15 +669,43 @@ class TestPhaseABridgeLoopFailClosed:
         result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
         assert result["status"] == "converged"
 
+    def test_extract_bridge_decision_accepts_rendered_bullet_format(self):
+        render_content = (
+            "# Bridge Job x\n\n"
+            "- Decision: SYNTHETIC (founder session, not a real review)\n"
+            "- Decision: GO\n"
+        )
+        assert phase_a_mod._extract_bridge_decision(render_content) == "GO"  # ANTICHEAT_OK: testing internal bridge decision parser
+
+    def test_extract_bridge_decision_uses_last_valid_turn(self):
+        render_content = (
+            "# Bridge Job x\n\n"
+            "## Reader turn\n"
+            "Decision: REQUEST_CHANGES\n\n"
+            "## Reviewer turn\n"
+            "Decision: GO\n"
+        )
+        assert phase_a_mod._extract_bridge_decision(render_content) == "GO"  # ANTICHEAT_OK: testing internal bridge decision parser
+
+    def test_extract_bridge_decision_prefers_terminal_error_over_earlier_request_changes(self):
+        render_content = (
+            "# Bridge Job x\n\n"
+            "## Reader turn\n"
+            "Decision: REQUEST_CHANGES\n\n"
+            "## Reviewer turn\n"
+            "Decision: ERROR\n"
+        )
+        assert phase_a_mod._extract_bridge_decision(render_content) == "ERROR"  # ANTICHEAT_OK: testing terminal bridge decision parsing
+
     def test_request_changes_continues_loop(self, tmp_path, monkeypatch):
         """REQUEST_CHANGES continues the loop (regression check)."""
         rendered_dir = self._setup_phase_a(tmp_path)
         call_count = {"n": 0}
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             call_count["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             if call_count["n"] < 3:
@@ -647,14 +721,39 @@ class TestPhaseABridgeLoopFailClosed:
         assert result["status"] == "converged"
         assert call_count["n"] == 3
 
+    @pytest.mark.parametrize("decision", ["REQUEST_CHANGES", "NO_GO"])
+    def test_non_go_exit_one_continues_loop(self, tmp_path, monkeypatch, decision):
+        """bridge_supervisor review returns exit=1 for non-GO decisions; Phase A must keep looping."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+        call_count = {"n": 0}
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            call_count["n"] += 1
+            rendered = rendered_dir / f"{job_id}.md"
+            if call_count["n"] < 3:
+                rendered.write_text(f"Decision: {decision}\n\nNeeds more work.\n")
+                return {"exit_code": 1, "stdout": f"{decision}\n", "stderr": ""}
+            rendered.write_text("Decision: GO\n\nFixed.\n")
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        assert call_count["n"] == 3
+
     def test_bridge_failure_no_rendered_output_fails_closed(self, tmp_path, monkeypatch):
         """Bridge failure with no rendered output fails closed."""
         self._setup_phase_a(tmp_path)
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             # No rendered output written, non-zero exit
             return {"exit_code": 1, "stdout": "", "stderr": "bridge crashed"}
 
@@ -663,7 +762,246 @@ class TestPhaseABridgeLoopFailClosed:
 
         result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
         assert result["status"] == "error"
-        assert "exit code" in result["error"]
+        assert "bridge subprocess failed in round 1" in result["error"].lower()
+        assert "bridge crashed" in result["error"]
+
+    def test_bridge_failure_with_stale_rendered_output_fails_closed(self, tmp_path, monkeypatch):
+        """A stale reader-only render must not mask a nonzero bridge subprocess exit."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text(
+                "# Bridge Review\n\nStatus: PAUSED - awaiting founder review before reviewer\n",
+                encoding="utf-8",
+            )
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "Adapter 'codex' produced no stdout after 120.0s",
+            }
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "error"
+        assert "bridge subprocess failed in round 1" in result["error"].lower()
+        assert "produced no stdout" in result["error"]
+        assert ".agent_bus/rendered/phase-a-r1-" in result["rendered_path"]
+
+    def test_go_substring_smuggling_does_not_false_converge(self, tmp_path, monkeypatch):
+        """Phase A must parse the canonical decision line, not any GO substring."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text(
+                "Decision: NO_GO\n\nReason: do not trust a quoted Decision: GO from prior text.\n"
+            )
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=1)
+        assert result["status"] == "max_rounds_reached"
+
+    def test_terminal_bridge_error_decision_fails_closed(self, tmp_path, monkeypatch):
+        """Phase A must fail closed when the final reviewer turn reports ERROR."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text(
+                "Decision: REQUEST_CHANGES\n\nInterim reader turn.\n\nDecision: ERROR\n\nReviewer failed closed.\n"
+            )
+            return {"exit_code": 1, "stdout": "", "stderr": "reviewer error"}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "error"
+        assert "decision=ERROR" in result["error"]
+
+    def test_zero_exit_without_rendered_output_fails_closed(self, tmp_path, monkeypatch):
+        """Phase A must error if the bridge exits 0 but writes no rendered file."""
+        self._setup_phase_a(tmp_path)
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "error"
+        assert "no rendered output" in result["error"].lower()
+
+    def test_bridge_review_stale_watchdog_fails_closed(self, tmp_path, monkeypatch):
+        """Phase A bridge review must fail closed on silent stale reviewer hangs."""
+        tools_agents = tmp_path / "tools" / "agents"
+        tools_agents.mkdir(parents=True)
+        fake_bridge = tools_agents / "bridge_supervisor.py"
+        fake_bridge.write_text(
+            "#!/usr/bin/env python3\n"
+            "import time\n"
+            "time.sleep(30)\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_STALE_TIMEOUT", 0.05)
+        monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_AGGREGATION_HANG_TIMEOUT", 999.0)
+        monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_POLL_SLEEP", 0.01)
+        monkeypatch.setattr(phase_a_mod, "resolve_bridge_turn_timeout", lambda *args, **kwargs: 0.05)
+
+        result = phase_a_mod.run_bridge_design_review(
+            tmp_path,
+            "reports/control_plane/test_plan.md",
+            1,
+            job_id="phase-a-r1-watchdog",
+            timeout=30,
+        )
+
+        assert result["exit_code"] == -2
+        assert "Bridge review stale" in result["stderr"]
+        assert "phase_a_bridge_phase-a-r1-watchdog.stdout.log" in result["stderr"]
+
+    def test_bridge_review_stale_watchdog_honors_bridge_turn_budget(self, tmp_path, monkeypatch):
+        """A live reviewer turn may stay quiet until the configured bridge-turn budget expires."""
+        tools_agents = tmp_path / "tools" / "agents"
+        tools_agents.mkdir(parents=True)
+        fake_bridge = tools_agents / "bridge_supervisor.py"
+        fake_bridge.write_text(
+            "#!/usr/bin/env python3\n"
+            "import time\n"
+            "time.sleep(0.12)\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_STALE_TIMEOUT", 0.05)
+        monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_AGGREGATION_HANG_TIMEOUT", 999.0)
+        monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_POLL_SLEEP", 0.01)
+        # Keep a wide margin above interpreter startup + the silent reviewer sleep
+        # so Linux CI still proves that the bridge-turn budget overrides the
+        # smaller stale watchdog threshold.
+        monkeypatch.setattr(phase_a_mod, "resolve_bridge_turn_timeout", lambda *args, **kwargs: 0.5)
+
+        result = phase_a_mod.run_bridge_design_review(
+            tmp_path,
+            "reports/control_plane/test_plan.md",
+            1,
+            job_id="phase-a-r1-budget",
+            timeout=1.0,
+        )
+
+        assert result["exit_code"] == 0
+        assert "Bridge review stale" not in result["stderr"]
+
+    def test_bridge_task_is_repo_local_only(self, tmp_path):
+        """Phase A bridge task must explicitly forbid external web/network research."""
+        tools_agents = tmp_path / "tools" / "agents"
+        tools_agents.mkdir(parents=True)
+        fake_bridge = tools_agents / "bridge_supervisor.py"
+        fake_bridge.write_text(
+            "#!/usr/bin/env python3\n",
+            encoding="utf-8",
+        )
+
+        result = phase_a_mod.run_bridge_design_review(
+            tmp_path,
+            "reports/control_plane/test_plan.md",
+            1,
+            job_id="phase-a-r1-local-only",
+            timeout=30,
+        )
+
+        task_text = (tmp_path / ".scratch" / "phase_a_bridge_r1.md").read_text(encoding="utf-8")
+        assert "Use repo-local evidence only." in task_text
+        assert "Do not browse the web" in task_text
+        assert result["exit_code"] == 0
+
+    def test_bridge_design_review_uses_configured_reviewer(self, tmp_path):
+        """Phase A bridge review must honor executor-configured reviewer backend."""
+        tools_agents = tmp_path / "tools" / "agents"
+        tools_agents.mkdir(parents=True)
+        fake_bridge = tools_agents / "bridge_supervisor.py"
+        fake_bridge.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json\n"
+            "import pathlib\n"
+            "import sys\n"
+            "scratch = pathlib.Path.cwd() / '.scratch'\n"
+            "scratch.mkdir(exist_ok=True)\n"
+            "(scratch / 'phase_a_bridge_args.json').write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        config_path = tmp_path / "mu" / "tools" / "executors"
+        config_path.mkdir(parents=True)
+        (config_path / "executor_config.json").write_text(
+            json.dumps({"bridge_reviewers": {"phase_a": "claude"}}),
+            encoding="utf-8",
+        )
+
+        result = phase_a_mod.run_bridge_design_review(
+            tmp_path,
+            "reports/control_plane/test_plan.md",
+            1,
+            job_id="phase-a-r1-config-reviewer",
+            timeout=30,
+        )
+
+        argv = json.loads((tmp_path / ".scratch" / "phase_a_bridge_args.json").read_text(encoding="utf-8"))
+        assert "--reviewer" in argv
+        assert argv[argv.index("--reviewer") + 1] == "claude"
+        assert result["exit_code"] == 0
+
+    def test_bridge_design_review_sets_configured_turn_timeout_env(self, tmp_path):
+        """Phase A bridge review should pass its turn-time budget to bridge_supervisor."""
+        tools_agents = tmp_path / "tools" / "agents"
+        tools_agents.mkdir(parents=True)
+        fake_bridge = tools_agents / "bridge_supervisor.py"
+        fake_bridge.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json\n"
+            "import os\n"
+            "import pathlib\n"
+            "scratch = pathlib.Path.cwd() / '.scratch'\n"
+            "scratch.mkdir(exist_ok=True)\n"
+            "(scratch / 'phase_a_bridge_env.json').write_text(json.dumps({'turn_timeout': os.getenv('RCX_BRIDGE_MAX_TURN_WALL_TIME_S')}), encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        config_path = tmp_path / "mu" / "tools" / "executors"
+        config_path.mkdir(parents=True)
+        (config_path / "executor_config.json").write_text(
+            json.dumps({"bridge_turn_timeouts": {"phase_a": 451}}),
+            encoding="utf-8",
+        )
+
+        result = phase_a_mod.run_bridge_design_review(
+            tmp_path,
+            "reports/control_plane/test_plan.md",
+            1,
+            job_id="phase-a-r1-config-timeout",
+            timeout=600,
+        )
+
+        env_payload = json.loads((tmp_path / ".scratch" / "phase_a_bridge_env.json").read_text(encoding="utf-8"))
+        assert env_payload["turn_timeout"] == "451.0"
+        assert result["exit_code"] == 0
 
 
 # ===========================================================================
@@ -1012,6 +1350,96 @@ class TestEnsureTrackerNote:
         result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
         assert "ensure_tracker_note" in result.get("steps_completed", [])
 
+    def test_noncanonical_tracker_note_is_repaired(self, tmp_path):
+        """A single malformed tracker note line must be repaired in place."""
+        repo, env = _init_git_repo(tmp_path)
+        tasks = repo / "TASKS.md"
+        content = tasks.read_text()
+        content = content.replace(
+            "old note.",
+            "old note.\n- Tracker sync note (Phase B, test-wave-id): malformed placeholder.\n",
+        )
+        tasks.write_text(content)
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "bad tracker note"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        handoff = _make_new_handoff(
+            tracker_note_text=(
+                "- Tracker sync note (2026-03-27, test-wave-id): **TEST — repaired tracker note.** "
+                "Class: L4_ENABLER. target_gate_id: G8. "
+                "evidence_command: `pytest mu/tests/tools/test_executor_dispatch.py -q`. "
+                "evidence_delta: repair malformed tracker note. "
+                "progress_proof_before: malformed tracker note blocked parser binding. "
+                "progress_proof_after: canonical tracker note restored. "
+                "primary_blocker_class: INTEGRATION. "
+                "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+                "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. boot0_progress_state: HOLD."
+            ),
+        )
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+        assert "ensure_tracker_note" in result.get("steps_completed", [])
+        tasks_content = (repo / "TASKS.md").read_text()
+        assert "- Tracker sync note (Phase B, test-wave-id): malformed placeholder." not in tasks_content
+        assert "test-wave-id): **TEST — repaired tracker note.**" in tasks_content
+
+    def test_canonical_tracker_note_is_updated_when_handoff_changes(self, tmp_path):
+        """A single canonical tracker note should be refreshed from the handoff when it drifts."""
+        repo, env = _init_git_repo(tmp_path)
+        tasks = repo / "TASKS.md"
+        content = tasks.read_text()
+        content = content.replace(
+            "old note.",
+            "old note.\n"
+            "- Tracker sync note (2026-03-26, test-wave-id): **TEST — old canonical note.** "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            "evidence_command: `pytest old.py -q`. "
+            "evidence_delta: old. "
+            "progress_proof_before: old. "
+            "progress_proof_after: old. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+            "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD.\n",
+        )
+        tasks.write_text(content)
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "old canonical note"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        handoff = _make_new_handoff(
+            tracker_note_text=(
+                "- Tracker sync note (2026-03-27, test-wave-id): **TEST — refreshed canonical note.** "
+                "Class: L4_ENABLER. target_gate_id: G8. "
+                "evidence_command: `pytest new.py -q`. "
+                "evidence_delta: new. "
+                "progress_proof_before: old. "
+                "progress_proof_after: refreshed. "
+                "primary_blocker_class: INTEGRATION. "
+                "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+                "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. boot0_progress_state: HOLD."
+            ),
+        )
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+        assert "ensure_tracker_note" in result.get("steps_completed", [])
+        tasks_content = (repo / "TASKS.md").read_text()
+        assert "old canonical note" not in tasks_content
+        assert "refreshed canonical note" in tasks_content
+
     def test_14_duplicate_wave_id_errors(self, tmp_path):
         """Test 14: Duplicate wave_id → error."""
         repo, env = _init_git_repo(tmp_path)
@@ -1033,6 +1461,43 @@ class TestEnsureTrackerNote:
         assert result["status"] == "error"
         assert result["step"] == "ensure_tracker_note"
         assert any("duplicate" in e.lower() for e in result["errors"])
+
+    def test_tracker_note_plus_authorized_next_reference_does_not_false_duplicate(self, tmp_path):
+        """A canonical tracker note plus an authorized NEXT-item reference must not fail as duplicate."""
+        repo, env = _init_git_repo(tmp_path)
+        tasks = repo / "TASKS.md"
+        content = tasks.read_text()
+        content = content.replace(
+            "old note.",
+            "old note.\n"
+            "- Tracker sync note (2026-03-27, test-wave-id): **TEST — canonical note.** "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            "evidence_command: `pytest mu/tests/tools/test_executor_dispatch.py -q`. "
+            "evidence_delta: canonical note. "
+            "progress_proof_before: old. "
+            "progress_proof_after: new. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+            "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD.\n"
+            "\n---\n\n## NEXT\n"
+            "- **[TEST]** Authorized item. **Tracked packet:** `reports/control_plane/test-wave-id.md`.\n"
+            "  Current status: references test-wave-id again for operator truth.\n",
+        )
+        tasks.write_text(content)
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "canonical note plus next reference"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        handoff = _make_new_handoff()
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+        assert result["step"] != "ensure_tracker_note" or result["status"] != "error"
+        assert "ensure_tracker_note" in result.get("steps_completed", [])
 
     def test_15_ra_missing_errors(self, tmp_path):
         """Test 15: '## Ra' missing from TASKS.md → error."""
@@ -1069,6 +1534,65 @@ class TestEnsureTrackerNote:
         tasks_content = (repo / "TASKS.md").read_text()
         assert "test-wave-id-extra" in tasks_content
         assert "test-wave-id" in tasks_content
+
+    def test_archived_tracker_note_outside_ra_does_not_block_active_note_insert(self, tmp_path):
+        """Archived tracker-note history outside ## Ra must not satisfy or overwrite the live note."""
+        repo, env = _init_git_repo(tmp_path)
+        tasks = repo / "TASKS.md"
+        content = tasks.read_text()
+        tasks.write_text(
+            content.replace(
+                "---\n\n## NEXT\n",
+                "---\n\n## ARCHIVE\n"
+                "- Tracker sync note (2026-03-20, test-wave-id): **TEST — archived historical note.** "
+                "Class: L4_ENABLER. target_gate_id: G8. "
+                "evidence_command: `pytest old.py -q`. "
+                "evidence_delta: archived. "
+                "progress_proof_before: old. "
+                "progress_proof_after: old. "
+                "primary_blocker_class: INTEGRATION. "
+                "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+                "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. boot0_progress_state: HOLD.\n\n"
+                "---\n\n## NEXT\n"
+            )
+        )
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "archived tracker note"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        handoff = _make_new_handoff(
+            tracker_note_text=(
+                "- Tracker sync note (2026-03-27, test-wave-id): **TEST — active canonical note.** "
+                "Class: L4_ENABLER. target_gate_id: G8. "
+                "evidence_command: `pytest new.py -q`. "
+                "evidence_delta: active. "
+                "progress_proof_before: archived. "
+                "progress_proof_after: active. "
+                "primary_blocker_class: INTEGRATION. "
+                "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+                "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. boot0_progress_state: HOLD."
+            ),
+        )
+
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert "ensure_tracker_note" in result.get("steps_completed", [])
+        tasks_content = (repo / "TASKS.md").read_text()
+        assert tasks_content.count("active canonical note") == 1
+        assert tasks_content.count("archived historical note") == 1
+        ra_idx = tasks_content.index("## Ra")
+        archive_idx = tasks_content.index("## ARCHIVE")
+        assert tasks_content.index("active canonical note") > ra_idx
+        assert tasks_content.index("active canonical note") < archive_idx
 
 
 class TestDispatcherPlanNameSanitization:
@@ -1244,6 +1768,11 @@ class TestSupervisorPackage:
             supervisor_lane="hooks/agents/bridge control-surface",
             deferred_items=["reports/deferred/non_blocking/example.md"],
             bridge_status={"rounds": 2, "reentry": True},
+            scope_items=[
+                "reports/control_plane/test_plan.md",
+                "mu/tools/agents/meta_bridge_supervisor.py",
+            ],
+            evidence_handles={"receipt_chain": "canonical and per-invocation receipts preserved"},
         )
 
         with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
@@ -1257,6 +1786,15 @@ class TestSupervisorPackage:
         assert package["lane"] == "hooks/agents/bridge control-surface"
         assert package["deferred_items"] == ["reports/deferred/non_blocking/example.md"]
         assert package["bridge_status"] == {"rounds": 2, "reentry": True}
+        assert package["scope_items"] == [
+            "reports/control_plane/test_plan.md",
+            "mu/tools/agents/meta_bridge_supervisor.py",
+            "file1.py",
+        ]
+        assert package["evidence_handles"] == {
+            "receipt_chain": "canonical and per-invocation receipts preserved",
+            "indicator": "reports/l4_wave_indicators/test-wave-id.json",
+        }
 
     def test_21_changed_files_empty_errors(self, tmp_path):
         """Test 21: changed_files empty → error before supervisor.
@@ -1630,6 +2168,25 @@ class TestReceiptAndCommit:
         assert result["status"] == "error"
         assert result["step"] == "run_pre_commit_script"
 
+    def test_step11_pre_push_failure_surfaces_stdout_when_stderr_empty(self, tmp_path):
+        """Step 11 should surface stdout if pre-push-fast writes no stderr."""
+        repo, env, mock_result = self._setup_repo_through_supervisor(tmp_path, "COMMIT_GO")
+
+        hooks_dir = repo / "mu" / "tools" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        script = hooks_dir / "pre-push-fast"
+        script.write_text("#!/bin/bash\necho 'tracker note contract failed'\nexit 1\n")
+        script.chmod(0o755)
+
+        with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
+            sys.modules["meta_bridge_client"].run_meta_bridge_package = MagicMock(return_value=mock_result)
+            sys.modules["meta_bridge_client"].MetaBridgeClientError = Exception
+            result = commit_mod.run_commit_pipeline(_make_new_handoff(), repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "run_pre_push_script"
+        assert any("tracker note contract failed" in e for e in result["errors"])
+
     def _setup_repo_through_supervisor(self, tmp_path, receipt_decision="COMMIT_GO"):
         """Helper: create repo, pre-insert wave_id, create receipt, return (repo, env, mock)."""
         repo, env = _init_git_repo(tmp_path)
@@ -1970,6 +2527,7 @@ class TestCommitContinuationAndBotFreshness:
         assert result["status"] == "continued"
         assert mock_helper.call_count == 1
         resumed = captured["result"]
+        assert resumed["handoff_sha"] == commit_mod._handoff_sha(handoff)  # ANTICHEAT_OK: resumed post-commit helper must retain continuation binding
         assert resumed["commit_sha"] == head_sha
         assert resumed["receipt_decision"] == "COMMIT_GO"
         assert resumed["steps_completed"][-1] == "hold_check"
@@ -2008,8 +2566,9 @@ class TestCommitContinuationAndBotFreshness:
         assert not continuation_path.exists()
         mock_helper.assert_not_called()
 
-    def test_has_fresh_bot_review_requires_current_head_commit(self):
+    def test_has_fresh_connector_review_requires_current_head_commit(self):
         pr_data = {
+            "headRefOid": "abc123",
             "latestReviews": {
                 "nodes": [
                     {
@@ -2025,8 +2584,23 @@ class TestCommitContinuationAndBotFreshness:
                 ]
             }
         }
-        assert commit_mod._has_fresh_bot_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing bot-review freshness helper
-        assert commit_mod._has_fresh_bot_review(pr_data, "def456") is False  # ANTICHEAT_OK: testing bot-review freshness helper
+        assert commit_mod._has_fresh_connector_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing connector-review freshness helper
+        assert commit_mod._has_fresh_connector_review(pr_data, "def456") is False  # ANTICHEAT_OK: testing connector-review freshness helper
+
+    def test_has_fresh_connector_review_ignores_other_bot_on_current_head(self):
+        pr_data = {
+            "headRefOid": "abc123",
+            "latestReviews": {
+                "nodes": [
+                    {
+                        "author": {"login": "dependabot[bot]"},
+                        "state": "COMMENTED",
+                        "commit": {"oid": "abc123"},
+                    },
+                ],
+            },
+        }
+        assert commit_mod._has_fresh_connector_review(pr_data, "abc123") is False  # ANTICHEAT_OK: non-connector bot reviews must not satisfy freshness
 
     def test_wait_for_bot_review_freshness_polls_until_current_head_review(self):
         calls = {"count": 0}
@@ -2034,8 +2608,9 @@ class TestCommitContinuationAndBotFreshness:
         def query_state():
             calls["count"] += 1
             if calls["count"] == 1:
-                return {"latestReviews": {"nodes": []}}
+                return {"headRefOid": "abc123", "latestReviews": {"nodes": []}}
             return {
+                "headRefOid": "abc123",
                 "latestReviews": {
                     "nodes": [
                         {
@@ -2056,17 +2631,1490 @@ class TestCommitContinuationAndBotFreshness:
             )
 
         assert calls["count"] == 2
-        assert commit_mod._has_fresh_bot_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing bot-review freshness helper
+        assert commit_mod._has_fresh_connector_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing connector-review freshness helper
+
+    def test_bot_review_author_helper_accepts_connector_login(self):
+        assert commit_mod._is_bot_review_author(commit_mod.BOT_REVIEW_LOGIN) is True  # ANTICHEAT_OK: testing bot-review author helper
+        assert commit_mod._is_bot_review_author("some-bot") is True  # ANTICHEAT_OK: testing bot-review author helper
+        assert commit_mod._is_bot_review_author("human-reviewer") is False  # ANTICHEAT_OK: testing bot-review author helper
+
+    def test_connector_review_author_helper_rejects_other_bots(self):
+        assert commit_mod._is_connector_review_author(commit_mod.BOT_REVIEW_LOGIN) is True  # ANTICHEAT_OK: testing connector-review author helper
+        assert commit_mod._is_connector_review_author("chatgpt-codex-connector[bot]") is True  # ANTICHEAT_OK: testing connector-review author helper
+        assert commit_mod._is_connector_review_author("dependabot[bot]") is False  # ANTICHEAT_OK: testing connector-review author helper
+        assert commit_mod._is_connector_review_author("renovate-bot") is False  # ANTICHEAT_OK: testing connector-review author helper
+
+    def test_pr_review_query_requests_thread_outdatedness(self):
+        assert "isOutdated" in commit_mod.PR_REVIEW_QUERY
+
+    def test_pr_review_query_requests_thread_comment_timestamps(self):
+        assert "createdAt" in commit_mod.PR_REVIEW_QUERY
+
+    def test_pr_review_query_requests_head_ref_oid(self):
+        assert "headRefOid" in commit_mod.PR_REVIEW_QUERY
+
+    def test_current_head_connector_issue_comment_outcome_requires_clear_comment_after_latest_request(self):
+        pr_data = {
+            "headRefOid": "abc123",
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T07:37:49Z",
+                    },
+                    {
+                        "author": {"login": "chatgpt-codex-connector[bot]"},
+                        "body": "Codex Review: Didn't find any major issues. Swish!",
+                        "createdAt": "2026-03-27T07:39:03Z",
+                    },
+                ]
+            }
+        }
+
+        outcome = commit_mod._current_head_connector_issue_comment_outcome(  # ANTICHEAT_OK: testing connector issue-comment freshness helper
+            pr_data,
+            "abc123",
+        )
+        assert outcome is not None
+        assert outcome["kind"] == "clear"
+
+        stale_pr_data = {
+            "headRefOid": "abc123",
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "chatgpt-codex-connector[bot]"},
+                        "body": "Codex Review: Didn't find any major issues. Swish!",
+                        "createdAt": "2026-03-27T07:39:03Z",
+                    },
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T07:40:00Z",
+                    },
+                ]
+            }
+        }
+
+        assert commit_mod._current_head_connector_issue_comment_outcome(stale_pr_data, "abc123") is None  # ANTICHEAT_OK: testing connector issue-comment freshness helper
+
+    def test_current_head_connector_issue_comment_outcome_ignores_non_connector_bot(self):
+        pr_data = {
+            "headRefOid": "abc123",
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T07:37:49Z",
+                    },
+                    {
+                        "author": {"login": "dependabot[bot]"},
+                        "body": "Codex Review: Didn't find any major issues. Swish!",
+                        "createdAt": "2026-03-27T07:39:03Z",
+                    },
+                ]
+            }
+        }
+
+        assert commit_mod._current_head_connector_issue_comment_outcome(pr_data, "abc123") is None  # ANTICHEAT_OK: testing connector-only issue-comment freshness helper
+
+    def test_current_head_connector_issue_comment_outcome_requires_expected_head(self):
+        pr_data = {
+            "headRefOid": "other456",
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T10:14:29Z",
+                    },
+                    {
+                        "author": {"login": "chatgpt-codex-connector[bot]"},
+                        "body": "Codex Review: Didn't find any major issues. Swish!",
+                        "createdAt": "2026-03-27T10:15:00Z",
+                    },
+                ]
+            },
+        }
+
+        assert commit_mod._current_head_connector_issue_comment_outcome(pr_data, "abc123") is None  # ANTICHEAT_OK: commit-bound issue-comment freshness helper
+
+    def test_wait_for_bot_review_freshness_accepts_no_issues_issue_comment(self):
+        calls = {"count": 0}
+
+        def query_state():
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return {
+                    "headRefOid": "abc123",
+                    "latestReviews": {"nodes": []},
+                    "comments": {
+                        "nodes": [
+                            {
+                                "author": {"login": "jabramsja"},
+                                "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                                "createdAt": "2026-03-27T07:37:49Z",
+                            }
+                        ]
+                    },
+                }
+            return {
+                "headRefOid": "abc123",
+                "latestReviews": {"nodes": []},
+                "comments": {
+                    "nodes": [
+                        {
+                            "author": {"login": "jabramsja"},
+                            "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                            "createdAt": "2026-03-27T07:37:49Z",
+                        },
+                        {
+                            "author": {"login": "chatgpt-codex-connector[bot]"},
+                            "body": "Codex Review: Didn't find any major issues. Swish!",
+                            "createdAt": "2026-03-27T07:39:03Z",
+                        },
+                    ]
+                },
+            }
+
+        with patch.object(commit_mod.time, "sleep", return_value=None):
+            pr_data = commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: testing bot-review polling helper
+                query_state,
+                head_sha="abc123",
+                wait_seconds=1,
+                poll_interval=0,
+            )
+
+        assert calls["count"] == 2
+        outcome = commit_mod._current_head_connector_issue_comment_outcome(pr_data, "abc123")  # ANTICHEAT_OK: testing connector issue-comment freshness helper
+        assert outcome is not None
+        assert outcome["kind"] == "clear"
+
+    def test_wait_for_required_checks_to_register_retries_no_checks_reported(self, tmp_path, monkeypatch):
+        calls = {"count": 0}
+
+        def fake_run(args, *, cwd, check=True, timeout=120, env=None):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return subprocess.CompletedProcess(
+                    args,
+                    1,
+                    stdout="",
+                    stderr="no checks reported on the 'jabramsja/test-wave-id' branch",
+                )
+            return subprocess.CompletedProcess(
+                args,
+                8,
+                stdout="green-gate\tpending\t0\thttps://example.invalid/check\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        commit_mod._wait_for_required_checks_to_register(  # ANTICHEAT_OK: testing CI registration helper
+            tmp_path,
+            pr_number="673",
+            wait_seconds=1,
+            poll_interval=0,
+        )
+
+        assert calls["count"] == 2
+
+    def test_post_commit_ignores_outdated_connector_threads(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {"steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"]}
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="dev\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "list", "--head"]:
+                return completed(cmd, stdout='[{"number":673}]')
+            if cmd[:4] == ["gh", "pr", "checks", "673"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "edit", "673"]:
+                return completed(cmd)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                payload = {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "reviewDecision": "",
+                                "headRefOid": "abc123",
+                                "latestReviews": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                            "state": "COMMENTED",
+                                            "commit": {"oid": "abc123"},
+                                        }
+                                    ]
+                                },
+                                "reviewThreads": {
+                                    "nodes": [
+                                        {
+                                            "isResolved": False,
+                                            "isOutdated": True,
+                                            "comments": {
+                                                "nodes": [
+                                                    {
+                                                        "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                                        "body": "old finding",
+                                                        "path": "x.py",
+                                                        "line": 1,
+                                                    }
+                                                ]
+                                            },
+                                        }
+                                    ]
+                                },
+                            }
+                        }
+                    }
+                }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod, "_wait_for_bot_review_freshness", lambda query_state, head_sha, **kwargs: query_state())
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: testing internal post-commit pipeline helper
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["pr_number"] == "673"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert "merge_sha" in post_commit
 
     def test_wait_for_bot_review_freshness_times_out_fail_closed(self):
         with patch.object(commit_mod.time, "sleep", return_value=None):
             with pytest.raises(TimeoutError, match="No current-head"):
                 commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: testing timeout fail-closed helper
-                    lambda: {"latestReviews": {"nodes": []}},
+                    lambda: {"headRefOid": "abc123", "latestReviews": {"nodes": []}},
                     head_sha="abc123",
                     wait_seconds=0,
                     poll_interval=0,
                 )
+
+    def test_wait_for_bot_review_freshness_fails_closed_on_pr_head_change(self):
+        with patch.object(commit_mod.time, "sleep", return_value=None):
+            with pytest.raises(ValueError, match="PR head moved from expected"):
+                commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: testing PR-head binding in freshness wait
+                    lambda: {"headRefOid": "other456", "latestReviews": {"nodes": []}, "comments": {"nodes": []}},
+                    head_sha="abc123",
+                    wait_seconds=1,
+                    poll_interval=0,
+                )
+
+    def test_wait_for_bot_review_freshness_extends_deadline_after_acknowledgement(self, monkeypatch):
+        query_calls = {"count": 0}
+
+        def query_state():
+            query_calls["count"] += 1
+            if query_calls["count"] < 3:
+                return {"headRefOid": "abc123", "latestReviews": {"nodes": []}, "comments": {"nodes": []}}
+            return {
+                "headRefOid": "abc123",
+                "latestReviews": {
+                    "nodes": [
+                        {
+                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                            "state": "COMMENTED",
+                            "commit": {"oid": "abc123"},
+                        }
+                    ]
+                },
+                "comments": {"nodes": []},
+            }
+
+        time_points = iter([0.0, 0.2, 1.2])
+        monkeypatch.setattr(commit_mod.time, "time", lambda: next(time_points))
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        pr_data = commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: testing acknowledgement-based wait extension
+            query_state,
+            head_sha="abc123",
+            wait_seconds=1,
+            request_acknowledged=lambda _: True,
+            acknowledged_wait_seconds=5,
+            poll_interval=0,
+            )
+
+        assert query_calls["count"] == 3
+        assert commit_mod._has_fresh_connector_review(pr_data, "abc123")  # ANTICHEAT_OK: verifying review freshness helper
+
+    def test_wait_for_bot_review_freshness_acknowledgement_does_not_clear_without_review(self, monkeypatch):
+        time_points = iter([0.0, 0.2, 1.1])
+        monkeypatch.setattr(commit_mod.time, "time", lambda: next(time_points))
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        with pytest.raises(TimeoutError, match="No current-head"):
+            commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: acknowledgement must not substitute for review clearance
+                lambda: {"headRefOid": "abc123", "latestReviews": {"nodes": []}, "comments": {"nodes": []}},
+                head_sha="abc123",
+                wait_seconds=0,
+                request_acknowledged=lambda _: True,
+                acknowledged_wait_seconds=1,
+                poll_interval=0,
+            )
+
+    def test_post_commit_ignores_prior_cycle_unresolved_bot_threads(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "git_commit",
+                "hold_check",
+                "run_pre_push_script",
+                "git_push",
+                "ensure_pr",
+                "wait_ci",
+            ],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+            "pr_number": "673",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="dev\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                payload = {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "headRefOid": "abc123",
+                                "reviewDecision": "",
+                                "latestReviews": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                            "state": "COMMENTED",
+                                            "submittedAt": "2026-03-27T07:40:00Z",
+                                            "commit": {"oid": "abc123"},
+                                        }
+                                    ]
+                                },
+                                "reviewThreads": {
+                                    "nodes": [
+                                        {
+                                            "isResolved": False,
+                                            "isOutdated": False,
+                                            "comments": {
+                                                "nodes": [
+                                                    {
+                                                        "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                                        "body": "prior-cycle finding",
+                                                        "path": "x.py",
+                                                        "line": 1,
+                                                        "createdAt": "2026-03-27T07:35:00Z",
+                                                    }
+                                                ]
+                                            },
+                                        }
+                                    ]
+                                },
+                                "comments": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": "jabramsja"},
+                                            "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                                            "createdAt": "2026-03-27T07:37:49Z",
+                                        }
+                                    ]
+                                },
+                            }
+                        }
+                    }
+                }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: Step 15 must ignore prior-cycle unresolved bot threads
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert "merge_sha" in post_commit
+
+    def test_post_commit_reports_only_current_cycle_bot_threads(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "git_commit",
+                "hold_check",
+                "run_pre_push_script",
+                "git_push",
+                "ensure_pr",
+                "wait_ci",
+            ],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+            "pr_number": "673",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                payload = {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "headRefOid": "abc123",
+                                "reviewDecision": "",
+                                "latestReviews": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                            "state": "COMMENTED",
+                                            "submittedAt": "2026-03-27T07:40:00Z",
+                                            "commit": {"oid": "abc123"},
+                                        }
+                                    ]
+                                },
+                                "reviewThreads": {
+                                    "nodes": [
+                                        {
+                                            "isResolved": False,
+                                            "isOutdated": False,
+                                            "comments": {
+                                                "nodes": [
+                                                    {
+                                                        "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                                        "body": "prior-cycle finding",
+                                                        "path": "old.py",
+                                                        "line": 1,
+                                                        "createdAt": "2026-03-27T07:35:00Z",
+                                                    }
+                                                ]
+                                            },
+                                        },
+                                        {
+                                            "isResolved": False,
+                                            "isOutdated": False,
+                                            "comments": {
+                                                "nodes": [
+                                                    {
+                                                        "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                                        "body": "current-cycle finding",
+                                                        "path": "new.py",
+                                                        "line": 9,
+                                                        "createdAt": "2026-03-27T07:41:00Z",
+                                                    }
+                                                ]
+                                            },
+                                        },
+                                    ]
+                                },
+                                "comments": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": "jabramsja"},
+                                            "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                                            "createdAt": "2026-03-27T07:37:49Z",
+                                        }
+                                    ]
+                                },
+                            }
+                        }
+                    }
+                }
+                return completed(cmd, stdout=json.dumps(payload))
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: Step 15 must scope bot findings to the active review cycle
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["status"] == "bot_findings_pending"
+        assert post_commit["bot_findings"] == [
+            {
+                "author": commit_mod.BOT_REVIEW_LOGIN,
+                "body": "current-cycle finding",
+                "path": "new.py",
+                "line": 9,
+            }
+        ]
+
+    def test_current_head_connector_issue_comment_outcome_ignores_pre_review_clear_comment(self):
+        pr_data = {
+            "headRefOid": "abc123",
+            "latestReviews": {
+                "nodes": [
+                    {
+                        "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                        "state": "COMMENTED",
+                        "submittedAt": "2026-03-27T07:40:00Z",
+                        "commit": {"oid": "abc123"},
+                    }
+                ]
+            },
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T07:37:49Z",
+                    },
+                    {
+                        "author": {"login": "chatgpt-codex-connector[bot]"},
+                        "body": "Codex Review: Didn't find any major issues. Swish!",
+                        "createdAt": "2026-03-27T07:39:03Z",
+                    },
+                ]
+            },
+        }
+
+        assert commit_mod._current_head_connector_issue_comment_outcome(pr_data, "abc123") is None  # ANTICHEAT_OK: testing connector issue-comment freshness helper against newer current-head review floor
+
+    def test_bot_review_request_acknowledgement_detects_connector_eyes_reaction(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        pr_data = {
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T08:58:34Z",
+                        "databaseId": 4141124626,
+                    }
+                ]
+            }
+        }
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:2] == ["gh", "api"] and cmd[2].endswith("/issues/comments/4141124626/reactions"):
+                payload = [
+                    {
+                        "user": {"login": "chatgpt-codex-connector[bot]"},
+                        "content": "eyes",
+                    }
+                ]
+                return completed(cmd, stdout=json.dumps(payload))
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        assert commit_mod._bot_review_request_acknowledged(  # ANTICHEAT_OK: direct helper regression for Step 15 ack path
+            repo,
+            repo_owner="jabramsja",
+            repo_name="rcx-pi-core",
+            pr_data=pr_data,
+        )
+
+    def test_bot_review_request_acknowledgement_rejects_non_connector_bot_reaction(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        pr_data = {
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T08:58:34Z",
+                        "databaseId": 4141124626,
+                    }
+                ]
+            }
+        }
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:2] == ["gh", "api"] and cmd[2].endswith("/issues/comments/4141124626/reactions"):
+                payload = [
+                    {
+                        "user": {"login": "dependabot[bot]"},
+                        "content": "eyes",
+                    }
+                ]
+                return completed(cmd, stdout=json.dumps(payload))
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        assert not commit_mod._bot_review_request_acknowledged(  # ANTICHEAT_OK: connector-specific ack regression
+            repo,
+            repo_owner="jabramsja",
+            repo_name="rcx-pi-core",
+            pr_data=pr_data,
+        )
+
+    def test_post_commit_requests_current_head_bot_review_once(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(
+            json.dumps(
+                {
+                    "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                    "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                    "handoff_sha": "handoff-sha",
+                    "target_branch": "jabramsja/test-wave-id",
+                    "commit_sha": "abc123",
+                    "receipt_decision": "COMMIT_GO",
+                    "steps_completed": list(result["steps_completed"]),
+                    "pr_number": "673",
+                    "updated_at_unix": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        comment_calls = []
+        graphql_calls = {"count": 0}
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="dev\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "list", "--head"]:
+                return completed(cmd, stdout='[{"number":673}]')
+            if cmd[:4] == ["gh", "pr", "checks", "673"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "edit", "673"]:
+                return completed(cmd)
+            if cmd[:3] == ["gh", "pr", "comment"]:
+                comment_calls.append(cmd)
+                return completed(cmd)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                graphql_calls["count"] += 1
+                if graphql_calls["count"] == 1:
+                    payload = {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "headRefOid": "abc123",
+                                    "reviewDecision": "",
+                                    "latestReviews": {"nodes": []},
+                                    "reviewThreads": {"nodes": []},
+                                }
+                            }
+                        }
+                    }
+                else:
+                    payload = {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "headRefOid": "abc123",
+                                    "reviewDecision": "",
+                                    "latestReviews": {
+                                        "nodes": [
+                                            {
+                                                "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                                "state": "COMMENTED",
+                                                "commit": {"oid": "abc123"},
+                                            }
+                                        ]
+                                    },
+                                    "reviewThreads": {"nodes": []},
+                                }
+                            }
+                        }
+                    }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising post-commit review request path
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["pr_number"] == "673"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert len(comment_calls) == 1
+
+    def test_post_commit_accepts_current_head_no_issues_issue_comment_without_review_object(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(
+            json.dumps(
+                {
+                    "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                    "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                    "handoff_sha": "handoff-sha",
+                    "target_branch": "jabramsja/test-wave-id",
+                    "commit_sha": "abc123",
+                    "receipt_decision": "COMMIT_GO",
+                    "steps_completed": list(result["steps_completed"]),
+                    "pr_number": "673",
+                    "updated_at_unix": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        comment_calls = []
+        graphql_calls = {"count": 0}
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="dev\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "list", "--head"]:
+                return completed(cmd, stdout='[{"number":673}]')
+            if cmd[:4] == ["gh", "pr", "checks", "673"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "edit", "673"]:
+                return completed(cmd)
+            if cmd[:3] == ["gh", "pr", "comment"]:
+                comment_calls.append(cmd)
+                return completed(cmd)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                graphql_calls["count"] += 1
+                if graphql_calls["count"] == 1:
+                    payload = {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "headRefOid": "abc123",
+                                    "reviewDecision": "",
+                                    "latestReviews": {"nodes": []},
+                                    "reviewThreads": {"nodes": []},
+                                    "comments": {"nodes": []},
+                                }
+                            }
+                        }
+                    }
+                else:
+                    payload = {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "headRefOid": "abc123",
+                                    "reviewDecision": "",
+                                    "latestReviews": {"nodes": []},
+                                    "reviewThreads": {"nodes": []},
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "author": {"login": "jabramsja"},
+                                                "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                                                "createdAt": "2026-03-27T07:37:49Z",
+                                            },
+                                            {
+                                                "author": {"login": "chatgpt-codex-connector[bot]"},
+                                                "body": "Codex Review: Didn't find any major issues. Swish!",
+                                                "createdAt": "2026-03-27T07:39:03Z",
+                                            },
+                                        ]
+                                    },
+                                }
+                            }
+                        }
+                    }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising no-issues issue-comment clearance path
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["pr_number"] == "673"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert len(comment_calls) == 1
+
+    def test_post_commit_does_not_request_review_when_current_head_clear_issue_comment_and_request_binding_exist(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(
+            json.dumps(
+                {
+                    "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                    "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                    "handoff_sha": "handoff-sha",
+                    "target_branch": "jabramsja/test-wave-id",
+                    "commit_sha": "abc123",
+                    "receipt_decision": "COMMIT_GO",
+                    "steps_completed": list(result["steps_completed"]),
+                    "pr_number": "673",
+                    "bot_review_request_sha": "abc123",
+                    "updated_at_unix": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        comment_calls = []
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="dev\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "list", "--head"]:
+                return completed(cmd, stdout='[{"number":673}]')
+            if cmd[:4] == ["gh", "pr", "checks", "673"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "edit", "673"]:
+                return completed(cmd)
+            if cmd[:3] == ["gh", "pr", "comment"]:
+                comment_calls.append(cmd)
+                return completed(cmd)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                payload = {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "headRefOid": "abc123",
+                                "reviewDecision": "",
+                                "latestReviews": {"nodes": []},
+                                "reviewThreads": {"nodes": []},
+                                "comments": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": "jabramsja"},
+                                            "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                                            "createdAt": "2026-03-27T07:37:49Z",
+                                        },
+                                        {
+                                            "author": {"login": "chatgpt-codex-connector[bot]"},
+                                            "body": "Codex Review: Didn't find any major issues. Swish!",
+                                            "createdAt": "2026-03-27T07:39:03Z",
+                                        },
+                                    ]
+                                },
+                            }
+                        }
+                    }
+                }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: existing clear issue comment must avoid re-request
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["pr_number"] == "673"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert len(comment_calls) == 0
+
+    def test_post_commit_requests_review_when_clear_issue_comment_lacks_current_head_request_binding(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(
+            json.dumps(
+                {
+                    "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                    "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                    "handoff_sha": "handoff-sha",
+                    "target_branch": "jabramsja/test-wave-id",
+                    "commit_sha": "abc123",
+                    "receipt_decision": "COMMIT_GO",
+                    "steps_completed": list(result["steps_completed"]),
+                    "pr_number": "673",
+                    "updated_at_unix": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        comment_calls = []
+        graphql_calls = {"count": 0}
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="dev\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "list", "--head"]:
+                return completed(cmd, stdout='[{"number":673}]')
+            if cmd[:4] == ["gh", "pr", "checks", "673"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "edit", "673"]:
+                return completed(cmd)
+            if cmd[:3] == ["gh", "pr", "comment"]:
+                comment_calls.append(cmd)
+                return completed(cmd)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                graphql_calls["count"] += 1
+                if graphql_calls["count"] == 1:
+                    payload = {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "headRefOid": "abc123",
+                                    "reviewDecision": "",
+                                    "latestReviews": {"nodes": []},
+                                    "reviewThreads": {"nodes": []},
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "author": {"login": "jabramsja"},
+                                                "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                                                "createdAt": "2026-03-27T07:37:49Z",
+                                            },
+                                            {
+                                                "author": {"login": "chatgpt-codex-connector[bot]"},
+                                                "body": "Codex Review: Didn't find any major issues. Swish!",
+                                                "createdAt": "2026-03-27T07:39:03Z",
+                                            },
+                                        ]
+                                    },
+                                }
+                            }
+                        }
+                    }
+                else:
+                    payload = {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "headRefOid": "abc123",
+                                    "reviewDecision": "",
+                                    "latestReviews": {
+                                        "nodes": [
+                                            {
+                                                "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                                "state": "COMMENTED",
+                                                "commit": {"oid": "abc123"},
+                                            }
+                                        ]
+                                    },
+                                    "reviewThreads": {"nodes": []},
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "author": {"login": "jabramsja"},
+                                                "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                                                "createdAt": "2026-03-27T07:40:00Z",
+                                            },
+                                            {
+                                                "author": {"login": "chatgpt-codex-connector[bot]"},
+                                                "body": "Codex Review: Didn't find any major issues. Swish!",
+                                                "createdAt": "2026-03-27T07:41:00Z",
+                                            },
+                                        ]
+                                    },
+                                }
+                            }
+                        }
+                    }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: clear issue comment must be request-bound to skip re-request
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["pr_number"] == "673"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert len(comment_calls) == 1
+
+    def test_post_commit_wait_ci_retries_until_checks_register(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(
+            json.dumps(
+                {
+                    "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                    "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                    "handoff_sha": "handoff-sha",
+                    "target_branch": "jabramsja/test-wave-id",
+                    "commit_sha": "abc123",
+                    "receipt_decision": "COMMIT_GO",
+                    "steps_completed": list(result["steps_completed"]),
+                    "pr_number": "673",
+                    "updated_at_unix": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        required_checks_calls = {"count": 0}
+
+        def completed(cmd, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, check=True, timeout=None, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="dev\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "list", "--head"]:
+                return completed(cmd, stdout='[{"number":673}]')
+            if cmd[:4] == ["gh", "pr", "edit", "673"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "checks", "673"] and "--required" in cmd and "--watch" not in cmd:
+                required_checks_calls["count"] += 1
+                if required_checks_calls["count"] == 1:
+                    return completed(
+                        cmd,
+                        returncode=1,
+                        stderr="no checks reported on the 'jabramsja/test-wave-id' branch",
+                    )
+                return completed(
+                    cmd,
+                    returncode=8,
+                    stdout="green-gate\tpending\t0\thttps://example.invalid/check\n",
+                )
+            if cmd[:4] == ["gh", "pr", "checks", "673"] and "--watch" in cmd:
+                return completed(cmd)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                payload = {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "headRefOid": "abc123",
+                                "reviewDecision": "",
+                                "latestReviews": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                            "state": "COMMENTED",
+                                            "commit": {"oid": "abc123"},
+                                        }
+                                    ]
+                                },
+                                "reviewThreads": {"nodes": []},
+                                "comments": {"nodes": []},
+                            }
+                        }
+                    }
+                }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising wait_ci registration-race helper through post-commit pipeline
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["pr_number"] == "673"
+        assert "wait_ci" in post_commit["steps_completed"]
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert required_checks_calls["count"] == 2
+
+    def test_post_commit_resume_skips_checkpointed_pre_push_and_checkpoints_git_push(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "git_commit",
+                "hold_check",
+                "run_pre_push_script",
+            ],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(
+            json.dumps(
+                {
+                    "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                    "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                    "handoff_sha": "handoff-sha",
+                    "target_branch": "jabramsja/test-wave-id",
+                    "commit_sha": "abc123",
+                    "receipt_decision": "COMMIT_GO",
+                    "steps_completed": list(result["steps_completed"]),
+                    "updated_at_unix": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        pre_push_script = repo / "mu" / "tools" / "hooks" / "pre-push-fast"
+        pre_push_script.parent.mkdir(parents=True, exist_ok=True)
+        pre_push_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        pre_push_calls = []
+        push_calls = []
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:2] == ["bash", str(pre_push_script)]:
+                pre_push_calls.append(cmd)
+                return completed(cmd)
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
+                push_calls.append(cmd)
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "list", "--head"]:
+                return completed(cmd, stdout="[]")
+            if cmd[:3] == ["gh", "pr", "create"]:
+                raise subprocess.CalledProcessError(1, cmd, stderr="create boom")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising checkpointed post-commit resume boundary
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["status"] == "error"
+        assert post_commit["step"] == "ensure_pr"
+        assert pre_push_calls == []
+        assert len(push_calls) == 1
+        assert push_calls[0][:5] == ["git", "push", "--no-verify", "-u", "origin"]
+
+        continuation = json.loads(continuation_path.read_text(encoding="utf-8"))
+        assert "run_pre_push_script" in continuation["steps_completed"]
+        assert "git_push" in continuation["steps_completed"]
+
+    def test_post_commit_does_not_recomment_same_head_bot_review_request(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(
+            json.dumps(
+                {
+                    "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                    "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                    "handoff_sha": "handoff-sha",
+                    "target_branch": "jabramsja/test-wave-id",
+                    "commit_sha": "abc123",
+                    "receipt_decision": "COMMIT_GO",
+                    "steps_completed": list(result["steps_completed"]),
+                    "pr_number": "673",
+                    "bot_review_request_sha": "abc123",
+                    "updated_at_unix": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        comment_calls = []
+        graphql_calls = {"count": 0}
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="dev\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "list", "--head"]:
+                return completed(cmd, stdout='[{"number":673}]')
+            if cmd[:4] == ["gh", "pr", "checks", "673"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "edit", "673"]:
+                return completed(cmd)
+            if cmd[:3] == ["gh", "pr", "comment"]:
+                comment_calls.append(cmd)
+                return completed(cmd)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                graphql_calls["count"] += 1
+                if graphql_calls["count"] == 1:
+                    payload = {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "headRefOid": "abc123",
+                                    "reviewDecision": "",
+                                    "latestReviews": {"nodes": []},
+                                    "reviewThreads": {"nodes": []},
+                                }
+                            }
+                        }
+                    }
+                else:
+                    payload = {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "headRefOid": "abc123",
+                                    "reviewDecision": "",
+                                    "latestReviews": {
+                                        "nodes": [
+                                            {
+                                                "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                                "state": "COMMENTED",
+                                                "commit": {"oid": "abc123"},
+                                            }
+                                        ]
+                                    },
+                                    "reviewThreads": {"nodes": []},
+                                }
+                            }
+                        }
+                    }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising post-commit review request dedupe
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["pr_number"] == "673"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert comment_calls == []
 
     def test_post_commit_pipeline_returns_structured_error_on_review_query_timeout(self, tmp_path):
         repo, _ = _init_git_repo(tmp_path)
@@ -2091,7 +4139,7 @@ class TestCommitContinuationAndBotFreshness:
         }
 
         def fake_run(args, *, cwd, check=True, timeout=120, env=None):
-            if args[:3] == ["git", "push", "-u"]:
+            if args[:4] == ["git", "push", "--no-verify", "-u"]:
                 return subprocess.CompletedProcess(args, 0, "", "")
             if args[:3] == ["gh", "pr", "list"]:
                 return subprocess.CompletedProcess(args, 0, "[]\n", "")
@@ -2377,11 +4425,12 @@ class TestRunBridgeSubprocessCleanup:
 
 
 class TestExecutorsUseBridgeSubprocess:
-    """All three executors use run_bridge_subprocess instead of raw
-    subprocess.run, ensuring consistent process-group cleanup."""
+    """Bridge invocation surfaces use the shared cleanup/watchdog helpers."""
 
-    def test_phase_a_imports_run_bridge_subprocess(self):
-        assert hasattr(phase_a_mod, "run_bridge_subprocess")
+    def test_phase_a_imports_bridge_watchdog_helpers(self):
+        assert hasattr(phase_a_mod, "process_descendants")
+        assert hasattr(phase_a_mod, "terminate_process_tree")
+        assert hasattr(phase_a_mod, "artifact_size_mtime_ns")
 
     def test_dialectic_imports_run_bridge_subprocess(self):
         assert hasattr(dialectic_mod, "run_bridge_subprocess")
@@ -2514,15 +4563,15 @@ class TestBridgeR6Finding2PhaseAAgentGate:
         (bus_dir / "post_merge_routing.json").write_text(json.dumps(routing))
         return rendered_dir
 
-    def test_failed_agent_review_blocks_bridge(self, tmp_path, monkeypatch):
-        """Nonzero agent exit code must prevent bridge from running."""
+    def test_hard_gate_agent_review_blocks_bridge(self, tmp_path, monkeypatch):
+        """Hard-gate / infra exits must prevent bridge from running."""
         self._setup_phase_a(tmp_path)
         bridge_called = {"n": 0}
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
-            return {"exit_code": 2, "stdout": "", "stderr": "agent failed"}
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 4, "stdout": "", "stderr": "preflight failed"}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             bridge_called["n"] += 1
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
@@ -2532,18 +4581,198 @@ class TestBridgeR6Finding2PhaseAAgentGate:
         result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
         assert result["status"] == "error"
         assert "agent review failed" in result["error"].lower() or "SDK agent review failed" in result["error"]
-        assert result["agent_exit_code"] == 2
+        assert result["agent_exit_code"] == 4
         # Bridge must NOT have been called
         assert bridge_called["n"] == 0
+
+    def test_agent_review_timeout_budget_comes_from_executor_config(self, tmp_path, monkeypatch):
+        """Phase A must pass the configured agent-review budget into run_sdk_agents."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+        captured: dict[str, int] = {}
+
+        monkeypatch.setattr(
+            phase_a_mod,
+            "load_executor_config",
+            lambda repo_root: {
+                "review_depths": {"phase_a": "quick"},
+                "timeouts": {"agent_review": 901},
+            },
+        )
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            captured["timeout"] = timeout
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: GO\n\nLooks good.\n")
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        assert captured["timeout"] == 901
+
+    def test_soft_warning_agent_review_proceeds_to_bridge(self, tmp_path, monkeypatch):
+        """Exit 2 is a soft gate and must not block bridge review."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+        bridge_called = {"n": 0}
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 2, "stdout": "", "stderr": "expert: COULD_SIMPLIFY"}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            bridge_called["n"] += 1
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: GO\n\nLooks good.\n")
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        assert result["agent_exit_code"] == 2
+        assert bridge_called["n"] == 1
+
+    def test_semantic_blocker_agent_review_continues_to_bridge(self, tmp_path, monkeypatch):
+        """Exit 1 (semantic blockers) must continue to bridge for contextual classification."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+        bridge_called = {"n": 0}
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "adversary timed out",
+                "report_path": ".scratch/phase_a_agent_review_test.report.md",
+                "status_path": ".scratch/phase_a_agent_review_test.status.json",
+                "stdout_path": ".scratch/phase_a_agent_review_test.stdout.log",
+            }
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            bridge_called["n"] += 1
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: GO\n\nLooks good.\n")
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        assert result["agent_exit_code"] == 1
+        assert result["agent_review_warning_only"] is True
+        assert result["agent_review_report_path"] == ".scratch/phase_a_agent_review_test.report.md"
+        assert result["agent_review_status_path"] == ".scratch/phase_a_agent_review_test.status.json"
+        assert result["agent_review_stdout_path"] == ".scratch/phase_a_agent_review_test.stdout.log"
+        assert bridge_called["n"] == 1
+
+    def test_infra_gate_agent_review_preserves_report_artifacts(self, tmp_path, monkeypatch):
+        """Infra exits (>=3) must fail closed and preserve report/status artifact paths."""
+        self._setup_phase_a(tmp_path)
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {
+                "exit_code": 4,
+                "stdout": "",
+                "stderr": "preflight failed",
+                "report_path": ".scratch/phase_a_agent_review_test.report.md",
+                "status_path": ".scratch/phase_a_agent_review_test.status.json",
+                "stdout_path": ".scratch/phase_a_agent_review_test.stdout.log",
+            }
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", lambda *a, **k: pytest.fail("bridge must not run"))
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "error"
+        assert result["agent_review_report_path"] == ".scratch/phase_a_agent_review_test.report.md"
+        assert result["agent_review_status_path"] == ".scratch/phase_a_agent_review_test.status.json"
+        assert result["agent_review_stdout_path"] == ".scratch/phase_a_agent_review_test.stdout.log"
+
+    def test_infra_gate_error_reads_status_diagnostic(self, tmp_path, monkeypatch):
+        """Infra exits must surface agent status diagnostic, not just truncated stderr."""
+        self._setup_phase_a(tmp_path)
+
+        # Write a status.json that the error handler should read
+        scratch = tmp_path / ".scratch"
+        scratch.mkdir(exist_ok=True)
+        status_data = {
+            "phase_label": "agent_review",
+            "status": "completed",
+            "completed_agents": {
+                "verifier": {"verdict": "PASS"},
+                "adversary": {"verdict": "UNKNOWN", "detail": "AGENT TIMEOUT: adversary exceeded 360s"},
+            },
+            "running_agents": [],
+        }
+        (scratch / "phase_a_agent_review_test.status.json").write_text(
+            json.dumps(status_data), encoding="utf-8"
+        )
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {
+                "exit_code": 3,
+                "stdout": "",
+                "stderr": "WARNING: Bun AVX blah blah noise",
+                "report_path": ".scratch/phase_a_agent_review_test.report.md",
+                "status_path": ".scratch/phase_a_agent_review_test.status.json",
+                "stdout_path": ".scratch/phase_a_agent_review_test.stdout.log",
+            }
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", lambda *a, **k: pytest.fail("bridge must not run"))
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "error"
+        # Error must include the agent status diagnostic, not just noisy stderr
+        assert "adversary=UNKNOWN" in result["error"]
+        assert "verifier=PASS" in result["error"]
+        assert "agent_status:" in result["error"]
+
+    def test_agent_review_artifacts_passed_to_bridge(self, tmp_path, monkeypatch):
+        """Phase A must surface agent review artifacts to bridge reviewer (parity with Phase B)."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+        captured_ctx = {}
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {
+                "exit_code": 2,
+                "stdout": "",
+                "stderr": "expert: COULD_SIMPLIFY",
+                "report_path": ".scratch/phase_a_agent_review_test.report.md",
+                "status_path": ".scratch/phase_a_agent_review_test.status.json",
+                "stdout_path": ".scratch/phase_a_agent_review_test.stdout.log",
+            }
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            captured_ctx["agent_review_context"] = agent_review_context
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: GO\n\nLooks good.\n")
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        # Bridge must have received agent review context
+        ctx = captured_ctx["agent_review_context"]
+        assert "report" in ctx
+        assert "phase_a_agent_review_test.report.md" in ctx
+        assert "exit_code: 2" in ctx
 
     def test_successful_agent_review_proceeds_to_bridge(self, tmp_path, monkeypatch):
         """Zero agent exit code allows bridge to proceed (regression check)."""
         rendered_dir = self._setup_phase_a(tmp_path)
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: GO\n\nLooks good.\n")
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -2580,10 +4809,10 @@ class TestBridgeR6Finding3PhaseARequestChangesSilentSuccess:
         rendered_dir = self._setup_phase_a(tmp_path)
         call_count = {"n": 0}
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             call_count["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: REQUEST_CHANGES\n\nPlease fix section 3.\n")
@@ -2605,10 +4834,10 @@ class TestBridgeR6Finding3PhaseARequestChangesSilentSuccess:
         rendered_dir = self._setup_phase_a(tmp_path)
         call_count = {"n": 0}
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             call_count["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             if call_count["n"] < 3:
@@ -2673,6 +4902,38 @@ class TestPhaseATrackedPacketReuse:
         scope = {"request": "x"}
         path = phase_a_mod.create_plan_draft(tmp_path, "my_plan", scope)
         assert path == locked
+
+    def test_run_phase_a_reused_locked_packet_converges(self, tmp_path, monkeypatch):
+        plan_dir = tmp_path / "reports" / "control_plane"
+        rendered_dir = tmp_path / ".agent_bus" / "rendered"
+        rendered_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".agent_bus" / "executors").mkdir(parents=True, exist_ok=True)
+        locked = plan_dir / "my_plan_2026-03-20.md"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        locked.write_text(
+            "# My Plan\n"
+            "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\nReal content here.\n",
+            encoding="utf-8",
+        )
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: GO\n\nLooks good.\n", encoding="utf-8")
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "my_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        content = locked.read_text(encoding="utf-8")
+        assert content.count("Phase-A-Lock: LOCKED") == 1
+        assert "bridge-converged" in content
 
 
 class TestFindTrackedPacket:

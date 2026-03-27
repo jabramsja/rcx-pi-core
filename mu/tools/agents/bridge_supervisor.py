@@ -82,6 +82,31 @@ _STDERR_SENTINEL = "\n[stderr]\n"
 AUTHORIZED_DECISIONS = frozenset(
     {"GO", "NO_GO", "REQUEST_CHANGES", "QUESTION", "STALE", "ERROR", "SYNTHETIC"}
 )
+# Fail closed on direct bridge calls before the full adapter timeout elapses.
+# This keeps reviewer/reader turns from sitting silently for 20 minutes when no
+# outer executor watchdog is present.
+BRIDGE_MAX_TURN_WALL_TIME_S = 300.0
+BRIDGE_ZERO_OUTPUT_TIMEOUT_S = 240.0
+
+
+def _resolve_timeout_override(name: str, default: float) -> float:
+    """Read a positive float timeout override from the environment."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _bridge_max_turn_wall_time_s() -> float:
+    """Allow executor-driven bridge runs to widen the reviewer turn budget."""
+    return _resolve_timeout_override(
+        "RCX_BRIDGE_MAX_TURN_WALL_TIME_S",
+        BRIDGE_MAX_TURN_WALL_TIME_S,
+    )
 
 
 def _lock_metadata_payload(holder: str, lock_path: Path) -> dict[str, Any]:
@@ -154,8 +179,8 @@ You MUST inspect the following cross-file invariants. Do NOT greenlight on summa
 Proof obligations:
 1. **Implementer surface**: Read `mu/tools/executors/phase_b_implementer.py`. Verify it uses `bridge_adapters.run_adapter()` directly. It must NOT invoke `bridge_supervisor.py review` (that is review-only).
 2. **Bridge loop mechanics**: Read the bridge convergence loop in `mu/tools/executors/phase_b_executor.py`. Verify that `REQUEST_CHANGES` / `NO_GO` re-invoke the implementer with findings BEFORE the next bridge round. `QUESTION` must fail closed (not loop).
-3. **Receipt authority chain**: Trace the path: `meta_bridge_supervisor.write_pre_commit_receipt()` → return value → `meta_bridge_client.run_meta_bridge_package()` → `receipt_path` field → `prepare_commit_handoff()` → `commit_executor` verification. The per-invocation receipt path must be exact, not discovered by sorting a directory.
-4. **Canonical hook receipt preserved**: `write_pre_commit_receipt` must still write the canonical receipt for hook compatibility. But the EXECUTOR flow must use the per-invocation receipt, not canonical.
+3. **Receipt authority chain**: Trace the canonical live path only: `mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()` → return value → `mu/tools/agents/meta_bridge_client.py::run_meta_bridge_package()` → `receipt_path` field → `mu/tools/executors/phase_b_executor.py::prepare_commit_handoff()` → `mu/tools/executors/commit_executor.py` verification. The per-invocation receipt path must be exact, not discovered by sorting a directory.
+4. **Canonical hook receipt preserved**: `mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()` must still write the canonical receipt for hook compatibility. But the EXECUTOR flow must use the per-invocation receipt, not canonical. Do not use legacy/nonexistent aliases when verifying this chain.
 5. **No manual fallback in docs**: Protocol docs must not present manual git push/PR/merge as a normal commit path. Only narrow BOOTSTRAP_PHASE_B_EXCEPTION is allowed.
 
 Adjacent files you MUST read (not just the diff):
@@ -728,12 +753,22 @@ def write_raw_output(paths: BridgePaths, job_id: str, turn_id: str, content: str
 
 def parse_envelope(output: str) -> dict[str, Any]:
     stdout_only = output
+    stderr_only = ""
+    has_stderr = False
     if _STDERR_SENTINEL in output:
-        stdout_only, _, _ = output.partition(_STDERR_SENTINEL)
+        stdout_only, _, stderr_only = output.partition(_STDERR_SENTINEL)
+        has_stderr = True
     elif output.startswith("[stderr]\n"):
         stdout_only = ""
+        stderr_only = output[len("[stderr]\n"):]
+        has_stderr = True
     if ENVELOPE_RE.search(stdout_only):
         output = stdout_only
+    elif has_stderr and ENVELOPE_RE.search(stderr_only):
+        raise BridgeError(
+            "Agent envelope found only in stderr, not in authoritative stdout. "
+            "Refusing stderr-sourced envelope."
+        )
     matches = list(ENVELOPE_RE.finditer(output))
     if not matches:
         raise BridgeError("Agent output missing BEGIN_AGENT_ENVELOPE / END_AGENT_ENVELOPE block")
@@ -1126,6 +1161,8 @@ def execute_agent_turn(
     # Validate adapter config BEFORE recording RUNNING turn to avoid phantom rows
     config = load_bridge_config(paths.config_path)
     adapter = get_adapter(config, adapter_name)
+    turn_timeout_s = min(adapter.timeout_s, _bridge_max_turn_wall_time_s())
+    zero_output_timeout_s = BRIDGE_ZERO_OUTPUT_TIMEOUT_S if agent_role == "reviewer" else None
 
     # Pre-allocate raw output file so it exists from adapter start
     raw_dir = paths.raw_dir / job["job_id"]
@@ -1162,6 +1199,9 @@ def execute_agent_turn(
             agent_role=agent_role,
             stream=stream,
             raw_output_path=raw_output_path,
+            timeout_override_s=turn_timeout_s,
+            zero_output_timeout_s=zero_output_timeout_s,
+            stop_after_envelope=True,
         )
     except (BridgeAdapterError, Exception) as exc:
         # Update turn to FAILED on adapter error
@@ -1380,9 +1420,15 @@ def _run_job_locked(paths: BridgePaths, job_id: str, *, verbose: bool = False, p
                 reviewer_sha_end = reviewer_turn["state_sha_end"]
                 prompt_baseline = reviewer_turn["reviewer_input_validation_sha"]
                 execution_stale = reviewer_sha_start and reviewer_sha_end and reviewer_sha_start != reviewer_sha_end
-                prompt_stale = prompt_baseline and reviewer_sha_start and prompt_baseline != reviewer_sha_start
-                if execution_stale or prompt_stale:
-                    reason = "state changed during execution" if execution_stale else "prompt built against stale state"
+                prompt_baseline_missing = reviewer_sha_start and prompt_baseline is None
+                prompt_stale = reviewer_sha_start and prompt_baseline and prompt_baseline != reviewer_sha_start
+                if execution_stale or prompt_baseline_missing or prompt_stale:
+                    if execution_stale:
+                        reason = "state changed during execution"
+                    elif prompt_baseline_missing:
+                        reason = "prompt baseline was missing"
+                    else:
+                        reason = "prompt built against stale state"
                     _log(verbose, f"Recovering: reviewer completed but {reason} (stale). Discarding verdict and retrying.")
                     conn.execute(
                         "UPDATE turns SET status = ?, decision = ? WHERE turn_id = ?",

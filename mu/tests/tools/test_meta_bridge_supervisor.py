@@ -190,6 +190,27 @@ class TestTemplateValidationFailureRouting:
         )
         prompt = meta.build_meta_reviewer_prompt(package, results, REPO_ROOT)
         assert "CONTROL-SURFACE REVIEW MODE" in prompt
+        assert "mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()" in prompt
+        assert "mu/tools/agents/meta_bridge_client.py::run_meta_bridge_package()" in prompt
+        assert "mu/tools/executors/phase_b_executor.py::prepare_commit_handoff()" in prompt
+        assert "mu/tools/executors/commit_executor.py" in prompt
+        assert "mu/tools/executors/meta_bridge_client.py" not in prompt
+        assert "mu/tools/hooks/pre_commit_receipt.py" not in prompt
+
+    def test_prompt_includes_bounded_review_contract(self):
+        package = {
+            "task_id": "TEST-1",
+            "wave_name": "test-wave",
+            "lane": "test-lane",
+        }
+        results = _make_validation_results(
+            passed_names=["L4 contract", "dirty_state"],
+            failed_names_errors=[],
+        )
+        prompt = meta.build_meta_reviewer_prompt(package, results, REPO_ROOT)
+        assert "Bounded Review Contract" in prompt
+        assert "Use no more than 8 shell commands" in prompt
+        assert "emit exactly one final `BEGIN_META_ENVELOPE ... END_META_ENVELOPE` block on stdout and stop" in prompt
 
 
 class TestDryRunBehavior:
@@ -716,6 +737,28 @@ def test_run_meta_review_rejects_stderr_only_recovery_envelope(pkg_in_repo):
             meta.run_meta_review(isolated_paths, package, validation_results)
 
 
+def test_run_meta_review_threads_timeout_and_watchdogs_into_adapter(pkg_in_repo):
+    pkg_path, isolated_paths = pkg_in_repo
+    validation_results = _make_validation_results(["dirty_state"], [])
+    package = json.loads(pkg_path.read_text(encoding="utf-8"))
+    envelope = (
+        "BEGIN_META_ENVELOPE\n"
+        '{"decision": "COMMIT_GO", "summary": "ok", "findings": [], "request_for_claude": "Proceed"}\n'
+        "END_META_ENVELOPE\n"
+    )
+
+    with patch.object(meta, "load_bridge_config", return_value={"agents": {}}), \
+         patch.object(meta, "get_adapter", return_value=MagicMock()), \
+         patch.object(meta, "run_adapter", return_value=envelope) as mock_run:
+        parsed = meta.run_meta_review(isolated_paths, package, validation_results, timeout_s=90)
+
+    assert parsed["decision"] == "COMMIT_GO"
+    kwargs = mock_run.call_args.kwargs
+    assert kwargs["timeout_override_s"] == 90
+    assert kwargs["stale_timeout_s"] == 90
+    assert "zero_output_timeout_s" not in kwargs or kwargs["zero_output_timeout_s"] is None
+
+
 def test_run_post_merge_review_recovers_authoritative_envelope_from_raw_output(tmp_path):
     bus_dir = tmp_path / "meta_bus"
     bus_dir.mkdir(parents=True, exist_ok=True)
@@ -811,6 +854,54 @@ def test_run_post_merge_review_rejects_stderr_only_recovery_envelope(tmp_path):
                 derived_files=["TASKS.md"],
                 rollout_order="1. Continue",
             )
+
+
+def test_run_post_merge_review_threads_timeout_and_watchdogs_into_adapter(tmp_path):
+    bus_dir = tmp_path / "meta_bus"
+    bus_dir.mkdir(parents=True, exist_ok=True)
+    paths = meta.MetaBridgePaths(
+        repo_root=REPO_ROOT,
+        bus_dir=bus_dir,
+        db_path=bus_dir / "meta_bridge.db",
+        lock_path=bus_dir / "meta_bridge.lock",
+    )
+    package = {
+        "task_id": "[POST-MERGE]",
+        "wave_name": "wave",
+        "lane": "hooks/agents/bridge control-surface",
+        "merged_pr": 1,
+        "merge_sha": "abc1234",
+        "rollout_packet_path": "reports/control_plane/post_merge_supervisor_plan_2026-03-21.md",
+        "deferred_items": [],
+        "next_candidates": [],
+        "tracker_state_summary": "stable",
+        "blocker_report_paths": [],
+    }
+    validation_results = _make_validation_results(["gate1"], [])
+    envelope = (
+        "BEGIN_META_ENVELOPE\n"
+        '{"decision": "CONTINUE_DIALECTIC", "summary": "ok", "findings": [], "request_for_claude": "Continue"}\n'
+        "END_META_ENVELOPE\n"
+    )
+
+    with patch.object(meta, "build_post_merge_prompt", return_value="prompt"), \
+         patch.object(meta, "load_bridge_config", return_value={"agents": {}}), \
+         patch.object(meta, "get_adapter", return_value=MagicMock()), \
+         patch.object(meta, "run_adapter", return_value=envelope) as mock_run:
+        parsed = meta.run_post_merge_review(
+            paths,
+            package,
+            validation_results,
+            derived_files=["TASKS.md"],
+            rollout_order="1. Continue",
+            timeout_s=75,
+        )
+
+    assert parsed["decision"] == "CONTINUE_DIALECTIC"
+    kwargs = mock_run.call_args.kwargs
+    assert kwargs["timeout_override_s"] == 75
+    assert kwargs["stale_timeout_s"] == 75
+    assert "zero_output_timeout_s" not in kwargs or kwargs["zero_output_timeout_s"] is None
 
 
 # ===========================================================================
@@ -1033,6 +1124,8 @@ class TestPostMergeIntegration:
         prompt = meta.build_post_merge_prompt(pkg, results, repo, ["f1.py"], "1. Step 1")
         assert "ROUTE_PHASE_A" in prompt
         assert "Step 1" in prompt
+        assert "Bounded Review Contract" in prompt
+        assert "Use no more than 8 shell commands" in prompt
 
     def test_check_rollout_packet_canonical_derives_when_path_missing(self, tmp_path):
         repo = tmp_path / "repo"
