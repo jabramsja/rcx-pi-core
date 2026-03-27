@@ -114,6 +114,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
 """
 
 BOT_REVIEW_LOGIN = "chatgpt-codex-connector"
+BOT_REVIEW_TRIGGER_COMMENT = "@codex review"
 BOT_REVIEW_WAIT_SECONDS = 210
 BOT_REVIEW_POLL_SECONDS = 15
 COMMIT_CONTINUATION_VERSION = 1
@@ -157,8 +158,10 @@ def _write_continuation_record(
     receipt_decision: str,
     steps_completed: list[str],
     pr_number: str | None = None,
+    bot_review_request_sha: str | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    existing_payload = _read_continuation_record(path) or {}
     payload: dict[str, Any] = {
         "version": COMMIT_CONTINUATION_VERSION,
         "status": CONTINUATION_ACTIVE_STATUS,
@@ -171,12 +174,29 @@ def _write_continuation_record(
     }
     if pr_number:
         payload["pr_number"] = pr_number
+    preserved_bot_review_request_sha = existing_payload.get("bot_review_request_sha")
+    if bot_review_request_sha:
+        payload["bot_review_request_sha"] = bot_review_request_sha
+    elif isinstance(preserved_bot_review_request_sha, str) and preserved_bot_review_request_sha:
+        payload["bot_review_request_sha"] = preserved_bot_review_request_sha
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def _clear_continuation_record(path: Path) -> None:
     if path.exists():
         path.unlink()
+
+
+def _read_continuation_record(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
 
 
 def _load_post_commit_continuation(
@@ -188,11 +208,8 @@ def _load_post_commit_continuation(
 ) -> dict[str, Any] | None:
     if not path.exists():
         return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
-    if not isinstance(payload, dict):
+    payload = _read_continuation_record(path)
+    if payload is None:
         return None
     if payload.get("version") != COMMIT_CONTINUATION_VERSION:
         return None
@@ -421,6 +438,34 @@ def _wait_for_bot_review_freshness(
                 f"({poll_interval}s poll)"
             )
         time.sleep(poll_interval)
+
+
+def _maybe_request_current_head_bot_review(
+    repo_root: Path,
+    *,
+    pr_number: str,
+    head_sha: str,
+    continuation_path: Path,
+    log: Any = None,
+) -> bool:
+    continuation = _read_continuation_record(continuation_path)
+    if continuation and continuation.get("bot_review_request_sha") == head_sha:
+        return False
+    _run(
+        ["gh", "pr", "comment", pr_number, "--body", BOT_REVIEW_TRIGGER_COMMENT],
+        cwd=repo_root,
+        timeout=30,
+    )
+    if continuation:
+        continuation["bot_review_request_sha"] = head_sha
+        continuation["updated_at_unix"] = int(time.time())
+        continuation_path.write_text(json.dumps(continuation, indent=2) + "\n", encoding="utf-8")
+    if log is not None:
+        log(
+            f"Requested current-head {BOT_REVIEW_LOGIN} review for {head_sha[:8]} "
+            f"via PR comment"
+        )
+    return True
 
 
 def prepare_handoff_from_routing_record(
@@ -806,16 +851,30 @@ def _run_post_commit_pipeline(
             ["git", "rev-parse", "HEAD"],
             cwd=repo_root,
         ).stdout.strip()
-        pr_data = _wait_for_bot_review_freshness(
-            lambda: _query_pr_review_state(
-                repo_root,
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-                pr_number=pr_number,
-            ),
-            head_sha=head_sha_before_merge,
-            log=log,
+        pr_data = _query_pr_review_state(
+            repo_root,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            pr_number=pr_number,
         )
+        if not _has_fresh_bot_review(pr_data, head_sha_before_merge):
+            _maybe_request_current_head_bot_review(
+                repo_root,
+                pr_number=pr_number,
+                head_sha=head_sha_before_merge,
+                continuation_path=continuation_path,
+                log=log,
+            )
+            pr_data = _wait_for_bot_review_freshness(
+                lambda: _query_pr_review_state(
+                    repo_root,
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    pr_number=pr_number,
+                ),
+                head_sha=head_sha_before_merge,
+                log=log,
+            )
     except (
         subprocess.CalledProcessError,
         subprocess.TimeoutExpired,

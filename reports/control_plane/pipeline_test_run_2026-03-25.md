@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Thirteenth live follow-up on 2026-03-27 advanced the review-follow-up branch through a fresh pre-commit supervisor pass and a new local commit, but stopped at automated Step 11: `pre-push-fast` still flagged the new direct `_run_post_commit_pipeline()` regression as private-helper access until it carried `ANTICHEAT_OK`. The active fix is now the one-line anti-cheat allowlist on that Step 15 regression test, on top of the already-staged Phase A bridge-exit contract correction and Step 15 bot-thread classification hardening.
+Status: Fourteenth live follow-up on 2026-03-27 pushed head `dc15396` through pre-commit, local commit, pre-push, push, PR sync, and green CI, but stopped again at automated Step 15: the pipeline waited honestly for a current-head `chatgpt-codex-connector` review and timed out after 210s because no fresh review had been triggered for the new head. A manual `@codex review` comment landed after that timeout and was acknowledged with `eyes`, but had not yet produced a review when the executor failed closed. The active fix is now Step 15 self-request review triggering plus per-head request dedupe in the continuation record.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -368,6 +368,27 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
 - Result: the boring-path stop moved again, but only by one gate. The next
   required fix is a one-line anti-cheat allowlist on the direct post-commit
   helper regression, then another bounded rerun of the automated commit path.
+
+## Fourteenth Live Stop (2026-03-27)
+
+- After the Thirteenth-stop follow-up landed locally, the automated commit
+  executor created commit `dc15396`
+  (`fix: unblock pipeline-test-run pre-push gate`), `pre-push-fast` passed,
+  the branch pushed to origin, PR `#673` reused the new head, and both required
+  checks (`test`, `green-gate`) passed.
+- The rerun then stopped at automated Step 15. `commit_executor.py` correctly
+  rejected the stale connector review on `78e08c92` and waited for a fresh
+  `chatgpt-codex-connector` review on the current head `dc15396`, but no such
+  review appeared within the built-in 210-second freshness window.
+- A manual `@codex review` comment was posted on PR `#673` only after the
+  executor had already timed out. GitHub showed the request comment with an
+  `eyes` reaction, but still no current-head review object had materialized
+  when the run failed closed.
+- Result: the boring-path stop moved again, and it is now an honest Step 15
+  orchestration defect rather than a code-review semantics bug. The next
+  required fix is for Step 15 to request a current-head connector review itself
+  before starting freshness polling, and to remember that request per head so
+  reruns do not spam duplicate `@codex review` comments.
 
 ## Next Mechanical Questions
 
