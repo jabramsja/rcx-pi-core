@@ -67,9 +67,18 @@ class PhaseAExecutorError(RuntimeError):
 
 PLAN_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
 ALLOWED_REVIEW_DEPTHS = {"quick", "full", "founder", "all"}
-RECOGNIZED_BRIDGE_DECISIONS = {"GO", "REQUEST_CHANGES", "NO_GO", "QUESTION"}
+RECOGNIZED_BRIDGE_DECISIONS = {
+    "GO",
+    "REQUEST_CHANGES",
+    "NO_GO",
+    "QUESTION",
+    "STALE",
+    "ERROR",
+    "SYNTHETIC",
+}
 BRIDGE_DECISION_RE = re.compile(
-    r"(?m)^\s*(?:-\s*)?Decision:\s*(GO|REQUEST_CHANGES|NO_GO|QUESTION)\b"
+    r"(?m)^\s*(?:-\s*)?Decision:\s*"
+    r"(GO|REQUEST_CHANGES|NO_GO|QUESTION|STALE|ERROR|SYNTHETIC)\b"
 )
 PHASE_A_ALLOWED_REVIEW_EXIT_CODES = {0, 1, 2}
 PHASE_A_BRIDGE_POLL_SLEEP = 2.0
@@ -632,12 +641,16 @@ def run_bridge_design_review(
 
 def _extract_bridge_decision(render_content: str) -> str:
     """Parse the canonical bridge decision line from rendered output."""
-    matches = list(BRIDGE_DECISION_RE.finditer(render_content))
-    if not matches:
+    decisions = [match.group(1) for match in BRIDGE_DECISION_RE.finditer(render_content)]
+    if not decisions:
         return ""
-    # Bridge renders may include earlier reader-turn decisions before the
-    # reviewer/final turn. The convergence loop must obey the last valid one.
-    return matches[-1].group(1)
+    # Bridge renders often start with a synthetic reader turn before the
+    # authoritative reviewer turn. Prefer the last non-synthetic decision, but
+    # still surface a terminal SYNTHETIC-only render as fail-closed input.
+    for decision in reversed(decisions):
+        if decision != "SYNTHETIC":
+            return decision
+    return decisions[-1]
 
 
 def lock_plan(repo_root: Path, plan_path: str) -> None:
@@ -881,6 +894,32 @@ def run_phase_a(
                 log("Bridge: QUESTION — fail-closed (unresolved question)")
                 result["status"] = "error"
                 result["error"] = "Bridge returned QUESTION decision — requires human resolution"
+                result["rendered_path"] = str(rendered_path)
+                return result
+            elif bridge_decision in {"STALE", "ERROR", "SYNTHETIC"}:
+                if bridge_result["exit_code"] not in (0, 1):
+                    log(
+                        f"Bridge subprocess failed (exit {bridge_result['exit_code']}) "
+                        f"with {bridge_decision} decision — failing closed"
+                    )
+                    result["status"] = "error"
+                    result["error"] = (
+                        f"Bridge subprocess failed in round {round_num} "
+                        f"(exit={bridge_result['exit_code']}, decision={bridge_decision}). "
+                        f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
+                    )
+                    result["rendered_path"] = str(rendered_path)
+                    return result
+                log(f"Bridge: {bridge_decision} — fail-closed")
+                result["status"] = "error"
+                if bridge_decision == "SYNTHETIC":
+                    result["error"] = (
+                        "Bridge returned SYNTHETIC-only decision (decision=SYNTHETIC) — reviewer turn missing"
+                    )
+                else:
+                    result["error"] = (
+                        f"Bridge returned {bridge_decision} decision (decision={bridge_decision}) — cannot proceed"
+                    )
                 result["rendered_path"] = str(rendered_path)
                 return result
             else:

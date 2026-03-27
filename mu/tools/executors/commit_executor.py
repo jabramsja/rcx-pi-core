@@ -750,6 +750,17 @@ def _maybe_request_current_head_bot_review(
     return True
 
 
+def _has_recorded_current_head_bot_request(
+    continuation_path: Path,
+    head_sha: str,
+) -> bool:
+    continuation = _read_continuation_record(continuation_path)
+    return bool(
+        isinstance(continuation, dict)
+        and continuation.get("bot_review_request_sha") == head_sha
+    )
+
+
 def _wait_for_required_checks_to_register(
     repo_root: Path,
     *,
@@ -1232,10 +1243,12 @@ def _run_post_commit_pipeline(
             pr_number=pr_number,
         )
         _assert_expected_pr_head(pr_data, head_sha_before_merge)
-        existing_issue_comment_outcome = _current_head_connector_issue_comment_outcome(
-            pr_data,
-            head_sha_before_merge,
-        )
+        existing_issue_comment_outcome = None
+        if _has_recorded_current_head_bot_request(continuation_path, head_sha_before_merge):
+            existing_issue_comment_outcome = _current_head_connector_issue_comment_outcome(
+                pr_data,
+                head_sha_before_merge,
+            )
         if (
             not _has_fresh_connector_review(pr_data, head_sha_before_merge)
             and existing_issue_comment_outcome is None

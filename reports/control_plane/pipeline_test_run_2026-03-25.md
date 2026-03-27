@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Twenty-ninth live follow-up on 2026-03-27 pushed the boring-path automation through local commit, pre-push, push, PR reuse, required CI, and fresh current-head bot review on head `a6fb234`. The current stop is a Phase A parser defect in `mu/tools/executors/phase_a_executor.py::_extract_bridge_decision()`: multi-turn rendered bridge output can contain both reader and reviewer `Decision:` lines, and the parser still obeyed the first match instead of the final reviewer turn. The active follow-up makes Phase A obey the last valid rendered decision and locks that regression in tests.
+Status: Thirtieth live follow-up on 2026-03-27 pushed the boring-path automation through local commit, pre-push, push, PR reuse, required CI, and fresh current-head bot review on head `0335fe6`. The current stop is a two-finding Step 15 follow-up: `mu/tools/executors/phase_a_executor.py` still needed to treat terminal `ERROR/STALE/SYNTHETIC` reviewer decisions as authoritative final outcomes, and `mu/tools/executors/commit_executor.py` still needed to require a recorded current-head review request before reusing a clear connector issue comment. The active follow-up hardens both fail-closed paths and locks them in executor regressions.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -784,6 +784,33 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   final-decision parser defect rather than another commit-pipeline wrapper
   failure. The next fix is to parse the last valid rendered bridge decision
   and lock that multi-turn regression in `mu/tests/tools/test_executor_dispatch.py`.
+
+## Thirtieth Live Stop (2026-03-27)
+
+- After the Phase A final-decision parser follow-up was committed locally as
+  `0335fe6` (`fix: honor final bridge decision turn`), the automated `commit`
+  executor again cleared Step 6 supervisor, Step 7 receipt verification,
+  Step 8 pre-commit, Step 9 local commit creation, Step 11 pre-push,
+  Step 12 push, and Step 13 PR reuse on `#673`.
+- Step 14 then passed cleanly on head
+  `0335fe6ccab5f3d9c0de9088e86d14d44e601043`: both required checks
+  (`green-gate` and `test`) completed green in roughly five minutes.
+- Step 15 exercised the current-head review path again. The executor posted a
+  fresh `@codex review` request at `2026-03-27T14:06:32Z`, the connector
+  acknowledged it with an `eyes` reaction, and the connector submitted a
+  current-head review on `0335fe6` at `2026-03-27T14:11:58Z`.
+- That fresh review moved the stop again instead of repeating the old parser
+  finding. It surfaced two live non-outdated threads:
+  `mu/tools/executors/phase_a_executor.py:73`, where terminal
+  `Decision: ERROR/STALE/SYNTHETIC` lines were still excluded from the parser
+  vocabulary, and `mu/tools/executors/commit_executor.py:1242`, where Step 15
+  could still skip a fresh current-head `@codex review` if an older clear
+  connector issue comment existed but the continuation record did not prove
+  that request was for the current head.
+- Result: the boring-path stop moved again and remains honest. The next fix is
+  a narrow dual-path hardening: Phase A must fail closed on terminal final
+  bridge decisions, and Step 15 must only trust a clear issue comment when the
+  continuation record already binds that request to the current head SHA.
 
 ## Next Mechanical Questions
 

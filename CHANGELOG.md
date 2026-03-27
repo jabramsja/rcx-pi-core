@@ -4,6 +4,23 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-27
 
+### Pipeline Test Run Terminal Decision And Review-Binding Hardening
+
+- `phase_a_executor.py` now recognizes terminal `Decision: STALE|ERROR|SYNTHETIC`
+  bridge outputs, prefers the last non-synthetic rendered decision, and fails
+  closed when the final reviewer turn ends in one of those terminal outcomes
+- `commit_executor.py` now reuses a clear connector issue comment only when the
+  continuation record already proves that review request was made for the
+  current head SHA, so an older clear comment cannot suppress a required
+  current-head review
+- `mu/tests/tools/test_executor_dispatch.py` now locks both regressions:
+  terminal final bridge decisions fail closed, and stale clear issue comments
+  without current-head request binding still trigger a fresh `@codex review`
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Thirtieth live stop honestly: head `0335fe6` passed required CI,
+  received a fresh current-head connector review, and the remaining stop was
+  these two fail-closed gaps
+
 ### Pipeline Test Run Final-Decision Parsing
 
 - `phase_a_executor.py` now takes the last valid `Decision:` line from rendered
