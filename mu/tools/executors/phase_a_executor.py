@@ -632,10 +632,12 @@ def run_bridge_design_review(
 
 def _extract_bridge_decision(render_content: str) -> str:
     """Parse the canonical bridge decision line from rendered output."""
-    match = BRIDGE_DECISION_RE.search(render_content)
-    if not match:
+    matches = list(BRIDGE_DECISION_RE.finditer(render_content))
+    if not matches:
         return ""
-    return match.group(1)
+    # Bridge renders may include earlier reader-turn decisions before the
+    # reviewer/final turn. The convergence loop must obey the last valid one.
+    return matches[-1].group(1)
 
 
 def lock_plan(repo_root: Path, plan_path: str) -> None:

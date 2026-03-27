@@ -677,6 +677,16 @@ class TestPhaseABridgeLoopFailClosed:
         )
         assert phase_a_mod._extract_bridge_decision(render_content) == "GO"  # ANTICHEAT_OK: testing internal bridge decision parser
 
+    def test_extract_bridge_decision_uses_last_valid_turn(self):
+        render_content = (
+            "# Bridge Job x\n\n"
+            "## Reader turn\n"
+            "Decision: REQUEST_CHANGES\n\n"
+            "## Reviewer turn\n"
+            "Decision: GO\n"
+        )
+        assert phase_a_mod._extract_bridge_decision(render_content) == "GO"  # ANTICHEAT_OK: testing internal bridge decision parser
+
     def test_request_changes_continues_loop(self, tmp_path, monkeypatch):
         """REQUEST_CHANGES continues the loop (regression check)."""
         rendered_dir = self._setup_phase_a(tmp_path)

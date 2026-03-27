@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Twenty-eighth live follow-up on 2026-03-27 pushed the boring-path automation through local commit, pre-push, push, PR reuse, and CI registration on current head `cd33a25`. The current stop is a Linux-only timing race in `mu/tests/tools/test_executor_dispatch.py::TestPhaseABridgeLoopFailClosed::test_bridge_review_stale_watchdog_honors_bridge_turn_budget`: the fake silent reviewer finishes locally, but the old `0.2s` bridge-turn budget was too tight once Python startup overhead was included on CI. The active follow-up widens that proof margin without changing runtime behavior.
+Status: Twenty-ninth live follow-up on 2026-03-27 pushed the boring-path automation through local commit, pre-push, push, PR reuse, required CI, and fresh current-head bot review on head `a6fb234`. The current stop is a Phase A parser defect in `mu/tools/executors/phase_a_executor.py::_extract_bridge_decision()`: multi-turn rendered bridge output can contain both reader and reviewer `Decision:` lines, and the parser still obeyed the first match instead of the final reviewer turn. The active follow-up makes Phase A obey the last valid rendered decision and locks that regression in tests.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -759,6 +759,31 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   follow-up widens the bridge-turn budget / total timeout margin so the test
   still proves that the configured bridge-turn budget overrides the smaller
   stale watchdog threshold without depending on sub-200ms process timing.
+
+## Twenty-Ninth Live Stop (2026-03-27)
+
+- After the CI-timing hardening follow-up was committed locally as `a6fb234`
+  (`fix: harden phase-a bridge budget proof`), the automated `commit`
+  executor again cleared Step 6 supervisor, Step 7 receipt verification,
+  Step 8 pre-commit, Step 9 local commit creation, Step 11 pre-push,
+  Step 12 push, and Step 13 PR reuse on `#673`.
+- Step 14 then passed cleanly on head
+  `a6fb234e4adb3453118a0ab464d1d437f388af89`: `green-gate` completed at
+  `2026-03-27T13:39:46Z` and the required `test` workflow completed at
+  `2026-03-27T13:39:49Z`.
+- Step 15 exercised the current-head review path exactly as intended. The
+  executor posted a fresh `@codex review` request at `2026-03-27T13:40:02Z`,
+  the connector acknowledged it with an `eyes` reaction, and the connector
+  submitted a current-head review on `a6fb234` at `2026-03-27T13:45:17Z`.
+- The fresh review did not surface another transport, freshness, or merge-gate
+  orchestration bug. It surfaced one live non-outdated thread on
+  `mu/tools/executors/phase_a_executor.py:636`: `_extract_bridge_decision()`
+  uses the first matching `Decision:` line in the rendered bridge markdown,
+  so a reader-turn `REQUEST_CHANGES` can mask a later reviewer-turn `GO`.
+- Result: the boring-path stop moved again, and it is now a narrow Phase A
+  final-decision parser defect rather than another commit-pipeline wrapper
+  failure. The next fix is to parse the last valid rendered bridge decision
+  and lock that multi-turn regression in `mu/tests/tools/test_executor_dispatch.py`.
 
 ## Next Mechanical Questions
 

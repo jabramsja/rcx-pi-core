@@ -4,6 +4,19 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-27
 
+### Pipeline Test Run Final-Decision Parsing
+
+- `phase_a_executor.py` now takes the last valid `Decision:` line from rendered
+  bridge output, so multi-turn transcripts obey the final reviewer turn instead
+  of the first reader turn
+- `mu/tests/tools/test_executor_dispatch.py` now locks that regression with a
+  rendered multi-turn decision fixture where `REQUEST_CHANGES` is followed by
+  final `GO`
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Twenty-Ninth live stop honestly: head `a6fb234` passed required
+  CI and received a fresh current-head connector review, and the remaining stop
+  was the Phase A final-decision parser defect surfaced by that review
+
 ### Pipeline Test Run CI Timing Hardening
 
 - `mu/tests/tools/test_executor_dispatch.py` now gives the Phase A
