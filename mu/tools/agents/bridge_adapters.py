@@ -195,7 +195,11 @@ def _process_tree_fingerprint(root_pid: int) -> tuple[tuple[int, float], ...]:
     return tuple(sorted((pid, cpu_by_pid.get(pid, 0.0)) for pid in tracked))
 
 
-def _kill_process_group(proc: subprocess.Popen[str]) -> None:
+def _kill_process_group(
+    proc: subprocess.Popen[str],
+    *,
+    wait_for_exit: bool = False,
+) -> None:
     tracked_pids = [pid for pid, _cpu in _process_tree_fingerprint(proc.pid)]
     try:
         os.killpg(proc.pid, signal.SIGKILL)
@@ -211,6 +215,20 @@ def _kill_process_group(proc: subprocess.Popen[str]) -> None:
             os.kill(pid, signal.SIGKILL)
         except (OSError, ProcessLookupError):
             pass
+    if wait_for_exit:
+        deadline = time.monotonic() + 2.0
+        while tracked_pids and time.monotonic() < deadline:
+            remaining: list[int] = []
+            for pid in tracked_pids:
+                try:
+                    os.kill(pid, 0)
+                    remaining.append(pid)
+                except (OSError, ProcessLookupError):
+                    continue
+            if not remaining:
+                break
+            tracked_pids = remaining
+            time.sleep(0.05)
 
 
 def _contains_complete_agent_envelope(text: str) -> bool:
@@ -271,7 +289,7 @@ def _start_stale_watchdog(
                 continue
             if time.monotonic() - last_progress >= stale_timeout_s:
                 stale_timed_out.set()
-                _kill_process_group(proc)
+                _kill_process_group(proc, wait_for_exit=True)
                 return
 
     thread = threading.Thread(target=_watch_progress, daemon=True)

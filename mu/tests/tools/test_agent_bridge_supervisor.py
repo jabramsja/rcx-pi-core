@@ -538,6 +538,50 @@ time.sleep(30.0)
         pytest.fail(f"Detached descendant survived adapter cleanup: pid={child_pid}")
 
 
+def test_kill_process_group_waits_for_tracked_pids_to_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    kill_calls: list[tuple[str, int, int]] = []
+    sleeps: list[float] = []
+    probe_counts = {7001: 0, 7002: 0}
+    clock = {"value": 0.0}
+
+    class _FakeProc:
+        pid = 7001
+
+        def kill(self) -> None:
+            kill_calls.append(("proc", self.pid, int(adapters.signal.SIGKILL)))
+
+    def fake_fingerprint(_root_pid: int) -> tuple[tuple[int, float], ...]:
+        return ((7001, 0.0), (7002, 0.0))
+
+    def fake_killpg(pid: int, sig: int) -> None:
+        kill_calls.append(("pg", pid, int(sig)))
+
+    def fake_kill(pid: int, sig: int) -> None:
+        if sig == 0:
+            probe_counts[pid] += 1
+            if probe_counts[pid] < 3:
+                return
+            raise ProcessLookupError
+        kill_calls.append(("pid", pid, int(sig)))
+
+    def fake_monotonic() -> float:
+        clock["value"] += 0.01
+        return clock["value"]
+
+    monkeypatch.setattr(adapters, "_process_tree_fingerprint", fake_fingerprint)
+    monkeypatch.setattr(adapters.os, "killpg", fake_killpg)
+    monkeypatch.setattr(adapters.os, "kill", fake_kill)
+    monkeypatch.setattr(adapters.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(adapters.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    adapters._kill_process_group(_FakeProc(), wait_for_exit=True)
+
+    assert ("pg", 7001, int(adapters.signal.SIGKILL)) in kill_calls
+    assert ("pid", 7002, int(adapters.signal.SIGKILL)) in kill_calls
+    assert sleeps
+    assert probe_counts[7002] >= 3
+
+
 def test_init_db_creates_runtime_paths_and_config(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()

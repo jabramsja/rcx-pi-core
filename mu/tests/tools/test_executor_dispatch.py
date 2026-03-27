@@ -2483,6 +2483,7 @@ class TestCommitContinuationAndBotFreshness:
         assert result["status"] == "continued"
         assert mock_helper.call_count == 1
         resumed = captured["result"]
+        assert resumed["handoff_sha"] == commit_mod._handoff_sha(handoff)  # ANTICHEAT_OK: resumed post-commit helper must retain continuation binding
         assert resumed["commit_sha"] == head_sha
         assert resumed["receipt_decision"] == "COMMIT_GO"
         assert resumed["steps_completed"][-1] == "hold_check"
@@ -2541,6 +2542,21 @@ class TestCommitContinuationAndBotFreshness:
         }
         assert commit_mod._has_fresh_connector_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing connector-review freshness helper
         assert commit_mod._has_fresh_connector_review(pr_data, "def456") is False  # ANTICHEAT_OK: testing connector-review freshness helper
+
+    def test_has_fresh_connector_review_ignores_other_bot_on_current_head(self):
+        pr_data = {
+            "headRefOid": "abc123",
+            "latestReviews": {
+                "nodes": [
+                    {
+                        "author": {"login": "dependabot[bot]"},
+                        "state": "COMMENTED",
+                        "commit": {"oid": "abc123"},
+                    },
+                ],
+            },
+        }
+        assert commit_mod._has_fresh_connector_review(pr_data, "abc123") is False  # ANTICHEAT_OK: non-connector bot reviews must not satisfy freshness
 
     def test_wait_for_bot_review_freshness_polls_until_current_head_review(self):
         calls = {"count": 0}
@@ -2782,7 +2798,7 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
             if cmd[:2] == ["git", "status"]:
                 return completed(cmd)
-            if cmd[:3] == ["git", "push", "-u"]:
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "list", "--head"]:
                 return completed(cmd, stdout='[{"number":673}]')
@@ -3045,7 +3061,7 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
             if cmd[:2] == ["git", "status"]:
                 return completed(cmd)
-            if cmd[:3] == ["git", "push", "-u"]:
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "list", "--head"]:
                 return completed(cmd, stdout='[{"number":673}]')
@@ -3161,7 +3177,7 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
             if cmd[:2] == ["git", "status"]:
                 return completed(cmd)
-            if cmd[:3] == ["git", "push", "-u"]:
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "list", "--head"]:
                 return completed(cmd, stdout='[{"number":673}]')
@@ -3283,7 +3299,7 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
             if cmd[:2] == ["git", "status"]:
                 return completed(cmd)
-            if cmd[:3] == ["git", "push", "-u"]:
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "list", "--head"]:
                 return completed(cmd, stdout='[{"number":673}]')
@@ -3396,7 +3412,7 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:2] == ["bash", str(pre_push_script)]:
                 pre_push_calls.append(cmd)
                 return completed(cmd)
-            if cmd[:3] == ["git", "push", "-u"]:
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
                 push_calls.append(cmd)
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "list", "--head"]:
@@ -3421,6 +3437,7 @@ class TestCommitContinuationAndBotFreshness:
         assert post_commit["step"] == "ensure_pr"
         assert pre_push_calls == []
         assert len(push_calls) == 1
+        assert push_calls[0][:5] == ["git", "push", "--no-verify", "-u", "origin"]
 
         continuation = json.loads(continuation_path.read_text(encoding="utf-8"))
         assert "run_pre_push_script" in continuation["steps_completed"]
@@ -3472,7 +3489,7 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
             if cmd[:2] == ["git", "status"]:
                 return completed(cmd)
-            if cmd[:3] == ["git", "push", "-u"]:
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "list", "--head"]:
                 return completed(cmd, stdout='[{"number":673}]')
@@ -3566,7 +3583,7 @@ class TestCommitContinuationAndBotFreshness:
         }
 
         def fake_run(args, *, cwd, check=True, timeout=120, env=None):
-            if args[:3] == ["git", "push", "-u"]:
+            if args[:4] == ["git", "push", "--no-verify", "-u"]:
                 return subprocess.CompletedProcess(args, 0, "", "")
             if args[:3] == ["gh", "pr", "list"]:
                 return subprocess.CompletedProcess(args, 0, "[]\n", "")

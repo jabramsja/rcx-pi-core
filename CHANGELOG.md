@@ -4,6 +4,35 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-27
 
+### Pipeline Test Run Step 15 Review-Thread Truth
+
+- `commit_executor.py` now restores `handoff_sha` before resuming the
+  post-commit helper, so bounded continuation checkpointing still works after a
+  restart instead of silently no-oping on resumed Steps 11-14
+- `commit_executor.py` Step 12 push now uses `git push --no-verify` because the
+  executor already ran `pre-push-fast` explicitly in Step 11 for the same head,
+  eliminating the duplicate hook rerun during automated pushes
+- `mu/tests/tools/test_executor_dispatch.py` now proves resumed post-commit
+  state keeps its continuation binding, that non-connector bot reviews cannot
+  satisfy current-head freshness, and that the resumed push path uses
+  `--no-verify`
+- `bridge_adapters.py` stale-timeout cleanup now waits for tracked descendants
+  to disappear before returning, while `mu/tests/tools/test_agent_bridge_supervisor.py`
+  keeps the separate fast stop-after-envelope contract green
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Twenty-Fourth live stop honestly: the code slice still closes the
+  Step 15 review-thread follow-up on `664be57`, but the latest automated rerun
+  failed earlier because the bounded supervisor packet did not expose the exact
+  implementer-path and no-manual-fallback proof surfaces
+- the active proof surface for the rerun now explicitly includes
+  `mu/tools/executors/phase_b_implementer.py`, `CLAUDE.md`,
+  `mu/tools/checks/check_control_surface_invariants.py`, and
+  `mu/tools/agents/templates/meta_bridge_task.txt` so the commit-local
+  supervisor can verify those obligations directly within budget
+- `CLAUDE.md` now makes the Step 11/Step 12 executor exception explicit: after
+  `pre-push-fast` passes on the same local HEAD, automated Step 12 may use
+  `git push --no-verify` only to avoid rerunning the same hook
+
 ### Pipeline Test Run Post-Commit Checkpointing
 
 - `commit_executor.py` now checkpoints post-commit continuation after

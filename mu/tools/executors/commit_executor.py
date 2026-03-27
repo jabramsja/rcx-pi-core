@@ -1079,7 +1079,8 @@ def _run_post_commit_pipeline(
     if "git_push" not in result["steps_completed"]:
         try:
             _run(
-                ["git", "push", "-u", "origin", target_branch],
+                # Step 11 already ran the exact pre-push gate for this local head.
+                ["git", "push", "--no-verify", "-u", "origin", target_branch],
                 cwd=repo_root, timeout=300,
             )
             result["steps_completed"].append("git_push")
@@ -1432,6 +1433,7 @@ def run_commit_pipeline(
     target_branch = f"{branch_prefix}/{wave_id}"
     base_branch = handoff["base_branch"]
     handoff_sha = _handoff_sha(handoff)
+    result["handoff_sha"] = handoff_sha
     continuation_path = _continuation_record_path(repo_root, wave_id)
     continuation = _load_post_commit_continuation(
         continuation_path,
