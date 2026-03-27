@@ -3351,6 +3351,81 @@ class TestCommitContinuationAndBotFreshness:
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert required_checks_calls["count"] == 2
 
+    def test_post_commit_resume_skips_checkpointed_pre_push_and_checkpoints_git_push(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "git_commit",
+                "hold_check",
+                "run_pre_push_script",
+            ],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(
+            json.dumps(
+                {
+                    "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                    "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                    "handoff_sha": "handoff-sha",
+                    "target_branch": "jabramsja/test-wave-id",
+                    "commit_sha": "abc123",
+                    "receipt_decision": "COMMIT_GO",
+                    "steps_completed": list(result["steps_completed"]),
+                    "updated_at_unix": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        pre_push_script = repo / "mu" / "tools" / "hooks" / "pre-push-fast"
+        pre_push_script.parent.mkdir(parents=True, exist_ok=True)
+        pre_push_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        pre_push_calls = []
+        push_calls = []
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:2] == ["bash", str(pre_push_script)]:
+                pre_push_calls.append(cmd)
+                return completed(cmd)
+            if cmd[:3] == ["git", "push", "-u"]:
+                push_calls.append(cmd)
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "list", "--head"]:
+                return completed(cmd, stdout="[]")
+            if cmd[:3] == ["gh", "pr", "create"]:
+                raise subprocess.CalledProcessError(1, cmd, stderr="create boom")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising checkpointed post-commit resume boundary
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["status"] == "error"
+        assert post_commit["step"] == "ensure_pr"
+        assert pre_push_calls == []
+        assert len(push_calls) == 1
+
+        continuation = json.loads(continuation_path.read_text(encoding="utf-8"))
+        assert "run_pre_push_script" in continuation["steps_completed"]
+        assert "git_push" in continuation["steps_completed"]
+
     def test_post_commit_does_not_recomment_same_head_bot_review_request(self, tmp_path, monkeypatch):
         repo = tmp_path
         handoff = _make_new_handoff()

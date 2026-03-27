@@ -283,6 +283,40 @@ def _load_post_commit_continuation(
     return payload
 
 
+def _checkpoint_post_commit_progress(
+    result: dict[str, Any],
+    *,
+    continuation_path: Path,
+    target_branch: str,
+) -> None:
+    commit_sha = result.get("commit_sha")
+    receipt_decision = result.get("receipt_decision")
+    handoff_sha = result.get("handoff_sha")
+    steps_completed = result.get("steps_completed")
+    if not isinstance(commit_sha, str) or not commit_sha:
+        return
+    if receipt_decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+        return
+    if not isinstance(handoff_sha, str) or not handoff_sha:
+        return
+    if not isinstance(steps_completed, list) or "git_commit" not in steps_completed:
+        return
+
+    pr_number_val = result.get("pr_number")
+    pr_number = str(pr_number_val) if pr_number_val else None
+    bot_review_request_sha = result.get("bot_review_request_sha")
+    _write_continuation_record(
+        continuation_path,
+        handoff_sha=handoff_sha,
+        target_branch=target_branch,
+        commit_sha=commit_sha,
+        receipt_decision=receipt_decision,
+        steps_completed=steps_completed,
+        pr_number=pr_number,
+        bot_review_request_sha=bot_review_request_sha if isinstance(bot_review_request_sha, str) else None,
+    )
+
+
 def _decode_untrusted_path(path_str: str) -> str | None:
     """Decode percent escapes and normalize compatibility characters."""
     normalized = path_str.replace("\\", "/")
@@ -1015,146 +1049,164 @@ def _run_post_commit_pipeline(
     pr_number = str(result.get("pr_number") or "")
 
     # ── Step 11: run_pre_push_script ──────────────────────────────────
-    pre_push_script = repo_root / "mu" / "tools" / "hooks" / "pre-push-fast"
-    if pre_push_script.exists():
-        try:
-            _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=300)
-        except subprocess.CalledProcessError as exc:
-            detail = (exc.stderr or exc.stdout or "").strip()
-            if not detail:
-                detail = f"exit {exc.returncode}"
-            return {"status": "error", "step": "run_pre_push_script",
-                    "errors": [f"pre-push-fast failed: {detail[:500]}"],
-                    "steps_completed": result["steps_completed"]}
-        except subprocess.TimeoutExpired:
-            return {"status": "error", "step": "run_pre_push_script",
-                    "errors": ["pre-push-fast timed out"],
-                    "steps_completed": result["steps_completed"]}
     if "run_pre_push_script" not in result["steps_completed"]:
+        pre_push_script = repo_root / "mu" / "tools" / "hooks" / "pre-push-fast"
+        if pre_push_script.exists():
+            try:
+                _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=300)
+            except subprocess.CalledProcessError as exc:
+                detail = (exc.stderr or exc.stdout or "").strip()
+                if not detail:
+                    detail = f"exit {exc.returncode}"
+                return {"status": "error", "step": "run_pre_push_script",
+                        "errors": [f"pre-push-fast failed: {detail[:500]}"],
+                        "steps_completed": result["steps_completed"]}
+            except subprocess.TimeoutExpired:
+                return {"status": "error", "step": "run_pre_push_script",
+                        "errors": ["pre-push-fast timed out"],
+                        "steps_completed": result["steps_completed"]}
         result["steps_completed"].append("run_pre_push_script")
-    log("Step 11: pre-push script passed")
+        _checkpoint_post_commit_progress(
+            result,
+            continuation_path=continuation_path,
+            target_branch=target_branch,
+        )
+        log("Step 11: pre-push script passed")
+    else:
+        log("Step 11: pre-push script already passed, skipping")
 
     # ── Step 12: git_push ─────────────────────────────────────────────
-    try:
-        _run(
-            ["git", "push", "-u", "origin", target_branch],
-            cwd=repo_root, timeout=300,
-        )
-        if "git_push" not in result["steps_completed"]:
-            result["steps_completed"].append("git_push")
-        log(f"Step 12: pushed to origin/{target_branch}")
-    except subprocess.CalledProcessError as exc:
-        return {"status": "error", "step": "git_push",
-                "errors": [f"git push failed: {exc.stderr.strip()}"],
-                "steps_completed": result["steps_completed"]}
-    except subprocess.TimeoutExpired:
-        return {"status": "error", "step": "git_push",
-                "errors": ["git push timed out"],
-                "steps_completed": result["steps_completed"]}
-
-    # ── Step 13: ensure_pr ────────────────────────────────────────────
-    try:
-        existing_prs = _run(
-            ["gh", "pr", "list", "--head", target_branch, "--base", base_branch,
-             "--state", "open", "--json", "number"],
-            cwd=repo_root, timeout=30,
-        ).stdout.strip()
-        pr_list = json.loads(existing_prs) if existing_prs else []
-    except (subprocess.CalledProcessError, json.JSONDecodeError):
-        pr_list = []
-
-    if len(pr_list) > 1:
-        return {"status": "error", "step": "ensure_pr",
-                "errors": [f"Multiple open PRs for {target_branch}: {[p['number'] for p in pr_list]}"],
-                "steps_completed": result["steps_completed"]}
-
-    if len(pr_list) == 1:
-        pr_number = str(pr_list[0]["number"])
-        if not pr_number.isdigit():
-            return {"status": "error", "step": "ensure_pr",
-                    "errors": [f"PR number non-numeric: {pr_number}"],
-                    "steps_completed": result["steps_completed"]}
+    if "git_push" not in result["steps_completed"]:
         try:
             _run(
-                ["gh", "pr", "edit", pr_number,
-                 "--title", handoff["pr_title"],
-                 "--body", handoff["pr_body"]],
-                cwd=repo_root, timeout=30,
+                ["git", "push", "-u", "origin", target_branch],
+                cwd=repo_root, timeout=300,
             )
-            log(f"Step 13: reused PR #{pr_number}, synced metadata")
-        except subprocess.CalledProcessError as exc:
-            log(f"Step 13: PR edit warning: {exc.stderr.strip()[:200]}")
-    else:
-        try:
-            pr_create_result = _run(
-                ["gh", "pr", "create",
-                 "--base", base_branch,
-                 "--head", target_branch,
-                 "--title", handoff["pr_title"],
-                 "--body", handoff["pr_body"]],
-                cwd=repo_root, timeout=30,
+            result["steps_completed"].append("git_push")
+            _checkpoint_post_commit_progress(
+                result,
+                continuation_path=continuation_path,
+                target_branch=target_branch,
             )
-            pr_url = pr_create_result.stdout.strip()
-            pr_number = pr_url.rstrip("/").split("/")[-1]
-            if not pr_number.isdigit():
-                return {"status": "error", "step": "ensure_pr",
-                        "errors": [f"PR number non-numeric from URL: {pr_url}"],
-                        "steps_completed": result["steps_completed"]}
-            log(f"Step 13: created PR #{pr_number}")
+            log(f"Step 12: pushed to origin/{target_branch}")
         except subprocess.CalledProcessError as exc:
-            return {"status": "error", "step": "ensure_pr",
-                    "errors": [f"gh pr create failed: {exc.stderr.strip()}"],
+            return {"status": "error", "step": "git_push",
+                    "errors": [f"git push failed: {exc.stderr.strip()}"],
                     "steps_completed": result["steps_completed"]}
         except subprocess.TimeoutExpired:
+            return {"status": "error", "step": "git_push",
+                    "errors": ["git push timed out"],
+                    "steps_completed": result["steps_completed"]}
+    else:
+        log(f"Step 12: push already completed for {target_branch}, skipping")
+
+    # ── Step 13: ensure_pr ────────────────────────────────────────────
+    if "ensure_pr" not in result["steps_completed"]:
+        try:
+            existing_prs = _run(
+                ["gh", "pr", "list", "--head", target_branch, "--base", base_branch,
+                 "--state", "open", "--json", "number"],
+                cwd=repo_root, timeout=30,
+            ).stdout.strip()
+            pr_list = json.loads(existing_prs) if existing_prs else []
+        except (subprocess.CalledProcessError, json.JSONDecodeError):
+            pr_list = []
+
+        if len(pr_list) > 1:
             return {"status": "error", "step": "ensure_pr",
-                    "errors": ["gh pr create timed out"],
+                    "errors": [f"Multiple open PRs for {target_branch}: {[p['number'] for p in pr_list]}"],
                     "steps_completed": result["steps_completed"]}
 
-    result["pr_number"] = pr_number
-    if "ensure_pr" not in result["steps_completed"]:
-        result["steps_completed"].append("ensure_pr")
+        if len(pr_list) == 1:
+            pr_number = str(pr_list[0]["number"])
+            if not pr_number.isdigit():
+                return {"status": "error", "step": "ensure_pr",
+                        "errors": [f"PR number non-numeric: {pr_number}"],
+                        "steps_completed": result["steps_completed"]}
+            try:
+                _run(
+                    ["gh", "pr", "edit", pr_number,
+                     "--title", handoff["pr_title"],
+                     "--body", handoff["pr_body"]],
+                    cwd=repo_root, timeout=30,
+                )
+                log(f"Step 13: reused PR #{pr_number}, synced metadata")
+            except subprocess.CalledProcessError as exc:
+                log(f"Step 13: PR edit warning: {exc.stderr.strip()[:200]}")
+        else:
+            try:
+                pr_create_result = _run(
+                    ["gh", "pr", "create",
+                     "--base", base_branch,
+                     "--head", target_branch,
+                     "--title", handoff["pr_title"],
+                     "--body", handoff["pr_body"]],
+                    cwd=repo_root, timeout=30,
+                )
+                pr_url = pr_create_result.stdout.strip()
+                pr_number = pr_url.rstrip("/").split("/")[-1]
+                if not pr_number.isdigit():
+                    return {"status": "error", "step": "ensure_pr",
+                            "errors": [f"PR number non-numeric from URL: {pr_url}"],
+                            "steps_completed": result["steps_completed"]}
+                log(f"Step 13: created PR #{pr_number}")
+            except subprocess.CalledProcessError as exc:
+                return {"status": "error", "step": "ensure_pr",
+                        "errors": [f"gh pr create failed: {exc.stderr.strip()}"],
+                        "steps_completed": result["steps_completed"]}
+            except subprocess.TimeoutExpired:
+                return {"status": "error", "step": "ensure_pr",
+                        "errors": ["gh pr create timed out"],
+                        "steps_completed": result["steps_completed"]}
 
-    if result.get("commit_sha") and result.get("handoff_sha") and result.get("receipt_decision"):
-        _write_continuation_record(
-            continuation_path,
-            handoff_sha=result["handoff_sha"],
+        result["pr_number"] = pr_number
+        result["steps_completed"].append("ensure_pr")
+        _checkpoint_post_commit_progress(
+            result,
+            continuation_path=continuation_path,
             target_branch=target_branch,
-            commit_sha=result["commit_sha"],
-            receipt_decision=result["receipt_decision"],
-            steps_completed=result["steps_completed"],
-            pr_number=pr_number,
         )
+    else:
+        pr_number = str(result.get("pr_number") or pr_number)
+        log(f"Step 13: PR #{pr_number or 'unknown'} already ensured, skipping")
 
     # ── Step 14: wait_ci ──────────────────────────────────────────────
-    log(f"Step 14: waiting for CI on PR #{pr_number}...")
-    try:
-        _wait_for_required_checks_to_register(
-            repo_root,
-            pr_number=pr_number,
-            log=log,
-        )
-        _run(
-            ["gh", "pr", "checks", pr_number, "--watch", "--required"],
-            cwd=repo_root, timeout=600,
-        )
-        if "wait_ci" not in result["steps_completed"]:
+    if "wait_ci" not in result["steps_completed"]:
+        log(f"Step 14: waiting for CI on PR #{pr_number}...")
+        try:
+            _wait_for_required_checks_to_register(
+                repo_root,
+                pr_number=pr_number,
+                log=log,
+            )
+            _run(
+                ["gh", "pr", "checks", pr_number, "--watch", "--required"],
+                cwd=repo_root, timeout=600,
+            )
             result["steps_completed"].append("wait_ci")
-        log("Step 14: CI passed")
-    except subprocess.CalledProcessError as exc:
-        return {"status": "error", "step": "wait_ci",
-                "errors": [f"CI checks failed: {exc.stderr.strip()}"],
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number}
-    except subprocess.TimeoutExpired:
-        return {"status": "error", "step": "wait_ci",
-                "errors": ["CI wait timed out after 600s"],
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number}
-    except TimeoutError as exc:
-        return {"status": "error", "step": "wait_ci",
-                "errors": [str(exc)],
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number}
+            _checkpoint_post_commit_progress(
+                result,
+                continuation_path=continuation_path,
+                target_branch=target_branch,
+            )
+            log("Step 14: CI passed")
+        except subprocess.CalledProcessError as exc:
+            return {"status": "error", "step": "wait_ci",
+                    "errors": [f"CI checks failed: {exc.stderr.strip()}"],
+                    "steps_completed": result["steps_completed"],
+                    "pr_number": pr_number}
+        except subprocess.TimeoutExpired:
+            return {"status": "error", "step": "wait_ci",
+                    "errors": ["CI wait timed out after 600s"],
+                    "steps_completed": result["steps_completed"],
+                    "pr_number": pr_number}
+        except TimeoutError as exc:
+            return {"status": "error", "step": "wait_ci",
+                    "errors": [str(exc)],
+                    "steps_completed": result["steps_completed"],
+                    "pr_number": pr_number}
+    else:
+        log(f"Step 14: required checks already passed for PR #{pr_number}, skipping")
 
     # ── Step 15: ensure_review_clear_and_merge ────────────────────────
     log(f"Step 15: checking review state for PR #{pr_number}...")

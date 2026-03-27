@@ -4,6 +4,20 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-27
 
+### Pipeline Test Run Post-Commit Checkpointing
+
+- `commit_executor.py` now checkpoints post-commit continuation after
+  `run_pre_push_script`, `git_push`, `ensure_pr`, and `wait_ci`, and skips any
+  of those steps that are already recorded in the bounded continuation state
+- `mu/tests/tools/test_executor_dispatch.py` now covers the resumed
+  post-commit boundary directly: if `run_pre_push_script` is already
+  checkpointed, the helper must skip rerunning pre-push, attempt `git push`,
+  and preserve that new progress even if a later PR step fails
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Twenty-Second live stop honestly: the boring-path run creates the
+  new local commit `02fbc4b`, but repeated automated resumes wedge after
+  Step 11 unless post-commit continuation becomes step-aware
+
 ### Pipeline Test Run Step 15 Commit-Bound Freshness
 
 - `commit_executor.py` Step 15 PR review GraphQL now also requests

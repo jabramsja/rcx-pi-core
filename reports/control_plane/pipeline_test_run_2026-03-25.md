@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Twenty-first live follow-up on 2026-03-27 narrowed the current-head connector-finding slice to a Step 15 commit-bound freshness follow-up. The resumed commit executor reused PR `#673`, pushed head `02b41d2`, passed required checks, posted a current-head `@codex review` request, and received a fresh connector review at `2026-03-27T10:27:26Z`. The remaining stop is no longer connector identity, outdated-thread filtering, tracker-note scope, Phase A stale timing, or bridge stdout detection; it is that Step 15 still accepted connector no-issues issue-comment clearance without explicitly proving the PR head stayed bound to the expected commit while waiting.
+Status: Twenty-second live follow-up on 2026-03-27 narrowed the boring-path stop again, from Step 15 freshness semantics to post-commit continuation granularity. The resumed commit executor created local commit `02fbc4b`, but repeated automated resumes then wedged after `Step 11: pre-push script passed` and before `git push`, leaving the continuation record stuck at `git_commit` and forcing every retry to rerun the full pre-push audit. The remaining stop is no longer review freshness; it is that post-commit continuation only checkpoints at local commit, not at the pre-push/push/PR/CI boundaries where the boring-path executor is now actually failing.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -578,6 +578,31 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   the PR review query, fail closed if the PR head drifts while waiting for the
   connector, and only accept connector issue-comment clearance while that same
   head is still current.
+
+## Twenty-Second Live Stop (2026-03-27)
+
+- After the Step 15 commit-bound freshness follow-up landed locally, rerunning
+  `python3 mu/tools/executors/executor_dispatch.py commit --handoff .agent_bus/executors/phase_b_handoff.json -v --json`
+  advanced honestly through the fresh supervisor pass, local commit creation,
+  and bounded continuation binding. `git reflog` shows the new local commit
+  `02fbc4b` (`fix: bind step15 freshness to current pr head`) at
+  `2026-03-27 06:43:09 -0400`, and the branch moved to `ahead 1` over origin.
+- The run then stopped again, but not in review, CI, or package truth. Two
+  separate automated resumes both replayed the same post-commit boundary:
+  the executor reported `Step 11: pre-push script passed` and then wedged
+  before `git push`, while `.agent_bus/executors/commit_executor_pipeline-test-run-2026-03-25.json`
+  remained pinned to `steps_completed = [..., "git_commit"]`.
+- PTY re-execution tightened the stop further. The resumed process built the
+  expected child tree `pre-push-fast -> dev.sh -> audit_fast.sh`, so the
+  control-plane audit itself is not the defect. Once that audit subtree exited,
+  the parent still never advanced the continuation record to `run_pre_push_script`
+  or `git_push`, and the branch never moved off local-only `ahead 1`.
+- Result: the boring-path stop moved again and is now a post-commit
+  continuation defect, not a semantic gate defect. The active fix is to
+  checkpoint and skip Steps 11-14 individually (`run_pre_push_script`,
+  `git_push`, `ensure_pr`, `wait_ci`) so a wedge after any one of those steps
+  can resume at the next honest boundary instead of repeating pre-push work
+  forever.
 
 ## Next Mechanical Questions
 
