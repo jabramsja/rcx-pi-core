@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Fifteenth live follow-up on 2026-03-27 pushed head `72a5d9e` through pre-commit, local commit, pre-push, push, PR sync, and green CI, then proved the new Step 15 self-request path by posting a current-head `@codex review` comment and persisting `bot_review_request_sha` in the continuation record. The run still failed closed after 210s because Step 15 only accepts current-head review objects; the live PR showed only request acknowledgment (`eyes`) and no current-head review object. Separate repo truth from PR `#672` shows the connector can also clear no-issues runs via a connector-authored issue comment instead of a review object, so the active fix is now current-head no-issues issue-comment clearance after the latest request, while still rejecting acknowledgment-only or other non-clear bot responses.
+Status: Eighteenth live follow-up on 2026-03-27 turned the local Step 14 plus supervisor-context slice into a tracker-note uniqueness follow-up. The resubmitted pre-commit package eventually cleared with `COMMIT_GO`, but the resumed commit executor then failed at Step 3 because `ensure_tracker_note` treated the canonical tracker note and the authorized `[PIPELINE-TEST-RUN]` NEXT-item reference as a duplicate wave-id collision. The active fix is now Step 14 registration wait plus supervisor-context preservation plus tracker-note uniqueness keyed to actual tracker-note lines instead of arbitrary whole-file wave-id mentions.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -416,6 +416,87 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   current-head no-issues issue comment after the latest `@codex review`
   request, while still rejecting acknowledgment-only signals (`eyes`) and any
   other non-clear bot issue comment.
+
+## Sixteenth Live Stop (2026-03-27)
+
+- After the Fifteenth-stop follow-up landed in the working tree, the automated
+  commit executor created commit `9605f10`
+  (`fix: accept connector issue-comment clearance in step15`), `pre-push-fast`
+  passed, the branch pushed to origin, and PR `#673` reused the new head.
+- The rerun then stopped immediately in Step 14 with the structured error
+  `CI checks failed: no checks reported on the 'jabramsja/pipeline-test-run-2026-03-25' branch`.
+  The continuation record at that point had advanced cleanly through
+  `ensure_pr`, which proves the stop was not in pre-commit, commit, push, or PR
+  sync.
+- Direct repo/GitHub truth seconds later showed the failure was a registration
+  race rather than a missing CI trigger. `gh pr view 673 --json statusCheckRollup`
+  showed PR head `9605f10` with in-progress `test` and `green-gate` checks, and
+  `gh run list --branch jabramsja/pipeline-test-run-2026-03-25 --limit 10`
+  showed the new push/PR runs already live on that head.
+- Additional CLI repro tightened the contract further:
+  `gh pr checks 673 --required` returned pending required checks with exit `8`
+  once the checks had registered, so the only bad case is the transient
+  `no checks reported` window immediately after push.
+- Result: the boring-path stop moved again, but the next fix is narrow and
+  mechanical. Step 14 needs a bounded registration wait that retries only the
+  transient `no checks reported` response before handing off to the normal
+  required-check watcher.
+
+## Seventeenth Live Stop (2026-03-27)
+
+- After the Step 14 registration-wait follow-up was staged, rerunning
+  `python3 mu/tools/executors/executor_dispatch.py pre-commit-supervisor --package .scratch/pipeline_test_run_followup_package.json -v --json`
+  returned `NEEDS_PHASE_B` instead of a fresh commit-capable receipt.
+- The meta-review did validate the staged wave truth, blocker acknowledgment,
+  and the Step 14 repro, but it failed closed on two control-surface
+  obligations it could not directly verify within the bounded package pass:
+  canonical hook-receipt preservation and the absence of normal-path manual
+  `git push` / `gh pr` / `merge_pr.sh` fallback in the active protocol surface.
+- Local repro showed the underlying issue was package truth, not those
+  obligations themselves. `mu/tools/agents/meta_bridge_supervisor.py` still
+  writes both the canonical hook-compatible receipt and the per-invocation
+  receipt, `mu/tools/agents/meta_bridge_client.py` still captures the exact
+  per-invocation path directly, `mu/tools/checks/check_control_surface_invariants.py`
+  still enforces the no-manual-fallback invariant, and
+  `mu/tools/executors/phase_b_implementer.py` still forbids Phase B-local
+  `git push`, `gh pr`, and merge-script execution.
+- The real automation defect was one layer lower: `commit_executor.py` step 6
+  was auto-building `.scratch/auto_supervisor_package.json` with
+  `scope_items = files_to_stage` and indicator-only `evidence_handles`, which
+  means any richer bounded review context would be lost before the automated
+  supervisor pass even if the manual resubmission package were corrected.
+- Result: the boring-path stop moved from CI registration timing to commit-local
+  review-context preservation. The active fix is to keep the Step 14
+  registration wait, teach commit handoffs to carry optional supervisor
+  `scope_items` and `evidence_handles`, and preserve those fields through
+  `commit_executor.py` step 6 so the automated control-surface review sees the
+  same direct proof surfaces as the manual resubmission.
+
+## Eighteenth Live Stop (2026-03-27)
+
+- After the supervisor-context package fix landed locally, rerunning
+  `python3 mu/tools/executors/executor_dispatch.py pre-commit-supervisor --package .scratch/pipeline_test_run_followup_package.json -v --json`
+  first failed closed on package-truth drift in `.scratch/`, then cleared with
+  `COMMIT_GO` once the package evidence surface matched the live handoff and
+  the exact receipt `.agent_bus/meta/pre_commit_receipts/receipt_2026-03-27T08-37-33p00-00_c8d9f36b.json`
+  was written.
+- The next command,
+  `python3 mu/tools/executors/executor_dispatch.py commit --handoff .agent_bus/executors/phase_b_handoff.json -v --json`,
+  advanced through input validation and feature-branch checks but failed closed
+  in Step 3 with
+  `wave_id 'pipeline-test-run-2026-03-25' appears 2 times in TASKS.md (duplicate)`.
+- Direct repo truth showed this was an executor defect, not TASKS drift.
+  `TASKS.md` contained one canonical tracker note for the wave and one
+  authorized `[PIPELINE-TEST-RUN]` NEXT entry whose current-status prose
+  necessarily referenced the same wave-id. The old Step 3 guard counted exact
+  whole-file mentions before it checked tracker-note shape, so a legitimate
+  NEXT-item reference could collide with the tracker note and stop the pipeline
+  before staging or commit.
+- Result: the boring-path stop moved again, this time from commit-local review
+  context to tracker-note uniqueness semantics. The active fix is to keep the
+  Step 14 wait and supervisor-context preservation, but narrow Step 3 duplicate
+  detection to actual tracker-note-line collisions so authorized NEXT-item wave
+  references no longer fail the mechanical commit path.
 
 ## Next Mechanical Questions
 

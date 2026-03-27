@@ -1511,6 +1511,8 @@ def prepare_commit_handoff(
     supervisor_lane: str | None = None,
     deferred_items: list[str] | None = None,
     bridge_status: dict[str, Any] | None = None,
+    scope_items: list[str] | None = None,
+    evidence_handles: dict[str, str] | None = None,
 ) -> Path:
     """Prepare a commit executor handoff file (new schema).
 
@@ -1539,6 +1541,10 @@ def prepare_commit_handoff(
         handoff["deferred_items"] = deferred_items
     if bridge_status is not None:
         handoff["bridge_status"] = bridge_status
+    if scope_items is not None:
+        handoff["scope_items"] = scope_items
+    if evidence_handles is not None:
+        handoff["evidence_handles"] = evidence_handles
 
     handoff_dir = repo_root / ".agent_bus" / "executors"
     handoff_dir.mkdir(parents=True, exist_ok=True)

@@ -274,6 +274,15 @@ class TestCommitHandoffValidation:
         )
         assert valid, errors
 
+    def test_optional_supervisor_context_passes(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_handoff(
+                scope_items=["reports/control_plane/test_plan.md", "file1.py"],
+                evidence_handles={"receipt_chain": "exact receipt path"},
+            )
+        )
+        assert valid, errors
+
     def test_empty_files_to_stage_fails(self):
         valid, errors = commit_mod.validate_handoff(_make_new_handoff(files_to_stage=[]))
         assert not valid
@@ -1380,6 +1389,43 @@ class TestEnsureTrackerNote:
         assert result["step"] == "ensure_tracker_note"
         assert any("duplicate" in e.lower() for e in result["errors"])
 
+    def test_tracker_note_plus_authorized_next_reference_does_not_false_duplicate(self, tmp_path):
+        """A canonical tracker note plus an authorized NEXT-item reference must not fail as duplicate."""
+        repo, env = _init_git_repo(tmp_path)
+        tasks = repo / "TASKS.md"
+        content = tasks.read_text()
+        content = content.replace(
+            "old note.",
+            "old note.\n"
+            "- Tracker sync note (2026-03-27, test-wave-id): **TEST — canonical note.** "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            "evidence_command: `pytest mu/tests/tools/test_executor_dispatch.py -q`. "
+            "evidence_delta: canonical note. "
+            "progress_proof_before: old. "
+            "progress_proof_after: new. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+            "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD.\n"
+            "\n---\n\n## NEXT\n"
+            "- **[TEST]** Authorized item. **Tracked packet:** `reports/control_plane/test-wave-id.md`.\n"
+            "  Current status: references test-wave-id again for operator truth.\n",
+        )
+        tasks.write_text(content)
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "canonical note plus next reference"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        handoff = _make_new_handoff()
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+        assert result["step"] != "ensure_tracker_note" or result["status"] != "error"
+        assert "ensure_tracker_note" in result.get("steps_completed", [])
+
     def test_15_ra_missing_errors(self, tmp_path):
         """Test 15: '## Ra' missing from TASKS.md → error."""
         repo, env = _init_git_repo(tmp_path)
@@ -1590,6 +1636,11 @@ class TestSupervisorPackage:
             supervisor_lane="hooks/agents/bridge control-surface",
             deferred_items=["reports/deferred/non_blocking/example.md"],
             bridge_status={"rounds": 2, "reentry": True},
+            scope_items=[
+                "reports/control_plane/test_plan.md",
+                "mu/tools/agents/meta_bridge_supervisor.py",
+            ],
+            evidence_handles={"receipt_chain": "canonical and per-invocation receipts preserved"},
         )
 
         with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
@@ -1603,6 +1654,15 @@ class TestSupervisorPackage:
         assert package["lane"] == "hooks/agents/bridge control-surface"
         assert package["deferred_items"] == ["reports/deferred/non_blocking/example.md"]
         assert package["bridge_status"] == {"rounds": 2, "reentry": True}
+        assert package["scope_items"] == [
+            "reports/control_plane/test_plan.md",
+            "mu/tools/agents/meta_bridge_supervisor.py",
+            "file1.py",
+        ]
+        assert package["evidence_handles"] == {
+            "receipt_chain": "canonical and per-invocation receipts preserved",
+            "indicator": "reports/l4_wave_indicators/test-wave-id.json",
+        }
 
     def test_21_changed_files_empty_errors(self, tmp_path):
         """Test 21: changed_files empty → error before supervisor.
@@ -2518,6 +2578,37 @@ class TestCommitContinuationAndBotFreshness:
         assert outcome is not None
         assert outcome["kind"] == "clear"
 
+    def test_wait_for_required_checks_to_register_retries_no_checks_reported(self, tmp_path, monkeypatch):
+        calls = {"count": 0}
+
+        def fake_run(args, *, cwd, check=True, timeout=120, env=None):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return subprocess.CompletedProcess(
+                    args,
+                    1,
+                    stdout="",
+                    stderr="no checks reported on the 'jabramsja/test-wave-id' branch",
+                )
+            return subprocess.CompletedProcess(
+                args,
+                8,
+                stdout="green-gate\tpending\t0\thttps://example.invalid/check\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        commit_mod._wait_for_required_checks_to_register(  # ANTICHEAT_OK: testing CI registration helper
+            tmp_path,
+            pr_number="673",
+            wait_seconds=1,
+            poll_interval=0,
+        )
+
+        assert calls["count"] == 2
+
     def test_post_commit_ignores_outdated_connector_threads(self, tmp_path, monkeypatch):
         repo = tmp_path
         handoff = _make_new_handoff()
@@ -2531,7 +2622,7 @@ class TestCommitContinuationAndBotFreshness:
         def completed(cmd, stdout="", stderr=""):
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
 
-        def fake_run(cmd, cwd=None, timeout=None):
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout="abc123\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
@@ -2655,7 +2746,7 @@ class TestCommitContinuationAndBotFreshness:
         def completed(cmd, stdout="", stderr=""):
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
 
-        def fake_run(cmd, cwd=None, timeout=None):
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout="abc123\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
@@ -2769,7 +2860,7 @@ class TestCommitContinuationAndBotFreshness:
         def completed(cmd, stdout="", stderr=""):
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
 
-        def fake_run(cmd, cwd=None, timeout=None):
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout="abc123\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
@@ -2854,6 +2945,117 @@ class TestCommitContinuationAndBotFreshness:
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert len(comment_calls) == 1
 
+    def test_post_commit_wait_ci_retries_until_checks_register(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(
+            json.dumps(
+                {
+                    "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                    "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                    "handoff_sha": "handoff-sha",
+                    "target_branch": "jabramsja/test-wave-id",
+                    "commit_sha": "abc123",
+                    "receipt_decision": "COMMIT_GO",
+                    "steps_completed": list(result["steps_completed"]),
+                    "pr_number": "673",
+                    "updated_at_unix": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        required_checks_calls = {"count": 0}
+
+        def completed(cmd, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, check=True, timeout=None, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="dev\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "push", "-u"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "list", "--head"]:
+                return completed(cmd, stdout='[{"number":673}]')
+            if cmd[:4] == ["gh", "pr", "edit", "673"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "checks", "673"] and "--required" in cmd and "--watch" not in cmd:
+                required_checks_calls["count"] += 1
+                if required_checks_calls["count"] == 1:
+                    return completed(
+                        cmd,
+                        returncode=1,
+                        stderr="no checks reported on the 'jabramsja/test-wave-id' branch",
+                    )
+                return completed(
+                    cmd,
+                    returncode=8,
+                    stdout="green-gate\tpending\t0\thttps://example.invalid/check\n",
+                )
+            if cmd[:4] == ["gh", "pr", "checks", "673"] and "--watch" in cmd:
+                return completed(cmd)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                payload = {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "reviewDecision": "",
+                                "latestReviews": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                            "state": "COMMENTED",
+                                            "commit": {"oid": "abc123"},
+                                        }
+                                    ]
+                                },
+                                "reviewThreads": {"nodes": []},
+                                "comments": {"nodes": []},
+                            }
+                        }
+                    }
+                }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising wait_ci registration-race helper through post-commit pipeline
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["pr_number"] == "673"
+        assert "wait_ci" in post_commit["steps_completed"]
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert required_checks_calls["count"] == 2
+
     def test_post_commit_does_not_recomment_same_head_bot_review_request(self, tmp_path, monkeypatch):
         repo = tmp_path
         handoff = _make_new_handoff()
@@ -2891,7 +3093,7 @@ class TestCommitContinuationAndBotFreshness:
         def completed(cmd, stdout="", stderr=""):
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
 
-        def fake_run(cmd, cwd=None, timeout=None):
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout="abc123\n")
             if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:

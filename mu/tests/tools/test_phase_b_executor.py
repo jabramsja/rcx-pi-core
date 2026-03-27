@@ -387,6 +387,26 @@ class TestPrepareCommitHandoff:
         assert "tracker_note_text" in handoff
         assert handoff["tracker_note_text"] == "- Tracker sync note (test): test note."
 
+    def test_optional_supervisor_context_in_handoff(self, tmp_path):
+        path = pb_mod.prepare_commit_handoff(
+            tmp_path,
+            wave_id="test",
+            task_id="[T]",
+            wave_class="MAINTENANCE",
+            target_gate_id="G8",
+            files_to_stage=["file.py"],
+            scope_items=["reports/control_plane/test_plan.md", "file.py"],
+            evidence_handles={"receipt_chain": "direct receipt path preserved"},
+            commit_message="test",
+            pr_title="test",
+            pr_body="test",
+        )
+        handoff = json.loads(path.read_text())
+        assert handoff["scope_items"] == ["reports/control_plane/test_plan.md", "file.py"]
+        assert handoff["evidence_handles"] == {
+            "receipt_chain": "direct receipt path preserved"
+        }
+
     def test_build_phase_b_tracker_note_is_l4_compliant(self):
         note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
             wave_id="pipeline-test-run-2026-03-25",

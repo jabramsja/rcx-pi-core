@@ -77,6 +77,8 @@ OPTIONAL_HANDOFF_FIELDS = {
     "supervisor_lane",
     "deferred_items",
     "bridge_status",
+    "scope_items",
+    "evidence_handles",
 }
 
 VALID_CALLERS = {"phase_b", "phase_a", "update_tracker_only"}
@@ -124,6 +126,8 @@ BOT_REVIEW_LOGIN = "chatgpt-codex-connector"
 BOT_REVIEW_TRIGGER_COMMENT = "@codex review"
 BOT_REVIEW_WAIT_SECONDS = 210
 BOT_REVIEW_POLL_SECONDS = 15
+CI_CHECK_REGISTRATION_WAIT_SECONDS = 120
+CI_CHECK_REGISTRATION_POLL_SECONDS = 5
 BOT_NO_ISSUES_COMMENT_RE = re.compile(
     r"Codex Review:\s*.*did(?:n't| not) find any major issues",
     re.IGNORECASE | re.DOTALL,
@@ -561,6 +565,44 @@ def _maybe_request_current_head_bot_review(
     return True
 
 
+def _wait_for_required_checks_to_register(
+    repo_root: Path,
+    *,
+    pr_number: str,
+    wait_seconds: int = CI_CHECK_REGISTRATION_WAIT_SECONDS,
+    poll_interval: int = CI_CHECK_REGISTRATION_POLL_SECONDS,
+    log: Any = None,
+) -> None:
+    deadline = time.time() + wait_seconds
+    while True:
+        result = _run(
+            ["gh", "pr", "checks", pr_number, "--required"],
+            cwd=repo_root,
+            timeout=30,
+            check=False,
+        )
+        detail = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()
+        if "no checks reported" not in detail.lower():
+            if result.returncode not in (0, 8):
+                raise subprocess.CalledProcessError(
+                    result.returncode,
+                    result.args,
+                    output=result.stdout,
+                    stderr=result.stderr,
+                )
+            return
+        if time.time() >= deadline:
+            raise TimeoutError(
+                f"Required checks did not register for PR #{pr_number} within {wait_seconds}s"
+            )
+        if log is not None:
+            log(
+                f"Waiting for required checks to register on PR #{pr_number} "
+                f"({poll_interval}s poll)"
+            )
+        time.sleep(poll_interval)
+
+
 def prepare_handoff_from_routing_record(
     record: dict[str, Any],
     repo_root: Path,
@@ -753,6 +795,31 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
     if bridge_status is not None and not isinstance(bridge_status, dict):
         errors.append("bridge_status must be an object when provided")
 
+    scope_items = handoff.get("scope_items")
+    if scope_items is not None:
+        if not isinstance(scope_items, list):
+            errors.append("scope_items must be a list when provided")
+        else:
+            for item in scope_items:
+                if not isinstance(item, str):
+                    errors.append("scope_items entries must be strings")
+                    continue
+                if _is_absolute_untrusted_path(item):
+                    errors.append(f"Absolute path in scope_items: {item}")
+                if _has_path_traversal(item):
+                    errors.append(f"Path traversal in scope_items: {item}")
+
+    evidence_handles = handoff.get("evidence_handles")
+    if evidence_handles is not None:
+        if not isinstance(evidence_handles, dict):
+            errors.append("evidence_handles must be an object when provided")
+        else:
+            for key, value in evidence_handles.items():
+                if not isinstance(key, str) or not key.strip():
+                    errors.append("evidence_handles keys must be non-empty strings")
+                if not isinstance(value, str):
+                    errors.append(f"evidence_handles['{key}'] must be a string")
+
     # tracker_note_text must be non-empty string
     tnt = handoff.get("tracker_note_text", "")
     if not isinstance(tnt, str) or not tnt.strip():
@@ -910,6 +977,11 @@ def _run_post_commit_pipeline(
     # ── Step 14: wait_ci ──────────────────────────────────────────────
     log(f"Step 14: waiting for CI on PR #{pr_number}...")
     try:
+        _wait_for_required_checks_to_register(
+            repo_root,
+            pr_number=pr_number,
+            log=log,
+        )
         _run(
             ["gh", "pr", "checks", pr_number, "--watch", "--required"],
             cwd=repo_root, timeout=600,
@@ -925,6 +997,11 @@ def _run_post_commit_pipeline(
     except subprocess.TimeoutExpired:
         return {"status": "error", "step": "wait_ci",
                 "errors": ["CI wait timed out after 600s"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number}
+    except TimeoutError as exc:
+        return {"status": "error", "step": "wait_ci",
+                "errors": [str(exc)],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
 
@@ -1251,7 +1328,7 @@ def run_commit_pipeline(
     ]
     note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
 
-    if wave_id_count > 1:
+    if wave_id_count > 1 and not matching_tracker_indices:
         return {"status": "error", "step": "ensure_tracker_note",
                 "errors": [f"wave_id '{wave_id}' appears {wave_id_count} times in TASKS.md (duplicate)"],
                 "steps_completed": result["steps_completed"]}
@@ -1432,16 +1509,29 @@ def run_commit_pipeline(
         if p.is_file() and p.suffix == ".md" and p.name != "README.md"
     ) if blocking_dir.is_dir() else []
 
+    scope_items = handoff.get("scope_items")
+    if isinstance(scope_items, list) and scope_items:
+        supervisor_scope_items = list(dict.fromkeys([*scope_items, *handoff["files_to_stage"]]))
+    else:
+        supervisor_scope_items = list(handoff["files_to_stage"])
+
+    evidence_handles: dict[str, str] = {}
+    handoff_evidence_handles = handoff.get("evidence_handles")
+    if isinstance(handoff_evidence_handles, dict):
+        evidence_handles.update(handoff_evidence_handles)
+    if "collect_and_stage_indicator" in result["steps_completed"]:
+        evidence_handles.setdefault("indicator", indicator_path)
+
     supervisor_package = {
         "task_id": handoff["task_id"],
         "wave_name": wave_id,
         "lane": handoff.get("supervisor_lane", handoff["caller"]),
         "changed_files": changed_files,
-        "scope_items": handoff["files_to_stage"],
+        "scope_items": supervisor_scope_items,
         "fixes_implemented": handoff["fixes_implemented"],
         "deferred_items": handoff.get("deferred_items", []),
         "bridge_status": handoff.get("bridge_status", {}),
-        "evidence_handles": {"indicator": indicator_path} if "collect_and_stage_indicator" in result["steps_completed"] else {},
+        "evidence_handles": evidence_handles,
         "blocker_report_paths": blocker_paths,
         "current_judgment": "COMMIT_GO",
     }
