@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Twelfth live follow-up on 2026-03-27 pushed the boring-path wave through pre-commit, local commit, push, PR creation, and CI on PR `#673`, then stopped at automated Step 15: a fresh `chatgpt-codex-connector` review correctly found a real adjacent Phase A defect (`phase_a_executor.py` misclassified bridge exit `1` for normal non-GO decisions), and the executor also still classified the connector's unresolved review thread as human instead of bot state. The active fix is now the paired Phase A bridge-exit contract correction plus Step 15 bot-thread classification hardening.
+Status: Thirteenth live follow-up on 2026-03-27 advanced the review-follow-up branch through a fresh pre-commit supervisor pass and a new local commit, but stopped at automated Step 11: `pre-push-fast` still flagged the new direct `_run_post_commit_pipeline()` regression as private-helper access until it carried `ANTICHEAT_OK`. The active fix is now the one-line anti-cheat allowlist on that Step 15 regression test, on top of the already-staged Phase A bridge-exit contract correction and Step 15 bot-thread classification hardening.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -350,6 +350,24 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   and `commit_executor.py` Step 15 must treat `chatgpt-codex-connector` as bot
   review state and ignore outdated unresolved bot threads instead of promoting
   them to human blockers.
+
+## Thirteenth Live Stop (2026-03-27)
+
+- After the Twelfth-stop fixes landed in the working tree, a fresh pre-commit
+  supervisor run returned `COMMIT_GO` on the staged five-file follow-up and the
+  automated commit executor created local commit `8c2bc0e`
+  (`fix: address pipeline-test-run review follow-up`).
+- The rerun did not stop in Step 15 again. It stopped earlier at Step 11 when
+  `pre-push-fast` reached the anti-cheat scan and flagged the new direct
+  `_run_post_commit_pipeline()` behavioral regression in
+  `mu/tests/tools/test_executor_dispatch.py` as private-helper access.
+- The underlying code-path fixes were already green at that point: the direct
+  Phase A regression and Step 15 bot-thread classification regressions both
+  passed their focused pytest slices, and the only failing gate was the missing
+  `ANTICHEAT_OK` marker on the internal-helper test line.
+- Result: the boring-path stop moved again, but only by one gate. The next
+  required fix is a one-line anti-cheat allowlist on the direct post-commit
+  helper regression, then another bounded rerun of the automated commit path.
 
 ## Next Mechanical Questions
 

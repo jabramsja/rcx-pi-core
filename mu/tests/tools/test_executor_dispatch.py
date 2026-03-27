@@ -2505,7 +2505,7 @@ class TestCommitContinuationAndBotFreshness:
         monkeypatch.setattr(commit_mod, "_run", fake_run)
         monkeypatch.setattr(commit_mod, "_wait_for_bot_review_freshness", lambda query_state, head_sha, **kwargs: query_state())
 
-        post_commit = commit_mod._run_post_commit_pipeline(
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: testing internal post-commit pipeline helper
             repo_root=repo,
             handoff=handoff,
             result=result,
