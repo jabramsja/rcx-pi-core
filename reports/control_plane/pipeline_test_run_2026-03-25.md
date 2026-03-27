@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Fourteenth live follow-up on 2026-03-27 pushed head `dc15396` through pre-commit, local commit, pre-push, push, PR sync, and green CI, but stopped again at automated Step 15: the pipeline waited honestly for a current-head `chatgpt-codex-connector` review and timed out after 210s because no fresh review had been triggered for the new head. A manual `@codex review` comment landed after that timeout and was acknowledged with `eyes`, but had not yet produced a review when the executor failed closed. The active fix is now Step 15 self-request review triggering plus per-head request dedupe in the continuation record.
+Status: Fifteenth live follow-up on 2026-03-27 pushed head `72a5d9e` through pre-commit, local commit, pre-push, push, PR sync, and green CI, then proved the new Step 15 self-request path by posting a current-head `@codex review` comment and persisting `bot_review_request_sha` in the continuation record. The run still failed closed after 210s because Step 15 only accepts current-head review objects; the live PR showed only request acknowledgment (`eyes`) and no current-head review object. Separate repo truth from PR `#672` shows the connector can also clear no-issues runs via a connector-authored issue comment instead of a review object, so the active fix is now current-head no-issues issue-comment clearance after the latest request, while still rejecting acknowledgment-only or other non-clear bot responses.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -389,6 +389,33 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   required fix is for Step 15 to request a current-head connector review itself
   before starting freshness polling, and to remember that request per head so
   reruns do not spam duplicate `@codex review` comments.
+
+## Fifteenth Live Stop (2026-03-27)
+
+- After the Fourteenth-stop follow-up landed in the working tree, the automated
+  commit executor created commit `72a5d9e`
+  (`fix: request current-head bot review in step15`), `pre-push-fast` passed,
+  the branch pushed to origin, PR `#673` reused the new head, and both required
+  checks (`test`, `green-gate`) passed.
+- Step 15 then exercised the new self-request path exactly as intended. The
+  executor posted one current-head `@codex review` comment on PR `#673`,
+  persisted `bot_review_request_sha: 72a5d9e...` in the continuation record,
+  and started the 210-second current-head freshness wait without spamming extra
+  request comments.
+- The run still failed closed after the full wait window because no fresh
+  current-head review object ever appeared. Direct API repro showed the request
+  comment acknowledged only with an `eyes` reaction from
+  `chatgpt-codex-connector[bot]`, which proves request receipt but not review
+  completion.
+- Separate repo truth shows that review-object-only acceptance is too strict for
+  the connector's actual benign path. PR `#672` received no review object at
+  all; instead, the connector cleared the PR via an issue comment:
+  `Codex Review: Didn't find any major issues. Swish!`
+- Result: the boring-path stop moved again, but the remaining gap is now narrow
+  and explicit. The next required fix is for Step 15 to accept a connector
+  current-head no-issues issue comment after the latest `@codex review`
+  request, while still rejecting acknowledgment-only signals (`eyes`) and any
+  other non-clear bot issue comment.
 
 ## Next Mechanical Questions
 

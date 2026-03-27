@@ -2428,6 +2428,96 @@ class TestCommitContinuationAndBotFreshness:
         assert commit_mod._is_bot_review_author("some-bot") is True  # ANTICHEAT_OK: testing bot-review author helper
         assert commit_mod._is_bot_review_author("human-reviewer") is False  # ANTICHEAT_OK: testing bot-review author helper
 
+    def test_current_head_bot_issue_comment_outcome_requires_clear_comment_after_latest_request(self):
+        pr_data = {
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T07:37:49Z",
+                    },
+                    {
+                        "author": {"login": "chatgpt-codex-connector[bot]"},
+                        "body": "Codex Review: Didn't find any major issues. Swish!",
+                        "createdAt": "2026-03-27T07:39:03Z",
+                    },
+                ]
+            }
+        }
+
+        outcome = commit_mod._current_head_bot_issue_comment_outcome(pr_data)  # ANTICHEAT_OK: testing bot issue-comment freshness helper
+        assert outcome is not None
+        assert outcome["kind"] == "clear"
+
+        stale_pr_data = {
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "chatgpt-codex-connector[bot]"},
+                        "body": "Codex Review: Didn't find any major issues. Swish!",
+                        "createdAt": "2026-03-27T07:39:03Z",
+                    },
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T07:40:00Z",
+                    },
+                ]
+            }
+        }
+
+        assert commit_mod._current_head_bot_issue_comment_outcome(stale_pr_data) is None  # ANTICHEAT_OK: testing bot issue-comment freshness helper
+
+    def test_wait_for_bot_review_freshness_accepts_no_issues_issue_comment(self):
+        calls = {"count": 0}
+
+        def query_state():
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return {
+                    "latestReviews": {"nodes": []},
+                    "comments": {
+                        "nodes": [
+                            {
+                                "author": {"login": "jabramsja"},
+                                "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                                "createdAt": "2026-03-27T07:37:49Z",
+                            }
+                        ]
+                    },
+                }
+            return {
+                "latestReviews": {"nodes": []},
+                "comments": {
+                    "nodes": [
+                        {
+                            "author": {"login": "jabramsja"},
+                            "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                            "createdAt": "2026-03-27T07:37:49Z",
+                        },
+                        {
+                            "author": {"login": "chatgpt-codex-connector[bot]"},
+                            "body": "Codex Review: Didn't find any major issues. Swish!",
+                            "createdAt": "2026-03-27T07:39:03Z",
+                        },
+                    ]
+                },
+            }
+
+        with patch.object(commit_mod.time, "sleep", return_value=None):
+            pr_data = commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: testing bot-review polling helper
+                query_state,
+                head_sha="abc123",
+                wait_seconds=1,
+                poll_interval=0,
+            )
+
+        assert calls["count"] == 2
+        outcome = commit_mod._current_head_bot_issue_comment_outcome(pr_data)  # ANTICHEAT_OK: testing bot issue-comment freshness helper
+        assert outcome is not None
+        assert outcome["kind"] == "clear"
+
     def test_post_commit_ignores_outdated_connector_threads(self, tmp_path, monkeypatch):
         repo = tmp_path
         handoff = _make_new_handoff()
@@ -2630,6 +2720,127 @@ class TestCommitContinuationAndBotFreshness:
         monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
 
         post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising post-commit review request path
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["pr_number"] == "673"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert len(comment_calls) == 1
+
+    def test_post_commit_accepts_current_head_no_issues_issue_comment_without_review_object(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(
+            json.dumps(
+                {
+                    "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                    "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                    "handoff_sha": "handoff-sha",
+                    "target_branch": "jabramsja/test-wave-id",
+                    "commit_sha": "abc123",
+                    "receipt_decision": "COMMIT_GO",
+                    "steps_completed": list(result["steps_completed"]),
+                    "pr_number": "673",
+                    "updated_at_unix": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        comment_calls = []
+        graphql_calls = {"count": 0}
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="dev\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "push", "-u"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "list", "--head"]:
+                return completed(cmd, stdout='[{"number":673}]')
+            if cmd[:4] == ["gh", "pr", "checks", "673"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "edit", "673"]:
+                return completed(cmd)
+            if cmd[:3] == ["gh", "pr", "comment"]:
+                comment_calls.append(cmd)
+                return completed(cmd)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                graphql_calls["count"] += 1
+                if graphql_calls["count"] == 1:
+                    payload = {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "reviewDecision": "",
+                                    "latestReviews": {"nodes": []},
+                                    "reviewThreads": {"nodes": []},
+                                    "comments": {"nodes": []},
+                                }
+                            }
+                        }
+                    }
+                else:
+                    payload = {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "reviewDecision": "",
+                                    "latestReviews": {"nodes": []},
+                                    "reviewThreads": {"nodes": []},
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "author": {"login": "jabramsja"},
+                                                "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                                                "createdAt": "2026-03-27T07:37:49Z",
+                                            },
+                                            {
+                                                "author": {"login": "chatgpt-codex-connector[bot]"},
+                                                "body": "Codex Review: Didn't find any major issues. Swish!",
+                                                "createdAt": "2026-03-27T07:39:03Z",
+                                            },
+                                        ]
+                                    },
+                                }
+                            }
+                        }
+                    }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising no-issues issue-comment clearance path
             repo_root=repo,
             handoff=handoff,
             result=result,

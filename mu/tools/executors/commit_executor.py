@@ -108,6 +108,13 @@ query($owner: String!, $repo: String!, $number: Int!) {
           }
         }
       }
+      comments(last: 30) {
+        nodes {
+          author { login }
+          body
+          createdAt
+        }
+      }
     }
   }
 }
@@ -117,6 +124,14 @@ BOT_REVIEW_LOGIN = "chatgpt-codex-connector"
 BOT_REVIEW_TRIGGER_COMMENT = "@codex review"
 BOT_REVIEW_WAIT_SECONDS = 210
 BOT_REVIEW_POLL_SECONDS = 15
+BOT_NO_ISSUES_COMMENT_RE = re.compile(
+    r"Codex Review:\s*.*did(?:n't| not) find any major issues",
+    re.IGNORECASE | re.DOTALL,
+)
+BOT_USAGE_LIMIT_COMMENT_RE = re.compile(
+    r"reached your Codex usage limits",
+    re.IGNORECASE,
+)
 COMMIT_CONTINUATION_VERSION = 1
 CONTINUATION_ACTIVE_STATUS = "post_commit_pending"
 TRANSIENT_STATUS_PREFIXES = (".agent_bus/", ".scratch/")
@@ -401,6 +416,69 @@ def _has_fresh_bot_review(pr_data: dict[str, Any], head_sha: str) -> bool:
     return False
 
 
+def _iter_pr_issue_comments(pr_data: dict[str, Any]) -> list[dict[str, Any]]:
+    comments = pr_data.get("comments", {}).get("nodes", [])
+    if not isinstance(comments, list):
+        return []
+    return [comment for comment in comments if isinstance(comment, dict)]
+
+
+def _latest_bot_review_request_timestamp(pr_data: dict[str, Any]) -> str | None:
+    latest_request_at: str | None = None
+    for comment in _iter_pr_issue_comments(pr_data):
+        author = comment.get("author", {}).get("login", "")
+        body = (comment.get("body") or "").strip()
+        created_at = comment.get("createdAt", "")
+        if _is_bot_review_author(author):
+            continue
+        if body != BOT_REVIEW_TRIGGER_COMMENT:
+            continue
+        if not isinstance(created_at, str) or not created_at:
+            continue
+        if latest_request_at is None or created_at > latest_request_at:
+            latest_request_at = created_at
+    return latest_request_at
+
+
+def _is_bot_no_issues_issue_comment(body: str) -> bool:
+    return bool(BOT_NO_ISSUES_COMMENT_RE.search(body or ""))
+
+
+def _current_head_bot_issue_comment_outcome(pr_data: dict[str, Any]) -> dict[str, Any] | None:
+    latest_request_at = _latest_bot_review_request_timestamp(pr_data)
+    if latest_request_at is None:
+        return None
+
+    latest_bot_comment: dict[str, Any] | None = None
+    for comment in _iter_pr_issue_comments(pr_data):
+        author = comment.get("author", {}).get("login", "")
+        created_at = comment.get("createdAt", "")
+        if not _is_bot_review_author(author):
+            continue
+        if not isinstance(created_at, str) or not created_at or created_at <= latest_request_at:
+            continue
+        if latest_bot_comment is None or created_at > latest_bot_comment.get("createdAt", ""):
+            latest_bot_comment = comment
+
+    if latest_bot_comment is None:
+        return None
+
+    body = latest_bot_comment.get("body", "") or ""
+    if BOT_USAGE_LIMIT_COMMENT_RE.search(body):
+        kind = "usage_limit"
+    elif _is_bot_no_issues_issue_comment(body):
+        kind = "clear"
+    else:
+        kind = "other"
+
+    return {
+        "kind": kind,
+        "author": latest_bot_comment.get("author", {}).get("login", ""),
+        "body": body,
+        "createdAt": latest_bot_comment.get("createdAt", ""),
+    }
+
+
 def _is_bot_review_author(author: str) -> bool:
     if not author:
         return False
@@ -428,13 +506,28 @@ def _wait_for_bot_review_freshness(
             if log is not None:
                 log(f"Fresh {BOT_REVIEW_LOGIN} review observed for {head_sha[:8]}")
             return pr_data
+        issue_comment_outcome = _current_head_bot_issue_comment_outcome(pr_data)
+        if issue_comment_outcome is not None:
+            if log is not None:
+                if issue_comment_outcome["kind"] == "clear":
+                    log(
+                        f"Fresh {BOT_REVIEW_LOGIN} no-issues issue comment observed "
+                        f"for {head_sha[:8]}"
+                    )
+                else:
+                    log(
+                        f"Fresh {BOT_REVIEW_LOGIN} issue comment observed for "
+                        f"{head_sha[:8]} ({issue_comment_outcome['kind']})"
+                    )
+            return pr_data
         if time.time() >= deadline:
             raise TimeoutError(
-                f"No current-head {BOT_REVIEW_LOGIN} review for {head_sha[:8]} within {wait_seconds}s"
+                f"No current-head {BOT_REVIEW_LOGIN} review or issue-comment clearance "
+                f"for {head_sha[:8]} within {wait_seconds}s"
             )
         if log is not None:
             log(
-                f"Waiting for {BOT_REVIEW_LOGIN} review on {head_sha[:8]} "
+                f"Waiting for {BOT_REVIEW_LOGIN} review signal on {head_sha[:8]} "
                 f"({poll_interval}s poll)"
             )
         time.sleep(poll_interval)
@@ -886,6 +979,26 @@ def _run_post_commit_pipeline(
                 "errors": [f"Review query failed: {exc}"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
+
+    issue_comment_outcome = _current_head_bot_issue_comment_outcome(pr_data)
+    if issue_comment_outcome is not None:
+        if issue_comment_outcome["kind"] == "usage_limit":
+            return {"status": "error", "step": "ensure_review_clear_and_merge",
+                    "errors": [f"{BOT_REVIEW_LOGIN} issue comment reported usage-limit exhaustion"],
+                    "steps_completed": result["steps_completed"],
+                    "pr_number": pr_number}
+        if issue_comment_outcome["kind"] == "other":
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": [{
+                    "author": issue_comment_outcome["author"],
+                    "body": issue_comment_outcome["body"][:500],
+                    "path": "",
+                    "line": None,
+                }],
+                "pr_number": pr_number,
+                "steps_completed": result["steps_completed"],
+            }
 
     review_decision = pr_data.get("reviewDecision", "")
     if review_decision == "CHANGES_REQUESTED":
