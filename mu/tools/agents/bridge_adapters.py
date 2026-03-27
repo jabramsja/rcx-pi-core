@@ -220,15 +220,35 @@ def _kill_process_group(
         while tracked_pids and time.monotonic() < deadline:
             remaining: list[int] = []
             for pid in tracked_pids:
-                try:
-                    os.kill(pid, 0)
+                if _pid_is_live_non_zombie(pid):
                     remaining.append(pid)
-                except (OSError, ProcessLookupError):
-                    continue
             if not remaining:
                 break
             tracked_pids = remaining
             time.sleep(0.05)
+
+
+def _pid_is_live_non_zombie(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except (OSError, ProcessLookupError):
+        return False
+
+    try:
+        proc = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+
+    stat = proc.stdout.strip()
+    if not stat:
+        return False
+    return not stat.lstrip().startswith("Z")
 
 
 def _contains_complete_agent_envelope(text: str) -> bool:

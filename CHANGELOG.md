@@ -4,6 +4,33 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-27
 
+### Pipeline Test Run Review-Cycle Truth, Zombie Cleanup, And Canonical Receipt-Proof Paths
+
+- `commit_executor.py` now scopes unresolved bot-thread findings to the active
+  review cycle by requesting thread-comment timestamps, falling back to the
+  current-head connector review timestamp when needed, and ignoring stale prior
+  review-cycle bot threads that remained non-outdated on unchanged lines
+- `bridge_adapters.py` stale-timeout cleanup now treats zombie descendants as
+  exited instead of using `os.kill(pid, 0)` alone as the liveness probe
+- `meta_bridge_supervisor.py`, `bridge_supervisor.py`, and
+  `shared_agent_utils.py` now bind the receipt-authority proof contract to the
+  canonical live chain in `mu/tools/agents/meta_bridge_supervisor.py`,
+  `mu/tools/agents/meta_bridge_client.py`,
+  `mu/tools/executors/phase_b_executor.py`, and
+  `mu/tools/executors/commit_executor.py`, and explicitly reject legacy
+  aliases such as `mu/tools/executors/meta_bridge_client.py` and
+  `mu/tools/hooks/pre_commit_receipt.py`
+- `mu/tests/tools/test_executor_dispatch.py`,
+  `mu/tests/tools/test_agent_bridge_supervisor.py`,
+  `mu/tests/tools/test_meta_bridge_supervisor.py`, and
+  `mu/tests/tools/test_control_surface_review.py` now lock the active
+  review-cycle, zombie-aware cleanup, and canonical proof-path expectations
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Thirty-Second live stop honestly: the fresh per-invocation receipt
+  was present, but the next automated commit still failed closed because the
+  commit-local supervisor's focused proof script used dead legacy receipt-path
+  aliases
+
 ### Pipeline Test Run Terminal Decision And Review-Binding Hardening
 
 - `phase_a_executor.py` now recognizes terminal `Decision: STALE|ERROR|SYNTHETIC`

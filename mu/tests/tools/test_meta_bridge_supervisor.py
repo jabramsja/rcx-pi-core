@@ -190,6 +190,12 @@ class TestTemplateValidationFailureRouting:
         )
         prompt = meta.build_meta_reviewer_prompt(package, results, REPO_ROOT)
         assert "CONTROL-SURFACE REVIEW MODE" in prompt
+        assert "mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()" in prompt
+        assert "mu/tools/agents/meta_bridge_client.py::run_meta_bridge_package()" in prompt
+        assert "mu/tools/executors/phase_b_executor.py::prepare_commit_handoff()" in prompt
+        assert "mu/tools/executors/commit_executor.py" in prompt
+        assert "mu/tools/executors/meta_bridge_client.py" not in prompt
+        assert "mu/tools/hooks/pre_commit_receipt.py" not in prompt
 
     def test_prompt_includes_bounded_review_contract(self):
         package = {

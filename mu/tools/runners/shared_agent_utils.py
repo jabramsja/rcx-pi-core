@@ -137,8 +137,8 @@ CONTROL-SURFACE REVIEW MODE: These files are part of the Phase B / commit author
 When reviewing, inspect these cross-file invariants:
 1. Implementer must use bridge_adapters.run_adapter(), NOT bridge_supervisor review mode.
 2. Bridge loop must re-invoke implementer on REQUEST_CHANGES/NO_GO. QUESTION must fail closed.
-3. Receipt authority: write_pre_commit_receipt() returns per-invocation path. Client captures it directly.
-4. Canonical hook receipt must still be written. Executor flow uses per-invocation receipt.
+3. Receipt authority: use the canonical live chain only: mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt() -> mu/tools/agents/meta_bridge_client.py::run_meta_bridge_package() -> mu/tools/executors/phase_b_executor.py::prepare_commit_handoff() -> mu/tools/executors/commit_executor.py verification. The returned receipt path must be the exact per-invocation artifact.
+4. Canonical hook receipt must still be written by mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt() while executor flow uses the per-invocation receipt. Do not substitute legacy/nonexistent aliases.
 5. Protocol docs must not present manual git push/PR/merge as normal commit path.
 6. Do NOT invoke live control-plane surfaces from Bash while reviewing.
    That includes Phase A/B executors, executor_dispatch, commit_executor,

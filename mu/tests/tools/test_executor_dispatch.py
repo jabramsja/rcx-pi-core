@@ -2647,6 +2647,9 @@ class TestCommitContinuationAndBotFreshness:
     def test_pr_review_query_requests_thread_outdatedness(self):
         assert "isOutdated" in commit_mod.PR_REVIEW_QUERY
 
+    def test_pr_review_query_requests_thread_comment_timestamps(self):
+        assert "createdAt" in commit_mod.PR_REVIEW_QUERY
+
     def test_pr_review_query_requests_head_ref_oid(self):
         assert "headRefOid" in commit_mod.PR_REVIEW_QUERY
 
@@ -2983,6 +2986,217 @@ class TestCommitContinuationAndBotFreshness:
                 acknowledged_wait_seconds=1,
                 poll_interval=0,
             )
+
+    def test_post_commit_ignores_prior_cycle_unresolved_bot_threads(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "git_commit",
+                "hold_check",
+                "run_pre_push_script",
+                "git_push",
+                "ensure_pr",
+                "wait_ci",
+            ],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+            "pr_number": "673",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="dev\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                payload = {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "headRefOid": "abc123",
+                                "reviewDecision": "",
+                                "latestReviews": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                            "state": "COMMENTED",
+                                            "submittedAt": "2026-03-27T07:40:00Z",
+                                            "commit": {"oid": "abc123"},
+                                        }
+                                    ]
+                                },
+                                "reviewThreads": {
+                                    "nodes": [
+                                        {
+                                            "isResolved": False,
+                                            "isOutdated": False,
+                                            "comments": {
+                                                "nodes": [
+                                                    {
+                                                        "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                                        "body": "prior-cycle finding",
+                                                        "path": "x.py",
+                                                        "line": 1,
+                                                        "createdAt": "2026-03-27T07:35:00Z",
+                                                    }
+                                                ]
+                                            },
+                                        }
+                                    ]
+                                },
+                                "comments": {"nodes": []},
+                            }
+                        }
+                    }
+                }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: Step 15 must ignore prior-cycle unresolved bot threads
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert "merge_sha" in post_commit
+
+    def test_post_commit_reports_only_current_cycle_bot_threads(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "git_commit",
+                "hold_check",
+                "run_pre_push_script",
+                "git_push",
+                "ensure_pr",
+                "wait_ci",
+            ],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+            "pr_number": "673",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                payload = {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "headRefOid": "abc123",
+                                "reviewDecision": "",
+                                "latestReviews": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                            "state": "COMMENTED",
+                                            "submittedAt": "2026-03-27T07:40:00Z",
+                                            "commit": {"oid": "abc123"},
+                                        }
+                                    ]
+                                },
+                                "reviewThreads": {
+                                    "nodes": [
+                                        {
+                                            "isResolved": False,
+                                            "isOutdated": False,
+                                            "comments": {
+                                                "nodes": [
+                                                    {
+                                                        "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                                        "body": "prior-cycle finding",
+                                                        "path": "old.py",
+                                                        "line": 1,
+                                                        "createdAt": "2026-03-27T07:35:00Z",
+                                                    }
+                                                ]
+                                            },
+                                        },
+                                        {
+                                            "isResolved": False,
+                                            "isOutdated": False,
+                                            "comments": {
+                                                "nodes": [
+                                                    {
+                                                        "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                                        "body": "current-cycle finding",
+                                                        "path": "new.py",
+                                                        "line": 9,
+                                                        "createdAt": "2026-03-27T07:41:00Z",
+                                                    }
+                                                ]
+                                            },
+                                        },
+                                    ]
+                                },
+                                "comments": {"nodes": []},
+                            }
+                        }
+                    }
+                }
+                return completed(cmd, stdout=json.dumps(payload))
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: Step 15 must scope bot findings to the active review cycle
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["status"] == "bot_findings_pending"
+        assert post_commit["bot_findings"] == [
+            {
+                "author": commit_mod.BOT_REVIEW_LOGIN,
+                "body": "current-cycle finding",
+                "path": "new.py",
+                "line": 9,
+            }
+        ]
 
     def test_bot_review_request_acknowledgement_detects_connector_eyes_reaction(self, tmp_path, monkeypatch):
         repo = tmp_path

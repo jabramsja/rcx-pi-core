@@ -103,12 +103,13 @@ query($owner: String!, $repo: String!, $number: Int!) {
         nodes {
           isResolved
           isOutdated
-          comments(first: 1) {
+          comments(last: 20) {
             nodes {
               author { login }
               body
               path
               line
+              createdAt
             }
           }
         }
@@ -548,6 +549,43 @@ def _latest_bot_review_request_timestamp(pr_data: dict[str, Any]) -> str | None:
     return created_at
 
 
+def _latest_current_head_connector_review_timestamp(
+    pr_data: dict[str, Any],
+    head_sha: str,
+) -> str | None:
+    if not _pr_head_matches_expected(pr_data, head_sha):
+        return None
+    latest_timestamp: str | None = None
+    latest_reviews = pr_data.get("latestReviews", {}).get("nodes", [])
+    if not isinstance(latest_reviews, list):
+        return None
+    for review in latest_reviews:
+        if not isinstance(review, dict):
+            continue
+        author = review.get("author", {}).get("login", "")
+        commit_oid = review.get("commit", {}).get("oid", "")
+        submitted_at = review.get("submittedAt", "")
+        if not _is_connector_review_author(author) or commit_oid != head_sha:
+            continue
+        if not isinstance(submitted_at, str) or not submitted_at:
+            continue
+        if latest_timestamp is None or submitted_at > latest_timestamp:
+            latest_timestamp = submitted_at
+    return latest_timestamp
+
+
+def _current_review_cycle_floor_timestamp(
+    pr_data: dict[str, Any],
+    head_sha: str,
+) -> str | None:
+    if not _pr_head_matches_expected(pr_data, head_sha):
+        return None
+    latest_request_at = _latest_bot_review_request_timestamp(pr_data)
+    if latest_request_at is not None:
+        return latest_request_at
+    return _latest_current_head_connector_review_timestamp(pr_data, head_sha)
+
+
 def _parse_github_timestamp_seconds(timestamp: str) -> float | None:
     if not isinstance(timestamp, str) or not timestamp:
         return None
@@ -559,6 +597,36 @@ def _parse_github_timestamp_seconds(timestamp: str) -> float | None:
 
 def _is_bot_no_issues_issue_comment(body: str) -> bool:
     return bool(BOT_NO_ISSUES_COMMENT_RE.search(body or ""))
+
+
+def _latest_relevant_thread_comment(
+    thread: dict[str, Any],
+    *,
+    floor_timestamp: str | None,
+) -> dict[str, Any] | None:
+    comments = thread.get("comments", {}).get("nodes", [])
+    if not isinstance(comments, list):
+        return None
+    floor_seconds = _parse_github_timestamp_seconds(floor_timestamp or "")
+    latest_comment: dict[str, Any] | None = None
+    latest_seconds: float | None = None
+    for comment in comments:
+        if not isinstance(comment, dict):
+            continue
+        created_at = comment.get("createdAt", "")
+        created_seconds = _parse_github_timestamp_seconds(created_at)
+        if floor_seconds is not None and (created_seconds is None or created_seconds < floor_seconds):
+            continue
+        if latest_comment is None:
+            latest_comment = comment
+            latest_seconds = created_seconds
+            continue
+        if created_seconds is None:
+            continue
+        if latest_seconds is None or created_seconds >= latest_seconds:
+            latest_comment = comment
+            latest_seconds = created_seconds
+    return latest_comment
 
 
 def _current_head_connector_issue_comment_outcome(
@@ -1331,14 +1399,21 @@ def _run_post_commit_pipeline(
                     "pr_number": pr_number}
 
     threads = pr_data.get("reviewThreads", {}).get("nodes", [])
+    current_review_cycle_floor = _current_review_cycle_floor_timestamp(
+        pr_data,
+        head_sha_before_merge,
+    )
     bot_findings = []
     for thread in threads:
         if thread.get("isResolved"):
             continue
-        comments = thread.get("comments", {}).get("nodes", [])
-        if not comments:
+        latest_comment = _latest_relevant_thread_comment(
+            thread,
+            floor_timestamp=current_review_cycle_floor,
+        )
+        if latest_comment is None:
             continue
-        author = comments[0].get("author", {}).get("login", "")
+        author = latest_comment.get("author", {}).get("login", "")
         is_bot = _is_bot_review_author(author)
         if not is_bot:
             return {"status": "error", "step": "ensure_review_clear_and_merge",
@@ -1349,9 +1424,9 @@ def _run_post_commit_pipeline(
             continue
         bot_findings.append({
             "author": author,
-            "body": comments[0].get("body", "")[:500],
-            "path": comments[0].get("path", ""),
-            "line": comments[0].get("line"),
+            "body": latest_comment.get("body", "")[:500],
+            "path": latest_comment.get("path", ""),
+            "line": latest_comment.get("line"),
         })
 
     if bot_findings:

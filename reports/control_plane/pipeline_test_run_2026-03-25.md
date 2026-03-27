@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Thirtieth live follow-up on 2026-03-27 pushed the boring-path automation through local commit, pre-push, push, PR reuse, required CI, and fresh current-head bot review on head `0335fe6`. The current stop is a two-finding Step 15 follow-up: `mu/tools/executors/phase_a_executor.py` still needed to treat terminal `ERROR/STALE/SYNTHETIC` reviewer decisions as authoritative final outcomes, and `mu/tools/executors/commit_executor.py` still needed to require a recorded current-head review request before reusing a clear connector issue comment. The active follow-up hardens both fail-closed paths and locks them in executor regressions.
+Status: Thirty-Second live follow-up on 2026-03-27 confirmed that the fresh per-invocation receipt path is no longer the blocker. After the boring-path automation passed CI and fresh current-head bot review on head `fa7ce400`, the next automated `commit` rerun issued a fresh receipt but still failed closed at Step 6 because the commit-local meta-review's focused receipt-authority proof chased dead legacy paths (`mu/tools/executors/meta_bridge_client.py` and `mu/tools/hooks/pre_commit_receipt.py`) instead of the live control-surface chain. The active follow-up preserves the Step 15 review-cycle truth and zombie-cleanup fixes, then binds the proof contract to the canonical live files and locks that in regressions.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -811,6 +811,62 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   a narrow dual-path hardening: Phase A must fail closed on terminal final
   bridge decisions, and Step 15 must only trust a clear issue comment when the
   continuation record already binds that request to the current head SHA.
+
+## Thirty-First Live Stop (2026-03-27)
+
+- After the terminal-decision / request-binding follow-up was committed locally
+  as `fa7ce400` (`fix: harden review-decision fail-closed paths`), the
+  automated `commit` executor again cleared Step 6 supervisor, Step 7 receipt
+  verification, Step 8 pre-commit, Step 9 local commit creation, Step 11
+  pre-push, Step 12 push, and Step 13 PR reuse on `#673`.
+- Step 14 then passed cleanly on head
+  `fa7ce40066a53b3af7ff1b4acca05ff695141c21`: the required `test` workflow
+  completed at `2026-03-27T14:35:49Z` and `green-gate` completed at
+  `2026-03-27T14:36:07Z`.
+- Step 15 exercised the current-head review path again. The executor posted a
+  fresh `@codex review` request at `2026-03-27T14:36:14Z`, observed the
+  connector `eyes` acknowledgement, and received a fresh connector review on
+  `fa7ce400` at `2026-03-27T14:44:48Z`.
+- That fresh review surfaced one real new current-head finding plus one Step 15
+  review-state truth gap. The real current-head finding is on
+  `mu/tools/agents/bridge_adapters.py:225`: stale-timeout cleanup still used
+  `os.kill(pid, 0)` as a liveness probe, so zombie descendants could be treated
+  as still alive and make cleanup look incomplete. The review-state truth gap is
+  in `mu/tools/executors/commit_executor.py`: Step 15 still collected any
+  unresolved non-outdated bot thread on the PR, even when that thread's latest
+  comment predated the latest current-head `@codex review` request and belonged
+  to the prior review cycle.
+- Result: the boring-path stop moved again and stays honest. The next fix is a
+  narrow two-surface hardening: Step 15 must scope bot findings to the active
+  review cycle, and stale-timeout cleanup must treat zombies as exited.
+
+## Thirty-Second Live Stop (2026-03-27)
+
+- After the Step 15 review-cycle / zombie-cleanup follow-up was staged locally,
+  rerunning
+  `python3 mu/tools/executors/executor_dispatch.py pre-commit-supervisor --package .scratch/pipeline_test_run_followup_package.json -v --json`
+  returned `COMMIT_GO` again and issued a fresh per-invocation receipt at
+  `.agent_bus/meta/pre_commit_receipts/receipt_2026-03-27T15-02-32p00-00_22641999.json`.
+- The next automated rerun,
+  `python3 mu/tools/executors/executor_dispatch.py commit --handoff .agent_bus/executors/phase_b_handoff.json -v --json`,
+  did not fail on receipt freshness or receipt-path selection. It failed closed
+  at Step 6 commit-local meta-review.
+- The exact stop was control-plane proof drift, not stale receipt state. The
+  focused review command set still attempted to inspect
+  `mu/tools/executors/meta_bridge_client.py` and
+  `mu/tools/hooks/pre_commit_receipt.py`, both of which are dead legacy paths.
+  Because the reviewer spent its bounded command budget on nonexistent files,
+  the receipt-authority obligation could not be directly verified and the
+  supervisor returned `NEEDS_PHASE_B`.
+- The live canonical receipt-authority chain at this stop is:
+  `mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()` ->
+  `mu/tools/agents/meta_bridge_client.py::run_meta_bridge_package()` ->
+  `mu/tools/executors/phase_b_executor.py::prepare_commit_handoff()` ->
+  `mu/tools/executors/commit_executor.py` receipt verification.
+- Result: the boring-path stop moved again and stays honest. The next fix is
+  prompt-contract hardening, not receipt regeneration: all control-surface
+  review surfaces must anchor receipt-authority proof to the canonical live
+  files and explicitly reject the dead legacy aliases.
 
 ## Next Mechanical Questions
 

@@ -179,8 +179,8 @@ You MUST inspect the following cross-file invariants. Do NOT greenlight on summa
 Proof obligations:
 1. **Implementer surface**: Read `mu/tools/executors/phase_b_implementer.py`. Verify it uses `bridge_adapters.run_adapter()` directly. It must NOT invoke `bridge_supervisor.py review` (that is review-only).
 2. **Bridge loop mechanics**: Read the bridge convergence loop in `mu/tools/executors/phase_b_executor.py`. Verify that `REQUEST_CHANGES` / `NO_GO` re-invoke the implementer with findings BEFORE the next bridge round. `QUESTION` must fail closed (not loop).
-3. **Receipt authority chain**: Trace the path: `meta_bridge_supervisor.write_pre_commit_receipt()` → return value → `meta_bridge_client.run_meta_bridge_package()` → `receipt_path` field → `prepare_commit_handoff()` → `commit_executor` verification. The per-invocation receipt path must be exact, not discovered by sorting a directory.
-4. **Canonical hook receipt preserved**: `write_pre_commit_receipt` must still write the canonical receipt for hook compatibility. But the EXECUTOR flow must use the per-invocation receipt, not canonical.
+3. **Receipt authority chain**: Trace the canonical live path only: `mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()` → return value → `mu/tools/agents/meta_bridge_client.py::run_meta_bridge_package()` → `receipt_path` field → `mu/tools/executors/phase_b_executor.py::prepare_commit_handoff()` → `mu/tools/executors/commit_executor.py` verification. The per-invocation receipt path must be exact, not discovered by sorting a directory.
+4. **Canonical hook receipt preserved**: `mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()` must still write the canonical receipt for hook compatibility. But the EXECUTOR flow must use the per-invocation receipt, not canonical. Do not use legacy/nonexistent aliases when verifying this chain.
 5. **No manual fallback in docs**: Protocol docs must not present manual git push/PR/merge as a normal commit path. Only narrow BOOTSTRAP_PHASE_B_EXCEPTION is allowed.
 
 Adjacent files you MUST read (not just the diff):

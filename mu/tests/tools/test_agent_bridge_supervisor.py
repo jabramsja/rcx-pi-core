@@ -541,7 +541,7 @@ time.sleep(30.0)
 def test_kill_process_group_waits_for_tracked_pids_to_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     kill_calls: list[tuple[str, int, int]] = []
     sleeps: list[float] = []
-    probe_counts = {7001: 0, 7002: 0}
+    liveness_counts = {7001: 0, 7002: 0}
     clock = {"value": 0.0}
 
     class _FakeProc:
@@ -557,12 +557,11 @@ def test_kill_process_group_waits_for_tracked_pids_to_exit(monkeypatch: pytest.M
         kill_calls.append(("pg", pid, int(sig)))
 
     def fake_kill(pid: int, sig: int) -> None:
-        if sig == 0:
-            probe_counts[pid] += 1
-            if probe_counts[pid] < 3:
-                return
-            raise ProcessLookupError
         kill_calls.append(("pid", pid, int(sig)))
+
+    def fake_pid_is_live_non_zombie(pid: int) -> bool:
+        liveness_counts[pid] += 1
+        return liveness_counts[pid] < 3
 
     def fake_monotonic() -> float:
         clock["value"] += 0.01
@@ -571,6 +570,7 @@ def test_kill_process_group_waits_for_tracked_pids_to_exit(monkeypatch: pytest.M
     monkeypatch.setattr(adapters, "_process_tree_fingerprint", fake_fingerprint)
     monkeypatch.setattr(adapters.os, "killpg", fake_killpg)
     monkeypatch.setattr(adapters.os, "kill", fake_kill)
+    monkeypatch.setattr(adapters, "_pid_is_live_non_zombie", fake_pid_is_live_non_zombie)
     monkeypatch.setattr(adapters.time, "monotonic", fake_monotonic)
     monkeypatch.setattr(adapters.time, "sleep", lambda seconds: sleeps.append(seconds))
 
@@ -579,7 +579,18 @@ def test_kill_process_group_waits_for_tracked_pids_to_exit(monkeypatch: pytest.M
     assert ("pg", 7001, int(adapters.signal.SIGKILL)) in kill_calls
     assert ("pid", 7002, int(adapters.signal.SIGKILL)) in kill_calls
     assert sleeps
-    assert probe_counts[7002] >= 3
+    assert liveness_counts[7002] >= 3
+
+
+def test_pid_is_live_non_zombie_rejects_zombie(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(adapters.os, "kill", lambda pid, sig: None)
+
+    def fake_run(*_args, **_kwargs):
+        return subprocess.CompletedProcess(["ps"], 0, stdout="Z+\n", stderr="")
+
+    monkeypatch.setattr(adapters.subprocess, "run", fake_run)
+
+    assert not adapters._pid_is_live_non_zombie(7001)  # ANTICHEAT_OK: testing zombie-aware liveness helper directly
 
 
 def test_init_db_creates_runtime_paths_and_config(tmp_path: Path) -> None:
