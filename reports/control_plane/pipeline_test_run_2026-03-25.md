@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Thirty-Third live follow-up on 2026-03-27 confirmed that the canonical receipt-authority chain is no longer the blocker. After the automated rerun resumed from local commit `5989b55`, passed pre-push, push, PR reuse, required CI, and received a fresh current-head connector review at `2026-03-27T15:53:35Z`, Step 15 still failed closed on two remaining control-plane defects: `commit_executor.py` preferred an older `@codex review` request over the newer current-head review when deriving the review-cycle floor, and `bridge_adapters.py` stale-timeout cleanup treated zombie descendants as fully gone before their PIDs disappeared. The active follow-up narrows to those two surfaces and locks both regressions.
+Status: Thirty-Fourth live follow-up on 2026-03-27 confirmed that the current-head review-floor and zombie-presence cleanup slice is no longer the blocker. That implementation landed locally as `cfe94c6`, and the next automated rerun failed earlier at Step 10 `pre-push-fast` only because the new direct helper regression in `mu/tests/tools/test_executor_dispatch.py` lacked the required `# ANTICHEAT_OK` annotation. The active follow-up narrows to that one-line anti-cheat allowlist plus packet/tracker truth sync.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -891,6 +891,31 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
 - Result: the boring-path stop moved again and stays honest. The next fix is a
   narrow current-head review-floor and zombie-presence cleanup follow-up, not a
   broader redesign or a return to the receipt-proof lane.
+
+## Thirty-Fourth Live Stop (2026-03-27)
+
+- After the current-head review-floor and zombie-presence cleanup follow-up
+  landed locally as commit `cfe94c6`
+  (`fix: harden pipeline review-cycle cleanup`), rerunning
+  `python3 mu/tools/executors/executor_dispatch.py commit --handoff .agent_bus/executors/phase_b_handoff.json -v --json`
+  advanced through Step 6 supervisor `COMMIT_GO`, Step 7 receipt verification,
+  Step 8 pre-commit, and Step 9 local commit creation before stopping at Step
+  10 `run_pre_push_script`.
+- Direct repro removed any package ambiguity:
+  `bash mu/tools/hooks/pre-push-fast` failed only because the anti-cheat scan
+  flagged the new direct call to
+  `_current_head_connector_issue_comment_outcome(...)` in
+  `mu/tests/tools/test_executor_dispatch.py` as private-helper access without a
+  matching `# ANTICHEAT_OK` marker.
+- Repo truth showed this is a policy-annotation mismatch, not a broken
+  regression. The direct helper assertion is intentional proof for the
+  current-head issue-comment freshness path, it already passes focused pytest,
+  and the full `pre-push-fast` gate also passes once the explicit anti-cheat
+  allowance is present.
+- Result: the boring-path stop moved again and stays honest. The next fix is a
+  one-line anti-cheat annotation plus packet/tracker truth sync for the narrow
+  post-commit follow-up, then another automated commit rerun from the bounded
+  continuation boundary.
 
 ## Next Mechanical Questions
 

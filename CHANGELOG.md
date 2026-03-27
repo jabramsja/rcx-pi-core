@@ -4,7 +4,7 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-27
 
-### Pipeline Test Run Current-Head Review-Cycle Floor And Zombie Presence Cleanup
+### Pipeline Test Run Current-Head Review-Cycle Floor, Zombie Cleanup, And Post-Commit Anti-Cheat Follow-Up
 
 - `commit_executor.py` Step 15 now uses the fresher of the latest
   `@codex review` request and the latest current-head connector review as the
@@ -17,10 +17,18 @@ All notable changes to RCX are documented in this file.
 - `mu/tests/tools/test_executor_dispatch.py` and
   `mu/tests/tools/test_agent_bridge_supervisor.py` now lock the current-head
   review-floor regression and the zombie-presence cleanup regression directly
+- `mu/tests/tools/test_executor_dispatch.py` now also marks the direct
+  Step 15 issue-comment freshness helper regression with `# ANTICHEAT_OK`, so
+  the intentional private-helper proof survives the post-commit anti-cheat scan
 - `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
   record the Thirty-Third live stop honestly: head `5989b55` passed CI,
   received a fresh current-head connector review, and then surfaced these two
   remaining control-plane defects
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  also record the Thirty-Fourth live stop honestly: after automated local
+  commit `cfe94c6`, the next rerun stopped at Step 10 `pre-push-fast` only
+  because the new direct helper regression lacked the required anti-cheat
+  annotation
 
 ### Pipeline Test Run Review-Cycle Truth, Zombie Cleanup, And Canonical Receipt-Proof Paths
 

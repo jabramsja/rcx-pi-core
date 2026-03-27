@@ -3243,7 +3243,7 @@ class TestCommitContinuationAndBotFreshness:
             },
         }
 
-        assert commit_mod._current_head_connector_issue_comment_outcome(pr_data, "abc123") is None
+        assert commit_mod._current_head_connector_issue_comment_outcome(pr_data, "abc123") is None  # ANTICHEAT_OK: testing connector issue-comment freshness helper against newer current-head review floor
 
     def test_bot_review_request_acknowledgement_detects_connector_eyes_reaction(self, tmp_path, monkeypatch):
         repo = tmp_path
