@@ -89,6 +89,7 @@ PR_REVIEW_QUERY = """
 query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
+      headRefOid
       reviewDecision
       latestReviews(first: 20) {
         nodes {
@@ -447,7 +448,25 @@ def _query_pr_review_state(
     return pr_data
 
 
-def _has_fresh_bot_review(pr_data: dict[str, Any], head_sha: str) -> bool:
+def _pr_head_matches_expected(pr_data: dict[str, Any], head_sha: str) -> bool:
+    pr_head = pr_data.get("headRefOid", "")
+    return isinstance(pr_head, str) and pr_head == head_sha
+
+
+def _assert_expected_pr_head(pr_data: dict[str, Any], head_sha: str) -> None:
+    pr_head = pr_data.get("headRefOid", "")
+    if not isinstance(pr_head, str) or not pr_head:
+        raise ValueError("PR review query missing headRefOid")
+    if pr_head != head_sha:
+        raise ValueError(
+            f"PR head moved from expected {head_sha[:8]} to {pr_head[:8]} "
+            f"while waiting for {BOT_REVIEW_LOGIN}"
+        )
+
+
+def _has_fresh_connector_review(pr_data: dict[str, Any], head_sha: str) -> bool:
+    if not _pr_head_matches_expected(pr_data, head_sha):
+        return False
     latest_reviews = pr_data.get("latestReviews", {}).get("nodes", [])
     if not isinstance(latest_reviews, list):
         return False
@@ -508,7 +527,12 @@ def _is_bot_no_issues_issue_comment(body: str) -> bool:
     return bool(BOT_NO_ISSUES_COMMENT_RE.search(body or ""))
 
 
-def _current_head_bot_issue_comment_outcome(pr_data: dict[str, Any]) -> dict[str, Any] | None:
+def _current_head_connector_issue_comment_outcome(
+    pr_data: dict[str, Any],
+    head_sha: str,
+) -> dict[str, Any] | None:
+    if not _pr_head_matches_expected(pr_data, head_sha):
+        return None
     latest_request_at = _latest_bot_review_request_timestamp(pr_data)
     if latest_request_at is None:
         return None
@@ -617,11 +641,12 @@ def _wait_for_bot_review_freshness(
     while True:
         pr_data = query_pr_state()
         last_pr_data = pr_data
-        if _has_fresh_bot_review(pr_data, head_sha):
+        _assert_expected_pr_head(pr_data, head_sha)
+        if _has_fresh_connector_review(pr_data, head_sha):
             if log is not None:
                 log(f"Fresh {BOT_REVIEW_LOGIN} review observed for {head_sha[:8]}")
             return pr_data
-        issue_comment_outcome = _current_head_bot_issue_comment_outcome(pr_data)
+        issue_comment_outcome = _current_head_connector_issue_comment_outcome(pr_data, head_sha)
         if issue_comment_outcome is not None:
             if log is not None:
                 if issue_comment_outcome["kind"] == "clear":
@@ -1153,7 +1178,8 @@ def _run_post_commit_pipeline(
             repo_name=repo_name,
             pr_number=pr_number,
         )
-        if not _has_fresh_bot_review(pr_data, head_sha_before_merge):
+        _assert_expected_pr_head(pr_data, head_sha_before_merge)
+        if not _has_fresh_connector_review(pr_data, head_sha_before_merge):
             _maybe_request_current_head_bot_review(
                 repo_root,
                 pr_number=pr_number,
@@ -1189,7 +1215,11 @@ def _run_post_commit_pipeline(
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
 
-    issue_comment_outcome = _current_head_bot_issue_comment_outcome(pr_data)
+    _assert_expected_pr_head(pr_data, head_sha_before_merge)
+    issue_comment_outcome = _current_head_connector_issue_comment_outcome(
+        pr_data,
+        head_sha_before_merge,
+    )
     if issue_comment_outcome is not None:
         if issue_comment_outcome["kind"] == "usage_limit":
             return {"status": "error", "step": "ensure_review_clear_and_merge",

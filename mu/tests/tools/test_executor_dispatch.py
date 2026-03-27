@@ -2521,8 +2521,9 @@ class TestCommitContinuationAndBotFreshness:
         assert not continuation_path.exists()
         mock_helper.assert_not_called()
 
-    def test_has_fresh_bot_review_requires_current_head_commit(self):
+    def test_has_fresh_connector_review_requires_current_head_commit(self):
         pr_data = {
+            "headRefOid": "abc123",
             "latestReviews": {
                 "nodes": [
                     {
@@ -2538,8 +2539,8 @@ class TestCommitContinuationAndBotFreshness:
                 ]
             }
         }
-        assert commit_mod._has_fresh_bot_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing bot-review freshness helper
-        assert commit_mod._has_fresh_bot_review(pr_data, "def456") is False  # ANTICHEAT_OK: testing bot-review freshness helper
+        assert commit_mod._has_fresh_connector_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing connector-review freshness helper
+        assert commit_mod._has_fresh_connector_review(pr_data, "def456") is False  # ANTICHEAT_OK: testing connector-review freshness helper
 
     def test_wait_for_bot_review_freshness_polls_until_current_head_review(self):
         calls = {"count": 0}
@@ -2547,8 +2548,9 @@ class TestCommitContinuationAndBotFreshness:
         def query_state():
             calls["count"] += 1
             if calls["count"] == 1:
-                return {"latestReviews": {"nodes": []}}
+                return {"headRefOid": "abc123", "latestReviews": {"nodes": []}}
             return {
+                "headRefOid": "abc123",
                 "latestReviews": {
                     "nodes": [
                         {
@@ -2569,7 +2571,7 @@ class TestCommitContinuationAndBotFreshness:
             )
 
         assert calls["count"] == 2
-        assert commit_mod._has_fresh_bot_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing bot-review freshness helper
+        assert commit_mod._has_fresh_connector_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing connector-review freshness helper
 
     def test_bot_review_author_helper_accepts_connector_login(self):
         assert commit_mod._is_bot_review_author(commit_mod.BOT_REVIEW_LOGIN) is True  # ANTICHEAT_OK: testing bot-review author helper
@@ -2585,8 +2587,12 @@ class TestCommitContinuationAndBotFreshness:
     def test_pr_review_query_requests_thread_outdatedness(self):
         assert "isOutdated" in commit_mod.PR_REVIEW_QUERY
 
-    def test_current_head_bot_issue_comment_outcome_requires_clear_comment_after_latest_request(self):
+    def test_pr_review_query_requests_head_ref_oid(self):
+        assert "headRefOid" in commit_mod.PR_REVIEW_QUERY
+
+    def test_current_head_connector_issue_comment_outcome_requires_clear_comment_after_latest_request(self):
         pr_data = {
+            "headRefOid": "abc123",
             "comments": {
                 "nodes": [
                     {
@@ -2603,11 +2609,15 @@ class TestCommitContinuationAndBotFreshness:
             }
         }
 
-        outcome = commit_mod._current_head_bot_issue_comment_outcome(pr_data)  # ANTICHEAT_OK: testing bot issue-comment freshness helper
+        outcome = commit_mod._current_head_connector_issue_comment_outcome(  # ANTICHEAT_OK: testing connector issue-comment freshness helper
+            pr_data,
+            "abc123",
+        )
         assert outcome is not None
         assert outcome["kind"] == "clear"
 
         stale_pr_data = {
+            "headRefOid": "abc123",
             "comments": {
                 "nodes": [
                     {
@@ -2624,10 +2634,11 @@ class TestCommitContinuationAndBotFreshness:
             }
         }
 
-        assert commit_mod._current_head_bot_issue_comment_outcome(stale_pr_data) is None  # ANTICHEAT_OK: testing bot issue-comment freshness helper
+        assert commit_mod._current_head_connector_issue_comment_outcome(stale_pr_data, "abc123") is None  # ANTICHEAT_OK: testing connector issue-comment freshness helper
 
-    def test_current_head_bot_issue_comment_outcome_ignores_non_connector_bot(self):
+    def test_current_head_connector_issue_comment_outcome_ignores_non_connector_bot(self):
         pr_data = {
+            "headRefOid": "abc123",
             "comments": {
                 "nodes": [
                     {
@@ -2644,7 +2655,28 @@ class TestCommitContinuationAndBotFreshness:
             }
         }
 
-        assert commit_mod._current_head_bot_issue_comment_outcome(pr_data) is None  # ANTICHEAT_OK: testing connector-only issue-comment freshness helper
+        assert commit_mod._current_head_connector_issue_comment_outcome(pr_data, "abc123") is None  # ANTICHEAT_OK: testing connector-only issue-comment freshness helper
+
+    def test_current_head_connector_issue_comment_outcome_requires_expected_head(self):
+        pr_data = {
+            "headRefOid": "other456",
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T10:14:29Z",
+                    },
+                    {
+                        "author": {"login": "chatgpt-codex-connector[bot]"},
+                        "body": "Codex Review: Didn't find any major issues. Swish!",
+                        "createdAt": "2026-03-27T10:15:00Z",
+                    },
+                ]
+            },
+        }
+
+        assert commit_mod._current_head_connector_issue_comment_outcome(pr_data, "abc123") is None  # ANTICHEAT_OK: commit-bound issue-comment freshness helper
 
     def test_wait_for_bot_review_freshness_accepts_no_issues_issue_comment(self):
         calls = {"count": 0}
@@ -2653,6 +2685,7 @@ class TestCommitContinuationAndBotFreshness:
             calls["count"] += 1
             if calls["count"] == 1:
                 return {
+                    "headRefOid": "abc123",
                     "latestReviews": {"nodes": []},
                     "comments": {
                         "nodes": [
@@ -2665,6 +2698,7 @@ class TestCommitContinuationAndBotFreshness:
                     },
                 }
             return {
+                "headRefOid": "abc123",
                 "latestReviews": {"nodes": []},
                 "comments": {
                     "nodes": [
@@ -2691,7 +2725,7 @@ class TestCommitContinuationAndBotFreshness:
             )
 
         assert calls["count"] == 2
-        outcome = commit_mod._current_head_bot_issue_comment_outcome(pr_data)  # ANTICHEAT_OK: testing bot issue-comment freshness helper
+        outcome = commit_mod._current_head_connector_issue_comment_outcome(pr_data, "abc123")  # ANTICHEAT_OK: testing connector issue-comment freshness helper
         assert outcome is not None
         assert outcome["kind"] == "clear"
 
@@ -2762,6 +2796,7 @@ class TestCommitContinuationAndBotFreshness:
                         "repository": {
                             "pullRequest": {
                                 "reviewDecision": "",
+                                "headRefOid": "abc123",
                                 "latestReviews": {
                                     "nodes": [
                                         {
@@ -2821,9 +2856,19 @@ class TestCommitContinuationAndBotFreshness:
         with patch.object(commit_mod.time, "sleep", return_value=None):
             with pytest.raises(TimeoutError, match="No current-head"):
                 commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: testing timeout fail-closed helper
-                    lambda: {"latestReviews": {"nodes": []}},
+                    lambda: {"headRefOid": "abc123", "latestReviews": {"nodes": []}},
                     head_sha="abc123",
                     wait_seconds=0,
+                    poll_interval=0,
+                )
+
+    def test_wait_for_bot_review_freshness_fails_closed_on_pr_head_change(self):
+        with patch.object(commit_mod.time, "sleep", return_value=None):
+            with pytest.raises(ValueError, match="PR head moved from expected"):
+                commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: testing PR-head binding in freshness wait
+                    lambda: {"headRefOid": "other456", "latestReviews": {"nodes": []}, "comments": {"nodes": []}},
+                    head_sha="abc123",
+                    wait_seconds=1,
                     poll_interval=0,
                 )
 
@@ -2833,8 +2878,9 @@ class TestCommitContinuationAndBotFreshness:
         def query_state():
             query_calls["count"] += 1
             if query_calls["count"] < 3:
-                return {"latestReviews": {"nodes": []}, "comments": {"nodes": []}}
+                return {"headRefOid": "abc123", "latestReviews": {"nodes": []}, "comments": {"nodes": []}}
             return {
+                "headRefOid": "abc123",
                 "latestReviews": {
                     "nodes": [
                         {
@@ -2858,10 +2904,10 @@ class TestCommitContinuationAndBotFreshness:
             request_acknowledged=lambda _: True,
             acknowledged_wait_seconds=5,
             poll_interval=0,
-        )
+            )
 
         assert query_calls["count"] == 3
-        assert commit_mod._has_fresh_bot_review(pr_data, "abc123")  # ANTICHEAT_OK: verifying review freshness helper
+        assert commit_mod._has_fresh_connector_review(pr_data, "abc123")  # ANTICHEAT_OK: verifying review freshness helper
 
     def test_wait_for_bot_review_freshness_acknowledgement_does_not_clear_without_review(self, monkeypatch):
         time_points = iter([0.0, 0.2, 1.1])
@@ -2870,7 +2916,7 @@ class TestCommitContinuationAndBotFreshness:
 
         with pytest.raises(TimeoutError, match="No current-head"):
             commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: acknowledgement must not substitute for review clearance
-                lambda: {"latestReviews": {"nodes": []}, "comments": {"nodes": []}},
+                lambda: {"headRefOid": "abc123", "latestReviews": {"nodes": []}, "comments": {"nodes": []}},
                 head_sha="abc123",
                 wait_seconds=0,
                 request_acknowledged=lambda _: True,
@@ -3017,6 +3063,7 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
+                                    "headRefOid": "abc123",
                                     "reviewDecision": "",
                                     "latestReviews": {"nodes": []},
                                     "reviewThreads": {"nodes": []},
@@ -3029,6 +3076,7 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
+                                    "headRefOid": "abc123",
                                     "reviewDecision": "",
                                     "latestReviews": {
                                         "nodes": [
@@ -3131,6 +3179,7 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
+                                    "headRefOid": "abc123",
                                     "reviewDecision": "",
                                     "latestReviews": {"nodes": []},
                                     "reviewThreads": {"nodes": []},
@@ -3144,6 +3193,7 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
+                                    "headRefOid": "abc123",
                                     "reviewDecision": "",
                                     "latestReviews": {"nodes": []},
                                     "reviewThreads": {"nodes": []},
@@ -3259,6 +3309,7 @@ class TestCommitContinuationAndBotFreshness:
                     "data": {
                         "repository": {
                             "pullRequest": {
+                                "headRefOid": "abc123",
                                 "reviewDecision": "",
                                 "latestReviews": {
                                     "nodes": [
@@ -3364,6 +3415,7 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
+                                    "headRefOid": "abc123",
                                     "reviewDecision": "",
                                     "latestReviews": {"nodes": []},
                                     "reviewThreads": {"nodes": []},
@@ -3376,6 +3428,7 @@ class TestCommitContinuationAndBotFreshness:
                         "data": {
                             "repository": {
                                 "pullRequest": {
+                                    "headRefOid": "abc123",
                                     "reviewDecision": "",
                                     "latestReviews": {
                                         "nodes": [

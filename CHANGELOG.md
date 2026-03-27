@@ -4,6 +4,19 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-27
 
+### Pipeline Test Run Step 15 Commit-Bound Freshness
+
+- `commit_executor.py` Step 15 PR review GraphQL now also requests
+  `headRefOid`, asserts the PR head stays on the expected commit while waiting,
+  and rejects connector issue-comment clearance if the head drifts
+- `mu/tests/tools/test_executor_dispatch.py` now covers commit-bound
+  issue-comment acceptance, fail-closed PR-head drift, and the post-commit
+  current-head paths that depend on `headRefOid`
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Twenty-First live stop honestly: the boring-path run reaches a
+  fresh current-head connector review on `02b41d2`, and the remaining stop is
+  the commit-bound Step 15 freshness gap
+
 ### Pipeline Test Run Current-Head Review Hardening
 
 - `commit_executor.py` now pins Step 15 freshness, no-issues issue-comment

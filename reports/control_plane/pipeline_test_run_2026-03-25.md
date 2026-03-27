@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Twentieth live follow-up on 2026-03-27 turned the Step 15 acknowledged-review latency slice into a current-head connector-finding hardening follow-up. The resumed commit executor reused PR `#673`, pushed head `ccd49b34`, passed required checks, posted a current-head `@codex review` request, and this time did receive a fresh connector review at `2026-03-27T09:36:55Z`. The new stop is no longer review latency; it is the control-plane findings surfaced by that fresh review: Step 15 freshness was still broad enough to accept any bot identity, the live PR review query still omitted `isOutdated`, `ensure_tracker_note` could still repair archived tracker notes outside active `## Ra`, Phase A's stale watchdog could still undercut the configured bridge-turn budget, and the bridge zero-output watchdog still relied on an implicitly stdout-shaped raw file rather than explicit stdout progress.
+Status: Twenty-first live follow-up on 2026-03-27 narrowed the current-head connector-finding slice to a Step 15 commit-bound freshness follow-up. The resumed commit executor reused PR `#673`, pushed head `02b41d2`, passed required checks, posted a current-head `@codex review` request, and received a fresh connector review at `2026-03-27T10:27:26Z`. The remaining stop is no longer connector identity, outdated-thread filtering, tracker-note scope, Phase A stale timing, or bridge stdout detection; it is that Step 15 still accepted connector no-issues issue-comment clearance without explicitly proving the PR head stayed bound to the expected commit while waiting.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -553,6 +553,31 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   `phase_a_executor.py`, and `bridge_adapters.py` so the fresh review's actual
   findings are resolved without widening the contract or reintroducing manual
   escape hatches.
+
+## Twenty-First Live Stop (2026-03-27)
+
+- After the current-head connector-review hardening slice landed locally,
+  rerunning
+  `python3 mu/tools/executors/executor_dispatch.py commit --handoff .agent_bus/executors/phase_b_handoff.json -v --json`
+  resumed honestly from the bounded post-commit continuation record again,
+  reused PR `#673`, pushed head `02b41d2`, and passed the required checks.
+- Step 15 then exercised the tightened connector-only path exactly as intended.
+  The executor posted a fresh current-head `@codex review` request at
+  `2026-03-27T10:14:29Z`, direct API truth showed the connector acknowledged it
+  with `eyes`, and a fresh `chatgpt-codex-connector` review for commit
+  `02b41d2` arrived at `2026-03-27T10:27:26Z`.
+- The run still stopped at `bot_findings_pending`, but the stop narrowed again.
+  The fresh review no longer flagged generic-bot identity, stale-thread
+  filtering, tracker-note scope, Phase A stale timing, or bridge stdout
+  detection. The remaining active finding was that Step 15 still accepted
+  connector no-issues issue comments by timestamp only, without explicitly
+  binding the wait loop to the PR head SHA, so a head change during the wait
+  window could still clear merge on a stale connector issue comment.
+- Result: the boring-path stop moved again and is now a single Step 15
+  commit-bound freshness defect. The active fix is to require `headRefOid` in
+  the PR review query, fail closed if the PR head drifts while waiting for the
+  connector, and only accept connector issue-comment clearance while that same
+  head is still current.
 
 ## Next Mechanical Questions
 
