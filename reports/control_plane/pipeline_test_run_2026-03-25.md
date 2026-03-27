@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Twenty-seventh live follow-up on 2026-03-27 finally pushed the boring-path automation through Step 15 on current head `5b9a6fe`: the executor cleared supervisor, receipts, pre-commit, pre-push, push, PR reuse, CI, and a fresh current-head connector review. The current stop is no longer local gate mechanics. It is one remaining Step 15 review-truth defect: the executor can re-request `@codex review` even when a valid current-head no-issues connector issue comment already exists, while three other surfaced review threads proved stale and were resolved as such.
+Status: Twenty-eighth live follow-up on 2026-03-27 pushed the boring-path automation through local commit, pre-push, push, PR reuse, and CI registration on current head `cd33a25`. The current stop is a Linux-only timing race in `mu/tests/tools/test_executor_dispatch.py::TestPhaseABridgeLoopFailClosed::test_bridge_review_stale_watchdog_honors_bridge_turn_budget`: the fake silent reviewer finishes locally, but the old `0.2s` bridge-turn budget was too tight once Python startup overhead was included on CI. The active follow-up widens that proof margin without changing runtime behavior.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -735,6 +735,30 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   existing current-head issue-comment outcome before calling
   `_maybe_request_current_head_bot_review()`, then the stale resolved threads can
   stay closed and the automated path can be rerun from an honest package.
+
+## Twenty-Eighth Live Stop (2026-03-27)
+
+- After the Step 15 clear-comment follow-up was committed locally as
+  `cd33a25` (`fix: preserve current-head clear issue comments`), the automated
+  `commit` executor again cleared Step 6 supervisor, Step 7 receipt
+  verification, Step 8 pre-commit, Step 9 local commit creation, Step 11
+  pre-push, Step 12 push, and Step 13 PR reuse on `#673`.
+- Step 14 then registered and waited on CI for head
+  `cd33a25b68eef6b25c40faf26f324e5bb360a801`. `green-gate` passed, but the
+  required `test` workflow failed at `2026-03-27T13:17:34Z` on one control-plane
+  regression:
+  `mu/tests/tools/test_executor_dispatch.py::TestPhaseABridgeLoopFailClosed::test_bridge_review_stale_watchdog_honors_bridge_turn_budget`.
+- The failure is timing-sensitive rather than semantic. The old test used a
+  fake silent reviewer that slept `0.12s` under a configured bridge-turn budget
+  of `0.2s`. That is enough margin on the local macOS shell, where the focused
+  repro still passed, but not on Linux CI once Python startup and scheduling
+  overhead are included, so the watchdog returned `exit_code == -2` before the
+  fake bridge exited.
+- Result: the next fix is a narrow CI-stability hardening of that test proof,
+  not another change to the commit/Step 15 control-surface behavior. The
+  follow-up widens the bridge-turn budget / total timeout margin so the test
+  still proves that the configured bridge-turn budget overrides the smaller
+  stale watchdog threshold without depending on sub-200ms process timing.
 
 ## Next Mechanical Questions
 

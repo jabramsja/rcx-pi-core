@@ -4,6 +4,18 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-27
 
+### Pipeline Test Run CI Timing Hardening
+
+- `mu/tests/tools/test_executor_dispatch.py` now gives the Phase A
+  bridge-turn-budget watchdog regression a wider timing margin, so it still
+  proves that the configured bridge-turn budget overrides the smaller stale
+  watchdog threshold without flaking on Linux CI process-startup overhead
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Twenty-Eighth live stop honestly: commit `cd33a25` cleared
+  supervisor, local commit, pre-push, push, PR reuse, and CI registration, and
+  then stopped only because the required `test` workflow exposed that timing
+  race while `green-gate` still passed
+
 ### Pipeline Test Run Step 15 Review-Thread Truth
 
 - `commit_executor.py` now restores `handoff_sha` before resuming the

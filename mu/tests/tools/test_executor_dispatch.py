@@ -854,14 +854,17 @@ class TestPhaseABridgeLoopFailClosed:
         monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_STALE_TIMEOUT", 0.05)
         monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_AGGREGATION_HANG_TIMEOUT", 999.0)
         monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_POLL_SLEEP", 0.01)
-        monkeypatch.setattr(phase_a_mod, "resolve_bridge_turn_timeout", lambda *args, **kwargs: 0.2)
+        # Keep a wide margin above interpreter startup + the silent reviewer sleep
+        # so Linux CI still proves that the bridge-turn budget overrides the
+        # smaller stale watchdog threshold.
+        monkeypatch.setattr(phase_a_mod, "resolve_bridge_turn_timeout", lambda *args, **kwargs: 0.5)
 
         result = phase_a_mod.run_bridge_design_review(
             tmp_path,
             "reports/control_plane/test_plan.md",
             1,
             job_id="phase-a-r1-budget",
-            timeout=0.3,
+            timeout=1.0,
         )
 
         assert result["exit_code"] == 0
