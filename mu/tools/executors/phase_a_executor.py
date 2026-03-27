@@ -479,6 +479,7 @@ def run_bridge_design_review(
     config = load_executor_config(repo_root)
     reviewer = resolve_bridge_reviewer(config, "phase_a")
     bridge_turn_timeout = resolve_bridge_turn_timeout(config, "phase_a", default=300.0)
+    stale_timeout = min(timeout, max(PHASE_A_BRIDGE_STALE_TIMEOUT, bridge_turn_timeout))
     scratch_dir = repo_root / ".scratch"
     scratch_dir.mkdir(exist_ok=True)
     task_path = scratch_dir / f"phase_a_bridge_r{round_num}.md"
@@ -593,7 +594,7 @@ def run_bridge_design_review(
                     "stderr_path": str(stderr_path.relative_to(repo_root)),
                 }
 
-            if idle_for >= PHASE_A_BRIDGE_STALE_TIMEOUT:
+            if idle_for >= stale_timeout:
                 terminate_process_tree(proc.pid, cwd=repo_root)
                 stdout, stderr = _read_logs()
                 return {
@@ -602,6 +603,7 @@ def run_bridge_design_review(
                     "stderr": (
                         f"Bridge review stale after {idle_for:.1f}s "
                         f"(job_id={run_id}, child_pids={list(snapshot['child_pids'])}, "
+                        f"stale_timeout_s={stale_timeout:.1f}, "
                         f"stdout_log={stdout_path.name}, stderr_log={stderr_path.name}).\n"
                         f"{stderr}"
                     ).strip(),

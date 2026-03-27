@@ -101,6 +101,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
       reviewThreads(first: 100) {
         nodes {
           isResolved
+          isOutdated
           comments(first: 1) {
             nodes {
               author { login }
@@ -349,6 +350,42 @@ def _matching_tracker_note_indices(lines: list[str], wave_id: str) -> list[int]:
     return indices
 
 
+def _matching_tracker_note_indices_in_range(
+    lines: list[str],
+    wave_id: str,
+    *,
+    start_idx: int,
+    end_idx: int,
+) -> list[int]:
+    """Return tracker-note-shaped line indices for *wave_id* inside one section."""
+    return [
+        idx for idx in _matching_tracker_note_indices(lines, wave_id)
+        if start_idx <= idx < end_idx
+    ]
+
+
+def _find_ra_section_range(lines: list[str]) -> tuple[int | None, int | None]:
+    """Return [start, end) indices for the active ## Ra section."""
+    ra_idx: int | None = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith("## Ra"):
+            ra_idx = i
+            break
+    if ra_idx is None:
+        return None, None
+
+    ra_end_idx = len(lines)
+    for i in range(ra_idx + 1, len(lines)):
+        stripped = lines[i].strip()
+        if stripped == "---" and i > ra_idx + 1:
+            ra_end_idx = i
+            break
+        if stripped.startswith("## ") and i > ra_idx:
+            ra_end_idx = i
+            break
+    return ra_idx, ra_end_idx
+
+
 def _force_add_denied_match(path_str: str) -> str | None:
     """Return the denylist token matched by a force-add path, if any."""
     normalized = path_str.replace("\\", "/")
@@ -419,7 +456,7 @@ def _has_fresh_bot_review(pr_data: dict[str, Any], head_sha: str) -> bool:
             continue
         author = review.get("author", {}).get("login", "")
         commit_oid = review.get("commit", {}).get("oid", "")
-        if _is_bot_review_author(author) and commit_oid == head_sha:
+        if _is_connector_review_author(author) and commit_oid == head_sha:
             return True
     return False
 
@@ -480,7 +517,7 @@ def _current_head_bot_issue_comment_outcome(pr_data: dict[str, Any]) -> dict[str
     for comment in _iter_pr_issue_comments(pr_data):
         author = comment.get("author", {}).get("login", "")
         created_at = comment.get("createdAt", "")
-        if not _is_bot_review_author(author):
+        if not _is_connector_review_author(author):
             continue
         if not isinstance(created_at, str) or not created_at or created_at <= latest_request_at:
             continue
@@ -535,16 +572,29 @@ def _bot_review_request_acknowledged(
             continue
         content = reaction.get("content", "")
         author = reaction.get("user", {}).get("login", "")
-        if content == BOT_REVIEW_ACK_REACTION and _is_bot_review_author(author):
+        if content == BOT_REVIEW_ACK_REACTION and _is_connector_review_author(author):
             return True
     return False
+
+
+def _normalize_bot_login(author: str) -> str:
+    if author.endswith("[bot]"):
+        return author[:-5]
+    return author
+
+
+def _is_connector_review_author(author: str) -> bool:
+    if not author:
+        return False
+    return _normalize_bot_login(author) == BOT_REVIEW_LOGIN
 
 
 def _is_bot_review_author(author: str) -> bool:
     if not author:
         return False
+    normalized = _normalize_bot_login(author)
     return (
-        author == BOT_REVIEW_LOGIN
+        normalized == BOT_REVIEW_LOGIN
         or author.endswith("[bot]")
         or author.endswith("-bot")
     )
@@ -1401,18 +1451,30 @@ def run_commit_pipeline(
                 "steps_completed": result["steps_completed"]}
 
     tasks_content = tasks_path.read_text(encoding="utf-8")
-    wave_id_count = _count_exact_wave_id_mentions(tasks_content, wave_id)
     lines = tasks_content.splitlines(keepends=True)
-    matching_tracker_indices = _matching_tracker_note_indices(lines, wave_id)
+    ra_idx, ra_end_idx = _find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        return {"status": "error", "step": "ensure_tracker_note",
+                "errors": ["## Ra section not found in TASKS.md"],
+                "steps_completed": result["steps_completed"]}
+
+    ra_content = "".join(lines[ra_idx:ra_end_idx])
+    ra_wave_id_count = _count_exact_wave_id_mentions(ra_content, wave_id)
+    matching_tracker_indices = _matching_tracker_note_indices_in_range(
+        lines,
+        wave_id,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
     canonical_tracker_indices = [
         idx for idx in matching_tracker_indices
         if _is_canonical_tracker_note_line(lines[idx].rstrip("\n"), wave_id)
     ]
     note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
 
-    if wave_id_count > 1 and not matching_tracker_indices:
+    if ra_wave_id_count > 1 and not matching_tracker_indices:
         return {"status": "error", "step": "ensure_tracker_note",
-                "errors": [f"wave_id '{wave_id}' appears {wave_id_count} times in TASKS.md (duplicate)"],
+                "errors": [f"wave_id '{wave_id}' appears {ra_wave_id_count} times in active ## Ra section of TASKS.md (duplicate)"],
                 "steps_completed": result["steps_completed"]}
     if len(canonical_tracker_indices) > 1:
         return {"status": "error", "step": "ensure_tracker_note",
@@ -1432,23 +1494,10 @@ def run_commit_pipeline(
     elif matching_tracker_indices:
         # Insert after the last tracker note in Ra, or repair a single malformed
         # tracker-note-shaped line for this wave in place.
-        ra_idx = None
-        ra_end_idx = None
         last_tracker_idx = None
-        for i, line in enumerate(lines):
-            if line.strip().startswith("## Ra"):
-                ra_idx = i
-            if ra_idx is not None and i > ra_idx:
-                if line.strip().startswith("- Tracker sync note"):
-                    last_tracker_idx = i
-                if line.strip() == "---" and i > ra_idx + 1:
-                    ra_end_idx = i
-                    break
-
-        if ra_idx is None:
-            return {"status": "error", "step": "ensure_tracker_note",
-                    "errors": ["## Ra section not found in TASKS.md"],
-                    "steps_completed": result["steps_completed"]}
+        for i in range(ra_idx + 1, ra_end_idx):
+            if lines[i].strip().startswith("- Tracker sync note"):
+                last_tracker_idx = i
 
         if len(matching_tracker_indices) == 1:
             lines[matching_tracker_indices[0]] = note_line
@@ -1466,27 +1515,14 @@ def run_commit_pipeline(
                     "errors": ["wave_id not found in TASKS.md after write"],
                     "steps_completed": result["steps_completed"]}
         tasks_modified = True
-    elif wave_id_count == 1:
+    elif ra_wave_id_count == 1:
         log(f"Step 3: wave_id {wave_id} already referenced outside tracker notes, skipping")
     else:
         # Insert after the last tracker note in Ra section
-        ra_idx = None
-        ra_end_idx = None
         last_tracker_idx = None
-        for i, line in enumerate(lines):
-            if line.strip().startswith("## Ra"):
-                ra_idx = i
-            if ra_idx is not None and i > ra_idx:
-                if line.strip().startswith("- Tracker sync note"):
-                    last_tracker_idx = i
-                if line.strip() == "---" and i > ra_idx + 1:
-                    ra_end_idx = i
-                    break
-
-        if ra_idx is None:
-            return {"status": "error", "step": "ensure_tracker_note",
-                    "errors": ["## Ra section not found in TASKS.md"],
-                    "steps_completed": result["steps_completed"]}
+        for i in range(ra_idx + 1, ra_end_idx):
+            if lines[i].strip().startswith("- Tracker sync note"):
+                last_tracker_idx = i
 
         if last_tracker_idx is not None:
             insert_idx = last_tracker_idx + 1

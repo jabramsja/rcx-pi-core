@@ -2,6 +2,26 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-03-27
+
+### Pipeline Test Run Current-Head Review Hardening
+
+- `commit_executor.py` now pins Step 15 freshness, no-issues issue-comment
+  clearance, and request-acknowledgement detection to the real
+  `chatgpt-codex-connector` identity instead of any generic bot account
+- `commit_executor.py` PR review GraphQL now requests `reviewThreads.isOutdated`,
+  and tracker-note repair is limited to the active `## Ra` section so archived
+  tracker history cannot be rewritten during closeout
+- `phase_a_executor.py` now honors the configured bridge-turn budget before its
+  stale watchdog fails a live reviewer turn closed
+- `bridge_adapters.py` now keys zero-output detection to explicit stdout
+  progress instead of inferred raw-file shape, while still failing closed on
+  stderr-only hangs
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Twentieth live stop honestly: the pipeline now receives a fresh
+  current-head connector review and the remaining stop is the review's concrete
+  control-plane findings, not review latency
+
 ## 2026-03-26
 
 ### Pipeline Smoke Truth Sync

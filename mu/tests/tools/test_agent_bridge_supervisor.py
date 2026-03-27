@@ -436,6 +436,50 @@ time.sleep(10.0)
     assert elapsed < 4.0
 
 
+def test_run_adapter_zero_output_watchdog_tracks_stdout_only(tmp_path: Path) -> None:
+    stderr_only_agent = tmp_path / "stderr_only_agent.py"
+    stderr_only_agent.write_text(
+        """\
+import sys
+import time
+
+sys.stdin.read()
+sys.stderr.write("warming up\\n")
+sys.stderr.flush()
+time.sleep(10.0)
+""",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=[sys.executable, str(stderr_only_agent)],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    with pytest.raises(adapters.BridgeAdapterError, match="produced no stdout"):
+        adapters.run_adapter(
+            spec,
+            prompt_text="review prompt",
+            prompt_path=prompt_path,
+            repo_root=tmp_path,
+            job_id="job-1",
+            turn_id="r1-reviewer",
+            agent_role="reviewer",
+            raw_output_path=raw_output_path,
+            zero_output_timeout_s=0.05,
+        )
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 2.0
+    assert "warming up" in raw_output_path.read_text(encoding="utf-8")
+
+
 def test_run_adapter_stale_timeout_kills_detached_descendants(tmp_path: Path) -> None:
     child_pid_path = tmp_path / "child.pid"
     detached_agent = tmp_path / "detached_agent.py"

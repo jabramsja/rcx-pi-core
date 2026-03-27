@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Nineteenth live follow-up on 2026-03-27 turned the local Step 14 plus supervisor-context plus tracker-note slice into a Step 15 acknowledged-review latency follow-up. The resumed commit executor reused PR `#673`, pushed head `cfba791`, passed required checks, and posted one current-head `@codex review` request, but Step 15 still failed closed because the connector only acknowledged the request with an `eyes` reaction inside the 210-second window and never surfaced a usable current-head review or no-issues issue comment before timeout. The active fix is now to keep Step 15 clearance fail-closed while extending its wait only when the connector has acknowledged the latest current-head request.
+Status: Twentieth live follow-up on 2026-03-27 turned the Step 15 acknowledged-review latency slice into a current-head connector-finding hardening follow-up. The resumed commit executor reused PR `#673`, pushed head `ccd49b34`, passed required checks, posted a current-head `@codex review` request, and this time did receive a fresh connector review at `2026-03-27T09:36:55Z`. The new stop is no longer review latency; it is the control-plane findings surfaced by that fresh review: Step 15 freshness was still broad enough to accept any bot identity, the live PR review query still omitted `isOutdated`, `ensure_tracker_note` could still repair archived tracker notes outside active `## Ra`, Phase A's stale watchdog could still undercut the configured bridge-turn budget, and the bridge zero-output watchdog still relied on an implicitly stdout-shaped raw file rather than explicit stdout progress.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -523,6 +523,36 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   the wait budget only after the connector has acknowledged the latest review
   request, anchored to the request timestamp so bounded continuations do not
   over-wait on rerun.
+
+## Twentieth Live Stop (2026-03-27)
+
+- After the Step 15 acknowledged-review wait follow-up was staged locally,
+  rerunning
+  `python3 mu/tools/executors/executor_dispatch.py commit --handoff .agent_bus/executors/phase_b_handoff.json -v --json`
+  advanced honestly from the bounded post-commit continuation record again,
+  reused PR `#673`, pushed head `ccd49b34`, and passed the required checks.
+- Step 15 then exercised the widened wait contract exactly as intended. The
+  executor posted a fresh current-head `@codex review` request at
+  `2026-03-27T09:30:53Z`, direct API truth showed the connector acknowledged it
+  with `eyes`, and a fresh `chatgpt-codex-connector` review for commit
+  `ccd49b34` arrived at `2026-03-27T09:36:55Z`.
+- The run still stopped, but no longer on latency or missing review transport.
+  The executor returned `bot_findings_pending` with one outdated historical
+  Phase A thread plus four active control-plane findings: Step 15 freshness and
+  issue-comment/ack handling were still broad enough to accept non-connector
+  bots, the live PR review query still omitted `isOutdated` so stale threads
+  could survive the local filter, `ensure_tracker_note` still searched the full
+  `TASKS.md` surface and could rewrite archived tracker-note history instead of
+  only the active `## Ra` section, Phase A's stale watchdog could still kill a
+  live reviewer turn before the configured bridge-turn budget, and the bridge
+  zero-output watchdog still relied on a raw-output file shape rather than an
+  explicit stdout-progress signal.
+- Result: the boring-path stop moved again, but materially forward. The next
+  fix is no longer Step 15 transport or review latency. It is a bounded
+  current-head connector-review hardening slice across `commit_executor.py`,
+  `phase_a_executor.py`, and `bridge_adapters.py` so the fresh review's actual
+  findings are resolved without widening the contract or reintroducing manual
+  escape hatches.
 
 ## Next Mechanical Questions
 

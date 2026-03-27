@@ -239,6 +239,10 @@ def _raw_file_size(path: Path | None) -> int:
         return 0
 
 
+def _stdout_progress_seen(event: threading.Event) -> bool:
+    return event.is_set()
+
+
 def _progress_fingerprint(proc: subprocess.Popen[str], raw_output_path: Path | None) -> tuple[Any, ...]:
     return (_raw_file_size(raw_output_path), _process_tree_fingerprint(proc.pid))
 
@@ -405,6 +409,7 @@ def _run_adapter_buffered(
 
     stdout_lines: list[str] = []
     stderr_buf = io.StringIO()
+    stdout_progress = threading.Event()
 
     # Drain stderr concurrently to prevent pipe deadlock when child writes
     # heavily to stderr while we block reading stdout line-by-line.
@@ -433,7 +438,7 @@ def _run_adapter_buffered(
         _kill_process_group(proc)
 
     def _kill_after_zero_output_timeout() -> None:
-        if _raw_file_size(raw_output_path) > 0 or proc.poll() is not None:
+        if _stdout_progress_seen(stdout_progress) or proc.poll() is not None:
             return
         zero_output_timed_out.set()
         _kill_process_group(proc)
@@ -459,6 +464,7 @@ def _run_adapter_buffered(
                 pass  # Process exited early; continue to read remaining output
         for line in proc.stdout:
             stdout_lines.append(line)
+            stdout_progress.set()
             if raw_fh is not None:
                 raw_fh.write(line)
                 raw_fh.flush()
@@ -591,6 +597,7 @@ def _run_adapter_streaming(
     stdout_buf = io.StringIO()
     stderr_buf = io.StringIO()
     envelope_terminated = threading.Event()
+    stdout_progress = threading.Event()
 
     def _stop_after_envelope(line: str, sink: io.StringIO) -> None:
         if (
@@ -607,9 +614,13 @@ def _run_adapter_streaming(
             time.sleep(0.05)
             _kill_process_group(proc)
 
+    def _record_stdout_progress(line: str, sink: io.StringIO) -> None:
+        stdout_progress.set()
+        _stop_after_envelope(line, sink)
+
     stdout_thread = threading.Thread(
         target=_tee_stream,
-        args=(proc.stdout, stdout_buf, sys.stdout, raw_fh, _stop_after_envelope),
+        args=(proc.stdout, stdout_buf, sys.stdout, raw_fh, _record_stdout_progress),
         daemon=True,
     )
     stderr_thread = threading.Thread(
@@ -630,7 +641,7 @@ def _run_adapter_streaming(
     )
 
     def _kill_after_zero_output_timeout() -> None:
-        if _raw_file_size(raw_output_path) > 0 or proc.poll() is not None:
+        if _stdout_progress_seen(stdout_progress) or proc.poll() is not None:
             return
         zero_output_timed_out.set()
         _kill_process_group(proc)

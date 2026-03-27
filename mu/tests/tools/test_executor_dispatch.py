@@ -825,6 +825,7 @@ class TestPhaseABridgeLoopFailClosed:
         monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_STALE_TIMEOUT", 0.05)
         monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_AGGREGATION_HANG_TIMEOUT", 999.0)
         monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_POLL_SLEEP", 0.01)
+        monkeypatch.setattr(phase_a_mod, "resolve_bridge_turn_timeout", lambda *args, **kwargs: 0.05)
 
         result = phase_a_mod.run_bridge_design_review(
             tmp_path,
@@ -837,6 +838,34 @@ class TestPhaseABridgeLoopFailClosed:
         assert result["exit_code"] == -2
         assert "Bridge review stale" in result["stderr"]
         assert "phase_a_bridge_phase-a-r1-watchdog.stdout.log" in result["stderr"]
+
+    def test_bridge_review_stale_watchdog_honors_bridge_turn_budget(self, tmp_path, monkeypatch):
+        """A live reviewer turn may stay quiet until the configured bridge-turn budget expires."""
+        tools_agents = tmp_path / "tools" / "agents"
+        tools_agents.mkdir(parents=True)
+        fake_bridge = tools_agents / "bridge_supervisor.py"
+        fake_bridge.write_text(
+            "#!/usr/bin/env python3\n"
+            "import time\n"
+            "time.sleep(0.12)\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_STALE_TIMEOUT", 0.05)
+        monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_AGGREGATION_HANG_TIMEOUT", 999.0)
+        monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_POLL_SLEEP", 0.01)
+        monkeypatch.setattr(phase_a_mod, "resolve_bridge_turn_timeout", lambda *args, **kwargs: 0.2)
+
+        result = phase_a_mod.run_bridge_design_review(
+            tmp_path,
+            "reports/control_plane/test_plan.md",
+            1,
+            job_id="phase-a-r1-budget",
+            timeout=0.3,
+        )
+
+        assert result["exit_code"] == 0
+        assert "Bridge review stale" not in result["stderr"]
 
     def test_bridge_task_is_repo_local_only(self, tmp_path):
         """Phase A bridge task must explicitly forbid external web/network research."""
@@ -1461,6 +1490,65 @@ class TestEnsureTrackerNote:
         tasks_content = (repo / "TASKS.md").read_text()
         assert "test-wave-id-extra" in tasks_content
         assert "test-wave-id" in tasks_content
+
+    def test_archived_tracker_note_outside_ra_does_not_block_active_note_insert(self, tmp_path):
+        """Archived tracker-note history outside ## Ra must not satisfy or overwrite the live note."""
+        repo, env = _init_git_repo(tmp_path)
+        tasks = repo / "TASKS.md"
+        content = tasks.read_text()
+        tasks.write_text(
+            content.replace(
+                "---\n\n## NEXT\n",
+                "---\n\n## ARCHIVE\n"
+                "- Tracker sync note (2026-03-20, test-wave-id): **TEST — archived historical note.** "
+                "Class: L4_ENABLER. target_gate_id: G8. "
+                "evidence_command: `pytest old.py -q`. "
+                "evidence_delta: archived. "
+                "progress_proof_before: old. "
+                "progress_proof_after: old. "
+                "primary_blocker_class: INTEGRATION. "
+                "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+                "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. boot0_progress_state: HOLD.\n\n"
+                "---\n\n## NEXT\n"
+            )
+        )
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "archived tracker note"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        handoff = _make_new_handoff(
+            tracker_note_text=(
+                "- Tracker sync note (2026-03-27, test-wave-id): **TEST — active canonical note.** "
+                "Class: L4_ENABLER. target_gate_id: G8. "
+                "evidence_command: `pytest new.py -q`. "
+                "evidence_delta: active. "
+                "progress_proof_before: archived. "
+                "progress_proof_after: active. "
+                "primary_blocker_class: INTEGRATION. "
+                "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+                "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. boot0_progress_state: HOLD."
+            ),
+        )
+
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert "ensure_tracker_note" in result.get("steps_completed", [])
+        tasks_content = (repo / "TASKS.md").read_text()
+        assert tasks_content.count("active canonical note") == 1
+        assert tasks_content.count("archived historical note") == 1
+        ra_idx = tasks_content.index("## Ra")
+        archive_idx = tasks_content.index("## ARCHIVE")
+        assert tasks_content.index("active canonical note") > ra_idx
+        assert tasks_content.index("active canonical note") < archive_idx
 
 
 class TestDispatcherPlanNameSanitization:
@@ -2488,6 +2576,15 @@ class TestCommitContinuationAndBotFreshness:
         assert commit_mod._is_bot_review_author("some-bot") is True  # ANTICHEAT_OK: testing bot-review author helper
         assert commit_mod._is_bot_review_author("human-reviewer") is False  # ANTICHEAT_OK: testing bot-review author helper
 
+    def test_connector_review_author_helper_rejects_other_bots(self):
+        assert commit_mod._is_connector_review_author(commit_mod.BOT_REVIEW_LOGIN) is True  # ANTICHEAT_OK: testing connector-review author helper
+        assert commit_mod._is_connector_review_author("chatgpt-codex-connector[bot]") is True  # ANTICHEAT_OK: testing connector-review author helper
+        assert commit_mod._is_connector_review_author("dependabot[bot]") is False  # ANTICHEAT_OK: testing connector-review author helper
+        assert commit_mod._is_connector_review_author("renovate-bot") is False  # ANTICHEAT_OK: testing connector-review author helper
+
+    def test_pr_review_query_requests_thread_outdatedness(self):
+        assert "isOutdated" in commit_mod.PR_REVIEW_QUERY
+
     def test_current_head_bot_issue_comment_outcome_requires_clear_comment_after_latest_request(self):
         pr_data = {
             "comments": {
@@ -2528,6 +2625,26 @@ class TestCommitContinuationAndBotFreshness:
         }
 
         assert commit_mod._current_head_bot_issue_comment_outcome(stale_pr_data) is None  # ANTICHEAT_OK: testing bot issue-comment freshness helper
+
+    def test_current_head_bot_issue_comment_outcome_ignores_non_connector_bot(self):
+        pr_data = {
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T07:37:49Z",
+                    },
+                    {
+                        "author": {"login": "dependabot[bot]"},
+                        "body": "Codex Review: Didn't find any major issues. Swish!",
+                        "createdAt": "2026-03-27T07:39:03Z",
+                    },
+                ]
+            }
+        }
+
+        assert commit_mod._current_head_bot_issue_comment_outcome(pr_data) is None  # ANTICHEAT_OK: testing connector-only issue-comment freshness helper
 
     def test_wait_for_bot_review_freshness_accepts_no_issues_issue_comment(self):
         calls = {"count": 0}
@@ -2793,6 +2910,44 @@ class TestCommitContinuationAndBotFreshness:
         monkeypatch.setattr(commit_mod, "_run", fake_run)
 
         assert commit_mod._bot_review_request_acknowledged(  # ANTICHEAT_OK: direct helper regression for Step 15 ack path
+            repo,
+            repo_owner="jabramsja",
+            repo_name="rcx-pi-core",
+            pr_data=pr_data,
+        )
+
+    def test_bot_review_request_acknowledgement_rejects_non_connector_bot_reaction(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        pr_data = {
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T08:58:34Z",
+                        "databaseId": 4141124626,
+                    }
+                ]
+            }
+        }
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:2] == ["gh", "api"] and cmd[2].endswith("/issues/comments/4141124626/reactions"):
+                payload = [
+                    {
+                        "user": {"login": "dependabot[bot]"},
+                        "content": "eyes",
+                    }
+                ]
+                return completed(cmd, stdout=json.dumps(payload))
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        assert not commit_mod._bot_review_request_acknowledged(  # ANTICHEAT_OK: connector-specific ack regression
             repo,
             repo_owner="jabramsja",
             repo_name="rcx-pi-core",
