@@ -819,38 +819,80 @@ def run_phase_a(
         )
         log(f"Bridge exit code: {bridge_result['exit_code']}")
 
-        if bridge_result["exit_code"] != 0:
-            log(f"Bridge failed (exit {bridge_result['exit_code']}) — failing closed")
-            result["status"] = "error"
-            result["error"] = (
-                f"Bridge subprocess failed in round {round_num} "
-                f"(exit={bridge_result['exit_code']}). "
-                f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
-            )
-            rendered_path = repo_root / ".agent_bus" / "rendered" / f"{bridge_job_id}.md"
-            if rendered_path.exists():
-                result["rendered_path"] = str(rendered_path)
-            return result
-
-        # Check rendered output for GO — bound to exact job_id
         rendered_path = repo_root / ".agent_bus" / "rendered" / f"{bridge_job_id}.md"
         if rendered_path.exists():
             render_content = rendered_path.read_text(encoding="utf-8")
             bridge_decision = _extract_bridge_decision(render_content)
             if bridge_decision == "GO":
+                if bridge_result["exit_code"] != 0:
+                    log(
+                        f"Bridge returned GO with unexpected exit {bridge_result['exit_code']} "
+                        "— failing closed"
+                    )
+                    result["status"] = "error"
+                    result["error"] = (
+                        f"Bridge subprocess failed in round {round_num} "
+                        f"(exit={bridge_result['exit_code']}, decision=GO). "
+                        f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
+                    )
+                    result["rendered_path"] = str(rendered_path)
+                    return result
                 log("Bridge converged: GO")
                 result["status"] = "converged"
                 break
             elif bridge_decision in {"REQUEST_CHANGES", "NO_GO"}:
+                # bridge_supervisor.py review returns exit=1 for non-GO decisions.
+                # Treat REQUEST_CHANGES/NO_GO as recoverable review outcomes when
+                # the exit code matches that CLI contract; only unexpected codes
+                # are infrastructure failures here.
+                if bridge_result["exit_code"] not in (0, 1):
+                    log(
+                        f"Bridge subprocess failed (exit {bridge_result['exit_code']}) "
+                        f"with decision {bridge_decision} — failing closed"
+                    )
+                    result["status"] = "error"
+                    result["error"] = (
+                        f"Bridge subprocess failed in round {round_num} "
+                        f"(exit={bridge_result['exit_code']}, decision={bridge_decision}). "
+                        f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
+                    )
+                    result["rendered_path"] = str(rendered_path)
+                    return result
                 log("Bridge: REQUEST_CHANGES — continuing loop")
                 continue
             elif bridge_decision == "QUESTION":
+                if bridge_result["exit_code"] not in (0, 1):
+                    log(
+                        f"Bridge subprocess failed (exit {bridge_result['exit_code']}) "
+                        "with QUESTION decision — failing closed"
+                    )
+                    result["status"] = "error"
+                    result["error"] = (
+                        f"Bridge subprocess failed in round {round_num} "
+                        f"(exit={bridge_result['exit_code']}, decision=QUESTION). "
+                        f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
+                    )
+                    result["rendered_path"] = str(rendered_path)
+                    return result
                 log("Bridge: QUESTION — fail-closed (unresolved question)")
                 result["status"] = "error"
                 result["error"] = "Bridge returned QUESTION decision — requires human resolution"
                 result["rendered_path"] = str(rendered_path)
                 return result
             else:
+                if bridge_result["exit_code"] != 0:
+                    log(
+                        f"Bridge failed (exit {bridge_result['exit_code']}) with "
+                        f"unrecognized decision {bridge_decision!r} — failing closed"
+                    )
+                    result["status"] = "error"
+                    result["error"] = (
+                        f"Bridge subprocess failed in round {round_num} "
+                        f"(exit={bridge_result['exit_code']}). "
+                        f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
+                    )
+                    result["rendered_path"] = str(rendered_path)
+                    return result
                 # Unrecognized decision — fail closed, do not burn rounds
                 log("Bridge: unrecognized decision — fail-closed")
                 result["status"] = "error"
@@ -858,6 +900,15 @@ def run_phase_a(
                 result["rendered_path"] = str(rendered_path)
                 return result
         else:
+            if bridge_result["exit_code"] != 0:
+                log(f"Bridge failed (exit {bridge_result['exit_code']}) — failing closed")
+                result["status"] = "error"
+                result["error"] = (
+                    f"Bridge subprocess failed in round {round_num} "
+                    f"(exit={bridge_result['exit_code']}). "
+                    f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
+                )
+                return result
             log("Bridge exited 0 without rendered output — fail-closed")
             result["status"] = "error"
             result["error"] = "Bridge exited 0 but produced no rendered output"

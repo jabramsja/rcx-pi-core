@@ -379,9 +379,19 @@ def _has_fresh_bot_review(pr_data: dict[str, Any], head_sha: str) -> bool:
             continue
         author = review.get("author", {}).get("login", "")
         commit_oid = review.get("commit", {}).get("oid", "")
-        if author == BOT_REVIEW_LOGIN and commit_oid == head_sha:
+        if _is_bot_review_author(author) and commit_oid == head_sha:
             return True
     return False
+
+
+def _is_bot_review_author(author: str) -> bool:
+    if not author:
+        return False
+    return (
+        author == BOT_REVIEW_LOGIN
+        or author.endswith("[bot]")
+        or author.endswith("-bot")
+    )
 
 
 def _wait_for_bot_review_freshness(
@@ -829,7 +839,7 @@ def _run_post_commit_pipeline(
     for review in latest_reviews:
         author = review.get("author", {}).get("login", "")
         state = review.get("state", "")
-        is_bot = author.endswith("[bot]") or author.endswith("-bot")
+        is_bot = _is_bot_review_author(author)
         if not is_bot and state == "CHANGES_REQUESTED":
             return {"status": "error", "step": "ensure_review_clear_and_merge",
                     "errors": [f"Human reviewer {author} requested changes"],
@@ -845,12 +855,14 @@ def _run_post_commit_pipeline(
         if not comments:
             continue
         author = comments[0].get("author", {}).get("login", "")
-        is_bot = author.endswith("[bot]") or author.endswith("-bot")
+        is_bot = _is_bot_review_author(author)
         if not is_bot:
             return {"status": "error", "step": "ensure_review_clear_and_merge",
                     "errors": [f"Unresolved human review thread from {author}"],
                     "steps_completed": result["steps_completed"],
                     "pr_number": pr_number}
+        if thread.get("isOutdated"):
+            continue
         bot_findings.append({
             "author": author,
             "body": comments[0].get("body", "")[:500],

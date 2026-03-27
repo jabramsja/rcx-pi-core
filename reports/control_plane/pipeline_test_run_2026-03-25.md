@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Eleventh live follow-up on 2026-03-26 confirmed the next boring-path stop had moved back into modular Phase B: the rerun cleared Phase A and reached a Phase B bridge `GO`, but the local disposition heuristic still promoted a low-severity `DOC_ACCURACY` finding to blocking just because its title quoted `crash`, so the active fix is now a narrower DOC_ACCURACY classification rule plus a GO-path regression
+Status: Twelfth live follow-up on 2026-03-27 pushed the boring-path wave through pre-commit, local commit, push, PR creation, and CI on PR `#673`, then stopped at automated Step 15: a fresh `chatgpt-codex-connector` review correctly found a real adjacent Phase A defect (`phase_a_executor.py` misclassified bridge exit `1` for normal non-GO decisions), and the executor also still classified the connector's unresolved review thread as human instead of bot state. The active fix is now the paired Phase A bridge-exit contract correction plus Step 15 bot-thread classification hardening.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -327,6 +327,29 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   `DOC_ACCURACY` findings should remain non-blocking even when their wording
   quotes a blocker keyword while describing prior behavior, and the GO-path
   regression must be locked in tests.
+
+## Twelfth Live Stop (2026-03-27)
+
+- After the disposition refinement follow-up landed in the candidate, the
+  automated commit executor ran end-to-end through Step 14 on branch
+  `jabramsja/pipeline-test-run-2026-03-25`: pre-commit supervisor returned
+  `COMMIT_GO`, the local commit was created, `pre-push-fast` passed, the branch
+  pushed to origin, PR `#673` opened, and both required CI checks (`test` and
+  `green-gate`) passed.
+- Step 15 then waited for a fresh current-head `chatgpt-codex-connector`
+  review, observed one on commit `78e08c92`, and stopped with
+  `Unresolved human review thread from chatgpt-codex-connector`.
+- The actual review finding was real, but it was not a merge-policy reason to
+  classify the connector as human. The review thread identified an adjacent
+  control-surface defect in `phase_a_executor.py`: `run_phase_a()` still failed
+  immediately on bridge exit `1` before parsing the rendered decision, even
+  though `bridge_supervisor.py review` uses exit `1` for normal `REQUEST_CHANGES`
+  / `NO_GO` outcomes.
+- Result: the boring-path stop moved again. The next required fix is two-part:
+  `phase_a_executor.py` must mirror the Phase B non-GO bridge exit contract,
+  and `commit_executor.py` Step 15 must treat `chatgpt-codex-connector` as bot
+  review state and ignore outdated unresolved bot threads instead of promoting
+  them to human blockers.
 
 ## Next Mechanical Questions
 

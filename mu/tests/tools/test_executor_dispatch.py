@@ -692,6 +692,31 @@ class TestPhaseABridgeLoopFailClosed:
         assert result["status"] == "converged"
         assert call_count["n"] == 3
 
+    @pytest.mark.parametrize("decision", ["REQUEST_CHANGES", "NO_GO"])
+    def test_non_go_exit_one_continues_loop(self, tmp_path, monkeypatch, decision):
+        """bridge_supervisor review returns exit=1 for non-GO decisions; Phase A must keep looping."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+        call_count = {"n": 0}
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            call_count["n"] += 1
+            rendered = rendered_dir / f"{job_id}.md"
+            if call_count["n"] < 3:
+                rendered.write_text(f"Decision: {decision}\n\nNeeds more work.\n")
+                return {"exit_code": 1, "stdout": f"{decision}\n", "stderr": ""}
+            rendered.write_text("Decision: GO\n\nFixed.\n")
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        assert call_count["n"] == 3
+
     def test_bridge_failure_no_rendered_output_fails_closed(self, tmp_path, monkeypatch):
         """Bridge failure with no rendered output fails closed."""
         self._setup_phase_a(tmp_path)
@@ -2397,6 +2422,102 @@ class TestCommitContinuationAndBotFreshness:
 
         assert calls["count"] == 2
         assert commit_mod._has_fresh_bot_review(pr_data, "abc123") is True  # ANTICHEAT_OK: testing bot-review freshness helper
+
+    def test_bot_review_author_helper_accepts_connector_login(self):
+        assert commit_mod._is_bot_review_author(commit_mod.BOT_REVIEW_LOGIN) is True  # ANTICHEAT_OK: testing bot-review author helper
+        assert commit_mod._is_bot_review_author("some-bot") is True  # ANTICHEAT_OK: testing bot-review author helper
+        assert commit_mod._is_bot_review_author("human-reviewer") is False  # ANTICHEAT_OK: testing bot-review author helper
+
+    def test_post_commit_ignores_outdated_connector_threads(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {"steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"]}
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="dev\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "push", "-u"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "list", "--head"]:
+                return completed(cmd, stdout='[{"number":673}]')
+            if cmd[:4] == ["gh", "pr", "checks", "673"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "edit", "673"]:
+                return completed(cmd)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                payload = {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "reviewDecision": "",
+                                "latestReviews": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                            "state": "COMMENTED",
+                                            "commit": {"oid": "abc123"},
+                                        }
+                                    ]
+                                },
+                                "reviewThreads": {
+                                    "nodes": [
+                                        {
+                                            "isResolved": False,
+                                            "isOutdated": True,
+                                            "comments": {
+                                                "nodes": [
+                                                    {
+                                                        "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                                        "body": "old finding",
+                                                        "path": "x.py",
+                                                        "line": 1,
+                                                    }
+                                                ]
+                                            },
+                                        }
+                                    ]
+                                },
+                            }
+                        }
+                    }
+                }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod, "_wait_for_bot_review_freshness", lambda query_state, head_sha, **kwargs: query_state())
+
+        post_commit = commit_mod._run_post_commit_pipeline(
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["pr_number"] == "673"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert "merge_sha" in post_commit
 
     def test_wait_for_bot_review_freshness_times_out_fail_closed(self):
         with patch.object(commit_mod.time, "sleep", return_value=None):
