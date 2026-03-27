@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -112,6 +113,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
       }
       comments(last: 30) {
         nodes {
+          databaseId
           author { login }
           body
           createdAt
@@ -125,7 +127,9 @@ query($owner: String!, $repo: String!, $number: Int!) {
 BOT_REVIEW_LOGIN = "chatgpt-codex-connector"
 BOT_REVIEW_TRIGGER_COMMENT = "@codex review"
 BOT_REVIEW_WAIT_SECONDS = 210
+BOT_REVIEW_ACK_WAIT_SECONDS = 900
 BOT_REVIEW_POLL_SECONDS = 15
+BOT_REVIEW_ACK_REACTION = "eyes"
 CI_CHECK_REGISTRATION_WAIT_SECONDS = 120
 CI_CHECK_REGISTRATION_POLL_SECONDS = 5
 BOT_NO_ISSUES_COMMENT_RE = re.compile(
@@ -427,8 +431,8 @@ def _iter_pr_issue_comments(pr_data: dict[str, Any]) -> list[dict[str, Any]]:
     return [comment for comment in comments if isinstance(comment, dict)]
 
 
-def _latest_bot_review_request_timestamp(pr_data: dict[str, Any]) -> str | None:
-    latest_request_at: str | None = None
+def _latest_bot_review_request_comment(pr_data: dict[str, Any]) -> dict[str, Any] | None:
+    latest_request: dict[str, Any] | None = None
     for comment in _iter_pr_issue_comments(pr_data):
         author = comment.get("author", {}).get("login", "")
         body = (comment.get("body") or "").strip()
@@ -439,9 +443,28 @@ def _latest_bot_review_request_timestamp(pr_data: dict[str, Any]) -> str | None:
             continue
         if not isinstance(created_at, str) or not created_at:
             continue
-        if latest_request_at is None or created_at > latest_request_at:
-            latest_request_at = created_at
-    return latest_request_at
+        if latest_request is None or created_at > latest_request.get("createdAt", ""):
+            latest_request = comment
+    return latest_request
+
+
+def _latest_bot_review_request_timestamp(pr_data: dict[str, Any]) -> str | None:
+    latest_request = _latest_bot_review_request_comment(pr_data)
+    if latest_request is None:
+        return None
+    created_at = latest_request.get("createdAt", "")
+    if not isinstance(created_at, str) or not created_at:
+        return None
+    return created_at
+
+
+def _parse_github_timestamp_seconds(timestamp: str) -> float | None:
+    if not isinstance(timestamp, str) or not timestamp:
+        return None
+    try:
+        return datetime.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 
 def _is_bot_no_issues_issue_comment(body: str) -> bool:
@@ -483,6 +506,40 @@ def _current_head_bot_issue_comment_outcome(pr_data: dict[str, Any]) -> dict[str
     }
 
 
+def _bot_review_request_acknowledged(
+    repo_root: Path,
+    *,
+    repo_owner: str,
+    repo_name: str,
+    pr_data: dict[str, Any],
+) -> bool:
+    latest_request = _latest_bot_review_request_comment(pr_data)
+    if latest_request is None:
+        return False
+    comment_id = latest_request.get("databaseId")
+    if not isinstance(comment_id, int) or comment_id <= 0:
+        return False
+    try:
+        response = _run(
+            ["gh", "api", f"repos/{repo_owner}/{repo_name}/issues/comments/{comment_id}/reactions"],
+            cwd=repo_root,
+            timeout=30,
+        )
+        reactions = json.loads(response.stdout or "[]")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return False
+    if not isinstance(reactions, list):
+        return False
+    for reaction in reactions:
+        if not isinstance(reaction, dict):
+            continue
+        content = reaction.get("content", "")
+        author = reaction.get("user", {}).get("login", "")
+        if content == BOT_REVIEW_ACK_REACTION and _is_bot_review_author(author):
+            return True
+    return False
+
+
 def _is_bot_review_author(author: str) -> bool:
     if not author:
         return False
@@ -498,11 +555,15 @@ def _wait_for_bot_review_freshness(
     *,
     head_sha: str,
     wait_seconds: int = BOT_REVIEW_WAIT_SECONDS,
+    request_acknowledged: Any = None,
+    acknowledged_wait_seconds: int = BOT_REVIEW_ACK_WAIT_SECONDS,
     poll_interval: int = BOT_REVIEW_POLL_SECONDS,
     log: Any = None,
 ) -> dict[str, Any]:
-    deadline = time.time() + wait_seconds
+    start_time = time.time()
+    deadline = start_time + wait_seconds
     last_pr_data: dict[str, Any] | None = None
+    acknowledgement_logged = False
     while True:
         pr_data = query_pr_state()
         last_pr_data = pr_data
@@ -524,10 +585,25 @@ def _wait_for_bot_review_freshness(
                         f"{head_sha[:8]} ({issue_comment_outcome['kind']})"
                     )
             return pr_data
+        if request_acknowledged is not None and request_acknowledged(pr_data):
+            acknowledged_deadline = start_time + acknowledged_wait_seconds
+            request_started = _parse_github_timestamp_seconds(
+                _latest_bot_review_request_timestamp(pr_data) or ""
+            )
+            if request_started is not None:
+                acknowledged_deadline = request_started + acknowledged_wait_seconds
+            deadline = max(deadline, acknowledged_deadline)
+            if log is not None and not acknowledgement_logged:
+                log(
+                    f"{BOT_REVIEW_LOGIN} acknowledged the current-head review request "
+                    f"for {head_sha[:8]}; extending wait to {acknowledged_wait_seconds}s"
+                )
+            acknowledgement_logged = True
         if time.time() >= deadline:
+            effective_wait_seconds = int(max(wait_seconds, deadline - start_time))
             raise TimeoutError(
                 f"No current-head {BOT_REVIEW_LOGIN} review or issue-comment clearance "
-                f"for {head_sha[:8]} within {wait_seconds}s"
+                f"for {head_sha[:8]} within {effective_wait_seconds}s"
             )
         if log is not None:
             log(
@@ -1043,6 +1119,12 @@ def _run_post_commit_pipeline(
                     pr_number=pr_number,
                 ),
                 head_sha=head_sha_before_merge,
+                request_acknowledged=lambda pr_data: _bot_review_request_acknowledged(
+                    repo_root,
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    pr_data=pr_data,
+                ),
                 log=log,
             )
     except (

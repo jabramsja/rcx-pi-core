@@ -2710,6 +2710,95 @@ class TestCommitContinuationAndBotFreshness:
                     poll_interval=0,
                 )
 
+    def test_wait_for_bot_review_freshness_extends_deadline_after_acknowledgement(self, monkeypatch):
+        query_calls = {"count": 0}
+
+        def query_state():
+            query_calls["count"] += 1
+            if query_calls["count"] < 3:
+                return {"latestReviews": {"nodes": []}, "comments": {"nodes": []}}
+            return {
+                "latestReviews": {
+                    "nodes": [
+                        {
+                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                            "state": "COMMENTED",
+                            "commit": {"oid": "abc123"},
+                        }
+                    ]
+                },
+                "comments": {"nodes": []},
+            }
+
+        time_points = iter([0.0, 0.2, 1.2])
+        monkeypatch.setattr(commit_mod.time, "time", lambda: next(time_points))
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        pr_data = commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: testing acknowledgement-based wait extension
+            query_state,
+            head_sha="abc123",
+            wait_seconds=1,
+            request_acknowledged=lambda _: True,
+            acknowledged_wait_seconds=5,
+            poll_interval=0,
+        )
+
+        assert query_calls["count"] == 3
+        assert commit_mod._has_fresh_bot_review(pr_data, "abc123")  # ANTICHEAT_OK: verifying review freshness helper
+
+    def test_wait_for_bot_review_freshness_acknowledgement_does_not_clear_without_review(self, monkeypatch):
+        time_points = iter([0.0, 0.2, 1.1])
+        monkeypatch.setattr(commit_mod.time, "time", lambda: next(time_points))
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        with pytest.raises(TimeoutError, match="No current-head"):
+            commit_mod._wait_for_bot_review_freshness(  # ANTICHEAT_OK: acknowledgement must not substitute for review clearance
+                lambda: {"latestReviews": {"nodes": []}, "comments": {"nodes": []}},
+                head_sha="abc123",
+                wait_seconds=0,
+                request_acknowledged=lambda _: True,
+                acknowledged_wait_seconds=1,
+                poll_interval=0,
+            )
+
+    def test_bot_review_request_acknowledgement_detects_connector_eyes_reaction(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        pr_data = {
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T08:58:34Z",
+                        "databaseId": 4141124626,
+                    }
+                ]
+            }
+        }
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:2] == ["gh", "api"] and cmd[2].endswith("/issues/comments/4141124626/reactions"):
+                payload = [
+                    {
+                        "user": {"login": "chatgpt-codex-connector[bot]"},
+                        "content": "eyes",
+                    }
+                ]
+                return completed(cmd, stdout=json.dumps(payload))
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        assert commit_mod._bot_review_request_acknowledged(  # ANTICHEAT_OK: direct helper regression for Step 15 ack path
+            repo,
+            repo_owner="jabramsja",
+            repo_name="rcx-pi-core",
+            pr_data=pr_data,
+        )
+
     def test_post_commit_requests_current_head_bot_review_once(self, tmp_path, monkeypatch):
         repo = tmp_path
         handoff = _make_new_handoff()

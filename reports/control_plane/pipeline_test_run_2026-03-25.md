@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Eighteenth live follow-up on 2026-03-27 turned the local Step 14 plus supervisor-context slice into a tracker-note uniqueness follow-up. The resubmitted pre-commit package eventually cleared with `COMMIT_GO`, but the resumed commit executor then failed at Step 3 because `ensure_tracker_note` treated the canonical tracker note and the authorized `[PIPELINE-TEST-RUN]` NEXT-item reference as a duplicate wave-id collision. The active fix is now Step 14 registration wait plus supervisor-context preservation plus tracker-note uniqueness keyed to actual tracker-note lines instead of arbitrary whole-file wave-id mentions.
+Status: Nineteenth live follow-up on 2026-03-27 turned the local Step 14 plus supervisor-context plus tracker-note slice into a Step 15 acknowledged-review latency follow-up. The resumed commit executor reused PR `#673`, pushed head `cfba791`, passed required checks, and posted one current-head `@codex review` request, but Step 15 still failed closed because the connector only acknowledged the request with an `eyes` reaction inside the 210-second window and never surfaced a usable current-head review or no-issues issue comment before timeout. The active fix is now to keep Step 15 clearance fail-closed while extending its wait only when the connector has acknowledged the latest current-head request.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -497,6 +497,32 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   Step 14 wait and supervisor-context preservation, but narrow Step 3 duplicate
   detection to actual tracker-note-line collisions so authorized NEXT-item wave
   references no longer fail the mechanical commit path.
+
+## Nineteenth Live Stop (2026-03-27)
+
+- After the tracker-note uniqueness follow-up landed locally, rerunning
+  `python3 mu/tools/executors/executor_dispatch.py commit --handoff .agent_bus/executors/phase_b_handoff.json -v --json`
+  resumed honestly from the bounded post-commit continuation record, reused PR
+  `#673`, pushed head `cfba791`, and passed all required checks (`test`,
+  `green-gate`, and the fixture gates).
+- Step 15 then exercised the current-head self-request path again on the new
+  head. The executor posted one `@codex review` comment at
+  `2026-03-27T08:58:34Z`, and direct API repro showed an `eyes` reaction from
+  `chatgpt-codex-connector[bot]` at `2026-03-27T08:58:43Z`, which proves the
+  request was acknowledged but not cleared.
+- The run still failed closed with
+  `No current-head chatgpt-codex-connector review or issue-comment clearance for cfba791f within 210s`.
+  Direct repo/GitHub truth showed this is an executor latency-budget defect, not
+  a package or routing bug: the immediately previous successful current-head
+  connector review on commit `72a5d9e` took `384s` from the latest
+  `@codex review` request (`2026-03-27T07:37:49Z` ->
+  `2026-03-27T07:44:13Z`), already beyond the hardcoded `210s` wait.
+- Result: the boring-path stop moved again, this time to the external review
+  latency contract. The active fix is to keep Step 15 merge clearance tied to a
+  real current-head review or a no-issues connector issue comment, but extend
+  the wait budget only after the connector has acknowledged the latest review
+  request, anchored to the request timestamp so bounded continuations do not
+  over-wait on rerun.
 
 ## Next Mechanical Questions
 
