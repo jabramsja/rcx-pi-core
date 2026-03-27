@@ -4,6 +4,24 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-27
 
+### Pipeline Test Run Current-Head Review-Cycle Floor And Zombie Presence Cleanup
+
+- `commit_executor.py` Step 15 now uses the fresher of the latest
+  `@codex review` request and the latest current-head connector review as the
+  review-cycle floor, and current-head connector issue-comment clearance uses
+  that same floor so older request-era comments or unresolved bot threads
+  cannot leak back in after a newer current-head review
+- `bridge_adapters.py` stale-timeout cleanup now waits for tracked PIDs to
+  disappear, not merely to stop being non-zombie, so zombie descendants are not
+  treated as fully cleaned up until they are actually reaped
+- `mu/tests/tools/test_executor_dispatch.py` and
+  `mu/tests/tools/test_agent_bridge_supervisor.py` now lock the current-head
+  review-floor regression and the zombie-presence cleanup regression directly
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  record the Thirty-Third live stop honestly: head `5989b55` passed CI,
+  received a fresh current-head connector review, and then surfaced these two
+  remaining control-plane defects
+
 ### Pipeline Test Run Review-Cycle Truth, Zombie Cleanup, And Canonical Receipt-Proof Paths
 
 - `commit_executor.py` now scopes unresolved bot-thread findings to the active

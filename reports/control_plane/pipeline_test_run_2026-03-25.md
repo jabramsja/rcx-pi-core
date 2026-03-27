@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Thirty-Second live follow-up on 2026-03-27 confirmed that the fresh per-invocation receipt path is no longer the blocker. After the boring-path automation passed CI and fresh current-head bot review on head `fa7ce400`, the next automated `commit` rerun issued a fresh receipt but still failed closed at Step 6 because the commit-local meta-review's focused receipt-authority proof chased dead legacy paths (`mu/tools/executors/meta_bridge_client.py` and `mu/tools/hooks/pre_commit_receipt.py`) instead of the live control-surface chain. The active follow-up preserves the Step 15 review-cycle truth and zombie-cleanup fixes, then binds the proof contract to the canonical live files and locks that in regressions.
+Status: Thirty-Third live follow-up on 2026-03-27 confirmed that the canonical receipt-authority chain is no longer the blocker. After the automated rerun resumed from local commit `5989b55`, passed pre-push, push, PR reuse, required CI, and received a fresh current-head connector review at `2026-03-27T15:53:35Z`, Step 15 still failed closed on two remaining control-plane defects: `commit_executor.py` preferred an older `@codex review` request over the newer current-head review when deriving the review-cycle floor, and `bridge_adapters.py` stale-timeout cleanup treated zombie descendants as fully gone before their PIDs disappeared. The active follow-up narrows to those two surfaces and locks both regressions.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -867,6 +867,30 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   prompt-contract hardening, not receipt regeneration: all control-surface
   review surfaces must anchor receipt-authority proof to the canonical live
   files and explicitly reject the dead legacy aliases.
+
+## Thirty-Third Live Stop (2026-03-27)
+
+- After the receipt-proof follow-up landed locally, rerunning
+  `python3 mu/tools/executors/executor_dispatch.py commit --handoff .agent_bus/executors/phase_b_handoff.json -v --json`
+  resumed from local commit `5989b55`, passed `pre-push-fast`, pushed,
+  reused PR `#673`, passed required CI (`test` and `green-gate`), posted a
+  fresh current-head `@codex review` request at `2026-03-27T15:43:53Z`, and
+  received a current-head connector review on that head at
+  `2026-03-27T15:53:35Z`.
+- The rerun no longer failed on receipt freshness or dead receipt-proof paths.
+  It failed closed because the fresh current-head review surfaced two remaining
+  control-plane defects:
+  1. `mu/tools/executors/commit_executor.py:585` still preferred the latest
+     `@codex review` request timestamp even when a newer current-head connector
+     review existed, so prior-cycle unresolved bot threads or issue comments
+     could leak back into the current-head Step 15 evaluation.
+  2. `mu/tools/agents/bridge_adapters.py:251` still let stale-timeout cleanup
+     treat zombie descendants as fully cleaned up before their PIDs actually
+     disappeared, so repeated runs could falsely report complete cleanup while
+     unreaped zombies remained.
+- Result: the boring-path stop moved again and stays honest. The next fix is a
+  narrow current-head review-floor and zombie-presence cleanup follow-up, not a
+  broader redesign or a return to the receipt-proof lane.
 
 ## Next Mechanical Questions
 

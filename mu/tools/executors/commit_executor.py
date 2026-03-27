@@ -581,9 +581,16 @@ def _current_review_cycle_floor_timestamp(
     if not _pr_head_matches_expected(pr_data, head_sha):
         return None
     latest_request_at = _latest_bot_review_request_timestamp(pr_data)
-    if latest_request_at is not None:
+    latest_review_at = _latest_current_head_connector_review_timestamp(pr_data, head_sha)
+    if latest_request_at is None:
+        return latest_review_at
+    if latest_review_at is None:
         return latest_request_at
-    return _latest_current_head_connector_review_timestamp(pr_data, head_sha)
+    request_seconds = _parse_github_timestamp_seconds(latest_request_at)
+    review_seconds = _parse_github_timestamp_seconds(latest_review_at)
+    if request_seconds is None or review_seconds is None:
+        return latest_review_at if latest_review_at >= latest_request_at else latest_request_at
+    return latest_review_at if review_seconds >= request_seconds else latest_request_at
 
 
 def _parse_github_timestamp_seconds(timestamp: str) -> float | None:
@@ -635,8 +642,8 @@ def _current_head_connector_issue_comment_outcome(
 ) -> dict[str, Any] | None:
     if not _pr_head_matches_expected(pr_data, head_sha):
         return None
-    latest_request_at = _latest_bot_review_request_timestamp(pr_data)
-    if latest_request_at is None:
+    floor_timestamp = _current_review_cycle_floor_timestamp(pr_data, head_sha)
+    if floor_timestamp is None:
         return None
 
     latest_bot_comment: dict[str, Any] | None = None
@@ -645,7 +652,7 @@ def _current_head_connector_issue_comment_outcome(
         created_at = comment.get("createdAt", "")
         if not _is_connector_review_author(author):
             continue
-        if not isinstance(created_at, str) or not created_at or created_at <= latest_request_at:
+        if not isinstance(created_at, str) or not created_at or created_at <= floor_timestamp:
             continue
         if latest_bot_comment is None or created_at > latest_bot_comment.get("createdAt", ""):
             latest_bot_comment = comment

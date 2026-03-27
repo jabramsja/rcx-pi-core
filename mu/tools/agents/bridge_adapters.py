@@ -220,7 +220,7 @@ def _kill_process_group(
         while tracked_pids and time.monotonic() < deadline:
             remaining: list[int] = []
             for pid in tracked_pids:
-                if _pid_is_live_non_zombie(pid):
+                if _pid_exists(pid):
                     remaining.append(pid)
             if not remaining:
                 break
@@ -228,10 +228,16 @@ def _kill_process_group(
             time.sleep(0.05)
 
 
-def _pid_is_live_non_zombie(pid: int) -> bool:
+def _pid_exists(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except (OSError, ProcessLookupError):
+        return False
+    return True
+
+
+def _pid_is_live_non_zombie(pid: int) -> bool:
+    if not _pid_exists(pid):
         return False
 
     try:

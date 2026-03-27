@@ -3060,7 +3060,15 @@ class TestCommitContinuationAndBotFreshness:
                                         }
                                     ]
                                 },
-                                "comments": {"nodes": []},
+                                "comments": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": "jabramsja"},
+                                            "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                                            "createdAt": "2026-03-27T07:37:49Z",
+                                        }
+                                    ]
+                                },
                             }
                         }
                     }
@@ -3168,7 +3176,15 @@ class TestCommitContinuationAndBotFreshness:
                                         },
                                     ]
                                 },
-                                "comments": {"nodes": []},
+                                "comments": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": "jabramsja"},
+                                            "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                                            "createdAt": "2026-03-27T07:37:49Z",
+                                        }
+                                    ]
+                                },
                             }
                         }
                     }
@@ -3197,6 +3213,37 @@ class TestCommitContinuationAndBotFreshness:
                 "line": 9,
             }
         ]
+
+    def test_current_head_connector_issue_comment_outcome_ignores_pre_review_clear_comment(self):
+        pr_data = {
+            "headRefOid": "abc123",
+            "latestReviews": {
+                "nodes": [
+                    {
+                        "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                        "state": "COMMENTED",
+                        "submittedAt": "2026-03-27T07:40:00Z",
+                        "commit": {"oid": "abc123"},
+                    }
+                ]
+            },
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "jabramsja"},
+                        "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                        "createdAt": "2026-03-27T07:37:49Z",
+                    },
+                    {
+                        "author": {"login": "chatgpt-codex-connector[bot]"},
+                        "body": "Codex Review: Didn't find any major issues. Swish!",
+                        "createdAt": "2026-03-27T07:39:03Z",
+                    },
+                ]
+            },
+        }
+
+        assert commit_mod._current_head_connector_issue_comment_outcome(pr_data, "abc123") is None
 
     def test_bot_review_request_acknowledgement_detects_connector_eyes_reaction(self, tmp_path, monkeypatch):
         repo = tmp_path
