@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Thirty-Fourth live follow-up on 2026-03-27 confirmed that the current-head review-floor and zombie-presence cleanup slice is no longer the blocker. That implementation landed locally as `cfe94c6`, and the next automated rerun failed earlier at Step 10 `pre-push-fast` only because the new direct helper regression in `mu/tests/tools/test_executor_dispatch.py` lacked the required `# ANTICHEAT_OK` annotation. The active follow-up narrows to that one-line anti-cheat allowlist plus packet/tracker truth sync.
+Status: Thirty-Fifth live follow-up on 2026-03-27 confirmed that the post-commit anti-cheat slice is no longer the blocker. That follow-up landed locally as `cc67c9a`, and the next automated rerun advanced through Step 15 before a fresh current-head review narrowed the remaining defect to stale-timeout cleanup waiting on zombie PID presence instead of reaping the root and waiting only on live non-zombie descendants. The active follow-up narrows to that bridge cleanup slice plus packet/tracker truth sync.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -916,6 +916,28 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   one-line anti-cheat annotation plus packet/tracker truth sync for the narrow
   post-commit follow-up, then another automated commit rerun from the bounded
   continuation boundary.
+
+## Thirty-Fifth Live Stop (2026-03-27)
+
+- After the anti-cheat follow-up landed locally as commit `cc67c9a`
+  (`fix: unblock pipeline pre-push anti-cheat gate`), rerunning
+  `python3 mu/tools/executors/executor_dispatch.py commit --handoff .agent_bus/executors/phase_b_handoff.json -v --json`
+  advanced cleanly through Step 11 pre-push, Step 12 push, Step 13 PR reuse,
+  and Step 14 CI on the new head. Step 15 then posted a fresh current-head
+  `@codex review` request at `2026-03-27T16:43:55Z`, observed the connector
+  acknowledgement, and received a fresh current-head review on `cc67c9a` at
+  `2026-03-27T16:51:44Z`.
+- That review did not reopen the anti-cheat or package-truth issue. It surfaced
+  one remaining live cleanup defect in `mu/tools/agents/bridge_adapters.py`:
+  stale-timeout cleanup still used zombie PID presence as the wait boundary via
+  `_pid_exists`, so detached descendants could remain unreaped under PID 1 even
+  after the adapter reported cleanup complete.
+- Result: the boring-path stop moved again and stays honest. The next fix is a
+  narrow bridge cleanup follow-up: kill tracked descendants before the root
+  process, reap the root process when possible, wait only on live non-zombie
+  descendants during stale-timeout cleanup, lock that behavior in focused tests,
+  and rerun the automated commit path from the bounded post-commit continuation
+  boundary.
 
 ## Next Mechanical Questions
 

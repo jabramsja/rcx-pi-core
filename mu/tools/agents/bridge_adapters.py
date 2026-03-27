@@ -201,13 +201,6 @@ def _kill_process_group(
     wait_for_exit: bool = False,
 ) -> None:
     tracked_pids = [pid for pid, _cpu in _process_tree_fingerprint(proc.pid)]
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except (OSError, ProcessLookupError):
-        try:
-            proc.kill()
-        except OSError:
-            pass
     for pid in tracked_pids:
         if pid == proc.pid:
             continue
@@ -215,16 +208,30 @@ def _kill_process_group(
             os.kill(pid, signal.SIGKILL)
         except (OSError, ProcessLookupError):
             pass
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (OSError, ProcessLookupError):
+        try:
+            proc.kill()
+        except OSError:
+            pass
     if wait_for_exit:
         deadline = time.monotonic() + 2.0
+        child_pids = [pid for pid in tracked_pids if pid != proc.pid]
         while tracked_pids and time.monotonic() < deadline:
-            remaining: list[int] = []
-            for pid in tracked_pids:
-                if _pid_exists(pid):
-                    remaining.append(pid)
-            if not remaining:
+            remaining_children = [
+                pid for pid in child_pids if _pid_is_live_non_zombie(pid)
+            ]
+            root_alive = proc.poll() is None
+            if not root_alive:
+                try:
+                    proc.wait(timeout=0)
+                except (subprocess.TimeoutExpired, ValueError):
+                    pass
+            if not remaining_children and not root_alive:
                 break
-            tracked_pids = remaining
+            child_pids = remaining_children
+            tracked_pids = ([proc.pid] if root_alive else []) + child_pids
             time.sleep(0.05)
 
 

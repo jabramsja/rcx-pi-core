@@ -4,7 +4,7 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-03-27
 
-### Pipeline Test Run Current-Head Review-Cycle Floor, Zombie Cleanup, And Post-Commit Anti-Cheat Follow-Up
+### Pipeline Test Run Review-Cycle Floor, Cleanup Wait, And Post-Commit Follow-Ups
 
 - `commit_executor.py` Step 15 now uses the fresher of the latest
   `@codex review` request and the latest current-head connector review as the
@@ -20,6 +20,11 @@ All notable changes to RCX are documented in this file.
 - `mu/tests/tools/test_executor_dispatch.py` now also marks the direct
   Step 15 issue-comment freshness helper regression with `# ANTICHEAT_OK`, so
   the intentional private-helper proof survives the post-commit anti-cheat scan
+- `bridge_adapters.py` stale-timeout cleanup now kills tracked descendants
+  before the root process, reaps the root process when possible, and waits only
+  on live non-zombie descendants during stale-timeout cleanup
+- `mu/tests/tools/test_agent_bridge_supervisor.py` now locks the root-reap and
+  live-non-zombie wait semantics for stale-timeout cleanup
 - `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
   record the Thirty-Third live stop honestly: head `5989b55` passed CI,
   received a fresh current-head connector review, and then surfaced these two
@@ -29,6 +34,10 @@ All notable changes to RCX are documented in this file.
   commit `cfe94c6`, the next rerun stopped at Step 10 `pre-push-fast` only
   because the new direct helper regression lacked the required anti-cheat
   annotation
+- `reports/control_plane/pipeline_test_run_2026-03-25.md` and `TASKS.md` now
+  also record the Thirty-Fifth live stop honestly: after the anti-cheat
+  follow-up landed as `cc67c9a`, the next current-head review narrowed the
+  remaining blocker to stale-timeout cleanup waiting on zombie PID presence
 
 ### Pipeline Test Run Review-Cycle Truth, Zombie Cleanup, And Canonical Receipt-Proof Paths
 

@@ -541,7 +541,9 @@ time.sleep(30.0)
 def test_kill_process_group_waits_for_tracked_pids_to_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     kill_calls: list[tuple[str, int, int]] = []
     sleeps: list[float] = []
-    presence_counts = {7001: 0, 7002: 0}
+    live_counts = {7002: 0}
+    poll_count = {"value": 0}
+    wait_calls: list[float] = []
     clock = {"value": 0.0}
 
     class _FakeProc:
@@ -549,6 +551,16 @@ def test_kill_process_group_waits_for_tracked_pids_to_exit(monkeypatch: pytest.M
 
         def kill(self) -> None:
             kill_calls.append(("proc", self.pid, int(adapters.signal.SIGKILL)))
+
+        def poll(self) -> int | None:
+            poll_count["value"] += 1
+            if poll_count["value"] < 4:
+                return None
+            return -9
+
+        def wait(self, timeout: float | None = None) -> int:
+            wait_calls.append(0.0 if timeout is None else timeout)
+            return -9
 
     def fake_fingerprint(_root_pid: int) -> tuple[tuple[int, float], ...]:
         return ((7001, 0.0), (7002, 0.0))
@@ -559,11 +571,9 @@ def test_kill_process_group_waits_for_tracked_pids_to_exit(monkeypatch: pytest.M
     def fake_kill(pid: int, sig: int) -> None:
         kill_calls.append(("pid", pid, int(sig)))
 
-    def fake_pid_exists(pid: int) -> bool:
-        presence_counts[pid] += 1
-        if pid == 7001:
-            return presence_counts[pid] < 4
-        return presence_counts[pid] < 3
+    def fake_pid_is_live_non_zombie(pid: int) -> bool:
+        live_counts[pid] += 1
+        return live_counts[pid] < 3
 
     def fake_monotonic() -> float:
         clock["value"] += 0.01
@@ -572,7 +582,7 @@ def test_kill_process_group_waits_for_tracked_pids_to_exit(monkeypatch: pytest.M
     monkeypatch.setattr(adapters, "_process_tree_fingerprint", fake_fingerprint)
     monkeypatch.setattr(adapters.os, "killpg", fake_killpg)
     monkeypatch.setattr(adapters.os, "kill", fake_kill)
-    monkeypatch.setattr(adapters, "_pid_exists", fake_pid_exists)
+    monkeypatch.setattr(adapters, "_pid_is_live_non_zombie", fake_pid_is_live_non_zombie)
     monkeypatch.setattr(adapters.time, "monotonic", fake_monotonic)
     monkeypatch.setattr(adapters.time, "sleep", lambda seconds: sleeps.append(seconds))
 
@@ -581,8 +591,9 @@ def test_kill_process_group_waits_for_tracked_pids_to_exit(monkeypatch: pytest.M
     assert ("pg", 7001, int(adapters.signal.SIGKILL)) in kill_calls
     assert ("pid", 7002, int(adapters.signal.SIGKILL)) in kill_calls
     assert sleeps
-    assert presence_counts[7001] >= 4
-    assert presence_counts[7002] >= 3
+    assert wait_calls == [0.0]
+    assert poll_count["value"] >= 4
+    assert live_counts[7002] >= 3
 
 
 def test_pid_exists_accepts_zombie(monkeypatch: pytest.MonkeyPatch) -> None:
