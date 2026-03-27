@@ -13,18 +13,32 @@ It surfaces common failure causes:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib.util
 import json
 import os
 import platform
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path(__file__).parents[2]
+def _find_repo_root() -> Path:
+    """Find repo root from either the root symlink path or the real mu/tools path."""
+    d = Path(__file__).resolve().parent
+    for _ in range(10):
+        if (d / "pyproject.toml").is_file():
+            return d
+        d = d.parent
+    raise RuntimeError("Cannot find repo root (no pyproject.toml)")
+
+
+REPO_ROOT = _find_repo_root()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
 @dataclass
@@ -89,6 +103,47 @@ def _check_runner_with_python(python_exe: str) -> dict[str, Any]:
         "returncode": check.returncode,
         "stderr_head": (check.stderr or "").splitlines()[:6],
         "stdout_head": (check.stdout or "").splitlines()[:6],
+    }
+
+
+def _run_sdk_preflight_check(
+    timeout_seconds: int = 20,
+    retry_timeout_seconds: int = 45,
+) -> dict[str, Any]:
+    start = time.monotonic()
+    try:
+        from tools.runners.run_review import run_agent_preflight
+    except Exception as exc:
+        return {
+            "ok": False,
+            "timeout_seconds": timeout_seconds,
+            "retry_timeout_seconds": retry_timeout_seconds,
+            "elapsed_seconds": round(time.monotonic() - start, 2),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    try:
+        ok, error = asyncio.run(
+            run_agent_preflight(
+                timeout_seconds=timeout_seconds,
+                retry_timeout_seconds=retry_timeout_seconds,
+            )
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "timeout_seconds": timeout_seconds,
+            "retry_timeout_seconds": retry_timeout_seconds,
+            "elapsed_seconds": round(time.monotonic() - start, 2),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    return {
+        "ok": ok,
+        "timeout_seconds": timeout_seconds,
+        "retry_timeout_seconds": retry_timeout_seconds,
+        "elapsed_seconds": round(time.monotonic() - start, 2),
+        "error": error or None,
     }
 
 
@@ -158,9 +213,13 @@ def collect_diagnostics() -> dict[str, Any]:
             python_candidates.append(candidate)
 
     data["runner_bootstrap"] = [_check_runner_with_python(py) for py in python_candidates]
+    data["sdk_preflight"] = _run_sdk_preflight_check()
 
-    # Overall determination: at least one interpreter can run run_review --help.
-    data["can_run_runners_here"] = any(item["ok"] for item in data["runner_bootstrap"])
+    # Overall determination: bootstrap and live SDK preflight must both pass.
+    data["can_run_runners_here"] = (
+        any(item["ok"] for item in data["runner_bootstrap"])
+        and data["sdk_preflight"]["ok"]
+    )
     return data
 
 
@@ -197,6 +256,17 @@ def print_human(data: dict[str, Any]) -> None:
         if not item["ok"] and item["stderr_head"]:
             print(f"  stderr: {item['stderr_head'][0]}")
 
+    print("")
+    preflight = data["sdk_preflight"]
+    preflight_status = "PASS" if preflight["ok"] else "FAIL"
+    print(
+        "SDK preflight: "
+        f"{preflight_status} "
+        f"(timeout={preflight['timeout_seconds']}s, retry={preflight['retry_timeout_seconds']}s, "
+        f"elapsed={preflight['elapsed_seconds']}s)"
+    )
+    if preflight["error"]:
+        print(f"  error: {preflight['error']}")
     print("")
     overall = "PASS" if data["can_run_runners_here"] else "FAIL"
     print(f"Overall runnable in this shell: {overall}")

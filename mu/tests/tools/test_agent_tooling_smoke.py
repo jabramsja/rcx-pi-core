@@ -10,11 +10,14 @@ IMPORTANT: These tests don't run the actual agents (which costs money
 and requires API keys). They just verify the tooling is functional.
 """
 
+import os
 import subprocess
 import sys
-import os
-from pathlib import Path
+import asyncio
 import importlib.util
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -53,6 +56,7 @@ def import_from_path(module_name: str, file_path: Path):
 
     spec = importlib.util.spec_from_file_location(module_name, file_path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -117,6 +121,55 @@ class TestAgentToolingSmoke:
             pytest.fail(
                 f"run_review.py failed without PYTHONPATH:\n{result.stderr}"
             )
+
+    def test_run_review_preflight_retries_after_initial_timeout(self):
+        """Cold-start timeout should retry once before failing closed."""
+        run_review = import_from_path("run_review_retry", TOOLS_DIR / "runners" / "run_review.py")
+        calls = {"count": 0}
+
+        async def fake_query(*, prompt, options):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                await asyncio.sleep(0.02)
+            yield SimpleNamespace(result="PONG")
+
+        with patch.object(run_review, "SDK_IMPORT_ERROR", None), \
+             patch.object(run_review, "query", fake_query), \
+             patch.object(run_review, "create_agent_definitions", return_value={"verifier": object()}), \
+             patch.object(run_review, "build_query_options", return_value=object()):
+            ok, err = asyncio.run(
+                run_review.run_agent_preflight(
+                    timeout_seconds=0.01,
+                    retry_timeout_seconds=0.05,
+                )
+            )
+
+        assert ok is True
+        assert err == ""
+        assert calls["count"] == 2
+
+    def test_run_review_preflight_fails_closed_after_retry_timeout(self):
+        """Repeated timeout should surface an explicit retry-aware failure."""
+        run_review = import_from_path("run_review_retry_fail", TOOLS_DIR / "runners" / "run_review.py")
+
+        async def fake_query(*, prompt, options):
+            await asyncio.sleep(0.02)
+            if False:  # pragma: no cover - keeps this an async generator
+                yield None
+
+        with patch.object(run_review, "SDK_IMPORT_ERROR", None), \
+             patch.object(run_review, "query", fake_query), \
+             patch.object(run_review, "create_agent_definitions", return_value={"verifier": object()}), \
+             patch.object(run_review, "build_query_options", return_value=object()):
+            ok, err = asyncio.run(
+                run_review.run_agent_preflight(
+                    timeout_seconds=0.01,
+                    retry_timeout_seconds=0.015,
+                )
+            )
+
+        assert ok is False
+        assert "retry" in err
 
     def test_agent_memory_functions_exist(self):
         """agent_memory.py should export expected functions."""
@@ -190,6 +243,64 @@ class TestAgentMemory:
         agent_memory = import_from_path("agent_memory", TOOLS_DIR / "runners" / "agent_memory.py")
 
         assert hasattr(agent_memory, '_sanitize_for_prompt')
+
+    def test_check_agent_runtime_requires_sdk_preflight(self, monkeypatch):
+        """Runtime diagnostics must fail when live SDK preflight fails."""
+        checker = import_from_path("check_agent_runtime_mod", TOOLS_DIR / "checks" / "check_agent_runtime.py")
+
+        monkeypatch.setattr(
+            checker,
+            "_module_spec",
+            lambda name: {"module": name, "found": True, "origin": "/tmp/fake.so", "error": None},
+        )
+        monkeypatch.setattr(
+            checker,
+            "_shared_object_arch",
+            lambda path: {"path": path, "exists": True, "file_output": "Mach-O fake"},
+        )
+        monkeypatch.setattr(
+            checker,
+            "_check_runner_with_python",
+            lambda py: {"python": py, "ok": True, "returncode": 0, "stderr_head": [], "stdout_head": []},
+        )
+        monkeypatch.setattr(
+            checker,
+            "_run_sdk_preflight_check",
+            lambda timeout_seconds=20, retry_timeout_seconds=45: {
+                "ok": False,
+                "timeout_seconds": timeout_seconds,
+                "retry_timeout_seconds": retry_timeout_seconds,
+                "elapsed_seconds": 20.0,
+                "error": "SDK preflight timed out",
+            },
+        )
+        monkeypatch.setattr(
+            checker,
+            "_run",
+            lambda cmd, timeout=20, env=None: checker.CmdResult(
+                cmd=cmd,
+                returncode=0,
+                stdout="1.3.11\n",
+                stderr="",
+            ),
+        )
+
+        with patch.dict(sys.modules, {"claude_agent_sdk": SimpleNamespace(__version__="1.0")}):
+            data = checker.collect_diagnostics()
+
+        assert data["sdk_preflight"]["ok"] is False
+        assert data["can_run_runners_here"] is False
+
+    def test_check_agent_runtime_finds_repo_root_above_mu_tools(self):
+        """Repo root detection must land on the actual repo, not the mu/ subtree."""
+        checker = import_from_path("check_agent_runtime_root", TOOLS_DIR / "checks" / "check_agent_runtime.py")
+        expected_repo_root = next(
+            parent for parent in [PROJECT_ROOT, *PROJECT_ROOT.parents]
+            if (parent / "pyproject.toml").exists()
+        )
+
+        assert checker.REPO_ROOT == expected_repo_root
+        assert (checker.REPO_ROOT / "tools" / "runners" / "run_review.py").exists()
 
 
 class TestAgentCompliance:

@@ -120,6 +120,8 @@ class TestDispatcherConfig:
     def test_load_default_config(self):
         config = dispatch_mod.load_config()
         assert "backends" in config
+        assert "bridge_reviewers" in config
+        assert "bridge_turn_timeouts" in config
         assert "timeouts" in config
         assert "bridge_loop_limits" in config
 
@@ -132,6 +134,7 @@ class TestDispatcherConfig:
         config_path.write_text(json.dumps({"timeouts": {"commit_executor": 999}}))
         config = dispatch_mod.load_config(config_path)
         assert config["timeouts"]["commit_executor"] == 999
+        assert config["bridge_turn_timeouts"]["phase_b"] == 900
         assert config["review_depths"]["phase_b"] == "quick"
 
 
@@ -516,6 +519,40 @@ class TestPhaseAPlanCreation:
         assert content.count("Phase-A-Lock: LOCKED") == 1
         assert "Notes mention Phase-A-Lock: UNLOCKED" in content
 
+    def test_lock_plan_is_idempotent_for_reused_locked_packet(self, tmp_path):
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text(
+            "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)\n"
+            "Phase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+        content = plan.read_text(encoding="utf-8")
+        assert content.count("Phase-A-Lock: LOCKED") == 1
+        assert "bridge-converged" in content
+
+    def test_lock_plan_rejects_multiple_control_lines(self, tmp_path):
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text(
+            "Phase-A-Lock: UNLOCKED\n"
+            "Phase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(phase_a_mod.PhaseAExecutorError, match="exactly one Phase-A-Lock control line"):
+            phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+
+    def test_lock_plan_rejects_missing_control_line(self, tmp_path):
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text(
+            "# Some plan\nStatus: draft\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(phase_a_mod.PhaseAExecutorError, match="No Phase-A-Lock control line found"):
+            phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+
 
 class TestPhaseADispatcherIntegration:
     """Dispatcher correctly routes to phase_a_executor."""
@@ -564,10 +601,10 @@ class TestPhaseABridgeLoopFailClosed:
         rendered_dir = self._setup_phase_a(tmp_path)
         call_count = {"n": 0}
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             call_count["n"] += 1
             # Write rendered output with QUESTION decision
             rendered = rendered_dir / f"{job_id}.md"
@@ -588,10 +625,10 @@ class TestPhaseABridgeLoopFailClosed:
         rendered_dir = self._setup_phase_a(tmp_path)
         call_count = {"n": 0}
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             call_count["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: SOMETHING_UNKNOWN\n\nWeird output\n")
@@ -609,10 +646,10 @@ class TestPhaseABridgeLoopFailClosed:
         """GO decision converges normally (regression check)."""
         rendered_dir = self._setup_phase_a(tmp_path)
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: GO\n\nLooks good.\n")
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -623,15 +660,23 @@ class TestPhaseABridgeLoopFailClosed:
         result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
         assert result["status"] == "converged"
 
+    def test_extract_bridge_decision_accepts_rendered_bullet_format(self):
+        render_content = (
+            "# Bridge Job x\n\n"
+            "- Decision: SYNTHETIC (founder session, not a real review)\n"
+            "- Decision: GO\n"
+        )
+        assert phase_a_mod._extract_bridge_decision(render_content) == "GO"
+
     def test_request_changes_continues_loop(self, tmp_path, monkeypatch):
         """REQUEST_CHANGES continues the loop (regression check)."""
         rendered_dir = self._setup_phase_a(tmp_path)
         call_count = {"n": 0}
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             call_count["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             if call_count["n"] < 3:
@@ -651,10 +696,10 @@ class TestPhaseABridgeLoopFailClosed:
         """Bridge failure with no rendered output fails closed."""
         self._setup_phase_a(tmp_path)
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             # No rendered output written, non-zero exit
             return {"exit_code": 1, "stdout": "", "stderr": "bridge crashed"}
 
@@ -663,7 +708,193 @@ class TestPhaseABridgeLoopFailClosed:
 
         result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
         assert result["status"] == "error"
-        assert "exit code" in result["error"]
+        assert "bridge subprocess failed in round 1" in result["error"].lower()
+        assert "bridge crashed" in result["error"]
+
+    def test_bridge_failure_with_stale_rendered_output_fails_closed(self, tmp_path, monkeypatch):
+        """A stale reader-only render must not mask a nonzero bridge subprocess exit."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text(
+                "# Bridge Review\n\nStatus: PAUSED - awaiting founder review before reviewer\n",
+                encoding="utf-8",
+            )
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "Adapter 'codex' produced no stdout after 120.0s",
+            }
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "error"
+        assert "bridge subprocess failed in round 1" in result["error"].lower()
+        assert "produced no stdout" in result["error"]
+        assert ".agent_bus/rendered/phase-a-r1-" in result["rendered_path"]
+
+    def test_go_substring_smuggling_does_not_false_converge(self, tmp_path, monkeypatch):
+        """Phase A must parse the canonical decision line, not any GO substring."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text(
+                "Decision: NO_GO\n\nReason: do not trust a quoted Decision: GO from prior text.\n"
+            )
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=1)
+        assert result["status"] == "max_rounds_reached"
+
+    def test_zero_exit_without_rendered_output_fails_closed(self, tmp_path, monkeypatch):
+        """Phase A must error if the bridge exits 0 but writes no rendered file."""
+        self._setup_phase_a(tmp_path)
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "error"
+        assert "no rendered output" in result["error"].lower()
+
+    def test_bridge_review_stale_watchdog_fails_closed(self, tmp_path, monkeypatch):
+        """Phase A bridge review must fail closed on silent stale reviewer hangs."""
+        tools_agents = tmp_path / "tools" / "agents"
+        tools_agents.mkdir(parents=True)
+        fake_bridge = tools_agents / "bridge_supervisor.py"
+        fake_bridge.write_text(
+            "#!/usr/bin/env python3\n"
+            "import time\n"
+            "time.sleep(30)\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_STALE_TIMEOUT", 0.05)
+        monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_AGGREGATION_HANG_TIMEOUT", 999.0)
+        monkeypatch.setattr(phase_a_mod, "PHASE_A_BRIDGE_POLL_SLEEP", 0.01)
+
+        result = phase_a_mod.run_bridge_design_review(
+            tmp_path,
+            "reports/control_plane/test_plan.md",
+            1,
+            job_id="phase-a-r1-watchdog",
+            timeout=30,
+        )
+
+        assert result["exit_code"] == -2
+        assert "Bridge review stale" in result["stderr"]
+        assert "phase_a_bridge_phase-a-r1-watchdog.stdout.log" in result["stderr"]
+
+    def test_bridge_task_is_repo_local_only(self, tmp_path):
+        """Phase A bridge task must explicitly forbid external web/network research."""
+        tools_agents = tmp_path / "tools" / "agents"
+        tools_agents.mkdir(parents=True)
+        fake_bridge = tools_agents / "bridge_supervisor.py"
+        fake_bridge.write_text(
+            "#!/usr/bin/env python3\n",
+            encoding="utf-8",
+        )
+
+        result = phase_a_mod.run_bridge_design_review(
+            tmp_path,
+            "reports/control_plane/test_plan.md",
+            1,
+            job_id="phase-a-r1-local-only",
+            timeout=30,
+        )
+
+        task_text = (tmp_path / ".scratch" / "phase_a_bridge_r1.md").read_text(encoding="utf-8")
+        assert "Use repo-local evidence only." in task_text
+        assert "Do not browse the web" in task_text
+        assert result["exit_code"] == 0
+
+    def test_bridge_design_review_uses_configured_reviewer(self, tmp_path):
+        """Phase A bridge review must honor executor-configured reviewer backend."""
+        tools_agents = tmp_path / "tools" / "agents"
+        tools_agents.mkdir(parents=True)
+        fake_bridge = tools_agents / "bridge_supervisor.py"
+        fake_bridge.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json\n"
+            "import pathlib\n"
+            "import sys\n"
+            "scratch = pathlib.Path.cwd() / '.scratch'\n"
+            "scratch.mkdir(exist_ok=True)\n"
+            "(scratch / 'phase_a_bridge_args.json').write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        config_path = tmp_path / "mu" / "tools" / "executors"
+        config_path.mkdir(parents=True)
+        (config_path / "executor_config.json").write_text(
+            json.dumps({"bridge_reviewers": {"phase_a": "claude"}}),
+            encoding="utf-8",
+        )
+
+        result = phase_a_mod.run_bridge_design_review(
+            tmp_path,
+            "reports/control_plane/test_plan.md",
+            1,
+            job_id="phase-a-r1-config-reviewer",
+            timeout=30,
+        )
+
+        argv = json.loads((tmp_path / ".scratch" / "phase_a_bridge_args.json").read_text(encoding="utf-8"))
+        assert "--reviewer" in argv
+        assert argv[argv.index("--reviewer") + 1] == "claude"
+        assert result["exit_code"] == 0
+
+    def test_bridge_design_review_sets_configured_turn_timeout_env(self, tmp_path):
+        """Phase A bridge review should pass its turn-time budget to bridge_supervisor."""
+        tools_agents = tmp_path / "tools" / "agents"
+        tools_agents.mkdir(parents=True)
+        fake_bridge = tools_agents / "bridge_supervisor.py"
+        fake_bridge.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json\n"
+            "import os\n"
+            "import pathlib\n"
+            "scratch = pathlib.Path.cwd() / '.scratch'\n"
+            "scratch.mkdir(exist_ok=True)\n"
+            "(scratch / 'phase_a_bridge_env.json').write_text(json.dumps({'turn_timeout': os.getenv('RCX_BRIDGE_MAX_TURN_WALL_TIME_S')}), encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        config_path = tmp_path / "mu" / "tools" / "executors"
+        config_path.mkdir(parents=True)
+        (config_path / "executor_config.json").write_text(
+            json.dumps({"bridge_turn_timeouts": {"phase_a": 451}}),
+            encoding="utf-8",
+        )
+
+        result = phase_a_mod.run_bridge_design_review(
+            tmp_path,
+            "reports/control_plane/test_plan.md",
+            1,
+            job_id="phase-a-r1-config-timeout",
+            timeout=600,
+        )
+
+        env_payload = json.loads((tmp_path / ".scratch" / "phase_a_bridge_env.json").read_text(encoding="utf-8"))
+        assert env_payload["turn_timeout"] == "451.0"
+        assert result["exit_code"] == 0
 
 
 # ===========================================================================
@@ -2377,11 +2608,12 @@ class TestRunBridgeSubprocessCleanup:
 
 
 class TestExecutorsUseBridgeSubprocess:
-    """All three executors use run_bridge_subprocess instead of raw
-    subprocess.run, ensuring consistent process-group cleanup."""
+    """Bridge invocation surfaces use the shared cleanup/watchdog helpers."""
 
-    def test_phase_a_imports_run_bridge_subprocess(self):
-        assert hasattr(phase_a_mod, "run_bridge_subprocess")
+    def test_phase_a_imports_bridge_watchdog_helpers(self):
+        assert hasattr(phase_a_mod, "process_descendants")
+        assert hasattr(phase_a_mod, "terminate_process_tree")
+        assert hasattr(phase_a_mod, "artifact_size_mtime_ns")
 
     def test_dialectic_imports_run_bridge_subprocess(self):
         assert hasattr(dialectic_mod, "run_bridge_subprocess")
@@ -2514,15 +2746,15 @@ class TestBridgeR6Finding2PhaseAAgentGate:
         (bus_dir / "post_merge_routing.json").write_text(json.dumps(routing))
         return rendered_dir
 
-    def test_failed_agent_review_blocks_bridge(self, tmp_path, monkeypatch):
-        """Nonzero agent exit code must prevent bridge from running."""
+    def test_hard_gate_agent_review_blocks_bridge(self, tmp_path, monkeypatch):
+        """Hard-gate / infra exits must prevent bridge from running."""
         self._setup_phase_a(tmp_path)
         bridge_called = {"n": 0}
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
-            return {"exit_code": 2, "stdout": "", "stderr": "agent failed"}
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 4, "stdout": "", "stderr": "preflight failed"}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             bridge_called["n"] += 1
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
@@ -2532,18 +2764,198 @@ class TestBridgeR6Finding2PhaseAAgentGate:
         result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
         assert result["status"] == "error"
         assert "agent review failed" in result["error"].lower() or "SDK agent review failed" in result["error"]
-        assert result["agent_exit_code"] == 2
+        assert result["agent_exit_code"] == 4
         # Bridge must NOT have been called
         assert bridge_called["n"] == 0
+
+    def test_agent_review_timeout_budget_comes_from_executor_config(self, tmp_path, monkeypatch):
+        """Phase A must pass the configured agent-review budget into run_sdk_agents."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+        captured: dict[str, int] = {}
+
+        monkeypatch.setattr(
+            phase_a_mod,
+            "load_executor_config",
+            lambda repo_root: {
+                "review_depths": {"phase_a": "quick"},
+                "timeouts": {"agent_review": 901},
+            },
+        )
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            captured["timeout"] = timeout
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: GO\n\nLooks good.\n")
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        assert captured["timeout"] == 901
+
+    def test_soft_warning_agent_review_proceeds_to_bridge(self, tmp_path, monkeypatch):
+        """Exit 2 is a soft gate and must not block bridge review."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+        bridge_called = {"n": 0}
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 2, "stdout": "", "stderr": "expert: COULD_SIMPLIFY"}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            bridge_called["n"] += 1
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: GO\n\nLooks good.\n")
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        assert result["agent_exit_code"] == 2
+        assert bridge_called["n"] == 1
+
+    def test_semantic_blocker_agent_review_continues_to_bridge(self, tmp_path, monkeypatch):
+        """Exit 1 (semantic blockers) must continue to bridge for contextual classification."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+        bridge_called = {"n": 0}
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "adversary timed out",
+                "report_path": ".scratch/phase_a_agent_review_test.report.md",
+                "status_path": ".scratch/phase_a_agent_review_test.status.json",
+                "stdout_path": ".scratch/phase_a_agent_review_test.stdout.log",
+            }
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            bridge_called["n"] += 1
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: GO\n\nLooks good.\n")
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        assert result["agent_exit_code"] == 1
+        assert result["agent_review_warning_only"] is True
+        assert result["agent_review_report_path"] == ".scratch/phase_a_agent_review_test.report.md"
+        assert result["agent_review_status_path"] == ".scratch/phase_a_agent_review_test.status.json"
+        assert result["agent_review_stdout_path"] == ".scratch/phase_a_agent_review_test.stdout.log"
+        assert bridge_called["n"] == 1
+
+    def test_infra_gate_agent_review_preserves_report_artifacts(self, tmp_path, monkeypatch):
+        """Infra exits (>=3) must fail closed and preserve report/status artifact paths."""
+        self._setup_phase_a(tmp_path)
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {
+                "exit_code": 4,
+                "stdout": "",
+                "stderr": "preflight failed",
+                "report_path": ".scratch/phase_a_agent_review_test.report.md",
+                "status_path": ".scratch/phase_a_agent_review_test.status.json",
+                "stdout_path": ".scratch/phase_a_agent_review_test.stdout.log",
+            }
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", lambda *a, **k: pytest.fail("bridge must not run"))
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "error"
+        assert result["agent_review_report_path"] == ".scratch/phase_a_agent_review_test.report.md"
+        assert result["agent_review_status_path"] == ".scratch/phase_a_agent_review_test.status.json"
+        assert result["agent_review_stdout_path"] == ".scratch/phase_a_agent_review_test.stdout.log"
+
+    def test_infra_gate_error_reads_status_diagnostic(self, tmp_path, monkeypatch):
+        """Infra exits must surface agent status diagnostic, not just truncated stderr."""
+        self._setup_phase_a(tmp_path)
+
+        # Write a status.json that the error handler should read
+        scratch = tmp_path / ".scratch"
+        scratch.mkdir(exist_ok=True)
+        status_data = {
+            "phase_label": "agent_review",
+            "status": "completed",
+            "completed_agents": {
+                "verifier": {"verdict": "PASS"},
+                "adversary": {"verdict": "UNKNOWN", "detail": "AGENT TIMEOUT: adversary exceeded 360s"},
+            },
+            "running_agents": [],
+        }
+        (scratch / "phase_a_agent_review_test.status.json").write_text(
+            json.dumps(status_data), encoding="utf-8"
+        )
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {
+                "exit_code": 3,
+                "stdout": "",
+                "stderr": "WARNING: Bun AVX blah blah noise",
+                "report_path": ".scratch/phase_a_agent_review_test.report.md",
+                "status_path": ".scratch/phase_a_agent_review_test.status.json",
+                "stdout_path": ".scratch/phase_a_agent_review_test.stdout.log",
+            }
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", lambda *a, **k: pytest.fail("bridge must not run"))
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "error"
+        # Error must include the agent status diagnostic, not just noisy stderr
+        assert "adversary=UNKNOWN" in result["error"]
+        assert "verifier=PASS" in result["error"]
+        assert "agent_status:" in result["error"]
+
+    def test_agent_review_artifacts_passed_to_bridge(self, tmp_path, monkeypatch):
+        """Phase A must surface agent review artifacts to bridge reviewer (parity with Phase B)."""
+        rendered_dir = self._setup_phase_a(tmp_path)
+        captured_ctx = {}
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {
+                "exit_code": 2,
+                "stdout": "",
+                "stderr": "expert: COULD_SIMPLIFY",
+                "report_path": ".scratch/phase_a_agent_review_test.report.md",
+                "status_path": ".scratch/phase_a_agent_review_test.status.json",
+                "stdout_path": ".scratch/phase_a_agent_review_test.stdout.log",
+            }
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            captured_ctx["agent_review_context"] = agent_review_context
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: GO\n\nLooks good.\n")
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        # Bridge must have received agent review context
+        ctx = captured_ctx["agent_review_context"]
+        assert "report" in ctx
+        assert "phase_a_agent_review_test.report.md" in ctx
+        assert "exit_code: 2" in ctx
 
     def test_successful_agent_review_proceeds_to_bridge(self, tmp_path, monkeypatch):
         """Zero agent exit code allows bridge to proceed (regression check)."""
         rendered_dir = self._setup_phase_a(tmp_path)
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: GO\n\nLooks good.\n")
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -2580,10 +2992,10 @@ class TestBridgeR6Finding3PhaseARequestChangesSilentSuccess:
         rendered_dir = self._setup_phase_a(tmp_path)
         call_count = {"n": 0}
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             call_count["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: REQUEST_CHANGES\n\nPlease fix section 3.\n")
@@ -2605,10 +3017,10 @@ class TestBridgeR6Finding3PhaseARequestChangesSilentSuccess:
         rendered_dir = self._setup_phase_a(tmp_path)
         call_count = {"n": 0}
 
-        def fake_run_sdk_agents(repo_root, files, *, depth="full", timeout=600):
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             call_count["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             if call_count["n"] < 3:
@@ -2673,6 +3085,38 @@ class TestPhaseATrackedPacketReuse:
         scope = {"request": "x"}
         path = phase_a_mod.create_plan_draft(tmp_path, "my_plan", scope)
         assert path == locked
+
+    def test_run_phase_a_reused_locked_packet_converges(self, tmp_path, monkeypatch):
+        plan_dir = tmp_path / "reports" / "control_plane"
+        rendered_dir = tmp_path / ".agent_bus" / "rendered"
+        rendered_dir.mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".agent_bus" / "executors").mkdir(parents=True, exist_ok=True)
+        locked = plan_dir / "my_plan_2026-03-20.md"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        locked.write_text(
+            "# My Plan\n"
+            "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\nReal content here.\n",
+            encoding="utf-8",
+        )
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: GO\n\nLooks good.\n", encoding="utf-8")
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "my_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        content = locked.read_text(encoding="utf-8")
+        assert content.count("Phase-A-Lock: LOCKED") == 1
+        assert "bridge-converged" in content
 
 
 class TestFindTrackedPacket:

@@ -6,11 +6,13 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +40,239 @@ class AdapterSpec:
     prompt_via_stdin: bool = True
     env: dict[str, str] | None = None
     mode: str = "live"
+
+
+_AGENT_ENVELOPE_BEGIN = "BEGIN_AGENT_ENVELOPE"
+_AGENT_ENVELOPE_END = "END_AGENT_ENVELOPE"
+_AGENT_ENVELOPE_RE = re.compile(
+    r"BEGIN_AGENT_ENVELOPE\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?END_AGENT_ENVELOPE",
+    re.DOTALL,
+)
+_AUTHORIZED_AGENT_DECISIONS = frozenset(
+    {"GO", "NO_GO", "REQUEST_CHANGES", "QUESTION", "STALE", "ERROR", "SYNTHETIC"}
+)
+
+
+def _extract_text_from_stream_content(block: Any) -> str:
+    """Best-effort text extraction from a Claude stream-json content block."""
+    if isinstance(block, dict):
+        text = block.get("text")
+        if isinstance(text, str):
+            return text.strip()
+    return ""
+
+
+def _extract_claude_stream_json_output(stdout_text: str) -> str | None:
+    """Normalize Claude CLI --output-format stream-json stdout into plain text."""
+    raw_lines = [line for line in stdout_text.splitlines() if line.strip()]
+    if not raw_lines:
+        return None
+
+    events: list[dict[str, Any]] = []
+    for line in raw_lines:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict) or not isinstance(payload.get("type"), str):
+            return None
+        events.append(payload)
+
+    result_text = ""
+    assistant_parts: list[str] = []
+    for payload in events:
+        event_type = payload.get("type")
+        if event_type == "result":
+            result = payload.get("result")
+            if isinstance(result, str) and result.strip():
+                result_text = result.strip()
+        elif event_type == "assistant":
+            message = payload.get("message")
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    text = _extract_text_from_stream_content(block)
+                    if text:
+                        assistant_parts.append(text)
+            else:
+                text = _extract_text_from_stream_content(content)
+                if text:
+                    assistant_parts.append(text)
+
+    if result_text:
+        return result_text
+    if assistant_parts:
+        return "\n".join(assistant_parts).strip()
+    return None
+
+
+def _normalize_stdout_for_adapter(
+    spec: AdapterSpec,
+    cmd: list[str],
+    stdout_text: str,
+) -> str:
+    """Return authoritative plain-text stdout for adapters with wrapped output."""
+    if not stdout_text.strip():
+        return stdout_text
+
+    uses_claude_stream_json = (
+        spec.name == "claude"
+        and "--output-format" in cmd
+        and "stream-json" in cmd
+    )
+    if not uses_claude_stream_json:
+        return stdout_text
+
+    normalized = _extract_claude_stream_json_output(stdout_text)
+    return normalized if normalized is not None else stdout_text
+
+
+def _parse_ps_time_seconds(value: str) -> float:
+    text = value.strip()
+    if not text:
+        return 0.0
+    days = 0
+    if "-" in text:
+        day_text, text = text.split("-", 1)
+        try:
+            days = int(day_text)
+        except ValueError:
+            return 0.0
+    parts = text.split(":")
+    try:
+        seconds = float(parts[-1])
+    except (IndexError, ValueError):
+        return 0.0
+    minutes = int(parts[-2]) if len(parts) >= 2 else 0
+    hours = int(parts[-3]) if len(parts) >= 3 else 0
+    return (days * 86400) + (hours * 3600) + (minutes * 60) + seconds
+
+
+def _process_tree_fingerprint(root_pid: int) -> tuple[tuple[int, float], ...]:
+    if root_pid <= 0:
+        return ()
+    try:
+        os.kill(root_pid, 0)
+    except (OSError, ProcessLookupError):
+        return ()
+
+    try:
+        proc = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,time="],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return ((root_pid, 0.0),)
+
+    children_by_parent: dict[int, set[int]] = {}
+    cpu_by_pid: dict[int, float] = {}
+    for raw in proc.stdout.splitlines():
+        parts = raw.split(None, 2)
+        if len(parts) != 3:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+        except ValueError:
+            continue
+        children_by_parent.setdefault(ppid, set()).add(pid)
+        cpu_by_pid[pid] = _parse_ps_time_seconds(parts[2])
+
+    descendants: set[int] = set()
+    stack = list(children_by_parent.get(root_pid, set()))
+    while stack:
+        pid = stack.pop()
+        if pid in descendants:
+            continue
+        descendants.add(pid)
+        stack.extend(children_by_parent.get(pid, set()))
+
+    tracked = {root_pid, *descendants}
+    return tuple(sorted((pid, cpu_by_pid.get(pid, 0.0)) for pid in tracked))
+
+
+def _kill_process_group(proc: subprocess.Popen[str]) -> None:
+    tracked_pids = [pid for pid, _cpu in _process_tree_fingerprint(proc.pid)]
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (OSError, ProcessLookupError):
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    for pid in tracked_pids:
+        if pid == proc.pid:
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+
+
+def _contains_complete_agent_envelope(text: str) -> bool:
+    for match in _AGENT_ENVELOPE_RE.finditer(text):
+        try:
+            envelope = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        decision = envelope.get("decision")
+        if isinstance(decision, str) and decision in _AUTHORIZED_AGENT_DECISIONS:
+            return True
+    return False
+
+
+def _authoritative_output_so_far(spec: AdapterSpec, cmd: list[str], stdout_text: str) -> str:
+    """Scan only authoritative assistant stdout, not raw tool-result payloads."""
+    return _normalize_stdout_for_adapter(spec, cmd, stdout_text)
+
+
+def _raw_file_size(path: Path | None) -> int:
+    if path is None:
+        return 0
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def _progress_fingerprint(proc: subprocess.Popen[str], raw_output_path: Path | None) -> tuple[Any, ...]:
+    return (_raw_file_size(raw_output_path), _process_tree_fingerprint(proc.pid))
+
+
+def _start_stale_watchdog(
+    proc: subprocess.Popen[str],
+    raw_output_path: Path | None,
+    stale_timeout_s: float | None,
+    stale_timed_out: threading.Event,
+) -> tuple[threading.Event, threading.Thread | None]:
+    stop_event = threading.Event()
+    if stale_timeout_s is None:
+        return stop_event, None
+
+    def _watch_progress() -> None:
+        last_progress = time.monotonic()
+        last_fingerprint = _progress_fingerprint(proc, raw_output_path)
+        poll_interval = min(max(stale_timeout_s / 5.0, 0.2), 5.0)
+        while not stop_event.wait(poll_interval):
+            if proc.poll() is not None:
+                return
+            fingerprint = _progress_fingerprint(proc, raw_output_path)
+            if fingerprint != last_fingerprint:
+                last_fingerprint = fingerprint
+                last_progress = time.monotonic()
+                continue
+            if time.monotonic() - last_progress >= stale_timeout_s:
+                stale_timed_out.set()
+                _kill_process_group(proc)
+                return
+
+    thread = threading.Thread(target=_watch_progress, daemon=True)
+    thread.start()
+    return stop_event, thread
 
 
 def _expand_value(value: str, context: dict[str, str]) -> str:
@@ -108,7 +343,13 @@ def _prepare_adapter_env(spec: AdapterSpec, context: dict[str, str]) -> tuple[li
     return cmd, env
 
 
-def _tee_stream(source: io.TextIOWrapper, sink: io.StringIO, tty: Any, raw_file: Any = None) -> None:
+def _tee_stream(
+    source: io.TextIOWrapper,
+    sink: io.StringIO,
+    tty: Any,
+    raw_file: Any = None,
+    on_line: Any = None,
+) -> None:
     """Read from source, write to sink (capture), tty (live display), and raw_file (incremental persist)."""
     for line in source:
         sink.write(line)
@@ -118,6 +359,8 @@ def _tee_stream(source: io.TextIOWrapper, sink: io.StringIO, tty: Any, raw_file:
         if raw_file is not None:
             raw_file.write(line)
             raw_file.flush()
+        if on_line is not None:
+            on_line(line, sink)
 
 
 def _run_adapter_buffered(
@@ -127,6 +370,9 @@ def _run_adapter_buffered(
     prompt_text: str,
     repo_root: Path,
     raw_output_path: Path | None = None,
+    zero_output_timeout_s: float | None = None,
+    stale_timeout_s: float | None = None,
+    stop_after_envelope: bool = False,
 ) -> str:
     """Run adapter with full capture (no streaming), optionally writing to raw file incrementally."""
     raw_fh = None
@@ -172,21 +418,37 @@ def _run_adapter_buffered(
     # Watchdog timer: kill the ENTIRE process group if it exceeds timeout_s.
     # This prevents orphaned children (e.g., codex exec spawning sub-processes).
     timed_out = threading.Event()
+    zero_output_timed_out = threading.Event()
+    stale_timed_out = threading.Event()
+    envelope_terminated = threading.Event()
+    stale_watchdog_stop, stale_watchdog = _start_stale_watchdog(
+        proc,
+        raw_output_path,
+        stale_timeout_s,
+        stale_timed_out,
+    )
 
     def _kill_after_timeout() -> None:
         timed_out.set()
-        try:
-            # Kill entire process group to clean up children
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            try:
-                proc.kill()
-            except OSError:
-                pass
+        _kill_process_group(proc)
+
+    def _kill_after_zero_output_timeout() -> None:
+        if _raw_file_size(raw_output_path) > 0 or proc.poll() is not None:
+            return
+        zero_output_timed_out.set()
+        _kill_process_group(proc)
 
     watchdog = threading.Timer(spec.timeout_s, _kill_after_timeout)
     watchdog.daemon = True
     watchdog.start()
+    zero_output_watchdog = None
+    if zero_output_timeout_s is not None and raw_output_path is not None:
+        zero_output_watchdog = threading.Timer(
+            zero_output_timeout_s,
+            _kill_after_zero_output_timeout,
+        )
+        zero_output_watchdog.daemon = True
+        zero_output_watchdog.start()
 
     try:
         if spec.prompt_via_stdin and proc.stdin is not None:
@@ -200,14 +462,30 @@ def _run_adapter_buffered(
             if raw_fh is not None:
                 raw_fh.write(line)
                 raw_fh.flush()
+            if (
+                stop_after_envelope
+                and not envelope_terminated.is_set()
+                and _contains_complete_agent_envelope(
+                    _authoritative_output_so_far(spec, cmd, "".join(stdout_lines))
+                )
+            ):
+                envelope_terminated.set()
+                _kill_process_group(proc)
         proc.wait(timeout=spec.timeout_s)
         watchdog.cancel()
+        if zero_output_watchdog is not None:
+            zero_output_watchdog.cancel()
+        stale_watchdog_stop.set()
+        if stale_watchdog is not None:
+            stale_watchdog.join(timeout=5)
     except subprocess.TimeoutExpired as exc:
         watchdog.cancel()
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            proc.kill()
+        if zero_output_watchdog is not None:
+            zero_output_watchdog.cancel()
+        stale_watchdog_stop.set()
+        if stale_watchdog is not None:
+            stale_watchdog.join(timeout=5)
+        _kill_process_group(proc)
         proc.wait()
         stderr_thread.join(timeout=5)
         if raw_fh is not None:
@@ -220,10 +498,7 @@ def _run_adapter_buffered(
         # Timer fired — genuine timeout regardless of returncode
         # (SIGKILL sets returncode to -9, not None)
         if proc.returncode is None:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (OSError, ProcessLookupError):
-                proc.kill()
+            _kill_process_group(proc)
             proc.wait()
         stderr_thread.join(timeout=5)
         if raw_fh is not None:
@@ -234,13 +509,33 @@ def _run_adapter_buffered(
 
     stderr_thread.join(timeout=5)
 
-    output = "".join(stdout_lines)
+    output = _normalize_stdout_for_adapter(spec, cmd, "".join(stdout_lines))
     stderr_text = stderr_buf.getvalue()
     if stderr_text:
         output = f"{output}\n[stderr]\n{stderr_text}".strip()
         if raw_fh is not None:
             raw_fh.write(f"\n[stderr]\n{stderr_text}")
             raw_fh.flush()
+    if zero_output_timed_out.is_set():
+        if raw_fh is not None:
+            raw_fh.close()
+        raise BridgeAdapterError(
+            f"Adapter '{spec.name}' produced no stdout after {zero_output_timeout_s}s",
+            output=output,
+            returncode=proc.returncode,
+        )
+    if stale_timed_out.is_set():
+        if raw_fh is not None:
+            raw_fh.close()
+        raise BridgeAdapterError(
+            f"Adapter '{spec.name}' stalled after {stale_timeout_s}s without output growth or process-tree activity",
+            output=output,
+            returncode=proc.returncode,
+        )
+    if envelope_terminated.is_set():
+        if raw_fh is not None:
+            raw_fh.close()
+        return output
     if raw_fh is not None:
         raw_fh.close()
     if proc.returncode != 0:
@@ -260,6 +555,9 @@ def _run_adapter_streaming(
     prompt_text: str,
     repo_root: Path,
     raw_output_path: Path | None = None,
+    zero_output_timeout_s: float | None = None,
+    stale_timeout_s: float | None = None,
+    stop_after_envelope: bool = False,
 ) -> str:
     """Run adapter with live tee to terminal + full capture for raw output file."""
     raw_fh = None
@@ -292,10 +590,26 @@ def _run_adapter_streaming(
 
     stdout_buf = io.StringIO()
     stderr_buf = io.StringIO()
+    envelope_terminated = threading.Event()
+
+    def _stop_after_envelope(line: str, sink: io.StringIO) -> None:
+        if (
+            not stop_after_envelope
+            or envelope_terminated.is_set()
+        ):
+            return
+        if _contains_complete_agent_envelope(
+            _authoritative_output_so_far(spec, cmd, sink.getvalue())
+        ):
+            envelope_terminated.set()
+            # Give the adapter a brief grace period to flush any immediate trailing bytes
+            # before we terminate lingering background work in the same process group.
+            time.sleep(0.05)
+            _kill_process_group(proc)
 
     stdout_thread = threading.Thread(
         target=_tee_stream,
-        args=(proc.stdout, stdout_buf, sys.stdout, raw_fh),
+        args=(proc.stdout, stdout_buf, sys.stdout, raw_fh, _stop_after_envelope),
         daemon=True,
     )
     stderr_thread = threading.Thread(
@@ -306,6 +620,30 @@ def _run_adapter_streaming(
     stdout_thread.start()
     stderr_thread.start()
 
+    zero_output_timed_out = threading.Event()
+    stale_timed_out = threading.Event()
+    stale_watchdog_stop, stale_watchdog = _start_stale_watchdog(
+        proc,
+        raw_output_path,
+        stale_timeout_s,
+        stale_timed_out,
+    )
+
+    def _kill_after_zero_output_timeout() -> None:
+        if _raw_file_size(raw_output_path) > 0 or proc.poll() is not None:
+            return
+        zero_output_timed_out.set()
+        _kill_process_group(proc)
+
+    zero_output_watchdog = None
+    if zero_output_timeout_s is not None and raw_output_path is not None:
+        zero_output_watchdog = threading.Timer(
+            zero_output_timeout_s,
+            _kill_after_zero_output_timeout,
+        )
+        zero_output_watchdog.daemon = True
+        zero_output_watchdog.start()
+
     try:
         if spec.prompt_via_stdin and proc.stdin is not None:
             try:
@@ -314,11 +652,18 @@ def _run_adapter_streaming(
             except BrokenPipeError:
                 pass  # Process exited early; continue to wait for remaining output
         proc.wait(timeout=spec.timeout_s)
+        if zero_output_watchdog is not None:
+            zero_output_watchdog.cancel()
+        stale_watchdog_stop.set()
+        if stale_watchdog is not None:
+            stale_watchdog.join(timeout=5)
     except subprocess.TimeoutExpired as exc:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            proc.kill()
+        if zero_output_watchdog is not None:
+            zero_output_watchdog.cancel()
+        stale_watchdog_stop.set()
+        if stale_watchdog is not None:
+            stale_watchdog.join(timeout=5)
+        _kill_process_group(proc)
         proc.wait()
         stdout_thread.join(timeout=5)
         stderr_thread.join(timeout=5)
@@ -331,13 +676,33 @@ def _run_adapter_streaming(
     stdout_thread.join(timeout=5)
     stderr_thread.join(timeout=5)
 
-    output = stdout_buf.getvalue()
+    output = _normalize_stdout_for_adapter(spec, cmd, stdout_buf.getvalue())
     stderr_text = stderr_buf.getvalue()
     if stderr_text:
         output = f"{output}\n[stderr]\n{stderr_text}".strip()
         if raw_fh is not None:
             raw_fh.write(f"\n[stderr]\n{stderr_text}")
             raw_fh.flush()
+    if zero_output_timed_out.is_set():
+        if raw_fh is not None:
+            raw_fh.close()
+        raise BridgeAdapterError(
+            f"Adapter '{spec.name}' produced no stdout after {zero_output_timeout_s}s",
+            output=output,
+            returncode=proc.returncode,
+        )
+    if stale_timed_out.is_set():
+        if raw_fh is not None:
+            raw_fh.close()
+        raise BridgeAdapterError(
+            f"Adapter '{spec.name}' stalled after {stale_timeout_s}s without output growth or process-tree activity",
+            output=output,
+            returncode=proc.returncode,
+        )
+    if envelope_terminated.is_set():
+        if raw_fh is not None:
+            raw_fh.close()
+        return output
     if raw_fh is not None:
         raw_fh.close()
     if proc.returncode != 0:
@@ -361,7 +726,18 @@ def run_adapter(
     agent_role: str,
     stream: bool = False,
     raw_output_path: Path | None = None,
+    timeout_override_s: float | None = None,
+    zero_output_timeout_s: float | None = None,
+    stale_timeout_s: float | None = None,
+    stop_after_envelope: bool = False,
 ) -> str:
+    if timeout_override_s is not None:
+        if timeout_override_s <= 0:
+            raise BridgeAdapterError("timeout_override_s must be positive")
+        spec = replace(spec, timeout_s=timeout_override_s)
+    if stale_timeout_s is not None and stale_timeout_s <= 0:
+        raise BridgeAdapterError("stale_timeout_s must be positive")
+
     context = {
         "prompt_file": str(prompt_path),
         "repo_root": str(repo_root),
@@ -372,5 +748,25 @@ def run_adapter(
     cmd, env = _prepare_adapter_env(spec, context)
 
     if stream:
-        return _run_adapter_streaming(spec, cmd, env, prompt_text, repo_root, raw_output_path)
-    return _run_adapter_buffered(spec, cmd, env, prompt_text, repo_root, raw_output_path)
+        return _run_adapter_streaming(
+            spec,
+            cmd,
+            env,
+            prompt_text,
+            repo_root,
+            raw_output_path,
+            zero_output_timeout_s,
+            stale_timeout_s,
+            stop_after_envelope,
+        )
+    return _run_adapter_buffered(
+        spec,
+        cmd,
+        env,
+        prompt_text,
+        repo_root,
+        raw_output_path,
+        zero_output_timeout_s,
+        stale_timeout_s,
+        stop_after_envelope,
+    )

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -248,6 +249,39 @@ class TestInvokeImplementer:
             )
             assert result["status"] == "timeout"
             assert result["exit_code"] == -1
+
+    def test_stale_timeout_returns_structured_error(self, tmp_path):
+        """Stale implementer runs are detected and reported explicitly."""
+        self._setup_bridge_config(tmp_path)
+        from bridge_adapters import BridgeAdapterError
+        mock_ba = self._patch_bridge_adapters()
+        mock_ba.run_adapter.side_effect = BridgeAdapterError("Adapter 'codex' stalled after 30s")
+
+        with patch.object(impl_mod, "_bridge_adapters", mock_ba):
+            result = impl_mod.invoke_implementer(
+                tmp_path, "test prompt", timeout=30,
+            )
+            assert result["status"] == "stale"
+            assert result["exit_code"] == -2
+
+    def test_passes_configured_stale_timeout_to_adapter(self, tmp_path):
+        """Executor config can bound implementer stall detection independently of wall time."""
+        self._setup_bridge_config(tmp_path)
+        config_dir = tmp_path / "mu" / "tools" / "executors"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "executor_config.json").write_text(json.dumps({
+            "timeouts": {"phase_b_implementer_stale": 123}
+        }))
+        mock_ba = self._patch_bridge_adapters()
+        mock_ba.run_adapter.return_value = "done"
+
+        with patch.object(impl_mod, "_bridge_adapters", mock_ba):
+            result = impl_mod.invoke_implementer(
+                tmp_path, "test prompt", timeout=600,
+            )
+
+        assert result["status"] == "success"
+        assert mock_ba.run_adapter.call_args.kwargs["stale_timeout_s"] == 123.0
 
     def test_nonzero_exit_returns_error(self, tmp_path):
         """Non-timeout failure from bridge adapter returns error status."""
@@ -612,6 +646,20 @@ class TestPhaseBFailClosed:
 class TestFinalPytestGate:
     """Failed pytest MUST block commit_ready — hard gate after bridge convergence."""
 
+    def test_run_pytest_on_files_forces_deterministic_hash_seed(self, tmp_path):
+        completed = subprocess.CompletedProcess(
+            args=["pytest"],
+            returncode=0,
+            stdout="ok",
+            stderr="",
+        )
+        with patch.object(pb_mod.subprocess, "run", return_value=completed) as mock_run:
+            result = pb_mod._run_pytest_on_files(tmp_path, ["mu/tests/tools/test_foo.py"])
+
+        assert result["passed"] is True
+        kwargs = mock_run.call_args.kwargs
+        assert kwargs["env"]["PYTHONHASHSEED"] == "0"
+
     def test_pytest_failure_blocks_commit_ready(self, tmp_path):
         """If final pytest gate fails, status must be error, not commit_ready."""
         repo = tmp_path / "repo"
@@ -636,6 +684,30 @@ class TestFinalPytestGate:
 
         assert result["status"] == "error"
         assert result["step"] == "final_pytest_gate"
+
+    def test_pytest_failure_surfaces_stderr_when_stdout_empty(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1",
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 3, "stdout": "", "stderr": "PYTHONHASHSEED must be '0'", "passed": False,
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert "PYTHONHASHSEED" in result["errors"][0]
 
     def test_pytest_success_allows_commit_ready(self, tmp_path):
         """If final pytest gate passes, pipeline continues to supervisor."""
@@ -686,6 +758,52 @@ class TestBridgeRenderAssociation:
             assert "--job-id" in call_args
             idx = call_args.index("--job-id")
             assert call_args[idx + 1] == "phase-b-r1-abc12345"
+
+    def test_run_bridge_review_uses_configured_reviewer(self, tmp_path):
+        """Phase B bridge review must honor executor-configured reviewer backend."""
+        config_dir = tmp_path / "mu" / "tools" / "executors"
+        config_dir.mkdir(parents=True)
+        (config_dir / "executor_config.json").write_text(
+            json.dumps({"bridge_reviewers": {"phase_b": "claude"}}),
+            encoding="utf-8",
+        )
+        with patch.object(pb_mod, "_run_bridge_review_subprocess") as mock_run:
+            mock_run.return_value = {
+                "exit_code": 0, "stdout": "GO\n", "stderr": "",
+            }
+            pb_mod.run_bridge_review(
+                tmp_path,
+                "test review",
+                job_id="phase-b-r1-abc12345",
+                timeout=10,
+            )
+
+        call_args = mock_run.call_args[0][1]
+        assert "--reviewer" in call_args
+        idx = call_args.index("--reviewer")
+        assert call_args[idx + 1] == "claude"
+
+    def test_run_bridge_review_sets_configured_turn_timeout_env(self, tmp_path):
+        """Phase B bridge review should widen the bridge turn budget via env."""
+        config_dir = tmp_path / "mu" / "tools" / "executors"
+        config_dir.mkdir(parents=True)
+        (config_dir / "executor_config.json").write_text(
+            json.dumps({"bridge_turn_timeouts": {"phase_b": 901}}),
+            encoding="utf-8",
+        )
+        with patch.object(pb_mod, "_run_bridge_review_subprocess") as mock_run:
+            mock_run.return_value = {
+                "exit_code": 0, "stdout": "GO\n", "stderr": "",
+            }
+            pb_mod.run_bridge_review(
+                tmp_path,
+                "test review",
+                job_id="phase-b-r1-abc12345",
+                timeout=1200,
+            )
+
+        call_kwargs = mock_run.call_args.kwargs
+        assert call_kwargs["env"]["RCX_BRIDGE_MAX_TURN_WALL_TIME_S"] == "901.0"
 
     def test_run_bridge_review_parses_decision_from_stdout(self, tmp_path):
         """Decision is parsed from stdout, not from rendered file freshness."""
@@ -955,37 +1073,46 @@ class TestBridgeLoopReinvokesImplementer:
 
 
 @pytest.mark.usefixtures("mock_routing_record")
-class TestNonzeroExitWithDecisionFailsClosed:
-    """Bridge subprocess returning nonzero exit code with REQUEST_CHANGES/NO_GO must fail closed."""
+class TestBridgeDecisionExitContract:
+    """REQUEST_CHANGES/NO_GO remain recoverable under the bridge CLI exit contract."""
 
-    def test_nonzero_exit_with_request_changes_fails_closed(self, tmp_path):
-        """exit_code=1 + REQUEST_CHANGES is a crashed bridge, not a recoverable review."""
+    def test_cli_exit_one_with_request_changes_is_recoverable(self, tmp_path):
+        """bridge_supervisor review returns exit=1 for REQUEST_CHANGES; executor must continue."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
         (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
 
         mock_impl = _make_mock_impl()
+        call_count = [0]
+
+        def bridge_side(*a, **kw):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "",
+                        "decision": "REQUEST_CHANGES", "job_id": "j1"}
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": "",
+                    "decision": "GO", "job_id": "j2"}
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
              patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
-             patch.object(pb_mod, "run_bridge_review", return_value={
-                 "exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "bridge crash",
-                 "decision": "REQUEST_CHANGES", "job_id": "j1",
-             }), \
-             patch.object(pb_mod, "_stage_files", return_value=True):
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_read_bridge_render", return_value="findings"), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
-        assert result["status"] == "error"
-        assert result["step"] == "bridge_subprocess"
-        assert "not recoverable" in result["errors"][0].lower()
-        # Implementer should only have been called once (initial), not for bridge fix
-        assert mock_impl.invoke_implementer.call_count == 1
+        assert result["status"] == "commit_ready"
+        assert mock_impl.invoke_implementer.call_count >= 2
 
-    def test_nonzero_exit_with_no_go_fails_closed(self, tmp_path):
-        """exit_code=1 + NO_GO is a crashed bridge, not a recoverable review."""
+    def test_unexpected_positive_exit_with_no_go_fails_closed(self, tmp_path):
+        """Unexpected positive exits remain infrastructure failures even with a decision token."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -998,7 +1125,7 @@ class TestNonzeroExitWithDecisionFailsClosed:
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_bridge_review", return_value={
-                 "exit_code": 1, "stdout": "NO_GO\n", "stderr": "",
+                 "exit_code": 7, "stdout": "NO_GO\n", "stderr": "",
                  "decision": "NO_GO", "job_id": "j1",
              }), \
              patch.object(pb_mod, "_stage_files", return_value=True):
@@ -1006,7 +1133,7 @@ class TestNonzeroExitWithDecisionFailsClosed:
 
         assert result["status"] == "error"
         assert result["step"] == "bridge_subprocess"
-        assert "not recoverable" in result["errors"][0].lower()
+        assert "unexpected exit" in result["errors"][0].lower()
 
     def test_zero_exit_with_request_changes_is_recoverable(self, tmp_path):
         """exit_code=0 + REQUEST_CHANGES is a real review — pipeline should continue."""
@@ -1095,8 +1222,8 @@ class TestReentryLoopMirrorsInitial:
             if bridge_calls[0] == 1:
                 return {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "init"}
             if bridge_calls[0] == 2:
-                # Re-entry R1: REQUEST_CHANGES (exit_code=0: recoverable review decision)
-                return {"exit_code": 0, "stdout": "REQUEST_CHANGES\n", "stderr": "",
+                # Re-entry R1: REQUEST_CHANGES (exit_code=1 under bridge CLI contract)
+                return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "",
                         "decision": "REQUEST_CHANGES", "job_id": "re1"}
             # Re-entry R2: GO
             return {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "re2"}
@@ -1341,6 +1468,17 @@ class TestFindingDisposition:
     def test_non_blocking_keyword_in_title(self):
         """Non-blocking keywords like 'hardening' route to non_blocking."""
         findings = [{"title": "Add hardening for edge case", "severity": "medium"}]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 0
+        assert len(non_blocking) == 1
+
+    def test_low_doc_accuracy_blocking_keyword_stays_non_blocking(self):
+        """Low-severity DOC_ACCURACY findings stay non-blocking even if they quote a blocker keyword."""
+        findings = [{
+            "title": "Bridge exit-code=1 conflates non-GO review with BridgeError infrastructure crash",
+            "class": "DOC_ACCURACY",
+            "severity": "low",
+        }]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
         assert len(blocking) == 0
         assert len(non_blocking) == 1
@@ -1754,6 +1892,51 @@ class TestOnlyBlockingToImplementer:
         prompt_text = fix_call_prompt[0][0] if fix_call_prompt[0] else ""
         # The blocking finding title should appear in prompt
         assert "Real bug" in prompt_text or "BLOCKING" in prompt_text
+
+    def test_go_low_doc_accuracy_crash_title_does_not_fail_closed(self, tmp_path):
+        """A GO transcript with only low DOC_ACCURACY crash-wording findings remains non-blocking."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        envelope = json.dumps({
+            "job_id": "j1", "turn_id": "t1", "agent_role": "reviewer",
+            "decision": "GO", "summary": "looks good",
+            "touched_files_claimed": [], "validations_claimed": [],
+            "request_for_next_agent": "",
+            "findings": [
+                {
+                    "title": "Bridge exit-code=1 conflates non-GO review with BridgeError infrastructure crash",
+                    "class": "DOC_ACCURACY",
+                    "severity": "low",
+                    "file": "mu/tools/executors/phase_b_executor.py",
+                    "status": "new",
+                },
+            ],
+        })
+        render_text = f"BEGIN_AGENT_ENVELOPE\n{envelope}\nEND_AGENT_ENVELOPE"
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tools/executors/phase_b_executor.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tools/executors/phase_b_executor.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 2, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0, "stdout": "GO\n", "stderr": "",
+                 "decision": "GO", "job_id": "j1",
+             }), \
+             patch.object(pb_mod, "_read_bridge_render", return_value=render_text), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert result["pre_commit_decision"] == "COMMIT_GO"
 
 
 @pytest.mark.usefixtures("mock_routing_record")
@@ -2436,13 +2619,15 @@ class TestResumeNeedsPhaseB:
         # Write saved state simulating crash during NEEDS_PHASE_B re-entry
         state_dir = repo / ".agent_bus" / "executors"
         state_dir.mkdir(parents=True)
+        changed_files = ["mu/tools/executors/foo.py"]
         (state_dir / "phase_b_state.json").write_text(json.dumps({
             "plan_path": "reports/control_plane/plan.md",
             "completed_step": "needs_phase_b_reentry",
             "wave_id": "plan",
             "bridge_rounds": 1,
+            "bridge_scope_fingerprint": pb_mod._bridge_scope_fingerprint(repo, changed_files),  # ANTICHEAT_OK: testing internal executor functions
             "deferred_packet_path": None,
-            "implementer_changed": ["mu/tools/executors/foo.py"],
+            "implementer_changed": changed_files,
             "executor_created": [],
             "all_non_blocking": [],
             "reentry_findings": "Fix the thing",
@@ -2473,8 +2658,8 @@ class TestResumeNeedsPhaseB:
             }
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
-             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tools/executors/foo.py"]), \
-             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tools/executors/foo.py"]), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
@@ -3021,6 +3206,54 @@ class TestResumeFromNeedsPhaseBReentrySkipsInitialBridgeLoop:
                 f"Initial bridge loop ran during needs_phase_b_reentry resume: {call_jid}"
             )
 
+    def test_resume_needs_phase_b_reentry_refreshes_bridge_when_scope_drifted(self, tmp_path):
+        """Changed worktree after a saved re-entry checkpoint must refresh bridge findings first."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        state = {
+            "plan_path": "reports/control_plane/plan.md",
+            "completed_step": "needs_phase_b_reentry",
+            "wave_id": "plan",
+            "bridge_rounds": 1,
+            "deferred_packet_path": None,
+            "implementer_changed": ["f.py"],
+            "executor_created": [],
+            "baseline_wave_files": ["f.py"],
+            "all_non_blocking": [],
+            "reentry_findings": "Fix the old bug",
+        }
+        pb_mod._save_state(repo, state)  # ANTICHEAT_OK: testing internal executor functions
+
+        mock_impl = _make_mock_impl()
+        bridge_calls = []
+
+        def bridge_side(*a, **kw):
+            bridge_calls.append(kw.get("job_id", "unknown"))
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "reentry-go"}
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_read_bridge_render", return_value=""), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": True, "exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert mock_impl.invoke_implementer.call_count == 0
+        assert any("phase-b-reentry" in str(call_jid) for call_jid in bridge_calls)
+
 
 @pytest.mark.usefixtures("mock_routing_record")
 class TestReentryRequestChangesCheckpointsState:
@@ -3048,8 +3281,8 @@ class TestReentryRequestChangesCheckpointsState:
                 # Initial bridge: GO
                 return {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "init"}
             if bridge_calls[0] == 2:
-                # Re-entry R1: REQUEST_CHANGES with new findings (exit_code=0: recoverable)
-                return {"exit_code": 0, "stdout": "REQUEST_CHANGES\n", "stderr": "",
+                # Re-entry R1: REQUEST_CHANGES with new findings (exit=1 under bridge CLI contract)
+                return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "",
                         "decision": "REQUEST_CHANGES", "job_id": "re1"}
             # Re-entry R2: GO
             return {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "re2"}
@@ -3545,26 +3778,47 @@ class TestSdkReviewDepthContract:
     def test_phase_a_sdk_review_defaults_to_quick(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
+        (repo / ".scratch").mkdir()
         captured: dict[str, object] = {}
 
-        def fake_run(cmd, cwd, capture_output, text, check, timeout, env):
+        class FakeProc:
+            pid = 1234
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+        def fake_popen(cmd, cwd, stdout, stderr, text, env):
             captured["cmd"] = cmd
             captured["cwd"] = cwd
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
+            captured["env"] = env
+            return FakeProc()
 
-        with patch.object(pa_mod.subprocess, "run", side_effect=fake_run):
+        def fake_run(cmd, cwd, capture_output, text, check):
+            assert cmd == ["ps", "-axo", "pid=,ppid="]
+            return SimpleNamespace(stdout="", stderr="")
+
+        with patch.object(pa_mod.subprocess, "Popen", side_effect=fake_popen), \
+             patch.object(pa_mod.subprocess, "run", side_effect=fake_run):
             result = pa_mod.run_sdk_agents(repo, ["mu/tools/executors/phase_a_executor.py"])
 
         assert result["exit_code"] == 0
         assert captured["cwd"] == repo
-        assert captured["cmd"] == [
+        cmd = captured["cmd"]
+        assert cmd[:5] == [
             sys.executable,
             "tools/runners/run_review.py",
             "mu/tools/executors/phase_a_executor.py",
             "--depth",
             "quick",
-            "--no-memory",
         ]
+        assert cmd[5] == "--fail-fast-hard-gate"
+        assert cmd[6] == "--no-memory"
+        assert cmd[7] == "--output"
+        assert str(cmd[8]).endswith(".report.md")
+        env = captured["env"]
+        assert env["RCX_REVIEW_STATUS_PATH"].endswith(".status.json")
+        assert env["RCX_REVIEW_AGENT_TIMEOUT"] == "600"
 
     def test_phase_b_sdk_review_defaults_to_quick_fail_fast(self, tmp_path):
         repo = tmp_path / "repo"
@@ -3609,6 +3863,7 @@ class TestSdkReviewDepthContract:
         assert str(cmd[8]).endswith(".report.md")
         env = captured["env"]
         assert env["RCX_REVIEW_STATUS_PATH"].endswith(".status.json")
+        assert env["RCX_REVIEW_AGENT_TIMEOUT"] == "600"
 
     def test_phase_a_review_depth_config_accepts_full_override(self):
         assert pa_mod.resolve_review_depth({"review_depths": {"phase_a": "full"}}, "phase_a") == "full"  # ANTICHEAT_OK: testing config resolver
@@ -3623,6 +3878,20 @@ class TestSdkReviewDepthContract:
     def test_phase_b_review_depth_config_rejects_invalid_value(self):
         with pytest.raises(pb_mod.PhaseBExecutorError, match="Invalid review depth"):
             pb_mod._resolve_review_depth({"review_depths": {"phase_b": "bogus"}}, "phase_b")  # ANTICHEAT_OK: testing config resolver
+
+    def test_phase_a_bridge_turn_timeout_config_accepts_override(self):
+        assert pa_mod.resolve_bridge_turn_timeout({"bridge_turn_timeouts": {"phase_a": 451}}, "phase_a", 300) == 451.0  # ANTICHEAT_OK: testing config resolver
+
+    def test_phase_a_bridge_turn_timeout_config_rejects_invalid_value(self):
+        with pytest.raises(pa_mod.PhaseAExecutorError, match="Invalid bridge turn timeout"):
+            pa_mod.resolve_bridge_turn_timeout({"bridge_turn_timeouts": {"phase_a": 0}}, "phase_a", 300)  # ANTICHEAT_OK: testing config resolver
+
+    def test_phase_b_bridge_turn_timeout_config_accepts_override(self):
+        assert pb_mod._resolve_bridge_turn_timeout({"bridge_turn_timeouts": {"phase_b": 901}}, "phase_b", 300) == 901.0  # ANTICHEAT_OK: testing config resolver
+
+    def test_phase_b_bridge_turn_timeout_config_rejects_invalid_value(self):
+        with pytest.raises(pb_mod.PhaseBExecutorError, match="Invalid bridge turn timeout"):
+            pb_mod._resolve_bridge_turn_timeout({"bridge_turn_timeouts": {"phase_b": -1}}, "phase_b", 300)  # ANTICHEAT_OK: testing config resolver
 
 
 class TestValidateInputsAcceptsRoutingRecordAuthority:

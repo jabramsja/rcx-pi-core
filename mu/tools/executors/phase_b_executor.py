@@ -45,6 +45,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # Import canonical load_routing_record from shared module
 try:
     from executor_common import (
+        load_executor_config,
         load_routing_record, ExecutorCommonError,
         BLOCKING_KEYWORDS, NON_BLOCKING_KEYWORDS,
         REPEAT_FINDING_CAP,
@@ -63,6 +64,7 @@ except ImportError:
     _spec = _ilu.spec_from_file_location("executor_common", str(_common_path))
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
+    load_executor_config = _mod.load_executor_config
     load_routing_record = _mod.load_routing_record
     ExecutorCommonError = _mod.ExecutorCommonError
     BLOCKING_KEYWORDS = _mod.BLOCKING_KEYWORDS
@@ -110,6 +112,7 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
     """
     severity = (finding.get("severity") or "").lower()
     disposition = finding.get("disposition")
+    finding_class = str(finding.get("class") or "").upper()
 
     # Critical/high findings stay blocking even if an explicit disposition tries
     # to soften them. This is the fail-closed floor for bridge feedback.
@@ -139,6 +142,18 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
     # Check for keyword matches
     blocking_match = next((kw for kw in BLOCKING_KEYWORDS if kw in text), None)
     non_blocking_match = next((kw for kw in NON_BLOCKING_KEYWORDS if kw in text), None)
+
+    # Low/medium doc-accuracy findings are documentation/editorial residue, not
+    # behavioral blockers. Keep them non-blocking even if their title quotes a
+    # blocking keyword while describing prior behavior (for example "crash").
+    if severity in ("medium", "low") and finding_class == "DOC_ACCURACY":
+        if non_blocking_match:
+            return "non_blocking", f"{severity} DOC_ACCURACY + non-blocking keyword: '{non_blocking_match}'"
+        if blocking_match:
+            return "non_blocking", (
+                f"{severity} DOC_ACCURACY remains non-blocking despite keyword: '{blocking_match}'"
+            )
+        return "non_blocking", f"{severity} DOC_ACCURACY finding"
 
     # Medium/low severity: non-blocking unless a blocking keyword match
     if severity in ("medium", "low"):
@@ -249,6 +264,26 @@ def _write_deferred_packet(
 
     packet_path.write_text("\n".join(lines), encoding="utf-8")
     return packet_path
+
+
+def _resolve_bridge_reviewer(config: dict[str, Any], phase_key: str, default: str = "claude") -> str:
+    """Resolve bridge reviewer backend from executor config."""
+    reviewer = config.get("bridge_reviewers", {}).get(phase_key, default)
+    if not isinstance(reviewer, str) or not reviewer.strip():
+        raise PhaseBExecutorError(
+            f"Invalid bridge reviewer {reviewer!r} for {phase_key}; expected non-empty string"
+        )
+    return reviewer.strip()
+
+
+def _resolve_bridge_turn_timeout(config: dict[str, Any], phase_key: str, default: float) -> float:
+    """Resolve bridge turn timeout budget from executor config."""
+    timeout = config.get("bridge_turn_timeouts", {}).get(phase_key, default)
+    if not isinstance(timeout, (int, float)) or timeout <= 0:
+        raise PhaseBExecutorError(
+            f"Invalid bridge turn timeout {timeout!r} for {phase_key}; expected positive number"
+        )
+    return float(timeout)
 
 
 def _record_non_blocking_findings(
@@ -461,6 +496,7 @@ def _run_pytest_on_files(
             text=True,
             check=False,
             timeout=timeout,
+            env={**os.environ, "PYTHONHASHSEED": "0"},
         )
         return {
             "exit_code": result.returncode,
@@ -470,6 +506,18 @@ def _run_pytest_on_files(
         }
     except subprocess.TimeoutExpired:
         return {"exit_code": -1, "stdout": "", "stderr": "pytest timed out", "passed": False}
+
+
+def _summarize_pytest_failure(result: dict[str, Any], *, stdout_limit: int = 1000, stderr_limit: int = 1000) -> str:
+    """Build a bounded pytest failure summary without dropping stderr-only failures."""
+    stdout = (result.get("stdout") or "").strip()
+    stderr = (result.get("stderr") or "").strip()
+    parts: list[str] = []
+    if stdout:
+        parts.append(f"stdout: {stdout[:stdout_limit]}")
+    if stderr:
+        parts.append(f"stderr: {stderr[:stderr_limit]}")
+    return " ".join(parts) if parts else "no stdout/stderr captured"
 
 
 # ---------------------------------------------------------------------------
@@ -714,6 +762,7 @@ def _run_bridge_review_subprocess(
     job_id: str,
     timeout: int,
     verbose: bool,
+    env: dict[str, str] | None = None,
     poll_interval: float = BRIDGE_REVIEW_POLL_INTERVAL,
     stale_timeout: float = BRIDGE_REVIEW_STALE_TIMEOUT,
     aggregation_hang_timeout: float = BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT,
@@ -734,6 +783,7 @@ def _run_bridge_review_subprocess(
             stdout=stdout_handle,
             stderr=stderr_handle,
             text=True,
+            env=env,
             start_new_session=True,
         )
 
@@ -847,6 +897,10 @@ def run_bridge_review(
     output is written to a deterministic path (.agent_bus/rendered/{job_id}.md).
     The decision is parsed from stdout (bridge_supervisor prints it).
     """
+    config = load_executor_config(repo_root)
+    reviewer = _resolve_bridge_reviewer(config, "phase_b")
+    bridge_turn_timeout = _resolve_bridge_turn_timeout(config, "phase_b", default=300.0)
+
     # Write task file
     scratch_dir = repo_root / ".scratch"
     scratch_dir.mkdir(exist_ok=True)
@@ -859,7 +913,7 @@ def run_bridge_review(
         "review",
         "--task-file", str(task_path),
         "--summary", "Phase B implementation review",
-        "--reviewer", "codex",
+        "--reviewer", reviewer,
     ]
     if job_id:
         cmd.extend(["--job-id", job_id])
@@ -872,6 +926,10 @@ def run_bridge_review(
         job_id=job_id or "",
         timeout=timeout,
         verbose=verbose,
+        env={
+            **os.environ,
+            "RCX_BRIDGE_MAX_TURN_WALL_TIME_S": str(min(timeout, bridge_turn_timeout)),
+        },
     )
     stdout_stripped = result["stdout"].strip()
     decision = ""
@@ -967,6 +1025,7 @@ def run_sdk_agents(
                 "RCX_REVIEW_HEARTBEAT_INTERVAL": str(int(poll_interval)),
                 "RCX_REVIEW_SINGLE_TAIL_TIMEOUT": str(single_tail_timeout),
                 "RCX_REVIEW_GROUP_STALE_TIMEOUT": str(int(stale_timeout)),
+                "RCX_REVIEW_AGENT_TIMEOUT": str(max(timeout, single_tail_timeout)),
             },
         )
 
@@ -2081,10 +2140,11 @@ def run_phase_b(
             return result
 
         if bridge_decision in ("REQUEST_CHANGES", "NO_GO"):
-            # FAIL CLOSED if the bridge subprocess itself failed (nonzero exit).
-            # A nonzero exit with a REQUEST_CHANGES/NO_GO token in stdout means
-            # the bridge process crashed — do not treat as a recoverable review.
-            if bridge_result["exit_code"] != 0:
+            # bridge_supervisor.py review returns exit=1 for non-GO decisions.
+            # Treat REQUEST_CHANGES/NO_GO as recoverable review outcomes when
+            # the exit code matches that CLI contract; only unexpected codes
+            # are infrastructure failures here.
+            if bridge_result["exit_code"] not in (0, 1):
                 log(f"Bridge subprocess failed (exit={bridge_result['exit_code']}) "
                     f"with decision {bridge_decision!r} — fail closed (not recoverable)")
                 result["status"] = "error"
@@ -2092,7 +2152,7 @@ def run_phase_b(
                 result["errors"] = [
                     f"Bridge subprocess failed in round {round_num} "
                     f"(exit={bridge_result['exit_code']}, decision={bridge_decision}). "
-                    f"Nonzero exit with {bridge_decision} is not recoverable. "
+                    f"Unexpected exit with {bridge_decision} is not recoverable. "
                     f"stderr: {bridge_result.get('stderr', '')[:500]}"
                 ]
                 _clear_state(repo_root)
@@ -2302,12 +2362,9 @@ def run_phase_b(
     # Resume from NEEDS_PHASE_B re-entry: skip pytest gate + staging + supervisor,
     # jump directly into the re-entry loop below.
     supervisor_parsed: dict[str, Any] = {}
+    refresh_reentry_findings = False
     if _skip_to_reentry:
         log("Resuming into NEEDS_PHASE_B re-entry (skipping supervisor)")
-        findings_for_impl = (saved_state or {}).get("reentry_findings", "Fix required (resumed)")
-        result["pre_commit_summary"] = findings_for_impl
-        decision = "NEEDS_PHASE_B"
-        # Provide stubs for variables used in re-entry block
         changed_files = _collect_wave_owned_files(
             repo_root,
             plan_path,
@@ -2316,6 +2373,17 @@ def run_phase_b(
             executor_created or None,
             baseline_wave_files or None,
         )
+        current_scope_fingerprint = _bridge_scope_fingerprint(repo_root, changed_files)
+        saved_scope_fingerprint = (saved_state or {}).get("bridge_scope_fingerprint")
+        refresh_reentry_findings = saved_scope_fingerprint != current_scope_fingerprint
+        if refresh_reentry_findings:
+            findings_for_impl = "Refresh bridge findings from the current worktree before re-invoking the implementer."
+            log("NEEDS_PHASE_B resume checkpoint drifted or lacked scope fingerprint; refreshing bridge findings first")
+        else:
+            findings_for_impl = (saved_state or {}).get("reentry_findings", "Fix required (resumed)")
+        result["pre_commit_summary"] = findings_for_impl
+        decision = "NEEDS_PHASE_B"
+        # Provide stubs for variables used in re-entry block
         deferred_packet_path = result.get("deferred_packet_path")
         supervisor_result = {"parsed": {"summary": findings_for_impl}}
         supervisor_parsed = supervisor_result["parsed"]
@@ -2372,7 +2440,7 @@ def run_phase_b(
                     "errors": [
                         f"Final pytest gate FAILED (exit={final_pytest['exit_code']}). "
                         "Tests must pass before commit. "
-                        f"stdout: {final_pytest['stdout'][:1000]}"
+                        + _summarize_pytest_failure(final_pytest)
                     ],
                 }
             log("Final pytest gate: PASSED")
@@ -2449,6 +2517,7 @@ def run_phase_b(
             "completed_step": "needs_phase_b_reentry",
             "wave_id": wave_id,
             "bridge_rounds": result["bridge_rounds"],
+            "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
             "deferred_packet_path": deferred_packet_path,
             "implementer_changed": sorted(implementer_changed),
             "executor_created": sorted(executor_created),
@@ -2462,40 +2531,52 @@ def run_phase_b(
             log(f"Re-entry round {reentry_round}/{max_bridge_rounds}...")
             result["bridge_rounds"] = reentry_round
 
-            log("Re-invoking implementer for fixes...")
-            # R7-2: pre/post git diff tracking for re-entry implementer
-            pre_reentry_files = set(_collect_changed_files(repo_root))
-            reentry_prompt = build_implementation_prompt(
-                plan.get("content", "") + "\n\n## Re-entry Findings\n\n"
-                + findings_for_impl,
-                repo_root=repo_root,
-                wave_id=wave_id,
-                scope_hint="Fix findings from bridge/supervisor review",
-            )
-            impl_result = invoke_implementer(
-                repo_root, reentry_prompt,
-                backend=backend, model_override=model,
-                timeout=timeout, verbose=verbose,
-            )
-            log(f"Implementer re-entry: {impl_result['status']}")
+            if refresh_reentry_findings:
+                refresh_reentry_findings = False
+                changed_files = _collect_wave_owned_files(
+                    repo_root, plan_path, plan_declared_files,
+                    implementer_changed or None, executor_created or None,
+                    baseline_wave_files or None,
+                )
+                log("Re-entry: checkpoint drift detected; refreshing bridge findings before re-invoking implementer")
+            else:
+                log("Re-invoking implementer for fixes...")
+                # R7-2: pre/post git diff tracking for re-entry implementer
+                pre_reentry_files = set(_collect_changed_files(repo_root))
+                reentry_prompt = build_implementation_prompt(
+                    plan.get("content", "") + "\n\n## Re-entry Findings\n\n"
+                    + findings_for_impl,
+                    repo_root=repo_root,
+                    wave_id=wave_id,
+                    scope_hint="Fix findings from bridge/supervisor review",
+                )
+                impl_result = invoke_implementer(
+                    repo_root, reentry_prompt,
+                    backend=backend, model_override=model,
+                    timeout=timeout, verbose=verbose,
+                )
+                log(f"Implementer re-entry: {impl_result['status']}")
 
-            # FAIL CLOSED on re-entry implementer failure
-            if impl_result["status"] != "success":
-                return {
-                    "status": "error",
-                    "step": "implementer_reentry",
-                    "errors": [f"Implementer re-entry failed: {impl_result['status']}"],
-                }
+                # FAIL CLOSED on re-entry implementer failure
+                if impl_result["status"] != "success":
+                    return {
+                        "status": "error",
+                        "step": "implementer_reentry",
+                        "errors": [f"Implementer re-entry failed: {impl_result['status']}"],
+                    }
 
-            # R7-2: recompute implementer_changed after re-entry
-            post_reentry_files = set(_collect_changed_files(repo_root))
-            implementer_changed |= (post_reentry_files - pre_reentry_files)
-            changed_files = _collect_wave_owned_files(
-                repo_root, plan_path, plan_declared_files,
-                implementer_changed or None, executor_created or None,
-                baseline_wave_files or None,
-            )
-            log(f"Re-entry changed files: {len(changed_files)} (implementer touched {len(post_reentry_files - pre_reentry_files)})")
+                # R7-2: recompute implementer_changed after re-entry
+                post_reentry_files = set(_collect_changed_files(repo_root))
+                implementer_changed |= (post_reentry_files - pre_reentry_files)
+                changed_files = _collect_wave_owned_files(
+                    repo_root, plan_path, plan_declared_files,
+                    implementer_changed or None, executor_created or None,
+                    baseline_wave_files or None,
+                )
+                log(
+                    f"Re-entry changed files: {len(changed_files)} "
+                    f"(implementer touched {len(post_reentry_files - pre_reentry_files)})"
+                )
 
             if changed_files:
                 log(f"Re-entry: staging {len(changed_files)} wave-owned files before bridge review...")
@@ -2584,8 +2665,11 @@ def run_phase_b(
                 return result
 
             if bridge_decision in ("REQUEST_CHANGES", "NO_GO"):
-                # FAIL CLOSED if the bridge subprocess itself failed (nonzero exit).
-                if bridge_result["exit_code"] != 0:
+                # bridge_supervisor.py review returns exit=1 for non-GO decisions.
+                # Treat REQUEST_CHANGES/NO_GO as recoverable review outcomes when
+                # the exit code matches that CLI contract; only unexpected codes
+                # are infrastructure failures here.
+                if bridge_result["exit_code"] not in (0, 1):
                     log(f"Re-entry bridge subprocess failed (exit={bridge_result['exit_code']}) "
                         f"with decision {bridge_decision!r} — fail closed (not recoverable)")
                     result["status"] = "error"
@@ -2593,7 +2677,7 @@ def run_phase_b(
                     result["errors"] = [
                         f"Re-entry bridge subprocess failed in round {reentry_round} "
                         f"(exit={bridge_result['exit_code']}, decision={bridge_decision}). "
-                        f"Nonzero exit with {bridge_decision} is not recoverable. "
+                        f"Unexpected exit with {bridge_decision} is not recoverable. "
                         f"stderr: {bridge_result.get('stderr', '')[:500]}"
                     ]
                     _clear_state(repo_root)
@@ -2665,6 +2749,7 @@ def run_phase_b(
                     "completed_step": "needs_phase_b_reentry",
                     "wave_id": wave_id,
                     "bridge_rounds": reentry_round,
+                    "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
                     "deferred_packet_path": deferred_packet_path,
                     "implementer_changed": sorted(implementer_changed),
                     "executor_created": sorted(executor_created),
@@ -2721,7 +2806,7 @@ def run_phase_b(
                     "errors": [
                         f"Re-entry pytest gate FAILED (exit={reentry_pytest['exit_code']}). "
                         "Tests must pass before commit. "
-                        f"stdout: {reentry_pytest['stdout'][:1000]}"
+                        + _summarize_pytest_failure(reentry_pytest)
                     ],
                 }
             log("Re-entry pytest gate: PASSED")
