@@ -79,6 +79,19 @@ except ImportError:
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     run_bridge_subprocess = _mod.run_bridge_subprocess
 
+try:
+    from tracker_sync_note import TrackerSyncNoteFields, render_tracker_sync_note
+except ImportError:
+    import importlib.util as _ilu
+    _tracker_path = SCRIPT_DIR / "tracker_sync_note.py"
+    _tracker_spec = _ilu.spec_from_file_location("tracker_sync_note", str(_tracker_path))
+    _tracker_mod = _ilu.module_from_spec(_tracker_spec)
+    assert _tracker_spec.loader is not None
+    sys.modules["tracker_sync_note"] = _tracker_mod
+    _tracker_spec.loader.exec_module(_tracker_mod)
+    TrackerSyncNoteFields = _tracker_mod.TrackerSyncNoteFields
+    render_tracker_sync_note = _tracker_mod.render_tracker_sync_note
+
 
 class PhaseBExecutorError(RuntimeError):
     """Raised when Phase B executor cannot proceed."""
@@ -1534,6 +1547,78 @@ def prepare_commit_handoff(
     return handoff_path
 
 
+def _build_phase_b_tracker_note(
+    *,
+    wave_id: str,
+    task_id: str,
+    target_gate_id: str,
+    plan_path: str,
+    changed_files: list[str],
+    test_files: list[str],
+    receipt_path: str,
+    bridge_rounds: int,
+    reentry: bool,
+) -> str:
+    """Render an L4-compliant tracker note for a Phase B commit handoff."""
+    display_task = (task_id or "").strip() or wave_id
+    if display_task.startswith("[") and display_task.endswith("]"):
+        display_task = display_task[1:-1]
+    if not display_task:
+        display_task = wave_id
+
+    indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+    if test_files:
+        evidence_command = "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short " + " ".join(test_files)
+        evidence_delta = (
+            f"(1) Phase B converged on the locked plan at {plan_path}. "
+            f"(2) Final pytest gate covered {len(test_files)} test file(s) from the wave-owned diff. "
+            f"(3) Commit handoff carries explicit receipt authority at {receipt_path}."
+        )
+    else:
+        evidence_command = (
+            f"python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} "
+            f"--output {indicator_path}"
+        )
+        evidence_delta = (
+            f"(1) Phase B converged on the locked plan at {plan_path}. "
+            f"(2) Commit handoff carries {len(changed_files)} wave-owned file(s) with explicit receipt "
+            f"authority at {receipt_path}. "
+            "(3) No test files were present in the wave-owned diff, so indicator collection is the "
+            "mechanical evidence surface."
+        )
+
+    progress_before = (
+        "Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, "
+        "so downstream governance could not bind the wave cleanly to its indicator artifact."
+    )
+    progress_after = (
+        f"Phase B emitted a commit-ready handoff for {wave_id} with {len(changed_files)} wave-owned "
+        f"file(s), bridge rounds={bridge_rounds}"
+    )
+    if reentry:
+        progress_after += ", reentry=true"
+    progress_after += ", explicit receipt authority, and an L4-compliant tracker note."
+
+    fields = TrackerSyncNoteFields(
+        wave_id=wave_id,
+        title=f"{display_task} — commit-ready Phase B handoff",
+        wave_class="L4_ENABLER",
+        target_gate_id=target_gate_id,
+        evidence_command=evidence_command,
+        evidence_delta=evidence_delta,
+        progress_proof_before=progress_before,
+        progress_proof_after=progress_after,
+        primary_blocker_class="INTEGRATION",
+        primary_invariant_id="INV_STRUCTURAL_FORWARD_MOTION",
+        indicator_artifact_ref=indicator_path,
+        indicator_collection_command=(
+            f"python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} "
+            f"--output {indicator_path}"
+        ),
+    )
+    return render_tracker_sync_note(fields)
+
+
 def _derive_planless_context(
     routing_record: dict[str, Any],
     repo_root: Path,
@@ -2912,6 +2997,18 @@ def run_phase_b(
     }
     if "reentry_converged" in locals() and locals()["reentry_converged"]:
         handoff_bridge_status["reentry"] = True
+    handoff_test_files = locals().get("reentry_test_files") or locals().get("final_test_files") or []
+    tracker_note_text = _build_phase_b_tracker_note(
+        wave_id=wave_id,
+        task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
+        target_gate_id="G8",
+        plan_path=plan_path,
+        changed_files=wave_owned_files,
+        test_files=handoff_test_files,
+        receipt_path=receipt_path,
+        bridge_rounds=result.get("bridge_rounds", 0),
+        reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
+    )
     log(f"Preparing commit handoff ({len(wave_owned_files)} wave-owned files)...")
     handoff_path = prepare_commit_handoff(
         repo_root,
@@ -2919,7 +3016,7 @@ def run_phase_b(
         task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
         wave_class="L4_ENABLER",
         target_gate_id="G8",
-        tracker_note_text=f"- Tracker sync note (Phase B, {wave_id}): Phase B implementation per locked plan.",
+        tracker_note_text=tracker_note_text,
         fixes_implemented=["Phase B implementation per locked plan"],
         files_to_stage=wave_owned_files,
         pre_commit_receipt_path=receipt_path,

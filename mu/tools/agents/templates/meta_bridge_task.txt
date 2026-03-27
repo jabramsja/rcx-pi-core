@@ -29,6 +29,16 @@ $validation_failure_routing
 
 $control_surface_obligations
 
+## Bounded Review Contract
+
+- Treat the package JSON and validation gate results as primary evidence. Re-run a passed gate only when you find a concrete contradiction.
+- Start with `changed_files`; inspect extra `scope_items` only as needed to resolve a specific doubt.
+- Keep the investigation bounded: prefer targeted `rg`, `git diff --cached -- <file>`, and short `sed` reads. Avoid broad repo sweeps or full-file dumps.
+- Use no more than 8 shell commands unless a specific contradiction requires one extra focused command to resolve it.
+- As soon as you have enough evidence for a decision, emit exactly one final `BEGIN_META_ENVELOPE ... END_META_ENVELOPE` block on stdout and stop.
+- Do not repeat the template envelope or continue exploring after you can decide.
+- If you cannot close within that budget, fail closed with `NEEDS_PHASE_B`, `STOP_FOR_FOUNDER`, or `STOP_FOR_TRIAGE_DISCUSSION` and say what prevented closure.
+
 ## Your Task
 
 1. Read FOUNDER_SESSION_BOOTSTRAP.md first

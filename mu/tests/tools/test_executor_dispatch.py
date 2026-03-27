@@ -1243,6 +1243,96 @@ class TestEnsureTrackerNote:
         result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
         assert "ensure_tracker_note" in result.get("steps_completed", [])
 
+    def test_noncanonical_tracker_note_is_repaired(self, tmp_path):
+        """A single malformed tracker note line must be repaired in place."""
+        repo, env = _init_git_repo(tmp_path)
+        tasks = repo / "TASKS.md"
+        content = tasks.read_text()
+        content = content.replace(
+            "old note.",
+            "old note.\n- Tracker sync note (Phase B, test-wave-id): malformed placeholder.\n",
+        )
+        tasks.write_text(content)
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "bad tracker note"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        handoff = _make_new_handoff(
+            tracker_note_text=(
+                "- Tracker sync note (2026-03-27, test-wave-id): **TEST — repaired tracker note.** "
+                "Class: L4_ENABLER. target_gate_id: G8. "
+                "evidence_command: `pytest mu/tests/tools/test_executor_dispatch.py -q`. "
+                "evidence_delta: repair malformed tracker note. "
+                "progress_proof_before: malformed tracker note blocked parser binding. "
+                "progress_proof_after: canonical tracker note restored. "
+                "primary_blocker_class: INTEGRATION. "
+                "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+                "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. boot0_progress_state: HOLD."
+            ),
+        )
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+        assert "ensure_tracker_note" in result.get("steps_completed", [])
+        tasks_content = (repo / "TASKS.md").read_text()
+        assert "- Tracker sync note (Phase B, test-wave-id): malformed placeholder." not in tasks_content
+        assert "test-wave-id): **TEST — repaired tracker note.**" in tasks_content
+
+    def test_canonical_tracker_note_is_updated_when_handoff_changes(self, tmp_path):
+        """A single canonical tracker note should be refreshed from the handoff when it drifts."""
+        repo, env = _init_git_repo(tmp_path)
+        tasks = repo / "TASKS.md"
+        content = tasks.read_text()
+        content = content.replace(
+            "old note.",
+            "old note.\n"
+            "- Tracker sync note (2026-03-26, test-wave-id): **TEST — old canonical note.** "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            "evidence_command: `pytest old.py -q`. "
+            "evidence_delta: old. "
+            "progress_proof_before: old. "
+            "progress_proof_after: old. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+            "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD.\n",
+        )
+        tasks.write_text(content)
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "old canonical note"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        handoff = _make_new_handoff(
+            tracker_note_text=(
+                "- Tracker sync note (2026-03-27, test-wave-id): **TEST — refreshed canonical note.** "
+                "Class: L4_ENABLER. target_gate_id: G8. "
+                "evidence_command: `pytest new.py -q`. "
+                "evidence_delta: new. "
+                "progress_proof_before: old. "
+                "progress_proof_after: refreshed. "
+                "primary_blocker_class: INTEGRATION. "
+                "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+                "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. boot0_progress_state: HOLD."
+            ),
+        )
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+        assert "ensure_tracker_note" in result.get("steps_completed", [])
+        tasks_content = (repo / "TASKS.md").read_text()
+        assert "old canonical note" not in tasks_content
+        assert "refreshed canonical note" in tasks_content
+
     def test_14_duplicate_wave_id_errors(self, tmp_path):
         """Test 14: Duplicate wave_id → error."""
         repo, env = _init_git_repo(tmp_path)
@@ -1860,6 +1950,25 @@ class TestReceiptAndCommit:
 
         assert result["status"] == "error"
         assert result["step"] == "run_pre_commit_script"
+
+    def test_step11_pre_push_failure_surfaces_stdout_when_stderr_empty(self, tmp_path):
+        """Step 11 should surface stdout if pre-push-fast writes no stderr."""
+        repo, env, mock_result = self._setup_repo_through_supervisor(tmp_path, "COMMIT_GO")
+
+        hooks_dir = repo / "mu" / "tools" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        script = hooks_dir / "pre-push-fast"
+        script.write_text("#!/bin/bash\necho 'tracker note contract failed'\nexit 1\n")
+        script.chmod(0o755)
+
+        with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
+            sys.modules["meta_bridge_client"].run_meta_bridge_package = MagicMock(return_value=mock_result)
+            sys.modules["meta_bridge_client"].MetaBridgeClientError = Exception
+            result = commit_mod.run_commit_pipeline(_make_new_handoff(), repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "run_pre_push_script"
+        assert any("tracker note contract failed" in e for e in result["errors"])
 
     def _setup_repo_through_supervisor(self, tmp_path, receipt_decision="COMMIT_GO"):
         """Helper: create repo, pre-insert wave_id, create receipt, return (repo, env, mock)."""

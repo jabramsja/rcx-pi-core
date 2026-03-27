@@ -289,6 +289,26 @@ def _count_exact_wave_id_mentions(text: str, wave_id: str) -> int:
     return sum(1 for line in text.splitlines() if pattern.search(line))
 
 
+def _is_canonical_tracker_note_line(line: str, wave_id: str) -> bool:
+    """Return True when *line* is a parseable canonical tracker note for *wave_id*."""
+    return bool(re.match(
+        rf"^- Tracker sync note \(([^,]+),\s*{re.escape(wave_id)}\):\s*\*\*[^*]+\*\*.*\bClass:\s*",
+        line,
+    ))
+
+
+def _matching_tracker_note_indices(lines: list[str], wave_id: str) -> list[int]:
+    """Return line indices for tracker-note-shaped lines that reference *wave_id*."""
+    pattern = re.compile(rf"(?<![a-z0-9-]){re.escape(wave_id)}(?![a-z0-9-])")
+    indices: list[int] = []
+    for i, line in enumerate(lines):
+        if not line.lstrip().startswith("- Tracker sync note"):
+            continue
+        if pattern.search(line):
+            indices.append(i)
+    return indices
+
+
 def _force_add_denied_match(path_str: str) -> str | None:
     """Return the denylist token matched by a force-add path, if any."""
     normalized = path_str.replace("\\", "/")
@@ -634,8 +654,11 @@ def _run_post_commit_pipeline(
         try:
             _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=300)
         except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or exc.stdout or "").strip()
+            if not detail:
+                detail = f"exit {exc.returncode}"
             return {"status": "error", "step": "run_pre_push_script",
-                    "errors": [f"pre-push-fast failed: {exc.stderr.strip()[:500]}"],
+                    "errors": [f"pre-push-fast failed: {detail[:500]}"],
                     "steps_completed": result["steps_completed"]}
         except subprocess.TimeoutExpired:
             return {"status": "error", "step": "run_pre_push_script",
@@ -1036,16 +1059,74 @@ def run_commit_pipeline(
 
     tasks_content = tasks_path.read_text(encoding="utf-8")
     wave_id_count = _count_exact_wave_id_mentions(tasks_content, wave_id)
+    lines = tasks_content.splitlines(keepends=True)
+    matching_tracker_indices = _matching_tracker_note_indices(lines, wave_id)
+    canonical_tracker_indices = [
+        idx for idx in matching_tracker_indices
+        if _is_canonical_tracker_note_line(lines[idx].rstrip("\n"), wave_id)
+    ]
+    note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
 
     if wave_id_count > 1:
         return {"status": "error", "step": "ensure_tracker_note",
                 "errors": [f"wave_id '{wave_id}' appears {wave_id_count} times in TASKS.md (duplicate)"],
                 "steps_completed": result["steps_completed"]}
+    if len(canonical_tracker_indices) > 1:
+        return {"status": "error", "step": "ensure_tracker_note",
+                "errors": [f"wave_id '{wave_id}' has {len(canonical_tracker_indices)} canonical tracker notes in TASKS.md (duplicate)"],
+                "steps_completed": result["steps_completed"]}
 
     tasks_modified = False
-    if wave_id_count == 0:
-        # Insert after last "^- Tracker sync note" in Ra section
-        lines = tasks_content.splitlines(keepends=True)
+    if canonical_tracker_indices:
+        canonical_idx = canonical_tracker_indices[0]
+        if lines[canonical_idx] != note_line:
+            lines[canonical_idx] = note_line
+            tasks_path.write_text("".join(lines), encoding="utf-8")
+            tasks_modified = True
+            log(f"Step 3: tracker note updated for {wave_id}")
+        else:
+            log(f"Step 3: tracker note for {wave_id} already present, skipping")
+    elif matching_tracker_indices:
+        # Insert after the last tracker note in Ra, or repair a single malformed
+        # tracker-note-shaped line for this wave in place.
+        ra_idx = None
+        ra_end_idx = None
+        last_tracker_idx = None
+        for i, line in enumerate(lines):
+            if line.strip().startswith("## Ra"):
+                ra_idx = i
+            if ra_idx is not None and i > ra_idx:
+                if line.strip().startswith("- Tracker sync note"):
+                    last_tracker_idx = i
+                if line.strip() == "---" and i > ra_idx + 1:
+                    ra_end_idx = i
+                    break
+
+        if ra_idx is None:
+            return {"status": "error", "step": "ensure_tracker_note",
+                    "errors": ["## Ra section not found in TASKS.md"],
+                    "steps_completed": result["steps_completed"]}
+
+        if len(matching_tracker_indices) == 1:
+            lines[matching_tracker_indices[0]] = note_line
+            log(f"Step 3: tracker note repaired for {wave_id}")
+        else:
+            return {"status": "error", "step": "ensure_tracker_note",
+                    "errors": [f"wave_id '{wave_id}' has {len(matching_tracker_indices)} malformed tracker notes in TASKS.md (duplicate)"],
+                    "steps_completed": result["steps_completed"]}
+        tasks_path.write_text("".join(lines), encoding="utf-8")
+
+        # Verify
+        verify_content = tasks_path.read_text(encoding="utf-8")
+        if _count_exact_wave_id_mentions(verify_content, wave_id) == 0:
+            return {"status": "error", "step": "ensure_tracker_note",
+                    "errors": ["wave_id not found in TASKS.md after write"],
+                    "steps_completed": result["steps_completed"]}
+        tasks_modified = True
+    elif wave_id_count == 1:
+        log(f"Step 3: wave_id {wave_id} already referenced outside tracker notes, skipping")
+    else:
+        # Insert after the last tracker note in Ra section
         ra_idx = None
         ra_end_idx = None
         last_tracker_idx = None
@@ -1070,11 +1151,9 @@ def run_commit_pipeline(
             # No tracker notes yet — insert after Ra header + description
             insert_idx = ra_idx + 2 if ra_end_idx and ra_end_idx > ra_idx + 2 else ra_idx + 1
 
-        note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
         lines.insert(insert_idx, note_line)
         tasks_path.write_text("".join(lines), encoding="utf-8")
 
-        # Verify
         verify_content = tasks_path.read_text(encoding="utf-8")
         if _count_exact_wave_id_mentions(verify_content, wave_id) == 0:
             return {"status": "error", "step": "ensure_tracker_note",
@@ -1082,8 +1161,6 @@ def run_commit_pipeline(
                     "steps_completed": result["steps_completed"]}
         tasks_modified = True
         log(f"Step 3: tracker note inserted for {wave_id}")
-    else:
-        log(f"Step 3: tracker note for {wave_id} already present, skipping")
 
     result["steps_completed"].append("ensure_tracker_note")
 

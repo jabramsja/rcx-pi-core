@@ -387,6 +387,32 @@ class TestPrepareCommitHandoff:
         assert "tracker_note_text" in handoff
         assert handoff["tracker_note_text"] == "- Tracker sync note (test): test note."
 
+    def test_build_phase_b_tracker_note_is_l4_compliant(self):
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            wave_id="pipeline-test-run-2026-03-25",
+            task_id="[PIPELINE-TEST-RUN]",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/pipeline_test_run_2026-03-25.md",
+            changed_files=[
+                "mu/tools/executors/phase_b_executor.py",
+                "mu/tests/tools/test_phase_b_executor.py",
+            ],
+            test_files=[
+                "mu/tests/tools/test_phase_b_executor.py",
+                "mu/tests/tools/test_executor_dispatch.py",
+            ],
+            receipt_path=".agent_bus/meta/pre_commit_receipts/receipt_test.json",
+            bridge_rounds=2,
+            reentry=True,
+        )
+        assert note.startswith("- Tracker sync note (")
+        assert "pipeline-test-run-2026-03-25): **PIPELINE-TEST-RUN — commit-ready Phase B handoff.**" in note
+        assert "Class: L4_ENABLER" in note
+        assert "target_gate_id: G8" in note
+        assert "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short" in note
+        assert "indicator_artifact_ref: reports/l4_wave_indicators/pipeline-test-run-2026-03-25.json" in note
+        assert "progress_proof_after: Phase B emitted a commit-ready handoff for pipeline-test-run-2026-03-25" in note
+
     def test_files_to_stage_in_handoff(self, tmp_path):
         path = pb_mod.prepare_commit_handoff(
             tmp_path,
