@@ -680,7 +680,7 @@ class TestFinalPytestGate:
             stderr="",
         )
         with patch.object(pb_mod.subprocess, "run", return_value=completed) as mock_run:
-            result = pb_mod._run_pytest_on_files(tmp_path, ["mu/tests/tools/test_foo.py"])
+            result = pb_mod._run_pytest_on_files(tmp_path, ["mu/tests/tools/test_foo.py"])  # ANTICHEAT_OK: testing internal final-pytest gate helper
 
         assert result["passed"] is True
         kwargs = mock_run.call_args.kwargs

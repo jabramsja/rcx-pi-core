@@ -666,7 +666,7 @@ class TestPhaseABridgeLoopFailClosed:
             "- Decision: SYNTHETIC (founder session, not a real review)\n"
             "- Decision: GO\n"
         )
-        assert phase_a_mod._extract_bridge_decision(render_content) == "GO"
+        assert phase_a_mod._extract_bridge_decision(render_content) == "GO"  # ANTICHEAT_OK: testing internal bridge decision parser
 
     def test_request_changes_continues_loop(self, tmp_path, monkeypatch):
         """REQUEST_CHANGES continues the loop (regression check)."""

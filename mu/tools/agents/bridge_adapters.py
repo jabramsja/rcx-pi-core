@@ -353,14 +353,14 @@ def _tee_stream(
     """Read from source, write to sink (capture), tty (live display), and raw_file (incremental persist)."""
     for line in source:
         sink.write(line)
-        if tty is not None:
-            tty.write(line)
-            tty.flush()
         if raw_file is not None:
             raw_file.write(line)
             raw_file.flush()
         if on_line is not None:
             on_line(line, sink)
+        if tty is not None:
+            tty.write(line)
+            tty.flush()
 
 
 def _run_adapter_buffered(
@@ -673,8 +673,9 @@ def _run_adapter_streaming(
             f"Adapter '{spec.name}' timed out after {spec.timeout_s}s"
         ) from exc
 
-    stdout_thread.join(timeout=5)
-    stderr_thread.join(timeout=5)
+    join_timeout = 0.2 if envelope_terminated.is_set() else 5
+    stdout_thread.join(timeout=join_timeout)
+    stderr_thread.join(timeout=join_timeout)
 
     output = _normalize_stdout_for_adapter(spec, cmd, stdout_buf.getvalue())
     stderr_text = stderr_buf.getvalue()
