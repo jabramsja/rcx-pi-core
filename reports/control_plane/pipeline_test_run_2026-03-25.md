@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Twenty-fifth live follow-up on 2026-03-27 proved the current slice is past the old post-commit and Step 15 transport stops, but surfaced one last control-surface contradiction in tracked protocol truth. The code truth is still the same current-head Step 15 follow-up on `664be57`; the active stop is no longer package scope. It is protocol-doc alignment: `commit_executor.py` Step 12 now uses a bounded `git push --no-verify` exception after Step 11 has already run `pre-push-fast` on the same HEAD, and `CLAUDE.md` had to be updated to describe that exception explicitly.
+Status: Twenty-sixth live follow-up on 2026-03-27 pushed materially farther: the automated commit path now clears the commit-local supervisor, verifies both receipts, passes pre-commit, and creates local commit `0206432`. The current stop is no longer package truth or protocol contradiction. It is the explicit Step 11 pre-push gate: `pre-push-fast` rejects the new direct `_kill_process_group()` regression until the test carries the required `# ANTICHEAT_OK` marker for private-helper proofs.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -689,6 +689,27 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
   must make the bounded Step 11/Step 12 exception explicit so the tracked
   protocol surface matches the mechanized commit authority path, then the
   supervisor/commit path can be rerun on fully converged repo truth.
+
+## Twenty-Sixth Live Stop (2026-03-27)
+
+- After the protocol-doc sync cleared the bounded supervisor again, the
+  automated `commit` executor advanced through Step 6 supervisor
+  `COMMIT_GO`, Step 7 receipt-chain verification, Step 8 pre-commit, and Step 9
+  local commit creation. `git log --oneline -1` showed new local commit
+  `0206432` before the next stop.
+- The first remaining hard gate is now explicit Step 11 pre-push. Running
+  `./tools/pre-push-fast` directly reproduced the failure without any package or
+  bridge ambiguity: the anti-cheat scan rejected
+  `mu/tests/tools/test_agent_bridge_supervisor.py` because the new direct call to
+  `_kill_process_group(..., wait_for_exit=True)` lacked the required
+  `# ANTICHEAT_OK` marker for private-helper proof tests.
+- Direct repo truth showed this is a policy-annotation mismatch, not an invalid
+  regression. The test is intentionally proving stale-timeout cleanup on the
+  private helper itself; it simply needs the same explicit anti-cheat allowance
+  already used in nearby executor helper tests.
+- Result: the next fix is a one-line anti-cheat annotation plus packet/tracker
+  sync, then rerun `pre-push-fast` and continue the automated commit path from
+  the honest post-commit continuation boundary.
 
 ## Next Mechanical Questions
 

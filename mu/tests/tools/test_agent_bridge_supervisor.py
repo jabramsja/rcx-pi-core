@@ -574,7 +574,7 @@ def test_kill_process_group_waits_for_tracked_pids_to_exit(monkeypatch: pytest.M
     monkeypatch.setattr(adapters.time, "monotonic", fake_monotonic)
     monkeypatch.setattr(adapters.time, "sleep", lambda seconds: sleeps.append(seconds))
 
-    adapters._kill_process_group(_FakeProc(), wait_for_exit=True)
+    adapters._kill_process_group(_FakeProc(), wait_for_exit=True)  # ANTICHEAT_OK: testing tracked stale-timeout cleanup helper directly
 
     assert ("pg", 7001, int(adapters.signal.SIGKILL)) in kill_calls
     assert ("pid", 7002, int(adapters.signal.SIGKILL)) in kill_calls

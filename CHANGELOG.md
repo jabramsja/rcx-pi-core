@@ -32,6 +32,10 @@ All notable changes to RCX are documented in this file.
 - `CLAUDE.md` now makes the Step 11/Step 12 executor exception explicit: after
   `pre-push-fast` passes on the same local HEAD, automated Step 12 may use
   `git push --no-verify` only to avoid rerunning the same hook
+- `mu/tests/tools/test_agent_bridge_supervisor.py` now marks the direct
+  `_kill_process_group()` regression with `# ANTICHEAT_OK`, so `pre-push-fast`
+  treats that private-helper proof as an explicit allowed exception instead of a
+  policy violation
 
 ### Pipeline Test Run Post-Commit Checkpointing
 
