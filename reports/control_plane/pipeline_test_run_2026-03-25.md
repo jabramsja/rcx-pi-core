@@ -3,7 +3,7 @@
 # Pipeline Test Run
 
 Date: 2026-03-25
-Status: Twenty-sixth live follow-up on 2026-03-27 pushed materially farther: the automated commit path now clears the commit-local supervisor, verifies both receipts, passes pre-commit, and creates local commit `0206432`. The current stop is no longer package truth or protocol contradiction. It is the explicit Step 11 pre-push gate: `pre-push-fast` rejects the new direct `_kill_process_group()` regression until the test carries the required `# ANTICHEAT_OK` marker for private-helper proofs.
+Status: Twenty-seventh live follow-up on 2026-03-27 finally pushed the boring-path automation through Step 15 on current head `5b9a6fe`: the executor cleared supervisor, receipts, pre-commit, pre-push, push, PR reuse, CI, and a fresh current-head connector review. The current stop is no longer local gate mechanics. It is one remaining Step 15 review-truth defect: the executor can re-request `@codex review` even when a valid current-head no-issues connector issue comment already exists, while three other surfaced review threads proved stale and were resolved as such.
 Phase-A-Lock: LOCKED
 Purpose: smallest honest end-to-end pipeline smoke on a low-risk control-plane-only task
 
@@ -710,6 +710,31 @@ pipeline mechanics, package truth, or routing logic rather than task complexity.
 - Result: the next fix is a one-line anti-cheat annotation plus packet/tracker
   sync, then rerun `pre-push-fast` and continue the automated commit path from
   the honest post-commit continuation boundary.
+
+## Twenty-Seventh Live Stop (2026-03-27)
+
+- After the anti-cheat allowlist follow-up landed locally, the automated
+  `commit` executor advanced through Step 11 pre-push, Step 12 push, Step 13 PR
+  reuse, Step 14 CI wait, and Step 15 current-head review wait on head
+  `5b9a6fefa967799fdc90a621a5972626ef61f64b`.
+- The run then exercised the full current-head connector path exactly as
+  intended. It posted `@codex review` at `2026-03-27T12:45:18Z`, observed the
+  connector acknowledgement, extended the bounded wait, and received a fresh
+  connector review for commit `5b9a6fe` at `2026-03-27T12:55:21Z`.
+- The resulting `bot_findings_pending` stop narrowed to one real current defect
+  plus three stale unresolved threads. Direct review-thread truth showed the two
+  duplicate connector-freshness findings on `commit_executor.py:513` and the
+  stale-timeout descendant-reaping finding on `bridge_adapters.py:215` were
+  stale relative to current code and were resolved. The remaining live thread on
+  `commit_executor.py:1239` is real: Step 15 still posts a fresh `@codex
+  review` before checking whether the PR already has a valid current-head
+  no-issues connector issue comment, so it can invalidate an existing clear
+  issue-comment outcome and force an unnecessary timeout.
+- Result: the next fix is a narrow Step 15 ordering change plus regression
+  coverage, not more pipeline redesign. `commit_executor.py` must check the
+  existing current-head issue-comment outcome before calling
+  `_maybe_request_current_head_bot_review()`, then the stale resolved threads can
+  stay closed and the automated path can be rerun from an honest package.
 
 ## Next Mechanical Questions
 

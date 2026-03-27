@@ -1232,7 +1232,14 @@ def _run_post_commit_pipeline(
             pr_number=pr_number,
         )
         _assert_expected_pr_head(pr_data, head_sha_before_merge)
-        if not _has_fresh_connector_review(pr_data, head_sha_before_merge):
+        existing_issue_comment_outcome = _current_head_connector_issue_comment_outcome(
+            pr_data,
+            head_sha_before_merge,
+        )
+        if (
+            not _has_fresh_connector_review(pr_data, head_sha_before_merge)
+            and existing_issue_comment_outcome is None
+        ):
             _maybe_request_current_head_bot_review(
                 repo_root,
                 pr_number=pr_number,

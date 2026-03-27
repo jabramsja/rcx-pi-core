@@ -3255,6 +3255,112 @@ class TestCommitContinuationAndBotFreshness:
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert len(comment_calls) == 1
 
+    def test_post_commit_does_not_request_review_when_current_head_clear_issue_comment_already_exists(self, tmp_path, monkeypatch):
+        repo = tmp_path
+        handoff = _make_new_handoff()
+        result = {
+            "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+        }
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(
+            json.dumps(
+                {
+                    "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                    "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                    "handoff_sha": "handoff-sha",
+                    "target_branch": "jabramsja/test-wave-id",
+                    "commit_sha": "abc123",
+                    "receipt_decision": "COMMIT_GO",
+                    "steps_completed": list(result["steps_completed"]),
+                    "pr_number": "673",
+                    "updated_at_unix": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        comment_calls = []
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="dev\n")
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:4] == ["git", "push", "--no-verify", "-u"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "list", "--head"]:
+                return completed(cmd, stdout='[{"number":673}]')
+            if cmd[:4] == ["gh", "pr", "checks", "673"]:
+                return completed(cmd)
+            if cmd[:4] == ["gh", "pr", "edit", "673"]:
+                return completed(cmd)
+            if cmd[:3] == ["gh", "pr", "comment"]:
+                comment_calls.append(cmd)
+                return completed(cmd)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                payload = {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "headRefOid": "abc123",
+                                "reviewDecision": "",
+                                "latestReviews": {"nodes": []},
+                                "reviewThreads": {"nodes": []},
+                                "comments": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": "jabramsja"},
+                                            "body": commit_mod.BOT_REVIEW_TRIGGER_COMMENT,
+                                            "createdAt": "2026-03-27T07:37:49Z",
+                                        },
+                                        {
+                                            "author": {"login": "chatgpt-codex-connector[bot]"},
+                                            "body": "Codex Review: Didn't find any major issues. Swish!",
+                                            "createdAt": "2026-03-27T07:39:03Z",
+                                        },
+                                    ]
+                                },
+                            }
+                        }
+                    }
+                }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod.time, "sleep", lambda _: None)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: existing clear issue comment must avoid re-request
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert post_commit["pr_number"] == "673"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert len(comment_calls) == 0
+
     def test_post_commit_wait_ci_retries_until_checks_register(self, tmp_path, monkeypatch):
         repo = tmp_path
         handoff = _make_new_handoff()

@@ -36,6 +36,10 @@ All notable changes to RCX are documented in this file.
   `_kill_process_group()` regression with `# ANTICHEAT_OK`, so `pre-push-fast`
   treats that private-helper proof as an explicit allowed exception instead of a
   policy violation
+- `commit_executor.py` now checks for an already-valid current-head no-issues
+  connector issue comment before posting a fresh `@codex review`, and
+  `mu/tests/tools/test_executor_dispatch.py` now proves Step 15 does not
+  invalidate its own clear issue-comment outcome
 
 ### Pipeline Test Run Post-Commit Checkpointing
 
