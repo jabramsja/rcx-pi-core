@@ -1984,6 +1984,14 @@ def write_post_merge_routing_record(
         "validations_passed": response.validations_passed,
         "validations_failed": response.validations_failed,
     }
+    # Propagate task context so downstream executors (Phase B planless path)
+    # can derive wave identity and bounded scope from the routing record.
+    if package.get("wave_name"):
+        record["wave_name"] = package["wave_name"]
+    if package.get("task_id"):
+        record["task_id"] = package["task_id"]
+    if package.get("next_candidates"):
+        record["next_candidates"] = package["next_candidates"]
 
     record_dir = repo_root / META_BUS_DIR_NAME
     record_dir.mkdir(parents=True, exist_ok=True)
