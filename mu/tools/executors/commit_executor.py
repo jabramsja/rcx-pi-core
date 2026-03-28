@@ -807,7 +807,12 @@ def _maybe_request_current_head_bot_review(
 ) -> bool:
     continuation = _read_continuation_record(continuation_path)
     if continuation and continuation.get("bot_review_request_sha") == head_sha:
-        return False
+        # Re-request if the original request is older than the wait timeout —
+        # the connector may have dropped the webhook and a fresh comment gives
+        # the delivery system another chance.
+        updated_at = continuation.get("updated_at_unix", 0)
+        if time.time() - updated_at < BOT_REVIEW_WAIT_SECONDS:
+            return False
     _run(
         ["gh", "pr", "comment", pr_number, "--body", BOT_REVIEW_TRIGGER_COMMENT],
         cwd=repo_root,
