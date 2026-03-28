@@ -1,0 +1,24 @@
+{
+  "wave_id": "pipeline-monitor-hotfix-2026-03-28",
+  "repeat_run_speedup_ratio": 1.061069,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.388347,
+  "repeat_run_raw_seconds": [
+    0.412063,
+    0.388347
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.412063
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.80041
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-28T20:04:52Z",
+  "collector_version": "2.2.0"
+}

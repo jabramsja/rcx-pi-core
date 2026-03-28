@@ -63,30 +63,32 @@ cmd_start() {
     log_path=$(find_executor_log)
   fi
 
-  # Create session with first pane (Executor Output)
-  tmux new-session -d -s "$SESSION" -x 200 -y 50
+  # Create session
+  tmux new-session -d -s "$SESSION"
+  local W="$SESSION:1"  # window 1 (base-index=1 on macOS)
 
-  # Pane 0 (top-left): Executor Output
+  # Pane 1 (will become top-left): Executor Output
   if [ -n "$log_path" ] && [ -f "$log_path" ]; then
-    tmux send-keys -t "$SESSION:0.0" "tail -f '$log_path'" Enter
+    tmux send-keys -t "$W" "tail -f '$log_path'" Enter
   else
-    tmux send-keys -t "$SESSION:0.0" "echo 'No executor log detected. Use: tools/pipeline_monitor.sh start --log <path>'; echo 'Watching for new logs...'; while true; do log=\$(ls -t $REPO_ROOT/.scratch/phase_b_bridge_*.stdout.log /tmp/phase_b_*.txt /tmp/commit_*.txt 2>/dev/null | head -1); if [ -n \"\$log\" ]; then echo \"Found: \$log\"; tail -f \"\$log\"; break; fi; sleep 5; done" Enter
+    tmux send-keys -t "$W" "echo 'Watching for executor logs...'; while true; do log=\$(ls -t $REPO_ROOT/.scratch/phase_b_bridge_*.stdout.log /tmp/phase_b_*.txt /tmp/commit_*.txt 2>/dev/null | head -1); if [ -n \"\$log\" ]; then echo \"Found: \$log\"; tail -f \"\$log\"; break; fi; sleep 5; done" Enter
   fi
 
-  # Split horizontally (top-right): Pipeline State
-  tmux split-window -h -t "$SESSION:0.0"
-  tmux send-keys -t "$SESSION:0.1" "watch -n5 -c '$REPO_ROOT/mu/tools/observability/pipeline_status.sh'" Enter
+  # Split horizontally → pane 2 (right, active): Pipeline State
+  tmux split-window -h -t "$W"
+  tmux send-keys "while true; do clear; '$REPO_ROOT/mu/tools/observability/pipeline_status.sh'; sleep 5; done" Enter
 
-  # Split pane 0 vertically (bottom-left): Process Tree
-  tmux split-window -v -t "$SESSION:0.0"
-  tmux send-keys -t "$SESSION:0.2" "watch -n5 'echo \"PIPELINE PROCESSES\"; echo \"─────────────────\"; pgrep -f \"executor_dispatch|commit_executor|phase_b_executor|phase_a_executor|meta_bridge_supervisor|codex.*sandbox|bridge_supervisor\" 2>/dev/null | while read pid; do ps -p \$pid -o pid=,etime=,command= 2>/dev/null | sed \"s|.*/||\" | cut -c1-80; pgrep -P \$pid 2>/dev/null | while read cpid; do echo \"  └─ \$(ps -p \$cpid -o pid=,command= 2>/dev/null | sed \"s|.*/||\" | cut -c1-70)\"; done; done; echo; echo \"BRIDGE LOCK\"; cat $REPO_ROOT/.agent_bus/meta/meta_bridge.lock 2>/dev/null | jq -r \"\\\"  \\(.holder) PID \\(.pid)\\\"\" 2>/dev/null || echo \"  (none)\"'" Enter
+  # Split right pane vertically → pane 3 (bottom-right): PR / CI Status
+  tmux split-window -v -t "$W"
+  tmux send-keys "while true; do clear; echo 'PR / CI STATUS'; echo '──────────────'; EXEC_FILE=\$(ls -t $REPO_ROOT/.agent_bus/executors/commit_executor_*.json 2>/dev/null | head -1); if [ -n \"\$EXEC_FILE\" ]; then PR=\$(jq -r '.pr_number // empty' \"\$EXEC_FILE\" 2>/dev/null); if [ -n \"\$PR\" ]; then echo \"PR #\$PR\"; gh pr checks \"\$PR\" 2>/dev/null | head -8; else echo 'No PR yet'; fi; else echo 'No active executor'; fi; sleep 15; done" Enter
 
-  # Split pane 1 vertically (bottom-right): PR / CI Status
-  tmux split-window -v -t "$SESSION:0.1"
-  tmux send-keys -t "$SESSION:0.3" "watch -n15 'echo \"PR / CI STATUS\"; echo \"──────────────\"; EXEC_FILE=\$(ls -t $REPO_ROOT/.agent_bus/executors/commit_executor_*.json 2>/dev/null | head -1); if [ -n \"\$EXEC_FILE\" ]; then PR=\$(jq -r \".pr_number // \\\"\\\"\" \"\$EXEC_FILE\" 2>/dev/null); if [ -n \"\$PR\" ] && [ \"\$PR\" != \"null\" ]; then echo \"PR #\$PR\"; gh pr checks \"\$PR\" 2>/dev/null | head -8; echo; REVIEW=\$(gh pr view \"\$PR\" --json reviews --jq \".reviews[-1] | \\\"Review: \\(.commit.oid[:10]) \\(.submittedAt) \\(.state)\\\"\" 2>/dev/null); echo \"\$REVIEW\"; echo; COMMENTS=\$(gh api repos/jabramsja/rcx-pi-core/issues/\$PR/comments --jq \".[-3:][] | \\\"\\(.created_at) \\(.body[:40])\\\"\" 2>/dev/null); echo \"Recent comments:\"; echo \"\$COMMENTS\"; else echo \"No PR yet\"; fi; else echo \"No active executor\"; fi'" Enter
+  # Select left pane (pane 1) and split vertically → pane 4 (bottom-left): Process Tree
+  tmux select-pane -t "$W.1"
+  tmux split-window -v -t "$W"
+  tmux send-keys "while true; do clear; echo 'PIPELINE PROCESSES'; echo '─────────────────'; pgrep -f 'executor_dispatch|commit_executor|phase_b_executor|phase_a_executor|meta_bridge_supervisor' 2>/dev/null | while read pid; do ps -p \$pid -o pid=,etime=,command= 2>/dev/null | sed 's|.*/||' | cut -c1-80; done; echo; echo 'BRIDGE LOCK'; cat $REPO_ROOT/.agent_bus/meta/meta_bridge.lock 2>/dev/null | jq -r '.holder + \" PID \" + (.pid|tostring)' 2>/dev/null || echo '  (none)'; sleep 5; done" Enter
 
-  # Balance panes
-  tmux select-layout -t "$SESSION" tiled 2>/dev/null || true
+  # Select top-left pane for initial focus
+  tmux select-pane -t "$W.1"
 
   echo "Pipeline monitor started (session: $SESSION)"
   if [ "$detach" = false ]; then
