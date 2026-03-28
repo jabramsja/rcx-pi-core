@@ -73,8 +73,8 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **subst.v2.json** | Substitution (13 projections) | ✅ | ✅ |
 | **recurrence.v1.json** | Closure detection (9 projections) — v1 proof-of-concept | ✅ | ✅ |
 | **recurrence.v2.json** | Hash-accelerated closure detection (9 projections) — production | ✅ | ✅ |
-| **Python Substrate** | ~6,274 LOC, ~5,556 tests, production-ready | ✅ PRIMARY | - |
-| **JS Substrate** | ~4800 LOC core + ~480 LOC inline tests (15 JS modules), auditable, portability proof | - | ✅ COMPLETE |
+| **Python Substrate** | ~8,430 LOC, ~7,525 tests, production-ready | ✅ PRIMARY | - |
+| **JS Substrate** | ~6,488 LOC core + inline tests (16 JS modules), auditable, portability proof | - | ✅ COMPLETE |
 | **Bootstrap Primitives** | eval_step, max_steps, stack_guard, projection_loader (mu_equal DEMOTED — Level 1 Content-Addressed Mu) | Same in both | Same in both |
 
 **What L3 proves:**
@@ -149,7 +149,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 - Security: reserved field misuse in non-kernel projections
 - Cross-seed ID collisions (except versioned families like v1/v2)
 
-**JS POC location:** `mu/host/js/` (~4800 LOC core + ~480 LOC inline tests across 15 JS modules; `eval_step.js` is compatibility shim)
+**JS POC location:** `mu/host/js/` (~6,488 LOC core + inline tests across 16 JS modules; `eval_step.js` is compatibility shim)
 - Now tracked in git (required for CI)
 - Includes `--json-api` mode for machine-readable output (cross-substrate verification)
 
@@ -194,7 +194,7 @@ Current truth: full L4 completion remains in SINK, but bounded reduction work is
 
 **Post-D008 Operating Mode:** D008 GO rendered (founder, 2026-03-01; supersedes prior DEFER). D005 production pilot COMPLETE (PR #452 merged, 2026-03-01). **G8 PASS (classification gate, caveated, 2026-03-03):** All four primitives classified with executable evidence (D001-D010). G8 PASS closes classification evidence, not L4 completion. L4 remains blocked by stop conditions #3/#4. No production reduction claims. Research-evidence precedent locked: research analogs sufficient for classification gates, production claims require productionization gates. Productionization gate lock documented in L4ExitChecklist.v0.md (D009: memoization/cycle-detection + cross-substrate + node-count vs per-level; D010: int-range + NaN/Inf + JS decoder + migration + integrity-chain). Hemisphere Metabolization Contract COMPLETE (E1-E5 all MET, 2026-02-20). Boot1 shadow-merge COMPLETE (2026-02-19). All prior NEXT contracts closed. Wave 25 JS perf fix merged (PR #453, 42x speedup + non-linear hash fix + policy lock). P4 hotspot measured and DEFERRED (2026-03-02, PR #458). **RT1+RT2+RT3 anti-theater hardening COMPLETE (2026-03-03):** RT1 closes cross-substrate seed parsing parity (NaN/Inf rejection) and JS type guards. RT2 introduces `tools/checks/check_simulated_production_logic.py` (9 tests). RT3 hardens the checker: arrow function aliases, concatenated/f-string detection, require+call proof (not just require), inode-based scan dedup, 5-line THEATER_OK proximity. 18 checker tests total. Wired into `tools/audits/audit_fast.sh` and `tools/audits/audit_all.sh`. This is process hardening, not runtime behavior change — host semantics and debt unchanged.
 
-**P7 Meta-Circular Reduction Chain (2026-03-13 → 2026-03-15):** All four P7 sub-waves + S1-A/S1-B complete. P7-a: Stage0 VM executor seed (9 opcodes, 125 gate tests, Python+JS parity, PR #568). P7-b: Lowering compiler (`lower_stage0.py` + `json_to_dag.py`, 41 gate tests, compiled match_v2 + subst_v2 bundles, PR #577). P7-c: Three-way parity harness (host Stage0 vs compiled Python vs compiled JS, corpus replay, PR #579). P7-d: Shadow-mode cutover (`_step_kernel_with_vm()`, 17 gate tests, PR #581). S1-A: Cutover evidence package (37 tests, performance profiling, CONDITIONAL GO memo, PR #598). **S1-B: VM CUTOVER ACTIVE (PR #603, founder GO 2026-03-15).** `_STAGE0_VM_CUTOVER = True`, `_STAGE0_SHADOW_ENABLED = False` in both Python and JS. **S1-C: ALL 33 projections via Stage0 VM (PR #606).** kernel.v1 (7) + bridge (5) compiled into Stage0 bundles; `_step_kernel_with_vm()` now executes all 4 seed groups via `stage0_vm_step`; `_apply_projection_trusted` eliminated from step_kernel_mu path. Host path (`_step_trusted`) still used by engine_pipeline only (projection_runner retired Wave 3F; classify + subst migrated to VM via Waves 3B-3E). **W6A: trusted path optimization (PR #635 merged, 2026-03-19).** Total inventory 313 (182 Py + 131 JS), authority 218 (121 Py + 97 JS), markers 12.
+**P7 Meta-Circular Reduction Chain (2026-03-13 → 2026-03-15):** All four P7 sub-waves + S1-A/S1-B complete. P7-a: Stage0 VM executor seed (9 opcodes, 125 gate tests, Python+JS parity, PR #568). P7-b: Lowering compiler (`lower_stage0.py` + `json_to_dag.py`, 41 gate tests, compiled match_v2 + subst_v2 bundles, PR #577). P7-c: Three-way parity harness (host Stage0 vs compiled Python vs compiled JS, corpus replay, PR #579). P7-d: Shadow-mode cutover (`_step_kernel_with_vm()`, 17 gate tests, PR #581). S1-A: Cutover evidence package (37 tests, performance profiling, CONDITIONAL GO memo, PR #598). **S1-B: VM CUTOVER ACTIVE (PR #603, founder GO 2026-03-15).** `_STAGE0_VM_CUTOVER = True`, `_STAGE0_SHADOW_ENABLED = False` in both Python and JS. **S1-C: ALL 33 projections via Stage0 VM (PR #606).** kernel.v1 (7) + bridge (5) compiled into Stage0 bundles; `_step_kernel_with_vm()` now executes all 4 seed groups via `stage0_vm_step`; `_apply_projection_trusted` eliminated from step_kernel_mu path. Host path (`_step_trusted`) still used by engine_pipeline only (projection_runner retired Wave 3F; classify + subst migrated to VM via Waves 3B-3E). **W6A: trusted path optimization (PR #635 merged, 2026-03-19).** Total inventory 313 (182 Py + 131 JS), authority 218 (121 Py + 97 JS), markers 12. JS substrate: 16 modules, ~6,488 LOC.
 
 **Conjecture Parking:** Non-Euclidean geometry / structural linear algebra hypotheses are PARKED (not active). See TASKS.md SINK "Conjecture Parking (NOT ACTIVE)" for re-evaluation trigger and promotion rules.
 
@@ -206,9 +206,9 @@ Boot1 is a **host-side loop policy alternative**, not a seed-defined structural 
 - **Trampoline (fallback):** `run_engine_pipeline()` iterative for-loop (`step_mu.py:run_engine_pipeline()`, `eval_step.js:runEnginePipeline()`)
 Both are host code consuming the same `{_run_engine: ...}` envelope. The loop-back *decision* is structural (made by projections); the loop-back *execution* remains host code. Shadow-merge authorized (founder D1=YES 2026-02-16); Boot1 recursive promoted to default. See `mu/docs/core/Boot1LoopContract.v0.md` for design spec. Note: Boot1 is NOT meta-circular progress — it changes the host execution strategy, not the structural execution model (see `Boot1LoopContract.v0.md` "does not promote to META-CIRCULAR").
 
-**Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~4800 LOC core in JS across 15 modules), we know exactly what would need to change.
+**Key Insight:** L3 doesn't close L4 - it opens it. By making bootstrap primitives explicit and minimal (~6,488 LOC core in JS across 16 modules), we know exactly what would need to change.
 
-**The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive? The JS substrate at ~4800 LOC core is our current answer - auditable, portable, mechanical.
+**The Honest Answer:** Forth has NEXT. Lisp has EVAL. Some primitive always exists. The question is: what's the minimal primitive? The JS substrate at ~6,488 LOC core is our current answer - auditable, portable, mechanical.
 
 ### Cross-Substrate Testing Strategy
 
@@ -404,7 +404,7 @@ The 12 represents the current tracked marker count (6 Py decorator + 6 JS decora
 - step_mu.py:ALGORITHM_ENTRYPOINT_KEYS - constant definition (AST_OK: security whitelist)
 
 **Scaffolding ceiling (prevents unbounded accumulation):**
-- AST_OK:infra ceiling: 78 (current 78)
+- AST_OK:infra ceiling: 135 (current 135)
 - AST_OK:infra is NOT debt, but capped to prevent drift
 - Keep line-level infra markers minimal; prefer function-level debt classification for runtime loops
 
@@ -505,7 +505,7 @@ These were resolved before promoting Phase 7 from VECTOR to NEXT (promoted 2026-
 - Task list: `TASKS.md`
 - **Agent bridge:** `mu/docs/agents/AgentBridgeProtocol.v0.md` (Claude ↔ Codex collaboration, hybrid review, design deliberation)
 - **Documentation governance:** `mu/docs/core/DocGovernance.v0.md` (Three Laws, tiered governance)
-- **Doc tests:** `tests/docs/` (279 tests: contracts, freshness, governance, root files)
+- **Doc tests:** `tests/docs/` (296 tests: contracts, freshness, governance, root files)
 - Grounding tests: `tests/structural/` (status, seeds, type tags, projection order, audit claims)
 
 ---
