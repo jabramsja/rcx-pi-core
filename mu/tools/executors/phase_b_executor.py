@@ -939,6 +939,7 @@ def run_bridge_review(
         job_id=job_id or "",
         timeout=timeout,
         verbose=verbose,
+        stale_timeout=max(BRIDGE_REVIEW_STALE_TIMEOUT, bridge_turn_timeout),
         env={
             **os.environ,
             "RCX_BRIDGE_MAX_TURN_WALL_TIME_S": str(min(timeout, bridge_turn_timeout)),
@@ -2184,7 +2185,7 @@ def run_phase_b(
         if bridge_result["exit_code"] == 0 and bridge_decision == "GO":
             render = _read_bridge_render(repo_root, bridge_job_id)
             parsed_findings = _parse_findings_from_render(render) if render else []
-            blocking_findings, non_blocking_findings = _classify_findings(parsed_findings)
+            blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
             if blocking_findings:
                 result["status"] = "error"
                 result["step"] = "bridge_decision"
@@ -2650,6 +2651,7 @@ def run_phase_b(
 
                 # FAIL CLOSED on re-entry implementer failure
                 if impl_result["status"] != "success":
+                    _clear_state(repo_root)
                     return {
                         "status": "error",
                         "step": "implementer_reentry",

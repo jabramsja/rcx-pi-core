@@ -33,8 +33,13 @@ case "$AGENT_TYPE" in
   verifier|adversary|expert|structural-proof|grounding|fuzzer|translator|visualizer|advisor)
     # Continue with validation
     ;;
+  explore|bash|general-purpose|plan)
+    # Skip validation for non-review agent types
+    exit 0
+    ;;
   *)
-    # Skip validation for other agent types (Explore, Bash, etc.)
+    # Unknown agent_type — fail closed
+    echo '{"decision": "block", "reason": "Unknown agent_type: validation cannot be skipped for unrecognized types"}'
     exit 0
     ;;
 esac
