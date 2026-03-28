@@ -116,18 +116,20 @@ cmd_start() {
   # Pane 1 (top-left): Auto-switching live output
   tmux send-keys -t "$W" "bash '$watcher'" Enter
 
+  local OBS_DIR="$REPO_ROOT/mu/tools/observability"
+
   # Split horizontally → pane 2 (right): Pipeline State
   tmux split-window -h -t "$W"
-  tmux send-keys "while true; do clear; '$REPO_ROOT/mu/tools/observability/pipeline_status.sh'; sleep 5; done" Enter
+  tmux send-keys "while true; do clear; '$OBS_DIR/pipeline_status.sh'; sleep 5; done" Enter
 
   # Split right pane vertically → pane 3 (bottom-right): PR / CI Status
   tmux split-window -v -t "$W"
-  tmux send-keys "while true; do clear; echo 'PR / CI STATUS'; echo '──────────────'; EXEC_FILE=\$(ls -t $REPO_ROOT/.agent_bus/executors/commit_executor_*.json 2>/dev/null | head -1); if [ -n \"\$EXEC_FILE\" ]; then PR=\$(jq -r '.pr_number // empty' \"\$EXEC_FILE\" 2>/dev/null); if [ -n \"\$PR\" ]; then echo \"PR #\$PR\"; gh pr checks \"\$PR\" 2>/dev/null | head -8; echo; REVIEW=\$(gh pr view \"\$PR\" --json reviews --jq '.reviews[-1] | \"Review: \" + (.commit.oid[:10]) + \" \" + .submittedAt + \" \" + .state' 2>/dev/null); [ -n \"\$REVIEW\" ] && echo \"\$REVIEW\"; else echo 'No PR yet'; fi; else echo 'No active executor'; fi; sleep 15; done" Enter
+  tmux send-keys "bash '$OBS_DIR/_pane_prci.sh'" Enter
 
   # Select left pane (pane 1) and split vertically → pane 4 (bottom-left): Process Tree
   tmux select-pane -t "$W.1"
   tmux split-window -v -t "$W"
-  tmux send-keys "while true; do clear; echo 'PIPELINE PROCESSES'; echo '─────────────────'; found=0; pgrep -f 'executor_dispatch|commit_executor|phase_b_executor|phase_a_executor|meta_bridge_supervisor|codex.*sandbox' 2>/dev/null | while read pid; do found=1; CMD=\$(ps -p \$pid -o command= 2>/dev/null | sed 's|.*/||' | cut -c1-70); ELAPSED=\$(ps -p \$pid -o etime= 2>/dev/null | xargs); echo \"  PID \$pid (\$ELAPSED) \$CMD\"; pgrep -P \$pid 2>/dev/null | while read cpid; do CCMD=\$(ps -p \$cpid -o command= 2>/dev/null | sed 's|.*/||' | cut -c1-60); echo \"    └─ \$cpid \$CCMD\"; done; done; echo; echo 'BRIDGE LOCK'; if [ -f $REPO_ROOT/.agent_bus/meta/meta_bridge.lock ]; then HOLDER=\$(jq -r '.holder' $REPO_ROOT/.agent_bus/meta/meta_bridge.lock 2>/dev/null); LPID=\$(jq -r '.pid' $REPO_ROOT/.agent_bus/meta/meta_bridge.lock 2>/dev/null); if kill -0 \$LPID 2>/dev/null; then echo \"  \$HOLDER PID \$LPID (alive)\"; else echo \"  \$HOLDER PID \$LPID (STALE)\"; fi; else echo '  (none)'; fi; sleep 5; done" Enter
+  tmux send-keys "bash '$OBS_DIR/_pane_processes.sh'" Enter
 
   # Select top-left pane for initial focus
   tmux select-pane -t "$W.1"
