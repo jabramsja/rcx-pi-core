@@ -1113,7 +1113,15 @@ def build_meta_reviewer_prompt(
             "must still write the canonical hook receipt for compatibility while returning the per-invocation path. "
             "Do not use legacy/nonexistent aliases when verifying this chain.\n"
             "5. **No manual fallback**: Protocol docs must not present manual git push/PR/merge as normal.\n\n"
-            "If you cannot verify any obligation, emit a CRITICAL finding. Do not skip."
+            "## SCOPE BOUNDING RULE\n\n"
+            "Your proof obligation is bounded to the **staged change set** and its **direct call sites** "
+            "(one hop). You do NOT need to re-verify the behavior of functions that are NOT being modified "
+            "in this wave. If a dependency (e.g., `write_pre_commit_receipt()`) is not in the staged diff, "
+            "you may ASSUME its existing behavior is correct unless the staged changes alter its contract. "
+            "Verify the staged code is correct, not the entire authority chain from scratch.\n\n"
+            "If you cannot verify an obligation within your command budget, emit a LOW finding "
+            "noting the unverified obligation, not a CRITICAL block. Only block on contradictions "
+            "you actually reproduce in the staged diff."
         )
 
     payload = {

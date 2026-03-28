@@ -977,6 +977,119 @@ def prepare_handoff_from_routing_record(
     return handoff, []
 
 
+def build_commit_handoff(
+    *,
+    wave_id: str,
+    task_id: str,
+    files_to_stage: list[str],
+    commit_message: str,
+    fixes_implemented: list[str],
+    wave_class: str = "L4_ENABLER",
+    target_gate_id: str = "G8",
+    caller: str = "phase_b",
+    base_branch: str = "dev",
+    branch_prefix: str = "jabramsja",
+    force_add_files: list[str] | None = None,
+    pr_title: str | None = None,
+    pr_body: str | None = None,
+    tracker_note_text: str | None = None,
+    supervisor_lane: str | None = None,
+    deferred_items: list[str] | None = None,
+    scope_items: list[str] | None = None,
+    evidence_handles: dict[str, str] | None = None,
+    pre_commit_receipt_path: str | None = None,
+    repo_root: Path | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Build a validated commit handoff from essential fields.
+
+    Fills in defaults for optional fields, auto-detects .gitignored files
+    for force_add_files, finds the latest COMMIT_GO receipt if not provided,
+    and validates the result against the handoff schema.
+
+    Returns (handoff_dict, errors). If errors is non-empty, the handoff is invalid.
+    """
+    errors: list[str] = []
+
+    if not wave_id:
+        errors.append("wave_id is required")
+    if not task_id:
+        errors.append("task_id is required")
+    if not files_to_stage:
+        errors.append("files_to_stage is required")
+    if not commit_message:
+        errors.append("commit_message is required")
+    if not fixes_implemented:
+        errors.append("fixes_implemented is required")
+    if errors:
+        return {}, errors
+
+    # Auto-detect .gitignored files and move to force_add_files
+    effective_files = list(files_to_stage)
+    effective_force = list(force_add_files or [])
+    if repo_root:
+        for f in list(effective_files):
+            try:
+                result = subprocess.run(
+                    ["git", "check-ignore", "-q", f],
+                    cwd=repo_root, capture_output=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    effective_files.remove(f)
+                    if f not in effective_force:
+                        effective_force.append(f)
+            except (subprocess.SubprocessError, OSError):
+                pass
+
+    # Auto-find latest COMMIT_GO receipt if not provided
+    # Use the canonical receipt path — no directory-sort discovery.
+    # The commit executor's Step 6 runs the supervisor and gets a fresh
+    # per-invocation receipt. This handoff receipt is provenance only.
+    effective_receipt = pre_commit_receipt_path or ".agent_bus/meta/pre_commit_receipt.json"
+
+    handoff = {
+        "wave_id": wave_id,
+        "task_id": task_id,
+        "wave_class": wave_class,
+        "target_gate_id": target_gate_id,
+        "caller": caller,
+        "branch_prefix": branch_prefix,
+        "tracker_note_text": tracker_note_text or (
+            f"- Tracker sync note ({wave_id}): "
+            f"**{commit_message}**. Class: {wave_class}. "
+            f"target_gate_id: {target_gate_id}. "
+            f"primary_blocker_class: INTEGRATION. "
+            f"primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            f"boot0_track_id: V1. boot0_progress_state: HOLD."
+        ),
+        "fixes_implemented": fixes_implemented,
+        "files_to_stage": effective_files,
+        "force_add_files": effective_force,
+        "commit_message": commit_message,
+        "pr_title": pr_title or commit_message[:70],
+        "pr_body": pr_body or f"## Summary\n\n" + "\n".join(f"- {f}" for f in fixes_implemented),
+        "base_branch": base_branch,
+        "pre_commit_receipt_path": effective_receipt,
+    }
+
+    # Add optional fields if provided
+    if supervisor_lane:
+        handoff["supervisor_lane"] = supervisor_lane
+    if deferred_items is not None:
+        handoff["deferred_items"] = deferred_items
+    if scope_items:
+        handoff["scope_items"] = scope_items
+    if evidence_handles:
+        handoff["evidence_handles"] = evidence_handles
+
+    # Validate against schema
+    valid, validation_errors = validate_handoff(handoff)
+    if not valid:
+        return handoff, validation_errors
+
+    return handoff, []
+
+
 def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
     """Step 1: Validate all handoff fields."""
     if not isinstance(handoff, dict):
