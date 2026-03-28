@@ -1,55 +1,101 @@
 #!/usr/bin/env bash
 # pipeline_monitor.sh — Real-time pipeline observability via tmux
-# Read-only: never modifies state, only reads .agent_bus/, processes, and GitHub.
+# Read-only by default. Action commands (clear-lock, nudge, kill) are explicit.
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 SESSION="rcx-pipeline"
+LIVE_LOG="/tmp/rcx_pipeline_live.txt"
 
 usage() {
-  cat <<EOF
-Usage: $(basename "$0") <command> [options]
+  cat <<'EOF'
+Usage: pipeline_monitor.sh <command> [options]
 
-Commands:
-  start [--log <path>] [--detach]   Launch tmux monitoring session
-  stop                              Kill the monitoring session
-  attach                            Attach to existing session
-  status                            One-shot status (no tmux)
+Dashboard:
+  start [--detach]         Launch tmux monitoring session
+  stop                     Kill the monitoring session
+  attach                   Attach to existing session
+  status                   One-shot status (no tmux)
 
-Options:
-  --log <path>    Specific log file to tail (auto-detected if omitted)
-  --detach        Start session without attaching
+Run executors with live output in tmux:
+  exec <command...>        Run command with tee to tmux live pane
 
-The monitor creates a tmux session with 4 panes:
-  ┌──────────────────┬──────────────────┐
-  │ Executor Output  │ Pipeline State   │
-  ├──────────────────┼──────────────────┤
-  │ Process Tree     │ PR / CI Status   │
-  └──────────────────┴──────────────────┘
+Actions (safe one-shot commands):
+  clear-lock               Remove stale bridge lock (checks PID first)
+  nudge <pr-number>        Post @codex review on a PR
+  kill <pid>               Kill a stale pipeline process
+
+┌──────────────────────┬──────────────────────┐
+│ Live Output (auto)   │ Pipeline State       │
+├──────────────────────┼──────────────────────┤
+│ Process Tree         │ PR / CI Status       │
+└──────────────────────┴──────────────────────┘
 EOF
   exit "${1:-0}"
 }
 
-find_executor_log() {
-  # Auto-detect the most recent executor/bridge stdout log
+# ── Auto-switching log watcher ──
+# Writes a helper script that continuously finds and tails the newest log,
+# switching when a newer one appears (new stage started).
+write_log_watcher() {
+  cat <<'WATCHER_EOF'
+#!/usr/bin/env bash
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+LIVE_LOG="/tmp/rcx_pipeline_live.txt"
+current_log=""
+tail_pid=""
+
+find_newest_log() {
   local log=""
-  # Check .scratch for phase_b stdout logs
+  # Live tee output (from 'exec' command) takes priority
+  if [ -f "$LIVE_LOG" ]; then
+    local age=$(( $(date +%s) - $(stat -f%m "$LIVE_LOG" 2>/dev/null || stat -c%Y "$LIVE_LOG" 2>/dev/null || echo 0) ))
+    if [ "$age" -lt 300 ]; then
+      echo "$LIVE_LOG"
+      return
+    fi
+  fi
+  # Bridge review logs
   log=$(ls -t "$REPO_ROOT"/.scratch/phase_b_bridge_*.stdout.log 2>/dev/null | head -1)
   [ -n "$log" ] && echo "$log" && return
-  # Check .scratch for agent review logs
+  # Agent review logs
   log=$(ls -t "$REPO_ROOT"/.scratch/phase_b_agent_review_*.stdout.log 2>/dev/null | head -1)
   [ -n "$log" ] && echo "$log" && return
-  # Check /tmp for operator-directed logs
+  # Operator-directed logs
   log=$(ls -t /tmp/phase_b_*.txt /tmp/commit_*.txt 2>/dev/null | head -1)
   [ -n "$log" ] && echo "$log" && return
   echo ""
 }
 
+switch_tail() {
+  local new_log="$1"
+  if [ -n "$tail_pid" ] && kill -0 "$tail_pid" 2>/dev/null; then
+    kill "$tail_pid" 2>/dev/null || true
+    wait "$tail_pid" 2>/dev/null || true
+  fi
+  printf '\033[1;36m── %s ──\033[0m\n' "$(basename "$new_log")"
+  tail -f "$new_log" &
+  tail_pid=$!
+  current_log="$new_log"
+}
+
+echo "Auto-switching log watcher — scanning for active logs..."
+while true; do
+  newest=$(find_newest_log)
+  if [ -n "$newest" ] && [ "$newest" != "$current_log" ]; then
+    switch_tail "$newest"
+  elif [ -z "$newest" ] && [ -z "$current_log" ]; then
+    printf '\r\033[2mWaiting for pipeline activity...\033[0m'
+  fi
+  sleep 3
+done
+WATCHER_EOF
+}
+
 cmd_start() {
-  local log_path="" detach=false
+  local detach=false
   while [ $# -gt 0 ]; do
     case "$1" in
-      --log) log_path="$2"; shift 2 ;;
       --detach) detach=true; shift ;;
       *) echo "Unknown option: $1"; usage 1 ;;
     esac
@@ -58,34 +104,30 @@ cmd_start() {
   # Kill existing session if any
   tmux kill-session -t "$SESSION" 2>/dev/null || true
 
-  # Auto-detect log if not provided
-  if [ -z "$log_path" ]; then
-    log_path=$(find_executor_log)
-  fi
+  # Write the log watcher script
+  local watcher="/tmp/rcx_log_watcher.sh"
+  write_log_watcher > "$watcher"
+  chmod +x "$watcher"
 
   # Create session
   tmux new-session -d -s "$SESSION"
   local W="$SESSION:1"  # window 1 (base-index=1 on macOS)
 
-  # Pane 1 (will become top-left): Executor Output
-  if [ -n "$log_path" ] && [ -f "$log_path" ]; then
-    tmux send-keys -t "$W" "tail -f '$log_path'" Enter
-  else
-    tmux send-keys -t "$W" "echo 'Watching for executor logs...'; while true; do log=\$(ls -t $REPO_ROOT/.scratch/phase_b_bridge_*.stdout.log /tmp/phase_b_*.txt /tmp/commit_*.txt 2>/dev/null | head -1); if [ -n \"\$log\" ]; then echo \"Found: \$log\"; tail -f \"\$log\"; break; fi; sleep 5; done" Enter
-  fi
+  # Pane 1 (top-left): Auto-switching live output
+  tmux send-keys -t "$W" "bash '$watcher'" Enter
 
-  # Split horizontally → pane 2 (right, active): Pipeline State
+  # Split horizontally → pane 2 (right): Pipeline State
   tmux split-window -h -t "$W"
   tmux send-keys "while true; do clear; '$REPO_ROOT/mu/tools/observability/pipeline_status.sh'; sleep 5; done" Enter
 
   # Split right pane vertically → pane 3 (bottom-right): PR / CI Status
   tmux split-window -v -t "$W"
-  tmux send-keys "while true; do clear; echo 'PR / CI STATUS'; echo '──────────────'; EXEC_FILE=\$(ls -t $REPO_ROOT/.agent_bus/executors/commit_executor_*.json 2>/dev/null | head -1); if [ -n \"\$EXEC_FILE\" ]; then PR=\$(jq -r '.pr_number // empty' \"\$EXEC_FILE\" 2>/dev/null); if [ -n \"\$PR\" ]; then echo \"PR #\$PR\"; gh pr checks \"\$PR\" 2>/dev/null | head -8; else echo 'No PR yet'; fi; else echo 'No active executor'; fi; sleep 15; done" Enter
+  tmux send-keys "while true; do clear; echo 'PR / CI STATUS'; echo '──────────────'; EXEC_FILE=\$(ls -t $REPO_ROOT/.agent_bus/executors/commit_executor_*.json 2>/dev/null | head -1); if [ -n \"\$EXEC_FILE\" ]; then PR=\$(jq -r '.pr_number // empty' \"\$EXEC_FILE\" 2>/dev/null); if [ -n \"\$PR\" ]; then echo \"PR #\$PR\"; gh pr checks \"\$PR\" 2>/dev/null | head -8; echo; REVIEW=\$(gh pr view \"\$PR\" --json reviews --jq '.reviews[-1] | \"Review: \" + (.commit.oid[:10]) + \" \" + .submittedAt + \" \" + .state' 2>/dev/null); [ -n \"\$REVIEW\" ] && echo \"\$REVIEW\"; else echo 'No PR yet'; fi; else echo 'No active executor'; fi; sleep 15; done" Enter
 
   # Select left pane (pane 1) and split vertically → pane 4 (bottom-left): Process Tree
   tmux select-pane -t "$W.1"
   tmux split-window -v -t "$W"
-  tmux send-keys "while true; do clear; echo 'PIPELINE PROCESSES'; echo '─────────────────'; pgrep -f 'executor_dispatch|commit_executor|phase_b_executor|phase_a_executor|meta_bridge_supervisor' 2>/dev/null | while read pid; do ps -p \$pid -o pid=,etime=,command= 2>/dev/null | sed 's|.*/||' | cut -c1-80; done; echo; echo 'BRIDGE LOCK'; cat $REPO_ROOT/.agent_bus/meta/meta_bridge.lock 2>/dev/null | jq -r '.holder + \" PID \" + (.pid|tostring)' 2>/dev/null || echo '  (none)'; sleep 5; done" Enter
+  tmux send-keys "while true; do clear; echo 'PIPELINE PROCESSES'; echo '─────────────────'; found=0; pgrep -f 'executor_dispatch|commit_executor|phase_b_executor|phase_a_executor|meta_bridge_supervisor|codex.*sandbox' 2>/dev/null | while read pid; do found=1; CMD=\$(ps -p \$pid -o command= 2>/dev/null | sed 's|.*/||' | cut -c1-70); ELAPSED=\$(ps -p \$pid -o etime= 2>/dev/null | xargs); echo \"  PID \$pid (\$ELAPSED) \$CMD\"; pgrep -P \$pid 2>/dev/null | while read cpid; do CCMD=\$(ps -p \$cpid -o command= 2>/dev/null | sed 's|.*/||' | cut -c1-60); echo \"    └─ \$cpid \$CCMD\"; done; done; echo; echo 'BRIDGE LOCK'; if [ -f $REPO_ROOT/.agent_bus/meta/meta_bridge.lock ]; then HOLDER=\$(jq -r '.holder' $REPO_ROOT/.agent_bus/meta/meta_bridge.lock 2>/dev/null); LPID=\$(jq -r '.pid' $REPO_ROOT/.agent_bus/meta/meta_bridge.lock 2>/dev/null); if kill -0 \$LPID 2>/dev/null; then echo \"  \$HOLDER PID \$LPID (alive)\"; else echo \"  \$HOLDER PID \$LPID (STALE)\"; fi; else echo '  (none)'; fi; sleep 5; done" Enter
 
   # Select top-left pane for initial focus
   tmux select-pane -t "$W.1"
@@ -95,7 +137,7 @@ cmd_start() {
     echo "Attaching... (detach with Ctrl-b d)"
     tmux attach-session -t "$SESSION"
   else
-    echo "Detached. Attach with: tools/pipeline_monitor.sh attach"
+    echo "Detached. Attach with: tmux attach-session -t $SESSION"
   fi
 }
 
@@ -112,7 +154,7 @@ cmd_attach() {
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     tmux attach-session -t "$SESSION"
   else
-    echo "No active pipeline monitor session. Start with: tools/pipeline_monitor.sh start"
+    echo "No active session. Start with: pipeline_monitor.sh start"
     exit 1
   fi
 }
@@ -121,13 +163,91 @@ cmd_status() {
   exec "$REPO_ROOT/mu/tools/observability/pipeline_status.sh"
 }
 
+# ── exec: Run a command with live tee to tmux ──
+cmd_exec() {
+  if [ $# -eq 0 ]; then
+    echo "Usage: pipeline_monitor.sh exec <command...>"
+    exit 1
+  fi
+  # Touch the live log so the tmux watcher picks it up
+  : > "$LIVE_LOG"
+  echo "Output streaming to tmux monitor via $LIVE_LOG"
+  echo "───────────────────────────────────────────────"
+  # Run with tee — output goes to both this terminal and the live log
+  "$@" 2>&1 | tee "$LIVE_LOG"
+}
+
+# ── clear-lock: Remove stale bridge lock ──
+cmd_clear_lock() {
+  local lock="$REPO_ROOT/.agent_bus/meta/meta_bridge.lock"
+  if [ ! -f "$lock" ]; then
+    echo "No bridge lock exists."
+    return
+  fi
+  local pid
+  pid=$(jq -r '.pid' "$lock" 2>/dev/null)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    echo "Lock holder PID $pid is ALIVE. Not removing."
+    echo "Use 'kill $pid' first if you're sure it's stale."
+    return 1
+  fi
+  rm -f "$lock"
+  echo "Stale lock removed (PID $pid was dead)."
+}
+
+# ── nudge: Post @codex review on a PR ──
+cmd_nudge() {
+  local pr="${1:-}"
+  if [ -z "$pr" ]; then
+    # Auto-detect from executor state
+    pr=$(ls -t "$REPO_ROOT/.agent_bus/executors/commit_executor_"*.json 2>/dev/null | head -1 | xargs jq -r '.pr_number // empty' 2>/dev/null)
+    if [ -z "$pr" ]; then
+      echo "Usage: pipeline_monitor.sh nudge <pr-number>"
+      exit 1
+    fi
+  fi
+  echo "Posting @codex review on PR #$pr..."
+  gh pr comment "$pr" --body "@codex review"
+  echo "Done. Connector typically responds in 3-8 minutes."
+}
+
+# ── kill: Kill a stale pipeline process ──
+cmd_kill() {
+  local pid="${1:-}"
+  if [ -z "$pid" ]; then
+    echo "Usage: pipeline_monitor.sh kill <pid>"
+    echo ""
+    echo "Active pipeline processes:"
+    pgrep -f 'executor_dispatch|commit_executor|phase_b_executor|phase_a_executor|meta_bridge_supervisor' 2>/dev/null | while read p; do
+      ps -p "$p" -o pid=,etime=,command= 2>/dev/null | sed 's|.*/||' | cut -c1-80
+    done
+    exit 1
+  fi
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "PID $pid is not running."
+    return 1
+  fi
+  echo "Killing PID $pid..."
+  kill "$pid"
+  sleep 1
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "Still alive, sending SIGKILL..."
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+  echo "Done."
+}
+
 # Main dispatch
 case "${1:-}" in
-  start)   shift; cmd_start "$@" ;;
-  stop)    cmd_stop ;;
-  attach)  cmd_attach ;;
-  status)  cmd_status ;;
-  -h|--help) usage 0 ;;
-  "") usage 1 ;;
-  *) echo "Unknown command: $1"; usage 1 ;;
+  start)       shift; cmd_start "$@" ;;
+  stop)        cmd_stop ;;
+  attach)      cmd_attach ;;
+  status)      cmd_status ;;
+  exec)        shift; cmd_exec "$@" ;;
+  clear-lock)  cmd_clear_lock ;;
+  nudge)       shift; cmd_nudge "$@" ;;
+  kill)        shift; cmd_kill "$@" ;;
+  -h|--help)   usage 0 ;;
+  "")          usage 1 ;;
+  *)           echo "Unknown command: $1"; usage 1 ;;
 esac
