@@ -2,7 +2,7 @@
 
 Date: 2026-03-23
 Updated: 2026-03-24
-Status: OPEN (2 remaining)
+Status: RESOLVED (2026-03-29, deferred_cleanup wave)
 Source: Bridge R1-R4 Codex review findings (phase-b-stabilization-r1 through r4)
 Wave: control-surface-live-fixes (BOOTSTRAP_PHASE_B_EXCEPTION)
 
@@ -19,11 +19,11 @@ Bridge convergence loop ran 4 rounds. Core runtime defects were fixed (receipt u
 - Prior "fix" left the silent rewrite in place; bridge R1 re-found it; now truly removed
 - Tests: `TestRoutingValidationNotBypassed` (6 tests)
 
-### 2. Closeout attestation accepts control-surface GO without test-execution BEHAVIORAL proof (R4 finding 2, critical) — PARTIALLY FIXED 2026-03-24
+### 2. Closeout attestation accepts control-surface GO without test-execution BEHAVIORAL proof (R4 finding 2, critical) — FIXED
 
 - `check_closeout_attestation.py:215-227` — `validate_attestation` now requires BEHAVIORAL validation proof with "validation" in claim for control-surface waves
 - Gate 10 now supplies validation commands to attestation generator via `--validation-commands` (fix #3)
-- **Remaining concern:** Needs live pipeline run to confirm BEHAVIORAL proof entries are actually generated and accepted end-to-end
+- **Proven by 6 live pipeline runs (PRs #682-#687):** BEHAVIORAL proof entries are generated and accepted end-to-end
 
 ### ~~3. Gate 10 cannot provide behavioral proof to attestation (R4 finding 3, high)~~ — FIXED 2026-03-24
 
