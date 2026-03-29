@@ -59,19 +59,26 @@ find_newest_log() {
       return
     fi
   fi
-  # Phase A agent/bridge logs
-  log=$(ls -t "$REPO_ROOT"/.scratch/phase_a_agent_review_*.stdout.log 2>/dev/null | head -1) || true
-  [ -n "$log" ] && echo "$log" && return
-  log=$(ls -t "$REPO_ROOT"/.scratch/phase_a_bridge_*.stdout.log 2>/dev/null | head -1) || true
-  [ -n "$log" ] && echo "$log" && return
-  # Phase B bridge/agent logs
-  log=$(ls -t "$REPO_ROOT"/.scratch/phase_b_bridge_*.stdout.log 2>/dev/null | head -1) || true
-  [ -n "$log" ] && echo "$log" && return
-  log=$(ls -t "$REPO_ROOT"/.scratch/phase_b_agent_review_*.stdout.log 2>/dev/null | head -1) || true
-  [ -n "$log" ] && echo "$log" && return
-  # Operator-directed logs
-  log=$(ls -t /tmp/phase_b_*.txt /tmp/commit_*.txt /tmp/phase_a_*.txt 2>/dev/null | head -1) || true
-  [ -n "$log" ] && echo "$log" && return
+  # Collect all recent pipeline logs and pick the most recently modified.
+  # Avoids pinning to idle executor log while subprocess logs are still active.
+  local newest=""
+  newest=$(ls -t \
+    "$REPO_ROOT"/.scratch/commit_executor_live.log \
+    "$REPO_ROOT"/.scratch/phase_a_executor_live.log \
+    "$REPO_ROOT"/.scratch/phase_b_executor_live.log \
+    "$REPO_ROOT"/.scratch/phase_a_agent_review_*.stdout.log \
+    "$REPO_ROOT"/.scratch/phase_a_bridge_*.stdout.log \
+    "$REPO_ROOT"/.scratch/phase_b_bridge_*.stdout.log \
+    "$REPO_ROOT"/.scratch/phase_b_agent_review_*.stdout.log \
+    /tmp/phase_b_*.txt /tmp/commit_*.txt /tmp/phase_a_*.txt \
+    2>/dev/null | head -1) || true
+  if [ -n "$newest" ]; then
+    local file_age=$(( $(date +%s) - $(stat -f%m "$newest" 2>/dev/null || stat -c%Y "$newest" 2>/dev/null || echo 0) ))
+    if [ "$file_age" -lt 300 ]; then
+      echo "$newest"
+      return
+    fi
+  fi
   echo ""
 }
 
