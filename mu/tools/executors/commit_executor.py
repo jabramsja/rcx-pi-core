@@ -1637,9 +1637,20 @@ def run_commit_pipeline(
         "merge_sha": None,
     }
 
+    # Tee log to file for pipeline monitor observability
+    _log_path = repo_root / ".scratch" / "commit_executor_live.log"
+    _log_path.parent.mkdir(parents=True, exist_ok=True)
+    _log_fp = open(_log_path, "w", encoding="utf-8")
+
     def log(msg: str) -> None:
+        line = f"[commit-executor] {msg}"
         if verbose:
-            print(f"[commit-executor] {msg}", flush=True)
+            print(line, flush=True)
+        try:
+            _log_fp.write(line + "\n")
+            _log_fp.flush()
+        except (OSError, ValueError):
+            pass
 
     # ── Step 1: validate_inputs ──────────────────────────────────────
     valid, errors = validate_handoff(handoff)

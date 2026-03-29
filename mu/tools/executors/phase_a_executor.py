@@ -767,9 +767,19 @@ def run_phase_a(
         "agent_review_ran": False,
     }
 
+    _log_path = repo_root / ".scratch" / "phase_a_executor_live.log"
+    _log_path.parent.mkdir(parents=True, exist_ok=True)
+    _log_fp = open(_log_path, "w", encoding="utf-8")
+
     def log(msg: str) -> None:
+        line = f"[phase-a] {msg}"
         if verbose:
-            print(f"[phase-a] {msg}")
+            print(line, flush=True)
+        try:
+            _log_fp.write(line + "\n")
+            _log_fp.flush()
+        except (OSError, ValueError):
+            pass
 
     config = load_executor_config(repo_root)
 
