@@ -2,14 +2,14 @@
   "agents": {
     "claude": {
       "mode": "live",
-      "cmd": ["claude", "--print"],
+      "cmd": ["claude", "--print", "--dangerously-skip-permissions"],
       "prompt_via_stdin": true,
       "timeout_s": 1800,
       "env": {}
     },
     "codex": {
       "mode": "live",
-      "cmd": ["codex", "exec", "-", "--sandbox", "danger-full-access"],
+      "cmd": ["codex", "exec", "-", "-m", "gpt-5.4", "-c", "model_reasoning_effort=\"xhigh\"", "--sandbox", "danger-full-access"],
       "prompt_via_stdin": true,
       "timeout_s": 1200,
       "env": {}
