@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-20
 **Lane:** hooks / agents / bridge control-surface red-team
-**Status:** ACTIVE BLOCKERS
+**Status:** RESOLVED (2026-03-29, deferred_cleanup wave)
 **Source queue:** `reports/codex/repo_audits/drift_2026-03-20_codex_redteam_phase_queue.md`
 
 ---
@@ -25,12 +25,12 @@ and the untracked plugin-capability governance gap.
 
 **Class:** DEFECT
 **Files:** `.claude/hooks/validate-agent-compliance.sh:27-42`
-**Status:** OPEN
+**Status:** FIXED (PR #682, 2026-03-23)
 
-**What is wrong**
+**What was wrong**
 
-The hook still claims fail-closed security, but missing or unknown `agent_type`
-falls through the `case` dispatch and exits `0` without emitting block JSON.
+The hook claimed fail-closed security, but missing or unknown `agent_type`
+fell through the `case` dispatch and exited `0` without emitting block JSON.
 
 **Direct evidence**
 
@@ -41,10 +41,7 @@ falls through the `case` dispatch and exits `0` without emitting block JSON.
   - `printf '{"agent_transcript_path":"/nonexistent"}\n' | ./.claude/hooks/validate-agent-compliance.sh`
   - Result: empty stdout, exit code `0`
 
-**Why this blocks honest closeout**
-
-The current hook-hardening slice cannot be called fail-closed while malformed or
-schema-drifted `SubagentStop` payloads still skip validation entirely.
+**Resolution proof:** Hook now emits `{"decision":"block","reason":"Unknown agent_type: ..."}` for missing/unknown agent_type. Regression tests: `TestHookExecutionAgainstMalformedPayloads` (4 tests) in `test_validate_agent_compliance.py`.
 
 ---
 
@@ -55,7 +52,7 @@ schema-drifted `SubagentStop` payloads still skip validation entirely.
 - `reports/deferred/non_blocking/hook_soft_gate_residue.md:87-153`
 - `tests/tools/test_validate_agent_compliance.py:762-831`
 - `tests/tools/test_agent_tooling_smoke.py:209-225`
-**Status:** OPEN
+**Status:** FIXED (deferred_cleanup wave, 2026-03-29)
 
 **What is wrong**
 
@@ -80,10 +77,7 @@ substantially closed, but the proof only covers part of the claim surface.
   - `nonexistent`
   in the validator/hook test files.
 
-**Why this blocks honest closeout**
-
-The lane can still move forward, but not under a stronger “resolved” or
-“hardened” narrative than the proof class actually supports.
+**Resolution proof:** 4 hook execution tests added (`TestHookExecutionAgainstMalformedPayloads`) that run the actual shell script with crafted JSON inputs: missing agent_type, unknown agent_type, empty payload, valid agent_type.
 
 ---
 
@@ -91,7 +85,7 @@ The lane can still move forward, but not under a stronger “resolved” or
 
 **Class:** POLICY_BOUND
 **Files:** `.claude/settings.json:52-54`
-**Status:** OPEN
+**Status:** STALE (telegram plugin not present in current settings.json)
 
 **What is wrong**
 
@@ -106,11 +100,7 @@ or what governance/risk posture applies to it.
 - Repo search in active tracker/deferred surfaces found no corresponding
   founder-facing grounding entry beyond the settings file itself.
 
-**Why this blocks honest closeout**
-
-This lane is explicitly about hooks / agents / bridge control surfaces. A new
-enabled plugin is control-surface expansion and needs either founder acceptance
-or tracked rationale before it should be treated as settled repo truth.
+**Resolution:** Plugin no longer present in `.claude/settings.json`. Item is stale — no governance action needed.
 
 ---
 

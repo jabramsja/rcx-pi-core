@@ -1,7 +1,7 @@
 # Deferred Cleanup
 
 Date: 2026-03-29
-Status: Phase A (design -- bridge-converged)
+Status: Phase B (implementation — blocker status resolved, archive packets updated)
 Phase-A-Lock: LOCKED
 Purpose: Resolve all blocking reports, archive resolved deferred reports, add hook proof tests, fix tmux PR/CI pane
 
@@ -43,7 +43,7 @@ _pane_prci.sh: gh pr list fallback, bot comment display, review thread count
 ## Evidence
 
 - Before: 3 open blocker reports, 24 unreviewed non-blocking reports, tmux pane broken
-- After: 0 open blockers, 12 archived, 14 remaining with documented open items, pane works
+- After: 0 open blockers, 12 archived, 15 remaining (14 original + 1 bridge nonblocker from this wave), pane works
 - Verify: `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_validate_agent_compliance.py::TestHookExecutionAgainstMalformedPayloads -v`
 
 ## Lane

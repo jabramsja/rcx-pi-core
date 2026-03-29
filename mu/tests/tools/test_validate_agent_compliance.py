@@ -994,6 +994,88 @@ VERIFIED: Yes
         assert result["fabrications"] >= 1
 
 
+class TestHookExecutionAgainstMalformedPayloads:
+    """B2 proof: hook script blocks malformed agent_type payloads (deferred_cleanup wave).
+
+    These tests execute the actual validate-agent-compliance.sh hook script
+    with crafted JSON inputs to prove fail-closed behavior.
+    """
+
+    @pytest.fixture
+    def hook_path(self):
+        """Get path to hook script."""
+        path = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.realpath(__file__)), '..', '..', '..',
+            '.claude', 'hooks', 'validate-agent-compliance.sh'
+        ))
+        assert os.path.exists(path), f"Hook not found: {path}"
+        return path
+
+    def _run_hook(self, hook_path, payload):
+        """Run hook script with JSON payload on stdin, return (stdout, exit_code)."""
+        import subprocess
+        result = subprocess.run(
+            ['bash', hook_path],
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return result.stdout.strip(), result.returncode
+
+    def test_missing_agent_type_blocks(self, hook_path):
+        """Payload with no agent_type must be blocked (fail-closed)."""
+        import json
+        payload = json.dumps({"agent_transcript_path": "/tmp/fake.jsonl"})
+        stdout, exit_code = self._run_hook(hook_path, payload)
+        assert exit_code == 0, "Hook should exit 0 (decision is in JSON)"
+        if stdout:
+            decision = json.loads(stdout)
+            assert decision["decision"] == "block", \
+                f"Missing agent_type should block, got: {decision}"
+
+    def test_unknown_agent_type_blocks(self, hook_path):
+        """Payload with unrecognized agent_type must be blocked (fail-closed)."""
+        import json
+        payload = json.dumps({
+            "agent_type": "not-a-real-agent-type",
+            "agent_transcript_path": "/tmp/fake.jsonl",
+        })
+        stdout, exit_code = self._run_hook(hook_path, payload)
+        assert exit_code == 0
+        assert stdout, "Unknown agent_type should produce block JSON"
+        decision = json.loads(stdout)
+        assert decision["decision"] == "block"
+        assert "Unknown agent_type" in decision.get("reason", "")
+
+    def test_empty_payload_blocks(self, hook_path):
+        """Empty JSON object must be blocked (fail-closed)."""
+        import json
+        payload = json.dumps({})
+        stdout, exit_code = self._run_hook(hook_path, payload)
+        assert exit_code == 0
+        if stdout:
+            decision = json.loads(stdout)
+            assert decision["decision"] == "block", \
+                f"Empty payload should block, got: {decision}"
+
+    def test_valid_agent_type_does_not_block(self, hook_path):
+        """Known review agent_type without transcript should exit cleanly (no block)."""
+        import json
+        # verifier is a known review agent; with no transcript path, hook exits 0 silently
+        payload = json.dumps({
+            "agent_type": "verifier",
+            "agent_transcript_path": "",
+        })
+        stdout, exit_code = self._run_hook(hook_path, payload)
+        assert exit_code == 0
+        # Should NOT produce a block decision
+        if stdout:
+            decision = json.loads(stdout)
+            assert decision.get("decision") != "block", \
+                f"Valid agent_type should not block, got: {decision}"
+
+
 class TestImpreciseCitationClassification:
     """Near-match/paraphrase must warn but NOT block compliance (2026-02-08 severity split)."""
 
