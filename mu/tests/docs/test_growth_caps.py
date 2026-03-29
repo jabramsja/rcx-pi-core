@@ -19,7 +19,7 @@ BASELINE_TOOL_SCRIPTS = 68  # .py + .sh in mu/tools/ (67 + sync_native_agents.sh
 BASELINE_CORE_DOCS = 48  # .md in mu/docs/ (all subdirs) — bumped for P6 TypedNumericEnvelopes.v0.md
 
 # Per-wave caps from DocGovernance.v0.md
-CAP_TEST_FILES = 105  # prior cap + 2 for test_run_review.py and test_supervision_poll.py
+CAP_TEST_FILES = 106  # prior cap + 1 for test_recurrence_v2_gate.py (post-redteam structural gap sweep)
 CAP_TOOL_SCRIPTS = 33  # prior cap + 5 for observability/ (pipeline_monitor, pipeline_status, _pane_processes, _pane_prci, _log_watcher)
 CAP_CORE_DOCS = 10  # 5 core + 3 other + 1 A11 contract + 1 AgentBridgeProtocol
 
