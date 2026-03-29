@@ -46,6 +46,7 @@ esac
 
 # Check if transcript exists
 if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
+  jq -n '{"decision": "block", "reason": "Agent transcript missing or path empty — cannot verify compliance (fail closed)"}'
   exit 0
 fi
 
@@ -62,8 +63,9 @@ AGENT_OUTPUT=$(jq -rs '
   ] | join("\n")
 ' "$TRANSCRIPT" 2>/dev/null || echo "")
 
-# If no output extracted, skip validation
+# If no output extracted, block (fail closed)
 if [ -z "$AGENT_OUTPUT" ]; then
+  jq -n '{"decision": "block", "reason": "Agent produced no extractable output — cannot verify compliance (fail closed)"}'
   exit 0
 fi
 
