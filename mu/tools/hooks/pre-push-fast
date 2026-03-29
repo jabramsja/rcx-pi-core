@@ -62,20 +62,11 @@ if [ -n "$RANGE" ]; then
         if [ -n "$WAVE_ID_SUFFIX" ] && echo "$L4_RANGE_FILES" | grep -qx "TASKS.md"; then
             # Check if the branch-derived wave_id actually exists in a tracker note.
             # Format in TASKS.md: "Tracker sync note (YYYY-MM-DD, wave-id):"
-            if grep -q ", ${WAVE_ID_SUFFIX}):" TASKS.md 2>/dev/null; then
+            if grep -qE "Tracker sync note \([^,]+, ${WAVE_ID_SUFFIX}\):" TASKS.md 2>/dev/null; then
                 WAVE_ID_FLAG="--wave-id $WAVE_ID_SUFFIX"
-            else
-                # Branch name doesn't match a tracker note wave_id.
-                # Extract available wave_ids from TASKS.md (macOS-compatible).
-                AVAILABLE_IDS=$(sed -n 's/.*Tracker sync note ([0-9-]*, \([A-Za-z0-9_-]*\)).*/\1/p' TASKS.md 2>/dev/null | head -20)
-                for AID in $AVAILABLE_IDS; do
-                    # Use the first tracker note that the L4 checker accepts
-                    if python3 "$REPO_ROOT/tools/checks/enforce_l4_execution_contract.py" --range "$L4_RANGE" --wave-id "$AID" >/dev/null 2>&1; then
-                        WAVE_ID_FLAG="--wave-id $AID"
-                        break
-                    fi
-                done
             fi
+            # No fallback: if branch-derived wave_id doesn't match a tracker note
+            # exactly, run L4 checker without --wave-id (uses diff-based binding).
         fi
         if ! python3 "$REPO_ROOT/tools/checks/enforce_l4_execution_contract.py" --range "$L4_RANGE" $WAVE_ID_FLAG; then
             echo ""

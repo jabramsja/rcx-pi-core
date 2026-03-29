@@ -34,7 +34,7 @@ for word in $CMD_ONELINE; do
     esac
     # This is the actual git subcommand
     case "$word" in
-      commit|push|merge|rebase|cherry-pick|reset|revert|am|stash)
+      commit|push|merge|rebase|cherry-pick|reset|revert|am)
         BLOCKED=true ;;
     esac
     NEXT_IS_GIT_SUB=false

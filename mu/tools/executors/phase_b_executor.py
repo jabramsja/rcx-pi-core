@@ -1558,6 +1558,7 @@ def _build_phase_b_tracker_note(
     *,
     wave_id: str,
     task_id: str,
+    wave_class: str = "L4_ENABLER",
     target_gate_id: str,
     plan_path: str,
     changed_files: list[str],
@@ -1609,7 +1610,7 @@ def _build_phase_b_tracker_note(
     fields = TrackerSyncNoteFields(
         wave_id=wave_id,
         title=f"{display_task} — commit-ready Phase B handoff",
-        wave_class="L4_ENABLER",
+        wave_class=wave_class,
         target_gate_id=target_gate_id,
         evidence_command=evidence_command,
         evidence_delta=evidence_delta,
@@ -1865,6 +1866,10 @@ def run_phase_b(
     model = config.get("model_overrides", {}).get("phase_b_executor")
     timeout = config.get("timeouts", {}).get("phase_b_executor", 1200)
 
+    # Extract wave governance fields from routing record (not hardcoded)
+    wave_class = routing_record.get("wave_class", "L4_ENABLER")
+    target_gate_id = routing_record.get("target_gate_id", "G8")
+
     # Parse plan-declared files from markdown/body content.
     plan_declared_files: list[str] | None = None
     _parsed = _parse_plan_declared_files(plan.get("content", ""))
@@ -1911,9 +1916,46 @@ def run_phase_b(
     )
     _skip_through_implementer = resume_after in {"implementer", "agent_review"} or _skip_through_bridge
 
-    # Step 3: Invoke implementer agent
+    # Step 2.5: Ensure we're on the feature branch (not dev)
     raw_wave_id = plan.get("wave_id") or plan_path.replace("reports/control_plane/", "").replace(".md", "")
     wave_id = normalize_wave_id(raw_wave_id)
+    _branch_result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=str(repo_root), capture_output=True, text=True,
+    )
+    if _branch_result.returncode == 0:
+        current_branch = _branch_result.stdout.strip()
+        feature_branch = f"jabramsja/{wave_id}"
+        if current_branch in ("dev", "main", "master") and current_branch != feature_branch:
+            # Check if feature branch already exists
+            branch_exists = subprocess.run(
+                ["git", "rev-parse", "--verify", f"refs/heads/{feature_branch}"],
+                cwd=str(repo_root), capture_output=True, text=True,
+            ).returncode == 0
+            try:
+                if branch_exists:
+                    log(f"Step 2.5: Checking out existing feature branch {feature_branch}")
+                    subprocess.run(
+                        ["git", "checkout", feature_branch],
+                        cwd=str(repo_root), check=True, capture_output=True,
+                    )
+                else:
+                    log(f"Step 2.5: Creating feature branch {feature_branch}")
+                    subprocess.run(
+                        ["git", "checkout", "-b", feature_branch],
+                        cwd=str(repo_root), check=True, capture_output=True,
+                    )
+                result["feature_branch"] = feature_branch
+            except subprocess.CalledProcessError as exc:
+                return {"status": "error", "step": "ensure_feature_branch",
+                        "errors": [f"Branch checkout failed (fail-closed): {exc}. "
+                                   f"Cannot invoke implementer on protected branch '{current_branch}'."]}
+        else:
+            log(f"Step 2.5: Already on {current_branch} (OK)")
+    else:
+        log("Step 2.5: Not a git repo — skipping branch checkout")
+
+    # Step 3: Invoke implementer agent
     if _skip_through_implementer:
         log(f"Step 3: SKIPPED (resume_after={resume_after})")
         result["implementer_invoked"] = True
@@ -3022,7 +3064,8 @@ def run_phase_b(
     tracker_note_text = _build_phase_b_tracker_note(
         wave_id=wave_id,
         task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
-        target_gate_id="G8",
+        wave_class=wave_class,
+        target_gate_id=target_gate_id,
         plan_path=plan_path,
         changed_files=wave_owned_files,
         test_files=handoff_test_files,
@@ -3035,8 +3078,8 @@ def run_phase_b(
         repo_root,
         wave_id=wave_id,
         task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
-        wave_class="L4_ENABLER",
-        target_gate_id="G8",
+        wave_class=wave_class,
+        target_gate_id=target_gate_id,
         tracker_note_text=tracker_note_text,
         fixes_implemented=["Phase B implementation per locked plan"],
         files_to_stage=wave_owned_files,
