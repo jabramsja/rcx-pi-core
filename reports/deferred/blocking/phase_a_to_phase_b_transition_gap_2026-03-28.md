@@ -1,7 +1,7 @@
 # Phase A → Phase B Transition Gap
 
 **Date:** 2026-03-28
-**Status:** OPEN
+**Status:** FIXED (2026-03-29, Option A: Phase A checkpoint commit)
 **Source:** Live pipeline run attempting full Phase A → Phase B → commit flow
 **Lane:** hooks/agents/bridge control-surface
 

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import argparse
 import copy
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -1054,7 +1054,7 @@ def build_commit_handoff(
         "caller": caller,
         "branch_prefix": branch_prefix,
         "tracker_note_text": tracker_note_text or (
-            f"- Tracker sync note ({wave_id}): "
+            f"- Tracker sync note ({datetime.now(timezone.utc).strftime('%Y-%m-%d')}, {wave_id}): "
             f"**{commit_message}**. Class: {wave_class}. "
             f"target_gate_id: {target_gate_id}. "
             f"primary_blocker_class: INTEGRATION. "

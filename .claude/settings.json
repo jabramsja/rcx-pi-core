@@ -34,6 +34,28 @@
             "statusMessage": "Checking STATUS.md authority sync..."
           }
         ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/record-dream.sh",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/should-dream.sh",
+            "timeout": 5,
+            "statusMessage": "Checking memory consolidation..."
+          }
+        ]
       }
     ],
     "SubagentStop": [

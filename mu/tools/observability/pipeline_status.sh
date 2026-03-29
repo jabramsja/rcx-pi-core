@@ -71,18 +71,23 @@ fi
 
 # ── Bridge Lock ──
 LOCK="$BUS/meta/meta_bridge.lock"
-if [ -f "$LOCK" ]; then
-  HOLDER=$(jq -r '.holder // "unknown"' "$LOCK" 2>/dev/null)
-  LOCK_PID=$(jq -r '.pid // "?"' "$LOCK" 2>/dev/null)
-  # Check if lock holder is still alive
-  if kill -0 "$LOCK_PID" 2>/dev/null; then
-    echo -e "${CYAN}Bridge:${RESET} ${YELLOW}LOCKED${RESET} by $HOLDER (PID $LOCK_PID, alive)"
+LOCK2="$BUS/bridge.lock"
+_show_lock_status() {
+  local lock="$1" label="$2"
+  if [ ! -f "$lock" ]; then return 1; fi
+  if [ ! -s "$lock" ]; then return 1; fi  # empty = released
+  local holder lock_pid
+  holder=$(jq -r '.holder // "unknown"' "$lock" 2>/dev/null) || return 1
+  lock_pid=$(jq -r '.pid // "0"' "$lock" 2>/dev/null) || return 1
+  if [ "$lock_pid" != "0" ] && kill -0 "$lock_pid" 2>/dev/null; then
+    echo -e "${CYAN}Bridge:${RESET} ${YELLOW}LOCKED${RESET} by $holder (PID $lock_pid, alive)"
   else
-    echo -e "${CYAN}Bridge:${RESET} ${RED}STALE LOCK${RESET} by $HOLDER (PID $LOCK_PID, dead)"
+    echo -e "${CYAN}Bridge:${RESET} ${RED}STALE LOCK${RESET} by $holder (PID $lock_pid, dead)"
   fi
-else
+  return 0
+}
+_show_lock_status "$LOCK" "meta" || _show_lock_status "$LOCK2" "bridge" || \
   echo -e "${CYAN}Bridge:${RESET} idle (no lock)"
-fi
 
 # ── Active Processes ──
 echo ""
