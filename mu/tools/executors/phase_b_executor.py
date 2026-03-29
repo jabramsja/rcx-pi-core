@@ -1568,6 +1568,10 @@ def _build_phase_b_tracker_note(
     reentry: bool,
 ) -> str:
     """Render an L4-compliant tracker note for a Phase B commit handoff."""
+    # Phase B produces implementation work — MAINTENANCE requires no_op_proof/defer_reason_code
+    # which are not available here. Guard to L4_ENABLER if routing says MAINTENANCE.
+    if wave_class == "MAINTENANCE":
+        wave_class = "L4_ENABLER"
     display_task = (task_id or "").strip() or wave_id
     if display_task.startswith("[") and display_task.endswith("]"):
         display_task = display_task[1:-1]
