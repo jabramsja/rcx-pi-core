@@ -698,6 +698,44 @@ def lock_plan(repo_root: Path, plan_path: str) -> None:
     full_path.write_text(content, encoding="utf-8")
 
 
+def checkpoint_commit_plan(
+    repo_root: Path,
+    plan_path: str,
+    plan_name: str,
+    *,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    """Stage and commit a locked plan file as a lightweight checkpoint.
+
+    Returns {"sha": "<commit_sha>"} on success, {"skipped": True} if nothing
+    to commit, or {"error": "<message>"} on failure.
+    """
+    log = (lambda msg: print(f"[phase-a] {msg}", file=sys.stderr)) if verbose else (lambda msg: None)
+    try:
+        subprocess.run(
+            ["git", "add", plan_path],
+            cwd=repo_root, check=True, capture_output=True, text=True,
+        )
+        checkpoint_msg = f"chore: Phase A lock — {plan_name}"
+        commit_result = subprocess.run(
+            ["git", "commit", plan_path, "-m", checkpoint_msg],
+            cwd=repo_root, capture_output=True, text=True,
+        )
+        if commit_result.returncode != 0:
+            if "nothing to commit" in commit_result.stdout:
+                log("Plan already committed — skipping checkpoint")
+                return {"skipped": True}
+            return {"error": f"Checkpoint commit failed: {commit_result.stderr.strip()}"}
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        log(f"Checkpoint commit: {sha[:8]} ({checkpoint_msg})")
+        return {"sha": sha}
+    except subprocess.CalledProcessError as exc:
+        return {"error": f"Checkpoint commit failed: {exc}"}
+
+
 def run_phase_a(
     repo_root: Path,
     plan_name: str,
@@ -982,6 +1020,17 @@ def run_phase_a(
         result["error"] = str(exc)
         return result
     log(f"Phase-A-Lock: LOCKED in {rel_plan_path}")
+
+    # Checkpoint commit: stage and commit the locked plan so Phase B can see it
+    # in git-tracked state. This is a lightweight commit — no PR, no CI wait.
+    # The full commit_executor pipeline runs after Phase B.
+    checkpoint = checkpoint_commit_plan(repo_root, rel_plan_path, plan_name, verbose=verbose)
+    if checkpoint.get("error"):
+        result["status"] = "error"
+        result["error"] = checkpoint["error"]
+        return result
+    if checkpoint.get("sha"):
+        result["checkpoint_commit_sha"] = checkpoint["sha"]
 
     return result
 

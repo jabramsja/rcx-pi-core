@@ -590,7 +590,7 @@ class TestPhaseAScopeExtraction:
 class TestPhaseABridgeLoopFailClosed:
     """Phase A bridge loop fails closed on QUESTION and unrecognized decisions."""
 
-    def _setup_phase_a(self, tmp_path):
+    def _setup_phase_a(self, tmp_path, monkeypatch=None):
         """Create minimal structure for run_phase_a."""
         # Create plan directory
         plan_dir = tmp_path / "reports" / "control_plane"
@@ -603,11 +603,17 @@ class TestPhaseABridgeLoopFailClosed:
         bus_dir.mkdir(parents=True)
         routing = {"decision": "ROUTE_PHASE_A", "summary": "test"}
         (bus_dir / "post_merge_routing.json").write_text(json.dumps(routing))
+        # Mock checkpoint commit (tmp_path is not a git repo)
+        if monkeypatch is not None:
+            monkeypatch.setattr(
+                phase_a_mod, "checkpoint_commit_plan",
+                lambda *a, **kw: {"sha": "fake_checkpoint_sha"},
+            )
         return rendered_dir
 
     def test_question_decision_fails_closed(self, tmp_path, monkeypatch):
         """QUESTION decision must fail closed, not burn rounds."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
         call_count = {"n": 0}
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
@@ -631,7 +637,7 @@ class TestPhaseABridgeLoopFailClosed:
 
     def test_unrecognized_decision_fails_closed(self, tmp_path, monkeypatch):
         """Unrecognized decision must fail closed, not burn rounds."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
         call_count = {"n": 0}
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
@@ -653,7 +659,7 @@ class TestPhaseABridgeLoopFailClosed:
 
     def test_go_decision_converges(self, tmp_path, monkeypatch):
         """GO decision converges normally (regression check)."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -699,7 +705,7 @@ class TestPhaseABridgeLoopFailClosed:
 
     def test_request_changes_continues_loop(self, tmp_path, monkeypatch):
         """REQUEST_CHANGES continues the loop (regression check)."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
         call_count = {"n": 0}
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
@@ -724,7 +730,7 @@ class TestPhaseABridgeLoopFailClosed:
     @pytest.mark.parametrize("decision", ["REQUEST_CHANGES", "NO_GO"])
     def test_non_go_exit_one_continues_loop(self, tmp_path, monkeypatch, decision):
         """bridge_supervisor review returns exit=1 for non-GO decisions; Phase A must keep looping."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
         call_count = {"n": 0}
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
@@ -748,7 +754,7 @@ class TestPhaseABridgeLoopFailClosed:
 
     def test_bridge_failure_no_rendered_output_fails_closed(self, tmp_path, monkeypatch):
         """Bridge failure with no rendered output fails closed."""
-        self._setup_phase_a(tmp_path)
+        self._setup_phase_a(tmp_path, monkeypatch)
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -767,7 +773,7 @@ class TestPhaseABridgeLoopFailClosed:
 
     def test_bridge_failure_with_stale_rendered_output_fails_closed(self, tmp_path, monkeypatch):
         """A stale reader-only render must not mask a nonzero bridge subprocess exit."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -795,7 +801,7 @@ class TestPhaseABridgeLoopFailClosed:
 
     def test_go_substring_smuggling_does_not_false_converge(self, tmp_path, monkeypatch):
         """Phase A must parse the canonical decision line, not any GO substring."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -815,7 +821,7 @@ class TestPhaseABridgeLoopFailClosed:
 
     def test_terminal_bridge_error_decision_fails_closed(self, tmp_path, monkeypatch):
         """Phase A must fail closed when the final reviewer turn reports ERROR."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -836,7 +842,7 @@ class TestPhaseABridgeLoopFailClosed:
 
     def test_zero_exit_without_rendered_output_fails_closed(self, tmp_path, monkeypatch):
         """Phase A must error if the bridge exits 0 but writes no rendered file."""
-        self._setup_phase_a(tmp_path)
+        self._setup_phase_a(tmp_path, monkeypatch)
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -4552,7 +4558,7 @@ class TestBridgeR6Finding2PhaseAAgentGate:
     Nonzero exit must be fatal, same as Phase B.
     """
 
-    def _setup_phase_a(self, tmp_path):
+    def _setup_phase_a(self, tmp_path, monkeypatch=None):
         plan_dir = tmp_path / "reports" / "control_plane"
         plan_dir.mkdir(parents=True)
         rendered_dir = tmp_path / ".agent_bus" / "rendered"
@@ -4561,11 +4567,16 @@ class TestBridgeR6Finding2PhaseAAgentGate:
         bus_dir.mkdir(parents=True)
         routing = {"decision": "ROUTE_PHASE_A", "summary": "test"}
         (bus_dir / "post_merge_routing.json").write_text(json.dumps(routing))
+        if monkeypatch is not None:
+            monkeypatch.setattr(
+                phase_a_mod, "checkpoint_commit_plan",
+                lambda *a, **kw: {"sha": "fake_checkpoint_sha"},
+            )
         return rendered_dir
 
     def test_hard_gate_agent_review_blocks_bridge(self, tmp_path, monkeypatch):
         """Hard-gate / infra exits must prevent bridge from running."""
-        self._setup_phase_a(tmp_path)
+        self._setup_phase_a(tmp_path, monkeypatch)
         bridge_called = {"n": 0}
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
@@ -4587,7 +4598,7 @@ class TestBridgeR6Finding2PhaseAAgentGate:
 
     def test_agent_review_timeout_budget_comes_from_executor_config(self, tmp_path, monkeypatch):
         """Phase A must pass the configured agent-review budget into run_sdk_agents."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
         captured: dict[str, int] = {}
 
         monkeypatch.setattr(
@@ -4617,7 +4628,7 @@ class TestBridgeR6Finding2PhaseAAgentGate:
 
     def test_soft_warning_agent_review_proceeds_to_bridge(self, tmp_path, monkeypatch):
         """Exit 2 is a soft gate and must not block bridge review."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
         bridge_called = {"n": 0}
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
@@ -4639,7 +4650,7 @@ class TestBridgeR6Finding2PhaseAAgentGate:
 
     def test_semantic_blocker_agent_review_continues_to_bridge(self, tmp_path, monkeypatch):
         """Exit 1 (semantic blockers) must continue to bridge for contextual classification."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
         bridge_called = {"n": 0}
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
@@ -4672,7 +4683,7 @@ class TestBridgeR6Finding2PhaseAAgentGate:
 
     def test_infra_gate_agent_review_preserves_report_artifacts(self, tmp_path, monkeypatch):
         """Infra exits (>=3) must fail closed and preserve report/status artifact paths."""
-        self._setup_phase_a(tmp_path)
+        self._setup_phase_a(tmp_path, monkeypatch)
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {
@@ -4695,7 +4706,7 @@ class TestBridgeR6Finding2PhaseAAgentGate:
 
     def test_infra_gate_error_reads_status_diagnostic(self, tmp_path, monkeypatch):
         """Infra exits must surface agent status diagnostic, not just truncated stderr."""
-        self._setup_phase_a(tmp_path)
+        self._setup_phase_a(tmp_path, monkeypatch)
 
         # Write a status.json that the error handler should read
         scratch = tmp_path / ".scratch"
@@ -4735,7 +4746,7 @@ class TestBridgeR6Finding2PhaseAAgentGate:
 
     def test_agent_review_artifacts_passed_to_bridge(self, tmp_path, monkeypatch):
         """Phase A must surface agent review artifacts to bridge reviewer (parity with Phase B)."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
         captured_ctx = {}
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
@@ -4767,7 +4778,7 @@ class TestBridgeR6Finding2PhaseAAgentGate:
 
     def test_successful_agent_review_proceeds_to_bridge(self, tmp_path, monkeypatch):
         """Zero agent exit code allows bridge to proceed (regression check)."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -4793,7 +4804,7 @@ class TestBridgeR6Finding3PhaseARequestChangesSilentSuccess:
     initial default) — a false positive.
     """
 
-    def _setup_phase_a(self, tmp_path):
+    def _setup_phase_a(self, tmp_path, monkeypatch=None):
         plan_dir = tmp_path / "reports" / "control_plane"
         plan_dir.mkdir(parents=True)
         rendered_dir = tmp_path / ".agent_bus" / "rendered"
@@ -4802,11 +4813,16 @@ class TestBridgeR6Finding3PhaseARequestChangesSilentSuccess:
         bus_dir.mkdir(parents=True)
         routing = {"decision": "ROUTE_PHASE_A", "summary": "test"}
         (bus_dir / "post_merge_routing.json").write_text(json.dumps(routing))
+        if monkeypatch is not None:
+            monkeypatch.setattr(
+                phase_a_mod, "checkpoint_commit_plan",
+                lambda *a, **kw: {"sha": "fake_checkpoint_sha"},
+            )
         return rendered_dir
 
     def test_all_request_changes_returns_max_rounds_not_success(self, tmp_path, monkeypatch):
         """All rounds returning REQUEST_CHANGES must yield max_rounds_reached, not success."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
         call_count = {"n": 0}
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
@@ -4831,7 +4847,7 @@ class TestBridgeR6Finding3PhaseARequestChangesSilentSuccess:
 
     def test_no_go_then_go_converges(self, tmp_path, monkeypatch):
         """NO_GO followed by GO still converges (regression check)."""
-        rendered_dir = self._setup_phase_a(tmp_path)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
         call_count = {"n": 0}
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
@@ -4928,6 +4944,10 @@ class TestPhaseATrackedPacketReuse:
 
         monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
         monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+        monkeypatch.setattr(
+            phase_a_mod, "checkpoint_commit_plan",
+            lambda *a, **kw: {"sha": "fake_checkpoint_sha"},
+        )
 
         result = phase_a_mod.run_phase_a(tmp_path, "my_plan", max_bridge_rounds=5)
         assert result["status"] == "converged"

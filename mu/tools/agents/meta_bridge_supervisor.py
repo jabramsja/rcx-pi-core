@@ -200,13 +200,18 @@ class _MetaBridgeLock:
     def __exit__(self, *exc: object) -> bool:
         if self._fp:
             try:
+                # Clear metadata while still holding flock — prevents stale PID
+                # appearance after release. File stays (inode-stable for flock).
+                self._fp.seek(0)
+                self._fp.truncate()
+                self._fp.flush()
+            except OSError:
+                pass  # best-effort cleanup
+            try:
                 fcntl.flock(self._fp, fcntl.LOCK_UN)
             finally:
                 self._fp.close()
                 self._fp = None
-            # Keep the lock path stable. flock is inode-bound, so unlinking the
-            # file can let a blocked waiter keep the old inode while a new
-            # contender recreates the path and acquires a different inode.
         return False
 
 

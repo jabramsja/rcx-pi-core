@@ -478,9 +478,14 @@ def test_meta_bridge_lock_persists_owner_metadata(tmp_path):
     lock_path = tmp_path / "meta_bridge.lock"
 
     with meta._MetaBridgeLock(lock_path):  # ANTICHEAT_OK: lock metadata coverage
+        # While held: metadata is present
+        assert lock_path.stat().st_size > 0
         metadata = json.loads(lock_path.read_text(encoding="utf-8"))
 
-    assert lock_path.stat().st_size > 0
+    # After release: file exists but is empty (metadata cleared to prevent stale PID)
+    assert lock_path.exists()
+    assert lock_path.stat().st_size == 0
+    # Metadata was correct while held
     assert metadata["holder"] == "meta_bridge_supervisor"
     assert metadata["pid"] == os.getpid()
     assert metadata["lock_path"] == str(lock_path)

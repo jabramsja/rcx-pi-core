@@ -40,7 +40,9 @@ EOF
 write_log_watcher() {
   cat <<'WATCHER_EOF'
 #!/usr/bin/env bash
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+# Resilient: never exits on transient errors
+set +e  # Do not exit on error
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 LIVE_LOG="/tmp/rcx_pipeline_live.txt"
 current_log=""
 tail_pid=""
@@ -49,20 +51,26 @@ find_newest_log() {
   local log=""
   # Live tee output (from 'exec' command) takes priority
   if [ -f "$LIVE_LOG" ]; then
-    local age=$(( $(date +%s) - $(stat -f%m "$LIVE_LOG" 2>/dev/null || stat -c%Y "$LIVE_LOG" 2>/dev/null || echo 0) ))
+    local mtime
+    mtime=$(stat -f%m "$LIVE_LOG" 2>/dev/null || stat -c%Y "$LIVE_LOG" 2>/dev/null || echo 0)
+    local age=$(( $(date +%s) - mtime ))
     if [ "$age" -lt 300 ]; then
       echo "$LIVE_LOG"
       return
     fi
   fi
-  # Bridge review logs
-  log=$(ls -t "$REPO_ROOT"/.scratch/phase_b_bridge_*.stdout.log 2>/dev/null | head -1)
+  # Phase A agent/bridge logs
+  log=$(ls -t "$REPO_ROOT"/.scratch/phase_a_agent_review_*.stdout.log 2>/dev/null | head -1) || true
   [ -n "$log" ] && echo "$log" && return
-  # Agent review logs
-  log=$(ls -t "$REPO_ROOT"/.scratch/phase_b_agent_review_*.stdout.log 2>/dev/null | head -1)
+  log=$(ls -t "$REPO_ROOT"/.scratch/phase_a_bridge_*.stdout.log 2>/dev/null | head -1) || true
+  [ -n "$log" ] && echo "$log" && return
+  # Phase B bridge/agent logs
+  log=$(ls -t "$REPO_ROOT"/.scratch/phase_b_bridge_*.stdout.log 2>/dev/null | head -1) || true
+  [ -n "$log" ] && echo "$log" && return
+  log=$(ls -t "$REPO_ROOT"/.scratch/phase_b_agent_review_*.stdout.log 2>/dev/null | head -1) || true
   [ -n "$log" ] && echo "$log" && return
   # Operator-directed logs
-  log=$(ls -t /tmp/phase_b_*.txt /tmp/commit_*.txt 2>/dev/null | head -1)
+  log=$(ls -t /tmp/phase_b_*.txt /tmp/commit_*.txt /tmp/phase_a_*.txt 2>/dev/null | head -1) || true
   [ -n "$log" ] && echo "$log" && return
   echo ""
 }
@@ -73,19 +81,27 @@ switch_tail() {
     kill "$tail_pid" 2>/dev/null || true
     wait "$tail_pid" 2>/dev/null || true
   fi
-  printf '\033[1;36m── %s ──\033[0m\n' "$(basename "$new_log")"
-  tail -f "$new_log" &
-  tail_pid=$!
-  current_log="$new_log"
+  tail_pid=""
+  if [ -f "$new_log" ]; then
+    printf '\033[1;36m── %s ──\033[0m\n' "$(basename "$new_log")"
+    tail -f "$new_log" &
+    tail_pid=$!
+    current_log="$new_log"
+  fi
 }
 
 echo "Auto-switching log watcher — scanning for active logs..."
 while true; do
-  newest=$(find_newest_log)
+  newest=$(find_newest_log) || newest=""
   if [ -n "$newest" ] && [ "$newest" != "$current_log" ]; then
     switch_tail "$newest"
   elif [ -z "$newest" ] && [ -z "$current_log" ]; then
     printf '\r\033[2mWaiting for pipeline activity...\033[0m'
+  fi
+  # Check if tail process died (file deleted/truncated)
+  if [ -n "$tail_pid" ] && ! kill -0 "$tail_pid" 2>/dev/null; then
+    tail_pid=""
+    current_log=""
   fi
   sleep 3
 done
@@ -179,22 +195,31 @@ cmd_exec() {
   "$@" 2>&1 | tee "$LIVE_LOG"
 }
 
-# ── clear-lock: Remove stale bridge lock ──
+# ── clear-lock: Remove stale bridge locks ──
 cmd_clear_lock() {
-  local lock="$REPO_ROOT/.agent_bus/meta/meta_bridge.lock"
-  if [ ! -f "$lock" ]; then
-    echo "No bridge lock exists."
-    return
+  local found=false
+  for lock in "$REPO_ROOT/.agent_bus/meta/meta_bridge.lock" "$REPO_ROOT/.agent_bus/bridge.lock"; do
+    if [ ! -f "$lock" ]; then
+      continue
+    fi
+    # Empty file = properly released lock, not stale
+    if [ ! -s "$lock" ]; then
+      continue
+    fi
+    found=true
+    local pid label
+    label=$(basename "$lock")
+    pid=$(jq -r '.pid // "0"' "$lock" 2>/dev/null) || pid="0"
+    if [ "$pid" != "0" ] && kill -0 "$pid" 2>/dev/null; then
+      echo "$label: holder PID $pid is ALIVE. Not removing."
+      continue
+    fi
+    rm -f "$lock"
+    echo "$label: stale lock removed (PID $pid was dead)."
+  done
+  if [ "$found" = false ]; then
+    echo "No stale bridge locks."
   fi
-  local pid
-  pid=$(jq -r '.pid' "$lock" 2>/dev/null)
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-    echo "Lock holder PID $pid is ALIVE. Not removing."
-    echo "Use 'kill $pid' first if you're sure it's stale."
-    return 1
-  fi
-  rm -f "$lock"
-  echo "Stale lock removed (PID $pid was dead)."
 }
 
 # ── nudge: Post @codex review on a PR ──
