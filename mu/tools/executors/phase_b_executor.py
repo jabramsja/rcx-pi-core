@@ -1785,6 +1785,9 @@ def run_phase_b(
                 log(f"BOOTSTRAP_PHASE_B_EXCEPTION: Routing says {routing_record.get('decision')}, "
                     f"overriding to ROUTE_PHASE_B for bootstrap exception invocation")
                 routing_record["decision"] = "ROUTE_PHASE_B"
+                # Inject task_id from override if routing record lacks it
+                if routing_record_override and routing_record_override.get("task_id") and not routing_record.get("task_id"):
+                    routing_record["task_id"] = routing_record_override["task_id"]
                 result["bootstrap_exception"] = True
             else:
                 return {"status": "error", "step": "validate_inputs",
@@ -1796,6 +1799,9 @@ def run_phase_b(
             log("Using synthetic ROUTE_PHASE_B — this is the narrow bootstrap exception "
                 "for waves that modify executor/implementer surfaces themselves.")
             routing_record = {"decision": "ROUTE_PHASE_B", "summary": "BOOTSTRAP_PHASE_B_EXCEPTION invocation"}
+            # Preserve task_id from override if provided (e.g., via --task-id CLI)
+            if routing_record_override and routing_record_override.get("task_id"):
+                routing_record["task_id"] = routing_record_override["task_id"]
             result["bootstrap_exception"] = True
         else:
             return {"status": "error", "step": "load_routing_record",
@@ -3077,6 +3083,14 @@ def main() -> int:
         help="Output as JSON",
     )
     parser.add_argument(
+        "--task-id",
+        type=str,
+        default=None,
+        help="TASKS.md task ID (e.g., '[NEXT-CODEX-POST-REDTEAM]'). "
+             "Overrides routing record task_id. Required for --bootstrap-exception "
+             "when routing record has no task_id.",
+    )
+    parser.add_argument(
         "--bootstrap-exception",
         action="store_true",
         dest="bootstrap_exception",
@@ -3120,6 +3134,12 @@ def main() -> int:
                 "errors": ["--routing-record must decode to a JSON object"],
             }, indent=2) if args.json else "[phase-b] Error: --routing-record must decode to a JSON object")
             return 1
+
+    # Inject task_id into routing record if provided via CLI
+    if args.task_id:
+        if routing_record_override is None:
+            routing_record_override = {}
+        routing_record_override["task_id"] = args.task_id
 
     result = run_phase_b(
         repo_root, args.plan,

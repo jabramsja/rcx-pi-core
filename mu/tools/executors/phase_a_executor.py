@@ -717,9 +717,13 @@ def checkpoint_commit_plan(
             cwd=repo_root, check=True, capture_output=True, text=True,
         )
         checkpoint_msg = f"chore: Phase A lock — {plan_name}"
+        # Skip receipt check only — plan-only checkpoint has no supervisor receipt.
+        # All other pre-commit checks (doc consistency, governance) still run.
+        checkpoint_env = {**os.environ, "RCX_SKIP_RECEIPT_CHECK": "1"}
         commit_result = subprocess.run(
             ["git", "commit", plan_path, "-m", checkpoint_msg],
             cwd=repo_root, capture_output=True, text=True,
+            env=checkpoint_env,
         )
         if commit_result.returncode != 0:
             if "nothing to commit" in commit_result.stdout:
