@@ -558,24 +558,20 @@ def _find_reentry_boundary(step_events):
 
 @pytest.mark.slow
 class TestBoot1TimestampResetReproduction:
-    """Reproduce and document Boot1 timestamp reset behavior across re-entry.
+    """Verify Boot1 timestamp monotonicity across re-entry.
 
-    CURRENT KNOWN BUG (non-blocking):
-    - timestamp (obs_ts) RESETS on re-entry (non-monotonic across passes)
-    - step (step_index from total_iterations) does NOT reset (monotonic)
+    FIX APPLIED (structural-cleanup-s1):
+    - timestamp (obs_ts) now PRESERVED across re-entry (monotonic per-run)
+    - step (step_index from total_iterations) remains monotonic (unchanged)
 
-    Per ObserverEventContract.v0.md lines 64-67, step is PRIMARY sort key,
-    timestamp is TIE-BREAKER for same-step events. Since same-step events
-    never span re-entry depths, no actual ordering violation occurs.
-
-    These tests assert CURRENT (buggy) behavior. When the timestamp reset
-    bug is fixed, these assertions must be INVERTED to verify the fix.
+    Previously, timestamp reset to 0 on re-entry (non-monotonic across passes).
+    Fix preserves _obs_ts / obsTs across re-entry, matching _total_iterations behavior.
 
     See: reports/deferred/non_blocking/boot1_observer_timestamp_reentry_regression.md
     """
 
-    def test_python_timestamp_reset_on_real_reentry(self):
-        """Python real re-entry via cycling projections - timestamp resets."""
+    def test_python_timestamp_monotonic_on_real_reentry(self):
+        """Python real re-entry via cycling projections - timestamp stays monotonic."""
         from rcx_pi.selfhost.kernel import reset_step_budget
         reset_step_budget()
 
@@ -595,21 +591,18 @@ class TestBoot1TimestampResetReproduction:
         before = step_events[reentry_idx - 1]
         after = step_events[reentry_idx]
 
-        # Document current behavior: timestamp resets, step stays monotonic
-        ts_reset = after['timestamp'] < before['timestamp']
-        step_monotonic = after['step'] > before['step']
-
-        assert ts_reset, (
-            f"Expected timestamp to reset on re-entry (current behavior). "
+        # Timestamp must be monotonically non-decreasing across re-entry
+        assert after['timestamp'] >= before['timestamp'], (
+            f"Timestamp must not regress on re-entry. "
             f"Before: {before['timestamp']}, After: {after['timestamp']}"
         )
-        assert step_monotonic, (
+        assert after['step'] > before['step'], (
             f"Expected step to remain monotonic. "
             f"Before: {before['step']}, After: {after['step']}"
         )
 
-    def test_js_timestamp_reset_on_real_reentry(self):
-        """JS real re-entry via cycling projections - timestamp resets."""
+    def test_js_timestamp_monotonic_on_real_reentry(self):
+        """JS real re-entry via cycling projections - timestamp stays monotonic."""
         resp = _js_request(
             "run_engine_pipeline",
             projections=_CYCLE_PROJECTIONS, input=_CYCLE_INPUT,
@@ -627,15 +620,12 @@ class TestBoot1TimestampResetReproduction:
         before = step_events[reentry_idx - 1]
         after = step_events[reentry_idx]
 
-        # Document current behavior: timestamp resets, step stays monotonic
-        ts_reset = after['timestamp'] < before['timestamp']
-        step_monotonic = after['step'] > before['step']
-
-        assert ts_reset, (
-            f"Expected timestamp to reset on re-entry (current behavior). "
+        # Timestamp must be monotonically non-decreasing across re-entry
+        assert after['timestamp'] >= before['timestamp'], (
+            f"Timestamp must not regress on re-entry. "
             f"Before: {before['timestamp']}, After: {after['timestamp']}"
         )
-        assert step_monotonic, (
+        assert after['step'] > before['step'], (
             f"Expected step to remain monotonic. "
             f"Before: {before['step']}, After: {after['step']}"
         )

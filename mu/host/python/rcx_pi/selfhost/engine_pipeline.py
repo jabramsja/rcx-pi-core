@@ -1031,7 +1031,7 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
     cur_max_steps = max_steps
     cur_frozen = frozen
 
-    # Observer event helper — uses mutable depth counter, resets ts per re-entry
+    # Observer event helper — uses mutable depth counter, preserves ts across re-entry
     _obs_ts = [0]
 
     def _emit(event_name, step_num, state_val, error_code=None, **extra):
@@ -1073,9 +1073,7 @@ def _run_engine_recursive(  # AST_OK: infra — Boot1 engine loop (iterative re-
         if depth > _recursion_depth:
             assert_mu(cur_input, "_run_engine_recursive.input")
 
-        # Reset observer timestamp counter per re-entry (matches original per-call semantics)
-        _obs_ts[0] = 0
-
+        # obsTs preserved across re-entry (monotonic per-run, like _total_iterations).
         # Feed engine its initial input
         state: Mu = {"_run_engine": {"projections": cur_projections, "input": cur_input, "max_steps": cur_max_steps, "frozen": cur_frozen}}
 

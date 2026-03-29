@@ -547,16 +547,6 @@ MAX_MU_HASH_CACHE = 10_000
 _mu_hash_cache: OrderedDict[str, str] = OrderedDict()
 
 
-def mu_hash_cache_clear() -> None:
-    """Clear the mu_hash cache. Useful for testing and memory management.
-
-    WHY KEPT (0 production callers): Cache management primitive for
-    test isolation and long-running evaluation memory control. Tests
-    may need this to prevent cross-test cache pollution. Removing would
-    leave no way to reset cache state without restarting the process.
-    """
-    _mu_hash_cache.clear()
-
 
 def _compute_mu_hash(canonical: str) -> str:
     """SHA-256 of canonical JSON string. Single hash algorithm definition."""

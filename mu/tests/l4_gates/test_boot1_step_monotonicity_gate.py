@@ -1,22 +1,20 @@
 """
 Wave 5A gate test: Boot1 observer step monotonicity normalization.
 
-Verifies (at boot1_depth=0, no re-entry):
+Verifies:
 1. All observer step values are monotonically non-decreasing
 2. All events within the same engine iteration share the same step value
    (per-iteration adjacency, not set membership)
 3. Exhaustion emits the last zero-based step index, not a count
 4. Both Python and JS Boot1 paths satisfy these invariants
-
-Note: These tests run at boot1_depth=0 and do not exercise actual re-entry
-(boot1_depth > 0). Re-entry coverage is tracked as a deferred non-blocker:
-reports/deferred/non_blocking/w5a_reentry_gate_coverage.md
+5. Step monotonicity holds across re-entry (boot1_depth > 0)
 """
 
 from __future__ import annotations
 
 import json
 import subprocess
+from unittest.mock import patch
 
 import pytest
 
@@ -225,3 +223,106 @@ class TestJsBoot1StepMonotonicity:
             f"JS exhaustion step ({exhaust_step}) should equal last "
             f"step_boundary step ({last_boundary_step})"
         )
+
+
+class TestPythonBoot1ReentryStepMonotonicity:
+    """Prove step monotonicity holds across re-entry (boot1_depth > 0).
+
+    Uses mock-injected re-entry (pattern from test_boot1_structural_iteration_gate.py)
+    to exercise the re-entry path and verify steps remain monotonic and timestamps
+    remain monotonic across the re-entry boundary.
+    """
+
+    def test_step_monotonic_across_reentry(self):
+        """Steps remain monotonically non-decreasing across mock-injected re-entry."""
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
+        from rcx_pi.selfhost.kernel import reset_step_budget
+
+        original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: grounding test verifies step monotonicity across re-entry
+        injected = [False]
+
+        def reentry_injecting_step(projs, state):
+            result = original_step(projs, state)
+            # Inject re-entry when engine produces a terminal result.
+            if (not injected[0]
+                    and result is not state
+                    and isinstance(result, dict)
+                    and "action" in result
+                    and "value" in result):
+                injected[0] = True
+                return {"_run_engine": {
+                    "projections": [],
+                    "input": {"reentry_step_test": True},
+                    "max_steps": 10,
+                    "frozen": None,
+                }}
+            return result
+
+        reset_step_budget()
+        observer = []
+        with patch.object(engine_pipeline_mod, "_step_trusted", side_effect=reentry_injecting_step):
+            run_engine_pipeline(
+                [], {"test": True},
+                max_steps=10, max_engine_iterations=20,
+                max_algorithm_iterations=50, observer=observer,
+            )
+
+        assert injected[0], "Mock must have injected the re-entry"
+
+        # Step monotonicity across full run including re-entry
+        steps = _extract_steps(observer)
+        assert len(steps) >= 2, f"Expected >=2 step events, got {len(steps)}"
+        _assert_monotonic(steps, "Python Boot1 re-entry step monotonicity")
+        _assert_same_step_grouping(observer, "Python Boot1 re-entry step grouping")
+
+        # Verify re-entry actually happened (boot1_depth > 0 events exist)
+        step_events = [e for e in observer if e.get("event_name") == "step_boundary"]
+        depths = [e["boot1_depth"] for e in step_events]
+        assert max(depths) >= 1, (
+            f"Re-entry must produce boot1_depth >= 1, got max={max(depths)}. "
+            f"Depths: {depths}"
+        )
+
+    def test_timestamp_monotonic_across_reentry(self):
+        """Observer timestamps remain monotonically non-decreasing across re-entry."""
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
+        from rcx_pi.selfhost.kernel import reset_step_budget
+
+        original_step = engine_pipeline_mod._step_trusted  # ANTICHEAT_OK: grounding test verifies timestamp monotonicity across re-entry
+        injected = [False]
+
+        def reentry_injecting_step(projs, state):
+            result = original_step(projs, state)
+            if (not injected[0]
+                    and result is not state
+                    and isinstance(result, dict)
+                    and "action" in result
+                    and "value" in result):
+                injected[0] = True
+                return {"_run_engine": {
+                    "projections": [],
+                    "input": {"ts_test": True},
+                    "max_steps": 10,
+                    "frozen": None,
+                }}
+            return result
+
+        reset_step_budget()
+        observer = []
+        with patch.object(engine_pipeline_mod, "_step_trusted", side_effect=reentry_injecting_step):
+            run_engine_pipeline(
+                [], {"test": True},
+                max_steps=10, max_engine_iterations=20,
+                max_algorithm_iterations=50, observer=observer,
+            )
+
+        assert injected[0], "Mock must have injected the re-entry"
+
+        # Timestamp monotonicity across full run including re-entry
+        timestamps = [e["timestamp"] for e in observer]
+        for i in range(1, len(timestamps)):
+            assert timestamps[i] >= timestamps[i - 1], (
+                f"Timestamp regression at index {i}: "
+                f"ts[{i-1}]={timestamps[i-1]} > ts[{i}]={timestamps[i]}. "
+                f"Full sequence: {timestamps}"
+            )
