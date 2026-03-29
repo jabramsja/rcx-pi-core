@@ -1048,8 +1048,7 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
       }
     }
 
-    obsTs = 0;
-
+    // obsTs preserved across re-entry (monotonic per-run, like totalIterations).
     let state = {
       _run_engine: {
         projections: curProjections,

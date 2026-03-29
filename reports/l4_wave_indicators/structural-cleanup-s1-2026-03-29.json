@@ -1,0 +1,24 @@
+{
+  "wave_id": "structural-cleanup-s1-2026-03-29",
+  "repeat_run_speedup_ratio": 1.26707,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.394331,
+  "repeat_run_raw_seconds": [
+    0.499645,
+    0.394331
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.499645
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.893976
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-29T08:16:50Z",
+  "collector_version": "2.2.0"
+}

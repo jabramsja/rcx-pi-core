@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-19T16:49:37.116585+00:00",
+  "generated_at": "2026-03-29T07:48:05.956844+00:00",
   "inventories": {
     "authority": {
       "entries": [
@@ -809,7 +809,7 @@
         },
         {
           "file": "mu/host/js/engine/kernel.js",
-          "line": 59,
+          "line": 65,
           "name": "_stepKernelCore",
           "signals": [
             "loop"
@@ -818,7 +818,7 @@
         },
         {
           "file": "mu/host/js/engine/kernel.js",
-          "line": 230,
+          "line": 236,
           "name": "runStructural",
           "signals": [
             "loop",
@@ -1181,7 +1181,6 @@
             "builtin:sorted",
             "loop",
             "mutation:append",
-            "mutation:assignment",
             "mutation:augassign",
             "mutation:update"
           ],
@@ -1702,7 +1701,7 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 632,
+          "line": 622,
           "name": "_canonicalize_hash_numeric",
           "signals": [
             "builtin:isinstance",
@@ -1747,7 +1746,7 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 706,
+          "line": 696,
           "name": "get_bootstrap_registry",
           "signals": [
             "builtin:list"
@@ -1781,7 +1780,7 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 690,
+          "line": 680,
           "name": "mark_bootstrap",
           "signals": [
             "mutation:append"
@@ -1799,16 +1798,7 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 550,
-          "name": "mu_hash_cache_clear",
-          "signals": [
-            "mutation:clear"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 566,
+          "line": 556,
           "name": "mu_hash_cached",
           "signals": [
             "builtin:len",
@@ -1818,7 +1808,7 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 658,
+          "line": 648,
           "name": "mu_hash_control",
           "signals": [
             "authority_call:mu_hash"
@@ -1827,7 +1817,7 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 669,
+          "line": 659,
           "name": "mu_hash_control_cached",
           "signals": [
             "authority_call:mu_hash_cached"
@@ -2408,8 +2398,8 @@
       ],
       "site_counts": {
         "javascript": 97,
-        "python": 121,
-        "total": 218
+        "python": 120,
+        "total": 217
       }
     },
     "total": {
@@ -3402,7 +3392,7 @@
         },
         {
           "file": "mu/host/js/engine/kernel.js",
-          "line": 59,
+          "line": 65,
           "name": "_stepKernelCore",
           "signals": [
             "loop"
@@ -3418,7 +3408,7 @@
         },
         {
           "file": "mu/host/js/engine/kernel.js",
-          "line": 230,
+          "line": 236,
           "name": "runStructural",
           "signals": [
             "loop",
@@ -3428,14 +3418,14 @@
         },
         {
           "file": "mu/host/js/engine/kernel.js",
-          "line": 127,
+          "line": 133,
           "name": "stepKernel",
           "signals": [],
           "substrate": "javascript"
         },
         {
           "file": "mu/host/js/engine/kernel.js",
-          "line": 342,
+          "line": 348,
           "name": "stepKernelStructural",
           "signals": [],
           "substrate": "javascript"
@@ -3858,7 +3848,6 @@
             "builtin:sorted",
             "loop",
             "mutation:append",
-            "mutation:assignment",
             "mutation:augassign",
             "mutation:update"
           ],
@@ -4491,7 +4480,7 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 632,
+          "line": 622,
           "name": "_canonicalize_hash_numeric",
           "signals": [
             "builtin:isinstance",
@@ -4502,7 +4491,7 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 561,
+          "line": 551,
           "name": "_compute_mu_hash",
           "signals": [],
           "substrate": "python"
@@ -4532,7 +4521,7 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 711,
+          "line": 701,
           "name": "assert_no_bootstrap_in_production",
           "signals": [],
           "substrate": "python"
@@ -4578,7 +4567,7 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 706,
+          "line": 696,
           "name": "get_bootstrap_registry",
           "signals": [
             "builtin:list"
@@ -4612,7 +4601,7 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 690,
+          "line": 680,
           "name": "mark_bootstrap",
           "signals": [
             "mutation:append"
@@ -4630,23 +4619,14 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 600,
+          "line": 590,
           "name": "mu_hash",
           "signals": [],
           "substrate": "python"
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 550,
-          "name": "mu_hash_cache_clear",
-          "signals": [
-            "mutation:clear"
-          ],
-          "substrate": "python"
-        },
-        {
-          "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 566,
+          "line": 556,
           "name": "mu_hash_cached",
           "signals": [
             "builtin:len",
@@ -4656,7 +4636,7 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 658,
+          "line": 648,
           "name": "mu_hash_control",
           "signals": [
             "authority_call:mu_hash"
@@ -4665,7 +4645,7 @@
         },
         {
           "file": "rcx_pi/selfhost/mu_type.py",
-          "line": 669,
+          "line": 659,
           "name": "mu_hash_control_cached",
           "signals": [
             "authority_call:mu_hash_cached"
@@ -5484,8 +5464,8 @@
       ],
       "site_counts": {
         "javascript": 131,
-        "python": 182,
-        "total": 313
+        "python": 181,
+        "total": 312
       }
     }
   },
