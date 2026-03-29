@@ -1774,12 +1774,19 @@ def run_phase_b(
     # Routing validation is FATAL: wrong routing token → error (not silent rewrite).
     # Only --bootstrap-exception (force=True) bypasses this gate.
     try:
+        # _merge_task_id sentinel: load normal routing record, then merge task_id
+        merge_task_id = None
+        if isinstance(routing_record_override, dict) and "_merge_task_id" in routing_record_override:
+            merge_task_id = routing_record_override.pop("_merge_task_id")
+            routing_record_override = None  # don't replace, just merge
         if routing_record_override is not None:
             if not isinstance(routing_record_override, dict):
                 raise PhaseBExecutorError("routing_record_override must be a JSON object")
             routing_record = routing_record_override
         else:
             routing_record = load_routing_record(repo_root)
+        if merge_task_id:
+            routing_record["task_id"] = merge_task_id
         if routing_record.get("decision") != "ROUTE_PHASE_B":
             if force:
                 log(f"BOOTSTRAP_PHASE_B_EXCEPTION: Routing says {routing_record.get('decision')}, "
@@ -3135,11 +3142,15 @@ def main() -> int:
             }, indent=2) if args.json else "[phase-b] Error: --routing-record must decode to a JSON object")
             return 1
 
-    # Inject task_id into routing record if provided via CLI
+    # Inject task_id into routing record override if provided via CLI.
+    # Merge into existing override (if any) rather than replacing it,
+    # so --task-id works both with and without --routing-record.
     if args.task_id:
-        if routing_record_override is None:
-            routing_record_override = {}
-        routing_record_override["task_id"] = args.task_id
+        if routing_record_override is not None:
+            routing_record_override["task_id"] = args.task_id
+        else:
+            # No full override — pass task_id for post-load merge in run_phase_b
+            routing_record_override = {"_merge_task_id": args.task_id}
 
     result = run_phase_b(
         repo_root, args.plan,
