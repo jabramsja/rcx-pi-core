@@ -1,0 +1,24 @@
+{
+  "wave_id": "pipeline-coordination-fixes-2026-03-29",
+  "repeat_run_speedup_ratio": 1.1978,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.399823,
+  "repeat_run_raw_seconds": [
+    0.478908,
+    0.399823
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.478908
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.878731
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-03-29T21:15:34Z",
+  "collector_version": "2.2.0"
+}
