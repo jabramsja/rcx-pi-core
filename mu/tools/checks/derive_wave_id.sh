@@ -33,10 +33,13 @@ elif [[ "$BRANCH" == jabramsja/* ]]; then
   WAVE_ID_SUFFIX="${BRANCH#jabramsja/}"
 fi
 
-# Only set wave-id flag if TASKS.md is in the diff.
-# Use = separator to prevent argparse from treating --suffix as a flag.
+# Only set wave-id flag if TASKS.md is in the diff AND the wave_id exists
+# in a tracker note (exact match). Use = separator to prevent argparse from
+# treating --suffix as a flag.
 if [ -n "$WAVE_ID_SUFFIX" ] && [ -n "$RANGE" ] && git diff --name-only "$RANGE" 2>/dev/null | grep -qx "TASKS.md"; then
-  WAVE_ID_FLAG="--wave-id=$WAVE_ID_SUFFIX"
+  if grep -qE "Tracker sync note \([^,]+, ${WAVE_ID_SUFFIX}\):" TASKS.md 2>/dev/null; then
+    WAVE_ID_FLAG="--wave-id=$WAVE_ID_SUFFIX"
+  fi
 fi
 
 export WAVE_ID_FLAG
