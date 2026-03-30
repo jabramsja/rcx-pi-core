@@ -351,6 +351,17 @@ def _checkpoint_post_commit_progress(
     )
 
 
+def _continuation_steps_for_new_commit(steps_completed: Any) -> list[str] | None:
+    """Return the bounded-resume baseline for a newly created local HEAD."""
+    if not isinstance(steps_completed, list):
+        return None
+    try:
+        git_commit_idx = steps_completed.index("git_commit")
+    except ValueError:
+        return None
+    return list(steps_completed[:git_commit_idx + 1])
+
+
 def _parse_porcelain_status_line(line: str) -> tuple[str, str] | None:
     raw_line = line.rstrip("\n")
     if not raw_line.strip():
@@ -1265,8 +1276,14 @@ def _attempt_bot_finding_remediation(
                 ["git", "rev-parse", "HEAD"], cwd=repo_root, timeout=10,
             ).stdout.strip()
             result["commit_sha"] = current_head
+            remediation_checkpoint = dict(result)
+            remediation_checkpoint["steps_completed"] = (
+                _continuation_steps_for_new_commit(result.get("steps_completed"))
+                or list(result.get("steps_completed", []))
+            )
+            remediation_checkpoint.pop("bot_review_request_sha", None)
             _checkpoint_post_commit_progress(
-                result,
+                remediation_checkpoint,
                 continuation_path=continuation_path,
                 target_branch=target_branch,
             )
