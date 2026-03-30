@@ -7,8 +7,8 @@
     "commit_executor": null
   },
   "bridge_reviewers": {
-    "phase_a": "claude",
-    "phase_b": "claude"
+    "phase_a": "codex",
+    "phase_b": "codex"
   },
   "bridge_turn_timeouts": {
     "phase_a": 300,

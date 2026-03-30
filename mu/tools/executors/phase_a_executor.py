@@ -35,6 +35,19 @@ from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
+# Import implementer for plan refinement during bridge loop
+_invoke_implementer = None
+try:
+    _agents_dir = str(SCRIPT_DIR.parent / "agents")
+    if _agents_dir not in sys.path:
+        sys.path.insert(0, _agents_dir)
+    _impl_dir = str(SCRIPT_DIR)
+    if _impl_dir not in sys.path:
+        sys.path.insert(0, _impl_dir)
+    from phase_b_implementer import invoke_implementer as _invoke_implementer
+except ImportError:
+    pass
+
 # Import canonical load_routing_record from shared module
 try:
     from executor_common import (
@@ -141,7 +154,7 @@ def resolve_review_depth(config: dict[str, Any], phase_key: str, default: str = 
     return depth
 
 
-def resolve_bridge_reviewer(config: dict[str, Any], phase_key: str, default: str = "claude") -> str:
+def resolve_bridge_reviewer(config: dict[str, Any], phase_key: str, default: str = "codex") -> str:
     """Resolve bridge reviewer backend from executor config."""
     reviewer = config.get("bridge_reviewers", {}).get(phase_key, default)
     if not isinstance(reviewer, str) or not reviewer.strip():
@@ -494,10 +507,23 @@ def run_bridge_design_review(
     task_path = scratch_dir / f"phase_a_bridge_r{round_num}.md"
     task_content = (
         f"# Phase A Bridge Round {round_num}\n\n"
-        f"Review the plan at `{plan_path}` for decision completeness.\n\n"
-        "Use repo-local evidence only. Do not browse the web or query external "
-        "network resources for this review; rely on the tracked packet, local "
-        "files, and local shell evidence only.\n\n"
+        f"Review the plan at `{plan_path}` as an adversarial co-lead reviewer.\n\n"
+        "## Required Plan Content (BLOCKING if missing)\n\n"
+        "A Phase A plan MUST contain ALL of the following to receive GO:\n"
+        "1. **Scope**: explicit list of files/directories in scope\n"
+        "2. **Work items**: concrete, bounded tasks derived from TASKS.md current phase\n"
+        "3. **Constraints**: what is NOT in scope\n"
+        "4. **Stop conditions**: when to stop\n"
+        "5. **Acceptance criteria**: how to know it's done\n"
+        "6. **Grounding**: references to TASKS.md authorization and governing packet\n\n"
+        "A plan with only routing metadata, supervisor request echoes, or empty sections\n"
+        "is NOT a plan — it is a stub. Reject stubs with REQUEST_CHANGES.\n\n"
+        "## Review Protocol\n\n"
+        "- Read TASKS.md for the current phase description and authorization\n"
+        "- Read the governing tracked packet for sequence and supporting inputs\n"
+        "- Verify plan work items are grounded in actual codebase state (run commands)\n"
+        "- Use repo-local evidence only. Do not browse the web or query external\n"
+        "  network resources for this review.\n\n"
     )
     if agent_review_context:
         task_content += agent_review_context + "\n\n"
@@ -927,7 +953,38 @@ def run_phase_a(
                     )
                     result["rendered_path"] = str(rendered_path)
                     return result
-                log("Bridge: REQUEST_CHANGES — continuing loop")
+                # Invoke Claude implementer to refine the plan based on findings
+                if _invoke_implementer is not None:
+                    plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
+                    impl_prompt = (
+                        f"You are updating a Phase A plan at `{rel_plan_path}`.\n\n"
+                        f"The bridge reviewer returned REQUEST_CHANGES with these findings:\n\n"
+                        f"{render_content[:4000]}\n\n"
+                        f"## Current plan content:\n\n{plan_content}\n\n"
+                        f"## Required plan sections:\n"
+                        "1. Scope: files/directories in scope\n"
+                        "2. Work items: concrete bounded tasks from TASKS.md current phase\n"
+                        "3. Constraints: what is NOT in scope\n"
+                        "4. Stop conditions\n"
+                        "5. Acceptance criteria\n"
+                        "6. Grounding: TASKS.md authorization + governing packet refs\n\n"
+                        f"Read TASKS.md (current phase for [NEXT-CODEX-POST-REDTEAM]) and the "
+                        f"governing packet at reports/control_plane/post_redteam_structural_queue_2026-03-20.md. "
+                        f"Update the plan file directly. Do NOT create new files."
+                    )
+                    log(f"Bridge: REQUEST_CHANGES — invoking implementer to refine plan...")
+                    impl_result = _invoke_implementer(
+                        repo_root, impl_prompt,
+                        backend="claude",
+                        timeout=900,
+                        verbose=verbose,
+                    )
+                    if impl_result["status"] != "success":
+                        log(f"Implementer failed: {impl_result['status']} — continuing with unmodified plan")
+                    else:
+                        log("Implementer updated plan — continuing to next bridge round")
+                else:
+                    log("Bridge: REQUEST_CHANGES — no implementer available, continuing with unmodified plan")
                 continue
             elif bridge_decision == "QUESTION":
                 if bridge_result["exit_code"] not in (0, 1):
