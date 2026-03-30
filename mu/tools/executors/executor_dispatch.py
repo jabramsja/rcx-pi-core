@@ -885,9 +885,15 @@ def main(argv: list[str] | None = None) -> int:
         else:
             try:
                 record = load_routing_record(repo_root)
-            except DispatchError as exc:
-                print(f"[error] {exc}", file=sys.stderr)
-                return 1
+            except DispatchError:
+                # No routing record — try to create one via post-merge supervisor
+                if args.verbose:
+                    print("[dispatch] No routing record — running post-merge supervisor...")
+                refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose)
+                if not refreshed or refresh_record is None:
+                    print("[error] No routing record and auto-refresh failed", file=sys.stderr)
+                    return 1
+                record = refresh_record
 
         # Dispatch
         result = dispatch(

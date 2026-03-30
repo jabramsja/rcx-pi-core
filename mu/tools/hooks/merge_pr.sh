@@ -27,7 +27,7 @@ set -euo pipefail
 REPO_OWNER="jabramsja"
 REPO_NAME="rcx-pi-core"
 SWEEP_COUNT=10
-POST_MERGE_WAIT=30
+POST_MERGE_WAIT=75
 
 # ---------------------------------------------------------------------------
 # Helpers
