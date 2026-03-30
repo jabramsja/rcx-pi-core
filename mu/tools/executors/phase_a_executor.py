@@ -818,7 +818,6 @@ def run_phase_a(
         routing_record = load_routing_record(repo_root)
         scope = extract_plan_scope(routing_record)
     except (PhaseAExecutorError, ExecutorCommonError):
-        routing_record = {}
         scope = {"request": "", "summary": "", "decision": "ROUTE_PHASE_A"}
 
     # Create or load plan draft
@@ -936,49 +935,27 @@ def run_phase_a(
                 log("Bridge converged: GO")
                 result["status"] = "converged"
                 break
-            elif bridge_decision == "NO_GO":
-                # NO_GO = fundamental scope/invariant violation; always fail-close.
-                log(f"Bridge returned NO_GO in round {round_num} — failing closed")
-                result["status"] = "error"
-                result["error"] = (
-                    f"Bridge returned NO_GO in round {round_num}. "
-                    f"Findings:\n{render_content[:2000]}"
-                )
-                result["rendered_path"] = str(rendered_path)
-                return result
-            elif bridge_decision == "REQUEST_CHANGES":
+            elif bridge_decision in {"REQUEST_CHANGES", "NO_GO"}:
                 # bridge_supervisor.py review returns exit=1 for non-GO decisions.
-                # Treat REQUEST_CHANGES as a recoverable review outcome when
+                # Treat REQUEST_CHANGES/NO_GO as recoverable review outcomes when
                 # the exit code matches that CLI contract; only unexpected codes
                 # are infrastructure failures here.
                 if bridge_result["exit_code"] not in (0, 1):
                     log(
                         f"Bridge subprocess failed (exit {bridge_result['exit_code']}) "
-                        f"with decision REQUEST_CHANGES — failing closed"
+                        f"with decision {bridge_decision} — failing closed"
                     )
                     result["status"] = "error"
                     result["error"] = (
                         f"Bridge subprocess failed in round {round_num} "
-                        f"(exit={bridge_result['exit_code']}, decision=REQUEST_CHANGES). "
+                        f"(exit={bridge_result['exit_code']}, decision={bridge_decision}). "
                         f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
                     )
                     result["rendered_path"] = str(rendered_path)
                     return result
-                # Derive active task and governing packet from routing data
-                _active_task = routing_record.get("task_id", "the active NEXT task")
-                _candidates = routing_record.get("next_candidates", [])
-                _packet_ref = (
-                    _candidates[0].get("tracked_packet", "")
-                    if _candidates
-                    else ""
-                )
                 # Invoke Claude implementer to refine the plan based on findings
                 if _invoke_implementer is not None:
                     plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
-                    _grounding = f"Read TASKS.md (current phase for {_active_task})"
-                    if _packet_ref:
-                        _grounding += f" and the governing packet at {_packet_ref}"
-                    _grounding += "."
                     impl_prompt = (
                         f"You are updating a Phase A plan at `{rel_plan_path}`.\n\n"
                         f"The bridge reviewer returned REQUEST_CHANGES with these findings:\n\n"
@@ -991,7 +968,8 @@ def run_phase_a(
                         "4. Stop conditions\n"
                         "5. Acceptance criteria\n"
                         "6. Grounding: TASKS.md authorization + governing packet refs\n\n"
-                        f"{_grounding} "
+                        f"Read TASKS.md (current phase for [NEXT-CODEX-POST-REDTEAM]) and the "
+                        f"governing packet at reports/control_plane/post_redteam_structural_queue_2026-03-20.md. "
                         f"Update the plan file directly. Do NOT create new files."
                     )
                     log(f"Bridge: REQUEST_CHANGES — invoking implementer to refine plan...")
