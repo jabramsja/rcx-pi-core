@@ -2040,7 +2040,10 @@ def _run_post_commit_pipeline(
     )
     if findings_result["outcome"] == "error":
         return findings_result["response"]
-    if findings_result["outcome"] == "bot_findings":
+    if findings_result["outcome"] == "bot_findings" and review_wait_timed_out is None:
+        # Only remediate bot findings if the bot actually reviewed the
+        # current HEAD.  On timeout, stale threads from previous commits
+        # are advisory — they get deferred, not remediated.
         remediation_response = _attempt_bot_finding_remediation(
             findings_result["bot_findings"],
             repo_root=repo_root,
