@@ -279,7 +279,7 @@ def _write_deferred_packet(
     return packet_path
 
 
-def _resolve_bridge_reviewer(config: dict[str, Any], phase_key: str, default: str = "claude") -> str:
+def _resolve_bridge_reviewer(config: dict[str, Any], phase_key: str, default: str = "codex") -> str:
     """Resolve bridge reviewer backend from executor config."""
     reviewer = config.get("bridge_reviewers", {}).get(phase_key, default)
     if not isinstance(reviewer, str) or not reviewer.strip():
