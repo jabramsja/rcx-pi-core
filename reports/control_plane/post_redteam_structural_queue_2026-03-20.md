@@ -1,23 +1,19 @@
 # Post-Red-Team Structural Queue
 
 Date: 2026-03-20
-Status: parked tracked control-plane packet
-Purpose: preserve the founder-directed structural sequence that follows the
-current control-surface/meta-bridge rollout
+Status: ACTIVE (unparked 2026-03-28, founder-authorized)
+Phase-A-Lock: UNLOCKED
+Purpose: founder-directed structural sequence following the
+control-surface/meta-bridge rollout (all 7 rollout steps complete)
 
 ## Current truth
 
-- do not advance this queue while the founder still wants the hooks / agents /
-  bridge control-surface lane treated as active
-- the current lane nuance is that the existing hook/control-surface summary
-  packet is serving as the seeded corpus for meta-bridge testing, so the active
-  work is control-plane buildout, not immediate broad hook remediation
-- this queue remains parked until:
-  - the pre-commit supervisor is live as the standing commit gate
-  - the post-merge supervisor follow-on has gone through its own Phase A and
-    Phase B path
-  - Claude has explicit repo-local executors for Phase A, Phase B, and commit
-    flow
+- Queue UNPARKED (2026-03-28). All parking conditions satisfied:
+  - the pre-commit supervisor is live as the standing commit gate ✓
+  - the post-merge supervisor has gone through its own Phase A and Phase B ✓
+  - Claude has explicit repo-local executors for Phase A, Phase B, and commit flow ✓
+  - pipeline proven end-to-end (9 PRs, #673-#681) ✓
+- Current phase: Phase A — structural gap sweep
 
 ## Governing sequence
 

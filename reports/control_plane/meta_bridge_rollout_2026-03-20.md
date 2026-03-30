@@ -59,7 +59,7 @@ touch in this lane:
    Executors validated via context optimization wave (MAINTENANCE class).
 6. ~~Reduce Claude memory to pointer layer~~ **(done — combined with step 5, founder-authorized 2026-03-22)**.
    CLAUDE.md slimmed 601→201 lines. Memory consolidated 19→6 files. Manual wave protocol archived to `reports/archive/manual_wave_protocol_2026-03-22.md`.
-7. Resume the parked structural queue — steps 1-6 complete, **awaiting separate founder GO** (2026-03-22).
+7. ~~Resume the parked structural queue~~ **(done — founder-authorized 2026-03-28)**. `[NEXT-CODEX-POST-REDTEAM]` UNPARKED. Current phase: Phase A structural gap sweep. Tracked packet: `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
 
 ## Required Claude behavior
 
