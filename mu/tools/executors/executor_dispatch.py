@@ -399,6 +399,36 @@ def _auto_refresh_routing(
     return True, refreshed
 
 
+def _extract_plan_path(phase_a_stdout: str, repo_root: Path) -> str | None:
+    """Parse plan_path from Phase A executor output (JSON or text)."""
+    # Try JSON first
+    for line in phase_a_stdout.strip().splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                data = json.loads(line)
+                pp = data.get("plan_path")
+                if isinstance(pp, str) and pp:
+                    return pp
+            except json.JSONDecodeError:
+                pass
+    # Try full output as JSON
+    try:
+        data = json.loads(phase_a_stdout)
+        pp = data.get("plan_path")
+        if isinstance(pp, str) and pp:
+            return pp
+    except (json.JSONDecodeError, ValueError):
+        pass
+    # Fallback: parse "[phase-a] Plan: <path>" text output
+    for line in phase_a_stdout.splitlines():
+        if line.strip().startswith("[phase-a] Plan:"):
+            pp = line.split("Plan:", 1)[1].strip()
+            if pp:
+                return pp
+    return None
+
+
 def dispatch(
     record: dict[str, Any],
     *,
@@ -607,8 +637,145 @@ def dispatch(
             check=False,
             timeout=timeout,
         )
+        if result.returncode != 0:
+            return {
+                "status": "failed",
+                "decision": decision,
+                "executor": executor_name,
+                "exit_code": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }
+
+        # ── Phase chain: A → B → commit ─────────────────────────
+        # After Phase A converges, immediately invoke Phase B with the
+        # locked plan.  After Phase B produces a commit handoff, invoke
+        # the commit executor.  This is the full pipeline cycle without
+        # requiring separate dispatch invocations between phases.
+
+        if executor_name == "phase_a_executor":
+            # Parse plan_path from Phase A JSON output
+            plan_path = _extract_plan_path(result.stdout, repo)
+            if plan_path is None:
+                return {
+                    "status": "failed",
+                    "decision": decision,
+                    "executor": executor_name,
+                    "exit_code": 0,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "message": "Phase A converged but no plan_path found in output",
+                }
+
+            if verbose:
+                print(f"[dispatch] Phase A converged → chaining to Phase B with plan: {plan_path}")
+
+            phase_b_timeout = cfg.get("timeouts", {}).get("phase_b_executor", 300)
+            phase_b_args = [
+                sys.executable,
+                str(SCRIPT_DIR / "phase_b_executor.py"),
+                "--plan", plan_path,
+            ]
+            phase_b_result = subprocess.run(
+                phase_b_args,
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=phase_b_timeout,
+            )
+            if phase_b_result.returncode != 0:
+                return {
+                    "status": "failed",
+                    "decision": "ROUTE_PHASE_B",
+                    "executor": "phase_b_executor",
+                    "exit_code": phase_b_result.returncode,
+                    "stdout": phase_b_result.stdout,
+                    "stderr": phase_b_result.stderr,
+                    "chained_from": "phase_a_executor",
+                }
+
+            if verbose:
+                print("[dispatch] Phase B converged → chaining to commit executor")
+
+            # Phase B writes handoff to canonical location
+            handoff_path = repo / ".agent_bus" / "executors" / "phase_b_handoff.json"
+            if not handoff_path.exists():
+                return {
+                    "status": "failed",
+                    "decision": "ROUTE_PHASE_B",
+                    "executor": "phase_b_executor",
+                    "exit_code": 0,
+                    "message": "Phase B converged but no handoff file found",
+                    "chained_from": "phase_a_executor",
+                }
+
+            commit_timeout = cfg.get("timeouts", {}).get("commit_executor", 300)
+            commit_args = [
+                sys.executable,
+                str(SCRIPT_DIR / "commit_executor.py"),
+                "--handoff", str(handoff_path),
+            ]
+            commit_result = subprocess.run(
+                commit_args,
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=commit_timeout,
+            )
+            return {
+                "status": "success" if commit_result.returncode == 0 else "failed",
+                "decision": "COMMIT_GO",
+                "executor": "commit_executor",
+                "exit_code": commit_result.returncode,
+                "stdout": commit_result.stdout,
+                "stderr": commit_result.stderr,
+                "chained_from": "phase_a_executor → phase_b_executor",
+            }
+
+        elif executor_name == "phase_b_executor":
+            # Phase B succeeded — chain to commit executor
+            handoff_path = repo / ".agent_bus" / "executors" / "phase_b_handoff.json"
+            if not handoff_path.exists():
+                return {
+                    "status": "failed",
+                    "decision": decision,
+                    "executor": executor_name,
+                    "exit_code": 0,
+                    "message": "Phase B converged but no handoff file found",
+                }
+
+            if verbose:
+                print("[dispatch] Phase B converged → chaining to commit executor")
+
+            commit_timeout = cfg.get("timeouts", {}).get("commit_executor", 300)
+            commit_args = [
+                sys.executable,
+                str(SCRIPT_DIR / "commit_executor.py"),
+                "--handoff", str(handoff_path),
+            ]
+            commit_result = subprocess.run(
+                commit_args,
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=commit_timeout,
+            )
+            return {
+                "status": "success" if commit_result.returncode == 0 else "failed",
+                "decision": "COMMIT_GO",
+                "executor": "commit_executor",
+                "exit_code": commit_result.returncode,
+                "stdout": commit_result.stdout,
+                "stderr": commit_result.stderr,
+                "chained_from": "phase_b_executor",
+            }
+
+        # Non-chained executor (commit, dialectic, etc.)
         return {
-            "status": "success" if result.returncode == 0 else "failed",
+            "status": "success",
             "decision": decision,
             "executor": executor_name,
             "exit_code": result.returncode,
@@ -678,6 +845,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Output as JSON",
     )
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="After merge, run post-merge supervisor and loop (full pipeline cycle)",
+    )
+    parser.add_argument(
+        "--max-waves",
+        type=int,
+        default=3,
+        help="Maximum waves per --loop invocation (default: 3)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -689,49 +867,82 @@ def main(argv: list[str] | None = None) -> int:
         print("[error] Not in a git repository", file=sys.stderr)
         return 1
 
-    # Load routing record
-    if args.routing_record:
-        try:
-            record = json.loads(args.routing_record.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
-            print(f"[error] Cannot load routing record: {exc}", file=sys.stderr)
-            return 1
-    else:
-        try:
-            record = load_routing_record(repo_root)
-        except DispatchError as exc:
-            print(f"[error] {exc}", file=sys.stderr)
-            return 1
-
-    # Load config
     config = load_config(args.config) if args.config else load_config()
+    wave_count = 0
 
-    # Dispatch
-    result = dispatch(
-        record,
-        config=config,
-        repo_root=repo_root,
-        skip_freshness=args.skip_freshness,
-        verbose=args.verbose,
-    )
+    while True:
+        wave_count += 1
+        if args.verbose:
+            print(f"\n[dispatch] === Wave {wave_count}/{args.max_waves if args.loop else 1} ===")
 
-    if args.json:
-        print(json.dumps(result, indent=2))
-    else:
-        status = result.get("status", "unknown")
-        decision = result.get("decision", "unknown")
-        executor = result.get("executor", "none")
-        message = result.get("message", result.get("summary", ""))
-        print(f"[dispatch] Status: {status}")
-        print(f"[dispatch] Decision: {decision}")
-        if executor != "none":
-            print(f"[dispatch] Executor: {executor}")
-        if message:
-            print(f"[dispatch] {message}")
-        if result.get("stdout"):
-            print(result["stdout"])
-        if result.get("stderr"):
-            print(result["stderr"], file=sys.stderr)
+        # Load routing record
+        if args.routing_record:
+            try:
+                record = json.loads(args.routing_record.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                print(f"[error] Cannot load routing record: {exc}", file=sys.stderr)
+                return 1
+        else:
+            try:
+                record = load_routing_record(repo_root)
+            except DispatchError as exc:
+                print(f"[error] {exc}", file=sys.stderr)
+                return 1
+
+        # Dispatch
+        result = dispatch(
+            record,
+            config=config,
+            repo_root=repo_root,
+            skip_freshness=args.skip_freshness,
+            verbose=args.verbose,
+        )
+
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            status = result.get("status", "unknown")
+            decision = result.get("decision", "unknown")
+            executor = result.get("executor", "none")
+            message = result.get("message", result.get("summary", ""))
+            print(f"[dispatch] Status: {status}")
+            print(f"[dispatch] Decision: {decision}")
+            if executor != "none":
+                print(f"[dispatch] Executor: {executor}")
+            if message:
+                print(f"[dispatch] {message}")
+            if result.get("stdout"):
+                print(result["stdout"])
+            if result.get("stderr"):
+                print(result["stderr"], file=sys.stderr)
+
+        # If not looping, or if the wave failed/stopped, exit
+        if not args.loop:
+            break
+        if result.get("status") != "success":
+            if args.verbose:
+                print(f"[dispatch] Wave {wave_count} did not succeed ({result.get('status')}), stopping loop")
+            break
+        if wave_count >= args.max_waves:
+            if args.verbose:
+                print(f"[dispatch] Max waves ({args.max_waves}) reached, stopping loop")
+            break
+
+        # Post-merge: refresh routing for next wave
+        if args.verbose:
+            print("[dispatch] Wave succeeded — running post-merge supervisor for next wave...")
+        package_path = repo_root / META_BUS_DIR / POST_MERGE_PACKAGE_NAME
+        if not package_path.exists():
+            if args.verbose:
+                print("[dispatch] No post-merge package — cannot loop to next wave")
+            break
+        refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose)
+        if not refreshed or refresh_record is None:
+            if args.verbose:
+                print("[dispatch] Post-merge supervisor failed — stopping loop")
+            break
+        # Clear the explicit routing record arg so next iteration loads fresh
+        args.routing_record = None
 
     return 0 if result.get("status") in ("success", "stopped", "not_implemented") else 1
 
