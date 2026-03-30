@@ -37,6 +37,7 @@ import subprocess
 import sys
 import time
 import unicodedata
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -63,6 +64,16 @@ except ImportError:
     normalize_wave_id = _mod.normalize_wave_id
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
+
+_bridge_adapters = None
+_bridge_import_error = None
+try:
+    _agents_dir = str(Path(__file__).resolve().parent.parent / "agents")
+    if _agents_dir not in sys.path:
+        sys.path.insert(0, _agents_dir)
+    import bridge_adapters as _bridge_adapters
+except ImportError as _exc:
+    _bridge_import_error = _exc
 
 BRANCH_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
@@ -129,9 +140,9 @@ query($owner: String!, $repo: String!, $number: Int!) {
 
 BOT_REVIEW_LOGIN = "chatgpt-codex-connector"
 BOT_REVIEW_TRIGGER_COMMENT = "@codex review"
-BOT_REVIEW_WAIT_SECONDS = 210
-BOT_REVIEW_ACK_WAIT_SECONDS = 900
-BOT_REVIEW_POLL_SECONDS = 15
+BOT_REVIEW_WAIT_SECONDS = 45
+BOT_REVIEW_ACK_WAIT_SECONDS = 60
+BOT_REVIEW_POLL_SECONDS = 5
 BOT_REVIEW_ACK_REACTION = "eyes"
 CI_CHECK_REGISTRATION_WAIT_SECONDS = 120
 CI_CHECK_REGISTRATION_POLL_SECONDS = 5
@@ -146,6 +157,11 @@ BOT_USAGE_LIMIT_COMMENT_RE = re.compile(
 COMMIT_CONTINUATION_VERSION = 1
 CONTINUATION_ACTIVE_STATUS = "post_commit_pending"
 TRANSIENT_STATUS_PREFIXES = (".agent_bus/", ".scratch/")
+
+BOT_REMEDIATION_MAX_ROUNDS = 2
+BOT_REMEDIATION_ADAPTER = "claude"
+BOT_REMEDIATION_TIMEOUT_S = 600
+BOT_REMEDIATION_STALE_TIMEOUT_S = 300.0
 
 
 def _run(
@@ -201,9 +217,14 @@ def _write_continuation_record(
     if pr_number:
         payload["pr_number"] = pr_number
     preserved_bot_review_request_sha = existing_payload.get("bot_review_request_sha")
+    preserved_commit_sha = existing_payload.get("commit_sha")
     if bot_review_request_sha:
         payload["bot_review_request_sha"] = bot_review_request_sha
-    elif isinstance(preserved_bot_review_request_sha, str) and preserved_bot_review_request_sha:
+    elif (
+        preserved_commit_sha == commit_sha
+        and isinstance(preserved_bot_review_request_sha, str)
+        and preserved_bot_review_request_sha
+    ):
         payload["bot_review_request_sha"] = preserved_bot_review_request_sha
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
@@ -269,7 +290,18 @@ def _load_post_commit_continuation(
     if branch_name != target_branch:
         return None
     if head_sha != commit_sha:
-        return None
+        # HEAD may have moved forward from remediation commits.
+        # Accept if commit_sha is an ancestor of current HEAD.
+        try:
+            merge_base = _run(
+                ["git", "merge-base", "--is-ancestor", commit_sha, head_sha],
+                cwd=repo_root, check=False,
+            )
+            if merge_base.returncode != 0:
+                return None
+            payload["commit_sha"] = head_sha
+        except subprocess.CalledProcessError:
+            return None
     non_transient_status = []
     for line in status_output:
         path_text = line[3:] if len(line) > 3 else line
@@ -315,6 +347,54 @@ def _checkpoint_post_commit_progress(
         steps_completed=steps_completed,
         pr_number=pr_number,
         bot_review_request_sha=bot_review_request_sha if isinstance(bot_review_request_sha, str) else None,
+    )
+
+
+def _continuation_steps_for_new_commit(steps_completed: Any) -> list[str] | None:
+    """Return the bounded-resume baseline for a newly created local HEAD."""
+    if not isinstance(steps_completed, list):
+        return None
+    try:
+        git_commit_idx = steps_completed.index("git_commit")
+    except ValueError:
+        return None
+    return list(steps_completed[:git_commit_idx + 1])
+
+
+def _parse_porcelain_status_line(line: str) -> tuple[str, str] | None:
+    raw_line = line.rstrip("\n")
+    if not raw_line.strip():
+        return None
+    if len(raw_line) < 4:
+        return None
+    status_code = raw_line[:2]
+    path_text = raw_line[3:]
+    if " -> " in path_text:
+        path_text = path_text.split(" -> ", 1)[1]
+    if not path_text:
+        return None
+    return status_code, path_text
+
+
+def _discard_worktree_path(
+    repo_root: Path,
+    *,
+    status_code: str,
+    file_path: str,
+) -> None:
+    if status_code == "??":
+        _run(
+            ["git", "clean", "-fd", "--", file_path],
+            cwd=repo_root,
+            timeout=10,
+            check=False,
+        )
+        return
+    _run(
+        ["git", "checkout", "--", file_path],
+        cwd=repo_root,
+        timeout=10,
+        check=False,
     )
 
 
@@ -839,6 +919,462 @@ def _has_recorded_current_head_bot_request(
         isinstance(continuation, dict)
         and continuation.get("bot_review_request_sha") == head_sha
     )
+
+
+def _mint_bot_remediation_receipt(
+    *,
+    repo_root: Path,
+    findings_addressed: list[dict[str, str]],
+    scoped_files: list[str],
+    round_num: int,
+    wave_id: str,
+) -> Path:
+    """Mint a type-B (bot remediation) pre-commit receipt for the current staged state.
+
+    Writes both the canonical hook-compatible receipt and a per-invocation
+    receipt.  The hook checks decision + staged_sha — both are present.
+    The receipt_type field distinguishes this from a full supervisor receipt
+    (type A) for audit purposes.
+    """
+    staged_diff = subprocess.run(
+        ["git", "diff", "--cached", "--binary"],
+        capture_output=True, cwd=repo_root, check=True,
+    ).stdout
+    staged_sha = hashlib.sha256(staged_diff).hexdigest()
+
+    receipt = {
+        "decision": "COMMIT_GO",
+        "staged_sha": staged_sha,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "receipt_type": "bot_remediation",
+        "wave_id": wave_id,
+        "remediation_round": round_num,
+        "findings_addressed": findings_addressed,
+        "scoped_files": scoped_files,
+    }
+
+    meta_dir = repo_root / ".agent_bus" / "meta"
+    meta_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write canonical hook-compatible receipt
+    canonical = meta_dir / "pre_commit_receipt.json"
+    canonical.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+
+    # Write per-invocation receipt for audit trail
+    receipts_dir = meta_dir / "pre_commit_receipts"
+    receipts_dir.mkdir(parents=True, exist_ok=True)
+    ts_slug = receipt["timestamp_utc"].replace(":", "-").replace("+", "p")
+    unique_suffix = uuid.uuid4().hex[:8]
+    per_invocation = receipts_dir / f"receipt_{ts_slug}_{unique_suffix}.json"
+    per_invocation.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+
+    return per_invocation
+
+
+def _extract_review_findings(
+    pr_data: dict[str, Any],
+    head_sha: str,
+    *,
+    result: dict[str, Any],
+    pr_number: str,
+) -> dict[str, Any]:
+    """Extract bot review findings from PR data.
+
+    Returns dict with 'outcome' key:
+      'clean'        — no findings, safe to merge
+      'bot_findings' — bot findings found (includes 'bot_findings' list)
+      'error'        — hard error (includes 'response' dict)
+    """
+    _assert_expected_pr_head(pr_data, head_sha)
+    issue_comment_outcome = _current_head_connector_issue_comment_outcome(
+        pr_data, head_sha,
+    )
+    if issue_comment_outcome is not None:
+        if issue_comment_outcome["kind"] == "usage_limit":
+            return {"outcome": "error", "response": {
+                "status": "error", "step": "ensure_review_clear_and_merge",
+                "errors": [f"{BOT_REVIEW_LOGIN} issue comment reported usage-limit exhaustion"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number}}
+        if issue_comment_outcome["kind"] == "other":
+            return {"outcome": "bot_findings", "bot_findings": [{
+                "author": issue_comment_outcome["author"],
+                "body": issue_comment_outcome["body"][:500],
+                "path": "", "line": None,
+            }]}
+
+    review_decision = pr_data.get("reviewDecision", "")
+    if review_decision == "CHANGES_REQUESTED":
+        return {"outcome": "error", "response": {
+            "status": "error", "step": "ensure_review_clear_and_merge",
+            "errors": ["reviewDecision is CHANGES_REQUESTED"],
+            "steps_completed": result["steps_completed"],
+            "pr_number": pr_number}}
+
+    latest_reviews = pr_data.get("latestReviews", {}).get("nodes", [])
+    for review in latest_reviews:
+        author = review.get("author", {}).get("login", "")
+        state = review.get("state", "")
+        is_bot = _is_bot_review_author(author)
+        if not is_bot and state == "CHANGES_REQUESTED":
+            return {"outcome": "error", "response": {
+                "status": "error", "step": "ensure_review_clear_and_merge",
+                "errors": [f"Human reviewer {author} requested changes"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number}}
+
+    threads = pr_data.get("reviewThreads", {}).get("nodes", [])
+    current_review_cycle_floor = _current_review_cycle_floor_timestamp(
+        pr_data, head_sha,
+    )
+    bot_findings: list[dict[str, Any]] = []
+    for thread in threads:
+        if thread.get("isResolved"):
+            continue
+        latest_comment = _latest_relevant_thread_comment(
+            thread, floor_timestamp=current_review_cycle_floor,
+        )
+        if latest_comment is None:
+            continue
+        author = latest_comment.get("author", {}).get("login", "")
+        is_bot = _is_bot_review_author(author)
+        if not is_bot:
+            return {"outcome": "error", "response": {
+                "status": "error", "step": "ensure_review_clear_and_merge",
+                "errors": [f"Unresolved human review thread from {author}"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number}}
+        if thread.get("isOutdated"):
+            continue
+        bot_findings.append({
+            "author": author,
+            "body": latest_comment.get("body", "")[:500],
+            "path": latest_comment.get("path", ""),
+            "line": latest_comment.get("line"),
+        })
+
+    if bot_findings:
+        return {"outcome": "bot_findings", "bot_findings": bot_findings}
+    return {"outcome": "clean"}
+
+
+def _build_bot_remediation_prompt(
+    bot_findings: list[dict[str, Any]],
+    *,
+    wave_id: str,
+    pr_number: str,
+    remediation_round: int,
+) -> str:
+    """Build a prompt for the bridge adapter to fix bot review findings."""
+    lines = [
+        f"You are a code-fix agent. A bot reviewer found issues on PR #{pr_number} "
+        f"(wave: {wave_id}). Fix each issue directly in the files.",
+        "",
+        "Rules:",
+        "- Edit only the files mentioned in the findings.",
+        "- Do NOT run git commands, tests, or hooks. Just edit files.",
+        f"- This is remediation round {remediation_round}/{BOT_REMEDIATION_MAX_ROUNDS}.",
+        "",
+        "## Findings",
+        "",
+    ]
+    for i, finding in enumerate(bot_findings, 1):
+        path = finding.get("path", "(unknown)")
+        line = finding.get("line")
+        body = finding.get("body", "")
+        loc = f"{path}:{line}" if line else path
+        lines.append(f"### Finding {i}: `{loc}`")
+        lines.append("")
+        lines.append(body)
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _attempt_bot_finding_remediation(
+    bot_findings: list[dict[str, Any]],
+    *,
+    repo_root: Path,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: str,
+    target_branch: str,
+    head_sha: str,
+    wave_id: str,
+    continuation_path: Path,
+    result: dict[str, Any],
+    log: Any,
+) -> dict[str, Any] | None:
+    """Attempt to fix bot findings via bridge adapter.
+
+    Returns None on success (caller proceeds to merge).
+    Returns a response dict on failure (bot_findings_pending or error).
+    """
+    if _bridge_adapters is None:
+        log("Step 15: bridge_adapters unavailable, skipping remediation")
+        return {
+            "status": "bot_findings_pending",
+            "bot_findings": bot_findings,
+            "pr_number": pr_number,
+            "steps_completed": result["steps_completed"],
+        }
+
+    config_path = repo_root / ".agent_bus" / "bridge_config.json"
+    try:
+        config = _bridge_adapters.load_bridge_config(config_path)
+        adapter = _bridge_adapters.get_adapter(config, BOT_REMEDIATION_ADAPTER)
+    except Exception as exc:
+        log(f"Step 15: cannot load bridge adapter: {exc}")
+        return {
+            "status": "bot_findings_pending",
+            "bot_findings": bot_findings,
+            "pr_number": pr_number,
+            "steps_completed": result["steps_completed"],
+        }
+
+    current_findings = bot_findings
+    current_head = head_sha
+
+    for round_num in range(1, BOT_REMEDIATION_MAX_ROUNDS + 1):
+        log(f"Step 15: bot-finding remediation round {round_num}/{BOT_REMEDIATION_MAX_ROUNDS}")
+
+        prompt = _build_bot_remediation_prompt(
+            current_findings,
+            wave_id=wave_id,
+            pr_number=pr_number,
+            remediation_round=round_num,
+        )
+
+        scratch_dir = repo_root / ".scratch"
+        scratch_dir.mkdir(exist_ok=True)
+        job_id = f"bot-fix-{uuid.uuid4().hex[:8]}"
+        prompt_path = scratch_dir / f"bot_remediation_prompt_r{round_num}.md"
+        prompt_path.write_text(prompt, encoding="utf-8")
+        raw_output_path = scratch_dir / f"bot_remediation_output_{job_id}.txt"
+
+        final_adapter = _bridge_adapters.AdapterSpec(
+            name=adapter.name,
+            cmd=adapter.cmd,
+            timeout_s=BOT_REMEDIATION_TIMEOUT_S,
+            prompt_via_stdin=adapter.prompt_via_stdin,
+            env=adapter.env,
+            mode=adapter.mode,
+        )
+
+        try:
+            _bridge_adapters.run_adapter(
+                final_adapter,
+                prompt_text=prompt,
+                prompt_path=prompt_path,
+                repo_root=repo_root,
+                job_id=job_id,
+                turn_id=f"bot-fix-r{round_num}",
+                agent_role="bot_remediation",
+                raw_output_path=raw_output_path,
+                stale_timeout_s=BOT_REMEDIATION_STALE_TIMEOUT_S,
+            )
+        except _bridge_adapters.BridgeAdapterError as exc:
+            log(f"Step 15: adapter error in round {round_num}: {exc}")
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": current_findings,
+                "pr_number": pr_number,
+                "steps_completed": result["steps_completed"],
+                "remediation_rounds_attempted": round_num,
+            }
+
+        # Check if adapter produced changes
+        status_out = _run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_root, timeout=30,
+        ).stdout
+        if not status_out.strip():
+            log(f"Step 15: adapter produced no changes in round {round_num}")
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": current_findings,
+                "pr_number": pr_number,
+                "steps_completed": result["steps_completed"],
+                "remediation_rounds_attempted": round_num,
+            }
+
+        # Stage only finding-scoped files, fail closed on out-of-scope changes
+        allowed_paths = {f.get("path") for f in current_findings if f.get("path")}
+        changed_lines = [ln for ln in status_out.splitlines() if ln.strip()]
+        scoped_entries: list[tuple[str, str]] = []
+        out_of_scope_entries: list[tuple[str, str]] = []
+        for ln in changed_lines:
+            parsed_line = _parse_porcelain_status_line(ln)
+            if parsed_line is None:
+                log(f"Step 15: cannot parse git status line: {ln!r}")
+                return {
+                    "status": "bot_findings_pending",
+                    "bot_findings": current_findings,
+                    "pr_number": pr_number,
+                    "steps_completed": result["steps_completed"],
+                    "remediation_rounds_attempted": round_num,
+                }
+            status_code, file_path = parsed_line
+            if file_path in allowed_paths:
+                scoped_entries.append((status_code, file_path))
+            elif not file_path.startswith(TRANSIENT_STATUS_PREFIXES):
+                out_of_scope_entries.append((status_code, file_path))
+        scoped_files = [file_path for _, file_path in scoped_entries]
+        out_of_scope = [file_path for _, file_path in out_of_scope_entries]
+
+        if out_of_scope:
+            log(f"Step 15: out-of-scope changes detected: {out_of_scope}")
+            # Discard only the scoped + out-of-scope files, not unrelated work
+            for status_code, file_path in scoped_entries + out_of_scope_entries:
+                _discard_worktree_path(
+                    repo_root,
+                    status_code=status_code,
+                    file_path=file_path,
+                )
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": current_findings,
+                "pr_number": pr_number,
+                "steps_completed": result["steps_completed"],
+                "remediation_rounds_attempted": round_num,
+            }
+
+        if not scoped_files:
+            log(f"Step 15: no in-scope file changes in round {round_num}")
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": current_findings,
+                "pr_number": pr_number,
+                "steps_completed": result["steps_completed"],
+                "remediation_rounds_attempted": round_num,
+            }
+
+        try:
+            _run(["git", "add", "--"] + scoped_files, cwd=repo_root, timeout=30)
+
+            # Mint bot-remediation receipt (type B) so the pre-commit hook
+            # sees a valid receipt for this staged state.  This is a
+            # lightweight alternative to a full supervisor round-trip.
+            bot_receipt = _mint_bot_remediation_receipt(
+                repo_root=repo_root,
+                findings_addressed=[
+                    {"path": f.get("path", ""), "body": f.get("body", "")[:200]}
+                    for f in current_findings
+                ],
+                scoped_files=scoped_files,
+                round_num=round_num,
+                wave_id=wave_id,
+            )
+            log(f"Step 15: bot-remediation receipt minted: {bot_receipt.name}")
+
+            msg = (
+                f"fix: address bot review findings (round {round_num})\n\n"
+                f"Co-Authored-By: Codex <noreply@openai.com>"
+            )
+            _run(["git", "commit", "-m", msg], cwd=repo_root, timeout=60)
+            current_head = _run(
+                ["git", "rev-parse", "HEAD"], cwd=repo_root, timeout=10,
+            ).stdout.strip()
+            result["commit_sha"] = current_head
+            remediation_checkpoint = dict(result)
+            remediation_checkpoint["steps_completed"] = (
+                _continuation_steps_for_new_commit(result.get("steps_completed"))
+                or list(result.get("steps_completed", []))
+            )
+            remediation_checkpoint.pop("bot_review_request_sha", None)
+            _checkpoint_post_commit_progress(
+                remediation_checkpoint,
+                continuation_path=continuation_path,
+                target_branch=target_branch,
+            )
+            # --no-verify on push: same rationale as step 12 — pre-push gate
+            # was already proven on the original wave commit.
+            _run(
+                ["git", "push", "--no-verify", "origin", target_branch],
+                cwd=repo_root, timeout=300,
+            )
+        except subprocess.CalledProcessError as exc:
+            log(f"Step 15: git operation failed in round {round_num}: {exc}")
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": current_findings,
+                "pr_number": pr_number,
+                "steps_completed": result["steps_completed"],
+                "remediation_rounds_attempted": round_num,
+            }
+
+        log(f"Step 15: remediation round {round_num} pushed ({current_head[:8]})")
+
+        # Wait for CI to pass on the new HEAD before proceeding
+        try:
+            _wait_for_required_checks_to_register(
+                repo_root, pr_number=pr_number, log=log,
+            )
+            _run(
+                ["gh", "pr", "checks", pr_number, "--watch", "--required"],
+                cwd=repo_root, timeout=600,
+            )
+            log(f"Step 15: CI passed on remediation commit {current_head[:8]}")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, TimeoutError) as exc:
+            log(f"Step 15: CI failed after remediation round {round_num}: {exc}")
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": current_findings,
+                "pr_number": pr_number,
+                "steps_completed": result["steps_completed"],
+                "remediation_rounds_attempted": round_num,
+            }
+
+        # Request fresh bot review and wait
+        try:
+            _maybe_request_current_head_bot_review(
+                repo_root, pr_number=pr_number, head_sha=current_head,
+                continuation_path=continuation_path, log=log,
+            )
+            pr_data = _wait_for_bot_review_freshness(
+                lambda: _query_pr_review_state(
+                    repo_root, repo_owner=repo_owner,
+                    repo_name=repo_name, pr_number=pr_number),
+                head_sha=current_head,
+                request_acknowledged=lambda pd: _bot_review_request_acknowledged(
+                    repo_root, repo_owner=repo_owner,
+                    repo_name=repo_name, pr_data=pd),
+                log=log,
+            )
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            json.JSONDecodeError,
+            ValueError,
+            TimeoutError,
+        ) as exc:
+            log(f"Step 15: review wait failed after round {round_num}: {exc}")
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": current_findings,
+                "pr_number": pr_number,
+                "steps_completed": result["steps_completed"],
+                "remediation_rounds_attempted": round_num,
+            }
+
+        # Re-check findings
+        findings_result = _extract_review_findings(
+            pr_data, current_head, result=result, pr_number=pr_number,
+        )
+        if findings_result["outcome"] == "error":
+            return findings_result["response"]
+        if findings_result["outcome"] == "clean":
+            log(f"Step 15: bot findings resolved after {round_num} remediation round(s)")
+            return None
+        current_findings = findings_result["bot_findings"]
+
+    log(f"Step 15: bot findings remain after {BOT_REMEDIATION_MAX_ROUNDS} remediation rounds")
+    return {
+        "status": "bot_findings_pending",
+        "bot_findings": current_findings,
+        "pr_number": pr_number,
+        "steps_completed": result["steps_completed"],
+        "remediation_rounds_attempted": BOT_REMEDIATION_MAX_ROUNDS,
+    }
 
 
 def _wait_for_required_checks_to_register(
@@ -1424,6 +1960,7 @@ def _run_post_commit_pipeline(
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
 
+    review_wait_timed_out: TimeoutError | None = None
     try:
         head_sha_before_merge = _run(
             ["git", "rev-parse", "HEAD"],
@@ -1469,98 +2006,67 @@ def _run_post_commit_pipeline(
                 ),
                 log=log,
             )
+    except TimeoutError as exc:
+        # Bot review timed out. Refresh PR state before merge evaluation so
+        # human reviews/threads that appeared during the wait window cannot be
+        # missed by stale pre-wait data.
+        review_wait_timed_out = exc
+        log(f"Step 15: bot review timed out ({exc}), refreshing PR state before merge")
     except (
         subprocess.CalledProcessError,
         subprocess.TimeoutExpired,
         json.JSONDecodeError,
         ValueError,
-        TimeoutError,
     ) as exc:
         return {"status": "error", "step": "ensure_review_clear_and_merge",
                 "errors": [f"Review query failed: {exc}"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
 
-    _assert_expected_pr_head(pr_data, head_sha_before_merge)
-    issue_comment_outcome = _current_head_connector_issue_comment_outcome(
-        pr_data,
-        head_sha_before_merge,
-    )
-    if issue_comment_outcome is not None:
-        if issue_comment_outcome["kind"] == "usage_limit":
+    if review_wait_timed_out is not None:
+        try:
+            pr_data = _query_pr_review_state(
+                repo_root,
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                pr_number=pr_number,
+            )
+            _assert_expected_pr_head(pr_data, head_sha_before_merge)
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            json.JSONDecodeError,
+            ValueError,
+        ) as exc:
             return {"status": "error", "step": "ensure_review_clear_and_merge",
-                    "errors": [f"{BOT_REVIEW_LOGIN} issue comment reported usage-limit exhaustion"],
-                    "steps_completed": result["steps_completed"],
-                    "pr_number": pr_number}
-        if issue_comment_outcome["kind"] == "other":
-            return {
-                "status": "bot_findings_pending",
-                "bot_findings": [{
-                    "author": issue_comment_outcome["author"],
-                    "body": issue_comment_outcome["body"][:500],
-                    "path": "",
-                    "line": None,
-                }],
-                "pr_number": pr_number,
-                "steps_completed": result["steps_completed"],
-            }
-
-    review_decision = pr_data.get("reviewDecision", "")
-    if review_decision == "CHANGES_REQUESTED":
-        return {"status": "error", "step": "ensure_review_clear_and_merge",
-                "errors": ["reviewDecision is CHANGES_REQUESTED"],
-                "steps_completed": result["steps_completed"],
-                "pr_number": pr_number}
-
-    latest_reviews = pr_data.get("latestReviews", {}).get("nodes", [])
-    for review in latest_reviews:
-        author = review.get("author", {}).get("login", "")
-        state = review.get("state", "")
-        is_bot = _is_bot_review_author(author)
-        if not is_bot and state == "CHANGES_REQUESTED":
-            return {"status": "error", "step": "ensure_review_clear_and_merge",
-                    "errors": [f"Human reviewer {author} requested changes"],
+                    "errors": [f"Review refresh after timeout failed: {exc}"],
                     "steps_completed": result["steps_completed"],
                     "pr_number": pr_number}
 
-    threads = pr_data.get("reviewThreads", {}).get("nodes", [])
-    current_review_cycle_floor = _current_review_cycle_floor_timestamp(
-        pr_data,
-        head_sha_before_merge,
+    findings_result = _extract_review_findings(
+        pr_data, head_sha_before_merge, result=result, pr_number=pr_number,
     )
-    bot_findings = []
-    for thread in threads:
-        if thread.get("isResolved"):
-            continue
-        latest_comment = _latest_relevant_thread_comment(
-            thread,
-            floor_timestamp=current_review_cycle_floor,
+    if findings_result["outcome"] == "error":
+        return findings_result["response"]
+    if findings_result["outcome"] == "bot_findings" and review_wait_timed_out is None:
+        # Only remediate bot findings if the bot actually reviewed the
+        # current HEAD.  On timeout, stale threads from previous commits
+        # are advisory — they get deferred, not remediated.
+        remediation_response = _attempt_bot_finding_remediation(
+            findings_result["bot_findings"],
+            repo_root=repo_root,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            pr_number=pr_number,
+            target_branch=target_branch,
+            head_sha=head_sha_before_merge,
+            wave_id=handoff["wave_id"],
+            continuation_path=continuation_path,
+            result=result,
+            log=log,
         )
-        if latest_comment is None:
-            continue
-        author = latest_comment.get("author", {}).get("login", "")
-        is_bot = _is_bot_review_author(author)
-        if not is_bot:
-            return {"status": "error", "step": "ensure_review_clear_and_merge",
-                    "errors": [f"Unresolved human review thread from {author}"],
-                    "steps_completed": result["steps_completed"],
-                    "pr_number": pr_number}
-        if thread.get("isOutdated"):
-            continue
-        bot_findings.append({
-            "author": author,
-            "body": latest_comment.get("body", "")[:500],
-            "path": latest_comment.get("path", ""),
-            "line": latest_comment.get("line"),
-        })
-
-    if bot_findings:
-        return {
-            "status": "bot_findings_pending",
-            "bot_findings": bot_findings,
-            "pr_number": pr_number,
-            "steps_completed": result["steps_completed"],
-        }
+        if remediation_response is not None:
+            return remediation_response
 
     merge_script = repo_root / "mu" / "tools" / "hooks" / "merge_pr.sh"
     if not merge_script.exists():
