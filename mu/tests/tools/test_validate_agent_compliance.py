@@ -1059,21 +1059,20 @@ class TestHookExecutionAgainstMalformedPayloads:
             assert decision["decision"] == "block", \
                 f"Empty payload should block, got: {decision}"
 
-    def test_valid_agent_type_does_not_block(self, hook_path):
-        """Known review agent_type without transcript should exit cleanly (no block)."""
+    def test_valid_agent_type_missing_transcript_blocks(self, hook_path):
+        """Known review agent_type with empty transcript should block (fail-closed)."""
         import json
-        # verifier is a known review agent; with no transcript path, hook exits 0 silently
+        # verifier is a known review agent; with no transcript path, hook now blocks
         payload = json.dumps({
             "agent_type": "verifier",
             "agent_transcript_path": "",
         })
         stdout, exit_code = self._run_hook(hook_path, payload)
         assert exit_code == 0
-        # Should NOT produce a block decision
-        if stdout:
-            decision = json.loads(stdout)
-            assert decision.get("decision") != "block", \
-                f"Valid agent_type should not block, got: {decision}"
+        assert stdout, "Hook should emit block JSON for missing transcript"
+        decision = json.loads(stdout)
+        assert decision.get("decision") == "block", \
+            f"Missing transcript should block (fail-closed), got: {decision}"
 
 
 class TestImpreciseCitationClassification:
