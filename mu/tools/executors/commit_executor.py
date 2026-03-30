@@ -217,9 +217,14 @@ def _write_continuation_record(
     if pr_number:
         payload["pr_number"] = pr_number
     preserved_bot_review_request_sha = existing_payload.get("bot_review_request_sha")
+    preserved_commit_sha = existing_payload.get("commit_sha")
     if bot_review_request_sha:
         payload["bot_review_request_sha"] = bot_review_request_sha
-    elif isinstance(preserved_bot_review_request_sha, str) and preserved_bot_review_request_sha:
+    elif (
+        preserved_commit_sha == commit_sha
+        and isinstance(preserved_bot_review_request_sha, str)
+        and preserved_bot_review_request_sha
+    ):
         payload["bot_review_request_sha"] = preserved_bot_review_request_sha
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
@@ -331,6 +336,43 @@ def _checkpoint_post_commit_progress(
         steps_completed=steps_completed,
         pr_number=pr_number,
         bot_review_request_sha=bot_review_request_sha if isinstance(bot_review_request_sha, str) else None,
+    )
+
+
+def _parse_porcelain_status_line(line: str) -> tuple[str, str] | None:
+    raw_line = line.rstrip("\n")
+    if not raw_line.strip():
+        return None
+    if len(raw_line) < 4:
+        return None
+    status_code = raw_line[:2]
+    path_text = raw_line[3:]
+    if " -> " in path_text:
+        path_text = path_text.split(" -> ", 1)[1]
+    if not path_text:
+        return None
+    return status_code, path_text
+
+
+def _discard_worktree_path(
+    repo_root: Path,
+    *,
+    status_code: str,
+    file_path: str,
+) -> None:
+    if status_code == "??":
+        _run(
+            ["git", "clean", "-fd", "--", file_path],
+            cwd=repo_root,
+            timeout=10,
+            check=False,
+        )
+        return
+    _run(
+        ["git", "checkout", "--", file_path],
+        cwd=repo_root,
+        timeout=10,
+        check=False,
     )
 
 
@@ -1122,8 +1164,8 @@ def _attempt_bot_finding_remediation(
         status_out = _run(
             ["git", "status", "--porcelain"],
             cwd=repo_root, timeout=30,
-        ).stdout.strip()
-        if not status_out:
+        ).stdout
+        if not status_out.strip():
             log(f"Step 15: adapter produced no changes in round {round_num}")
             return {
                 "status": "bot_findings_pending",
@@ -1135,26 +1177,37 @@ def _attempt_bot_finding_remediation(
 
         # Stage only finding-scoped files, fail closed on out-of-scope changes
         allowed_paths = {f.get("path") for f in current_findings if f.get("path")}
-        changed_lines = [
-            ln.strip() for ln in status_out.splitlines() if ln.strip()
-        ]
-        scoped_files: list[str] = []
-        out_of_scope: list[str] = []
+        changed_lines = [ln for ln in status_out.splitlines() if ln.strip()]
+        scoped_entries: list[tuple[str, str]] = []
+        out_of_scope_entries: list[tuple[str, str]] = []
         for ln in changed_lines:
-            # git status --porcelain: first 2 chars are status, then space, then path
-            file_path = ln[3:] if len(ln) > 3 else ln
-            if " -> " in file_path:
-                file_path = file_path.split(" -> ", 1)[1]
+            parsed_line = _parse_porcelain_status_line(ln)
+            if parsed_line is None:
+                log(f"Step 15: cannot parse git status line: {ln!r}")
+                return {
+                    "status": "bot_findings_pending",
+                    "bot_findings": current_findings,
+                    "pr_number": pr_number,
+                    "steps_completed": result["steps_completed"],
+                    "remediation_rounds_attempted": round_num,
+                }
+            status_code, file_path = parsed_line
             if file_path in allowed_paths:
-                scoped_files.append(file_path)
+                scoped_entries.append((status_code, file_path))
             elif not file_path.startswith(TRANSIENT_STATUS_PREFIXES):
-                out_of_scope.append(file_path)
+                out_of_scope_entries.append((status_code, file_path))
+        scoped_files = [file_path for _, file_path in scoped_entries]
+        out_of_scope = [file_path for _, file_path in out_of_scope_entries]
 
         if out_of_scope:
             log(f"Step 15: out-of-scope changes detected: {out_of_scope}")
             # Discard only the scoped + out-of-scope files, not unrelated work
-            for f in scoped_files + out_of_scope:
-                _run(["git", "checkout", "--", f], cwd=repo_root, timeout=10, check=False)
+            for status_code, file_path in scoped_entries + out_of_scope_entries:
+                _discard_worktree_path(
+                    repo_root,
+                    status_code=status_code,
+                    file_path=file_path,
+                )
             return {
                 "status": "bot_findings_pending",
                 "bot_findings": current_findings,
@@ -1199,6 +1252,12 @@ def _attempt_bot_finding_remediation(
             current_head = _run(
                 ["git", "rev-parse", "HEAD"], cwd=repo_root, timeout=10,
             ).stdout.strip()
+            result["commit_sha"] = current_head
+            _checkpoint_post_commit_progress(
+                result,
+                continuation_path=continuation_path,
+                target_branch=target_branch,
+            )
             # --no-verify on push: same rationale as step 12 — pre-push gate
             # was already proven on the original wave commit.
             _run(
