@@ -44,7 +44,7 @@ while true; do
     fi
 
     # Bot comments (last 3)
-    BOT_COMMENTS=$(gh pr view "$PR" --json comments --jq '[.comments[] | select(.author.login == "github-actions" or .author.login == "bot" or (.author.login | test("\\[bot\\]$"))) | .author.login + ": " + (.body | split("\n")[0])[:80]] | last(3) | .[]' 2>/dev/null) || BOT_COMMENTS=""
+    BOT_COMMENTS=$(gh pr view "$PR" --json comments --jq '[.comments[] | select(.author.login == "github-actions" or .author.login == "bot" or (.author.login | test("\\[bot\\]$"))) | .author.login + ": " + (.body | split("\n")[0])[:80]] | last(3) | .[]' 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g') || BOT_COMMENTS=""
     if [ -n "$BOT_COMMENTS" ]; then
       echo ""
       echo "Bot comments:"

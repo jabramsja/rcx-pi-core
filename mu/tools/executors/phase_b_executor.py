@@ -1401,7 +1401,15 @@ def _stage_files(repo_root: Path, files: list[str]) -> bool:
         )
         return True
     except subprocess.CalledProcessError:
-        return False
+        # Retry with -f for tracked-but-gitignored files (e.g. .claude/hooks/)
+        try:
+            subprocess.run(
+                ["git", "add", "-f", "--", *files],
+                cwd=repo_root, capture_output=True, text=True, check=True,
+            )
+            return True
+        except subprocess.CalledProcessError:
+            return False
 
 
 def _agent_review_scope_fingerprint(repo_root: Path, files: list[str], *, depth: str) -> str:

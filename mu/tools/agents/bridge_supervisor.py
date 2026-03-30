@@ -86,7 +86,7 @@ AUTHORIZED_DECISIONS = frozenset(
 # This keeps reviewer/reader turns from sitting silently for 20 minutes when no
 # outer executor watchdog is present.
 BRIDGE_MAX_TURN_WALL_TIME_S = 300.0
-BRIDGE_ZERO_OUTPUT_TIMEOUT_S = 240.0
+BRIDGE_ZERO_OUTPUT_TIMEOUT_S = 600.0
 
 
 def _resolve_timeout_override(name: str, default: float) -> float:
