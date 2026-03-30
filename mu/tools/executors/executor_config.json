@@ -11,7 +11,7 @@
     "phase_b": "codex"
   },
   "bridge_turn_timeouts": {
-    "phase_a": 300,
+    "phase_a": 600,
     "phase_b": 900
   },
   "model_overrides": {
