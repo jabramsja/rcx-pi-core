@@ -1617,18 +1617,21 @@ class TestDispatcherPlanNameSanitization:
 
         captured: dict[str, list[str]] = {}
 
+        calls = []
         def fake_run(args, **kwargs):
-            captured["args"] = args
-            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            calls.append(args)
+            if len(calls) == 1:
+                return subprocess.CompletedProcess(args, 0, stdout="[phase-a] Status: converged\n[phase-a] Plan: test_plan.md\n", stderr="")
+            return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
 
         monkeypatch.setattr(dispatch_mod, "validate_routing_record_freshness", lambda *a, **k: (True, "fresh"))
         monkeypatch.setattr(subprocess, "run", fake_run)
 
-        result = dispatch_mod.dispatch(record, repo_root=tmp_path, skip_freshness=True)
+        dispatch_mod.dispatch(record, repo_root=tmp_path, skip_freshness=True)
 
-        assert result["status"] == "success"
-        assert "--plan-name" in captured["args"]
-        plan_name = captured["args"][captured["args"].index("--plan-name") + 1]
+        phase_a_args = calls[0]
+        assert "--plan-name" in phase_a_args
+        plan_name = phase_a_args[phase_a_args.index("--plan-name") + 1]
         assert ".." not in plan_name
         assert "/" not in plan_name
         assert "\\" not in plan_name

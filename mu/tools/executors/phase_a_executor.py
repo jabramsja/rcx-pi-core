@@ -1035,16 +1035,9 @@ def run_phase_a(
         return result
     log(f"Phase-A-Lock: LOCKED in {rel_plan_path}")
 
-    # Checkpoint commit: stage and commit the locked plan so Phase B can see it
-    # in git-tracked state. This is a lightweight commit — no PR, no CI wait.
-    # The full commit_executor pipeline runs after Phase B.
-    checkpoint = checkpoint_commit_plan(repo_root, rel_plan_path, plan_name, verbose=verbose)
-    if checkpoint.get("error"):
-        result["status"] = "error"
-        result["error"] = checkpoint["error"]
-        return result
-    if checkpoint.get("sha"):
-        result["checkpoint_commit_sha"] = checkpoint["sha"]
+    # No checkpoint commit — the locked plan is a working artifact that
+    # Phase B consumes directly.  It gets committed as part of the
+    # implementation commit after Phase B converges.
 
     return result
 
