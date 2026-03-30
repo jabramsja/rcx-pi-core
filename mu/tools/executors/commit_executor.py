@@ -290,7 +290,19 @@ def _load_post_commit_continuation(
     if branch_name != target_branch:
         return None
     if head_sha != commit_sha:
-        return None
+        # HEAD may have moved forward from remediation commits.
+        # Accept if commit_sha is an ancestor of current HEAD.
+        try:
+            merge_base = _run(
+                ["git", "merge-base", "--is-ancestor", commit_sha, head_sha],
+                cwd=repo_root, check=False,
+            )
+            if merge_base.returncode != 0:
+                return None
+            # Update commit_sha to current HEAD for downstream use
+            payload["commit_sha"] = head_sha
+        except subprocess.CalledProcessError:
+            return None
     non_transient_status = []
     for line in status_output:
         path_text = line[3:] if len(line) > 3 else line
