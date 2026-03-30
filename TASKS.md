@@ -461,6 +461,7 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   **Sequence:** Phase A: code/runtime structural gap sweep → Phase B: host/boundary unification → Phase C: structural reduction into Mu → Phase D: interior host-semantics sweep.
   **Current phase:** Phase A — find and fix real Mu/Stage0/runtime structure gaps, behavioral errors, proof gaps, hidden host-side drift.
   **Lane:** structural (post-control-surface).
+  **Tracked packet:** `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
 
 - ~~**[W3D-B]**~~ **CLOSED** (2026-03-17, moved to Ra). classify_mu VM unification — migrated off projection_runner onto stage0_vm_run_bounded.
 - ~~**[W3E]**~~ **CLOSED** (2026-03-17, moved to Ra). subst_mu bounded-helper fold-in onto stage0_vm_run_bounded (PR #624).
