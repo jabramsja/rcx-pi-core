@@ -290,19 +290,10 @@ def _load_post_commit_continuation(
     if branch_name != target_branch:
         return None
     if head_sha != commit_sha:
-        # HEAD may have moved forward from remediation commits.
-        # Accept if commit_sha is an ancestor of current HEAD.
-        try:
-            merge_base = _run(
-                ["git", "merge-base", "--is-ancestor", commit_sha, head_sha],
-                cwd=repo_root, check=False,
-            )
-            if merge_base.returncode != 0:
-                return None
-            # Update commit_sha to current HEAD for downstream use
-            payload["commit_sha"] = head_sha
-        except subprocess.CalledProcessError:
-            return None
+        # Continuation authority is bound to the exact recorded local commit.
+        # Any descendant HEAD must rerun the earlier receipt/commit-prep flow
+        # instead of inheriting the original continuation.
+        return None
     non_transient_status = []
     for line in status_output:
         path_text = line[3:] if len(line) > 3 else line
@@ -1961,6 +1952,7 @@ def _run_post_commit_pipeline(
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
 
+    review_wait_timed_out: TimeoutError | None = None
     try:
         head_sha_before_merge = _run(
             ["git", "rev-parse", "HEAD"],
@@ -2007,9 +1999,11 @@ def _run_post_commit_pipeline(
                 log=log,
             )
     except TimeoutError as exc:
-        # Bot review timed out — proceed to merge. Bot findings that
-        # arrive post-merge become deferred items for the next wave.
-        log(f"Step 15: bot review timed out ({exc}), proceeding to merge")
+        # Bot review timed out. Refresh PR state before merge evaluation so
+        # human reviews/threads that appeared during the wait window cannot be
+        # missed by stale pre-wait data.
+        review_wait_timed_out = exc
+        log(f"Step 15: bot review timed out ({exc}), refreshing PR state before merge")
     except (
         subprocess.CalledProcessError,
         subprocess.TimeoutExpired,
@@ -2020,6 +2014,26 @@ def _run_post_commit_pipeline(
                 "errors": [f"Review query failed: {exc}"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
+
+    if review_wait_timed_out is not None:
+        try:
+            pr_data = _query_pr_review_state(
+                repo_root,
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                pr_number=pr_number,
+            )
+            _assert_expected_pr_head(pr_data, head_sha_before_merge)
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            json.JSONDecodeError,
+            ValueError,
+        ) as exc:
+            return {"status": "error", "step": "ensure_review_clear_and_merge",
+                    "errors": [f"Review refresh after timeout failed: {exc}"],
+                    "steps_completed": result["steps_completed"],
+                    "pr_number": pr_number}
 
     findings_result = _extract_review_findings(
         pr_data, head_sha_before_merge, result=result, pr_number=pr_number,
