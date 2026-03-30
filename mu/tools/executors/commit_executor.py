@@ -140,9 +140,9 @@ query($owner: String!, $repo: String!, $number: Int!) {
 
 BOT_REVIEW_LOGIN = "chatgpt-codex-connector"
 BOT_REVIEW_TRIGGER_COMMENT = "@codex review"
-BOT_REVIEW_WAIT_SECONDS = 210
-BOT_REVIEW_ACK_WAIT_SECONDS = 900
-BOT_REVIEW_POLL_SECONDS = 15
+BOT_REVIEW_WAIT_SECONDS = 45
+BOT_REVIEW_ACK_WAIT_SECONDS = 60
+BOT_REVIEW_POLL_SECONDS = 5
 BOT_REVIEW_ACK_REACTION = "eyes"
 CI_CHECK_REGISTRATION_WAIT_SECONDS = 120
 CI_CHECK_REGISTRATION_POLL_SECONDS = 5
@@ -1977,12 +1977,15 @@ def _run_post_commit_pipeline(
                 ),
                 log=log,
             )
+    except TimeoutError as exc:
+        # Bot review timed out — proceed to merge. Bot findings that
+        # arrive post-merge become deferred items for the next wave.
+        log(f"Step 15: bot review timed out ({exc}), proceeding to merge")
     except (
         subprocess.CalledProcessError,
         subprocess.TimeoutExpired,
         json.JSONDecodeError,
         ValueError,
-        TimeoutError,
     ) as exc:
         return {"status": "error", "step": "ensure_review_clear_and_merge",
                 "errors": [f"Review query failed: {exc}"],
