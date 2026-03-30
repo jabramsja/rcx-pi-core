@@ -21,6 +21,8 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent  # mu/tools/executors -> repo root
 AGENTS_DIR = SCRIPT_DIR.parent / "agents"
+META_BUS_DIR = ".agent_bus/meta"
+POST_MERGE_PACKAGE_NAME = "post_merge_package.json"
 
 # Import canonical load_routing_record from shared module
 try:
@@ -323,6 +325,80 @@ def _validate_phase_b_handoff_identity(handoff_path: Path, record: dict[str, Any
     return True, "ok"
 
 
+def _auto_refresh_routing(
+    repo_root: Path,
+    *,
+    verbose: bool = False,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Re-run the post-merge supervisor to refresh a stale routing record.
+
+    Looks for the canonical post-merge package at .agent_bus/meta/post_merge_package.json.
+    Returns (success, refreshed_record) — record is None on failure.
+    """
+    package_path = repo_root / META_BUS_DIR / POST_MERGE_PACKAGE_NAME
+    if not package_path.exists():
+        if verbose:
+            print(f"[dispatch] No post-merge package at {package_path} — cannot auto-refresh")
+        return False, None
+
+    supervisor_script = AGENTS_DIR / "meta_bridge_supervisor.py"
+    if not supervisor_script.exists():
+        if verbose:
+            print(f"[dispatch] Supervisor script not found: {supervisor_script}")
+        return False, None
+
+    cmd = [
+        sys.executable,
+        str(supervisor_script),
+        "--mode", "post-merge",
+        "--package", str(package_path),
+        "--json",
+    ]
+    if verbose:
+        cmd.append("--verbose")
+        print(f"[dispatch] Running: {' '.join(cmd)}")
+
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        if verbose:
+            print("[dispatch] Post-merge supervisor timed out during auto-refresh")
+        return False, None
+
+    if result.returncode != 0:
+        if verbose:
+            print(f"[dispatch] Post-merge supervisor exited {result.returncode}")
+            if result.stderr:
+                print(f"[dispatch] stderr: {result.stderr[:500]}")
+        return False, None
+
+    # Reload the routing record
+    try:
+        refreshed = _common_load_routing_record(repo_root)
+    except ExecutorCommonError as exc:
+        if verbose:
+            print(f"[dispatch] Failed to reload routing record after refresh: {exc}")
+        return False, None
+
+    # Verify freshness of the refreshed record
+    fresh, msg = validate_routing_record_freshness(refreshed, repo_root)
+    if not fresh:
+        if verbose:
+            print(f"[dispatch] Refreshed record still stale: {msg}")
+        return False, None
+
+    if verbose:
+        print(f"[dispatch] Auto-refresh succeeded: decision={refreshed.get('decision')}")
+    return True, refreshed
+
+
 def dispatch(
     record: dict[str, Any],
     *,
@@ -377,16 +453,34 @@ def dispatch(
                        f"Manual execution required.",
         }
 
-    # Validate freshness
+    # Validate freshness — auto-refresh via post-merge supervisor if stale
     if not skip_freshness:
         fresh, msg = validate_routing_record_freshness(record, repo)
         if not fresh:
-            return {
-                "status": "stale",
-                "decision": decision,
-                "executor": executor_name,
-                "message": f"Routing record is stale: {msg}. Re-run post-merge supervisor.",
-            }
+            if verbose:
+                print(f"[dispatch] Routing record stale: {msg}")
+                print("[dispatch] Auto-refreshing via post-merge supervisor...")
+            refreshed, refresh_record = _auto_refresh_routing(repo, verbose=verbose)
+            if not refreshed or refresh_record is None:
+                return {
+                    "status": "stale",
+                    "decision": decision,
+                    "executor": executor_name,
+                    "message": f"Routing record is stale: {msg}. "
+                               f"Auto-refresh failed — re-run post-merge supervisor manually.",
+                }
+            # Use the refreshed record for the rest of dispatch
+            record = refresh_record
+            decision = record.get("decision", "")
+            executor_name = resolve_executor(decision)
+            if executor_name is None:
+                return {
+                    "status": "error",
+                    "decision": decision,
+                    "message": f"Refreshed routing decision unknown: {decision}.",
+                }
+            if verbose:
+                print(f"[dispatch] Refreshed: decision={decision}, executor={executor_name}")
 
     if verbose:
         print(f"[dispatch] Decision: {decision} → {executor_name}")
