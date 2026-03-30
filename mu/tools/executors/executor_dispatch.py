@@ -90,6 +90,10 @@ class DispatchError(RuntimeError):
     """Raised when dispatch cannot proceed."""
 
 
+class RoutingRecordMissing(DispatchError):
+    """Raised when the routing record file does not exist (not corrupted)."""
+
+
 class ControlSurfaceError(RuntimeError):
     """Raised when a modular surface invocation is malformed."""
 
@@ -114,7 +118,10 @@ def load_routing_record(repo_root: Path) -> dict[str, Any]:
     try:
         return _common_load_routing_record(repo_root)
     except ExecutorCommonError as exc:
-        raise DispatchError(str(exc)) from exc
+        msg = str(exc)
+        if "not found" in msg:
+            raise RoutingRecordMissing(msg) from exc
+        raise DispatchError(msg) from exc
 
 
 def validate_routing_record_freshness(record: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
@@ -885,7 +892,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             try:
                 record = load_routing_record(repo_root)
-            except DispatchError:
+            except RoutingRecordMissing:
                 # No routing record — try to create one via post-merge supervisor
                 if args.verbose:
                     print("[dispatch] No routing record — running post-merge supervisor...")
