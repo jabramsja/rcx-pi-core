@@ -233,11 +233,14 @@ def _compute_staged_sha(repo):
 def _commit_post_commit_source() -> str:
     """Return combined source for the main pipeline and extracted post-commit helper."""
     import inspect
-    return (
-        inspect.getsource(commit_mod.run_commit_pipeline)
-        + "\n"
-        + inspect.getsource(commit_mod._run_post_commit_pipeline)  # ANTICHEAT_OK: testing extracted post-commit helper source
-    )
+    parts = [
+        inspect.getsource(commit_mod.run_commit_pipeline),
+        inspect.getsource(commit_mod._run_post_commit_pipeline),  # ANTICHEAT_OK: testing extracted post-commit helper source
+    ]
+    for helper in ("_extract_review_findings", "_attempt_bot_finding_remediation"):
+        if hasattr(commit_mod, helper):
+            parts.append(inspect.getsource(getattr(commit_mod, helper)))  # ANTICHEAT_OK: testing refactored review/remediation helpers
+    return "\n".join(parts)
 
 
 # ===========================================================================

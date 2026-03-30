@@ -365,7 +365,7 @@ def _auto_refresh_routing(
             capture_output=True,
             text=True,
             check=False,
-            timeout=120,
+            timeout=300,
         )
     except subprocess.TimeoutExpired:
         if verbose:
@@ -472,6 +472,16 @@ def dispatch(
             # Use the refreshed record for the rest of dispatch
             record = refresh_record
             decision = record.get("decision", "")
+            # Re-check stop tokens after refresh
+            if decision in STOP_TOKENS:
+                return {
+                    "status": "stopped",
+                    "decision": decision,
+                    "summary": record.get("summary", ""),
+                    "request_for_claude": record.get("request_for_claude", ""),
+                    "message": f"Routing stopped after refresh: {decision}. "
+                               f"Requires founder/triage intervention.",
+                }
             executor_name = resolve_executor(decision)
             if executor_name is None:
                 return {
