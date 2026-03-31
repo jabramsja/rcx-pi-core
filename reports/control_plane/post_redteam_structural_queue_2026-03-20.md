@@ -2,7 +2,8 @@
 
 Date: 2026-03-20
 Status: ACTIVE (unparked 2026-03-28, founder-authorized)
-Phase-A-Lock: UNLOCKED
+Phase-A-Lock: LOCKED
+Canonical-Plan: reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md
 Purpose: founder-directed structural sequence following the
 control-surface/meta-bridge rollout (all 7 rollout steps complete)
 
@@ -13,7 +14,8 @@ control-surface/meta-bridge rollout (all 7 rollout steps complete)
   - the post-merge supervisor has gone through its own Phase A and Phase B ✓
   - Claude has explicit repo-local executors for Phase A, Phase B, and commit flow ✓
   - pipeline proven end-to-end (9 PRs, #673-#681) ✓
-- Current phase: Phase A — structural gap sweep
+- Current phase: Phase A — plan LOCKED (PR #699), ready for Phase B implementation
+- Canonical locked plan: `reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md` (583 lines, 6+ adversarial Codex review rounds)
 
 ## Governing sequence
 
