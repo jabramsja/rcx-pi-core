@@ -468,6 +468,24 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 - ~~**[PIPELINE-TEST-RUN]**~~ **CLOSED** (2026-03-28, moved to Ra). Full 15-step commit pipeline proven end-to-end (PR #673 + 8 follow-on PRs).
 - ~~**[COMMIT-EXECUTOR-E2E]**~~ **CLOSED** (2026-03-28, moved to Ra). 15-step commit executor proven mechanically via pipeline-test-run evidence.
 
+- **[PIPELINE-RECOVERY]** **IN PROGRESS** (2026-03-31, founder-authorized).
+  Pipeline failure recovery system — tiered auto-fix/retry/diagnose/escalate.
+  **Design:** `mu/docs/agents/PipelineRecovery.v0.md`
+  **File:** `mu/tools/executors/recovery_gate.py`
+  ~~**Phase 1:** Classifier + Tier 1 auto-fix~~ **Landed** (PR #704).
+  **Phase 2 DONE:** Wired into dispatcher retry loop + hardened (PR #705). index.lock demoted Tier 1→2. task_id bidirectional. 311 tests.
+  **Remaining:** (3) Tier 2 auto-retry, (4) Tier 3 LLM recovery loop (diagnose→implement→verify), (5) Integration + learning store.
+  **Lane:** control-surface (pipeline hardening).
+
+- ~~**[PIPELINE-OBSERVABILITY]**~~ **DONE** (2026-03-31, shipped in session).
+  Pipeline dashboard + tmux monitor rewrite for real-time transparency.
+  **Lane:** control-surface (observability).
+
+- **[DEFERRED-CONSOLIDATION]** **IN PROGRESS** (2026-03-31).
+  Consolidate 6 overlapping deferred files. Split into Wave 1A (9 critical/high) + Wave 1B (18 medium/low). ~~Wave 1A~~ **Landed** (PR #703).
+  **Plans:** `reports/control_plane/wave1b_pipeline_cleanup_2026-03-31.md`
+  **Lane:** control-surface (deferred cleanup).
+
 - **[NEXT-CODEX-POST-REDTEAM]** **UNPARKED** (2026-03-28, founder-authorized).
   Structural follow-on queue: `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
   **Parking conditions satisfied:** (1) pre-commit supervisor LIVE as standing gate [PRE-COMMIT-SUPERVISOR-STANDING closed to Ra], (2) post-merge supervisor through Phase A/B [META-BRIDGE-S2 closed to Ra], (3) repo-local executors for Phase A/B/commit [EXECUTOR-SURFACES closed to Ra], (4) pipeline proven end-to-end [PIPELINE-TEST-RUN + COMMIT-EXECUTOR-E2E closed to Ra].
