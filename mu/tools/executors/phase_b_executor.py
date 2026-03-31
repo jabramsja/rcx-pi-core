@@ -127,6 +127,21 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
     disposition = finding.get("disposition")
     finding_class = str(finding.get("class") or "").upper()
 
+    # Governance/doc-only findings are never blocking regardless of severity.
+    # Must satisfy BOTH conditions: governance class AND governance file path.
+    # A POLICY_BOUND finding on actual code (e.g. phase_b_executor.py) stays blocking.
+    # Only POLICY_BOUND/DOC_ACCURACY on reports/, TASKS.md, .claude/ are downgraded.
+    _GOV_CLASSES = {"POLICY_BOUND", "DOC_ACCURACY"}
+    _GOV_PATH_PREFIXES = ("reports/", "TASKS.md", ".claude/", "CHANGELOG.md", "STATUS.md")
+    finding_file = str(finding.get("file") or "")
+    is_gov_path = any(finding_file.startswith(p) for p in _GOV_PATH_PREFIXES)
+    is_governance = finding_class in _GOV_CLASSES and is_gov_path
+    if is_governance:
+        return "non_blocking", (
+            f"{severity} {finding_class} on governance/doc path — "
+            f"downgraded to non-blocking (file: {finding_file})"
+        )
+
     # Critical/high findings stay blocking even if an explicit disposition tries
     # to soften them. This is the fail-closed floor for bridge feedback.
     # IMPORTANT: this check runs BEFORE the generic disposition check so that

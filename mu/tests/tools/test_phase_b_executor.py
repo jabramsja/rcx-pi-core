@@ -1530,6 +1530,86 @@ class TestFindingDisposition:
         assert len(non_blocking) == 1
 
 
+class TestGovernanceDowngrade:
+    """Governance/doc findings on non-code paths downgrade to non-blocking.
+
+    The predicate requires BOTH governance class AND governance path.
+    A POLICY_BOUND finding on actual code stays blocking.
+    """
+
+    def test_policy_bound_on_report_path_is_non_blocking(self):
+        """POLICY_BOUND on reports/ is governance — non-blocking."""
+        findings = [{
+            "title": "Plan file has unchecked boxes",
+            "class": "POLICY_BOUND",
+            "severity": "high",
+            "file": "reports/control_plane/wave1a_pipeline_validation_2026-03-31.md",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 0, "POLICY_BOUND on reports/ should be non-blocking"
+        assert len(non_blocking) == 1
+
+    def test_policy_bound_on_code_file_stays_blocking(self):
+        """POLICY_BOUND on actual code file stays blocking — not governance."""
+        findings = [{
+            "title": "Code policy violation in executor",
+            "class": "POLICY_BOUND",
+            "severity": "high",
+            "file": "mu/tools/executors/phase_b_executor.py",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 1, "POLICY_BOUND on code file must stay blocking"
+        assert len(non_blocking) == 0
+
+    def test_doc_accuracy_on_tasks_md_is_non_blocking(self):
+        """DOC_ACCURACY on TASKS.md is governance — non-blocking."""
+        findings = [{
+            "title": "TASKS.md missing tracker sync note",
+            "class": "DOC_ACCURACY",
+            "severity": "high",
+            "file": "TASKS.md",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 0, "DOC_ACCURACY on TASKS.md should be non-blocking"
+        assert len(non_blocking) == 1
+
+    def test_doc_accuracy_on_code_file_stays_blocking(self):
+        """DOC_ACCURACY on a code file stays blocking — not governance."""
+        findings = [{
+            "title": "Doc comment contradicts behavior",
+            "class": "DOC_ACCURACY",
+            "severity": "high",
+            "file": "mu/tools/agents/bridge_adapters.py",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 1, "DOC_ACCURACY on code file must stay blocking"
+        assert len(non_blocking) == 0
+
+    def test_defect_on_report_path_not_downgraded(self):
+        """DEFECT class on reports/ is NOT governance — class must also match."""
+        findings = [{
+            "title": "Script in report has a bug",
+            "class": "DEFECT",
+            "severity": "high",
+            "file": "reports/control_plane/some_script.py",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 1, "DEFECT on any path stays blocking regardless of path"
+        assert len(non_blocking) == 0
+
+    def test_governance_downgrade_reason_includes_file(self):
+        """The downgrade reason includes the file path for auditability."""
+        disp, reason = pb_mod._disposition_for_finding({  # ANTICHEAT_OK: testing internal executor functions
+            "title": "Stale reference",
+            "class": "POLICY_BOUND",
+            "severity": "high",
+            "file": "reports/deferred/README.md",
+        })
+        assert disp == "non_blocking"
+        assert "governance" in reason.lower()
+        assert "reports/deferred/README.md" in reason
+
+
 class TestHighSeverityDetailHeuristic:
     """High severity no longer downgrades from prose-only detail/description text."""
 
