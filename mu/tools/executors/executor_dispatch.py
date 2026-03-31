@@ -48,6 +48,18 @@ except ImportError:
     normalize_wave_id = _mod.normalize_wave_id
 
 try:
+    from recovery_gate import attempt_recovery
+except ImportError:
+    import importlib.util as _ilu
+    _recovery_path = SCRIPT_DIR / "recovery_gate.py"
+    _recovery_spec = _ilu.spec_from_file_location("recovery_gate", str(_recovery_path))
+    _recovery_mod = _ilu.module_from_spec(_recovery_spec)
+    assert _recovery_spec.loader is not None
+    sys.modules["recovery_gate"] = _recovery_mod
+    _recovery_spec.loader.exec_module(_recovery_mod)
+    attempt_recovery = _recovery_mod.attempt_recovery
+
+try:
     from meta_bridge_supervisor import compute_repo_state as _compute_repo_state
 except ImportError:
     import importlib.util as _ilu
@@ -341,7 +353,7 @@ def _validate_phase_b_handoff_identity(handoff_path: Path, record: dict[str, Any
 
     expected_task_id = record.get("task_id")
     actual_task_id = handoff.get("task_id")
-    if expected_task_id and actual_task_id != expected_task_id:
+    if (expected_task_id or actual_task_id) and actual_task_id != expected_task_id:
         return False, (
             f"Phase B handoff task_id mismatch: expected {expected_task_id}, got {actual_task_id}"
         )
@@ -1095,10 +1107,11 @@ def main(argv: list[str] | None = None) -> int:
                     return 1
                 record = refresh_record
 
-        # Dispatch with retries
+        # Dispatch with retries (while-based so recovery can grant extra attempts)
         max_attempts = 1 + max(0, args.retries)
         result = None
-        for attempt in range(1, max_attempts + 1):
+        attempt = 1
+        while attempt <= max_attempts:
             # If previous attempt was a chained commit failure (Phase A/B
             # succeeded but commit failed), retry only the commit executor
             # instead of re-running the full Phase A→B→commit chain.
@@ -1124,6 +1137,28 @@ def main(argv: list[str] | None = None) -> int:
                 if args.verbose:
                     print("[dispatch] Executor returned terminal outcome — not retrying")
                 break
+            # Recovery gate: classify failure and attempt Tier 1 auto-fix
+            if result.get("status") == "failed":
+                _wave_id = normalize_wave_id(
+                    record.get("wave_name") or record.get("wave_id", ""))
+                recovery = attempt_recovery(repo_root, result, _wave_id)
+                result["recovery"] = recovery
+                if args.verbose:
+                    print(f"[dispatch] Recovery: class={recovery.get('failure_class')} "
+                          f"tier={recovery.get('tier')} recovered={recovery.get('recovered')}")
+                if recovery.get("recovered"):
+                    # Recovery succeeded — grant one extra attempt (don't increment counter)
+                    _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose)
+                    if not args.routing_record and not _is_chained_commit_failure(result):
+                        refreshed, refresh_record = _auto_refresh_routing(
+                            repo_root, verbose=args.verbose)
+                        if refreshed and refresh_record is not None:
+                            record = refresh_record
+                    continue  # retry dispatch without counting against budget
+                elif recovery.get("exhausted"):
+                    if args.verbose:
+                        print("[dispatch] Recovery exhausted — not retrying")
+                    break
             if attempt >= max_attempts:
                 break
             if args.verbose:
@@ -1142,6 +1177,7 @@ def main(argv: list[str] | None = None) -> int:
                 refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose)
                 if refreshed and refresh_record is not None:
                     record = refresh_record
+            attempt += 1
 
         if args.json:
             print(json.dumps(result, indent=2))

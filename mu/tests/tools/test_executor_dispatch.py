@@ -44,6 +44,10 @@ phase_b_mod = load_module(
     "phase_b_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "phase_b_executor.py",
 )
+recovery_mod = load_module(
+    "recovery_gate",
+    REPO_ROOT / "mu" / "tools" / "executors" / "recovery_gate.py",
+)
 
 
 _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"}
@@ -5350,3 +5354,161 @@ class TestDispatcherStaleHandoffOverride:
         )
         assert result["status"] == "error"
         assert "No Phase B handoff file" in result["message"]
+
+
+# ===========================================================================
+# Recovery gate wiring tests
+# ===========================================================================
+
+
+class TestRecoveryGateWiring:
+    """Recovery gate integration with the dispatcher retry loop."""
+
+    @staticmethod
+    def _routing_file(tmp_path, wave_name="test-wave"):
+        f = tmp_path / "routing.json"
+        f.write_text(json.dumps({
+            "decision": "ROUTE_PHASE_B", "summary": "test",
+            "wave_name": wave_name,
+        }))
+        return f
+
+    @staticmethod
+    def _base_args(routing_file):
+        return ["--routing-record", str(routing_file), "--skip-freshness"]
+
+    def test_recovery_gate_wired_on_failure(self, tmp_path):
+        """attempt_recovery is called when dispatch returns failed status."""
+        routing_file = self._routing_file(tmp_path)
+        fail_result = {
+            "status": "failed", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "stderr": "bridge.lock held by dead PID",
+        }
+        recovery_result = {
+            "recovered": False, "exhausted": False,
+            "failure_class": "stale_bridge_lock", "tier": 1,
+            "action": "noop", "detail": "test",
+        }
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch", return_value=fail_result), \
+             patch.object(dispatch_mod, "attempt_recovery",
+                          return_value=recovery_result) as mock_recovery, \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            dispatch_mod.main(self._base_args(routing_file))
+            mock_recovery.assert_called_once()
+            call_args = mock_recovery.call_args
+            assert call_args[0][1] == fail_result  # result dict passed
+            assert call_args[0][2] == "test-wave"  # wave_id from normalize
+
+    def test_recovery_grants_extra_attempt(self, tmp_path):
+        """Recovery success grants one extra retry without counting against budget."""
+        routing_file = self._routing_file(tmp_path)
+        fail_result = {
+            "status": "failed", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "stderr": "bridge.lock exists",
+        }
+        success_result = {
+            "status": "success", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+        }
+        recovery_success = {
+            "recovered": True, "exhausted": False,
+            "failure_class": "stale_bridge_lock", "tier": 1,
+            "action": "truncate_dead_pid_lock", "detail": "fixed",
+        }
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          side_effect=[fail_result, success_result]) as mock_dispatch, \
+             patch.object(dispatch_mod, "attempt_recovery",
+                          return_value=recovery_success), \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            # No --retries: max_attempts=1, but recovery grants one extra
+            exit_code = dispatch_mod.main(self._base_args(routing_file))
+            assert mock_dispatch.call_count == 2  # original + recovery retry
+            assert exit_code == 0  # succeeds on retry
+
+    def test_recovery_exhausted_stops_retry(self, tmp_path):
+        """Exhausted recovery breaks the retry loop immediately."""
+        routing_file = self._routing_file(tmp_path)
+        fail_result = {
+            "status": "failed", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "stderr": "bridge.lock held",
+        }
+        recovery_exhausted = {
+            "recovered": False, "exhausted": True,
+            "failure_class": "stale_bridge_lock", "tier": 1,
+            "action": "exhausted", "detail": "max attempts reached",
+        }
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          return_value=fail_result) as mock_dispatch, \
+             patch.object(dispatch_mod, "attempt_recovery",
+                          return_value=recovery_exhausted), \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            # Even with --retries 2, exhausted recovery stops immediately
+            args = self._base_args(routing_file) + ["--retries", "2"]
+            dispatch_mod.main(args)
+            assert mock_dispatch.call_count == 1  # only one attempt
+
+    def test_recovery_not_called_on_success(self, tmp_path):
+        """Recovery is not invoked when dispatch succeeds."""
+        routing_file = self._routing_file(tmp_path)
+        success_result = {
+            "status": "success", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+        }
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          return_value=success_result), \
+             patch.object(dispatch_mod, "attempt_recovery") as mock_recovery, \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            dispatch_mod.main(self._base_args(routing_file))
+            mock_recovery.assert_not_called()
+
+    def test_recovery_not_called_on_terminal(self, tmp_path):
+        """Terminal executor outcomes bypass recovery entirely."""
+        routing_file = self._routing_file(tmp_path)
+        terminal_result = {
+            "status": "failed", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "stdout": json.dumps({"status": "question_for_founder"}),
+        }
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          return_value=terminal_result), \
+             patch.object(dispatch_mod, "attempt_recovery") as mock_recovery, \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            dispatch_mod.main(self._base_args(routing_file) + ["--retries", "2"])
+            mock_recovery.assert_not_called()
+
+    def test_recovery_result_in_dispatch_output(self, tmp_path):
+        """Recovery result dict is attached to the dispatch result."""
+        routing_file = self._routing_file(tmp_path)
+        fail_result = {
+            "status": "failed", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "stderr": "bridge.lock",
+        }
+        recovery_result = {
+            "recovered": False, "exhausted": False,
+            "failure_class": "stale_bridge_lock", "tier": 1,
+            "action": "noop", "detail": "bridge.lock not found",
+        }
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          return_value=fail_result), \
+             patch.object(dispatch_mod, "attempt_recovery",
+                          return_value=recovery_result), \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            dispatch_mod.main(self._base_args(routing_file))
+            assert "recovery" in fail_result
+            assert fail_result["recovery"] == recovery_result
