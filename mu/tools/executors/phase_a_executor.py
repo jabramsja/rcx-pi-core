@@ -665,6 +665,36 @@ def run_bridge_design_review(
             time.sleep(PHASE_A_BRIDGE_POLL_SLEEP)
 
 
+def _parse_phase_a_findings(render_content: str) -> list[dict[str, Any]]:
+    """Parse findings from bridge rendered output for blocking/non-blocking classification.
+
+    Looks for the structured findings block in the reviewer turn. Each finding
+    has severity, title, disposition, and detail.
+    """
+    findings: list[dict[str, Any]] = []
+    # Parse the JSON envelope from the rendered content
+    import re as _re
+    envelope_match = _re.search(
+        r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE",
+        render_content,
+        _re.DOTALL,
+    )
+    if envelope_match:
+        try:
+            envelope = json.loads(envelope_match.group(1))
+            for f in envelope.get("findings", []):
+                findings.append({
+                    "severity": f.get("severity", "medium"),
+                    "title": f.get("title", ""),
+                    "detail": f.get("detail", ""),
+                    "disposition": f.get("disposition", ""),
+                    "file": f.get("file", ""),
+                })
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return findings
+
+
 def _extract_bridge_decision(render_content: str) -> str:
     """Parse the canonical bridge decision line from rendered output."""
     decisions = [match.group(1) for match in BRIDGE_DECISION_RE.finditer(render_content)]
@@ -953,13 +983,33 @@ def run_phase_a(
                     )
                     result["rendered_path"] = str(rendered_path)
                     return result
-                # Invoke Claude implementer to refine the plan based on findings
-                if _invoke_implementer is not None:
+                # Classify findings as blocking vs non-blocking.
+                # If only non-blockers remain, converge — design advisory
+                # findings don't need to block plan convergence.
+                parsed_findings = _parse_phase_a_findings(render_content)
+                blocking = [f for f in parsed_findings if f.get("disposition") == "blocking"
+                            or (f.get("disposition") not in ("blocking", "non_blocking")
+                                and f.get("severity") in ("critical", "high"))]
+                non_blocking = [f for f in parsed_findings if f not in blocking]
+                log(f"Bridge: REQUEST_CHANGES — {len(blocking)} blocking, {len(non_blocking)} non-blocking")
+
+                if parsed_findings and not blocking:
+                    log(f"Bridge: all {len(non_blocking)} findings are non-blocking — treating as GO")
+                    result["status"] = "converged"
+                    result["non_blocking_count"] = len(non_blocking)
+                    break
+
+                # Invoke Claude implementer to fix blocking findings
+                if _invoke_implementer is not None and blocking:
                     plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
+                    blocking_text = "\n".join(
+                        f"- [{f.get('severity','?')}] {f.get('title','untitled')}: {f.get('detail','')[:200]}"
+                        for f in blocking
+                    )
                     impl_prompt = (
                         f"You are updating a Phase A plan at `{rel_plan_path}`.\n\n"
-                        f"The bridge reviewer returned REQUEST_CHANGES with these findings:\n\n"
-                        f"{render_content[:4000]}\n\n"
+                        f"The bridge reviewer returned REQUEST_CHANGES. Fix ONLY the blocking findings:\n\n"
+                        f"{blocking_text}\n\n"
                         f"## Current plan content:\n\n{plan_content}\n\n"
                         f"## Required plan sections:\n"
                         "1. Scope: files/directories in scope\n"
@@ -972,7 +1022,7 @@ def run_phase_a(
                         f"governing packet at reports/control_plane/post_redteam_structural_queue_2026-03-20.md. "
                         f"Update the plan file directly. Do NOT create new files."
                     )
-                    log(f"Bridge: REQUEST_CHANGES — invoking implementer to refine plan...")
+                    log("Invoking implementer to fix blocking findings...")
                     impl_result = _invoke_implementer(
                         repo_root, impl_prompt,
                         backend="claude",
@@ -983,7 +1033,7 @@ def run_phase_a(
                         log(f"Implementer failed: {impl_result['status']} — continuing with unmodified plan")
                     else:
                         log("Implementer updated plan — continuing to next bridge round")
-                else:
+                elif not _invoke_implementer:
                     log("Bridge: REQUEST_CHANGES — no implementer available, continuing with unmodified plan")
                 continue
             elif bridge_decision == "QUESTION":

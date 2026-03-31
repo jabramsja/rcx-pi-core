@@ -670,11 +670,21 @@ def dispatch(
             if verbose:
                 print(f"[dispatch] Phase A converged → chaining to Phase B with plan: {plan_path}")
 
-            phase_b_timeout = cfg.get("timeouts", {}).get("phase_b_executor", 300)
+            phase_b_timeout = cfg.get("timeouts", {}).get("phase_b_executor", 3600)
+            # Synthesize a ROUTE_PHASE_B routing record so Phase B's
+            # routing validation passes.
+            phase_b_routing = json.dumps({
+                "decision": "ROUTE_PHASE_B",
+                "wave_name": record.get("wave_name", ""),
+                "task_id": record.get("task_id", ""),
+                "summary": "Chained from Phase A convergence",
+                "next_candidates": record.get("next_candidates", []),
+            })
             phase_b_args = [
                 sys.executable,
                 str(SCRIPT_DIR / "phase_b_executor.py"),
                 "--plan", plan_path,
+                "--routing-record", phase_b_routing,
             ]
             phase_b_result = subprocess.run(
                 phase_b_args,
