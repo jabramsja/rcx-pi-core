@@ -1139,7 +1139,8 @@ def main(argv: list[str] | None = None) -> int:
                 break
             # Recovery gate: classify failure and attempt Tier 1 auto-fix
             if result.get("status") == "failed":
-                _wave_id = normalize_wave_id(record.get("wave_name", ""))
+                _wave_id = normalize_wave_id(
+                    record.get("wave_name") or record.get("wave_id", ""))
                 recovery = attempt_recovery(repo_root, result, _wave_id)
                 result["recovery"] = recovery
                 if args.verbose:
