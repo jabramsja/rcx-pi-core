@@ -987,9 +987,9 @@ def run_phase_a(
                 # If only non-blockers remain, converge — design advisory
                 # findings don't need to block plan convergence.
                 parsed_findings = _parse_phase_a_findings(render_content)
-                blocking = [f for f in parsed_findings if f.get("disposition") == "blocking"
-                            or (f.get("disposition") not in ("blocking", "non_blocking")
-                                and f.get("severity") in ("critical", "high"))]
+                blocking = [f for f in parsed_findings if f.get("severity") in ("critical", "high")
+                            or f.get("disposition") == "blocking"
+                            or f.get("disposition") not in ("blocking", "non_blocking")]
                 non_blocking = [f for f in parsed_findings if f not in blocking]
                 log(f"Bridge: REQUEST_CHANGES — {len(blocking)} blocking, {len(non_blocking)} non-blocking")
 
@@ -999,13 +999,22 @@ def run_phase_a(
                     result["non_blocking_count"] = len(non_blocking)
                     break
 
-                # Invoke Claude implementer to fix blocking findings
-                if _invoke_implementer is not None and blocking:
+                # Invoke Claude implementer to fix blocking findings.
+                # Also invoke when findings could not be parsed (empty
+                # parsed_findings) — the bridge still said REQUEST_CHANGES,
+                # so the implementer needs the raw reviewer feedback.
+                if _invoke_implementer is not None and (blocking or not parsed_findings):
                     plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
-                    blocking_text = "\n".join(
-                        f"- [{f.get('severity','?')}] {f.get('title','untitled')}: {f.get('detail','')[:200]}"
-                        for f in blocking
-                    )
+                    if blocking:
+                        blocking_text = "\n".join(
+                            f"- [{f.get('severity','?')}] {f.get('title','untitled')}: {f.get('detail','')[:200]}"
+                            for f in blocking
+                        )
+                    else:
+                        blocking_text = (
+                            "(Structured findings unavailable — raw reviewer feedback below)\n\n"
+                            + render_content[:2000]
+                        )
                     impl_prompt = (
                         f"You are updating a Phase A plan at `{rel_plan_path}`.\n\n"
                         f"The bridge reviewer returned REQUEST_CHANGES. Fix ONLY the blocking findings:\n\n"
