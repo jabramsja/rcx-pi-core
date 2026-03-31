@@ -482,16 +482,17 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   **Lane:** control-surface (observability).
 
 - **[DEFERRED-CONSOLIDATION]** **IN PROGRESS** (2026-03-31).
-  Consolidate 6 overlapping deferred files → `wave1_pipeline_consolidated_2026-03-31.md` (97→27 unique items). Split into Wave 1A (9 critical/high) + Wave 1B (18 medium/low). Wave 1A executing via Phase B.
+  Consolidate 6 overlapping deferred files → `wave1_pipeline_consolidated_2026-03-31.md` (97→27 unique items). Split into Wave 1A (9 critical/high) + Wave 1B (18 medium/low). ~~Wave 1A~~ **Landed** (PR #703).
   **Plans:** `reports/control_plane/wave1a_pipeline_validation_2026-03-31.md`, `wave1b_pipeline_cleanup_2026-03-31.md`
   **Lane:** control-surface (deferred cleanup).
 
 - **[PIPELINE-RECOVERY]** **IN PROGRESS** (2026-03-31, founder-authorized).
   Pipeline failure recovery system — tiered auto-fix/retry/diagnose/escalate.
   **Design:** `mu/docs/agents/PipelineRecovery.v0.md`
-  **New file:** `mu/tools/executors/recovery_gate.py`
-  **Phase 1 DONE:** Classifier + Tier 1 auto-fix (committed `57551148`, in pipeline for review).
-  **Remaining:** (2) Tier 2 auto-retry, (3) Observability, (4) Tier 3 LLM diagnosis, (5) Integration + E2E test.
+  **File:** `mu/tools/executors/recovery_gate.py`
+  ~~**Phase 1:** Classifier + Tier 1 auto-fix~~ **Landed** (PR #704).
+  **Phase 2 DONE:** Wired into dispatcher retry loop + hardened (PR #705). index.lock demoted Tier 1→2. task_id bidirectional. 311 tests.
+  **Remaining:** (3) Tier 2 auto-retry, (4) Tier 3 LLM recovery loop (diagnose→implement→verify), (5) Integration + learning store.
   **Lane:** control-surface (pipeline hardening).
 
 - **[PARALLEL-PIPELINE]** **QUEUED** (2026-03-31, founder-authorized).
