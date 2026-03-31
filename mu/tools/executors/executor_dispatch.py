@@ -73,6 +73,30 @@ ROUTING_DISPATCH = {
 # Tokens that stop and require human intervention
 STOP_TOKENS = {"STOP_FOR_FOUNDER", "STOP_FOR_TRIAGE_DISCUSSION"}
 
+# Dispatch-level statuses that are never retryable.
+# - success/stopped/error/not_implemented/stale: config or structural outcomes.
+# - timeout: subprocess.TimeoutExpired kills the direct child but NOT its
+#   descendants (e.g. reviewer/implementer launched by phase_b_executor).
+#   Retrying without process-tree cleanup would accumulate orphan processes.
+_NON_RETRYABLE_DISPATCH_STATUSES = frozenset({
+    "success", "held", "stopped", "error", "not_implemented", "stale", "timeout",
+})
+
+# Executor-reported statuses that indicate a terminal outcome requiring
+# founder intervention — retrying would just re-produce the same result.
+# - question_for_founder: bridge QUESTION requires human input
+# - max_rounds_reached: bridge loop exhausted without convergence
+# - supervisor_rejected: pre-commit supervisor returned non-COMMIT_GO
+#   (e.g. STOP_FOR_FOUNDER) — founder decision required
+# - needs_phase_b: supervisor returned NEEDS_PHASE_B after reentry
+#   convergence — manual intervention required
+_TERMINAL_EXECUTOR_STATUSES = frozenset({
+    "question_for_founder",
+    "max_rounds_reached",
+    "supervisor_rejected",
+    "needs_phase_b",
+})
+
 # Available executor scripts
 AVAILABLE_EXECUTORS = {"commit_executor", "phase_b_executor", "phase_a_executor", "dialectic_executor"}
 SURFACE_COMMANDS = {
@@ -323,6 +347,161 @@ def _validate_phase_b_handoff_identity(handoff_path: Path, record: dict[str, Any
         )
 
     return True, "ok"
+
+
+def _is_terminal_executor_outcome(result: dict[str, Any]) -> bool:
+    """Check if a failed executor result contains a terminal outcome.
+
+    Terminal outcomes (e.g. bridge NO_GO requiring founder intervention,
+    max bridge rounds exhausted) should not be retried — retrying would
+    re-invoke the executor with the same inputs and the same result.
+    """
+    stdout = result.get("stdout", "")
+    if not stdout:
+        return False
+    # Try full JSON parse (executor with --json)
+    try:
+        data = json.loads(stdout)
+        if isinstance(data, dict) and data.get("status") in _TERMINAL_EXECUTOR_STATUSES:
+            return True
+    except (json.JSONDecodeError, ValueError):
+        pass
+    # Try line-by-line: Phase B text output is "[phase-b] Status: <status>"
+    # and executors may emit per-line JSON objects.
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[phase-") and "Status:" in stripped:
+            status_part = stripped.split("Status:", 1)[1].strip()
+            if status_part in _TERMINAL_EXECUTOR_STATUSES:
+                return True
+        if stripped.startswith("{"):
+            try:
+                data = json.loads(stripped)
+                if isinstance(data, dict) and data.get("status") in _TERMINAL_EXECUTOR_STATUSES:
+                    return True
+            except (json.JSONDecodeError, ValueError):
+                pass
+    return False
+
+
+def _is_chained_commit_failure(result: dict[str, Any]) -> bool:
+    """Check if a dispatch result is a failed chained commit.
+
+    When Phase A→B→commit or Phase B→commit chains, the commit step may
+    fail while earlier phases succeeded.  Retrying should only re-run the
+    commit executor, not the full chain.
+    """
+    return (
+        result.get("status") == "failed"
+        and result.get("executor") == "commit_executor"
+        and result.get("chained_from") is not None
+    )
+
+
+def _classify_commit_executor_result(
+    commit_result: subprocess.CompletedProcess[str],
+) -> tuple[str, str]:
+    """Derive (dispatch_status, decision) from a commit executor subprocess result.
+
+    The commit executor exits 0 for both ``success`` and ``held`` (the latter
+    when the routing decision was ``COMMIT_GO_HOLD_PUSH``).  Without parsing
+    the executor's output, the dispatcher would collapse ``held`` into
+    ``success`` and report ``COMMIT_GO`` — making a local-hold stop look like
+    a completed wave.
+
+    Returns ``("held", "COMMIT_HELD")`` when the commit was made locally but
+    push was intentionally skipped, ``("success", "COMMIT_GO")`` on full
+    success, or ``("failed", "COMMIT_GO")`` on non-zero exit.
+    """
+    if commit_result.returncode != 0:
+        return "failed", "COMMIT_GO"
+    stdout = commit_result.stdout or ""
+    if "[commit-executor] Status: held" in stdout:
+        return "held", "COMMIT_HELD"
+    return "success", "COMMIT_GO"
+
+
+def _retry_commit_only(
+    repo: Path,
+    config: dict[str, Any],
+    *,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    """Retry only the commit executor using the existing Phase B handoff.
+
+    Used when a chained commit fails — avoids re-running Phase A/B.
+    """
+    handoff_path = repo / ".agent_bus" / "executors" / "phase_b_handoff.json"
+    if not handoff_path.exists():
+        return {
+            "status": "error",
+            "decision": "COMMIT_GO",
+            "executor": "commit_executor",
+            "message": f"Cannot retry commit: handoff file missing at {handoff_path}",
+        }
+
+    if verbose:
+        print("[dispatch] Retrying commit executor only (Phase A/B already succeeded)")
+
+    commit_timeout = config.get("timeouts", {}).get("commit_executor", 300)
+    commit_args = [
+        sys.executable,
+        str(SCRIPT_DIR / "commit_executor.py"),
+        "--handoff", str(handoff_path),
+    ]
+    try:
+        commit_result = subprocess.run(
+            commit_args,
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=commit_timeout,
+        )
+        c_status, c_decision = _classify_commit_executor_result(commit_result)
+        return {
+            "status": c_status,
+            "decision": c_decision,
+            "executor": "commit_executor",
+            "exit_code": commit_result.returncode,
+            "stdout": commit_result.stdout,
+            "stderr": commit_result.stderr,
+            "chained_from": "retry_commit_only",
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "timeout",
+            "decision": "COMMIT_GO",
+            "executor": "commit_executor",
+            "message": f"Commit executor timed out after {commit_timeout}s",
+        }
+
+
+# Phase B state file path — must match phase_b_executor.py constants.
+_PHASE_B_STATE_PATH = Path(".agent_bus") / "executors" / "phase_b_state.json"
+
+
+def _clear_phase_b_state_for_retry(
+    repo_root: Path,
+    result: dict[str, Any],
+    *,
+    verbose: bool = False,
+) -> None:
+    """Clear Phase B persisted state before a dispatcher retry.
+
+    When Phase B fails during the bridge-fix cycle (e.g. implementer_bridge_fix
+    or pytest_fix step), it returns without clearing its persisted state.  The
+    stale checkpoint (typically completed_step="agent_review") would cause the
+    next Phase B invocation to skip the implementer re-entry, bypassing the
+    required bridge-fix cycle.  Clearing the state forces a fresh start.
+    """
+    if result.get("executor") != "phase_b_executor":
+        return
+    state_path = repo_root / _PHASE_B_STATE_PATH
+    if state_path.exists():
+        state_path.unlink()
+        if verbose:
+            print("[dispatch] Cleared stale Phase B state before retry")
 
 
 def _auto_refresh_routing(
@@ -734,9 +913,10 @@ def dispatch(
                 check=False,
                 timeout=commit_timeout,
             )
+            c_status, c_decision = _classify_commit_executor_result(commit_result)
             return {
-                "status": "success" if commit_result.returncode == 0 else "failed",
-                "decision": "COMMIT_GO",
+                "status": c_status,
+                "decision": c_decision,
                 "executor": "commit_executor",
                 "exit_code": commit_result.returncode,
                 "stdout": commit_result.stdout,
@@ -773,9 +953,10 @@ def dispatch(
                 check=False,
                 timeout=commit_timeout,
             )
+            c_status, c_decision = _classify_commit_executor_result(commit_result)
             return {
-                "status": "success" if commit_result.returncode == 0 else "failed",
-                "decision": "COMMIT_GO",
+                "status": c_status,
+                "decision": c_decision,
                 "executor": "commit_executor",
                 "exit_code": commit_result.returncode,
                 "stdout": commit_result.stdout,
@@ -784,9 +965,12 @@ def dispatch(
             }
 
         # Non-chained executor (commit, dialectic, etc.)
+        nc_status, nc_decision = ("success", decision)
+        if executor_name == "commit_executor":
+            nc_status, nc_decision = _classify_commit_executor_result(result)
         return {
-            "status": "success",
-            "decision": decision,
+            "status": nc_status,
+            "decision": nc_decision,
             "executor": executor_name,
             "exit_code": result.returncode,
             "stdout": result.stdout,
@@ -866,6 +1050,12 @@ def main(argv: list[str] | None = None) -> int:
         default=3,
         help="Maximum waves per --loop invocation (default: 3)",
     )
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=0,
+        help="Retry failed executor up to N times before giving up (default: 0)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -905,14 +1095,53 @@ def main(argv: list[str] | None = None) -> int:
                     return 1
                 record = refresh_record
 
-        # Dispatch
-        result = dispatch(
-            record,
-            config=config,
-            repo_root=repo_root,
-            skip_freshness=args.skip_freshness,
-            verbose=args.verbose,
-        )
+        # Dispatch with retries
+        max_attempts = 1 + max(0, args.retries)
+        result = None
+        for attempt in range(1, max_attempts + 1):
+            # If previous attempt was a chained commit failure (Phase A/B
+            # succeeded but commit failed), retry only the commit executor
+            # instead of re-running the full Phase A→B→commit chain.
+            if result is not None and _is_chained_commit_failure(result):
+                result = _retry_commit_only(
+                    repo_root, config,
+                    verbose=args.verbose,
+                )
+            else:
+                result = dispatch(
+                    record,
+                    config=config,
+                    repo_root=repo_root,
+                    skip_freshness=args.skip_freshness,
+                    verbose=args.verbose,
+                )
+            # Non-retryable dispatch statuses — break immediately
+            if result.get("status") in _NON_RETRYABLE_DISPATCH_STATUSES:
+                break
+            # Terminal executor outcomes (founder-required, max bridge rounds
+            # exhausted) — retrying would re-produce the same result
+            if result.get("status") == "failed" and _is_terminal_executor_outcome(result):
+                if args.verbose:
+                    print("[dispatch] Executor returned terminal outcome — not retrying")
+                break
+            if attempt >= max_attempts:
+                break
+            if args.verbose:
+                print(f"[dispatch] Attempt {attempt}/{max_attempts} failed — retrying...")
+            # Clear Phase B persisted state before retry to prevent stale
+            # resume from skipping required implementer re-entry after a
+            # bridge-fix cycle failure.
+            _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose)
+            # Only refresh routing if no explicit --routing-record was provided
+            # and this was NOT a chained commit retry (routing is irrelevant
+            # when retrying only the commit step).
+            # Do NOT unlink the existing routing record before refresh — if
+            # refresh fails, the canonical record would be permanently lost.
+            # The supervisor overwrites the file in place on success.
+            if not args.routing_record and not _is_chained_commit_failure(result):
+                refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose)
+                if refreshed and refresh_record is not None:
+                    record = refresh_record
 
         if args.json:
             print(json.dumps(result, indent=2))
@@ -960,7 +1189,7 @@ def main(argv: list[str] | None = None) -> int:
         # Clear the explicit routing record arg so next iteration loads fresh
         args.routing_record = None
 
-    return 0 if result.get("status") in ("success", "stopped", "not_implemented") else 1
+    return 0 if result.get("status") in ("success", "held", "stopped", "not_implemented") else 1
 
 
 if __name__ == "__main__":
