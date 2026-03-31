@@ -3099,28 +3099,24 @@ class TestRoutingValidationNotBypassed:
     """
 
     def test_wrong_routing_token_fails_without_force(self):
-        """ROUTE_PHASE_A token → validation error (no silent rewrite)."""
+        """ROUTE_PHASE_A token → PhaseBExecutorError (no silent rewrite)."""
         routing = {"decision": "ROUTE_PHASE_A", "summary": "test"}
         plan = {"phase_a_lock": "LOCKED"}
-        valid, errors = pb_mod.validate_inputs(routing, plan)
-        assert not valid
-        assert any("ROUTE_PHASE_B" in e for e in errors)
+        with pytest.raises(pb_mod.PhaseBExecutorError, match="ROUTE_PHASE_B"):
+            pb_mod.validate_inputs(routing, plan)
 
     def test_correct_routing_token_passes(self):
-        """ROUTE_PHASE_B token → validation passes."""
+        """ROUTE_PHASE_B token → validation passes (no exception)."""
         routing = {"decision": "ROUTE_PHASE_B", "summary": "test"}
         plan = {"phase_a_lock": "LOCKED"}
-        valid, errors = pb_mod.validate_inputs(routing, plan)
-        assert valid
-        assert errors == []
+        pb_mod.validate_inputs(routing, plan)  # should not raise
 
     def test_unlocked_plan_fails(self):
-        """Plan not LOCKED → validation error."""
+        """Plan not LOCKED → PhaseBExecutorError."""
         routing = {"decision": "ROUTE_PHASE_B", "summary": "test"}
         plan = {"phase_a_lock": "DRAFT"}
-        valid, errors = pb_mod.validate_inputs(routing, plan)
-        assert not valid
-        assert any("LOCKED" in e for e in errors)
+        with pytest.raises(pb_mod.PhaseBExecutorError, match="LOCKED"):
+            pb_mod.validate_inputs(routing, plan)
 
     def test_run_phase_b_fails_on_bad_routing_without_force(self, tmp_path):
         """run_phase_b with wrong routing token returns error (not override)."""
@@ -3946,20 +3942,18 @@ class TestValidateInputsAcceptsRoutingRecordAuthority:
     def test_routing_record_authority_is_valid(self):
         record = {"decision": "ROUTE_PHASE_B"}
         plan = {"phase_a_lock": "ROUTING_RECORD_AUTHORITY"}
-        valid, errors = pb_mod.validate_inputs(record, plan)
-        assert valid, errors
+        pb_mod.validate_inputs(record, plan)  # should not raise
 
     def test_locked_still_valid(self):
         record = {"decision": "ROUTE_PHASE_B"}
         plan = {"phase_a_lock": "LOCKED"}
-        valid, errors = pb_mod.validate_inputs(record, plan)
-        assert valid, errors
+        pb_mod.validate_inputs(record, plan)  # should not raise
 
     def test_unlocked_still_invalid(self):
         record = {"decision": "ROUTE_PHASE_B"}
         plan = {"phase_a_lock": "UNLOCKED"}
-        valid, errors = pb_mod.validate_inputs(record, plan)
-        assert not valid
+        with pytest.raises(pb_mod.PhaseBExecutorError):
+            pb_mod.validate_inputs(record, plan)
 
 
 class TestHighSeverityCannotBeDowngradedByDisposition:

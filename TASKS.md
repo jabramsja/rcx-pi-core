@@ -471,6 +471,23 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   **Lane:** structural (post-control-surface).
   **Tracked packet:** `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
 
+- ~~**[PIPELINE-OBSERVABILITY]**~~ **DONE** (2026-03-31, shipped in session).
+  Pipeline dashboard + tmux monitor rewrite for real-time transparency.
+  **Shipped:** Web dashboard v2 (`tools/observability/pipeline_dashboard_web.py`) — narrative timeline, model activity feeds (Codex JSONL + Claude stream-JSON parsing), bridge round findings. Tmux panes (`_pane_processes.sh`, `_pane_findings.sh`) — human-readable status, live activity, review findings with blocking/non-blocking, no-flicker updates, auto-reload. `/preflight` auto-starts web dashboard + tmux cheat sheet.
+  **Lane:** control-surface (observability).
+
+- **[DEFERRED-CONSOLIDATION]** **IN PROGRESS** (2026-03-31).
+  Consolidate 6 overlapping deferred files → `wave1_pipeline_consolidated_2026-03-31.md` (97→27 unique items). Split into Wave 1A (9 critical/high) + Wave 1B (18 medium/low). Wave 1A executing via Phase B.
+  **Plans:** `reports/control_plane/wave1a_pipeline_validation_2026-03-31.md`, `wave1b_pipeline_cleanup_2026-03-31.md`
+  **Lane:** control-surface (deferred cleanup).
+
+- **[PIPELINE-RECOVERY]** **QUEUED** (2026-03-31, founder-authorized).
+  Pipeline failure recovery system — tiered auto-fix/retry/diagnose/escalate.
+  **Design:** `mu/docs/agents/PipelineRecovery.v0.md`
+  **New file:** `mu/tools/executors/recovery_gate.py`
+  **5 phases:** (1) Classifier + Tier 1 auto-fix, (2) Tier 2 auto-retry, (3) Observability, (4) Tier 3 LLM diagnosis, (5) Integration + E2E test.
+  **Lane:** control-surface (pipeline hardening).
+
 - ~~**[W3D-B]**~~ **CLOSED** (2026-03-17, moved to Ra). classify_mu VM unification — migrated off projection_runner onto stage0_vm_run_bounded.
 - ~~**[W3E]**~~ **CLOSED** (2026-03-17, moved to Ra). subst_mu bounded-helper fold-in onto stage0_vm_run_bounded (PR #624).
 - ~~**[W3F]**~~ **CLOSED** (2026-03-18, moved to Ra). projection_runner retirement — 132 LOC deleted, zero production callers (PR #626).

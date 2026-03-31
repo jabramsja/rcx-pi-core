@@ -212,8 +212,25 @@ def _init_git_repo(tmp_path):
         "---\n\n## NEXT\n"
     )
 
+    # Create a minimal indicator collector script (B2: fail-closed when missing)
+    indicator_dir = repo / "mu" / "tools" / "metrics"
+    indicator_dir.mkdir(parents=True, exist_ok=True)
+    indicator_script = indicator_dir / "collect_l4_wave_indicators.py"
+    indicator_script.write_text(
+        '#!/usr/bin/env python3\n'
+        'import argparse, json, pathlib\n'
+        'p = argparse.ArgumentParser()\n'
+        'p.add_argument("--wave-id")\n'
+        'p.add_argument("--output")\n'
+        'a = p.parse_args()\n'
+        'out = pathlib.Path(a.output)\n'
+        'out.parent.mkdir(parents=True, exist_ok=True)\n'
+        'out.write_text(json.dumps({"wave_id": a.wave_id}))\n'
+    )
+
     # Initial commit
-    subprocess.run(["git", "add", "TASKS.md"], cwd=repo, capture_output=True, env=env)
+    subprocess.run(["git", "add", "TASKS.md", str(indicator_script.relative_to(repo))],
+                   cwd=repo, capture_output=True, env=env)
     subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True, env=env)
     # Ensure branch is named "dev"
     subprocess.run(["git", "branch", "-m", "dev"], cwd=repo, capture_output=True, env=env)
@@ -397,22 +414,19 @@ class TestPhaseBPlanLoading:
     def test_validate_wrong_decision(self):
         record = {"decision": "ROUTE_PHASE_A"}
         plan = {"phase_a_lock": "LOCKED"}
-        valid, errors = phase_b_mod.validate_inputs(record, plan)
-        assert not valid
-        assert any("ROUTE_PHASE_B" in e for e in errors)
+        with pytest.raises(phase_b_mod.PhaseBExecutorError, match="ROUTE_PHASE_B"):
+            phase_b_mod.validate_inputs(record, plan)
 
     def test_validate_unlocked_plan(self):
         record = {"decision": "ROUTE_PHASE_B"}
         plan = {"phase_a_lock": "UNLOCKED"}
-        valid, errors = phase_b_mod.validate_inputs(record, plan)
-        assert not valid
-        assert any("LOCKED" in e for e in errors)
+        with pytest.raises(phase_b_mod.PhaseBExecutorError, match="LOCKED"):
+            phase_b_mod.validate_inputs(record, plan)
 
     def test_validate_correct_inputs(self):
         record = {"decision": "ROUTE_PHASE_B"}
         plan = {"phase_a_lock": "LOCKED"}
-        valid, errors = phase_b_mod.validate_inputs(record, plan)
-        assert valid
+        phase_b_mod.validate_inputs(record, plan)  # should not raise
 
 
 class TestPhaseBCommitHandoff:

@@ -14,7 +14,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_resolved = Path(__file__).resolve()
+# tools/ is a symlink to mu/tools/, so resolved path is mu/tools/observability/file.py (4 levels)
+# Handle both real path (mu/tools/observability/) and symlink path (tools/observability/)
+REPO_ROOT = _resolved.parent.parent.parent
+if REPO_ROOT.name == "mu":
+    REPO_ROOT = REPO_ROOT.parent
 PORT = 8099
 
 
@@ -53,8 +58,8 @@ def detect_subs(lines):
     for l in lines:
         if "grep" in l:
             continue
-        # Codex CLI reviewer: must have "codex exec" (not Codex.app desktop helpers)
-        if "codex" in l.lower() and "exec" in l and "sandbox" in l and "Codex.app" not in l and "Codex Helper" not in l:
+        # Codex CLI reviewer: must have "codex exec" + "gpt" (not Codex.app desktop helpers)
+        if "codex" in l.lower() and "exec" in l and "gpt" in l and "Codex.app" not in l and "Codex Helper" not in l:
             pid = int(l.split()[1])
             subs.append({"name": "Codex 5.4 xhigh", "role": "reviewer", "pid": pid, "started": pid_start(pid)})
         # Claude implementer: must have --print (not interactive sessions)
@@ -339,22 +344,82 @@ def model_activity():
                 "status": "active" if (now - reviewer_mtime) < 60 else "stale" if (now - reviewer_mtime) < 300 else "done",
             })
 
-    # 3. Implementer output (Claude)
+    # 3. Implementer output (Claude stream-JSON)
     scratch = REPO_ROOT / ".scratch"
     impl_file, impl_mtime = _newest_file(scratch.glob("phase_b_implementer_output_*.txt"))
     if impl_file and (now - impl_mtime) < 1800 and impl_file.stat().st_size > 0:
-        lines = _tail_lines(impl_file, 20)
+        impl_events = _parse_claude_stream_json(impl_file)
         feeds.append({
             "source": "Claude Opus 4.6 max",
             "role": "implementer",
             "file": impl_file.name,
             "age": round(now - impl_mtime),
-            "lines": lines,
+            "events": impl_events[-25:],
             "size": impl_file.stat().st_size,
             "status": "active" if (now - impl_mtime) < 60 else "stale" if (now - impl_mtime) < 300 else "done",
         })
 
     return feeds
+
+
+def _parse_claude_stream_json(path, tail=80):
+    """Parse Claude --output-format stream-json into human-readable events."""
+    events = []
+    try:
+        lines = path.read_text(errors="replace").splitlines()[-tail:]
+    except Exception:
+        return events
+    for line in lines:
+        try:
+            evt = json.loads(line.strip())
+            etype = evt.get("type", "")
+            if etype == "assistant":
+                msg = evt.get("message", {})
+                for block in msg.get("content", []):
+                    btype = block.get("type", "")
+                    if btype == "text":
+                        text = block.get("text", "").strip()
+                        if not text:
+                            continue
+                        # Truncate long text, take first meaningful line
+                        first_line = text.split("\n")[0][:120]
+                        if first_line:
+                            events.append({
+                                "time": "",
+                                "action": "thinking",
+                                "detail": first_line,
+                                "kind": "text",
+                            })
+                    elif btype == "tool_use":
+                        name = block.get("name", "?")
+                        inp = block.get("input", {})
+                        detail = ""
+                        if "file_path" in inp:
+                            detail = inp["file_path"].replace(str(REPO_ROOT) + "/", "")
+                        elif "command" in inp:
+                            cmd = inp["command"]
+                            detail = cmd[:90] if len(cmd) > 90 else cmd
+                        elif "pattern" in inp:
+                            detail = inp["pattern"][:60]
+                            if "path" in inp:
+                                detail += f" in {inp['path'].replace(str(REPO_ROOT) + '/', '')}"
+                        elif "old_string" in inp:
+                            detail = inp.get("file_path", "").replace(str(REPO_ROOT) + "/", "")
+                        else:
+                            # Generic: show first string value
+                            for v in inp.values():
+                                if isinstance(v, str) and v:
+                                    detail = v[:60]
+                                    break
+                        events.append({
+                            "time": "",
+                            "action": name,
+                            "detail": detail,
+                            "kind": "tool",
+                        })
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+    return events
 
 
 def wave_context():
@@ -486,6 +551,107 @@ def implementer_changes():
         return []
 
 
+def session_timeline():
+    """Build a chronological timeline of pipeline events."""
+    events = []
+    now = time.time()
+    cutoff = now - 6 * 3600  # last 6 hours
+
+    def add(ts, label, style="normal"):
+        if ts and ts > cutoff:
+            events.append({"ts": ts, "time": datetime.fromtimestamp(ts).strftime("%H:%M"), "label": label, "style": style})
+
+    # Implementer runs
+    scratch = REPO_ROOT / ".scratch"
+    for f in sorted(scratch.glob("phase_b_implementer_output_*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)[:5]:
+        ts = f.stat().st_mtime
+        size = f.stat().st_size
+        if size > 100000:
+            add(ts, f"Claude done — {size // 1024}KB output", "implementer")
+        else:
+            add(ts, "Claude implementing...", "implementer")
+
+    # Agent reviews
+    for f in sorted(scratch.glob("phase_b_agent_review_*.status.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:5]:
+        ts = f.stat().st_mtime
+        data = read_json_safe(f)
+        if not data:
+            continue
+        completed = data.get("completed_agents", {})
+        running = data.get("running_agents", [])
+        passed = sum(1 for v in completed.values() if v.get("passed"))
+        failed = sum(1 for v in completed.values() if not v.get("passed"))
+        if data.get("status") == "completed" or (completed and not running):
+            if failed:
+                add(ts, f"Agents: {passed} pass, {failed} need work", "warning")
+            else:
+                add(ts, f"Agents: all {len(completed)} passed", "good")
+        elif running:
+            add(ts, f"Agents running: {', '.join(running)}", "active")
+
+    # Bridge rounds
+    raw_dir = REPO_ROOT / ".agent_bus" / "raw"
+    if raw_dir.exists():
+        for d in sorted(raw_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[:8]:
+            if not d.is_dir():
+                continue
+            for rf in d.glob("*reviewer*.txt"):
+                if rf.stat().st_size == 0:
+                    continue
+                ts = rf.stat().st_mtime
+                try:
+                    content = rf.read_text(errors="replace")
+                    matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", content, re.DOTALL))
+                    if not matches:
+                        add(ts, "Codex reviewing...", "active")
+                        continue
+                    env = json.loads(matches[-1].group(1))
+                    dec = env.get("decision", "?")
+                    findings = env.get("findings", [])
+                    blk = sum(1 for f in findings if f.get("disposition") == "blocking")
+                    nb = sum(1 for f in findings if f.get("disposition") != "blocking")
+                    if dec in ("GO", "COMMIT_GO"):
+                        add(ts, f"Codex: GO ({nb} advisory)", "good")
+                    elif dec == "NO_GO":
+                        add(ts, f"Codex: NO_GO ({blk} blocker, {nb} advisory)", "bad")
+                    elif dec == "REQUEST_CHANGES":
+                        add(ts, f"Codex: REQUEST_CHANGES ({blk}B {nb}NB)", "warning")
+                    else:
+                        add(ts, f"Codex: {dec}", "normal")
+                except Exception:
+                    pass
+            # Review start time from reader file
+            for rf in d.glob("*reader*.txt"):
+                add(rf.stat().st_mtime, "Codex reviewing...", "active")
+
+    # Git commits
+    try:
+        r = subprocess.run(
+            ["git", "log", "--format=%ct|%s", "--since=6 hours ago", "-8"],
+            capture_output=True, text=True, timeout=5, cwd=REPO_ROOT,
+        )
+        for line in r.stdout.strip().splitlines():
+            parts = line.split("|", 1)
+            if len(parts) == 2:
+                add(int(parts[0]), f"Committed: {parts[1]}", "good")
+    except Exception:
+        pass
+
+    # Sort chronologically and add "you are here" marker
+    events.sort(key=lambda e: e["ts"])
+
+    # Determine current activity for the marker
+    marker = "idle"
+    try:
+        subprocess.run(["pgrep", "-f", "codex.*exec.*gpt"], capture_output=True, timeout=3).returncode == 0 and (marker := "Codex reviewing now")
+        subprocess.run(["pgrep", "-f", "claude.*--print"], capture_output=True, timeout=3).returncode == 0 and (marker := "Claude implementing now")
+        subprocess.run(["pgrep", "-f", "run_review.py"], capture_output=True, timeout=3).returncode == 0 and (marker := "SDK agents running now")
+    except Exception:
+        pass
+
+    return {"events": events[-20:], "current": marker}
+
+
 def lock_status():
     for lock_path in [REPO_ROOT / ".agent_bus" / "bridge.lock",
                       REPO_ROOT / ".agent_bus" / "meta" / "meta_bridge.lock"]:
@@ -521,6 +687,7 @@ def get_state():
     narrative = build_narrative(phase, subs, wave, lock, history)
     impl_files = implementer_changes()
     activity = model_activity()
+    timeline = session_timeline()
 
     return {
         "timestamp": datetime.now().isoformat(),
@@ -539,6 +706,7 @@ def get_state():
         "narrative": narrative,
         "impl_files": impl_files,
         "model_activity": activity,
+        "timeline": timeline,
     }
 
 
@@ -1047,39 +1215,66 @@ function renderMain(data) {
     html += '</div>';
   }
 
-  // Bridge Round History
+  // Latest Review Round — only show the newest, fully expanded with all findings
   if (history.length) {
+    const r = history[history.length - 1]; // newest is last (sorted by timestamp)
+    const blk = r.blocking||[], nb = r.non_blocking||[];
     html += '<div style="margin-bottom:20px">';
-    html += '<div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Review Rounds</div>';
-    [...history].reverse().forEach((r, i) => {
-      const blk = r.blocking||[], nb = r.non_blocking||[];
-      const expanded = i === 0 ? ' expanded' : '';
-      html += `<div class="round${expanded}" onclick="this.classList.toggle('expanded')">
-        <div class="round-top">
-          <span class="round-time">${r.time_str}</span>
-          <span class="decision ${decClass(r.decision)}">${esc(r.decision)}</span>
-          <span class="round-counts">
-            ${blk.length ? '<span class="blk">'+blk.length+' blocking</span> ' : ''}
-            ${nb.length ? '<span class="nb">'+nb.length+' advisory</span>' : ''}
-          </span>
-        </div>`;
-      if (r.summary) html += `<div class="round-summary">${esc(r.summary)}</div>`;
-      if (blk.length || nb.length) {
-        html += '<div class="round-findings">';
-        blk.forEach(f => {
-          const sev = f.severity || 'medium';
-          html += `<div class="finding finding-blk"><span class="finding-sev sev-${sev}">${sev}</span> ${esc(f.title||f.description||'')}</div>`;
-        });
-        nb.forEach(f => {
-          const sev = f.severity || 'low';
-          html += `<div class="finding finding-nb"><span class="finding-sev sev-${sev}">${sev}</span> ${esc(f.title||f.description||'')}</div>`;
-        });
-        html += '</div>';
-      }
+    html += '<div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Latest Review</div>';
+    html += `<div class="round expanded">
+      <div class="round-top">
+        <span class="round-time">${r.time_str}</span>
+        <span class="decision ${decClass(r.decision)}">${esc(r.decision)}</span>
+        <span class="round-counts">
+          ${blk.length ? '<span class="blk">'+blk.length+' blocking</span> ' : ''}
+          ${nb.length ? '<span class="nb">'+nb.length+' advisory</span>' : ''}
+        </span>
+      </div>`;
+    if (r.summary) html += `<div class="round-summary">${esc(r.summary)}</div>`;
+    if (blk.length || nb.length) {
+      html += '<div class="round-findings">';
+      blk.forEach(f => {
+        const sev = f.severity || 'medium';
+        html += `<div class="finding finding-blk"><span class="finding-sev sev-${sev}">${sev}</span> ${esc(f.title||f.description||'')}</div>`;
+      });
+      nb.forEach(f => {
+        const sev = f.severity || 'low';
+        html += `<div class="finding finding-nb"><span class="finding-sev sev-${sev}">${sev}</span> ${esc(f.title||f.description||'')}</div>`;
+      });
       html += '</div>';
-    });
-    html += '</div>';
+    }
+    html += '</div></div>';
   }
+
+  // Session Timeline
+  const tl = data.timeline || {};
+  const tlEvents = tl.events || [];
+  if (tlEvents.length) {
+    html += '<div style="margin-bottom:20px">';
+    html += '<div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Session Timeline</div>';
+    html += '<div style="padding:8px 0">';
+    tlEvents.forEach(e => {
+      let color = 'var(--text-dim)';
+      if (e.style === 'good') color = 'var(--green)';
+      else if (e.style === 'bad') color = 'var(--red)';
+      else if (e.style === 'warning') color = 'var(--yellow)';
+      else if (e.style === 'implementer') color = 'var(--purple)';
+      else if (e.style === 'active') color = 'var(--cyan)';
+      html += `<div style="padding:2px 0;font-size:11px"><span style="color:var(--text-muted);min-width:40px;display:inline-block">${e.time}</span> <span style="color:${color}">${esc(e.label)}</span></div>`;
+    });
+    // "You are here" marker
+    const now = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false});
+    const current = tl.current || 'idle';
+    html += `<div style="padding:4px 0;font-size:11px"><span style="color:var(--text-muted)">${now}</span> <span style="color:var(--cyan);font-weight:600">&larr; ${esc(current)}</span></div>`;
+    html += '</div></div>';
+  }
+
+  // Guidance
+  html += `<div style="margin-top:12px;padding:10px;background:var(--bg-2);border-radius:6px;font-size:11px;color:var(--text-muted);line-height:1.7">
+    <span style="font-weight:600">What's normal:</span>
+    Claude implements (5-15m) &rarr; SDK agents check (3-5m) &rarr; Codex reviews (10-20m) &rarr; repeat if needed.<br>
+    NO_GO is normal &mdash; usually takes 2-3 rounds to converge. GO means ready to commit.
+  </div>`;
 
   document.getElementById('main').innerHTML = html;
 }
@@ -1109,7 +1304,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data = get_state()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(data, default=str).encode())
         elif self.path == "/" or self.path == "/index.html":

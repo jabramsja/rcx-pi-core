@@ -9,6 +9,8 @@ SELF_MTIME=$(stat -f%m "$SELF" 2>/dev/null || stat -c%Y "$SELF" 2>/dev/null || e
 
 BOLD="\033[1m" DIM="\033[2m" GREEN="\033[32m" YELLOW="\033[33m"
 RED="\033[31m" CYAN="\033[36m" PURPLE="\033[35m" RESET="\033[0m"
+LAST_HASH=""
+TMPOUT="/tmp/rcx_pane_processes_$$.txt"
 
 elapsed_str() {
   local started="$1"
@@ -29,7 +31,8 @@ elapsed_str() {
 }
 
 while true; do
-  clear
+  # Build output to temp file, only redraw if content changed
+  {
   echo -e "${BOLD}WHAT'S HAPPENING${RESET}  $(date '+%H:%M:%S')"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
@@ -71,17 +74,14 @@ while true; do
   echo "─────────────────────────────────────"
 
   # Check for Codex (reviewer)
-  codex_pids=$(pgrep -f "codex" 2>/dev/null | head -5) || codex_pids=""
+  codex_pids=$(pgrep -f "codex.*exec.*gpt" 2>/dev/null | head -5) || codex_pids=""
   codex_count=0
   codex_start=""
   for pid in $codex_pids; do
-    cmd=$(ps -p "$pid" -o command= 2>/dev/null) || continue
-    if echo "$cmd" | grep -q "exec.*gpt-5.4"; then
-      codex_count=$((codex_count + 1))
-      if [ -z "$codex_start" ]; then
-        s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
-        codex_start=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
-      fi
+    codex_count=$((codex_count + 1))
+    if [ -z "$codex_start" ]; then
+      s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
+      codex_start=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
     fi
   done
   if [ "$codex_count" -gt 0 ]; then
@@ -193,10 +193,116 @@ while true; do
     fi
   fi
 
+  echo ""
+
+  } > "$TMPOUT" 2>/dev/null
+
+  # Live activity — show whichever model is active (implementer OR reviewer)
+  # Pick the most recently modified source
+  IMPL=$(ls -t "$REPO_ROOT/.scratch/phase_b_implementer_output_"*.txt 2>/dev/null | head -1) || true
+  REVIEWER=$(ls -t "$REPO_ROOT/.agent_bus/raw"/phase-?-r[0-9]*/*reviewer*.txt 2>/dev/null | head -1) || true
+  CODEX_JSONL=""
+  CODEX_DIR="$HOME/.codex/sessions/$(date '+%Y/%m/%d')"
+  if [ -d "$CODEX_DIR" ]; then
+    CODEX_JSONL=$(ls -t "$CODEX_DIR"/*.jsonl 2>/dev/null | head -1) || true
+  fi
+
+  # Find which source is freshest
+  activity_source=""
+  activity_label=""
+  activity_age=9999
+  for candidate_file in "$IMPL" "$REVIEWER" "$CODEX_JSONL"; do
+    [ -z "$candidate_file" ] || [ ! -f "$candidate_file" ] && continue
+    age=$(( $(date +%s) - $(stat -f%m "$candidate_file" 2>/dev/null || stat -c%Y "$candidate_file" 2>/dev/null || echo 0) ))
+    if [ "$age" -lt "$activity_age" ] && [ "$age" -lt 600 ]; then
+      activity_age=$age
+      activity_source="$candidate_file"
+    fi
+  done
+
+  if [ -n "$activity_source" ]; then
+    # Determine label
+    case "$activity_source" in
+      *implementer*) activity_label="${PURPLE}IMPLEMENTING${RESET}" ;;
+      *reviewer*) activity_label="${YELLOW}REVIEWING${RESET}" ;;
+      *codex*|*rollout*) activity_label="${YELLOW}REVIEWING${RESET}" ;;
+    esac
+
+    echo -e "${BOLD}ACTIVITY${RESET} ${activity_label} ${DIM}(${activity_age}s ago)${RESET}" >> "$TMPOUT"
+    echo "─────────────────────────────────────" >> "$TMPOUT"
+
+    if echo "$activity_source" | grep -q "implementer"; then
+      # Claude stream-json: parse tool calls and thinking
+      tail -20 "$activity_source" 2>/dev/null | python3 -c "
+import json, sys
+for line in sys.stdin:
+    try:
+        evt = json.loads(line.strip())
+        if evt.get('type') != 'assistant': continue
+        for b in evt.get('message',{}).get('content',[]):
+            bt = b.get('type','')
+            if bt == 'tool_use':
+                name = b.get('name','?')
+                inp = b.get('input',{})
+                d = inp.get('file_path','') or inp.get('command','')[:70] or inp.get('pattern','')[:50] or ''
+                d = d.split('WorkingRCX/')[-1] if 'WorkingRCX/' in d else d
+                print(f'  \033[36m{name}\033[0m {d}')
+            elif bt == 'text':
+                t = b.get('text','').strip().split(chr(10))[0][:90]
+                if t: print(f'  \033[2m{t}\033[0m')
+    except: pass
+" 2>/dev/null | tail -6 >> "$TMPOUT"
+
+    elif echo "$activity_source" | grep -q "rollout\|codex/sessions"; then
+      # Codex JSONL: parse tool calls and token counts
+      tail -30 "$activity_source" 2>/dev/null | python3 -c "
+import json, sys
+for line in sys.stdin:
+    try:
+        evt = json.loads(line.strip())
+        ts = evt.get('timestamp','')[11:19]
+        etype = evt.get('type','')
+        payload = evt.get('payload',{})
+        if etype == 'response_item':
+            ptype = payload.get('type','')
+            if ptype == 'function_call':
+                name = payload.get('name','?')
+                args = payload.get('arguments','')[:60]
+                print(f'  \033[36m{ts} {name}\033[0m {args}')
+            elif ptype == 'message':
+                content = payload.get('content',[])
+                if isinstance(content, list) and content:
+                    t = content[0].get('text','')[:90]
+                elif isinstance(content, str):
+                    t = content[:90]
+                else:
+                    t = ''
+                if t: print(f'  \033[2m{ts} {t}\033[0m')
+    except: pass
+" 2>/dev/null | tail -6 >> "$TMPOUT"
+
+    else
+      # Raw reviewer text: show last few lines
+      tail -6 "$activity_source" 2>/dev/null | while IFS= read -r line; do
+        echo "  $line" | head -c 95
+        echo ""
+      done >> "$TMPOUT"
+    fi
+    echo "" >> "$TMPOUT"
+  fi
+
+  # Only redraw if content changed (ignore timestamp line)
+  NEW_HASH=$(tail -n +2 "$TMPOUT" 2>/dev/null | md5 -q 2>/dev/null || tail -n +2 "$TMPOUT" | md5sum 2>/dev/null | cut -d' ' -f1)
+  if [ "$NEW_HASH" != "$LAST_HASH" ]; then
+    clear
+    cat "$TMPOUT"
+    LAST_HASH="$NEW_HASH"
+  fi
+
   # Auto-reload: if script changed on disk, re-exec
   NEW_MTIME=$(stat -f%m "$SELF" 2>/dev/null || stat -c%Y "$SELF" 2>/dev/null || echo 0)
   if [ "$NEW_MTIME" != "$SELF_MTIME" ]; then
-    echo -e "  ${DIM}(script updated — reloading...)${RESET}"
+    rm -f "$TMPOUT"
     sleep 1
     exec bash "$SELF"
   fi

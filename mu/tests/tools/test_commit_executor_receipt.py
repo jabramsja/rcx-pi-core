@@ -71,6 +71,21 @@ def _setup_repo(tmp_path):
         "staged_sha": "phase_b_sha",
         "timestamp_utc": "2026-03-24T00:00:00+00:00",
     }))
+    # Create a minimal indicator collector script (B2: fail-closed when missing)
+    indicator_dir = repo / "mu" / "tools" / "metrics"
+    indicator_dir.mkdir(parents=True, exist_ok=True)
+    indicator_script = indicator_dir / "collect_l4_wave_indicators.py"
+    indicator_script.write_text(
+        '#!/usr/bin/env python3\n'
+        'import argparse, json, pathlib\n'
+        'p = argparse.ArgumentParser()\n'
+        'p.add_argument("--wave-id")\n'
+        'p.add_argument("--output")\n'
+        'a = p.parse_args()\n'
+        'out = pathlib.Path(a.output)\n'
+        'out.parent.mkdir(parents=True, exist_ok=True)\n'
+        'out.write_text(json.dumps({"wave_id": a.wave_id}))\n'
+    )
     return repo
 
 
