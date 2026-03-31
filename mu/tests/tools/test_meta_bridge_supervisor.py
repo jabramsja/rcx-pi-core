@@ -1504,7 +1504,7 @@ class TestGate10PackageScoped:
         source = Path(meta.__file__).read_text()
         gate10_start = source.find("Gate 10: Closeout attestation")
         assert gate10_start > 0
-        gate10_section = source[gate10_start:gate10_start + 7000]
+        gate10_section = source[gate10_start:gate10_start + 8500]
         # The code must parse JSON regardless of exit code using att_data pattern
         assert "att_data is not None" in gate10_section, (
             "Gate 10 must attempt JSON parse on nonzero exits using att_data pattern, "

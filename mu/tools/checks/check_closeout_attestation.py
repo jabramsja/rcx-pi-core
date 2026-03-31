@@ -259,6 +259,19 @@ def validate_attestation(attestation: dict[str, Any]) -> tuple[bool, list[str]]:
                     "chain end-to-end test and include results in attestation"
                 )
 
+    # GO requires at least one BEHAVIORAL proof beyond changed_files.
+    # Git-derived changed_files alone is not evidence of test execution.
+    has_behavioral_beyond_files = any(
+        p.get("proof_class") == "BEHAVIORAL"
+        and p.get("claim") != "changed_files"
+        for p in proofs
+    )
+    if not has_behavioral_beyond_files:
+        issues.append(
+            "GO requires at least one BEHAVIORAL proof beyond changed_files "
+            "(e.g. validation command, test execution). Only git-derived proofs present."
+        )
+
     # Check for INFERENCE-only claims on required invariants
     inference_only = [
         p for p in proofs

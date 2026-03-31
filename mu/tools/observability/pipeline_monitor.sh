@@ -26,9 +26,9 @@ Actions (safe one-shot commands):
   kill <pid>               Kill a stale pipeline process
 
 ┌──────────────────────┬──────────────────────┐
-│ Live Output (auto)   │ Pipeline State       │
+│ Live Output (auto)   │ Review Findings      │
 ├──────────────────────┼──────────────────────┤
-│ Process Tree         │ PR / CI Status       │
+│ Status + Activity    │ Session Timeline     │
 └──────────────────────┴──────────────────────┘
 EOF
   exit "${1:-0}"
@@ -136,20 +136,20 @@ cmd_start() {
   tmux new-session -d -s "$SESSION"
   local W="$SESSION:1"  # window 1 (base-index=1 on macOS)
 
+  local OBS_DIR="$REPO_ROOT/mu/tools/observability"
+
   # Pane 1 (top-left): Auto-switching live output
   tmux send-keys -t "$W" "bash '$watcher'" Enter
 
-  local OBS_DIR="$REPO_ROOT/mu/tools/observability"
-
-  # Split horizontally → pane 2 (right): Pipeline State
+  # Split horizontally → pane 2 (right): Review Findings
   tmux split-window -h -t "$W"
-  tmux send-keys "while true; do clear; '$OBS_DIR/pipeline_status.sh'; sleep 5; done" Enter
+  tmux send-keys "bash '$OBS_DIR/_pane_findings.sh'" Enter
 
-  # Split right pane vertically → pane 3 (bottom-right): PR / CI Status
+  # Split right pane vertically → pane 3 (bottom-right): Session Timeline
   tmux split-window -v -t "$W"
-  tmux send-keys "bash '$OBS_DIR/_pane_prci.sh'" Enter
+  tmux send-keys "bash '$OBS_DIR/_pane_timeline.sh'" Enter
 
-  # Select left pane (pane 1) and split vertically → pane 4 (bottom-left): Process Tree
+  # Select left pane (pane 1) and split vertically → pane 4 (bottom-left): Status + Activity
   tmux select-pane -t "$W.1"
   tmux split-window -v -t "$W"
   tmux send-keys "bash '$OBS_DIR/_pane_processes.sh'" Enter

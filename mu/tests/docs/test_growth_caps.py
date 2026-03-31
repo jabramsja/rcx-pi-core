@@ -20,8 +20,8 @@ BASELINE_CORE_DOCS = 48  # .md in mu/docs/ (all subdirs) — bumped for P6 Typed
 
 # Per-wave caps from DocGovernance.v0.md
 CAP_TEST_FILES = 106  # prior cap + 1 for test_recurrence_v2_gate.py (post-redteam structural gap sweep)
-CAP_TOOL_SCRIPTS = 35  # prior cap + 5 for observability/ + 2 for pipeline dashboard (web + terminal)
-CAP_CORE_DOCS = 10  # 5 core + 3 other + 1 A11 contract + 1 AgentBridgeProtocol
+CAP_TOOL_SCRIPTS = 36  # prior cap + 1 for _pane_timeline.sh (session timeline tmux pane)
+CAP_CORE_DOCS = 11  # prior cap + 1 for PipelineRecovery.v0.md (recovery system design)
 
 
 def _count_test_files() -> int:

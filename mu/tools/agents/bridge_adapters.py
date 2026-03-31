@@ -486,13 +486,13 @@ def _run_adapter_buffered(
 
     def _kill_after_timeout() -> None:
         timed_out.set()
-        _kill_process_group(proc)
+        _kill_process_group(proc, wait_for_exit=True)
 
     def _kill_after_zero_output_timeout() -> None:
         if _stdout_progress_seen(stdout_progress) or proc.poll() is not None:
             return
         zero_output_timed_out.set()
-        _kill_process_group(proc)
+        _kill_process_group(proc, wait_for_exit=True)
 
     watchdog = threading.Timer(spec.timeout_s, _kill_after_timeout)
     watchdog.daemon = True
@@ -527,7 +527,7 @@ def _run_adapter_buffered(
                 )
             ):
                 envelope_terminated.set()
-                _kill_process_group(proc)
+                _kill_process_group(proc, wait_for_exit=True)
         proc.wait(timeout=spec.timeout_s)
         watchdog.cancel()
         if zero_output_watchdog is not None:
@@ -542,7 +542,7 @@ def _run_adapter_buffered(
         stale_watchdog_stop.set()
         if stale_watchdog is not None:
             stale_watchdog.join(timeout=5)
-        _kill_process_group(proc)
+        _kill_process_group(proc, wait_for_exit=True)
         proc.wait()
         stderr_thread.join(timeout=5)
         if raw_fh is not None:
@@ -555,7 +555,7 @@ def _run_adapter_buffered(
         # Timer fired — genuine timeout regardless of returncode
         # (SIGKILL sets returncode to -9, not None)
         if proc.returncode is None:
-            _kill_process_group(proc)
+            _kill_process_group(proc, wait_for_exit=True)
             proc.wait()
         stderr_thread.join(timeout=5)
         if raw_fh is not None:
@@ -663,7 +663,7 @@ def _run_adapter_streaming(
             # Give the adapter a brief grace period to flush any immediate trailing bytes
             # before we terminate lingering background work in the same process group.
             time.sleep(0.05)
-            _kill_process_group(proc)
+            _kill_process_group(proc, wait_for_exit=True)
 
     def _record_stdout_progress(line: str, sink: io.StringIO) -> None:
         stdout_progress.set()
@@ -695,7 +695,7 @@ def _run_adapter_streaming(
         if _stdout_progress_seen(stdout_progress) or proc.poll() is not None:
             return
         zero_output_timed_out.set()
-        _kill_process_group(proc)
+        _kill_process_group(proc, wait_for_exit=True)
 
     zero_output_watchdog = None
     if zero_output_timeout_s is not None and raw_output_path is not None:
@@ -725,7 +725,7 @@ def _run_adapter_streaming(
         stale_watchdog_stop.set()
         if stale_watchdog is not None:
             stale_watchdog.join(timeout=5)
-        _kill_process_group(proc)
+        _kill_process_group(proc, wait_for_exit=True)
         proc.wait()
         stdout_thread.join(timeout=5)
         stderr_thread.join(timeout=5)

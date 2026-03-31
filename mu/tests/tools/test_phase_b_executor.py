@@ -1530,6 +1530,86 @@ class TestFindingDisposition:
         assert len(non_blocking) == 1
 
 
+class TestGovernanceDowngrade:
+    """Governance/doc findings on non-code paths downgrade to non-blocking.
+
+    The predicate requires BOTH governance class AND governance path.
+    A POLICY_BOUND finding on actual code stays blocking.
+    """
+
+    def test_policy_bound_on_report_path_is_non_blocking(self):
+        """POLICY_BOUND on reports/ is governance — non-blocking."""
+        findings = [{
+            "title": "Plan file has unchecked boxes",
+            "class": "POLICY_BOUND",
+            "severity": "high",
+            "file": "reports/control_plane/wave1a_pipeline_validation_2026-03-31.md",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 0, "POLICY_BOUND on reports/ should be non-blocking"
+        assert len(non_blocking) == 1
+
+    def test_policy_bound_on_code_file_stays_blocking(self):
+        """POLICY_BOUND on actual code file stays blocking — not governance."""
+        findings = [{
+            "title": "Code policy violation in executor",
+            "class": "POLICY_BOUND",
+            "severity": "high",
+            "file": "mu/tools/executors/phase_b_executor.py",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 1, "POLICY_BOUND on code file must stay blocking"
+        assert len(non_blocking) == 0
+
+    def test_doc_accuracy_on_tasks_md_is_non_blocking(self):
+        """DOC_ACCURACY on TASKS.md is governance — non-blocking."""
+        findings = [{
+            "title": "TASKS.md missing tracker sync note",
+            "class": "DOC_ACCURACY",
+            "severity": "high",
+            "file": "TASKS.md",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 0, "DOC_ACCURACY on TASKS.md should be non-blocking"
+        assert len(non_blocking) == 1
+
+    def test_doc_accuracy_on_code_file_stays_blocking(self):
+        """DOC_ACCURACY on a code file stays blocking — not governance."""
+        findings = [{
+            "title": "Doc comment contradicts behavior",
+            "class": "DOC_ACCURACY",
+            "severity": "high",
+            "file": "mu/tools/agents/bridge_adapters.py",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 1, "DOC_ACCURACY on code file must stay blocking"
+        assert len(non_blocking) == 0
+
+    def test_defect_on_report_path_not_downgraded(self):
+        """DEFECT class on reports/ is NOT governance — class must also match."""
+        findings = [{
+            "title": "Script in report has a bug",
+            "class": "DEFECT",
+            "severity": "high",
+            "file": "reports/control_plane/some_script.py",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 1, "DEFECT on any path stays blocking regardless of path"
+        assert len(non_blocking) == 0
+
+    def test_governance_downgrade_reason_includes_file(self):
+        """The downgrade reason includes the file path for auditability."""
+        disp, reason = pb_mod._disposition_for_finding({  # ANTICHEAT_OK: testing internal executor functions
+            "title": "Stale reference",
+            "class": "POLICY_BOUND",
+            "severity": "high",
+            "file": "reports/deferred/README.md",
+        })
+        assert disp == "non_blocking"
+        assert "governance" in reason.lower()
+        assert "reports/deferred/README.md" in reason
+
+
 class TestHighSeverityDetailHeuristic:
     """High severity no longer downgrades from prose-only detail/description text."""
 
@@ -3099,28 +3179,24 @@ class TestRoutingValidationNotBypassed:
     """
 
     def test_wrong_routing_token_fails_without_force(self):
-        """ROUTE_PHASE_A token → validation error (no silent rewrite)."""
+        """ROUTE_PHASE_A token → PhaseBExecutorError (no silent rewrite)."""
         routing = {"decision": "ROUTE_PHASE_A", "summary": "test"}
         plan = {"phase_a_lock": "LOCKED"}
-        valid, errors = pb_mod.validate_inputs(routing, plan)
-        assert not valid
-        assert any("ROUTE_PHASE_B" in e for e in errors)
+        with pytest.raises(pb_mod.PhaseBExecutorError, match="ROUTE_PHASE_B"):
+            pb_mod.validate_inputs(routing, plan)
 
     def test_correct_routing_token_passes(self):
-        """ROUTE_PHASE_B token → validation passes."""
+        """ROUTE_PHASE_B token → validation passes (no exception)."""
         routing = {"decision": "ROUTE_PHASE_B", "summary": "test"}
         plan = {"phase_a_lock": "LOCKED"}
-        valid, errors = pb_mod.validate_inputs(routing, plan)
-        assert valid
-        assert errors == []
+        pb_mod.validate_inputs(routing, plan)  # should not raise
 
     def test_unlocked_plan_fails(self):
-        """Plan not LOCKED → validation error."""
+        """Plan not LOCKED → PhaseBExecutorError."""
         routing = {"decision": "ROUTE_PHASE_B", "summary": "test"}
         plan = {"phase_a_lock": "DRAFT"}
-        valid, errors = pb_mod.validate_inputs(routing, plan)
-        assert not valid
-        assert any("LOCKED" in e for e in errors)
+        with pytest.raises(pb_mod.PhaseBExecutorError, match="LOCKED"):
+            pb_mod.validate_inputs(routing, plan)
 
     def test_run_phase_b_fails_on_bad_routing_without_force(self, tmp_path):
         """run_phase_b with wrong routing token returns error (not override)."""
@@ -3946,20 +4022,18 @@ class TestValidateInputsAcceptsRoutingRecordAuthority:
     def test_routing_record_authority_is_valid(self):
         record = {"decision": "ROUTE_PHASE_B"}
         plan = {"phase_a_lock": "ROUTING_RECORD_AUTHORITY"}
-        valid, errors = pb_mod.validate_inputs(record, plan)
-        assert valid, errors
+        pb_mod.validate_inputs(record, plan)  # should not raise
 
     def test_locked_still_valid(self):
         record = {"decision": "ROUTE_PHASE_B"}
         plan = {"phase_a_lock": "LOCKED"}
-        valid, errors = pb_mod.validate_inputs(record, plan)
-        assert valid, errors
+        pb_mod.validate_inputs(record, plan)  # should not raise
 
     def test_unlocked_still_invalid(self):
         record = {"decision": "ROUTE_PHASE_B"}
         plan = {"phase_a_lock": "UNLOCKED"}
-        valid, errors = pb_mod.validate_inputs(record, plan)
-        assert not valid
+        with pytest.raises(pb_mod.PhaseBExecutorError):
+            pb_mod.validate_inputs(record, plan)
 
 
 class TestHighSeverityCannotBeDowngradedByDisposition:

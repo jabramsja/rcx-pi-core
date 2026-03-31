@@ -77,7 +77,7 @@ except ImportError as _exc:
 
 BRANCH_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
-FORCE_ADD_DENYLIST = (".git/", ".env", ".agent_bus/")
+FORCE_ADD_DENYLIST = tuple(d.lower() for d in (".git/", ".env", ".agent_bus/"))
 
 REQUIRED_HANDOFF_FIELDS = {
     "wave_id", "wave_class", "target_gate_id", "branch_prefix",
@@ -520,7 +520,7 @@ def _force_add_denied_match(path_str: str) -> str | None:
     if ".agent_bus" in parts:
         return ".agent_bus/"
     for denied in FORCE_ADD_DENYLIST:
-        if lowered.startswith(denied.lower()):
+        if lowered.startswith(denied):
             return denied
     return None
 
@@ -1450,10 +1450,10 @@ def prepare_handoff_from_routing_record(
         return None, [f"Embedded handoff invalid: {err}" for err in handoff_errors]
 
     # COMMIT_GO / COMMIT_GO_HOLD_PUSH require a pre-prepared handoff with
-    # an exact Phase B receipt chain.  Synthesizing one here would point at
-    # the canonical hook receipt instead of the per-invocation Phase B
-    # receipt, breaking the authority chain.  Only embedded handoffs
-    # (validated above) are accepted for these decisions.
+    # an exact Phase B receipt chain.  The supervisor receipt (written in
+    # step 6) is the runtime commit-decision authority; the Phase B handoff
+    # receipt provides provenance traceability.  Synthesizing a handoff here
+    # would lack both, so only embedded handoffs (validated above) are accepted.
     if decision in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
         return None, [
             f"{decision} requires a pre-prepared Phase B handoff (or valid "
@@ -2424,8 +2424,9 @@ def run_commit_pipeline(
                     "errors": ["Indicator collection timed out"],
                     "steps_completed": result["steps_completed"]}
     else:
-        log("Step 5: indicator script not found, skipping")
-        result["steps_completed"].append("collect_and_stage_indicator")
+        return {"status": "error", "step": "collect_and_stage_indicator",
+                "errors": [f"Indicator collector script not found: {indicator_script}"],
+                "steps_completed": result["steps_completed"]}
 
     # ── Step 6: build_and_run_supervisor ──────────────────────────────
     try:
@@ -2533,11 +2534,10 @@ def run_commit_pipeline(
                 "steps_completed": result["steps_completed"]}
 
     # ── Step 7: validate_receipt ──────────────────────────────────────
-    # Preserve the exact Phase B receipt chain first, then read the fresh
-    # step-6 supervisor receipt for the final commit decision. The handoff
-    # receipt path remains required authority provenance even though the
-    # supervisor receipt is the only receipt minted after tracker/indicator
-    # mutations in steps 3-5.
+    # The supervisor receipt (step 6) is the runtime authority — it reflects
+    # the actual staged state after tracker/indicator mutations in steps 3-5.
+    # The handoff receipt path is preserved for provenance traceability only;
+    # it is NOT authoritative for the commit decision.
     handoff_receipt_rel = handoff["pre_commit_receipt_path"]
     # Containment check: handoff receipt must resolve inside the repo root.
     # Reject path traversal and symlinks that escape the repo boundary.

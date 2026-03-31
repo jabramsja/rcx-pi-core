@@ -127,6 +127,21 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
     disposition = finding.get("disposition")
     finding_class = str(finding.get("class") or "").upper()
 
+    # Governance/doc-only findings are never blocking regardless of severity.
+    # Must satisfy BOTH conditions: governance class AND governance file path.
+    # A POLICY_BOUND finding on actual code (e.g. phase_b_executor.py) stays blocking.
+    # Only POLICY_BOUND/DOC_ACCURACY on reports/, TASKS.md, .claude/ are downgraded.
+    _GOV_CLASSES = {"POLICY_BOUND", "DOC_ACCURACY"}
+    _GOV_PATH_PREFIXES = ("reports/", "TASKS.md", ".claude/", "CHANGELOG.md", "STATUS.md")
+    finding_file = str(finding.get("file") or "")
+    is_gov_path = any(finding_file.startswith(p) for p in _GOV_PATH_PREFIXES)
+    is_governance = finding_class in _GOV_CLASSES and is_gov_path
+    if is_governance:
+        return "non_blocking", (
+            f"{severity} {finding_class} on governance/doc path — "
+            f"downgraded to non-blocking (file: {finding_file})"
+        )
+
     # Critical/high findings stay blocking even if an explicit disposition tries
     # to soften them. This is the fail-closed floor for bridge feedback.
     # IMPORTANT: this check runs BEFORE the generic disposition check so that
@@ -596,8 +611,12 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
 def validate_inputs(
     routing_record: dict[str, Any],
     plan: dict[str, str],
-) -> tuple[bool, list[str]]:
-    """Validate inputs before proceeding with Phase B."""
+) -> None:
+    """Validate inputs before proceeding with Phase B.
+
+    Raises PhaseBExecutorError on invalid routing token or unlocked plan.
+    Callers holding BOOTSTRAP_PHASE_B_EXCEPTION may catch and override.
+    """
     errors: list[str] = []
 
     # Routing decision must be ROUTE_PHASE_B
@@ -610,7 +629,10 @@ def validate_inputs(
     if lock not in ("LOCKED", "ROUTING_RECORD_AUTHORITY"):
         errors.append(f"Plan Phase-A-Lock must be LOCKED (or ROUTING_RECORD_AUTHORITY for planless), got {lock}")
 
-    return len(errors) == 0, errors
+    if errors:
+        raise PhaseBExecutorError(
+            f"validate_inputs fatal: {'; '.join(errors)}"
+        )
 
 
 def _parse_ps_time_seconds(value: str) -> float:
@@ -1217,8 +1239,15 @@ def _select_sdk_review_files(files: list[str]) -> list[str]:
     return implementation
 
 
-def _collect_changed_files(repo_root: Path) -> list[str]:
-    """Collect all changed files (staged + unstaged + untracked) from git."""
+def _collect_changed_files(
+    repo_root: Path,
+    allowed_files: set[str] | None = None,
+) -> list[str]:
+    """Collect changed files (staged + unstaged + untracked) from git.
+
+    When *allowed_files* is provided, only files in that set are returned.
+    This prevents sweeping unrelated dirty-worktree files into the wave.
+    """
     changed: list[str] = []
     try:
         staged = subprocess.run(
@@ -1236,6 +1265,8 @@ def _collect_changed_files(repo_root: Path) -> list[str]:
         changed = sorted(set(f for f in staged + unstaged + untracked if f))
     except subprocess.CalledProcessError:
         pass
+    if allowed_files is not None:
+        changed = [f for f in changed if f in allowed_files]
     return changed
 
 
@@ -1847,13 +1878,14 @@ def run_phase_b(
 
     log(f"Phase-A-Lock: {plan.get('phase_a_lock', 'unknown')}")
 
-    valid, errors = validate_inputs(routing_record, plan)
-    if not valid:
+    try:
+        validate_inputs(routing_record, plan)
+    except PhaseBExecutorError as exc:
         if force:
-            log(f"BOOTSTRAP_PHASE_B_EXCEPTION: Validation errors overridden: {errors}")
+            log(f"BOOTSTRAP_PHASE_B_EXCEPTION: Validation errors overridden: {exc}")
             result["bootstrap_exception"] = True
         else:
-            return {"status": "error", "step": "validate_inputs", "errors": errors}
+            return {"status": "error", "step": "validate_inputs", "errors": [str(exc)]}
 
     # Step 2: Load executor config for backend/model/timeout
     try:

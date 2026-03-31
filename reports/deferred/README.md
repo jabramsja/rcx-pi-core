@@ -19,6 +19,9 @@ Archive rule:
 
 Current active inventory (audited 2026-03-31):
 
+Pipeline/control-surface (consolidated 2026-03-31):
+- `non_blocking/wave1_pipeline_consolidated_2026-03-31.md` — 27 unique items across 6 clusters (A-F), supersedes 6 prior files
+
 Redteam residue (March 2026):
 - `non_blocking/redteam_2026-03-09_wave2.md` — branch-prefix coupling, wrapper staleness (low)
 - `non_blocking/redteam_2026-03-09_wave3.md` — Hypothesis suppressions/decorators (fuzzer hygiene wave)
@@ -31,15 +34,8 @@ Runtime/gate residue:
 - `non_blocking/hook_soft_gate_residue.md` — soft-gate annoyance (quote-split, false positives)
 - `non_blocking/w5a_reentry_gate_coverage.md` — gate test missing re-entry exercise
 
-Pipeline/control-surface residue:
-- `non_blocking/commit_pipeline_automation_plan_2026-03-22_bridge_nonblockers.md` — 33 doc/comment stale-state items
-- `non_blocking/commit_pipeline_bridge_r1_findings_2026-03-23.md` — Phase B validation non-fatal, attestation gaps
-- `non_blocking/commit_pipeline_hardening_2026-03-23.md` — 11 hardening items (validators, denylist, timeouts)
-- `non_blocking/deferred-cleanup-2026-03-29_bridge_nonblockers.md` — jq bug, PR validation, escape injection (low)
-- `non_blocking/deferred-nonpipeline-fixes-2026-03-29_bridge_nonblockers.md` — OSC escapes, doc mismatches (low)
-- `non_blocking/next-codex-post-redteam-phase-a-structural-gap-swe-2026-03-30_bridge_nonblockers.md` — retry coverage, timeout parser, self-referential meta-finding
-
 Archived (2026-03-31):
 - `redteam_2026-03-09_wave1.md` → `reports/archive/deferred/` (all resolved/design-locked)
 - `redteam_2026-03-10_wave4e.md` → `reports/archive/deferred/` (collected_at fixed, JS-only intentional)
 - `native_agent_test_findings_2026-03-11.md` → `reports/archive/deferred/` (markers added, architecture mitigations)
+- 6 pipeline files → `reports/archive/deferred/` (superseded by `wave1_pipeline_consolidated_2026-03-31.md`)
