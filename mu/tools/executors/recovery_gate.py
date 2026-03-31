@@ -56,7 +56,7 @@ class FailureClass(Enum):
     UNCLASSIFIED = "unclassified"
 
 _TIER_MAP: dict[FailureClass, int] = {
-    FailureClass.STALE_BRIDGE_LOCK: 1, FailureClass.STALE_GIT_INDEX_LOCK: 1,
+    FailureClass.STALE_BRIDGE_LOCK: 1, FailureClass.STALE_GIT_INDEX_LOCK: 2,
     FailureClass.STALE_EXECUTOR_STATE: 1, FailureClass.STALE_CONTINUATION: 1,
     FailureClass.MIXED_STAGING: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
@@ -180,15 +180,23 @@ def fix_stale_bridge_lock(repo_root: Path) -> dict[str, Any]:
 
 
 def fix_stale_git_index_lock(repo_root: Path) -> dict[str, Any]:
-    """Remove .git/index.lock if it exists."""
+    """Placeholder for future Tier 2/3 index.lock recovery.
+
+    Demoted from Tier 1 auto-fix because no sound ownership check exists to
+    prove the lock is stale vs held by a live git process. See Codex review
+    2026-03-31: pgrep-based PID detection is unreliable (git processes
+    launched from repo cwd don't include the repo name in argv).
+
+    When Tier 2 retry or Tier 3 LLM diagnosis is implemented, this function
+    can be upgraded with a proper ownership check (e.g., lsof on the lock
+    file or /proc/$pid/cwd inspection).
+    """
     lock_path = repo_root / ".git" / "index.lock"
     if not lock_path.exists():
         return _fix_result(False, "noop", "index.lock not found")
-    try:
-        lock_path.unlink()
-        return _fix_result(True, "unlink_index_lock", "removed .git/index.lock")
-    except OSError as exc:
-        return _fix_result(False, "unlink_failed", f"failed to remove index.lock: {exc}")
+    return _fix_result(False, "demoted_to_tier2",
+                       "index.lock exists but Tier 1 auto-fix disabled — "
+                       "no sound ownership check to prove lock is stale")
 
 
 def fix_stale_executor_state(repo_root: Path, wave_id: str = "") -> dict[str, Any]:
@@ -205,6 +213,11 @@ def fix_stale_executor_state(repo_root: Path, wave_id: str = "") -> dict[str, An
     if wave_id and state_wave == wave_id:
         return _fix_result(False, "noop",
                            f"phase_b_state.json wave_id matches current ({wave_id})")
+    if not wave_id:
+        # No wave_id to compare — can't determine staleness, don't delete
+        return _fix_result(False, "noop",
+                           f"no wave_id provided — cannot determine if "
+                           f"phase_b_state.json (wave: {state_wave}) is stale")
     state_path.unlink(missing_ok=True)
     return _fix_result(True, "unlink_stale_state",
                        f"removed stale phase_b_state.json (was: {state_wave}, current: {wave_id})")
@@ -241,7 +254,9 @@ def fix_mixed_staging(repo_root: Path) -> dict[str, Any]:
 
 _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.STALE_BRIDGE_LOCK: lambda root, **kw: fix_stale_bridge_lock(root),
-    FailureClass.STALE_GIT_INDEX_LOCK: lambda root, **kw: fix_stale_git_index_lock(root),
+    # STALE_GIT_INDEX_LOCK demoted to Tier 2: no sound ownership check exists
+    # to prove the lock is stale vs held by a live git process. See Codex
+    # review 2026-03-31 for the pgrep-evasion proof.
     FailureClass.STALE_EXECUTOR_STATE: lambda root, **kw: fix_stale_executor_state(
         root, wave_id=kw.get("wave_id", "")),
     FailureClass.STALE_CONTINUATION: lambda root, **kw: fix_stale_executor_state(

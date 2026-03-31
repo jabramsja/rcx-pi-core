@@ -120,9 +120,11 @@ class TestTierMapping:
         for fc in FailureClass:
             assert rg_mod.tier_for(fc) in (1, 2, 3, 4), f"{fc} bad tier"
         tier1 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 1}
-        assert tier1 == {FailureClass.STALE_BRIDGE_LOCK, FailureClass.STALE_GIT_INDEX_LOCK,
+        assert tier1 == {FailureClass.STALE_BRIDGE_LOCK,
                          FailureClass.STALE_EXECUTOR_STATE, FailureClass.STALE_CONTINUATION,
                          FailureClass.MIXED_STAGING}
+        # STALE_GIT_INDEX_LOCK demoted to Tier 2 (no sound ownership check)
+        assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
         tier4 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 4}
         assert tier4 == {FailureClass.TERMINAL_POLICY, FailureClass.UNCLASSIFIED}
 
@@ -155,11 +157,14 @@ class TestFixStaleGitIndexLock:
         (tmp_path / ".git").mkdir()
         assert rg_mod.fix_stale_git_index_lock(tmp_path)["fixed"] is False
 
-    def test_lock_removed(self, tmp_path):
+    def test_lock_not_removed_demoted(self, tmp_path):
+        """index.lock auto-fix demoted to Tier 2 — never deletes."""
         git_dir = tmp_path / ".git"; git_dir.mkdir()
         lock = git_dir / "index.lock"; lock.write_text("lock")
-        assert rg_mod.fix_stale_git_index_lock(tmp_path)["fixed"] is True
-        assert not lock.exists()
+        r = rg_mod.fix_stale_git_index_lock(tmp_path)
+        assert r["fixed"] is False
+        assert r["action"] == "demoted_to_tier2"
+        assert lock.exists()
 
 
 class TestFixStaleExecutorState:
@@ -181,10 +186,11 @@ class TestFixStaleExecutorState:
         assert rg_mod.fix_stale_executor_state(tmp_path, "same")["fixed"] is False
         assert f.exists()
 
-    def test_empty_wave_always_removes(self, tmp_path):
+    def test_empty_wave_does_not_remove(self, tmp_path):
         f = self._make_state(tmp_path, "any")
-        assert rg_mod.fix_stale_executor_state(tmp_path, "")["fixed"] is True
-        assert not f.exists()
+        r = rg_mod.fix_stale_executor_state(tmp_path, "")
+        assert r["fixed"] is False
+        assert f.exists()  # no wave_id means can't determine staleness
 
     def test_corrupt_json_removed(self, tmp_path):
         d = tmp_path / ".agent_bus" / "executors"; d.mkdir(parents=True)
@@ -195,11 +201,13 @@ class TestFixStaleExecutorState:
 
 class TestFixMixedStaging:
     def test_no_mixed_files(self, tmp_path):
-        with patch("recovery_gate.subprocess") as mock_sp:
-            mock_sp.run.return_value = type("R", (), {
-                "returncode": 0, "stdout": "M  clean.py\n", "stderr": ""})()
-            mock_sp.TimeoutExpired = TimeoutError
-            mock_sp.CalledProcessError = subprocess.CalledProcessError
+        mock_sp = type("MockSP", (), {
+            "run": staticmethod(lambda cmd, **kw: type("R", (), {
+                "returncode": 0, "stdout": "M  clean.py\n", "stderr": ""})()),
+            "TimeoutExpired": TimeoutError,
+            "CalledProcessError": subprocess.CalledProcessError,
+        })()
+        with patch.object(rg_mod, "subprocess", mock_sp):
             r = rg_mod.fix_mixed_staging(tmp_path)
         assert r["fixed"] is False and r["action"] == "noop"
 
@@ -210,10 +218,12 @@ class TestFixMixedStaging:
         def fake_run(cmd, **kw):
             return status_r if "status" in cmd else reset_r
 
-        with patch("recovery_gate.subprocess") as mock_sp:
-            mock_sp.run = fake_run
-            mock_sp.TimeoutExpired = TimeoutError
-            mock_sp.CalledProcessError = subprocess.CalledProcessError
+        mock_sp = type("MockSP", (), {
+            "run": staticmethod(fake_run),
+            "TimeoutExpired": TimeoutError,
+            "CalledProcessError": subprocess.CalledProcessError,
+        })()
+        with patch.object(rg_mod, "subprocess", mock_sp):
             r = rg_mod.fix_mixed_staging(tmp_path)
         assert r["fixed"] is True and "dirty.py" in r["detail"]
 
@@ -258,12 +268,13 @@ class TestAttemptRecovery:
             tmp_path, {"status": "error", "stderr": "bridge.lock held", "step": "bridge_loop"}, "w1")
         assert r["recovered"] is True and r["tier"] == 1
 
-    def test_tier1_index_lock_recovery(self, tmp_path):
+    def test_tier2_index_lock_not_auto_fixed(self, tmp_path):
+        """index.lock is Tier 2 — attempt_recovery returns not_implemented."""
         git_dir = tmp_path / ".git"; git_dir.mkdir()
-        lock = git_dir / "index.lock"; lock.write_text("lock")
+        (git_dir / "index.lock").write_text("lock")
         r = rg_mod.attempt_recovery(
             tmp_path, {"status": "error", "stderr": "index.lock held", "step": "s"}, "w1")
-        assert r["recovered"] is True and not lock.exists()
+        assert r["recovered"] is False and r["tier"] == 2 and r["action"] == "not_implemented"
 
     def test_exhausted_after_max_attempts(self, tmp_path):
         rg_mod._save_recovery_log(tmp_path, [ # ANTICHEAT_OK
@@ -275,15 +286,17 @@ class TestAttemptRecovery:
         assert r["recovered"] is False and r["exhausted"] is True
 
     def test_different_class_not_exhausted(self, tmp_path):
+        """Exhaustion is per (wave, step, class) — different class resets count."""
         rg_mod._save_recovery_log(tmp_path, [ # ANTICHEAT_OK
             {"wave_id": "w1", "step": "s1", "failure_class": "stale_bridge_lock"},
             {"wave_id": "w1", "step": "s1", "failure_class": "stale_bridge_lock"},
         ])
-        git_dir = tmp_path / ".git"; git_dir.mkdir()
-        (git_dir / "index.lock").write_text("x")
+        # Use mixed_staging (Tier 1) instead of index_lock (now Tier 2)
         r = rg_mod.attempt_recovery(
-            tmp_path, {"status": "error", "stderr": "index.lock held", "step": "s1"}, "w1")
-        assert r["exhausted"] is False and r["recovered"] is True
+            tmp_path, {"status": "error", "stderr": "mixed staging",
+                       "step": "stage_files", "stdout": "MM dirty.py"},
+            "w1")
+        assert r["exhausted"] is False  # different class, not exhausted
 
     def test_recovery_logged(self, tmp_path):
         bus = tmp_path / ".agent_bus"; bus.mkdir()
