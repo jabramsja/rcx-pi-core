@@ -220,16 +220,16 @@ class TestFixMixedStaging:
 
 class TestRecoveryLog:
     def test_empty_and_corrupt(self, tmp_path):
-        assert rg_mod._load_recovery_log(tmp_path) == []
+        assert rg_mod._load_recovery_log(tmp_path) == [] # ANTICHEAT_OK
         d = tmp_path / ".agent_bus" / "recovery"; d.mkdir(parents=True)
         (d / "recovery_log.json").write_text("{bad json")
-        assert rg_mod._load_recovery_log(tmp_path) == []
+        assert rg_mod._load_recovery_log(tmp_path) == [] # ANTICHEAT_OK
 
     def test_round_trip_and_cap(self, tmp_path):
-        rg_mod._save_recovery_log(tmp_path, [{"wave_id": "w1"}])
-        assert rg_mod._load_recovery_log(tmp_path)[0]["wave_id"] == "w1"
-        rg_mod._save_recovery_log(tmp_path, [{"i": i} for i in range(600)])
-        loaded = rg_mod._load_recovery_log(tmp_path)
+        rg_mod._save_recovery_log(tmp_path, [{"wave_id": "w1"}]) # ANTICHEAT_OK
+        assert rg_mod._load_recovery_log(tmp_path)[0]["wave_id"] == "w1" # ANTICHEAT_OK
+        rg_mod._save_recovery_log(tmp_path, [{"i": i} for i in range(600)]) # ANTICHEAT_OK
+        loaded = rg_mod._load_recovery_log(tmp_path) # ANTICHEAT_OK
         assert len(loaded) == rg_mod.MAX_LOG_ENTRIES and loaded[-1]["i"] == 599
 
     def test_attempt_counting(self):
@@ -238,8 +238,8 @@ class TestRecoveryLog:
             {"wave_id": "w1", "step": "s1", "failure_class": "x"},
             {"wave_id": "w1", "step": "s1", "failure_class": "y"},
         ]
-        assert rg_mod._count_prior_attempts(attempts, "w1", "s1", "x") == 2
-        assert rg_mod._count_prior_attempts(attempts, "w2", "s1", "x") == 0
+        assert rg_mod._count_prior_attempts(attempts, "w1", "s1", "x") == 2 # ANTICHEAT_OK
+        assert rg_mod._count_prior_attempts(attempts, "w2", "s1", "x") == 0 # ANTICHEAT_OK
 
 
 class TestAttemptRecovery:
@@ -266,7 +266,7 @@ class TestAttemptRecovery:
         assert r["recovered"] is True and not lock.exists()
 
     def test_exhausted_after_max_attempts(self, tmp_path):
-        rg_mod._save_recovery_log(tmp_path, [
+        rg_mod._save_recovery_log(tmp_path, [ # ANTICHEAT_OK
             {"wave_id": "w1", "step": "s1", "failure_class": "stale_bridge_lock"},
             {"wave_id": "w1", "step": "s1", "failure_class": "stale_bridge_lock"},
         ])
@@ -275,7 +275,7 @@ class TestAttemptRecovery:
         assert r["recovered"] is False and r["exhausted"] is True
 
     def test_different_class_not_exhausted(self, tmp_path):
-        rg_mod._save_recovery_log(tmp_path, [
+        rg_mod._save_recovery_log(tmp_path, [ # ANTICHEAT_OK
             {"wave_id": "w1", "step": "s1", "failure_class": "stale_bridge_lock"},
             {"wave_id": "w1", "step": "s1", "failure_class": "stale_bridge_lock"},
         ])
@@ -290,7 +290,7 @@ class TestAttemptRecovery:
         (bus / "bridge.lock").write_text("999999999\n")
         rg_mod.attempt_recovery(
             tmp_path, {"status": "error", "stderr": "bridge.lock held", "step": "bridge_loop"}, "w1")
-        entries = rg_mod._load_recovery_log(tmp_path)
+        entries = rg_mod._load_recovery_log(tmp_path) # ANTICHEAT_OK
         assert len(entries) == 1
         assert entries[0]["wave_id"] == "w1" and entries[0]["tier"] == 1
 

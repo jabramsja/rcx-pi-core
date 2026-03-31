@@ -12,11 +12,13 @@ BOLD="\033[1m" DIM="\033[2m" GREEN="\033[32m" YELLOW="\033[33m"
 RED="\033[31m" CYAN="\033[36m" PURPLE="\033[35m" RESET="\033[0m"
 LAST_HASH=""
 TMPOUT="/tmp/rcx_pane_findings_$$.txt"
-LAST_NOTIFIED_ROUND=""
+NOTIFY_MARKER="/tmp/rcx_last_notified_round.txt"
+LAST_NOTIFIED_ROUND=$(cat "$NOTIFY_MARKER" 2>/dev/null || echo "")
 
 notify() {
-  local title="$1" msg="$2"
+  local title="$1" msg="$2" round="$3"
   osascript -e "display notification \"$msg\" with title \"$title\" sound name \"Glass\"" 2>/dev/null &
+  echo "$round" > "$NOTIFY_MARKER"
 }
 
 while true; do
@@ -45,7 +47,11 @@ while true; do
   found_any=false
   for dir in $ROUND_DIRS; do
     ROUND_NAME=$(basename "$dir")
-    REVIEWER_FILE=$(ls -t "$dir"/*reviewer*.txt 2>/dev/null | head -1) || true
+    # Pick the newest non-empty reviewer file (timestamp-sorted, skip 0-byte placeholders)
+    REVIEWER_FILE=""
+    for rf in $(ls -t "$dir"/*reviewer*.txt 2>/dev/null); do
+      [ -s "$rf" ] && REVIEWER_FILE="$rf" && break
+    done
 
     if [ -z "$REVIEWER_FILE" ] || [ ! -s "$REVIEWER_FILE" ]; then
       continue
@@ -102,12 +108,13 @@ for f in nb:
 " 2>/dev/null)
 
     if [ -z "$ENVELOPE" ]; then
-      # No envelope yet — review still in progress
+      # No envelope yet — review still in progress. Show this and stop.
       SIZE=$(wc -c < "$REVIEWER_FILE" | xargs)
       echo -e ""
       echo -e "  ${CYAN}$ROUND_NAME${RESET} ${DIM}($age_str, ${SIZE}B)${RESET}"
       echo -e "  ${YELLOW}In progress...${RESET}"
-      continue
+      found_any=true
+      break
     fi
 
     # Parse envelope output
@@ -124,18 +131,19 @@ for f in nb:
       *) dec_color="$CYAN" ;;
     esac
 
-    # Desktop notification on new round
-    if [ "$ROUND_NAME" != "$LAST_NOTIFIED_ROUND" ] && [ -n "$DECISION" ]; then
-      LAST_NOTIFIED_ROUND="$ROUND_NAME"
+    # Desktop notification — only once per round+decision (persisted across reloads)
+    NOTIFY_KEY="${ROUND_NAME}:${DECISION}"
+    if [ "$NOTIFY_KEY" != "$LAST_NOTIFIED_ROUND" ] && [ -n "$DECISION" ]; then
+      LAST_NOTIFIED_ROUND="$NOTIFY_KEY"
       case "$DECISION" in
         GO|COMMIT_GO)
-          notify "RCX Pipeline" "GO — ready to commit (${NB_COUNT} advisory)" ;;
+          notify "RCX Pipeline" "GO — ready to commit (${NB_COUNT} advisory)" "$NOTIFY_KEY" ;;
         NO_GO)
-          notify "RCX Pipeline" "NO_GO — ${BLK_COUNT} blocker(s) found" ;;
+          notify "RCX Pipeline" "NO_GO — ${BLK_COUNT} blocker(s) found" "$NOTIFY_KEY" ;;
         REQUEST_CHANGES)
-          notify "RCX Pipeline" "REQUEST_CHANGES — ${BLK_COUNT} blocking, ${NB_COUNT} advisory" ;;
+          notify "RCX Pipeline" "REQUEST_CHANGES — ${BLK_COUNT} blocking, ${NB_COUNT} advisory" "$NOTIFY_KEY" ;;
         *)
-          notify "RCX Pipeline" "Review: $DECISION" ;;
+          notify "RCX Pipeline" "Review: $DECISION" "$NOTIFY_KEY" ;;
       esac
     fi
 
@@ -205,12 +213,16 @@ if not completed and not running:
     fi
   fi
 
-  # Only redraw if content changed (ignore timestamp line)
-  NEW_HASH=$(tail -n +2 "$TMPOUT" 2>/dev/null | md5 -q 2>/dev/null || tail -n +2 "$TMPOUT" | md5sum 2>/dev/null | cut -d' ' -f1)
+  # Only full redraw if content changed (skip title+separator for hash)
+  NEW_HASH=$(tail -n +3 "$TMPOUT" 2>/dev/null | md5 -q 2>/dev/null || tail -n +3 "$TMPOUT" | md5sum 2>/dev/null | cut -d' ' -f1)
   if [ "$NEW_HASH" != "$LAST_HASH" ]; then
     clear
     cat "$TMPOUT"
     LAST_HASH="$NEW_HASH"
+  else
+    # Data unchanged — just update timestamp so user knows it's alive
+    tput cup 0 0 2>/dev/null
+    echo -e "${BOLD}REVIEW FINDINGS${RESET}  $(date '+%H:%M:%S')"
   fi
 
   # Auto-reload
