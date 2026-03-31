@@ -580,4 +580,296 @@ reduction into Mu) per the governing queue's phase sequence.
 
 ## Findings (populated after sweep execution)
 
-_To be filled by WI-6 after WI-1 through WI-5 complete._
+Sweep executed: 2026-03-30
+Executor: Claude Opus 4.6 (Phase A implementer)
+
+---
+
+### Finding F-1: No Engine State Schema Artifact (Gap 1)
+
+**Classification:** DEFECT (structural gap)
+
+**Files:** `mu/programs/` (missing `rcx_engine_state*`), `mu/substrate/` (missing
+`engine_state*`), `mu/host/python/rcx_pi/selfhost/engine_pipeline.py`
+
+**Evidence:**
+```
+$ ls mu/programs/rcx_engine_state* mu/substrate/engine_state* 2>/dev/null
+(no output — no artifacts exist)
+
+$ grep -n "engine.state\|EngineState\|graph_state\|formal_state" engine_pipeline.py
+526:        state: previous engine state (for identity-stall detection)
+780:    """Service a boundary effect request from the engine state machine.
+1170:def run_engine_pipeline(  # AST_OK: infra — boundary host loop, services engine state machine
+1183:    """Host loop that drives the engine state machine defined in rcx_engine.v1.json.
+```
+
+**Characterization:** CONFIRMED. The PDF kernel's formal state model (`G=(V,E)`,
+bookkeeping maps `Ω`, `Λ`, `Ξ`, rank `ρ`, `NextID(G)`) has no corresponding
+`RCXEngineState.v1` seed or schema artifact. The term "engine state" appears only
+in comments and docstrings inside `engine_pipeline.py` (lines 526, 780, 1170,
+1183, 1206, 1321). The engine entry ABI (`run_engine_pipeline` at line 1170,
+`run_engine_with_routing` at line 1530) accepts raw projections and input values
+with no formal state type enforcement. The `rcx_engine.v1.json` seed (11
+projections) defines an engine *cycle* (init → trace → hash → fix → recurrence →
+exhaustion → unwrap) but not an engine *state model* with graph topology,
+bookkeeping maps, or rank invariants.
+
+**Fix direction:** Phase C structural reduction — create `rcx_engine_state.v1.json`
+seed that encodes the formal state model as projections, making the state model
+a loadable Mu artifact rather than implicit host-side convention.
+
+---
+
+### Finding F-2: No Scheduler Seed or Operator-Pool Artifact (Gap 2)
+
+**Classification:** DEFECT (structural gap)
+
+**Files:** `mu/programs/` (missing `rcx_engine_scheduler*`,
+`rcx_engine_supervisor*`), `mu/host/python/rcx_pi/selfhost/engine_pipeline.py`
+(lines 726–750), `mu/host/js/engine/pipeline.js` (lines 253–279),
+`mu/closures/exhaustion.v1.json`
+
+**Evidence:**
+```
+$ ls mu/programs/rcx_engine_scheduler* mu/programs/rcx_engine_supervisor* 2>/dev/null
+(no output — no artifacts exist)
+
+$ grep -n "scheduler|operator.pool|seedOps|lexicographic|operator.*order" engine_pipeline.py
+(no output — no scheduler terms in Python engine pipeline)
+
+$ grep -n "scheduler|operator.pool|seedOps|lexicographic" pipeline.js routing.js
+(no output — no scheduler terms in JS)
+
+$ ls mu/tests/structural/test_rcx_enginenew_scheduler* mu/tests/fixtures/rcx_enginenew_scheduler*
+(no output — no scheduler test artifacts exist)
+```
+
+**Scheduler-entry boundary characterization (run_algorithm chokepoint):**
+
+The `run_algorithm` boundary dispatch is the existing scheduler-entry surface:
+
+- **Python** (`engine_pipeline.py:726–750`): `_ALGORITHM_SEED_ALLOWLIST` is a
+  frozen set of 4 authorized seeds (`recurrence.v1.json`, `recurrence.v2.json`,
+  `exhaustion.v1.json`, `fix.v1.json`). `_boundary_op_run_algorithm` (line 736)
+  validates the request, checks the allowlist, loads the seed, and calls
+  `_run_sub_algorithm` (line 750).
+- **JS** (`pipeline.js:253–279`): `_ALGORITHM_SEED_ALLOWLIST` is a frozen object
+  with the same 4 seeds. `boundaryOpRunAlgorithm` (line 260) performs identical
+  validation and calls `runSubAlgorithm` (line 278).
+- Both substrates have parity on the dispatch map: `_BOUNDARY_DISPATCH` /
+  `BOUNDARY_DISPATCH` maps `run_algorithm` → the handler function.
+
+**Post-dispatch execution path (seed-path truth):**
+
+- **Python** (`step_mu.py:1824`): `_run_sub_algorithm` iterates the seed via
+  `run_algorithm_meta_circular` (line 1844), which defaults to
+  `execution_mode="structural"` (line 1391) and uses `step_kernel_mu` with
+  `kernel_mode="bridge"` (line 1426). Bootstrap fallback requires explicit
+  `execution_mode="bootstrap"` AND `allow_bootstrap_fallback=True` (line 1433) —
+  it is disabled by default with a SECURITY error.
+- **JS** (`pipeline.js:152`): `runSubAlgorithm` iterates the seed via
+  `runAlgorithmWithBridge` (line 156), which runs through `_stepKernelCore`
+  (line 135). No bootstrap fallback path exists in JS at all.
+
+**Seed-path truth verdict:** The seed path is real and is the default execution
+path in both substrates. Bootstrap fallback is explicit debug-only in Python and
+absent in JS. This satisfies the seed implementation packet (§115-121) exit
+criteria (§446-451).
+
+**Operator-identity model:** The `exhaustion.v1.json` seed contains extensive
+operator/frozen/freeze/pool semantics (operator extraction, frozen-list
+management, freeze detection). However, no scheduler artifact governs operator
+*ordering* (seedOps, Godel-coded unary maps, lexicographic order) or operator
+*identity* across the full engine cycle. The operator-pool model lives entirely
+in the exhaustion seed's projection patterns, not in a standalone scheduler.
+
+**Characterization:** CONFIRMED. The PDF scheduler model (seedOps, Godel-coded
+unary maps, finite operator pool per step, strict lexicographic order,
+identity-map safeguard, promotion/freeze) has no executable artifact. The
+existing `run_algorithm` chokepoint provides a security boundary (allowlist +
+dispatch) but not scheduling semantics. Operator identity is partially modeled
+in `exhaustion.v1.json` but without cross-cycle ordering or promotion logic.
+
+**Fix direction:** Phase C structural reduction — create
+`rcx_engine_scheduler.v1.json` seed encoding operator ordering, pool management,
+and promotion/freeze lifecycle. The `run_algorithm` allowlist would be widened to
+admit the scheduler seed per the seed implementation packet (§356-363).
+
+---
+
+### Finding F-3: Terminal Semantics — Partial Coverage (Gap 5)
+
+**Classification:** DEFECT (structural gap — partial) + partially RESOLVED
+
+**Files:** `mu/host/python/rcx_pi/selfhost/step_mu.py` (lines 42–43, 150–190),
+`mu/host/js/core/terminal_classification.js` (lines 60–66, 122–235),
+`mu/host/python/rcx_pi/selfhost/engine_pipeline.py`,
+`mu/host/js/engine/pipeline.js`
+
+**Evidence — Terminal authority surface:**
+
+Terminal classification authority lives in *structural* classification functions,
+not host wrapper code:
+
+- **Python** (`step_mu.py:161`): `classify_terminal_kind` dispatches to
+  `terminal_classify.v1.json` seed projections via `eval_step()` (line 169).
+  Key sets are seed-derived (line 64, `_load_tc_key_sets`). Terminal kinds:
+  `kernel_done`, `recurrence_terminal`, `exhaustion_terminal`, `engine_terminal`,
+  `non_terminal`.
+- **JS** (`terminal_classification.js:219`): `classifyTerminalKind` mirrors
+  Python exactly. `deriveEngineExitReason` (line 268) delegates to
+  `terminal_classify.v1.json` seed projections. Key sets are seed-derived
+  (line 66).
+
+This is a Wave 25 structural displacement achievement — terminal semantics were
+moved from hardcoded host sets to seed-derived classification.
+
+**Evidence — L4 gate coverage:**
+
+All 4 terminal-related L4 gates pass:
+- `test_engine_exit_reason_gate.py`: 17 passed (exit reasons: closure,
+  exhaustion, stall, completed — 4 reasons, both substrates, cross-substrate
+  parity)
+- `test_engine_terminal_event_gate.py`: 12 passed (terminal event emission,
+  exactly-one-terminal invariant, boot1/trampoline parity)
+- `test_terminal_classification_parity_gate.py`: 45 passed (seed-derived key
+  sets, no hardcoded frozensets, prefilter short-circuit, cache integrity)
+- `test_terminal_semantics_displacement_gate.py`: 51 passed (classify parity,
+  exit reason parity, seed-derived key set cardinality/correctness)
+
+**Gap map holes still open:**
+- `hash_error`: No exit reason or terminal path for hash-error events. The
+  engine pipeline handles hash computation inline but `hash_error` is not a
+  recognized `engine_exit_reason` value.
+- `globalstall`: Not surfaced as a terminal classification or exit reason. The
+  engine detects identity stall (hash-based) but does not distinguish
+  single-projection stall from global (all-operator) stall.
+- `restart protocol / run-id separation`: No restart terminal or run-id tracking
+  in either substrate. The engine is single-run; restart semantics are not modeled.
+
+**Characterization:** PARTIALLY RESOLVED. Core terminal classification (5 kinds,
+4 exit reasons) is structurally displaced into `terminal_classify.v1.json` with
+full L4 gate coverage and cross-substrate parity (125 tests across 4 gates, all
+passing). The remaining PDF terminal paths (`hash_error`, `globalstall`, restart
+protocol) have no coverage and no structural representation.
+
+**Fix direction:** Phase C structural reduction — extend `terminal_classify.v1.json`
+with projections for `hash_error` and `globalstall` terminal kinds. Restart
+protocol requires design work (new Phase A slice, Gap 3/6 scope).
+
+---
+
+### Finding F-4: Workload Corpus — 3 Vectors, No Research Integrity Artifacts (Gap 7)
+
+**Classification:** DEFECT (structural gap)
+
+**Files:** `mu/tests/fixtures/rcx_engine_workload_contract.json`,
+`tests/parity/test_rcx_engine_workload_contract_parity.py`
+
+**Evidence — Current manifest:**
+```
+$ python3 -c "... rcx_engine_workload_contract.json ..."
+workload.identity_stall - Identity projection stalls immediately; engine produces terminal with stall=true
+workload.constant_closure - Constant projection converges to fixed point; engine detects closure and stall
+workload.no_match_stall - No-match projection stalls on input; engine detects closure from stall
+```
+
+3 vectors. Parity test passes (Python/JS agree on all 3).
+
+**Evidence — Missing PDF workload paths:**
+- `ω emergence` (omega emergence): no vector
+- `P(x) subset closure`: no vector
+- `fork motif`: no vector
+- `operator-pool freeze`: no vector (exhaustion seed exists but no workload
+  vector exercises it through the engine pipeline)
+- `hash-error`: no vector
+
+**Evidence — Research integrity (seed implementation packet §83-94, §466-473):**
+
+```
+$ python3 -c "... has_negative ..."
+workload.identity_stall - has_negative: MISSING
+workload.constant_closure - has_negative: MISSING
+workload.no_match_stall - has_negative: MISSING
+```
+
+- **Negative controls:** MISSING. No `negative_control` field on any vector.
+  One research negative control exists (`mu/tests/research/test_d007_h3_negative_control.py`)
+  but it is for hypothesis falsification, not workload contract vectors.
+- **Ablation/removal tests:** MISSING. No ablation or removal test cases found
+  in `mu/tests/engine/`, `mu/tests/research/`, or `tests/engine/`.
+- **Given-for-free ledger:** MISSING. No `given_for_free` or `host_implicit`
+  artifacts found in `mu/docs/core/` or `mu/tests/fixtures/`.
+
+**Post-gap-map activity:** 2 commits since 2026-03-12 touched engine test dirs
+(P7-c three-way parity harness, Wave 20 fuzz test) but did not add new workload
+vectors to the manifest.
+
+**Engine test collection:** 639 tests collected across `mu/tests/engine/` — the
+testing surface is broad, but the *canonical workload contract* manifest that
+maps to PDF workload paths has only 3 vectors.
+
+**Characterization:** CONFIRMED. The workload corpus is too small for full-PDF
+claims. The 3 existing vectors cover basic stall/closure paths only. 5 PDF
+workload paths have no coverage. Research-integrity artifacts required by the
+seed implementation packet (§83-94) — negative controls, ablation tests,
+given-for-free ledger — do not exist. Per the packet's validity conditions
+(§466-473), widened EngineNew claims cannot survive without these artifacts.
+
+**Fix direction:** Phase C structural reduction — expand
+`rcx_engine_workload_contract.json` with vectors for ω emergence, P(x) subset
+closure, fork motif, operator-pool freeze, and hash-error. Add `negative_control`
+field to each vector. Create ablation test fixtures. Create
+`host_given_for_free_ledger.json` enumerating implicit host provisions.
+
+---
+
+### Finding F-5: Cross-Substrate Parity and Ratchets — ALL PASS
+
+**Classification:** No finding (all gates pass)
+
+**Evidence:**
+```
+$ node mu/host/js/eval_step.js
+All tests passed: true
+(12 seeds verified, 10 test suites, 20 parity vectors, 3 security vectors)
+
+$ PYTHONHASHSEED=0 python3 -m pytest tests/parity/test_rcx_engine_parity.py \
+    tests/parity/test_rcx_engine_workload_contract_parity.py -v --tb=short
+17 passed in 2.88s
+
+$ python3 tools/checks/check_host_authority_inventory_ratchet.py
+Current: 312 total (181 Python + 131 JS), 217 authority (120 Python + 97 JS)
+Baseline: 312 total, 217 authority
+PASS: No new total-inventory or authority-subset sites detected.
+
+$ python3 tools/checks/check_host_semantics_ratchet.py
+PASS: No host-semantics footprint increase detected.
+
+$ python3 tools/checks/check_bootstrap_purity_ratchet.py
+PASS: Bootstrap purity ratchet OK — no new host capabilities
+```
+
+**Characterization:** All 5 checks pass. Engine parity is intact across
+substrates. No ratchet regressions. No blocking finding.
+
+---
+
+### Summary Table
+
+| ID | Gap | Classification | Status | Downstream Phase |
+|----|-----|---------------|--------|-----------------|
+| F-1 | Gap 1: Engine State Model | DEFECT | CONFIRMED — no state schema artifact | Phase C (structural reduction) |
+| F-2 | Gap 2: Scheduler Boundary | DEFECT | CONFIRMED — no scheduler seed; run_algorithm chokepoint exists but lacks scheduling semantics; seed-path truth verified | Phase C (structural reduction) |
+| F-3 | Gap 5: Terminal Semantics | DEFECT (partial) | PARTIALLY RESOLVED — 5 terminal kinds + 4 exit reasons displaced to seed with 125 L4 gate tests passing; hash_error/globalstall/restart still open | Phase C (extend terminal_classify.v1.json) |
+| F-4 | Gap 7: Workload Corpus | DEFECT | CONFIRMED — 3 of 8+ needed vectors; no negative controls, no ablation tests, no given-for-free ledger | Phase C (structural reduction) |
+| F-5 | Parity + Ratchets | — | ALL PASS — no regression | N/A |
+
+### Stop Condition Evaluation
+
+- **Condition 1 (all 6 WIs complete):** YES — all findings classified, parity verified.
+- **Condition 2 (blocking parity failure):** NO — all parity checks pass.
+- **Condition 3 (host semantics ratchet increase):** NO — PASS, 0 increases.
+- **Condition 4 (host authority inventory increase):** NO — PASS, 312/312 total, 217/217 authority.
+- **Condition 5 (gap map >50% outdated):** NO — 3 of 4 gaps fully confirmed, 1 partially resolved. The gap map (2026-03-12) is materially current.
