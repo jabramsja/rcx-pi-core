@@ -69,7 +69,19 @@ content = open('$REVIEWER_FILE', errors='replace').read()
 matches = list(re.finditer(r'BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE', content, re.DOTALL))
 if not matches:
     sys.exit(0)
-env = json.loads(matches[-1].group(1))
+# Find the last VALID envelope with a real decision (skip schema examples)
+env = None
+for m in reversed(matches):
+    try:
+        candidate = json.loads(m.group(1))
+        dec = candidate.get('decision', '')
+        if '|' not in dec and dec:  # Skip 'GO|NO_GO|...' schema examples
+            env = candidate
+            break
+    except (json.JSONDecodeError, KeyError):
+        continue
+if env is None:
+    sys.exit(0)
 dec = env.get('decision', '?')
 summary = env.get('summary', '')[:120]
 findings = env.get('findings', [])

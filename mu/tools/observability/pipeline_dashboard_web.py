@@ -96,9 +96,19 @@ def bridge_round_history():
                 matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", content, re.DOTALL))
                 if not matches:
                     continue
-                env = json.loads(matches[-1].group(1))
+                env = None
+                for m in reversed(matches):
+                    try:
+                        candidate = json.loads(m.group(1))
+                        if "|" not in candidate.get("decision", ""):
+                            env = candidate
+                            break
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+                if env is None:
+                    continue
                 dec = env.get("decision", "")
-                if "|" in dec:
+                if not dec:
                     continue
                 findings = env.get("findings", [])
                 blk = [x for x in findings if x.get("disposition") == "blocking"]

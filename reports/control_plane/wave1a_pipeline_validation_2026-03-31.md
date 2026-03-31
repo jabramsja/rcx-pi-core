@@ -2,9 +2,10 @@
 
 **Status:** PHASE_A_LOCKED
 **Task:** NEXT-CODEX-POST-REDTEAM deferred cleanup
-**Surface:** `mu/tools/executors/phase_b_executor.py`, `mu/tools/checks/check_closeout_attestation.py`, `mu/tools/agents/meta_bridge_supervisor.py`, `mu/tools/executors/commit_executor.py`, `mu/tools/agents/bridge_adapters.py`
+**Surface (primary):** `mu/tools/executors/phase_b_executor.py`, `mu/tools/checks/check_closeout_attestation.py`, `mu/tools/agents/meta_bridge_supervisor.py`, `mu/tools/executors/commit_executor.py`, `mu/tools/agents/bridge_adapters.py`
+**Surface (secondary — tests, docs, reports):** `mu/tests/tools/test_phase_b_executor.py`, `mu/tests/tools/test_meta_bridge_supervisor.py`, `mu/tests/tools/test_commit_executor_receipt.py`, `mu/tests/tools/test_executor_dispatch.py`, `mu/tests/docs/test_growth_caps.py`, `mu/docs/agents/PipelineRecovery.v0.md`, `mu/tools/observability/pipeline_dashboard_web.py`, `mu/tools/observability/pipeline_monitor.sh`, `mu/tools/observability/_pane_findings.sh`, `mu/tools/observability/_pane_processes.sh`, `mu/tools/observability/_pane_timeline.sh`, `reports/deferred/non_blocking/wave1_pipeline_consolidated_2026-03-31.md`, `reports/deferred/non_blocking/wave1a-pipeline-validation-2026-03-31_bridge_nonblockers.md`, `reports/control_plane/wave1b_pipeline_cleanup_2026-03-31.md`, `reports/deferred/README.md`, `.claude/skills/preflight/SKILL.md`, `TASKS.md`
 **Classification:** L4_ENABLER (pipeline hardening, no runtime dirs)
-**Scope:** 9 items — Cluster A (5 validation) + Cluster B (4 executor)
+**Scope:** 9 items — Cluster A (5 validation) + Cluster B (4 executor). Secondary surface includes observability v2, deferred report consolidation, and pipeline recovery design shipped in same branch.
 **Source:** `reports/deferred/non_blocking/wave1_pipeline_consolidated_2026-03-31.md`
 
 ---
