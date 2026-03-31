@@ -29,9 +29,11 @@ Run this at the START of every session. It reads canonical sources and reports c
 
 10. Clean stale bridge lock — if `.agent_bus/meta/meta_bridge.lock` exists and the PID is dead, remove it.
 
-11. Start pipeline monitor — run `tools/observability/pipeline_monitor.sh start --detach` to launch the tmux dashboard in the background. If already running, skip. Tell the user to open a second terminal and run `tmux attach-session -t rcx-pipeline` to see the live dashboard.
+11. Start pipeline monitor (tmux) — run `tools/observability/pipeline_monitor.sh start --detach` to launch the tmux dashboard in the background. If already running, skip.
 
-12. Check dream staleness — read `~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/.last_dream`. If missing or older than 24 hours, run `/dream` before starting work.
+12. Start web dashboard — check if `pipeline_dashboard_web.py` is already running (`pgrep -f pipeline_dashboard_web`). If not, start it: `nohup python3 tools/observability/pipeline_dashboard_web.py > /dev/null 2>&1 &`. Verify it responds: `curl -s http://localhost:8099/api/state | head -c 20`.
+
+13. Check dream staleness — read `~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/.last_dream`. If missing or older than 24 hours, run `/dream` before starting work.
 
 ## Output Format
 
@@ -46,15 +48,24 @@ Ratchets: <pass/fail>
 JS Parity: <pass/fail>
 Uncommitted: <count files> / Agent review needed: <yes/no>
 Bridge lock: <clean/stale-cleared>
-Monitor: <started/already running>
+Monitors: tmux <started/running> | web <started/running> @ http://localhost:8099
 Dream: <fresh (Nh ago) / STALE — running /dream>
 Recent: <last 3 commits one-line>
 ```
 
 Flag any issues that need attention before starting work.
 
-**ALWAYS** end preflight output with the tmux attach command for the user to copy-paste, regardless of whether the monitor was just started or was already running:
+**ALWAYS** end preflight output with a quick-reference block the user can copy-paste:
 
 ```
-Pipeline monitor: tmux attach-session -t rcx-pipeline
+DASHBOARDS
+  Web:   http://localhost:8099
+  tmux:  tmux attach-session -t rcx-pipeline
+
+TMUX CHEAT SHEET
+  Detach from tmux:     Ctrl-b  then  d
+  Reattach to tmux:     tmux attach-session -t rcx-pipeline
+  List tmux sessions:   tmux ls
+  Scroll in tmux pane:  Ctrl-b  then  [   (arrow keys to scroll, q to exit)
+  Switch tmux panes:    Ctrl-b  then  arrow key
 ```
