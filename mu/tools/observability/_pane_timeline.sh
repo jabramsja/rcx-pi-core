@@ -65,7 +65,8 @@ if s == 'completed':
     if failed: print(f'${YELLOW}Agents${RESET}: {passed} pass, {failed} need work')
     else: print(f'${GREEN}Agents${RESET}: all {total} passed')
 elif running:
-    print(f'${CYAN}Agents running${RESET}: {', '.join(running)}')
+    names = ', '.join(running)
+    print(f'${CYAN}Agents running${RESET}: {names}')
 else:
     print(f'${CYAN}Agents${RESET}: {s}')
 " 2>/dev/null)

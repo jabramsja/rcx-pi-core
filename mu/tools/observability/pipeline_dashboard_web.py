@@ -41,8 +41,8 @@ def pid_start(pid):
 
 def detect_phase(lines):
     for name, pattern in [("phase-a", "phase_a_executor"), ("phase-b", "phase_b_executor"),
-                          ("commit", "commit_executor"), ("bridge", "bridge_supervisor"),
-                          ("post-merge", "meta_bridge_supervisor")]:
+                          ("commit", "commit_executor"), ("post-merge", "meta_bridge_supervisor"),
+                          ("bridge", "bridge_supervisor")]:
         for l in lines:
             if pattern in l and "grep" not in l and "test_" not in l:
                 pid = int(l.split()[1])
@@ -124,6 +124,7 @@ def bridge_round_history():
                 })
             except Exception:
                 pass
+    rounds.sort(key=lambda r: r["timestamp"])
     return rounds
 
 
@@ -913,7 +914,7 @@ function elapsed(ts) {
   return s+'s';
 }
 
-function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function decClass(d) { return 'dec-'+(d||'').toLowerCase().replace(/[^a-z_]/g,''); }
 
 function colorLogLine(line) {

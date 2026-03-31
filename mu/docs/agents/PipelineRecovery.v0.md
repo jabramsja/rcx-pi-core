@@ -120,28 +120,55 @@ Timeout adjustments passed via `RCX_RECOVERY_TIMEOUT_OVERRIDE` env var.
 | Agent review crash | partial status JSON, no report | Claude reads partial status + agent log, decides retry/skip/escalate |
 | Unknown executor error | `status == "error"` with no Tier 1/2 match | Claude reads error JSON + log tail, emits recovery plan |
 
-**Tier 3 prompt design (~40 lines):**
-- Input: error JSON + last 50 log lines + `git status --porcelain` + lock/state file ages
-- Output schema: `{"action": "retry"|"cleanup_and_retry"|"escalate", "commands": ["shell cmds"], "reason": "one line"}`
-- Prohibited actions: editing code files, running tests, invoking bridge reviews, multi-step plans
-- Allowed actions: `git reset`, `rm` (state files only), `git checkout -- <file>`, retry decision
-- Token budget: ~2000 input, ~200 output. Use cheapest capable model.
-- Invocation: `subprocess.run(["claude", "--print", "-p", prompt_text], timeout=60)`
+**Tier 3 uses a Recovery Loop (not one-shot):**
+
+```
+Recovery Loop:  Diagnose → Implement Fix → Verify → ─(pass)─→ Re-enter Pipeline
+                  ↑                          |
+                  └───────(fail, max 3)──────┘
+                              |
+                         (exhausted)
+                              ↓
+                    Escalate + Learning Store
+```
+
+- **Diagnose**: Claude reads error + logs (~2K token focused prompt)
+- **Implement Fix**: Claude emits shell commands OR small code edits (NOT a full Phase B pass)
+- **Verify**: Run the specific check that failed (one gate, not full audit_fast)
+- **Max 3 iterations**, then escalate to Tier 4
+- Invocation: `subprocess.run(["claude", "--print", "-p", prompt_text], timeout=60)` — NOT through bridge adapter stack (bootstrap paradox)
+- Token budget: ~2000 input, ~200 output per iteration
+
+**Key constraint:** Recovery does NOT invoke Phase B, bridge review, or SDK agents. The recovery loop is lighter than the main pipeline — it diagnoses, applies a bounded fix, and verifies the specific gate that failed. If the fix works, re-enter the main pipeline at the failed step.
 
 ### Tier 4: Escalate
 
 | Failure Signal | Detection | Recovery |
 |---|---|---|
-| Same failure after 2 recovery attempts | Recovery log shows 2 prior attempts for (wave_id, step, class) | Stop + detailed report |
+| Same failure after 3 recovery loop iterations | Recovery loop exhausted | Stop + detailed report |
+| Same failure after 2 recovery gate attempts | Recovery log shows 2 prior attempts for (wave_id, step, class) | Stop + report |
 | Terminal executor outcome | `question_for_founder`, `max_rounds_reached`, `supervisor_rejected` | Never recover — these are policy decisions |
 | Unknown failure class | Classifier returns None | Stop + report |
 | Recovery script itself failed | Tier 3 commands returned nonzero | Stop + report both errors |
 
 ---
 
+## Learning Store
+
+Every recovery attempt is logged to `.agent_bus/recovery/recovery_log.json`. Over time, the learning store enables automatic promotion:
+
+- **Pattern detection**: If the same (failure_class, fix_action) succeeds 3+ times, promote to Tier 1 (deterministic auto-fix)
+- **Environment learning**: The pipeline learns YOUR machine's specific failure modes (e.g., "Bun AVX warnings always appear but are harmless", "pkill -f is dangerous on this machine")
+- **Regression detection**: If a previously-promoted Tier 1 fix starts failing, demote back to Tier 3
+
+This transforms the recovery gate from a static classifier into an adaptive system that improves with each pipeline run.
+
+---
+
 ## Bounded Retry Policy
 
-- **Max 2 recovery attempts per (wave_id, step, failure_class) tuple**
+- **Recovery loop**: max 3 diagnose/fix/verify iterations per Tier 3 invocation
+- **Recovery gate**: max 2 attempts per (wave_id, step, failure_class) tuple
 - Different failure classes counted independently
 - Recovery log at `.agent_bus/recovery/recovery_log.json` (capped at 500 entries)
 - Dispatch `max_attempts` is independent outer bound
