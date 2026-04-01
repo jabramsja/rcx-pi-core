@@ -196,6 +196,10 @@ def _find_tracked_packet(plan_dir: Path, plan_name: str) -> Path | None:
     if not plan_dir.exists():
         return None
 
+    exact = plan_dir / f"{plan_name}.md"
+    if exact.exists():
+        return exact
+
     candidates = sorted(plan_dir.glob(f"{plan_name}_*.md"))
     if not candidates:
         return None

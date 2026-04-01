@@ -1124,7 +1124,8 @@ def build_meta_reviewer_prompt(
         control_surface_obligations = (
             "## CONTROL-SURFACE REVIEW MODE\n\n"
             "This wave touches Phase B / commit authority chain files. You MUST inspect:\n\n"
-            "1. **Implementer surface**: `phase_b_implementer.py` must use `bridge_adapters.run_adapter()` directly, "
+            "1. **Implementer surface**: `mu/tools/executors/phase_b_implementer.py` must use "
+            "`bridge_adapters.run_adapter()` directly, "
             "NOT `bridge_supervisor.py review`.\n"
             "2. **Bridge loop**: `phase_b_executor.py` must re-invoke implementer on `REQUEST_CHANGES`/`NO_GO`. "
             "`QUESTION` must fail closed.\n"

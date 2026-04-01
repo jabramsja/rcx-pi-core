@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import time
@@ -48,6 +49,7 @@ class FailureClass(Enum):
     AGGREGATION_HANG = "aggregation_hang"
     IMPLEMENTER_STALE = "implementer_stale"
     # Tier 3 -- LLM diagnosis (small focused prompt)
+    NEEDS_PHASE_B = "needs_phase_b"
     GIT_STAGING_CONFLICT = "git_staging_conflict"
     TEST_FAILURE = "test_failure"
     AGENT_REVIEW_CRASH = "agent_review_crash"
@@ -62,16 +64,20 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.MIXED_STAGING: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
     FailureClass.AGGREGATION_HANG: 2, FailureClass.IMPLEMENTER_STALE: 2,
-    FailureClass.GIT_STAGING_CONFLICT: 3, FailureClass.TEST_FAILURE: 3,
-    FailureClass.AGENT_REVIEW_CRASH: 3, FailureClass.UNKNOWN_ERROR: 3,
+    FailureClass.NEEDS_PHASE_B: 3, FailureClass.GIT_STAGING_CONFLICT: 3,
+    FailureClass.TEST_FAILURE: 3, FailureClass.AGENT_REVIEW_CRASH: 3,
+    FailureClass.UNKNOWN_ERROR: 3,
     FailureClass.TERMINAL_POLICY: 4, FailureClass.UNCLASSIFIED: 4,
 }
 
 _TERMINAL_STATUSES = frozenset({
     "question_for_founder", "max_rounds_reached",
-    "supervisor_rejected", "needs_phase_b",
+    "supervisor_rejected",
 })
 _TRANSIENT_KILL_CODES = frozenset({-9, -15, 137})
+_STATUS_LINE_RE = re.compile(
+    r"^\s*\[[^\]]+\]\s+Status:\s*([A-Za-z0-9_ -]+)\s*$"
+)
 
 
 def tier_for(fc: FailureClass) -> int:
@@ -90,26 +96,36 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     exit_code = result.get("exit_code")
     step = result.get("step", "")
     stdout = result.get("stdout", "")
+    embedded = _extract_embedded_result(stdout)
+    embedded_statuses = _extract_embedded_statuses(stdout)
+    embedded_status = embedded.get("status")
+    if isinstance(embedded_status, str) and embedded_status.strip():
+        status = embedded_status.strip()
+    embedded_step = embedded.get("step")
+    if (not isinstance(step, str) or not step.strip()) and isinstance(embedded_step, str):
+        step = embedded_step.strip()
+    combined_text = _collect_error_text(result, embedded)
+    combined_lower = combined_text.lower()
+
+    if status == FailureClass.NEEDS_PHASE_B.value:
+        return FailureClass.NEEDS_PHASE_B
+    if FailureClass.NEEDS_PHASE_B.value in embedded_statuses:
+        return FailureClass.NEEDS_PHASE_B
 
     # Tier 4: terminal policy outcomes (check first, never recover)
     if status in _TERMINAL_STATUSES:
         return FailureClass.TERMINAL_POLICY
-    if stdout:
-        try:
-            data = json.loads(stdout)
-            if isinstance(data, dict) and data.get("status") in _TERMINAL_STATUSES:
-                return FailureClass.TERMINAL_POLICY
-        except (json.JSONDecodeError, ValueError):
-            pass
+    if embedded_statuses & _TERMINAL_STATUSES:
+        return FailureClass.TERMINAL_POLICY
 
     # Tier 1: deterministic lock/state issues
-    if "bridge.lock" in stderr or "bridge.lock" in stdout:
+    if "bridge.lock" in combined_lower:
         return FailureClass.STALE_BRIDGE_LOCK
-    if "index.lock" in stderr or "index.lock" in stdout:
+    if "index.lock" in combined_lower:
         return FailureClass.STALE_GIT_INDEX_LOCK
-    if "phase_b_state.json" in stderr or "stale_state" in status:
+    if "phase_b_state.json" in combined_lower or "stale_state" in status:
         return FailureClass.STALE_EXECUTOR_STATE
-    if "continuation" in stderr.lower() and "stale" in stderr.lower():
+    if "continuation" in combined_lower and "stale" in combined_lower:
         return FailureClass.STALE_CONTINUATION
     if _looks_like_mixed_staging(stderr, stdout, step):
         return FailureClass.MIXED_STAGING
@@ -119,22 +135,95 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.PROCESS_TIMEOUT
     if exit_code is not None and exit_code in _TRANSIENT_KILL_CODES:
         return FailureClass.TRANSIENT_KILL
-    if "aggregation" in stderr.lower():
+    if "aggregation" in combined_lower:
         return FailureClass.AGGREGATION_HANG
     if result.get("implementer_status") == "stale":
         return FailureClass.IMPLEMENTER_STALE
 
     # Tier 3: needs diagnosis
-    if step in ("stage_files", "git_commit") and "git add" in stderr.lower():
+    if step in ("stage_files", "git_commit") and "git add" in combined_lower:
         return FailureClass.GIT_STAGING_CONFLICT
-    if "test" in stderr.lower() and ("fail" in stderr.lower() or "error" in stderr.lower()):
+    if "test" in combined_lower and ("fail" in combined_lower or "error" in combined_lower):
         return FailureClass.TEST_FAILURE
     if "agent" in step.lower() and status in ("error", "failed"):
+        return FailureClass.AGENT_REVIEW_CRASH
+    if "agent review" in combined_lower and status in ("error", "failed"):
         return FailureClass.AGENT_REVIEW_CRASH
     if status in ("error", "failed"):
         return FailureClass.UNKNOWN_ERROR
 
     return FailureClass.UNCLASSIFIED
+
+
+def _extract_embedded_result(stdout: str) -> dict[str, Any]:
+    """Extract an executor result object from stdout when available."""
+    if not stdout:
+        return {}
+
+    try:
+        data = json.loads(stdout)
+        if isinstance(data, dict):
+            return data
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("{"):
+            continue
+        try:
+            data = json.loads(stripped)
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return {}
+
+
+def _extract_embedded_statuses(stdout: str) -> set[str]:
+    """Extract executor-reported statuses from stdout JSON or status lines."""
+    statuses: set[str] = set()
+    if not stdout:
+        return statuses
+
+    try:
+        data = json.loads(stdout)
+        if isinstance(data, dict) and isinstance(data.get("status"), str):
+            statuses.add(data["status"])
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("{"):
+            try:
+                data = json.loads(stripped)
+                if isinstance(data, dict) and isinstance(data.get("status"), str):
+                    statuses.add(data["status"])
+            except (json.JSONDecodeError, ValueError):
+                pass
+        match = _STATUS_LINE_RE.match(stripped)
+        if match:
+            statuses.add(match.group(1).strip())
+    return statuses
+
+
+def _collect_error_text(result: dict[str, Any], embedded: dict[str, Any]) -> str:
+    """Collect outer and embedded error text for failure classification."""
+    parts: list[str] = []
+    for key in ("message", "stderr", "stdout"):
+        value = result.get(key, "")
+        if isinstance(value, str) and value:
+            parts.append(value)
+    embedded_error = embedded.get("error")
+    if isinstance(embedded_error, str) and embedded_error:
+        parts.append(embedded_error)
+    embedded_errors = embedded.get("errors")
+    if isinstance(embedded_errors, list):
+        parts.extend(item for item in embedded_errors if isinstance(item, str) and item)
+    return "\n".join(parts)
 
 
 def _looks_like_mixed_staging(stderr: str, stdout: str, step: str) -> bool:
@@ -420,6 +509,18 @@ _DANGEROUS_COMMANDS = frozenset({
     "git clean -f", "dd if=", "mkfs.", "chmod 777",
     "> /dev/sd", ":(){ :|:& };:",
 })
+_DANGEROUS_COMMAND_PATTERNS = (
+    re.compile(r"\bgit\s+reset\b"),
+    re.compile(r"\bgit\s+checkout\b(?:[^\n]*\s)?--(?:\s|$)"),
+    re.compile(
+        r"\bgit\s+restore\b"
+        r"(?=[^\n]*\s--source(?:=|\s)|[^\n]*\s--staged(?:=|\s|$))"
+    ),
+)
+_SENSITIVE_RELATIVE_PATHS = (
+    ".git/config",
+    ".git/hooks",
+)
 
 MAX_RECOVERY_ITERATIONS = 3
 _CLAUDE_TIMEOUT = 60
@@ -432,7 +533,33 @@ def _is_dangerous_command(cmd: str) -> bool:
     for denied in _DANGEROUS_COMMANDS:
         if denied in cmd_lower:
             return True
+    if _touches_sensitive_path_text(cmd_lower):
+        return True
+    for pattern in _DANGEROUS_COMMAND_PATTERNS:
+        if pattern.search(cmd_lower):
+            return True
     return False
+
+
+def _touches_sensitive_path_text(text: str) -> bool:
+    """Fail closed on commands that touch repo-internal sensitive paths."""
+    lowered = text.strip().lower()
+    return (
+        ".git/config" in lowered
+        or ".git/hooks/" in lowered
+        or lowered.endswith(".git/hooks")
+    )
+
+
+def _is_sensitive_repo_path(relative_path: str) -> bool:
+    normalized = relative_path.replace("\\", "/").lower()
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    normalized = normalized.lstrip("/")
+    return any(
+        normalized == denied or normalized.startswith(f"{denied}/")
+        for denied in _SENSITIVE_RELATIVE_PATHS
+    )
 
 
 def _build_diagnosis_prompt(
@@ -495,6 +622,9 @@ def _apply_edit(edit: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
     repo_resolved = repo_root.resolve()
     if not str(file_path).startswith(str(repo_resolved) + os.sep) and file_path != repo_resolved:
         return False, f"repo-escape blocked: {raw_path} resolves outside repo root"
+    repo_relative = file_path.relative_to(repo_resolved).as_posix()
+    if _is_sensitive_repo_path(repo_relative):
+        return False, f"sensitive path blocked: {raw_path}"
     old_text = edit.get("old_text", "")
     new_text = edit.get("new_text", "")
     if not file_path.exists():
@@ -544,6 +674,7 @@ def run_recovery_loop(
     for i in range(max_iterations):
         iteration_t0 = time.monotonic()
         prompt = _build_diagnosis_prompt(result, wave_id, i, repo_root)
+        action_succeeded = False
 
         # Call claude --print for diagnosis
         try:
@@ -618,12 +749,17 @@ def run_recovery_loop(
         if action == "shell":
             cmd_results = []
             blocked = False
+            executed_any = False
+            shell_success = True
             for cmd in commands:
                 if not isinstance(cmd, str):
+                    shell_success = False
                     continue
+                executed_any = True
                 if _is_dangerous_command(cmd):
                     cmd_results.append(f"BLOCKED: {cmd}")
                     blocked = True
+                    shell_success = False
                     continue
                 try:
                     cmd_proc = subprocess.run(
@@ -631,26 +767,55 @@ def run_recovery_loop(
                         timeout=_SHELL_TIMEOUT, cwd=repo_root)
                     cmd_results.append(
                         f"exit={cmd_proc.returncode}: {cmd_proc.stdout[:200]}")
+                    if cmd_proc.returncode != 0:
+                        shell_success = False
                 except subprocess.TimeoutExpired:
                     cmd_results.append(f"TIMEOUT: {cmd}")
+                    shell_success = False
                 except OSError as exc:
                     cmd_results.append(f"ERROR: {exc}")
+                    shell_success = False
             loop_log.append({
                 "iteration": i + 1, "action": "shell",
                 "commands": commands, "results": cmd_results,
                 "blocked": blocked, "detail": explanation,
                 "duration_s": round(time.monotonic() - iteration_t0, 3)})
+            action_succeeded = executed_any and shell_success
 
         elif action == "edit":
             edit_results = []
+            edit_count = 0
+            edit_success = True
             for edit in commands:
                 if isinstance(edit, dict):
+                    edit_count += 1
                     ok, msg = _apply_edit(edit, repo_root)
                     edit_results.append(msg)
+                    if not ok:
+                        edit_success = False
             loop_log.append({
                 "iteration": i + 1, "action": "edit",
                 "results": edit_results, "detail": explanation,
                 "duration_s": round(time.monotonic() - iteration_t0, 3)})
+            action_succeeded = edit_count > 0 and edit_success
+
+        if not verify_command:
+            dur = round(time.monotonic() - iteration_t0, 3)
+            if action_succeeded:
+                _log_tier3_attempt(
+                    repo_root, wave_id, step, fc, i + 1,
+                    action, "success", dur,
+                    "no explicit verify command; action completed cleanly")
+                loop_log.append({
+                    "iteration": i + 1, "action": "verify_pass",
+                    "detail": "no explicit verify command; action completed cleanly",
+                })
+                return {"recovered": True, "exhausted": False,
+                        "iterations": i + 1, "log": loop_log}
+            _log_tier3_attempt(
+                repo_root, wave_id, step, fc, i + 1,
+                action, "failed", dur, explanation or "action did not complete cleanly")
+            continue
 
         # Verify: re-run the failed gate/check if a verify command is provided
         if verify_command:
@@ -778,8 +943,28 @@ def attempt_recovery(
         return _make_result(False, "escalate", 4, fc,
                             f"tier 4 failure ({fc.value}) requires escalation", False)
     if tier == 3:
-        return _make_result(False, "not_implemented", tier, fc,
-                            f"tier 3 recovery not yet wired into dispatcher", False)
+        loop_result = run_recovery_loop(
+            repo_root,
+            {
+                **result,
+                "failure_class": fc.value,
+                "tier": tier,
+            },
+            wave_id,
+        )
+        detail = f"tier 3 recovery loop ran {loop_result.get('iterations', 0)} iteration(s)"
+        if loop_result.get("log"):
+            last_entry = loop_result["log"][-1]
+            if last_entry.get("detail"):
+                detail = f"{detail}; {last_entry['detail']}"
+        return _make_result(
+            loop_result.get("recovered", False),
+            "recovery_loop",
+            tier,
+            fc,
+            detail,
+            loop_result.get("exhausted", False),
+        )
 
     # Tier 2: check _TIER2_FIXES before falling through
     if tier == 2:

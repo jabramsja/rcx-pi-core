@@ -1655,6 +1655,58 @@ class TestDispatcherPlanNameSanitization:
         assert "\\" not in plan_name
         assert plan_name == "unsafe_plan_v1"
 
+    def test_phase_a_prefers_tracked_packet_stem(self, tmp_path, monkeypatch):
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "state_sha": "ignored",
+            "wave_name": "tracked-wave",
+            "next_candidates": [{
+                "candidate": "ignored candidate",
+                "tracked_packet": "reports/control_plane/recovery_tier3_wiring_2026-04-01.md",
+            }],
+        }
+
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout="[phase-a] Status: converged\n[phase-a] Plan: reports/control_plane/recovery_tier3_wiring_2026-04-01.md\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(dispatch_mod, "validate_routing_record_freshness", lambda *a, **k: (True, "fresh"))
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+
+        dispatch_mod.dispatch(record, repo_root=tmp_path, skip_freshness=True)
+
+        phase_a_args = calls[0]
+        assert "--json" in phase_a_args
+        plan_name = phase_a_args[phase_a_args.index("--plan-name") + 1]
+        assert plan_name == "recovery_tier3_wiring_2026-04-01"
+
+    def test_phase_b_dispatch_requests_json_output(self, tmp_path, monkeypatch):
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "wave_name": "tracked-wave",
+            "next_candidates": [{
+                "tracked_packet": "reports/control_plane/recovery_tier3_wiring_2026-04-01.md",
+            }],
+        }
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 1, stdout="{}", stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "validate_routing_record_freshness", lambda *a, **k: (True, "fresh"))
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+
+        dispatch_mod.dispatch(record, repo_root=tmp_path, skip_freshness=True)
+
+        assert "--json" in calls[0]
+
 
 # --- Tests 16-19: stage_files (Step 4) and collect_indicator (Step 5) ---
 
@@ -4264,6 +4316,39 @@ class TestModularSurfaceEntrypoints:
         assert "post-merge" in cmd
         assert "--verbose" in cmd
 
+    def test_phase_b_surface_recovery_retries_after_tier3_success(self, tmp_path):
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-b",
+                "--routing-record-json",
+                '{"wave_name":"surface-wave","decision":"ROUTE_PHASE_B"}',
+            ]
+        )
+        recovery = {
+            "recovered": True,
+            "exhausted": False,
+            "failure_class": "needs_phase_b",
+            "tier": 3,
+            "action": "recovery_loop",
+            "detail": "phase-b re-entry succeeded",
+        }
+        failed = subprocess.CompletedProcess(["phase-b"], 1, stdout="", stderr="")
+        succeeded = subprocess.CompletedProcess(["phase-b"], 0, stdout="", stderr="")
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=[failed, succeeded]) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery", return_value=recovery) as mock_recovery, \
+             patch.object(dispatch_mod, "_clear_phase_b_state_for_retry") as mock_clear:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={"timeouts": {"phase_b_executor": 300}},
+            )
+
+        assert exit_code == 0
+        assert mock_run.call_count == 2
+        assert mock_recovery.call_args[0][2] == "surface-wave"
+        mock_clear.assert_called_once()
+
     def test_commit_surface_requires_exactly_one_handoff_or_routing_record(self, tmp_path):
         handoff_path = tmp_path / "handoff.json"
         handoff_path.write_text("{}", encoding="utf-8")
@@ -4291,8 +4376,10 @@ class TestModularSurfaceEntrypoints:
         assert str(handoff_path) in cmd
         assert "--json" in cmd
 
-    def test_main_surface_mode_runs_forwarded_command(self):
-        with patch.object(dispatch_mod, "run_surface_command", return_value=0) as mock_run, \
+    def test_main_phase_surface_mode_runs_recoverable_command(self):
+        with patch.object(dispatch_mod, "run_recoverable_surface_command", return_value=0) as mock_run, \
+             patch.object(dispatch_mod, "run_surface_command") as mock_surface, \
+             patch.object(dispatch_mod, "load_config", return_value={"timeouts": {}}), \
              patch.object(dispatch_mod.subprocess, "run") as mock_subprocess_run:
             mock_subprocess_run.return_value = subprocess.CompletedProcess(
                 args=["git"], returncode=0, stdout=str(REPO_ROOT), stderr=""
@@ -4300,6 +4387,47 @@ class TestModularSurfaceEntrypoints:
             exit_code = dispatch_mod.main(["phase-a", "--plan-name", "example"])
         assert exit_code == 0
         mock_run.assert_called_once()
+        mock_surface.assert_not_called()
+
+    def test_main_non_phase_surface_runs_forwarded_command(self, tmp_path):
+        package_path = tmp_path / "package.json"
+        package_path.write_text("{}", encoding="utf-8")
+        with patch.object(dispatch_mod, "run_recoverable_surface_command") as mock_recoverable, \
+             patch.object(dispatch_mod, "run_surface_command", return_value=0) as mock_run, \
+             patch.object(dispatch_mod.subprocess, "run") as mock_subprocess_run:
+            mock_subprocess_run.return_value = subprocess.CompletedProcess(
+                args=["git"], returncode=0, stdout=str(REPO_ROOT), stderr=""
+            )
+            exit_code = dispatch_mod.main(
+                ["pre-commit-supervisor", "--package", str(package_path)]
+            )
+        assert exit_code == 0
+        mock_recoverable.assert_not_called()
+        mock_run.assert_called_once()
+
+
+class TestDispatcherExecutorGroupCleanup:
+    """Dispatcher timeout cleanup must reap the process tree before retry."""
+
+    def test_timeout_calls_terminate_process_tree(self):
+        mock_proc = MagicMock()
+        mock_proc.communicate.side_effect = subprocess.TimeoutExpired(
+            cmd=["test"], timeout=1
+        )
+        mock_proc.pid = 4321
+        mock_proc.wait.return_value = None
+
+        with patch.object(dispatch_mod.subprocess, "Popen", return_value=mock_proc) as mock_popen, \
+             patch.object(dispatch_mod.os, "killpg") as mock_killpg, \
+             patch.object(dispatch_mod, "terminate_process_tree") as mock_terminate:
+            with pytest.raises(subprocess.TimeoutExpired):
+                dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)
+
+        _, kwargs = mock_popen.call_args
+        assert kwargs["start_new_session"] is True
+        mock_killpg.assert_called_once_with(4321, signal.SIGTERM)
+        mock_terminate.assert_called_once_with(4321, cwd=Path("."))
+        mock_proc.kill.assert_called_once()
 
 
 # --- Phase B handoff new schema test ---
@@ -4986,6 +5114,14 @@ class TestFindTrackedPacket:
     def test_returns_none_when_no_directory(self, tmp_path):
         result = phase_a_mod._find_tracked_packet(tmp_path / "nonexistent", "test")  # ANTICHEAT_OK: testing tracked packet reuse
         assert result is None
+
+    def test_returns_exact_packet_match(self, tmp_path):
+        plan_dir = tmp_path / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        exact = plan_dir / "my_plan.md"
+        exact.write_text("# Plan\nPhase-A-Lock: UNLOCKED\n")
+        result = phase_a_mod._find_tracked_packet(plan_dir, "my_plan")  # ANTICHEAT_OK: testing tracked packet reuse
+        assert result == exact
 
     def test_returns_none_when_no_matches(self, tmp_path):
         plan_dir = tmp_path / "reports" / "control_plane"
@@ -5807,8 +5943,8 @@ class TestRecoveryGateWiring:
         assert disk["timeouts"]["phase_b_executor"] == 3600
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
 
-    def test_tier3_still_not_implemented(self, tmp_path):
-        """Tier 3 fails closed — not retried even with --retries (R6 Finding 2)."""
+    def test_tier3_unrecovered_fails_closed_under_retries(self, tmp_path):
+        """Tier 3 non-recovery still fails closed under --retries."""
         routing_file = self._routing_file(tmp_path)
         fail_result = {
             "status": "failed", "decision": "ROUTE_PHASE_B",
@@ -5819,7 +5955,7 @@ class TestRecoveryGateWiring:
         recovery_tier3 = {
             "recovered": False, "exhausted": False,
             "failure_class": "test_failure", "tier": 3,
-            "action": "not_implemented", "detail": "tier 3 not wired",
+            "action": "recovery_loop", "detail": "no safe fix proposed",
         }
         mock_proc = MagicMock()
         mock_proc.stdout = str(tmp_path)
@@ -5834,6 +5970,38 @@ class TestRecoveryGateWiring:
             assert exit_code == 1  # not recovered, not retried
             assert mock_dispatch.call_count == 1, (
                 "tier 3 non-recovery must fail closed, not retry")
+
+    def test_tier3_recovery_loop_grants_retry(self, tmp_path):
+        """Recovered Tier 3 failures retry immediately without consuming retry budget."""
+        routing_file = self._routing_file(tmp_path)
+        fail_result = {
+            "status": "failed", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "stderr": "FAILED test_x - AssertionError",
+            "step": "pre_commit",
+        }
+        success_result = {
+            "status": "success", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+        }
+        recovery_tier3 = {
+            "recovered": True, "exhausted": False,
+            "failure_class": "needs_phase_b", "tier": 3,
+            "action": "recovery_loop", "detail": "phase b re-entry succeeded",
+        }
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          side_effect=[fail_result, success_result]) as mock_dispatch, \
+             patch.object(dispatch_mod, "attempt_recovery",
+                          return_value=recovery_tier3), \
+             patch.object(dispatch_mod, "_clear_phase_b_state_for_retry") as mock_clear, \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            args = self._base_args(routing_file) + ["--retries", "2"]
+            exit_code = dispatch_mod.main(args)
+            assert exit_code == 0
+            assert mock_dispatch.call_count == 2
+            mock_clear.assert_called_once()
 
     def test_tier4_escalate_fails_closed_under_retries(self, tmp_path):
         """Tier 4 escalate must fail closed — never retried (R6 Finding 2).
@@ -5881,9 +6049,11 @@ class TestRecoveryGateWiring:
             returncode=0, stdout=phase_a_stdout, stderr="")
 
         call_count = {"n": 0}
+        calls = []
 
         def mock_run(args, cwd, timeout):
             call_count["n"] += 1
+            calls.append(args)
             if call_count["n"] == 1:
                 # Phase A succeeds
                 return phase_a_ok
@@ -5899,6 +6069,8 @@ class TestRecoveryGateWiring:
         assert result["executor"] == "phase_b_executor"
         assert result.get("chained_from") == "phase_a_executor"
         assert "Phase B" in result.get("message", "")
+        assert "--json" in calls[0]
+        assert "--json" in calls[1]
 
     def test_chained_commit_timeout_reports_commit_executor(self, tmp_path):
         """Chained commit timeout (from Phase B chain) reports commit_executor.
@@ -5914,9 +6086,11 @@ class TestRecoveryGateWiring:
         (handoff_dir / "phase_b_handoff.json").write_text("{}")
 
         call_count = {"n": 0}
+        calls = []
 
         def mock_run(args, cwd, timeout):
             call_count["n"] += 1
+            calls.append(args)
             if call_count["n"] == 1:
                 return phase_b_ok
             # Commit times out
@@ -5931,3 +6105,5 @@ class TestRecoveryGateWiring:
         assert result["executor"] == "commit_executor"
         assert result.get("chained_from") == "phase_b_executor"
         assert "Commit" in result.get("message", "")
+        assert "--json" in calls[0]
+        assert "--json" in calls[1]

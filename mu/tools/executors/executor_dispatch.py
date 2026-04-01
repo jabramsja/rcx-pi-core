@@ -35,6 +35,7 @@ try:
         ensure_not_agent_review_mode,
         ExecutorCommonError,
         normalize_wave_id,
+        terminate_process_tree,
     )
 except ImportError:
     import importlib.util as _ilu
@@ -48,6 +49,7 @@ except ImportError:
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
     normalize_wave_id = _mod.normalize_wave_id
+    terminate_process_tree = _mod.terminate_process_tree
 
 try:
     from recovery_gate import attempt_recovery
@@ -101,17 +103,15 @@ _NON_RETRYABLE_DISPATCH_STATUSES = frozenset({
 # - max_rounds_reached: bridge loop exhausted without convergence
 # - supervisor_rejected: pre-commit supervisor returned non-COMMIT_GO
 #   (e.g. STOP_FOR_FOUNDER) — founder decision required
-# - needs_phase_b: supervisor returned NEEDS_PHASE_B after reentry
-#   convergence — manual intervention required
 _TERMINAL_EXECUTOR_STATUSES = frozenset({
     "question_for_founder",
     "max_rounds_reached",
     "supervisor_rejected",
-    "needs_phase_b",
 })
 
 # Available executor scripts
 AVAILABLE_EXECUTORS = {"commit_executor", "phase_b_executor", "phase_a_executor", "dialectic_executor"}
+_JSON_EXECUTORS = frozenset({"commit_executor", "phase_b_executor", "phase_a_executor"})
 SURFACE_COMMANDS = {
     "phase-a",
     "phase-b",
@@ -333,6 +333,108 @@ def run_surface_command(cmd: list[str], *, repo_root: Path) -> int:
     return result.returncode
 
 
+def _surface_wave_id(args: argparse.Namespace, repo_root: Path) -> str:
+    """Derive a stable wave_id for recoverable surface invocations."""
+    if args.surface == "phase-a":
+        return normalize_wave_id(args.plan_name)
+    if args.surface == "phase-b":
+        payload = _load_routing_record_payload(
+            path_value=args.routing_record_path,
+            json_value=args.routing_record_json,
+        )
+        if payload:
+            try:
+                record = json.loads(payload)
+                wave_name = record.get("wave_name") or record.get("wave_id", "")
+                if isinstance(wave_name, str) and wave_name.strip():
+                    return normalize_wave_id(wave_name)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+        if args.plan:
+            return normalize_wave_id(Path(args.plan).stem)
+    return "wave-unknown"
+
+
+def run_recoverable_surface_command(
+    args: argparse.Namespace,
+    *,
+    repo_root: Path,
+    config: dict[str, Any],
+) -> int:
+    """Run Phase A/B surfaces through the dispatcher recovery gate."""
+    cmd = build_surface_command(args)
+    executor_name = {
+        "phase-a": "phase_a_executor",
+        "phase-b": "phase_b_executor",
+    }[args.surface]
+    decision = {
+        "phase-a": "ROUTE_PHASE_A",
+        "phase-b": "ROUTE_PHASE_B",
+    }[args.surface]
+    wave_id = _surface_wave_id(args, repo_root)
+    original_timeouts = None
+
+    while True:
+        timeout = config.get("timeouts", {}).get(executor_name, 600)
+        try:
+            completed = _run_executor_in_group(cmd, cwd=repo_root, timeout=timeout)
+            if completed.stdout:
+                sys.stdout.write(completed.stdout)
+            if completed.stderr:
+                sys.stderr.write(completed.stderr)
+            if completed.returncode == 0:
+                return 0
+            result = {
+                "status": "failed",
+                "decision": decision,
+                "executor": executor_name,
+                "step": args.surface.replace("-", "_"),
+                "exit_code": completed.returncode,
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+            }
+        except subprocess.TimeoutExpired:
+            result = {
+                "status": "timeout",
+                "decision": decision,
+                "executor": executor_name,
+                "step": args.surface.replace("-", "_"),
+                "message": f"Executor {executor_name} timed out after {timeout}s",
+                "stdout": "",
+                "stderr": "",
+            }
+
+        if result.get("status") == "failed" and _is_terminal_executor_outcome(result):
+            break
+
+        recovery = attempt_recovery(repo_root, result, wave_id)
+        result["recovery"] = recovery
+        if getattr(args, "verbose", False):
+            print(
+                f"[dispatch] Surface recovery: class={recovery.get('failure_class')} "
+                f"tier={recovery.get('tier')} recovered={recovery.get('recovered')}"
+            )
+        if not recovery.get("recovered"):
+            break
+
+        new_orig = _apply_recovery_overrides(
+            config, repo_root=repo_root, verbose=getattr(args, "verbose", False))
+        if original_timeouts is None:
+            original_timeouts = new_orig
+        _clear_phase_b_state_for_retry(repo_root, result, verbose=getattr(args, "verbose", False))
+
+    if original_timeouts is not None:
+        _restore_config_on_disk(
+            repo_root, original_timeouts,
+            verbose=getattr(args, "verbose", False),
+        )
+        config["timeouts"] = dict(original_timeouts)
+    for env_key in list(os.environ):
+        if env_key.startswith("RCX_RECOVERY_ORIGINAL_TIMEOUT_"):
+            os.environ.pop(env_key, None)
+    return 1
+
+
 def _validate_phase_b_handoff_identity(handoff_path: Path, record: dict[str, Any]) -> tuple[bool, str]:
     """Fail closed if a stale handoff file does not match the current routing identity."""
     try:
@@ -461,7 +563,14 @@ def _run_executor_in_group(
             os.killpg(proc.pid, signal.SIGTERM)
         except OSError:
             pass
-        proc.kill()
+        try:
+            terminate_process_tree(proc.pid, cwd=cwd)
+        except Exception:
+            pass
+        try:
+            proc.kill()
+        except OSError:
+            pass
         proc.wait()
         raise
     return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
@@ -896,10 +1005,31 @@ def dispatch(
                 # can prepare a tracker-only handoff internally.
                 executor_args.extend(["--routing-record", json.dumps(record)])
         elif executor_name == "phase_a_executor":
-            # Phase A needs --plan-name
+            # Phase A needs --plan-name. When a candidate already declares a
+            # tracked packet, prefer that canonical packet stem so Phase A
+            # reuses the tracked file instead of minting a date-slug duplicate.
             candidates = record.get("next_candidates", [])
             plan_name = None
             for c in candidates:
+                tp = c.get("tracked_packet")
+                if tp and isinstance(tp, str):
+                    tp_resolved = (repo / tp).resolve()
+                    if ".." in Path(tp).parts:
+                        return {
+                            "status": "error",
+                            "decision": decision,
+                            "executor": executor_name,
+                            "message": f"Path traversal in tracked_packet: {tp}",
+                        }
+                    if not tp_resolved.is_relative_to(repo.resolve()):
+                        return {
+                            "status": "error",
+                            "decision": decision,
+                            "executor": executor_name,
+                            "message": f"tracked_packet escapes repo root: {tp}",
+                        }
+                    plan_name = Path(tp).stem
+                    break
                 candidate_text = c.get("candidate", "")
                 if candidate_text:
                     plan_name = _sanitize_plan_name(candidate_text)
@@ -945,6 +1075,8 @@ def dispatch(
                 executor_args.extend(["--routing-record", json.dumps(record)])
         else:
             executor_args.extend(["--routing-record", json.dumps(record)])
+        if executor_name in _JSON_EXECUTORS:
+            executor_args.append("--json")
 
         result = _run_executor_in_group(
             executor_args, cwd=repo, timeout=timeout,
@@ -997,6 +1129,7 @@ def dispatch(
                 str(SCRIPT_DIR / "phase_b_executor.py"),
                 "--plan", plan_path,
                 "--routing-record", phase_b_routing,
+                "--json",
             ]
             try:
                 phase_b_result = _run_executor_in_group(
@@ -1041,6 +1174,7 @@ def dispatch(
                 sys.executable,
                 str(SCRIPT_DIR / "commit_executor.py"),
                 "--handoff", str(handoff_path),
+                "--json",
             ]
             try:
                 commit_result = _run_executor_in_group(
@@ -1085,6 +1219,7 @@ def dispatch(
                 sys.executable,
                 str(SCRIPT_DIR / "commit_executor.py"),
                 "--handoff", str(handoff_path),
+                "--json",
             ]
             try:
                 commit_result = _run_executor_in_group(
@@ -1151,6 +1286,13 @@ def main(argv: list[str] | None = None) -> int:
             print("[error] Not in a git repository", file=sys.stderr)
             return 1
         try:
+            if args.surface in {"phase-a", "phase-b"}:
+                config = load_config()
+                return run_recoverable_surface_command(
+                    args,
+                    repo_root=repo_root,
+                    config=config,
+                )
             cmd = build_surface_command(args)
         except ControlSurfaceError as exc:
             print(f"[executor-dispatch] Error: {exc}", file=sys.stderr)

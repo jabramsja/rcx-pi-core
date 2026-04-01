@@ -18,11 +18,21 @@ class TestClassifyFailure:
 
     @pytest.mark.parametrize("status", [
         "question_for_founder", "max_rounds_reached",
-        "supervisor_rejected", "needs_phase_b",
+        "supervisor_rejected",
     ])
     def test_terminal_statuses(self, status):
         assert rg_mod.classify_failure(
             {"status": status, "step": "x"}) == FailureClass.TERMINAL_POLICY
+
+    def test_needs_phase_b_is_tier3(self):
+        assert rg_mod.classify_failure(
+            {"status": "needs_phase_b", "step": "phase_b"}
+        ) == FailureClass.NEEDS_PHASE_B
+
+    def test_needs_phase_b_in_stdout_status_line(self):
+        assert rg_mod.classify_failure(
+            {"status": "failed", "stdout": "[phase-b] Status: needs_phase_b\n", "stderr": ""}
+        ) == FailureClass.NEEDS_PHASE_B
 
     def test_terminal_in_stdout_json(self):
         inner = json.dumps({"status": "supervisor_rejected"})
@@ -105,6 +115,19 @@ class TestClassifyFailure:
             {"status": "error", "step": "agent_review",
              "stderr": "agent died"}) == FailureClass.AGENT_REVIEW_CRASH
 
+    def test_embedded_phase_a_agent_review_failure(self):
+        stdout = json.dumps({
+            "status": "error",
+            "error": (
+                "SDK agent review failed (exit=3). "
+                "Hard gate: agents must pass before bridge review. "
+                "agent_status: verifier=NON_COMPLIANT"
+            ),
+        })
+        assert rg_mod.classify_failure(
+            {"status": "failed", "step": "", "stdout": stdout, "stderr": ""}
+        ) == FailureClass.AGENT_REVIEW_CRASH
+
     def test_unknown_error(self):
         assert rg_mod.classify_failure(
             {"status": "error", "step": "some_step",
@@ -127,6 +150,7 @@ class TestTierMapping:
         assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
         tier4 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 4}
         assert tier4 == {FailureClass.TERMINAL_POLICY, FailureClass.UNCLASSIFIED}
+        assert rg_mod.tier_for(FailureClass.NEEDS_PHASE_B) == 3
 
 
 class TestFixStaleBridgeLock:
@@ -318,6 +342,23 @@ class TestAttemptRecovery:
     def test_unclassified_escalates(self, tmp_path):
         r = rg_mod.attempt_recovery(tmp_path, {"status": "banana"}, "w1")
         assert r["recovered"] is False and r["tier"] == 4 and r["failure_class"] == "unclassified"
+
+    def test_tier3_needs_phase_b_invokes_recovery_loop(self, tmp_path):
+        with patch.object(rg_mod, "run_recovery_loop", return_value={
+            "recovered": True,
+            "exhausted": False,
+            "iterations": 1,
+            "log": [{"action": "verify_pass", "detail": "phase b re-entry succeeded"}],
+        }) as mock_loop:
+            r = rg_mod.attempt_recovery(
+                tmp_path,
+                {"status": "needs_phase_b", "step": "phase_b"},
+                "w1",
+            )
+        mock_loop.assert_called_once()
+        assert r["recovered"] is True
+        assert r["tier"] == 3
+        assert r["action"] == "recovery_loop"
 
     def test_distinct_executor_timeouts_separate_buckets(self, tmp_path, monkeypatch):
         """Timeout results with different executors don't share exhaustion bucket.
@@ -764,8 +805,10 @@ class TestDangerousCommandDetection:
         "rm -rf /tmp/x", "git push origin main", "git reset --hard HEAD",
         "sudo rm -rf /", "git push --force",
         "rm -r /tmp/stuff", "git checkout .", "git restore .",
+        "git reset HEAD foo.py", "git checkout -- foo.py",
+        "git restore --staged foo.py", "git restore --source=HEAD foo.py",
         "git clean -fd", "dd if=/dev/zero of=/dev/sda",
-        "chmod 777 /etc/passwd",
+        "chmod 777 /etc/passwd", "cat .git/config", "ls .git/hooks/",
     ])
     def test_dangerous_blocked(self, cmd):
         assert rg_mod._is_dangerous_command(cmd) is True  # ANTICHEAT_OK
@@ -809,6 +852,17 @@ class TestApplyEditRepoEscape:
         assert ok is False
         assert "repo-escape blocked" in msg
         assert outside.read_text() == "secret"  # unchanged
+
+    def test_sensitive_git_config_edit_blocked(self, tmp_path):
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        (git_dir / "config").write_text("old")
+        ok, msg = rg_mod._apply_edit(  # ANTICHEAT_OK
+            {"file_path": ".git/config", "old_text": "old", "new_text": "new"},
+            tmp_path,
+        )
+        assert ok is False
+        assert "sensitive path blocked" in msg
 
 
 class TestRecoveryLoopDurableLogging:

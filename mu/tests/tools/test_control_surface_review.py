@@ -403,6 +403,7 @@ class TestMetaBridgePromptControlSurface:
         }
         prompt = mbs.build_meta_reviewer_prompt(package, [], REPO_ROOT)
         assert "CONTROL-SURFACE REVIEW MODE" in prompt
+        assert "mu/tools/executors/phase_b_implementer.py" in prompt
         assert "mu/tools/agents/meta_bridge_supervisor.py::write_pre_commit_receipt()" in prompt
         assert "mu/tools/agents/meta_bridge_client.py::run_meta_bridge_package()" in prompt
         assert "mu/tools/executors/phase_b_executor.py::prepare_commit_handoff()" in prompt
