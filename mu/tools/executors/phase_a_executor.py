@@ -1013,12 +1013,22 @@ def run_phase_a(
                 # Invoke Claude implementer to fix blocking findings
                 if _invoke_implementer is not None and blocking:
                     plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
+                    plan_hash_before = hash(plan_content)
                     blocking_text = "\n".join(
                         f"- [{f.get('severity','?')}] {f.get('title','untitled')}: {f.get('detail','')[:200]}"
                         for f in blocking
                     )
+                    # Derive task_id from routing record or plan content
+                    _task_id = scope.get("task_id", "")
+                    if not _task_id:
+                        for line in plan_content.splitlines():
+                            if line.strip().startswith("Task:"):
+                                _task_id = line.split("Task:", 1)[1].strip()
+                                break
                     impl_prompt = (
                         f"You are updating a Phase A plan at `{rel_plan_path}`.\n\n"
+                        f"IMPORTANT: Write ALL changes to `{rel_plan_path}` ONLY. "
+                        f"Do NOT create new files. Do NOT write to any other path.\n\n"
                         f"The bridge reviewer returned REQUEST_CHANGES. Fix ONLY the blocking findings:\n\n"
                         f"{blocking_text}\n\n"
                         f"## Current plan content:\n\n{plan_content}\n\n"
@@ -1029,9 +1039,9 @@ def run_phase_a(
                         "4. Stop conditions\n"
                         "5. Acceptance criteria\n"
                         "6. Grounding: TASKS.md authorization + governing packet refs\n\n"
-                        f"Read TASKS.md (current phase for [NEXT-CODEX-POST-REDTEAM]) and the "
-                        f"governing packet at reports/control_plane/post_redteam_structural_queue_2026-03-20.md. "
-                        f"Update the plan file directly. Do NOT create new files."
+                        f"Read TASKS.md for the current task ({_task_id or 'see NEXT section'}) "
+                        f"and use the plan file at `{rel_plan_path}` as the governing packet. "
+                        f"Update ONLY `{rel_plan_path}`. Do NOT create new files."
                     )
                     log("Invoking implementer to fix blocking findings...")
                     impl_result = _invoke_implementer(
@@ -1043,7 +1053,20 @@ def run_phase_a(
                     if impl_result["status"] != "success":
                         log(f"Implementer failed: {impl_result['status']} — continuing with unmodified plan")
                     else:
-                        log("Implementer updated plan — continuing to next bridge round")
+                        # Verify the implementer actually modified rel_plan_path
+                        new_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
+                        if hash(new_content) == plan_hash_before:
+                            log(f"WARNING: Implementer returned success but {rel_plan_path} "
+                                f"was NOT modified. Plan may have been written elsewhere. "
+                                f"Failing closed to prevent infinite stub loop.")
+                            result["status"] = "error"
+                            result["error"] = (
+                                f"Implementer did not modify {rel_plan_path}. "
+                                f"Check if plan was written to a different file."
+                            )
+                            break
+                        log(f"Implementer updated plan ({len(new_content.splitlines())} lines) "
+                            f"— continuing to next bridge round")
                 elif not _invoke_implementer:
                     log("Bridge: REQUEST_CHANGES — no implementer available, continuing with unmodified plan")
                 continue
