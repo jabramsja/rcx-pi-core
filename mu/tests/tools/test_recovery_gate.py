@@ -1,9 +1,9 @@
-"""Tests for recovery_gate: failure classifier and Tier 1 auto-fix."""
+"""Tests for recovery_gate: failure classifier and Tier 1–3 recovery."""
 from __future__ import annotations
 
-import json, os, subprocess
+import json, os, sqlite3, subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import pytest
 
 from mu.tests.tools.module_loader import load_module
@@ -257,9 +257,17 @@ class TestAttemptRecovery:
         r = rg_mod.attempt_recovery(tmp_path, {"status": "question_for_founder", "step": "b"}, "w1")
         assert r["recovered"] is False and r["tier"] == 4 and r["action"] == "escalate"
 
-    def test_tier2_not_implemented(self, tmp_path):
+    def test_tier2_timeout_recovers_via_fix(self, tmp_path, monkeypatch):
+        """PROCESS_TIMEOUT now has a Tier 2 fix — returns recovered=True."""
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "executor_config.json").write_text(json.dumps({
+            "timeouts": {"phase_b_executor": 100}
+        }))
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
         r = rg_mod.attempt_recovery(tmp_path, {"status": "timeout", "step": "p"}, "w1")
-        assert r["recovered"] is False and r["tier"] == 2 and r["action"] == "not_implemented"
+        assert r["recovered"] is True and r["tier"] == 2
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
 
     def test_tier1_bridge_lock_recovery(self, tmp_path):
         bus = tmp_path / ".agent_bus"; bus.mkdir()
@@ -268,13 +276,13 @@ class TestAttemptRecovery:
             tmp_path, {"status": "error", "stderr": "bridge.lock held", "step": "bridge_loop"}, "w1")
         assert r["recovered"] is True and r["tier"] == 1
 
-    def test_tier2_index_lock_not_auto_fixed(self, tmp_path):
-        """index.lock is Tier 2 — attempt_recovery returns not_implemented."""
+    def test_tier2_index_lock_no_fix_registered(self, tmp_path):
+        """index.lock is Tier 2 but has no registered fix — returns no_fix_registered."""
         git_dir = tmp_path / ".git"; git_dir.mkdir()
         (git_dir / "index.lock").write_text("lock")
         r = rg_mod.attempt_recovery(
             tmp_path, {"status": "error", "stderr": "index.lock held", "step": "s"}, "w1")
-        assert r["recovered"] is False and r["tier"] == 2 and r["action"] == "not_implemented"
+        assert r["recovered"] is False and r["tier"] == 2 and r["action"] == "no_fix_registered"
 
     def test_exhausted_after_max_attempts(self, tmp_path):
         rg_mod._save_recovery_log(tmp_path, [ # ANTICHEAT_OK
@@ -310,3 +318,544 @@ class TestAttemptRecovery:
     def test_unclassified_escalates(self, tmp_path):
         r = rg_mod.attempt_recovery(tmp_path, {"status": "banana"}, "w1")
         assert r["recovered"] is False and r["tier"] == 4 and r["failure_class"] == "unclassified"
+
+    def test_distinct_executor_timeouts_separate_buckets(self, tmp_path, monkeypatch):
+        """Timeout results with different executors don't share exhaustion bucket.
+
+        Bridge R6 Finding 1: dispatch timeout results omit 'step', so
+        unrelated timeout sites collapsed into (wave, unknown, process_timeout).
+        Fix: step falls back to executor name.
+        """
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "executor_config.json").write_text(json.dumps({
+            "timeouts": {"phase_b_executor": 100, "commit_executor": 100}
+        }))
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        # Two phase_b timeouts (no step — falls back to executor name)
+        r1 = rg_mod.attempt_recovery(
+            tmp_path,
+            {"status": "timeout", "executor": "phase_b_executor"},
+            "w-timeout")
+        assert r1["recovered"] is True
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        r2 = rg_mod.attempt_recovery(
+            tmp_path,
+            {"status": "timeout", "executor": "phase_b_executor"},
+            "w-timeout")
+        assert r2["recovered"] is True
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        # Third phase_b timeout should be exhausted (max 2 per tuple)
+        r3 = rg_mod.attempt_recovery(
+            tmp_path,
+            {"status": "timeout", "executor": "phase_b_executor"},
+            "w-timeout")
+        assert r3["exhausted"] is True
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        # But a COMMIT executor timeout should NOT be exhausted — separate bucket
+        r4 = rg_mod.attempt_recovery(
+            tmp_path,
+            {"status": "timeout", "executor": "commit_executor"},
+            "w-timeout")
+        assert r4["recovered"] is True, (
+            "commit_executor timeout should not be exhausted by "
+            "phase_b_executor exhaustion — they must use separate buckets")
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+
+
+# ===========================================================================
+# Tier 2 auto-retry tests
+# ===========================================================================
+
+
+class TestFixProcessTimeout:
+    def test_increases_timeout(self, tmp_path, monkeypatch):
+        """Verify 50% increase, capped at 2x original."""
+        # Write a config with known timeout
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "executor_config.json").write_text(json.dumps({
+            "timeouts": {"phase_b_executor": 100}
+        }))
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        r = rg_mod.fix_process_timeout(tmp_path)
+        assert r["fixed"] is True
+        assert r["action"] == "increase_timeout"
+        assert os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] == "150"
+        # Default timeout key when no result provided
+        assert os.environ["RCX_RECOVERY_TIMEOUT_KEY"] == "phase_b_executor"
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+
+    def test_cap_at_2x(self, tmp_path, monkeypatch):
+        """50% of 100 = 150, cap = 200. 150 < 200 so no cap. Test with explicit cap scenario."""
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        # 1.5 * 100 = 150, min(150, 200) = 150 — no cap yet
+        # To hit the cap: need int(val * 1.5) > val * 2, impossible for positive vals
+        # The cap prevents bugs where the increase factor is changed; verify it's applied
+        (cfg_dir / "executor_config.json").write_text(json.dumps({
+            "timeouts": {"phase_b_executor": 3600}
+        }))
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_b_executor", raising=False)
+        r = rg_mod.fix_process_timeout(tmp_path)
+        new_val = int(os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"])
+        assert new_val == 5400  # 1.5 * 3600
+        assert new_val <= 3600 * 2  # never exceeds 2x
+        assert os.environ["RCX_RECOVERY_TIMEOUT_KEY"] == "phase_b_executor"
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+
+    def test_increases_timeout_commit_executor(self, tmp_path, monkeypatch):
+        """Step-aware: commit_executor timeout targets the correct config key."""
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "executor_config.json").write_text(json.dumps({
+            "timeouts": {"phase_b_executor": 3600, "commit_executor": 3600}
+        }))
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_TIMEOUT_commit_executor", raising=False)
+        r = rg_mod.fix_process_timeout(
+            tmp_path, result={"executor": "commit_executor", "status": "timeout"})
+        assert r["fixed"] is True
+        assert os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] == "5400"
+        assert os.environ["RCX_RECOVERY_TIMEOUT_KEY"] == "commit_executor"
+        assert "commit_executor" in r["detail"]
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+
+
+class TestFixTransientKill:
+    def test_returns_retryable(self, tmp_path):
+        r = rg_mod.fix_transient_kill(tmp_path)
+        assert r["fixed"] is True
+        assert r["action"] == "retryable"
+
+
+class TestFixAggregationHang:
+    @staticmethod
+    def _create_bridge_db(db_path, jobs=None):
+        """Create a bridge.db with the jobs schema and optional job rows."""
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS jobs ("
+            "  job_id TEXT PRIMARY KEY,"
+            "  created_at TEXT NOT NULL,"
+            "  updated_at TEXT NOT NULL,"
+            "  status TEXT NOT NULL,"
+            "  task_text TEXT NOT NULL,"
+            "  scope_hint TEXT,"
+            "  wave_class TEXT,"
+            "  terminal_decision TEXT"
+            ")")
+        for job in (jobs or []):
+            conn.execute(
+                "INSERT INTO jobs (job_id, created_at, updated_at, status, "
+                "task_text, scope_hint) VALUES (?, ?, ?, ?, ?, ?)",
+                (job["job_id"], "2026-01-01", "2026-01-01",
+                 job["status"], "test task", job.get("scope_hint", "")))
+        conn.commit()
+        conn.close()
+
+    def test_clears_lock_and_marks_stale_jobs(self, tmp_path):
+        """Lock is removed. Stale bridge.db jobs are marked failed, DB preserved."""
+        bus = tmp_path / ".agent_bus"
+        bus.mkdir()
+        (bus / "bridge.lock").write_text("123\n")
+        db_path = bus / "bridge.db"
+        self._create_bridge_db(db_path, jobs=[
+            {"job_id": "j1", "status": "in_progress", "scope_hint": "wave-a"},
+            {"job_id": "j2", "status": "pending", "scope_hint": "wave-a"},
+            {"job_id": "j3", "status": "completed", "scope_hint": "wave-a"},
+        ])
+        r = rg_mod.fix_aggregation_hang(tmp_path, wave_id="wave-a")
+        assert r["fixed"] is True
+        assert r["action"] == "clear_bridge_state"
+        assert not (bus / "bridge.lock").exists()
+        # bridge.db must still exist (not deleted)
+        assert db_path.exists()
+        # Stale jobs marked failed, completed job untouched
+        conn = sqlite3.connect(str(db_path))
+        rows = {r[0]: r[1] for r in conn.execute(
+            "SELECT job_id, status FROM jobs").fetchall()}
+        conn.close()
+        assert rows["j1"] == "failed"
+        assert rows["j2"] == "failed"
+        assert rows["j3"] == "completed"
+        assert "bridge.lock" in r["detail"]
+        assert "bridge.db" in r["detail"]
+
+    def test_wave_scoped_does_not_affect_other_waves(self, tmp_path):
+        """Jobs for other waves are NOT marked failed (Finding 3 fix)."""
+        bus = tmp_path / ".agent_bus"
+        bus.mkdir()
+        db_path = bus / "bridge.db"
+        self._create_bridge_db(db_path, jobs=[
+            {"job_id": "j-wave-a", "status": "in_progress",
+             "scope_hint": "wave-a"},
+            {"job_id": "j-wave-b", "status": "in_progress",
+             "scope_hint": "wave-b"},
+            {"job_id": "j-legacy", "status": "pending",
+             "scope_hint": ""},
+        ])
+        r = rg_mod.fix_aggregation_hang(tmp_path, wave_id="wave-a")
+        assert r["fixed"] is True
+        conn = sqlite3.connect(str(db_path))
+        rows = {r[0]: (r[1], r[2]) for r in conn.execute(
+            "SELECT job_id, status, terminal_decision FROM jobs").fetchall()}
+        conn.close()
+        # wave-a job: marked failed
+        assert rows["j-wave-a"][0] == "failed"
+        assert rows["j-wave-a"][1] == "recovery_aggregation_hang"
+        # wave-b job: UNTOUCHED (different scope_hint)
+        assert rows["j-wave-b"][0] == "in_progress"
+        assert rows["j-wave-b"][1] is None
+        # legacy job (empty scope_hint): UNTOUCHED (Bridge R7 fix —
+        # NULL/empty scope_hint rows must not be treated as current-wave)
+        assert rows["j-legacy"][0] == "pending"
+        assert rows["j-legacy"][1] is None
+
+    def test_null_scoped_rows_untouched_when_wave_id_provided(self, tmp_path):
+        """NULL scope_hint rows must NOT be failed — they may belong to other
+        waves that didn't set scope_hint (Bridge R7 blocking fix)."""
+        bus = tmp_path / ".agent_bus"
+        bus.mkdir()
+        db_path = bus / "bridge.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "CREATE TABLE jobs (job_id TEXT, created_at TEXT, updated_at TEXT, "
+            "status TEXT, task_text TEXT, scope_hint TEXT, "
+            "terminal_decision TEXT)")
+        # Insert a row with explicit NULL scope_hint (real-world path:
+        # bridge_supervisor.submit_job() without --scope-hint)
+        conn.execute(
+            "INSERT INTO jobs (job_id, created_at, updated_at, status, "
+            "task_text, scope_hint) VALUES (?, ?, ?, ?, ?, NULL)",
+            ("j-null", "2026-01-01", "2026-01-01", "in_progress", "test"))
+        conn.execute(
+            "INSERT INTO jobs (job_id, created_at, updated_at, status, "
+            "task_text, scope_hint) VALUES (?, ?, ?, ?, ?, ?)",
+            ("j-wave-x", "2026-01-01", "2026-01-01", "in_progress",
+             "test", "wave-x"))
+        conn.commit()
+        conn.close()
+        r = rg_mod.fix_aggregation_hang(tmp_path, wave_id="wave-x")
+        assert r["fixed"] is True
+        conn = sqlite3.connect(str(db_path))
+        rows = {r[0]: (r[1],) for r in conn.execute(
+            "SELECT job_id, status FROM jobs").fetchall()}
+        conn.close()
+        # wave-x job: marked failed
+        assert rows["j-wave-x"][0] == "failed"
+        # NULL-scoped job: UNTOUCHED
+        assert rows["j-null"][0] == "in_progress"
+
+    def test_no_stale_jobs_db_untouched(self, tmp_path):
+        """If all jobs are completed, bridge.db has nothing to mark."""
+        bus = tmp_path / ".agent_bus"
+        bus.mkdir()
+        db_path = bus / "bridge.db"
+        self._create_bridge_db(db_path, jobs=[
+            {"job_id": "j1", "status": "completed"},
+        ])
+        r = rg_mod.fix_aggregation_hang(tmp_path)
+        assert r["fixed"] is True
+        assert r["action"] == "no_stale_state"
+        assert db_path.exists()
+
+    def test_no_files_still_retryable(self, tmp_path):
+        r = rg_mod.fix_aggregation_hang(tmp_path)
+        assert r["fixed"] is True
+        assert r["action"] == "no_stale_state"
+
+
+class TestFixImplementerStale:
+    def test_increases_stale_timeout(self, tmp_path, monkeypatch):
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "executor_config.json").write_text(json.dumps({
+            "timeouts": {"phase_b_implementer_stale": 200}
+        }))
+        monkeypatch.delenv("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", raising=False)
+        r = rg_mod.fix_implementer_stale(tmp_path)
+        assert r["fixed"] is True
+        assert r["action"] == "increase_stale_timeout"
+        assert os.environ["RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE"] == "300"
+        monkeypatch.delenv("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", raising=False)
+
+
+class TestTier2FixesMap:
+    def test_all_four_registered(self):
+        """All 4 Tier 2 failure classes have registered fix functions."""
+        expected = {
+            rg_mod.FailureClass.PROCESS_TIMEOUT,
+            rg_mod.FailureClass.TRANSIENT_KILL,
+            rg_mod.FailureClass.AGGREGATION_HANG,
+            rg_mod.FailureClass.IMPLEMENTER_STALE,
+        }
+        assert set(rg_mod._TIER2_FIXES.keys()) == expected  # ANTICHEAT_OK
+
+
+class TestTier2AttemptRecovery:
+    def test_tier2_timeout_recovers(self, tmp_path, monkeypatch):
+        """attempt_recovery for PROCESS_TIMEOUT returns recovered=True."""
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "executor_config.json").write_text(json.dumps({
+            "timeouts": {"phase_b_executor": 100}
+        }))
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        r = rg_mod.attempt_recovery(
+            tmp_path, {"status": "timeout", "step": "phase_b"}, "w1")
+        assert r["recovered"] is True
+        assert r["tier"] == 2
+        assert r["failure_class"] == "process_timeout"
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+
+    def test_tier2_transient_kill_recovers(self, tmp_path):
+        r = rg_mod.attempt_recovery(
+            tmp_path, {"status": "failed", "exit_code": -9, "stderr": "", "step": "impl"}, "w1")
+        assert r["recovered"] is True and r["tier"] == 2
+
+    def test_tier2_logged(self, tmp_path):
+        r = rg_mod.attempt_recovery(
+            tmp_path, {"status": "failed", "exit_code": -9, "stderr": "", "step": "impl"}, "w1")
+        entries = rg_mod._load_recovery_log(tmp_path)  # ANTICHEAT_OK
+        assert len(entries) == 1
+        assert entries[0]["tier"] == 2
+
+
+# ===========================================================================
+# Tier 3 LLM recovery loop tests
+# ===========================================================================
+
+
+class TestRecoveryLoop:
+    def test_diagnose_and_fix(self, tmp_path):
+        """Mock claude --print returning a shell fix, verify it runs."""
+        result = {"status": "failed", "step": "pre_commit",
+                  "stderr": "test_x failed", "stdout": ""}
+        claude_response = json.dumps({
+            "action": "shell",
+            "commands": ["echo fixed"],
+            "explanation": "applying fix"
+        })
+        verify_ok = MagicMock(returncode=0, stdout="", stderr="")
+        call_count = {"n": 0}
+
+        def mock_run(cmd, **kw):
+            call_count["n"] += 1
+            if isinstance(cmd, list) and "claude" in cmd:
+                return MagicMock(stdout=claude_response, stderr="", returncode=0)
+            if isinstance(cmd, list):  # verify command
+                return verify_ok
+            # shell=True command
+            return MagicMock(stdout="ok", stderr="", returncode=0)
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = mock_run
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, result, "w1", verify_command=["echo", "verify"])
+        assert r["recovered"] is True
+        assert r["iterations"] == 1
+
+    def test_max_iterations(self, tmp_path):
+        """Verify loop stops after max_iterations."""
+        result = {"status": "failed", "step": "test", "stderr": "fail", "stdout": ""}
+        claude_response = json.dumps({
+            "action": "shell", "commands": ["echo try"], "explanation": "trying"
+        })
+        verify_fail = MagicMock(returncode=1, stdout="", stderr="still fails")
+
+        def mock_run(cmd, **kw):
+            if isinstance(cmd, list) and "claude" in cmd:
+                return MagicMock(stdout=claude_response, stderr="", returncode=0)
+            if isinstance(cmd, list):  # verify
+                return verify_fail
+            return MagicMock(stdout="", stderr="", returncode=0)
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = mock_run
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, result, "w1", max_iterations=3,
+                verify_command=["echo", "verify"])
+        assert r["recovered"] is False
+        assert r["exhausted"] is True
+        assert r["iterations"] == 3
+
+    def test_escalate_action(self, tmp_path):
+        """Verify escalate action returns exhausted=True."""
+        result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
+        claude_response = json.dumps({
+            "action": "escalate", "commands": [], "explanation": "need human"
+        })
+
+        def mock_run(cmd, **kw):
+            return MagicMock(stdout=claude_response, stderr="", returncode=0)
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = mock_run
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(tmp_path, result, "w1")
+        assert r["recovered"] is False
+        assert r["exhausted"] is True
+        assert r["iterations"] == 1
+
+    def test_dangerous_command_blocked(self, tmp_path):
+        """Verify denylist blocks rm -rf etc."""
+        result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
+        claude_response = json.dumps({
+            "action": "shell",
+            "commands": ["rm -rf /tmp/stuff", "echo safe"],
+            "explanation": "cleanup"
+        })
+        verify_fail = MagicMock(returncode=1, stdout="", stderr="nope")
+
+        def mock_run(cmd, **kw):
+            if isinstance(cmd, list) and "claude" in cmd:
+                return MagicMock(stdout=claude_response, stderr="", returncode=0)
+            if isinstance(cmd, list):  # verify
+                return verify_fail
+            return MagicMock(stdout="ok", stderr="", returncode=0)
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = mock_run
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, result, "w1", max_iterations=1,
+                verify_command=["echo", "check"])
+        # Verify the dangerous command was blocked in the log
+        assert any(
+            entry.get("blocked") is True
+            for entry in r["log"]
+            if entry.get("action") == "shell"
+        )
+
+    def test_timeout_handled(self, tmp_path):
+        """Verify claude call timeout is handled gracefully."""
+        result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
+
+        def mock_run(cmd, **kw):
+            raise subprocess.TimeoutExpired(cmd="claude", timeout=60)
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = mock_run
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, result, "w1", max_iterations=1)
+        assert r["recovered"] is False
+        assert len(r["log"]) == 1
+        assert r["log"][0]["action"] == "timeout"
+
+
+class TestDangerousCommandDetection:
+    @pytest.mark.parametrize("cmd", [
+        "rm -rf /tmp/x", "git push origin main", "git reset --hard HEAD",
+        "sudo rm -rf /", "git push --force",
+        "rm -r /tmp/stuff", "git checkout .", "git restore .",
+        "git clean -fd", "dd if=/dev/zero of=/dev/sda",
+        "chmod 777 /etc/passwd",
+    ])
+    def test_dangerous_blocked(self, cmd):
+        assert rg_mod._is_dangerous_command(cmd) is True  # ANTICHEAT_OK
+
+    @pytest.mark.parametrize("cmd", [
+        "echo hello", "git status", "pytest tests/", "cat file.py",
+        "git diff", "git log --oneline",
+    ])
+    def test_safe_allowed(self, cmd):
+        assert rg_mod._is_dangerous_command(cmd) is False  # ANTICHEAT_OK
+
+
+class TestApplyEditRepoEscape:
+    def test_edit_within_repo(self, tmp_path):
+        """Edit within repo root succeeds."""
+        target = tmp_path / "file.py"
+        target.write_text("old content")
+        ok, msg = rg_mod._apply_edit(  # ANTICHEAT_OK
+            {"file_path": "file.py", "old_text": "old", "new_text": "new"},
+            tmp_path)
+        assert ok is True
+        assert "new content" in target.read_text()
+
+    def test_edit_outside_repo_blocked(self, tmp_path):
+        """Edit targeting path outside repo_root is blocked."""
+        ok, msg = rg_mod._apply_edit(  # ANTICHEAT_OK
+            {"file_path": "../../etc/passwd", "old_text": "x", "new_text": "y"},
+            tmp_path)
+        assert ok is False
+        assert "repo-escape blocked" in msg
+
+    def test_edit_symlink_escape_blocked(self, tmp_path):
+        """Symlink that resolves outside repo_root is blocked."""
+        outside = tmp_path.parent / "outside_file"
+        outside.write_text("secret")
+        link = tmp_path / "link.txt"
+        link.symlink_to(outside)
+        ok, msg = rg_mod._apply_edit(  # ANTICHEAT_OK
+            {"file_path": "link.txt", "old_text": "secret", "new_text": "hacked"},
+            tmp_path)
+        assert ok is False
+        assert "repo-escape blocked" in msg
+        assert outside.read_text() == "secret"  # unchanged
+
+
+class TestRecoveryLoopDurableLogging:
+    def test_iterations_persisted_to_recovery_log(self, tmp_path):
+        """Each Tier 3 iteration is durably logged to recovery_log.json."""
+        result = {"status": "failed", "step": "pre_commit",
+                  "stderr": "test failed", "stdout": ""}
+        claude_response = json.dumps({
+            "action": "shell", "commands": ["echo fix"], "explanation": "trying"
+        })
+        verify_fail = MagicMock(returncode=1, stdout="", stderr="still fails")
+
+        def mock_run(cmd, **kw):
+            if isinstance(cmd, list) and "claude" in cmd:
+                return MagicMock(stdout=claude_response, stderr="", returncode=0)
+            if isinstance(cmd, list):
+                return verify_fail
+            return MagicMock(stdout="ok", stderr="", returncode=0)
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = mock_run
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            rg_mod.run_recovery_loop(
+                tmp_path, result, "w-log-test", max_iterations=2,
+                verify_command=["echo", "check"])
+
+        entries = rg_mod._load_recovery_log(tmp_path)  # ANTICHEAT_OK
+        assert len(entries) == 2
+        assert all(e["tier"] == 3 for e in entries)
+        assert all(e["wave_id"] == "w-log-test" for e in entries)
+
+    def test_escalate_persisted(self, tmp_path):
+        """Escalate action is durably logged."""
+        result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
+        claude_response = json.dumps({
+            "action": "escalate", "commands": [], "explanation": "need human"
+        })
+
+        def mock_run(cmd, **kw):
+            return MagicMock(stdout=claude_response, stderr="", returncode=0)
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = mock_run
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            rg_mod.run_recovery_loop(tmp_path, result, "w-esc")
+
+        entries = rg_mod._load_recovery_log(tmp_path)  # ANTICHEAT_OK
+        assert len(entries) == 1
+        assert "escalate" in entries[0]["action"]
+        assert entries[0]["outcome"] == "escalated"

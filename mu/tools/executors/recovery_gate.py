@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pipeline recovery gate: failure classification and Tier 1 auto-fix.
+"""Pipeline recovery gate: failure classification and Tier 1–3 recovery.
 
 Design doc: mu/docs/agents/PipelineRecovery.v0.md
 Import constraints: only stdlib + executor_common.
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import time
 from dataclasses import asdict, dataclass
@@ -264,6 +265,423 @@ _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.MIXED_STAGING: lambda root, **kw: fix_mixed_staging(root),
 }
 
+
+# ---------------------------------------------------------------------------
+# Tier 2 auto-retry with adjustment (zero tokens)
+# ---------------------------------------------------------------------------
+
+_CONFIG_PATH_REL = Path("mu") / "tools" / "executors" / "executor_config.json"
+
+
+def _load_config_timeouts(repo_root: Path) -> dict[str, Any]:
+    """Load timeouts dict from executor_config.json (read-only)."""
+    config_path = repo_root / _CONFIG_PATH_REL
+    try:
+        cfg = json.loads(config_path.read_text(encoding="utf-8"))
+        return cfg.get("timeouts", {})
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Increase timeout by 50% (capped at 2x original) via env var override.
+
+    Step-aware: reads the executor name from kw['result'] to target the
+    correct timeout key (e.g. commit_executor, phase_a_executor).
+    Falls back to 'phase_b_executor' if not available.
+
+    The 2x cap is against the *original* baseline (before any recovery
+    bumps), not the current config value.  The dispatcher writes each
+    override back to executor_config.json between attempts, so reading
+    ``current`` from disk on the second recovery would already reflect
+    the first bump — compounding past the intended cap.
+    """
+    timeouts = _load_config_timeouts(repo_root)
+    # Determine which executor timed out from the result
+    result = kw.get("result", {})
+    executor = result.get("executor", "phase_b_executor")
+    timeout_key = executor if executor in timeouts else "phase_b_executor"
+    current = timeouts.get(timeout_key, 3600)
+    # Track original baseline across sequential recoveries.  On the first
+    # call the env var is absent so we seed it from the (still-original)
+    # config value.  Subsequent calls read the stored original.
+    baseline_env_key = f"RCX_RECOVERY_ORIGINAL_TIMEOUT_{timeout_key}"
+    stored_baseline = os.environ.get(baseline_env_key)
+    if stored_baseline is not None:
+        baseline = int(stored_baseline)
+    else:
+        baseline = current
+        os.environ[baseline_env_key] = str(baseline)
+    new_timeout = min(int(current * 1.5), baseline * 2)
+    os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] = str(new_timeout)
+    os.environ["RCX_RECOVERY_TIMEOUT_KEY"] = timeout_key
+    return _fix_result(True, "increase_timeout",
+                       f"timeout for {timeout_key} increased from {current}s "
+                       f"to {new_timeout}s (capped at 2x original {baseline}s) "
+                       f"via RCX_RECOVERY_TIMEOUT_OVERRIDE")
+
+
+def fix_transient_kill(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """No-op fix — marks as retryable. Dispatcher already retries."""
+    return _fix_result(True, "retryable",
+                       "transient kill — safe to retry with same parameters")
+
+
+def fix_aggregation_hang(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Clear bridge lock and mark stale bridge DB jobs as failed.
+
+    Does NOT delete bridge.db — it is the shared job/transcript SQLite bus
+    used by bridge_supervisor.py. Only the lock file is removed and
+    in-progress/pending jobs for the CURRENT WAVE are marked as failed.
+    Jobs belonging to other waves (identified by scope_hint) are untouched.
+    """
+    wave_id = kw.get("wave_id", "")
+    cleared: list[str] = []
+    # Clear bridge.lock
+    lock_path = repo_root / ".agent_bus" / "bridge.lock"
+    if lock_path.exists():
+        lock_path.unlink(missing_ok=True)
+        cleared.append(str(lock_path.relative_to(repo_root)))
+    # Mark stale/stuck jobs in bridge.db as failed (preserve the DB itself).
+    # Wave-scoped: only mark jobs whose scope_hint matches this wave EXACTLY.
+    # NULL/empty scope_hint rows are left untouched — they may belong to
+    # other waves that didn't set scope_hint (Bridge R7 fix: NULL-scoped
+    # rows must not be treated as current-wave work).
+    bridge_db = repo_root / ".agent_bus" / "bridge.db"
+    if bridge_db.exists():
+        try:
+            conn = sqlite3.connect(str(bridge_db), timeout=5)
+            try:
+                if wave_id:
+                    cursor = conn.execute(
+                        "UPDATE jobs SET status = 'failed', "
+                        "terminal_decision = 'recovery_aggregation_hang' "
+                        "WHERE status IN ('pending', 'in_progress') "
+                        "AND scope_hint = ?",
+                        (wave_id,))
+                else:
+                    cursor = conn.execute(
+                        "UPDATE jobs SET status = 'failed', "
+                        "terminal_decision = 'recovery_aggregation_hang' "
+                        "WHERE status IN ('pending', 'in_progress')")
+                stale_count = cursor.rowcount
+                conn.commit()
+            finally:
+                conn.close()
+            if stale_count > 0:
+                cleared.append(
+                    f"bridge.db: marked {stale_count} stale job(s) as failed")
+        except (sqlite3.Error, OSError):
+            pass  # DB inaccessible — still safe to retry
+    if not cleared:
+        return _fix_result(True, "no_stale_state",
+                           "no bridge state files to clear — safe to retry")
+    return _fix_result(True, "clear_bridge_state",
+                       f"cleared bridge state: {cleared}")
+
+
+def fix_implementer_stale(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Increase stale timeout by 50% (capped at 2x original) via env var override."""
+    timeouts = _load_config_timeouts(repo_root)
+    timeout_key = "phase_b_implementer_stale"
+    current = timeouts.get(timeout_key, 300)
+    # Same original-baseline tracking as fix_process_timeout — prevent
+    # compounding when the dispatcher writes bumped values to disk.
+    baseline_env_key = f"RCX_RECOVERY_ORIGINAL_TIMEOUT_{timeout_key}"
+    stored_baseline = os.environ.get(baseline_env_key)
+    if stored_baseline is not None:
+        baseline = int(stored_baseline)
+    else:
+        baseline = current
+        os.environ[baseline_env_key] = str(baseline)
+    new_timeout = min(int(current * 1.5), baseline * 2)
+    os.environ["RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE"] = str(new_timeout)
+    return _fix_result(True, "increase_stale_timeout",
+                       f"stale timeout increased from {current}s to {new_timeout}s "
+                       f"(capped at 2x original {baseline}s) "
+                       f"via RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE")
+
+
+_TIER2_FIXES: dict[FailureClass, Any] = {
+    FailureClass.PROCESS_TIMEOUT: fix_process_timeout,
+    FailureClass.TRANSIENT_KILL: fix_transient_kill,
+    FailureClass.AGGREGATION_HANG: fix_aggregation_hang,
+    FailureClass.IMPLEMENTER_STALE: fix_implementer_stale,
+}
+
+
+# ---------------------------------------------------------------------------
+# Tier 3 LLM recovery loop (small focused prompt via claude --print)
+# ---------------------------------------------------------------------------
+
+_DANGEROUS_COMMANDS = frozenset({
+    "rm -rf", "rm -r ", "git push", "git reset --hard",
+    "git push --force", "git checkout .", "git restore .",
+    "git clean -f", "dd if=", "mkfs.", "chmod 777",
+    "> /dev/sd", ":(){ :|:& };:",
+})
+
+MAX_RECOVERY_ITERATIONS = 3
+_CLAUDE_TIMEOUT = 60
+_SHELL_TIMEOUT = 30
+
+
+def _is_dangerous_command(cmd: str) -> bool:
+    """Check if a shell command matches the denylist."""
+    cmd_lower = cmd.strip().lower()
+    for denied in _DANGEROUS_COMMANDS:
+        if denied in cmd_lower:
+            return True
+    return False
+
+
+def _build_diagnosis_prompt(
+    result: dict[str, Any], wave_id: str, iteration: int,
+    repo_root: Path,
+) -> str:
+    """Build a ~2K token diagnosis prompt for claude --print."""
+    fc = result.get("failure_class", result.get("recovery", {}).get("failure_class", "unknown"))
+    tier = result.get("tier", result.get("recovery", {}).get("tier", 3))
+    step = result.get("step", "unknown")
+    stderr = result.get("stderr", "")
+    stdout = result.get("stdout", "")
+    # Truncate to keep within token budget
+    stderr_lines = stderr.strip().splitlines()[-100:]
+    stdout_lines = stdout.strip().splitlines()[-50:]
+    # Get git status
+    try:
+        git_proc = subprocess.run(
+            ["git", "status", "--short"], cwd=repo_root,
+            capture_output=True, text=True, timeout=10)
+        git_status = git_proc.stdout[:500] if git_proc.returncode == 0 else "(unavailable)"
+    except (subprocess.TimeoutExpired, OSError):
+        git_status = "(unavailable)"
+
+    return f"""You are a pipeline recovery agent. A pipeline step has failed and you must diagnose and fix it.
+
+Failure class: {fc}
+Tier: {tier}
+Step: {step}
+Iteration: {iteration + 1}/{MAX_RECOVERY_ITERATIONS}
+Wave: {wave_id}
+
+STDERR (last 100 lines):
+{chr(10).join(stderr_lines)}
+
+STDOUT (last 50 lines):
+{chr(10).join(stdout_lines)}
+
+Git status:
+{git_status}
+
+Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
+{{"action": "shell"|"edit"|"skip"|"escalate", "commands": ["cmd1", "cmd2"], "explanation": "why"}}
+
+- "shell": run shell commands to fix the issue
+- "edit": apply file edits (commands = [{{"file_path": "...", "old_text": "...", "new_text": "..."}}])
+- "skip": cannot fix, return failure
+- "escalate": need human intervention
+
+Safety: no rm -rf, no git push, no git reset --hard. Max 30s per command."""
+
+
+def _apply_edit(edit: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
+    """Apply a single file edit from the LLM response.
+
+    Safety: file_path must resolve to within repo_root (no symlink escape).
+    """
+    raw_path = edit.get("file_path", "")
+    file_path = (repo_root / raw_path).resolve()
+    repo_resolved = repo_root.resolve()
+    if not str(file_path).startswith(str(repo_resolved) + os.sep) and file_path != repo_resolved:
+        return False, f"repo-escape blocked: {raw_path} resolves outside repo root"
+    old_text = edit.get("old_text", "")
+    new_text = edit.get("new_text", "")
+    if not file_path.exists():
+        return False, f"file not found: {file_path}"
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        if old_text not in content:
+            return False, f"old_text not found in {file_path}"
+        content = content.replace(old_text, new_text, 1)
+        file_path.write_text(content, encoding="utf-8")
+        return True, f"edited {file_path}"
+    except OSError as exc:
+        return False, f"edit failed: {exc}"
+
+
+def _log_tier3_attempt(
+    repo_root: Path, wave_id: str, step: str, failure_class: str,
+    iteration: int, action: str, outcome: str, duration_s: float,
+    detail: str = "",
+) -> None:
+    """Persist a single Tier 3 recovery iteration to recovery_log.json."""
+    attempts = _load_recovery_log(repo_root)
+    attempt = RecoveryAttempt(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        wave_id=wave_id, step=step, failure_class=failure_class, tier=3,
+        action=f"tier3_iter{iteration}_{action}", outcome=outcome,
+        duration_s=duration_s, tokens_used=0, detail=detail,
+    )
+    attempts.append(asdict(attempt))
+    _save_recovery_log(repo_root, attempts)
+
+
+def run_recovery_loop(
+    repo_root: Path, result: dict[str, Any], wave_id: str,
+    max_iterations: int = MAX_RECOVERY_ITERATIONS,
+    verify_command: list[str] | None = None,
+) -> dict[str, Any]:
+    """Tier 3 LLM recovery loop: diagnose → fix → verify.
+
+    Returns dict with: recovered, exhausted, iterations, log.
+    All iterations are durably logged to recovery_log.json.
+    """
+    loop_log: list[dict[str, Any]] = []
+    fc = result.get("failure_class", result.get("recovery", {}).get("failure_class", "unknown"))
+    step = result.get("step") or result.get("executor", "unknown")
+
+    for i in range(max_iterations):
+        iteration_t0 = time.monotonic()
+        prompt = _build_diagnosis_prompt(result, wave_id, i, repo_root)
+
+        # Call claude --print for diagnosis
+        try:
+            claude_proc = subprocess.run(
+                ["claude", "--print", "-p", prompt],
+                capture_output=True, text=True, timeout=_CLAUDE_TIMEOUT,
+                cwd=repo_root)
+            raw_response = claude_proc.stdout.strip()
+        except subprocess.TimeoutExpired:
+            dur = round(time.monotonic() - iteration_t0, 3)
+            loop_log.append({
+                "iteration": i + 1, "action": "timeout",
+                "detail": "claude --print timed out",
+                "duration_s": dur})
+            _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
+                               "timeout", "failed", dur, "claude --print timed out")
+            continue
+        except OSError as exc:
+            dur = round(time.monotonic() - iteration_t0, 3)
+            loop_log.append({
+                "iteration": i + 1, "action": "error",
+                "detail": f"claude invocation failed: {exc}",
+                "duration_s": dur})
+            _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
+                               "error", "failed", dur, f"claude invocation failed: {exc}")
+            continue
+
+        # Parse JSON response
+        try:
+            # Strip markdown fences if present
+            cleaned = raw_response
+            if cleaned.startswith("```"):
+                lines = cleaned.splitlines()
+                lines = [l for l in lines if not l.startswith("```")]
+                cleaned = "\n".join(lines)
+            response = json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError):
+            dur = round(time.monotonic() - iteration_t0, 3)
+            loop_log.append({
+                "iteration": i + 1, "action": "parse_error",
+                "detail": f"could not parse response: {raw_response[:200]}",
+                "duration_s": dur})
+            _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
+                               "parse_error", "failed", dur,
+                               f"could not parse response: {raw_response[:200]}")
+            continue
+
+        action = response.get("action", "skip")
+        commands = response.get("commands", [])
+        explanation = response.get("explanation", "")
+
+        if action == "escalate":
+            dur = round(time.monotonic() - iteration_t0, 3)
+            loop_log.append({
+                "iteration": i + 1, "action": "escalate",
+                "detail": explanation, "duration_s": dur})
+            _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
+                               "escalate", "escalated", dur, explanation)
+            return {"recovered": False, "exhausted": True,
+                    "iterations": i + 1, "log": loop_log}
+
+        if action == "skip":
+            dur = round(time.monotonic() - iteration_t0, 3)
+            loop_log.append({
+                "iteration": i + 1, "action": "skip",
+                "detail": explanation, "duration_s": dur})
+            _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
+                               "skip", "skipped", dur, explanation)
+            return {"recovered": False, "exhausted": False,
+                    "iterations": i + 1, "log": loop_log}
+
+        if action == "shell":
+            cmd_results = []
+            blocked = False
+            for cmd in commands:
+                if not isinstance(cmd, str):
+                    continue
+                if _is_dangerous_command(cmd):
+                    cmd_results.append(f"BLOCKED: {cmd}")
+                    blocked = True
+                    continue
+                try:
+                    cmd_proc = subprocess.run(
+                        cmd, shell=True, capture_output=True, text=True,
+                        timeout=_SHELL_TIMEOUT, cwd=repo_root)
+                    cmd_results.append(
+                        f"exit={cmd_proc.returncode}: {cmd_proc.stdout[:200]}")
+                except subprocess.TimeoutExpired:
+                    cmd_results.append(f"TIMEOUT: {cmd}")
+                except OSError as exc:
+                    cmd_results.append(f"ERROR: {exc}")
+            loop_log.append({
+                "iteration": i + 1, "action": "shell",
+                "commands": commands, "results": cmd_results,
+                "blocked": blocked, "detail": explanation,
+                "duration_s": round(time.monotonic() - iteration_t0, 3)})
+
+        elif action == "edit":
+            edit_results = []
+            for edit in commands:
+                if isinstance(edit, dict):
+                    ok, msg = _apply_edit(edit, repo_root)
+                    edit_results.append(msg)
+            loop_log.append({
+                "iteration": i + 1, "action": "edit",
+                "results": edit_results, "detail": explanation,
+                "duration_s": round(time.monotonic() - iteration_t0, 3)})
+
+        # Verify: re-run the failed gate/check if a verify command is provided
+        if verify_command:
+            try:
+                verify_proc = subprocess.run(
+                    verify_command, capture_output=True, text=True,
+                    timeout=_SHELL_TIMEOUT, cwd=repo_root)
+                if verify_proc.returncode == 0:
+                    dur = round(time.monotonic() - iteration_t0, 3)
+                    loop_log.append({
+                        "iteration": i + 1, "action": "verify_pass",
+                        "detail": "verification passed"})
+                    _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
+                                       action, "success", dur, "verification passed")
+                    return {"recovered": True, "exhausted": False,
+                            "iterations": i + 1, "log": loop_log}
+                # Update result with new error for next iteration
+                result = dict(result)
+                result["stderr"] = verify_proc.stderr
+                result["stdout"] = verify_proc.stdout
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+        # Log iteration outcome (verify failed or no verify command)
+        dur = round(time.monotonic() - iteration_t0, 3)
+        _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
+                           action, "failed", dur, explanation)
+
+    return {"recovered": False, "exhausted": True,
+            "iterations": max_iterations, "log": loop_log}
+
+
 # ---------------------------------------------------------------------------
 # Recovery log
 # ---------------------------------------------------------------------------
@@ -343,7 +761,11 @@ def attempt_recovery(
     t0 = time.monotonic()
     fc = classify_failure(result)
     tier = tier_for(fc)
-    step = result.get("step", "unknown")
+    # Use executor name as fallback when step is missing — prevents
+    # distinct timeout sites (e.g. phase_b_executor vs commit_executor)
+    # from collapsing into the same (wave_id, "unknown", class) bucket
+    # (Bridge R6 Finding 1 fix).
+    step = result.get("step") or result.get("executor", "unknown")
 
     attempts = _load_recovery_log(repo_root)
     prior = _count_prior_attempts(attempts, wave_id, step, fc.value)
@@ -355,16 +777,37 @@ def attempt_recovery(
     if tier == 4:
         return _make_result(False, "escalate", 4, fc,
                             f"tier 4 failure ({fc.value}) requires escalation", False)
-    if tier in (2, 3):
+    if tier == 3:
         return _make_result(False, "not_implemented", tier, fc,
-                            f"tier {tier} recovery not yet implemented", False)
+                            f"tier 3 recovery not yet wired into dispatcher", False)
+
+    # Tier 2: check _TIER2_FIXES before falling through
+    if tier == 2:
+        fix_fn = _TIER2_FIXES.get(fc)
+        if fix_fn is not None:
+            fix_result = fix_fn(repo_root, wave_id=wave_id, result=result)
+            duration = time.monotonic() - t0
+            attempt_rec = RecoveryAttempt(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                wave_id=wave_id, step=step, failure_class=fc.value, tier=tier,
+                action=fix_result.get("action", "unknown"),
+                outcome="success" if fix_result.get("fixed") else "failed",
+                duration_s=round(duration, 3), tokens_used=0,
+                detail=fix_result.get("detail", ""))
+            attempts.append(asdict(attempt_rec))
+            _save_recovery_log(repo_root, attempts)
+            return _make_result(fix_result.get("fixed", False),
+                                fix_result.get("action", "unknown"), tier, fc,
+                                fix_result.get("detail", ""), False)
+        return _make_result(False, "no_fix_registered", tier, fc,
+                            f"no tier 2 fix registered for {fc.value}", False)
 
     fix_fn = _TIER1_FIXES.get(fc)
     if fix_fn is None:
         return _make_result(False, "no_fix_registered", tier, fc,
                             f"no tier 1 fix registered for {fc.value}", False)
 
-    fix_result = fix_fn(repo_root, wave_id=wave_id)
+    fix_result = fix_fn(repo_root, wave_id=wave_id, result=result)
     duration = time.monotonic() - t0
 
     attempt = RecoveryAttempt(

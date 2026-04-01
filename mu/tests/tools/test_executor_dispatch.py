@@ -1636,14 +1636,14 @@ class TestDispatcherPlanNameSanitization:
         captured: dict[str, list[str]] = {}
 
         calls = []
-        def fake_run(args, **kwargs):
+        def fake_run(args, cwd, timeout):
             calls.append(args)
             if len(calls) == 1:
                 return subprocess.CompletedProcess(args, 0, stdout="[phase-a] Status: converged\n[phase-a] Plan: test_plan.md\n", stderr="")
             return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
 
         monkeypatch.setattr(dispatch_mod, "validate_routing_record_freshness", lambda *a, **k: (True, "fresh"))
-        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
 
         dispatch_mod.dispatch(record, repo_root=tmp_path, skip_freshness=True)
 
@@ -5026,7 +5026,7 @@ class TestDispatcherCommitMechanicalBridge:
             "wave_name": "test",
             "task_id": "[TEST-1]",
         }
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5041,7 +5041,7 @@ class TestDispatcherCommitMechanicalBridge:
     def test_update_tracker_without_handoff_passes_routing_record(self, tmp_path):
         """When no handoff file exists, dispatcher passes --routing-record."""
         record = {"decision": "UPDATE_TRACKER_ONLY", "summary": "update tracker"}
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5056,7 +5056,7 @@ class TestDispatcherCommitMechanicalBridge:
         """Dispatcher must not return needs_handoff for mechanically preparable routes."""
         # Use UPDATE_TRACKER_ONLY since COMMIT_GO now requires a handoff file
         record = {"decision": "UPDATE_TRACKER_ONLY", "summary": "test"}
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5146,7 +5146,7 @@ class TestDispatcherPlanlessPhaseB:
             "wave_name": "w",
             "next_candidates": [{"candidate": "do it"}],
         }
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5164,7 +5164,7 @@ class TestDispatcherPlanlessPhaseB:
             "summary": "test",
             "next_candidates": [{"candidate": "do", "tracked_packet": "reports/plan.md"}],
         }
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5211,7 +5211,7 @@ class TestTrackedPacketPathTraversal:
             "summary": "test",
             "next_candidates": [{"candidate": "do", "tracked_packet": "reports/plan.md"}],
         }
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5270,7 +5270,7 @@ class TestDispatcherStaleHandoffOverride:
             "summary": "just tracker",
             "wave_name": "tracker-only-wave",
         }
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5298,7 +5298,7 @@ class TestDispatcherStaleHandoffOverride:
             "wave_name": "ready-to-commit",
             "task_id": "[EXECUTOR-SURFACES]",
         }
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5512,3 +5512,422 @@ class TestRecoveryGateWiring:
             dispatch_mod.main(self._base_args(routing_file))
             assert "recovery" in fail_result
             assert fail_result["recovery"] == recovery_result
+
+    def test_tier2_recovery_retries_with_adjustment(self, tmp_path, monkeypatch):
+        """Tier 2 recovery (e.g. timeout) grants retry with adjusted config."""
+        routing_file = self._routing_file(tmp_path)
+        fail_result = {
+            "status": "failed", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "stderr": "", "step": "phase_b",
+        }
+        success_result = {
+            "status": "success", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+        }
+        recovery_tier2 = {
+            "recovered": True, "exhausted": False,
+            "failure_class": "process_timeout", "tier": 2,
+            "action": "increase_timeout", "detail": "timeout increased",
+        }
+        # Simulate fix_process_timeout having set the env var
+        monkeypatch.setenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", "5400")
+        captured_configs = []
+
+        def capture_dispatch(record, *, config=None, **kw):
+            captured_configs.append(
+                dict(config.get("timeouts", {})) if config else {})
+            return fail_result if len(captured_configs) == 1 else success_result
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          side_effect=capture_dispatch) as mock_dispatch, \
+             patch.object(dispatch_mod, "attempt_recovery",
+                          return_value=recovery_tier2), \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            exit_code = dispatch_mod.main(self._base_args(routing_file))
+            assert mock_dispatch.call_count == 2  # original + recovery retry
+            assert exit_code == 0
+            # Verify the retry used the overridden timeout
+            assert captured_configs[1].get("phase_b_executor") == 5400
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+
+    def test_tier2_commit_timeout_uses_correct_key(self, tmp_path, monkeypatch):
+        """Tier 2 PROCESS_TIMEOUT for commit_executor targets the correct config key."""
+        routing_file = self._routing_file(tmp_path)
+        fail_result = {
+            "status": "failed", "decision": "ROUTE_PHASE_B",
+            "executor": "commit_executor",
+            "stderr": "", "step": "commit",
+        }
+        success_result = {
+            "status": "success", "decision": "ROUTE_PHASE_B",
+            "executor": "commit_executor",
+        }
+        recovery_tier2 = {
+            "recovered": True, "exhausted": False,
+            "failure_class": "process_timeout", "tier": 2,
+            "action": "increase_timeout", "detail": "timeout increased",
+        }
+        monkeypatch.setenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", "5400")
+        monkeypatch.setenv("RCX_RECOVERY_TIMEOUT_KEY", "commit_executor")
+        captured_configs = []
+
+        def capture_dispatch(record, *, config=None, **kw):
+            captured_configs.append(
+                dict(config.get("timeouts", {})) if config else {})
+            return fail_result if len(captured_configs) == 1 else success_result
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          side_effect=capture_dispatch), \
+             patch.object(dispatch_mod, "attempt_recovery",
+                          return_value=recovery_tier2), \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            exit_code = dispatch_mod.main(self._base_args(routing_file))
+            assert exit_code == 0
+            # Verify the retry used the overridden timeout on commit_executor, not phase_b
+            assert captured_configs[1].get("commit_executor") == 5400
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+
+    def test_apply_overrides_writes_to_disk(self, tmp_path, monkeypatch):
+        """_apply_recovery_overrides writes overrides to executor_config.json on disk."""
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        original_config = {
+            "timeouts": {
+                "phase_b_executor": 3600,
+                "phase_b_implementer_stale": 300,
+                "commit_executor": 3600,
+            }
+        }
+        cfg_path = cfg_dir / "executor_config.json"
+        cfg_path.write_text(json.dumps(original_config, indent=2) + "\n")
+
+        # Test stale timeout override writes to disk
+        monkeypatch.setenv("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", "450")
+        in_memory = {"timeouts": dict(original_config["timeouts"])}
+        orig = dispatch_mod._apply_recovery_overrides(  # ANTICHEAT_OK
+            in_memory, repo_root=tmp_path)
+        assert orig is not None  # disk was modified
+        assert orig["phase_b_implementer_stale"] == 300  # original value
+        # In-memory config updated
+        assert in_memory["timeouts"]["phase_b_implementer_stale"] == 450
+        # Disk config updated
+        disk = json.loads(cfg_path.read_text())
+        assert disk["timeouts"]["phase_b_implementer_stale"] == 450
+        # Restore
+        dispatch_mod._restore_config_on_disk(tmp_path, orig)  # ANTICHEAT_OK
+        restored = json.loads(cfg_path.read_text())
+        assert restored["timeouts"]["phase_b_implementer_stale"] == 300
+        monkeypatch.delenv("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", raising=False)
+
+    def test_apply_overrides_clears_env_vars(self, tmp_path, monkeypatch):
+        """Env vars are consumed and cleared to prevent leakage (Bridge R4 fix)."""
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "executor_config.json").write_text(json.dumps({
+            "timeouts": {"phase_b_executor": 3600, "phase_b_implementer_stale": 300}
+        }))
+        monkeypatch.setenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", "5400")
+        monkeypatch.setenv("RCX_RECOVERY_TIMEOUT_KEY", "phase_b_executor")
+        monkeypatch.setenv("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", "450")
+        in_memory = {"timeouts": {"phase_b_executor": 3600, "phase_b_implementer_stale": 300}}
+        dispatch_mod._apply_recovery_overrides(in_memory, repo_root=tmp_path)  # ANTICHEAT_OK
+        # Values applied to in-memory config
+        assert in_memory["timeouts"]["phase_b_executor"] == 5400
+        assert in_memory["timeouts"]["phase_b_implementer_stale"] == 450
+        # Env vars cleared after consumption
+        assert os.environ.get("RCX_RECOVERY_TIMEOUT_OVERRIDE") is None
+        assert os.environ.get("RCX_RECOVERY_TIMEOUT_KEY") is None
+        assert os.environ.get("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE") is None
+
+    def test_recovery_restores_in_memory_config(self, tmp_path, monkeypatch):
+        """In-memory config is restored after retry loop, not just disk (Bridge R4 fix)."""
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        original_config = {
+            "timeouts": {
+                "phase_b_executor": 3600,
+                "phase_b_implementer_stale": 300,
+                "commit_executor": 3600,
+            }
+        }
+        cfg_path = cfg_dir / "executor_config.json"
+        cfg_path.write_text(json.dumps(original_config, indent=2) + "\n")
+
+        routing_file = self._routing_file(tmp_path)
+        fail_result = {
+            "status": "timeout", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+        }
+        success_result = {
+            "status": "success", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+        }
+        recovery_tier2 = {
+            "recovered": True, "exhausted": False,
+            "failure_class": "process_timeout", "tier": 2,
+            "action": "increase_timeout", "detail": "timeout increased",
+        }
+        captured_configs_after = []
+
+        def set_env_and_return(*a, **k):
+            monkeypatch.setenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", "5400")
+            return recovery_tier2
+
+        call_count = {"n": 0}
+
+        def counting_dispatch(record, *, config=None, **kw):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return fail_result
+            # On retry, capture the config then succeed
+            captured_configs_after.append(
+                dict(config.get("timeouts", {})) if config else {})
+            return success_result
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          side_effect=counting_dispatch), \
+             patch.object(dispatch_mod, "attempt_recovery",
+                          side_effect=set_env_and_return), \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            # Capture the config object passed to main so we can inspect after
+            original_load = dispatch_mod.load_config
+
+            config_ref = {}
+
+            def capture_config(*a, **kw):
+                c = original_load(*a, **kw)
+                config_ref["config"] = c
+                return c
+
+            with patch.object(dispatch_mod, "load_config",
+                              side_effect=capture_config):
+                dispatch_mod.main(self._base_args(routing_file))
+
+        # Disk must be restored
+        disk = json.loads(cfg_path.read_text())
+        assert disk["timeouts"]["phase_b_executor"] == 3600
+        # In-memory config must also be restored (not still 5400)
+        assert config_ref["config"]["timeouts"]["phase_b_executor"] == 3600
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+
+    def test_timeout_status_routed_to_recovery(self, tmp_path):
+        """Timeout status reaches recovery gate (Finding 1 fix)."""
+        routing_file = self._routing_file(tmp_path)
+        timeout_result = {
+            "status": "timeout", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "message": "timed out after 3600s",
+        }
+        success_result = {
+            "status": "success", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+        }
+        recovery_tier2 = {
+            "recovered": True, "exhausted": False,
+            "failure_class": "process_timeout", "tier": 2,
+            "action": "increase_timeout", "detail": "timeout increased",
+        }
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          side_effect=[timeout_result, success_result]) as mock_d, \
+             patch.object(dispatch_mod, "attempt_recovery",
+                          return_value=recovery_tier2) as mock_rec, \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            exit_code = dispatch_mod.main(self._base_args(routing_file))
+            mock_rec.assert_called_once()
+            assert mock_d.call_count == 2  # original + recovery retry
+            assert exit_code == 0
+
+    def test_sequential_recovery_preserves_original_timeouts(
+        self, tmp_path, monkeypatch,
+    ):
+        """Second recovery does not overwrite the true pre-recovery baseline (Finding 2)."""
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        original_config = {
+            "timeouts": {
+                "phase_b_executor": 3600,
+                "phase_b_implementer_stale": 300,
+                "commit_executor": 3600,
+            }
+        }
+        cfg_path = cfg_dir / "executor_config.json"
+        cfg_path.write_text(json.dumps(original_config, indent=2) + "\n")
+
+        routing_file = self._routing_file(tmp_path)
+        fail_result = {
+            "status": "timeout", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+        }
+        success_result = {
+            "status": "success", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+        }
+        recovery_tier2 = {
+            "recovered": True, "exhausted": False,
+            "failure_class": "process_timeout", "tier": 2,
+            "action": "increase_timeout", "detail": "timeout increased",
+        }
+        call_count = {"n": 0}
+
+        def counting_dispatch(record, *, config=None, **kw):
+            call_count["n"] += 1
+            if call_count["n"] <= 2:
+                return fail_result
+            return success_result
+
+        # First recovery sets timeout override to 5400, second to 8100
+        override_values = iter(["5400", "8100"])
+
+        def set_override_env(*a, **k):
+            monkeypatch.setenv(
+                "RCX_RECOVERY_TIMEOUT_OVERRIDE", next(override_values))
+            return recovery_tier2
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          side_effect=counting_dispatch), \
+             patch.object(dispatch_mod, "attempt_recovery",
+                          side_effect=set_override_env), \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            dispatch_mod.main(self._base_args(routing_file))
+        # After completion, disk config must be restored to the ORIGINAL 3600,
+        # not the intermediate 5400
+        disk = json.loads(cfg_path.read_text())
+        assert disk["timeouts"]["phase_b_executor"] == 3600
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+
+    def test_tier3_still_not_implemented(self, tmp_path):
+        """Tier 3 fails closed — not retried even with --retries (R6 Finding 2)."""
+        routing_file = self._routing_file(tmp_path)
+        fail_result = {
+            "status": "failed", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "stderr": "FAILED test_x - AssertionError",
+            "step": "pre_commit",
+        }
+        recovery_tier3 = {
+            "recovered": False, "exhausted": False,
+            "failure_class": "test_failure", "tier": 3,
+            "action": "not_implemented", "detail": "tier 3 not wired",
+        }
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          return_value=fail_result) as mock_dispatch, \
+             patch.object(dispatch_mod, "attempt_recovery",
+                          return_value=recovery_tier3), \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            # Even with --retries 2, tier 3 must fail closed
+            args = self._base_args(routing_file) + ["--retries", "2"]
+            exit_code = dispatch_mod.main(args)
+            assert exit_code == 1  # not recovered, not retried
+            assert mock_dispatch.call_count == 1, (
+                "tier 3 non-recovery must fail closed, not retry")
+
+    def test_tier4_escalate_fails_closed_under_retries(self, tmp_path):
+        """Tier 4 escalate must fail closed — never retried (R6 Finding 2).
+
+        Bridge R6 Finding 2: tier-4 action=escalate was retried 3 times
+        when --retries 2 was set, violating the recovery gate's fail-closed
+        intent and re-running side-effectful executors.
+        """
+        routing_file = self._routing_file(tmp_path)
+        fail_result = {
+            "status": "failed", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "stderr": "unrecoverable", "step": "bridge_loop",
+        }
+        recovery_tier4 = {
+            "recovered": False, "exhausted": False,
+            "failure_class": "terminal_policy", "tier": 4,
+            "action": "escalate", "detail": "requires escalation",
+        }
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          return_value=fail_result) as mock_dispatch, \
+             patch.object(dispatch_mod, "attempt_recovery",
+                          return_value=recovery_tier4), \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            args = self._base_args(routing_file) + ["--retries", "2"]
+            exit_code = dispatch_mod.main(args)
+            assert exit_code == 1
+            assert mock_dispatch.call_count == 1, (
+                "tier 4 escalate must fail closed — "
+                "was retried when it should have stopped immediately")
+
+    def test_chained_phase_b_timeout_reports_correct_executor(self, tmp_path):
+        """Chained Phase B timeout reports phase_b_executor, not phase_a_executor.
+
+        Bridge R5 finding: TimeoutExpired from chained subprocess.run propagated
+        to the outer handler, misattributing the timeout to the outer executor.
+        """
+        record = {"decision": "ROUTE_PHASE_A", "summary": "test chain timeout"}
+        # Phase A subprocess succeeds with a plan path in stdout
+        phase_a_stdout = json.dumps({"plan_path": str(tmp_path / "plan.md")})
+        (tmp_path / "plan.md").write_text("# plan")
+        phase_a_ok = MagicMock(
+            returncode=0, stdout=phase_a_stdout, stderr="")
+
+        call_count = {"n": 0}
+
+        def mock_run(args, cwd, timeout):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                # Phase A succeeds
+                return phase_a_ok
+            # Phase B times out
+            raise subprocess.TimeoutExpired(cmd=args, timeout=3600)
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=mock_run), \
+             patch.object(dispatch_mod, "ensure_not_agent_review_mode"):
+            result = dispatch_mod.dispatch(
+                record, repo_root=tmp_path, skip_freshness=True)
+
+        assert result["status"] == "timeout"
+        assert result["executor"] == "phase_b_executor"
+        assert result.get("chained_from") == "phase_a_executor"
+        assert "Phase B" in result.get("message", "")
+
+    def test_chained_commit_timeout_reports_commit_executor(self, tmp_path):
+        """Chained commit timeout (from Phase B chain) reports commit_executor.
+
+        Bridge R5 finding: same issue as above but for the Phase B → commit leg.
+        """
+        record = {"decision": "ROUTE_PHASE_B", "summary": "test chain timeout"}
+        # Phase B succeeds
+        phase_b_ok = MagicMock(returncode=0, stdout="{}", stderr="")
+        # Create handoff file so the commit chain is reached
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text("{}")
+
+        call_count = {"n": 0}
+
+        def mock_run(args, cwd, timeout):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return phase_b_ok
+            # Commit times out
+            raise subprocess.TimeoutExpired(cmd=args, timeout=300)
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=mock_run), \
+             patch.object(dispatch_mod, "ensure_not_agent_review_mode"):
+            result = dispatch_mod.dispatch(
+                record, repo_root=tmp_path, skip_freshness=True)
+
+        assert result["status"] == "timeout"
+        assert result["executor"] == "commit_executor"
+        assert result.get("chained_from") == "phase_b_executor"
+        assert "Commit" in result.get("message", "")
