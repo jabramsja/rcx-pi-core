@@ -432,6 +432,7 @@ Items here are implemented and verified under current invariants. Changes requir
 - Tracker sync note (2026-03-31, tasks-compaction-and-archive-2026-03-31): **chore: TASKS.md compaction (611→187 lines) + report/deferred archives.** Class: MAINTENANCE. no_op_proof: Doc/report cleanup only — no runtime files. defer_reason_code: GOVERNANCE_CLEANUP. target_gate_id: G8. evidence_command: `wc -l TASKS.md && ls reports/control_plane/*.md | wc -l`. evidence_delta: (1) TASKS.md 611→187 lines — 201 tracker notes archived to archive/tasks_ra_march_2026.md, all CLOSED items moved to Ra, VECTOR/SINK slimmed. (2) 10 review artifacts archived from reports/ root. (3) 14 completed control_plane packets archived. (4) 3 resolved deferred items archived. (5) Deferred README synced to 14 active items. FOUNDER_OVERRIDE:tasks-compaction-and-archive (founder authorized governance cleanup). primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/tasks-compaction-and-archive-2026-03-31.json. indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id tasks-compaction-and-archive-2026-03-31 --output reports/l4_wave_indicators/tasks-compaction-and-archive-2026-03-31.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
 - Tracker sync note (2026-03-31, pipeline-recovery-phase1-2026-03-31): **Pipeline Recovery Phase 1: classifier + Tier 1 auto-fix + 49 tests.**. Class: L4_ENABLER. target_gate_id: G8. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_recovery_gate.py -q --tb=short`. evidence_delta: recovery_gate.py: FailureClass enum (16 types), classify_failure(), 4 Tier 1 fix functions, recovery log, attempt_recovery(). 49 tests.. progress_proof_before: No automated failure recovery. progress_proof_after: Tier 1 auto-fix for stale locks, git index.lock, stale executor state, mixed staging. FOUNDER_OVERRIDE:FOUNDER_OVERRIDE:pipeline-recovery-phase1. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/pipeline-recovery-phase1-2026-03-31.json. indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id pipeline-recovery-phase1-2026-03-31 --range dev..HEAD --output reports/l4_wave_indicators/pipeline-recovery-phase1-2026-03-31.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
 - Tracker sync note (2026-03-31, recovery-gate-wiring-2026-03-31): **Wire recovery_gate into dispatcher + harden Tier 1 fixes.**. Class: L4_ENABLER. target_gate_id: G8. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py::TestRecoveryGateWiring mu/tests/tools/test_recovery_gate.py -q --tb=short`. evidence_delta: (1) attempt_recovery() wired into executor_dispatch.py retry loop. (2) for-loop refactored to while-loop for recovery budget extension. (3) index.lock demoted Tier 1→2 (no sound ownership check). (4) task_id validation hardened (bidirectional). (5) empty wave_id safe (noop). (6) 6 new dispatch tests + updated recovery tests.. progress_proof_before: recovery_gate.py existed but was never called by the dispatcher. progress_proof_after: Tier 1 auto-fix activates on pipeline failures, Codex bridge + 3 pre-commit reviews converged. FOUNDER_OVERRIDE:recovery-gate-wiring. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/recovery-gate-wiring-2026-03-31.json. indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id recovery-gate-wiring-2026-03-31 --output reports/l4_wave_indicators/recovery-gate-wiring-2026-03-31.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
+- Tracker sync note (2026-03-31, tier-2-auto-retry-tier-3-llm-recovery-loop-2026-03-31): **Tier 2 auto-retry + Tier 3 LLM recovery loop (function only, not wired).** Class: L4_ENABLER. target_gate_id: G8. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_executor_dispatch.py -q --tb=short`. evidence_delta: (1) 4 Tier 2 fix functions (process_timeout, transient_kill, aggregation_hang, implementer_stale) with dispatcher integration. (2) Tier 3 run_recovery_loop function with diagnosis prompt, shell/edit execution, denylist, repo-escape blocking (NOT wired into dispatcher — deferred to [RECOVERY-TIER3-WIRING]). (3) 53 new tests, 364 total pass. (4) 9 bridge rounds + reentry convergence. progress_proof_before: Tier 2/3 returned not_implemented. progress_proof_after: Tier 2 auto-fixes and retries on timeout/kill/hang/stale. Tier 3 loop function exists for next wave wiring. FOUNDER_OVERRIDE:tier2-tier3-recovery. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/tier-2-auto-retry-tier-3-llm-recovery-loop-2026-03-31.json. indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id tier-2-auto-retry-tier-3-llm-recovery-loop-2026-03-31 --output reports/l4_wave_indicators/tier-2-auto-retry-tier-3-llm-recovery-loop-2026-03-31.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
 
 **fix: executor_dispatch auto-refreshes stale routing via post-merge supervisor.** Class: L4_ENABLER. target_gate_id: G8. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py -x --tb=short 2>&1 | tail -5`. evidence_delta: (1) executor_dispatch.py auto-invokes post-merge supervisor when routing record is stale instead of failing. (2) 256 existing tests pass. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/dispatch-auto-refresh-2026-03-30.json. indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id dispatch-auto-refresh-2026-03-30 --output reports/l4_wave_indicators/dispatch-auto-refresh-2026-03-30.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
 > **Archive:** 148 tracker notes (2026-02-07 through 2026-02-28) and pre-March resolved items
@@ -468,50 +469,40 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 - ~~**[PIPELINE-TEST-RUN]**~~ **CLOSED** (2026-03-28, moved to Ra). Full 15-step commit pipeline proven end-to-end (PR #673 + 8 follow-on PRs).
 - ~~**[COMMIT-EXECUTOR-E2E]**~~ **CLOSED** (2026-03-28, moved to Ra). 15-step commit executor proven mechanically via pipeline-test-run evidence.
 
+- **[RECOVERY-TIER3-WIRING]** **NEXT** (2026-03-31, founder-authorized).
+  Wire Tier 3 recovery loop live + fix pipeline gaps exposed by Tier 2+3 wave.
+  **Work items:**
+  (1) Wire `run_recovery_loop()` into `attempt_recovery()` for Tier 3 failures (one line change)
+  (2) Reclassify `needs_phase_b` from Tier 4 terminal to Tier 3 recoverable in recovery_gate.py
+  (3) Fix Tier 2 sequential timeout cap (re-base on original config, not overridden value)
+  (4) Expand Tier 3 denylist to pattern-based (git reset/checkout/restore subcommand forms)
+  (5) Block edits to repo-internal sensitive paths (`.git/config`, `.git/hooks/`)
+  (6) Surface command path (`phase-b`, `phase-a`) should route through dispatcher recovery
+  **Lane:** control-surface (pipeline hardening).
+  **Depends on:** Tier 2+3 code landing (current wave).
+
 - **[PIPELINE-RECOVERY]** **IN PROGRESS** (2026-03-31, founder-authorized).
   Pipeline failure recovery system — tiered auto-fix/retry/diagnose/escalate.
   **Design:** `mu/docs/agents/PipelineRecovery.v0.md`
   **File:** `mu/tools/executors/recovery_gate.py`
   ~~**Phase 1:** Classifier + Tier 1 auto-fix~~ **Landed** (PR #704).
-  **Phase 2 DONE:** Wired into dispatcher retry loop + hardened (PR #705). index.lock demoted Tier 1→2. task_id bidirectional. 311 tests.
-  **Remaining:** (3) Tier 2 auto-retry, (4) Tier 3 LLM recovery loop (diagnose→implement→verify), (5) Integration + learning store.
+  ~~**Phase 2:** Wired into dispatcher retry loop + hardened~~ **Landed** (PR #705).
+  **Phase 3 IN PROGRESS:** Tier 2 auto-retry + Tier 3 recovery loop function (current wave).
+  **Remaining:** (4) Tier 3 wiring + hardening [RECOVERY-TIER3-WIRING], (5) Learning store.
   **Lane:** control-surface (pipeline hardening).
 
-- ~~**[PIPELINE-OBSERVABILITY]**~~ **DONE** (2026-03-31, shipped in session).
-  Pipeline dashboard + tmux monitor rewrite for real-time transparency.
-  **Lane:** control-surface (observability).
-
 - **[DEFERRED-CONSOLIDATION]** **IN PROGRESS** (2026-03-31).
-  Consolidate 6 overlapping deferred files. Split into Wave 1A (9 critical/high) + Wave 1B (18 medium/low). ~~Wave 1A~~ **Landed** (PR #703).
+  Consolidate 6 overlapping deferred files. Wave 1A (9 critical/high) ~~**Landed**~~ (PR #703). Wave 1B (18 medium/low) queued.
   **Plans:** `reports/control_plane/wave1b_pipeline_cleanup_2026-03-31.md`
   **Lane:** control-surface (deferred cleanup).
 
 - **[NEXT-CODEX-POST-REDTEAM]** **UNPARKED** (2026-03-28, founder-authorized).
   Structural follow-on queue: `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
-  **Parking conditions satisfied:** (1) pre-commit supervisor LIVE as standing gate [PRE-COMMIT-SUPERVISOR-STANDING closed to Ra], (2) post-merge supervisor through Phase A/B [META-BRIDGE-S2 closed to Ra], (3) repo-local executors for Phase A/B/commit [EXECUTOR-SURFACES closed to Ra], (4) pipeline proven end-to-end [PIPELINE-TEST-RUN + COMMIT-EXECUTOR-E2E closed to Ra].
-  **Sequence:** Phase A: code/runtime structural gap sweep → Phase B: host/boundary unification → Phase C: structural reduction into Mu → Phase D: interior host-semantics sweep.
-  **Current phase:** Phase A — find and fix real Mu/Stage0/runtime structure gaps, behavioral errors, proof gaps, hidden host-side drift.
+  **Sequence:** Phase A → Phase B → Phase C → Phase D.
+  **Current phase:** Phase A — structural gap sweep.
   **Lane:** structural (post-control-surface).
-  **Tracked packet:** `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
 
-- ~~**[PIPELINE-OBSERVABILITY]**~~ **DONE** (2026-03-31, shipped in session).
-  Pipeline dashboard + tmux monitor rewrite for real-time transparency.
-  **Shipped:** Web dashboard v2 (`tools/observability/pipeline_dashboard_web.py`) — narrative timeline, model activity feeds (Codex JSONL + Claude stream-JSON parsing), bridge round findings. Tmux panes (`_pane_processes.sh`, `_pane_findings.sh`) — human-readable status, live activity, review findings with blocking/non-blocking, no-flicker updates, auto-reload. `/preflight` auto-starts web dashboard + tmux cheat sheet.
-  **Lane:** control-surface (observability).
-
-- **[DEFERRED-CONSOLIDATION]** **IN PROGRESS** (2026-03-31).
-  Consolidate 6 overlapping deferred files → `wave1_pipeline_consolidated_2026-03-31.md` (97→27 unique items). Split into Wave 1A (9 critical/high) + Wave 1B (18 medium/low). ~~Wave 1A~~ **Landed** (PR #703).
-  **Plans:** `reports/control_plane/wave1a_pipeline_validation_2026-03-31.md`, `wave1b_pipeline_cleanup_2026-03-31.md`
-  **Lane:** control-surface (deferred cleanup).
-
-- **[PIPELINE-RECOVERY]** **IN PROGRESS** (2026-03-31, founder-authorized).
-  Pipeline failure recovery system — tiered auto-fix/retry/diagnose/escalate.
-  **Design:** `mu/docs/agents/PipelineRecovery.v0.md`
-  **File:** `mu/tools/executors/recovery_gate.py`
-  ~~**Phase 1:** Classifier + Tier 1 auto-fix~~ **Landed** (PR #704).
-  **Phase 2 DONE:** Wired into dispatcher retry loop + hardened (PR #705). index.lock demoted Tier 1→2. task_id bidirectional. 311 tests.
-  **Remaining:** (3) Tier 2 auto-retry, (4) Tier 3 LLM recovery loop (diagnose→implement→verify), (5) Integration + learning store.
-  **Lane:** control-surface (pipeline hardening).
+- ~~**[PIPELINE-OBSERVABILITY]**~~ **DONE** (2026-03-31). Pipeline dashboard + tmux monitor.
 
 - **[PARALLEL-PIPELINE]** **QUEUED** (2026-03-31, founder-authorized).
   Enable parallel pipelines across git worktrees with agent teams.

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -87,11 +88,10 @@ STOP_TOKENS = {"STOP_FOR_FOUNDER", "STOP_FOR_TRIAGE_DISCUSSION"}
 
 # Dispatch-level statuses that are never retryable.
 # - success/stopped/error/not_implemented/stale: config or structural outcomes.
-# - timeout: subprocess.TimeoutExpired kills the direct child but NOT its
-#   descendants (e.g. reviewer/implementer launched by phase_b_executor).
-#   Retrying without process-tree cleanup would accumulate orphan processes.
+# NOTE: "timeout" was removed — it is now routed through the recovery gate
+# where Tier 2 fix_process_timeout adjusts the timeout and grants a retry.
 _NON_RETRYABLE_DISPATCH_STATUSES = frozenset({
-    "success", "held", "stopped", "error", "not_implemented", "stale", "timeout",
+    "success", "held", "stopped", "error", "not_implemented", "stale",
 })
 
 # Executor-reported statuses that indicate a terminal outcome requiring
@@ -493,6 +493,103 @@ def _retry_commit_only(
 _PHASE_B_STATE_PATH = Path(".agent_bus") / "executors" / "phase_b_state.json"
 
 
+def _apply_recovery_overrides(
+    config: dict[str, Any],
+    repo_root: Path | None = None,
+    verbose: bool = False,
+) -> dict[str, Any] | None:
+    """Apply Tier 2 recovery env var overrides to config for retry.
+
+    fix_process_timeout sets RCX_RECOVERY_TIMEOUT_OVERRIDE (and
+    RCX_RECOVERY_TIMEOUT_KEY to target the correct executor timeout).
+    fix_implementer_stale sets RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE.
+
+    These are applied to the in-memory config dict AND written to
+    executor_config.json on disk (when repo_root is provided) so that
+    subprocesses which reload config from disk (e.g. phase_b_implementer)
+    pick up the adjusted values.
+
+    Returns original disk timeouts dict if disk was modified (caller
+    should pass to _restore_config_on_disk after retry), or None.
+    """
+    disk_config = None
+    original_timeouts = None
+    config_path = None
+    disk_modified = False
+
+    if repo_root is not None:
+        config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+        try:
+            disk_config = json.loads(config_path.read_text(encoding="utf-8"))
+            original_timeouts = dict(disk_config.get("timeouts", {}))
+        except (json.JSONDecodeError, OSError):
+            disk_config = None
+
+    timeout_override = os.environ.get("RCX_RECOVERY_TIMEOUT_OVERRIDE")
+    if timeout_override:
+        try:
+            val = int(timeout_override)
+            timeout_key = os.environ.get(
+                "RCX_RECOVERY_TIMEOUT_KEY", "phase_b_executor")
+            config.setdefault("timeouts", {})[timeout_key] = val
+            if disk_config is not None:
+                disk_config.setdefault("timeouts", {})[timeout_key] = val
+                disk_modified = True
+            if verbose:
+                print(f"[dispatch] Applied timeout override: {timeout_key}={val}s")
+        except ValueError:
+            pass
+        # Clear env vars after consumption to prevent leakage to later
+        # retries or --loop waves (Bridge R4 Finding fix).
+        os.environ.pop("RCX_RECOVERY_TIMEOUT_OVERRIDE", None)
+        os.environ.pop("RCX_RECOVERY_TIMEOUT_KEY", None)
+
+    stale_override = os.environ.get("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE")
+    if stale_override:
+        try:
+            val = int(stale_override)
+            config.setdefault("timeouts", {})["phase_b_implementer_stale"] = val
+            if disk_config is not None:
+                disk_config.setdefault("timeouts", {})["phase_b_implementer_stale"] = val
+                disk_modified = True
+            if verbose:
+                print(f"[dispatch] Applied stale timeout override: "
+                      f"phase_b_implementer_stale={val}s")
+        except ValueError:
+            pass
+        # Clear env var after consumption (Bridge R4 Finding fix).
+        os.environ.pop("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", None)
+
+    if disk_modified and config_path is not None and disk_config is not None:
+        try:
+            config_path.write_text(
+                json.dumps(disk_config, indent=2) + "\n", encoding="utf-8")
+            if verbose:
+                print("[dispatch] Recovery overrides written to executor_config.json")
+        except OSError:
+            pass
+
+    return original_timeouts if disk_modified else None
+
+
+def _restore_config_on_disk(
+    repo_root: Path,
+    original_timeouts: dict[str, Any],
+    verbose: bool = False,
+) -> None:
+    """Restore original timeouts to executor_config.json after recovery retry."""
+    config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    try:
+        disk_config = json.loads(config_path.read_text(encoding="utf-8"))
+        disk_config["timeouts"] = original_timeouts
+        config_path.write_text(
+            json.dumps(disk_config, indent=2) + "\n", encoding="utf-8")
+        if verbose:
+            print("[dispatch] Restored original executor_config.json timeouts")
+    except (json.JSONDecodeError, OSError):
+        pass
+
+
 def _clear_phase_b_state_for_retry(
     repo_root: Path,
     result: dict[str, Any],
@@ -877,14 +974,23 @@ def dispatch(
                 "--plan", plan_path,
                 "--routing-record", phase_b_routing,
             ]
-            phase_b_result = subprocess.run(
-                phase_b_args,
-                cwd=repo,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=phase_b_timeout,
-            )
+            try:
+                phase_b_result = subprocess.run(
+                    phase_b_args,
+                    cwd=repo,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=phase_b_timeout,
+                )
+            except subprocess.TimeoutExpired:
+                return {
+                    "status": "timeout",
+                    "decision": "ROUTE_PHASE_B",
+                    "executor": "phase_b_executor",
+                    "message": f"Phase B executor timed out after {phase_b_timeout}s",
+                    "chained_from": "phase_a_executor",
+                }
             if phase_b_result.returncode != 0:
                 return {
                     "status": "failed",
@@ -917,14 +1023,23 @@ def dispatch(
                 str(SCRIPT_DIR / "commit_executor.py"),
                 "--handoff", str(handoff_path),
             ]
-            commit_result = subprocess.run(
-                commit_args,
-                cwd=repo,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=commit_timeout,
-            )
+            try:
+                commit_result = subprocess.run(
+                    commit_args,
+                    cwd=repo,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=commit_timeout,
+                )
+            except subprocess.TimeoutExpired:
+                return {
+                    "status": "timeout",
+                    "decision": "COMMIT_GO",
+                    "executor": "commit_executor",
+                    "message": f"Commit executor timed out after {commit_timeout}s",
+                    "chained_from": "phase_a_executor → phase_b_executor",
+                }
             c_status, c_decision = _classify_commit_executor_result(commit_result)
             return {
                 "status": c_status,
@@ -957,14 +1072,23 @@ def dispatch(
                 str(SCRIPT_DIR / "commit_executor.py"),
                 "--handoff", str(handoff_path),
             ]
-            commit_result = subprocess.run(
-                commit_args,
-                cwd=repo,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=commit_timeout,
-            )
+            try:
+                commit_result = subprocess.run(
+                    commit_args,
+                    cwd=repo,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=commit_timeout,
+                )
+            except subprocess.TimeoutExpired:
+                return {
+                    "status": "timeout",
+                    "decision": "COMMIT_GO",
+                    "executor": "commit_executor",
+                    "message": f"Commit executor timed out after {commit_timeout}s",
+                    "chained_from": "phase_b_executor",
+                }
             c_status, c_decision = _classify_commit_executor_result(commit_result)
             return {
                 "status": c_status,
@@ -1111,6 +1235,7 @@ def main(argv: list[str] | None = None) -> int:
         max_attempts = 1 + max(0, args.retries)
         result = None
         attempt = 1
+        _recovery_original_timeouts = None
         while attempt <= max_attempts:
             # If previous attempt was a chained commit failure (Phase A/B
             # succeeded but commit failed), retry only the commit executor
@@ -1137,16 +1262,30 @@ def main(argv: list[str] | None = None) -> int:
                 if args.verbose:
                     print("[dispatch] Executor returned terminal outcome — not retrying")
                 break
-            # Recovery gate: classify failure and attempt Tier 1 auto-fix
-            if result.get("status") == "failed":
+            # Recovery gate: classify failure and attempt Tier 1/2 auto-fix
+            # "timeout" is included so PROCESS_TIMEOUT reaches Tier 2 recovery
+            if result.get("status") in ("failed", "timeout"):
                 _wave_id = normalize_wave_id(
                     record.get("wave_name") or record.get("wave_id", ""))
                 recovery = attempt_recovery(repo_root, result, _wave_id)
                 result["recovery"] = recovery
                 if args.verbose:
+                    tier = recovery.get('tier')
+                    action = recovery.get('action', '')
                     print(f"[dispatch] Recovery: class={recovery.get('failure_class')} "
-                          f"tier={recovery.get('tier')} recovered={recovery.get('recovered')}")
+                          f"tier={tier} recovered={recovery.get('recovered')}")
+                    if recovery.get("recovered") and tier == 2:
+                        print(f"[dispatch] Tier 2 recovery: {action} "
+                              f"— retrying with adjusted parameters")
                 if recovery.get("recovered"):
+                    # Apply Tier 2 env var overrides to config + disk before retry.
+                    # Only capture original_timeouts on the FIRST recovery to
+                    # prevent sequential recoveries from overwriting the true
+                    # pre-recovery baseline (Finding 2 fix).
+                    new_orig = _apply_recovery_overrides(
+                        config, repo_root=repo_root, verbose=args.verbose)
+                    if _recovery_original_timeouts is None:
+                        _recovery_original_timeouts = new_orig
                     # Recovery succeeded — grant one extra attempt (don't increment counter)
                     _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose)
                     if not args.routing_record and not _is_chained_commit_failure(result):
@@ -1159,6 +1298,15 @@ def main(argv: list[str] | None = None) -> int:
                     if args.verbose:
                         print("[dispatch] Recovery exhausted — not retrying")
                     break
+                else:
+                    # Tier 3/4 non-recovery: fail closed instead of falling
+                    # through to the normal retry loop (Bridge R6 Finding 2).
+                    _rec_tier = recovery.get("tier", 0)
+                    if _rec_tier >= 3:
+                        if args.verbose:
+                            print(f"[dispatch] Tier {_rec_tier} recovery not "
+                                  f"available — failing closed")
+                        break
             if attempt >= max_attempts:
                 break
             if args.verbose:
@@ -1178,6 +1326,15 @@ def main(argv: list[str] | None = None) -> int:
                 if refreshed and refresh_record is not None:
                     record = refresh_record
             attempt += 1
+
+        # Restore disk AND in-memory config if recovery overrides were written.
+        # Both must be restored to prevent leakage to --loop waves
+        # (Bridge R4 Finding fix).
+        if _recovery_original_timeouts is not None:
+            _restore_config_on_disk(
+                repo_root, _recovery_original_timeouts,
+                verbose=args.verbose)
+            config["timeouts"] = dict(_recovery_original_timeouts)
 
         if args.json:
             print(json.dumps(result, indent=2))
