@@ -710,6 +710,66 @@ class TestRecoveryLoop:
         assert r["recovered"] is True
         assert r["iterations"] == 1
 
+    def test_extracts_prose_wrapped_json(self, tmp_path):
+        """Prose-wrapped fenced JSON should still drive recovery."""
+        result = {"status": "failed", "step": "pre_commit",
+                  "stderr": "test_x failed", "stdout": ""}
+        claude_response = """Root cause identified.
+
+```json
+{"action": "shell", "commands": ["echo fixed"], "explanation": "applying fix"}
+```
+"""
+        verify_ok = MagicMock(returncode=0, stdout="", stderr="")
+
+        def mock_run(cmd, **kw):
+            if isinstance(cmd, list) and "claude" in cmd:
+                return MagicMock(stdout=claude_response, stderr="", returncode=0)
+            if isinstance(cmd, list):
+                return verify_ok
+            return MagicMock(stdout="ok", stderr="", returncode=0)
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = mock_run
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, result, "w1", verify_command=["echo", "verify"])
+        assert r["recovered"] is True
+        assert r["iterations"] == 1
+
+    def test_parse_error_reprompts_with_invalid_response_context(self, tmp_path):
+        """Malformed prose should be fed back into the next iteration prompt."""
+        result = {"status": "failed", "step": "phase_a",
+                  "stderr": "agent review failed", "stdout": ""}
+        prompts: list[str] = []
+        responses = [
+            "The root cause is an external env var in the parent invocation.",
+            json.dumps({
+                "action": "skip",
+                "commands": [],
+                "explanation": "caller-supplied env var cannot be changed safely here",
+            }),
+        ]
+
+        def mock_run(cmd, **kw):
+            if isinstance(cmd, list) and "claude" in cmd:
+                prompts.append(cmd[3])
+                return MagicMock(
+                    stdout=responses[len(prompts) - 1], stderr="", returncode=0)
+            return MagicMock(stdout="", stderr="", returncode=0)
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = mock_run
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(tmp_path, result, "w-reprompt", max_iterations=2)
+
+        assert r["recovered"] is False
+        assert r["exhausted"] is False
+        assert r["iterations"] == 2
+        assert "Previous response was invalid" not in prompts[0]
+        assert "Previous response was invalid" in prompts[1]
+        assert "external env var in the parent invocation" in prompts[1]
+
     def test_max_iterations(self, tmp_path):
         """Verify loop stops after max_iterations."""
         result = {"status": "failed", "step": "test", "stderr": "fail", "stdout": ""}

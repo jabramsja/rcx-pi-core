@@ -105,3 +105,22 @@ Manual `commit_executor.py` invocations bypass the existing Phase B pytest gate.
 **Depends on:** PR #706 (Tier 2 auto-retry + Tier 3 recovery loop function) — landed
 **Design spec:** `mu/docs/agents/PipelineRecovery.v0.md`
 **Lane:** control-surface (pipeline hardening)
+
+---
+
+## 7. 2026-04-01 Follow-Up: Tier 3 Response Hardening
+
+Follow-up after commit `9c7e7c1c`:
+
+- `mu/tools/executors/recovery_gate.py` now salvages prose-wrapped JSON responses from `claude --print` instead of requiring the whole response body to be raw JSON.
+- The Tier 3 prompt now feeds the prior malformed response back into the next iteration and explicitly tells the recovery agent to use `skip` or `escalate` when the root cause is caller-supplied env/CLI state outside repo control.
+- `mu/tests/tools/test_recovery_gate.py` now locks both regressions:
+  - prose-wrapped fenced JSON still drives recovery
+  - malformed prose is reflected into the next iteration prompt so the model can re-emit structured JSON instead of burning the remaining loop on the same mistake
+
+Behavioral proof:
+
+- Forced routed Phase A failure via `RCX_AGENT_PREFLIGHT_FORCE_FAIL=1 python3 mu/tools/executors/executor_dispatch.py phase-a --plan-name recovery_tier3_recovery_probe_2026-04-01 --max-rounds 2 --json -v`
+- Dispatcher automatically classified the Phase A SDK failure as `agent_review_crash` and entered Tier 3 recovery
+- The patched Tier 3 loop returned a structured one-iteration `skip` for wave `recovery-tier3-recovery-probe-2026-04-01` instead of the earlier timeout + repeated prose parse-error pattern
+- Recovery log evidence: `.agent_bus/recovery/recovery_log.json` entry `tier3_iter1_skip` explaining that `RCX_AGENT_PREFLIGHT_FORCE_FAIL=1` is caller-supplied parent-process state the loop cannot safely clear

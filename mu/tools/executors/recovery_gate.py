@@ -564,7 +564,7 @@ def _is_sensitive_repo_path(relative_path: str) -> bool:
 
 def _build_diagnosis_prompt(
     result: dict[str, Any], wave_id: str, iteration: int,
-    repo_root: Path,
+    repo_root: Path, prior_invalid_response: str = "",
 ) -> str:
     """Build a ~2K token diagnosis prompt for claude --print."""
     fc = result.get("failure_class", result.get("recovery", {}).get("failure_class", "unknown"))
@@ -584,6 +584,18 @@ def _build_diagnosis_prompt(
     except (subprocess.TimeoutExpired, OSError):
         git_status = "(unavailable)"
 
+    invalid_response_block = ""
+    if prior_invalid_response.strip():
+        invalid_response_block = f"""
+
+Previous response was invalid because it was not parseable JSON. Reissue the
+diagnosis as a SINGLE JSON object matching the schema below and do not add any
+prose outside the JSON.
+
+Previous invalid response (truncated):
+{prior_invalid_response[:600]}
+"""
+
     return f"""You are a pipeline recovery agent. A pipeline step has failed and you must diagnose and fix it.
 
 Failure class: {fc}
@@ -600,6 +612,7 @@ STDOUT (last 50 lines):
 
 Git status:
 {git_status}
+{invalid_response_block}
 
 Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
 {{"action": "shell"|"edit"|"skip"|"escalate", "commands": ["cmd1", "cmd2"], "explanation": "why"}}
@@ -609,7 +622,72 @@ Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
 - "skip": cannot fix, return failure
 - "escalate": need human intervention
 
+If the cause is a caller-supplied env var, CLI flag, or parent-process state
+that this recovery loop cannot safely change, use "skip" with explanation.
+If human intervention is required, use "escalate" with explanation.
+
 Safety: no rm -rf, no git push, no git reset --hard. Max 30s per command."""
+
+
+def _extract_first_json_object(text: str) -> str | None:
+    """Return the first balanced JSON object embedded in text."""
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        in_string = False
+        escaped = False
+        for idx in range(start, len(text)):
+            ch = text[idx]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+                continue
+            if ch == "{":
+                depth += 1
+                continue
+            if ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:idx + 1]
+                if depth < 0:
+                    break
+        start = text.find("{", start + 1)
+    return None
+
+
+def _parse_recovery_response(raw_response: str) -> dict[str, Any]:
+    """Parse a recovery-agent response, tolerating prose-wrapped JSON."""
+    cleaned = raw_response.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        lines = [line for line in lines if not line.startswith("```")]
+        cleaned = "\n".join(lines).strip()
+    if not cleaned:
+        raise ValueError("empty response")
+
+    candidates: list[str] = [cleaned]
+    embedded = _extract_first_json_object(cleaned)
+    if embedded and embedded != cleaned:
+        candidates.append(embedded)
+
+    last_error = "response was not valid JSON"
+    for candidate in candidates:
+        try:
+            response = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError) as exc:
+            last_error = str(exc)
+            continue
+        if isinstance(response, dict):
+            return response
+        last_error = "response must decode to a JSON object"
+    raise ValueError(last_error)
 
 
 def _apply_edit(edit: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
@@ -670,10 +748,12 @@ def run_recovery_loop(
     loop_log: list[dict[str, Any]] = []
     fc = result.get("failure_class", result.get("recovery", {}).get("failure_class", "unknown"))
     step = result.get("step") or result.get("executor", "unknown")
+    prior_invalid_response = ""
 
     for i in range(max_iterations):
         iteration_t0 = time.monotonic()
-        prompt = _build_diagnosis_prompt(result, wave_id, i, repo_root)
+        prompt = _build_diagnosis_prompt(
+            result, wave_id, i, repo_root, prior_invalid_response=prior_invalid_response)
         action_succeeded = False
 
         # Call claude --print for diagnosis
@@ -704,22 +784,18 @@ def run_recovery_loop(
 
         # Parse JSON response
         try:
-            # Strip markdown fences if present
-            cleaned = raw_response
-            if cleaned.startswith("```"):
-                lines = cleaned.splitlines()
-                lines = [l for l in lines if not l.startswith("```")]
-                cleaned = "\n".join(lines)
-            response = json.loads(cleaned)
-        except (json.JSONDecodeError, ValueError):
+            response = _parse_recovery_response(raw_response)
+            prior_invalid_response = ""
+        except ValueError as exc:
+            prior_invalid_response = raw_response[:1000]
             dur = round(time.monotonic() - iteration_t0, 3)
             loop_log.append({
                 "iteration": i + 1, "action": "parse_error",
-                "detail": f"could not parse response: {raw_response[:200]}",
+                "detail": f"could not parse response ({exc}): {raw_response[:200]}",
                 "duration_s": dur})
             _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
                                "parse_error", "failed", dur,
-                               f"could not parse response: {raw_response[:200]}")
+                               f"could not parse response ({exc}): {raw_response[:200]}")
             continue
 
         action = response.get("action", "skip")

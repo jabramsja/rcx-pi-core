@@ -2,6 +2,22 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-04-01
+
+### Tier 3 Recovery Response Hardening
+
+- `recovery_gate.py` now salvages prose-wrapped fenced JSON from the Tier 3
+  `claude --print` recovery loop instead of requiring the entire response body
+  to be raw JSON
+- `recovery_gate.py` now feeds a malformed recovery response back into the next
+  iteration prompt and explicitly tells the recovery agent to return `skip` or
+  `escalate` when the root cause is caller-supplied env/CLI state outside repo
+  control
+- `mu/tests/tools/test_recovery_gate.py` now locks both regressions directly:
+  prose-wrapped JSON still drives recovery, and malformed prose is reflected
+  into the next iteration prompt so the model can re-emit structured JSON
+  instead of wasting the remaining loop on repeat parse errors
+
 ## 2026-03-27
 
 ### Pipeline Test Run Review-Cycle Floor, Cleanup Wait, And Post-Commit Follow-Ups
