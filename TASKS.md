@@ -482,6 +482,9 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   (8) **P2 bot PR#706:** Timeout bump cap must re-base on original pre-recovery baseline, not already-overridden config value
   (9) Commit executor should run pytest on affected test files before committing (gap: Phase B has pytest gate but manual commit_executor invocations bypass it)
   **Lane:** control-surface (pipeline hardening).
+  **Tracked packet:** `mu/docs/agents/PipelineRecovery.v0.md`
+  **Depends on:** Tier 2+3 code landing (PR #706).
+  **Lane:** control-surface (pipeline hardening).
   **Depends on:** Tier 2+3 code landing (PR #706).
 
 - **[PIPELINE-RECOVERY]** **IN PROGRESS** (2026-03-31, founder-authorized).
