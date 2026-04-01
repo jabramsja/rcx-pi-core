@@ -478,8 +478,10 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   (4) Expand Tier 3 denylist to pattern-based (git reset/checkout/restore subcommand forms)
   (5) Block edits to repo-internal sensitive paths (`.git/config`, `.git/hooks/`)
   (6) Surface command path (`phase-b`, `phase-a`) should route through dispatcher recovery
+  (7) **P1 bot PR#706:** Timeout retry must perform process-tree cleanup before retrying (grandchildren survive subprocess.run timeout kill)
+  (8) **P2 bot PR#706:** Timeout bump cap must re-base on original pre-recovery baseline, not already-overridden config value
   **Lane:** control-surface (pipeline hardening).
-  **Depends on:** Tier 2+3 code landing (current wave).
+  **Depends on:** Tier 2+3 code landing (PR #706).
 
 - **[PIPELINE-RECOVERY]** **IN PROGRESS** (2026-03-31, founder-authorized).
   Pipeline failure recovery system — tiered auto-fix/retry/diagnose/escalate.
