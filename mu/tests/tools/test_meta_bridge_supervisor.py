@@ -211,6 +211,10 @@ class TestTemplateValidationFailureRouting:
         assert "Bounded Review Contract" in prompt
         assert "Use no more than 8 shell commands" in prompt
         assert "emit exactly one final `BEGIN_META_ENVELOPE ... END_META_ENVELOPE` block on stdout and stop" in prompt
+        assert "Reading `FOUNDER_SESSION_BOOTSTRAP.md` remains REQUIRED" in prompt
+        assert "Do NOT invoke `founder_session_guard.sh`" in prompt
+        assert "`bridge_status` and `blocker_report_paths` may legitimately be empty" in prompt
+        assert "Do not use `set -e`/`pipefail` shell blocks" in prompt
 
 
 class TestDryRunBehavior:

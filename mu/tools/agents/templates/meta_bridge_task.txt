@@ -32,8 +32,13 @@ $control_surface_obligations
 ## Bounded Review Contract
 
 - Treat the package JSON and validation gate results as primary evidence. Re-run a passed gate only when you find a concrete contradiction.
+- Reading `FOUNDER_SESSION_BOOTSTRAP.md` remains REQUIRED for this review.
+- Startup validation already ran before this review. Do NOT invoke `founder_session_guard.sh`, `founder_session_attest.sh`, repo bootstrap wrappers, or skill startup workflows from inside this review.
+- Read only the required bootstrap file, `TASKS.md`, the named control-plane packet, the staged diff, and direct one-hop call sites needed to resolve a concrete doubt.
 - Start with `changed_files`; inspect extra `scope_items` only as needed to resolve a specific doubt.
+- `bridge_status` and `blocker_report_paths` may legitimately be empty. Treat empty corroboration as a LOW note or no finding unless it contradicts the staged package or a failed validation gate.
 - Keep the investigation bounded: prefer targeted `rg`, `git diff --cached -- <file>`, and short `sed` reads. Avoid broad repo sweeps or full-file dumps.
+- Do not use `set -e`/`pipefail` shell blocks that can abort on a clean zero-match probe. A non-match from `rg` is informative, not an execution failure.
 - Use no more than 8 shell commands unless a specific contradiction requires one extra focused command to resolve it.
 - As soon as you have enough evidence for a decision, emit exactly one final `BEGIN_META_ENVELOPE ... END_META_ENVELOPE` block on stdout and stop.
 - Do not repeat the template envelope or continue exploring after you can decide.
