@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -433,6 +434,39 @@ def _classify_commit_executor_result(
     return "success", "COMMIT_GO"
 
 
+def _run_executor_in_group(
+    args: list[str],
+    cwd: Path,
+    timeout: int | float,
+) -> subprocess.CompletedProcess[str]:
+    """Run an executor subprocess in its own process group.
+
+    On timeout, kills the entire process group (including grandchildren)
+    before raising TimeoutExpired.  This prevents orphaned worker
+    subprocesses from persisting across retry attempts.
+    """
+    proc = subprocess.Popen(
+        args,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # Kill entire process group to clean up grandchildren
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except OSError:
+            pass
+        proc.kill()
+        proc.wait()
+        raise
+    return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+
+
 def _retry_commit_only(
     repo: Path,
     config: dict[str, Any],
@@ -462,13 +496,8 @@ def _retry_commit_only(
         "--handoff", str(handoff_path),
     ]
     try:
-        commit_result = subprocess.run(
-            commit_args,
-            cwd=repo,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=commit_timeout,
+        commit_result = _run_executor_in_group(
+            commit_args, cwd=repo, timeout=commit_timeout,
         )
         c_status, c_decision = _classify_commit_executor_result(commit_result)
         return {
@@ -917,13 +946,8 @@ def dispatch(
         else:
             executor_args.extend(["--routing-record", json.dumps(record)])
 
-        result = subprocess.run(
-            executor_args,
-            cwd=repo,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
+        result = _run_executor_in_group(
+            executor_args, cwd=repo, timeout=timeout,
         )
         if result.returncode != 0:
             return {
@@ -975,13 +999,8 @@ def dispatch(
                 "--routing-record", phase_b_routing,
             ]
             try:
-                phase_b_result = subprocess.run(
-                    phase_b_args,
-                    cwd=repo,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=phase_b_timeout,
+                phase_b_result = _run_executor_in_group(
+                    phase_b_args, cwd=repo, timeout=phase_b_timeout,
                 )
             except subprocess.TimeoutExpired:
                 return {
@@ -1024,13 +1043,8 @@ def dispatch(
                 "--handoff", str(handoff_path),
             ]
             try:
-                commit_result = subprocess.run(
-                    commit_args,
-                    cwd=repo,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=commit_timeout,
+                commit_result = _run_executor_in_group(
+                    commit_args, cwd=repo, timeout=commit_timeout,
                 )
             except subprocess.TimeoutExpired:
                 return {
@@ -1073,13 +1087,8 @@ def dispatch(
                 "--handoff", str(handoff_path),
             ]
             try:
-                commit_result = subprocess.run(
-                    commit_args,
-                    cwd=repo,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=commit_timeout,
+                commit_result = _run_executor_in_group(
+                    commit_args, cwd=repo, timeout=commit_timeout,
                 )
             except subprocess.TimeoutExpired:
                 return {
@@ -1335,6 +1344,11 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root, _recovery_original_timeouts,
                 verbose=args.verbose)
             config["timeouts"] = dict(_recovery_original_timeouts)
+        # Clean up original-baseline env vars set by fix_process_timeout /
+        # fix_implementer_stale to prevent leakage to --loop waves.
+        for _env_key in list(os.environ):
+            if _env_key.startswith("RCX_RECOVERY_ORIGINAL_TIMEOUT_"):
+                os.environ.pop(_env_key, None)
 
         if args.json:
             print(json.dumps(result, indent=2))

@@ -405,6 +405,7 @@ class TestFixProcessTimeout:
         }))
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_b_executor", raising=False)
         r = rg_mod.fix_process_timeout(tmp_path)
         new_val = int(os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"])
         assert new_val == 5400  # 1.5 * 3600
@@ -422,6 +423,7 @@ class TestFixProcessTimeout:
         }))
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_TIMEOUT_commit_executor", raising=False)
         r = rg_mod.fix_process_timeout(
             tmp_path, result={"executor": "commit_executor", "status": "timeout"})
         assert r["fixed"] is True

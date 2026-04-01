@@ -289,6 +289,12 @@ def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     Step-aware: reads the executor name from kw['result'] to target the
     correct timeout key (e.g. commit_executor, phase_a_executor).
     Falls back to 'phase_b_executor' if not available.
+
+    The 2x cap is against the *original* baseline (before any recovery
+    bumps), not the current config value.  The dispatcher writes each
+    override back to executor_config.json between attempts, so reading
+    ``current`` from disk on the second recovery would already reflect
+    the first bump — compounding past the intended cap.
     """
     timeouts = _load_config_timeouts(repo_root)
     # Determine which executor timed out from the result
@@ -296,12 +302,23 @@ def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     executor = result.get("executor", "phase_b_executor")
     timeout_key = executor if executor in timeouts else "phase_b_executor"
     current = timeouts.get(timeout_key, 3600)
-    new_timeout = min(int(current * 1.5), current * 2)
+    # Track original baseline across sequential recoveries.  On the first
+    # call the env var is absent so we seed it from the (still-original)
+    # config value.  Subsequent calls read the stored original.
+    baseline_env_key = f"RCX_RECOVERY_ORIGINAL_TIMEOUT_{timeout_key}"
+    stored_baseline = os.environ.get(baseline_env_key)
+    if stored_baseline is not None:
+        baseline = int(stored_baseline)
+    else:
+        baseline = current
+        os.environ[baseline_env_key] = str(baseline)
+    new_timeout = min(int(current * 1.5), baseline * 2)
     os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] = str(new_timeout)
     os.environ["RCX_RECOVERY_TIMEOUT_KEY"] = timeout_key
     return _fix_result(True, "increase_timeout",
                        f"timeout for {timeout_key} increased from {current}s "
-                       f"to {new_timeout}s via RCX_RECOVERY_TIMEOUT_OVERRIDE")
+                       f"to {new_timeout}s (capped at 2x original {baseline}s) "
+                       f"via RCX_RECOVERY_TIMEOUT_OVERRIDE")
 
 
 def fix_transient_kill(repo_root: Path, **kw: Any) -> dict[str, Any]:
@@ -364,13 +381,24 @@ def fix_aggregation_hang(repo_root: Path, **kw: Any) -> dict[str, Any]:
 
 
 def fix_implementer_stale(repo_root: Path, **kw: Any) -> dict[str, Any]:
-    """Increase stale timeout by 50% (capped at 2x) via env var override."""
+    """Increase stale timeout by 50% (capped at 2x original) via env var override."""
     timeouts = _load_config_timeouts(repo_root)
-    current = timeouts.get("phase_b_implementer_stale", 300)
-    new_timeout = min(int(current * 1.5), current * 2)
+    timeout_key = "phase_b_implementer_stale"
+    current = timeouts.get(timeout_key, 300)
+    # Same original-baseline tracking as fix_process_timeout — prevent
+    # compounding when the dispatcher writes bumped values to disk.
+    baseline_env_key = f"RCX_RECOVERY_ORIGINAL_TIMEOUT_{timeout_key}"
+    stored_baseline = os.environ.get(baseline_env_key)
+    if stored_baseline is not None:
+        baseline = int(stored_baseline)
+    else:
+        baseline = current
+        os.environ[baseline_env_key] = str(baseline)
+    new_timeout = min(int(current * 1.5), baseline * 2)
     os.environ["RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE"] = str(new_timeout)
     return _fix_result(True, "increase_stale_timeout",
                        f"stale timeout increased from {current}s to {new_timeout}s "
+                       f"(capped at 2x original {baseline}s) "
                        f"via RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE")
 
 

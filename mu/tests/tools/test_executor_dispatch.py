@@ -1636,14 +1636,14 @@ class TestDispatcherPlanNameSanitization:
         captured: dict[str, list[str]] = {}
 
         calls = []
-        def fake_run(args, **kwargs):
+        def fake_run(args, cwd, timeout):
             calls.append(args)
             if len(calls) == 1:
                 return subprocess.CompletedProcess(args, 0, stdout="[phase-a] Status: converged\n[phase-a] Plan: test_plan.md\n", stderr="")
             return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
 
         monkeypatch.setattr(dispatch_mod, "validate_routing_record_freshness", lambda *a, **k: (True, "fresh"))
-        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
 
         dispatch_mod.dispatch(record, repo_root=tmp_path, skip_freshness=True)
 
@@ -5026,7 +5026,7 @@ class TestDispatcherCommitMechanicalBridge:
             "wave_name": "test",
             "task_id": "[TEST-1]",
         }
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5041,7 +5041,7 @@ class TestDispatcherCommitMechanicalBridge:
     def test_update_tracker_without_handoff_passes_routing_record(self, tmp_path):
         """When no handoff file exists, dispatcher passes --routing-record."""
         record = {"decision": "UPDATE_TRACKER_ONLY", "summary": "update tracker"}
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5056,7 +5056,7 @@ class TestDispatcherCommitMechanicalBridge:
         """Dispatcher must not return needs_handoff for mechanically preparable routes."""
         # Use UPDATE_TRACKER_ONLY since COMMIT_GO now requires a handoff file
         record = {"decision": "UPDATE_TRACKER_ONLY", "summary": "test"}
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5146,7 +5146,7 @@ class TestDispatcherPlanlessPhaseB:
             "wave_name": "w",
             "next_candidates": [{"candidate": "do it"}],
         }
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5164,7 +5164,7 @@ class TestDispatcherPlanlessPhaseB:
             "summary": "test",
             "next_candidates": [{"candidate": "do", "tracked_packet": "reports/plan.md"}],
         }
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5211,7 +5211,7 @@ class TestTrackedPacketPathTraversal:
             "summary": "test",
             "next_candidates": [{"candidate": "do", "tracked_packet": "reports/plan.md"}],
         }
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5270,7 +5270,7 @@ class TestDispatcherStaleHandoffOverride:
             "summary": "just tracker",
             "wave_name": "tracker-only-wave",
         }
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5298,7 +5298,7 @@ class TestDispatcherStaleHandoffOverride:
             "wave_name": "ready-to-commit",
             "task_id": "[EXECUTOR-SURFACES]",
         }
-        with patch("subprocess.run") as mock_run:
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
             )
@@ -5882,15 +5882,15 @@ class TestRecoveryGateWiring:
 
         call_count = {"n": 0}
 
-        def mock_run(cmd, **kw):
+        def mock_run(args, cwd, timeout):
             call_count["n"] += 1
             if call_count["n"] == 1:
                 # Phase A succeeds
                 return phase_a_ok
             # Phase B times out
-            raise subprocess.TimeoutExpired(cmd=cmd, timeout=3600)
+            raise subprocess.TimeoutExpired(cmd=args, timeout=3600)
 
-        with patch.object(dispatch_mod.subprocess, "run", side_effect=mock_run), \
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=mock_run), \
              patch.object(dispatch_mod, "ensure_not_agent_review_mode"):
             result = dispatch_mod.dispatch(
                 record, repo_root=tmp_path, skip_freshness=True)
@@ -5915,14 +5915,14 @@ class TestRecoveryGateWiring:
 
         call_count = {"n": 0}
 
-        def mock_run(cmd, **kw):
+        def mock_run(args, cwd, timeout):
             call_count["n"] += 1
             if call_count["n"] == 1:
                 return phase_b_ok
             # Commit times out
-            raise subprocess.TimeoutExpired(cmd=cmd, timeout=300)
+            raise subprocess.TimeoutExpired(cmd=args, timeout=300)
 
-        with patch.object(dispatch_mod.subprocess, "run", side_effect=mock_run), \
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=mock_run), \
              patch.object(dispatch_mod, "ensure_not_agent_review_mode"):
             result = dispatch_mod.dispatch(
                 record, repo_root=tmp_path, skip_freshness=True)
