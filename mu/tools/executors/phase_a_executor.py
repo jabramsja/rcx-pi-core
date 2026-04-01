@@ -986,7 +986,18 @@ def run_phase_a(
                 # Classify findings as blocking vs non-blocking.
                 # If only non-blockers remain, converge — design advisory
                 # findings don't need to block plan convergence.
-                parsed_findings = _parse_phase_a_findings(render_content)
+                # Read raw reviewer output for finding parsing — the JSON
+                # envelope (BEGIN_AGENT_ENVELOPE) is in the raw output,
+                # not in the rendered markdown.
+                raw_dir = repo_root / ".agent_bus" / "raw" / bridge_job_id
+                raw_content = ""
+                if raw_dir.is_dir():
+                    for raw_file in sorted(raw_dir.iterdir()):
+                        if "reviewer" in raw_file.name:
+                            raw_content = raw_file.read_text(encoding="utf-8")
+                            break
+                parsed_findings = _parse_phase_a_findings(
+                    raw_content if raw_content else render_content)
                 blocking = [f for f in parsed_findings if f.get("disposition") == "blocking"
                             or (f.get("disposition") not in ("blocking", "non_blocking")
                                 and f.get("severity") in ("critical", "high"))]
