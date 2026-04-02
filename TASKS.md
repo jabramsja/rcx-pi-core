@@ -470,23 +470,7 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 - ~~**[PIPELINE-TEST-RUN]**~~ **CLOSED** (2026-03-28, moved to Ra). Full 15-step commit pipeline proven end-to-end (PR #673 + 8 follow-on PRs).
 - ~~**[COMMIT-EXECUTOR-E2E]**~~ **CLOSED** (2026-03-28, moved to Ra). 15-step commit executor proven mechanically via pipeline-test-run evidence.
 
-- **[RECOVERY-TIER3-WIRING]** **NEXT** (2026-03-31, founder-authorized).
-  Wire Tier 3 recovery loop live + fix pipeline gaps exposed by Tier 2+3 wave.
-  **Work items:**
-  (1) Wire `run_recovery_loop()` into `attempt_recovery()` for Tier 3 failures (one line change)
-  (2) Reclassify `needs_phase_b` from Tier 4 terminal to Tier 3 recoverable in recovery_gate.py
-  (3) Fix Tier 2 sequential timeout cap (re-base on original config, not overridden value)
-  (4) Expand Tier 3 denylist to pattern-based (git reset/checkout/restore subcommand forms)
-  (5) Block edits to repo-internal sensitive paths (`.git/config`, `.git/hooks/`)
-  (6) Surface command path (`phase-b`, `phase-a`) should route through dispatcher recovery
-  (7) **P1 bot PR#706:** Timeout retry must perform process-tree cleanup before retrying (grandchildren survive subprocess.run timeout kill)
-  (8) **P2 bot PR#706:** Timeout bump cap must re-base on original pre-recovery baseline, not already-overridden config value
-  (9) Commit executor should run pytest on affected test files before committing (gap: Phase B has pytest gate but manual commit_executor invocations bypass it)
-  **Lane:** control-surface (pipeline hardening).
-  **Tracked packet:** `reports/control_plane/recovery_tier3_wiring_2026-04-01.md`
-  **Depends on:** ~~Tier 2+3 code~~ **Landed** (PR #706).
-  **Lane:** control-surface (pipeline hardening).
-  **Depends on:** ~~Tier 2+3 code~~ **Landed** (PR #706).
+- ~~**[RECOVERY-TIER3-WIRING]**~~ **CLOSED** (2026-04-01, moved to Ra). Tier 3 recovery wiring + pipeline hardening landed; tracked packet: `reports/control_plane/recovery_tier3_wiring_2026-04-01.md`.
 
 - **[PIPELINE-RECOVERY]** **IN PROGRESS** (2026-03-31, founder-authorized).
   Pipeline failure recovery system — tiered auto-fix/retry/diagnose/escalate.
@@ -494,9 +478,23 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   **File:** `mu/tools/executors/recovery_gate.py`
   ~~**Phase 1:** Classifier + Tier 1 auto-fix~~ **Landed** (PR #704).
   ~~**Phase 2:** Wired into dispatcher retry loop + hardened~~ **Landed** (PR #705).
-  **Phase 3 IN PROGRESS:** Tier 2 auto-retry + Tier 3 recovery loop function (current wave).
-  **Remaining:** (4) Tier 3 wiring + hardening [RECOVERY-TIER3-WIRING], (5) Learning store.
+  ~~**Phase 3:** Tier 2 auto-retry + Tier 3 recovery loop function~~ **Landed** (PR #706).
+  ~~**Phase 4:** Tier 3 wiring + hardening [RECOVERY-TIER3-WIRING]~~ **Landed** (tracker sync 2026-04-01).
+  **Remaining:** (5) Learning store.
   **Lane:** control-surface (pipeline hardening).
+
+- **[PIPELINE-PROOF-HARDENING]** **NEXT** (2026-04-02, founder-directed).
+  Tighten Phase A packet review, Codex reviewer normalization, and routed recovery proof surfaces after the live recovery/Tier 3 proof pass.
+  **Work items:**
+  (1) Treat sectionless Phase A drafts as stubs and defer SDK review until a real packet exists
+  (2) Preserve bridge reviewer evidence into the Phase A implementer prompt
+  (3) Add bounded `--packet-review` mode so bridge reviewer stays on packet/TASKS/file evidence instead of broad repo sweeps
+  (4) Normalize Codex `--json` reviewer output into assistant text envelopes for bridge parsing
+  (5) Force SDK review into read-only plan permission mode and tighten reviewer prompt repo-state rules / current-checkout path rules
+  (6) Harden recovery classification for wrapped Phase A SDK timeouts and trim oversized Tier 3 diagnosis prompt blocks
+  (7) Sync `[RECOVERY-TIER3-WIRING]` packet/task truth to the already-landed code path
+  **Lane:** control-surface (pipeline hardening).
+  **Tracked packet:** `reports/control_plane/pipeline_proof_hardening_2026-04-02.md`
 
 - **[DEFERRED-CONSOLIDATION]** **IN PROGRESS** (2026-03-31).
   Consolidate 6 overlapping deferred files. Wave 1A (9 critical/high) ~~**Landed**~~ (PR #703). Wave 1B (18 medium/low) queued.

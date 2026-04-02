@@ -262,6 +262,123 @@ print(json.dumps({"type": "result", "subtype": "success", "result": ""}))
     assert parsed["summary"] == "assistant-content"
 
 
+def test_run_adapter_normalizes_codex_json_agent_message(tmp_path: Path) -> None:
+    stream_agent = tmp_path / "codex_json_agent.py"
+    stream_agent.write_text(
+        """\
+import json
+import sys
+
+sys.stdin.read()
+envelope = \"\"\"BEGIN_AGENT_ENVELOPE
+{
+  "job_id": "job-1",
+  "turn_id": "r1-reviewer",
+  "agent_role": "reviewer",
+  "decision": "GO",
+  "summary": "codex-json",
+  "touched_files_claimed": [],
+  "findings": [],
+  "validations_claimed": [],
+  "request_for_next_agent": ""
+}
+END_AGENT_ENVELOPE\"\"\"
+print(json.dumps({"type": "thread.started", "thread_id": "thread-1"}))
+print(json.dumps({"type": "turn.started"}))
+print(json.dumps({"type": "item.completed", "item": {"id": "item_0", "type": "agent_message", "text": envelope}}))
+print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}}))
+""",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=[sys.executable, str(stream_agent), "--json"],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+
+    output = adapters.run_adapter(
+        spec,
+        prompt_text="review prompt",
+        prompt_path=prompt_path,
+        repo_root=tmp_path,
+        job_id="job-1",
+        turn_id="r1-reviewer",
+        agent_role="reviewer",
+        raw_output_path=raw_output_path,
+    )
+
+    parsed = bridge.parse_envelope(output)
+    assert parsed["decision"] == "GO"
+    assert parsed["summary"] == "codex-json"
+    raw_lines = raw_output_path.read_text(encoding="utf-8").splitlines()
+    assert raw_lines[0].startswith('{"type": "thread.started"') or raw_lines[0].startswith('{"type":"thread.started"')
+
+
+def test_run_adapter_stops_after_codex_json_envelope(tmp_path: Path) -> None:
+    stream_agent = tmp_path / "codex_json_lingering_agent.py"
+    stream_agent.write_text(
+        """\
+import json
+import sys
+import time
+
+sys.stdin.read()
+envelope = \"\"\"BEGIN_AGENT_ENVELOPE
+{
+  "job_id": "job-1",
+  "turn_id": "r1-reviewer",
+  "agent_role": "reviewer",
+  "decision": "GO",
+  "summary": "codex-linger-safe",
+  "touched_files_claimed": [],
+  "findings": [],
+  "validations_claimed": [],
+  "request_for_next_agent": ""
+}
+END_AGENT_ENVELOPE\"\"\"
+print(json.dumps({"type": "thread.started", "thread_id": "thread-1"}), flush=True)
+print(json.dumps({"type": "turn.started"}), flush=True)
+print(json.dumps({"type": "item.completed", "item": {"id": "item_0", "type": "agent_message", "text": envelope}}), flush=True)
+time.sleep(10.0)
+""",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=[sys.executable, str(stream_agent), "--json"],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    output = adapters.run_adapter(
+        spec,
+        prompt_text="review prompt",
+        prompt_path=prompt_path,
+        repo_root=tmp_path,
+        job_id="job-1",
+        turn_id="r1-reviewer",
+        agent_role="reviewer",
+        raw_output_path=raw_output_path,
+        stop_after_envelope=True,
+    )
+    elapsed = time.monotonic() - start
+
+    parsed = bridge.parse_envelope(output)
+    assert parsed["decision"] == "GO"
+    assert parsed["summary"] == "codex-linger-safe"
+    assert elapsed < 2.0
+
+
 def test_run_adapter_stops_after_stream_json_envelope(tmp_path: Path) -> None:
     stream_agent = tmp_path / "stream_agent_lingering.py"
     stream_agent.write_text(
@@ -1024,6 +1141,38 @@ def test_reviewer_prompt_includes_staged_diff(tmp_path: Path) -> None:
     assert "+updated content for diff test" in prompt, "staged diff should show added line"
 
 
+def test_reviewer_prompt_keeps_bootstrap_but_forbids_startup_wrappers(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _init_temp_repo(repo_root)
+    paths = bridge.bridge_paths(repo_root)
+    bridge.init_db(paths)
+
+    job_id = bridge.submit_job(
+        paths,
+        task_text="prompt policy test",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=[],
+        job_id="prompt-policy-job",
+    )
+
+    with bridge.open_db(paths) as conn:
+        job = bridge.read_job(conn, job_id)
+        prompt = bridge.build_reviewer_prompt(conn, paths, job, 1, [])
+
+    assert "read FOUNDER_SESSION_BOOTSTRAP.md" in prompt
+    assert "Startup validation already ran before this review." in prompt
+    assert "Do NOT invoke `founder_session_guard.sh`" in prompt
+    assert "Do NOT invoke `founder_session_attest.sh`" not in prompt  # single consolidated rule surface
+    assert "Do NOT mutate repo state to make review easier." in prompt
+    assert "Never use `git stash`" in prompt
+
+
 # --- DEFECT-4: single-supervisor file lock ---
 
 
@@ -1721,6 +1870,18 @@ def test_no_diff_flag_cli_parsing(tmp_path: Path) -> None:
         "--no-diff",
     ])
     assert args.no_diff is True
+    assert args.packet_review is False
+
+    args_packet = bridge.build_parser().parse_args([
+        "--repo-root", str(tmp_path),
+        "review",
+        "--task", "packet review",
+        "--summary", "context",
+        "--no-diff",
+        "--packet-review",
+    ])
+    assert args_packet.no_diff is True
+    assert args_packet.packet_review is True
 
     # Without --no-diff, default is False
     args2 = bridge.build_parser().parse_args([
@@ -1730,6 +1891,7 @@ def test_no_diff_flag_cli_parsing(tmp_path: Path) -> None:
         "--summary", "did stuff",
     ])
     assert args2.no_diff is False
+    assert args2.packet_review is False
 
 
 def test_no_diff_review_omits_diff_from_reviewer_prompt(tmp_path: Path) -> None:
@@ -1773,6 +1935,7 @@ print(f"BEGIN_AGENT_ENVELOPE\\n{json.dumps(envelope)}\\nEND_AGENT_ENVELOPE")
         task_text="Should we add event streaming?",
         reader_summary="Design deliberation about bridge UX improvements",
         include_diff=False,
+        design_deliberation=True,
     )
     assert result == "GO"
 
@@ -1784,6 +1947,44 @@ print(f"BEGIN_AGENT_ENVELOPE\\n{json.dumps(envelope)}\\nEND_AGENT_ENVELOPE")
         reviewer_env = bridge.latest_envelope(conn, row["job_id"], role="reviewer")
     assert reviewer_env is not None
     assert "diff_suppressed=True" in reviewer_env["summary"]
+
+
+def test_no_diff_packet_review_omits_diff_without_design_marker(tmp_path: Path) -> None:
+    """Packet/code reviews may suppress diff without switching into design deliberation."""
+    paths, _ = _setup_bridge_repo(tmp_path)
+    (tmp_path / "repo" / "new_file.py").write_text("print('hello')\n", encoding="utf-8")
+    _git(tmp_path / "repo", "add", "new_file.py")
+
+    job_id = bridge.submit_job(
+        paths,
+        task_text="Review the tracked packet only.",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=[],
+        job_id="packet-review-no-diff",
+    )
+
+    with bridge.open_db(paths) as conn:
+        job = bridge.read_job(conn, job_id)
+        prompt = bridge.build_reviewer_prompt(
+            conn,
+            paths,
+            job,
+            1,
+            [],
+            include_diff=False,
+            design_deliberation=False,
+            packet_review=True,
+        )
+
+    assert "THIS IS A DESIGN DELIBERATION" not in prompt
+    assert "THIS IS A PACKET REVIEW, NOT A BROAD REPO RED-TEAM." in prompt
+    assert "Do NOT broaden into adjacent repo sweeps" in prompt
+    assert "If the packet is obviously a stub or placeholder, reject it from the packet text plus `TASKS.md` evidence alone." in prompt
 
 
 # ---------------------------------------------------------------------------

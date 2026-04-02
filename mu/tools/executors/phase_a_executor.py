@@ -9,7 +9,7 @@ Control flow:
 1. Read routing record and rollout context
 2. Create a plan packet draft in reports/control_plane/
 3. Run SDK agent review on the plan
-4. Send plan + agent findings to bridge (--no-diff, design review)
+4. Send plan + agent findings to bridge (--no-diff packet review)
 5. Fix blockers, defer non-blockers
 6. Loop bridge until only non-blockers remain
 7. Set Phase-A-Lock: LOCKED
@@ -272,6 +272,50 @@ Purpose: {scope.get('request', 'planning required')}
     return plan_path
 
 
+_REQUIRED_PHASE_A_SECTION_TITLES = frozenset({
+    "scope",
+    "work items",
+    "constraints",
+    "stop conditions",
+    "acceptance criteria",
+    "grounding",
+})
+
+
+def _extract_phase_a_section_titles(content: str) -> set[str]:
+    titles: set[str] = set()
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("##"):
+            continue
+        title = stripped.lstrip("#").strip().lower()
+        title = re.sub(r"^[0-9]+(?:\.[0-9]+)*\.\s*", "", title)
+        title = re.sub(r"\s+", " ", title).rstrip(":").strip()
+        canonical = title
+        for required in _REQUIRED_PHASE_A_SECTION_TITLES:
+            if (
+                title == required
+                or title.startswith(f"{required} ")
+                or title.startswith(f"{required}(")
+                or title.startswith(f"{required}:")
+            ):
+                canonical = required
+                break
+        if canonical:
+            titles.add(canonical)
+    return titles
+
+
+def _plan_is_placeholder_stub(content: str) -> bool:
+    """Return True when a Phase A packet is still a bridge/implementer stub."""
+    normalized = content.lower()
+    if "(stub)" in normalized:
+        return True
+    return not _REQUIRED_PHASE_A_SECTION_TITLES.issubset(
+        _extract_phase_a_section_titles(content)
+    )
+
+
 def run_sdk_agents(
     repo_root: Path,
     files: list[str],
@@ -501,7 +545,7 @@ def run_bridge_design_review(
     timeout: int = 1200,
     agent_review_context: str = "",
 ) -> dict[str, Any]:
-    """Run bridge design review (--no-diff) on a plan packet."""
+    """Run bridge packet review (--no-diff, non-design) on a plan packet."""
     config = load_executor_config(repo_root)
     reviewer = resolve_bridge_reviewer(config, "phase_a")
     bridge_turn_timeout = resolve_bridge_turn_timeout(config, "phase_a", default=300.0)
@@ -525,7 +569,11 @@ def run_bridge_design_review(
         "## Review Protocol\n\n"
         "- Read TASKS.md for the current phase description and authorization\n"
         "- Read the governing tracked packet for sequence and supporting inputs\n"
-        "- Verify plan work items are grounded in actual codebase state (run commands)\n"
+        "- Treat this as a plan-packet review, not a broad repo red-team pass\n"
+        "- If the packet is obviously a stub, reject it immediately from the packet "
+        "and TASKS.md evidence; do not spend review budget on unrelated repo sweeps\n"
+        "- Verify plan work items are grounded in actual codebase state using only "
+        "the plan, TASKS.md, and files explicitly referenced by the plan or task\n"
         "- Use repo-local evidence only. Do not browse the web or query external\n"
         "  network resources for this review.\n\n"
     )
@@ -541,7 +589,7 @@ def run_bridge_design_review(
         "--task-file", str(task_path),
         "--summary", f"Phase A plan review R{round_num}",
         "--reviewer", reviewer,
-        "-v", "--no-diff",
+        "-v", "--no-diff", "--packet-review",
     ]
     if job_id:
         cmd.extend(["--job-id", job_id])
@@ -673,30 +721,112 @@ def _parse_phase_a_findings(render_content: str) -> list[dict[str, Any]]:
     """Parse findings from bridge rendered output for blocking/non-blocking classification.
 
     Looks for the structured findings block in the reviewer turn. Each finding
-    has severity, title, disposition, and detail.
+    keeps the reviewer evidence needed for packet rewrites.
     """
     findings: list[dict[str, Any]] = []
-    # Parse the JSON envelope from the rendered content
-    import re as _re
-    envelope_match = _re.search(
-        r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE",
-        render_content,
-        _re.DOTALL,
-    )
-    if envelope_match:
+
+    def _envelope_findings(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        parsed: list[dict[str, Any]] = []
+        for finding in payload.get("findings", []):
+            if not isinstance(finding, dict):
+                continue
+            parsed.append({
+                "class": finding.get("class", ""),
+                "severity": finding.get("severity", "medium"),
+                "title": finding.get("title", ""),
+                "detail": finding.get("detail", ""),
+                "disposition": finding.get("disposition", ""),
+                "file": finding.get("file", ""),
+                "line_start": finding.get("line_start"),
+                "line_end": finding.get("line_end"),
+                "evidence_cmd": finding.get("evidence_cmd", ""),
+                "evidence_result": finding.get("evidence_result", ""),
+                "status": finding.get("status", ""),
+            })
+        return parsed
+
+    def _extract_direct_envelope(text: str) -> dict[str, Any] | None:
+        import re as _re
+
+        envelope_match = _re.search(
+            r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE",
+            text,
+            _re.DOTALL,
+        )
+        if not envelope_match:
+            return None
         try:
-            envelope = json.loads(envelope_match.group(1))
-            for f in envelope.get("findings", []):
-                findings.append({
-                    "severity": f.get("severity", "medium"),
-                    "title": f.get("title", ""),
-                    "detail": f.get("detail", ""),
-                    "disposition": f.get("disposition", ""),
-                    "file": f.get("file", ""),
-                })
+            payload = json.loads(envelope_match.group(1))
         except (json.JSONDecodeError, TypeError):
-            pass
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    envelope = _extract_direct_envelope(render_content)
+    if envelope is not None:
+        return _envelope_findings(envelope)
+
+    # Codex bridge raw output is JSONL where the authoritative envelope lives
+    # inside the final reviewer agent_message text, not at the file top level.
+    agent_messages: list[str] = []
+    for line in render_content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("type") != "item.completed":
+            continue
+        item = payload.get("item")
+        if not isinstance(item, dict) or item.get("type") != "agent_message":
+            continue
+        text = item.get("text")
+        if isinstance(text, str) and text.strip():
+            agent_messages.append(text)
+
+    if agent_messages:
+        normalized = "\n".join(agent_messages)
+        envelope = _extract_direct_envelope(normalized)
+        if envelope is not None:
+            return _envelope_findings(envelope)
+
     return findings
+
+
+def _format_phase_a_blocking_findings(findings: list[dict[str, Any]]) -> str:
+    """Format reviewer findings for the Phase A implementer prompt."""
+    formatted: list[str] = []
+    for idx, finding in enumerate(findings, 1):
+        severity = finding.get("severity", "?")
+        title = finding.get("title", "untitled")
+        detail = (finding.get("detail") or "").strip()
+        finding_class = (finding.get("class") or "").strip()
+        file_ref = (finding.get("file") or "").strip()
+        line_start = finding.get("line_start")
+        line_end = finding.get("line_end")
+        evidence_cmd = (finding.get("evidence_cmd") or "").strip()
+        evidence_result = (finding.get("evidence_result") or "").strip()
+
+        location = file_ref
+        if file_ref and isinstance(line_start, int):
+            location = f"{file_ref}:{line_start}"
+            if isinstance(line_end, int) and line_end != line_start:
+                location += f"-{line_end}"
+
+        lines = [f"{idx}. [{severity}] {title}"]
+        if finding_class:
+            lines.append(f"   Class: {finding_class}")
+        if location:
+            lines.append(f"   Reference: {location}")
+        if detail:
+            lines.append(f"   Reviewer detail: {detail[:500]}")
+        if evidence_result:
+            lines.append(f"   Evidence result: {evidence_result[:700]}")
+        if evidence_cmd:
+            lines.append(f"   Reproduce with: {evidence_cmd[:500]}")
+        formatted.append("\n".join(lines))
+    return "\n\n".join(formatted)
 
 
 def _extract_bridge_decision(render_content: str) -> str:
@@ -864,312 +994,380 @@ def run_phase_a(
     rel_plan_path = str(plan_path.relative_to(repo_root))
     result["plan_path"] = rel_plan_path
     log(f"Plan draft: {rel_plan_path}")
-
-    # Run SDK agent review on the plan. Exit 2 is warnings / soft gate per
-    # run_review.py + AgentRunbook; hard gate / infra exits still fail closed.
     review_depth = resolve_review_depth(config, "phase_a")
-    log(f"Running SDK agent review on plan (depth={review_depth})...")
     agent_timeout = config.get("timeouts", {}).get("agent_review", 900)
-    agent_result = run_sdk_agents(
-        repo_root,
-        [rel_plan_path],
-        depth=review_depth,
-        verbose=verbose,
-        timeout=agent_timeout,
-    )
-    result["agent_review_ran"] = True
-    result["agent_exit_code"] = agent_result["exit_code"]
-    result["agent_review_report_path"] = agent_result.get("report_path")
-    result["agent_review_status_path"] = agent_result.get("status_path")
-    result["agent_review_stdout_path"] = agent_result.get("stdout_path")
-    log(f"Agent review exit code: {agent_result['exit_code']}")
+    plan_content = plan_path.read_text(encoding="utf-8")
+    defer_agent_review = _plan_is_placeholder_stub(plan_content)
 
-    if agent_result["exit_code"] not in PHASE_A_ALLOWED_REVIEW_EXIT_CODES:
-        # Prefer structured status diagnostic over raw stderr, which can be
-        # dominated by irrelevant noise (Bun AVX warnings, SDK chatter).
-        status_diag = ""
-        if agent_result.get("status_path"):
-            status_diag = _read_agent_status_diagnostic(
-                repo_root / agent_result["status_path"]
+    def _run_phase_a_agent_review(log_label: str) -> tuple[bool, str]:
+        log(log_label)
+        agent_result = run_sdk_agents(
+            repo_root,
+            [rel_plan_path],
+            depth=review_depth,
+            verbose=verbose,
+            timeout=agent_timeout,
+        )
+        result["agent_review_ran"] = True
+        result["agent_exit_code"] = agent_result["exit_code"]
+        result["agent_review_report_path"] = agent_result.get("report_path")
+        result["agent_review_status_path"] = agent_result.get("status_path")
+        result["agent_review_stdout_path"] = agent_result.get("stdout_path")
+        log(f"Agent review exit code: {agent_result['exit_code']}")
+
+        if agent_result["exit_code"] not in PHASE_A_ALLOWED_REVIEW_EXIT_CODES:
+            status_diag = ""
+            if agent_result.get("status_path"):
+                status_diag = _read_agent_status_diagnostic(
+                    repo_root / agent_result["status_path"]
+                )
+            detail_parts: list[str] = []
+            if status_diag:
+                detail_parts.append(f"agent_status: {status_diag}")
+            detail_parts.append(
+                f"stderr_tail: {_trim_stderr(agent_result.get('stderr', ''), 500, tail=True)}"
             )
-        detail_parts: list[str] = []
-        if status_diag:
-            detail_parts.append(f"agent_status: {status_diag}")
-        detail_parts.append(
-            f"stderr_tail: {_trim_stderr(agent_result.get('stderr', ''), 500, tail=True)}"
-        )
-        if agent_result.get("report_path"):
-            detail_parts.append(f"report_path={agent_result['report_path']}")
-        if agent_result.get("status_path"):
-            detail_parts.append(f"status_path={agent_result['status_path']}")
-        if agent_result.get("stdout_path"):
-            detail_parts.append(f"stdout_path={agent_result['stdout_path']}")
-        result["status"] = "error"
-        result["error"] = (
-            f"SDK agent review failed (exit={agent_result['exit_code']}). "
-            "Hard gate: agents must pass before bridge review. "
-            + " | ".join(detail_parts)
-        )
-        return result
-    if agent_result["exit_code"] == 1:
-        log(
-            "Agent review returned semantic blocker findings (exit=1); "
-            "continuing to bridge for contextual blocking/non-blocking classification"
-        )
-        result["agent_review_warning_only"] = True
-    elif agent_result["exit_code"] == 2:
-        log("Agent review returned soft warnings (exit=2) — continuing to bridge")
-        result["agent_review_warning_only"] = True
+            if agent_result.get("report_path"):
+                detail_parts.append(f"report_path={agent_result['report_path']}")
+            if agent_result.get("status_path"):
+                detail_parts.append(f"status_path={agent_result['status_path']}")
+            if agent_result.get("stdout_path"):
+                detail_parts.append(f"stdout_path={agent_result['stdout_path']}")
+            result["status"] = "error"
+            result["error"] = (
+                f"SDK agent review failed (exit={agent_result['exit_code']}). "
+                "Hard gate: agents must pass before bridge review. "
+                + " | ".join(detail_parts)
+            )
+            return False, ""
 
-    # Build agent review context for bridge (mirrors Phase B's SDK artifact surface)
-    agent_review_bridge_ctx = ""
-    if result.get("agent_review_report_path"):
-        agent_review_bridge_ctx = (
-            "## SDK Agent Review Artifacts\n\n"
-            f"- exit_code: {result.get('agent_exit_code')}\n"
-            f"- report: {result.get('agent_review_report_path')}\n"
-            f"- status: {result.get('agent_review_status_path')}\n"
-            f"- stdout: {result.get('agent_review_stdout_path')}\n\n"
-            "Bridge must treat SDK findings as review inputs for contextual "
-            "blocking/non-blocking classification. Semantic SDK negatives are "
-            "not automatic current-step blockers by themselves."
-        )
+        if agent_result["exit_code"] == 1:
+            log(
+                "Agent review returned semantic blocker findings (exit=1); "
+                "continuing to bridge for contextual blocking/non-blocking classification"
+            )
+            result["agent_review_warning_only"] = True
+        elif agent_result["exit_code"] == 2:
+            log("Agent review returned soft warnings (exit=2) — continuing to bridge")
+            result["agent_review_warning_only"] = True
 
-    # Bridge convergence loop (design review, --no-diff)
-    for round_num in range(1, max_bridge_rounds + 1):
-        bridge_job_id = f"phase-a-r{round_num}-{uuid.uuid4().hex[:8]}"
-        log(f"Bridge design review round {round_num}/{max_bridge_rounds} (job={bridge_job_id})...")
-        result["bridge_rounds"] = round_num
+        if result.get("agent_review_report_path"):
+            return True, (
+                "## SDK Agent Review Artifacts\n\n"
+                f"- exit_code: {result.get('agent_exit_code')}\n"
+                f"- report: {result.get('agent_review_report_path')}\n"
+                f"- status: {result.get('agent_review_status_path')}\n"
+                f"- stdout: {result.get('agent_review_stdout_path')}\n\n"
+                "Bridge must treat SDK findings as review inputs for contextual "
+                "blocking/non-blocking classification. Semantic SDK negatives are "
+                "not automatic current-step blockers by themselves."
+            )
+        return True, ""
 
-        bridge_result = run_bridge_design_review(
-            repo_root, rel_plan_path, round_num,
-            job_id=bridge_job_id,
-            agent_review_context=agent_review_bridge_ctx,
-        )
-        log(f"Bridge exit code: {bridge_result['exit_code']}")
+    def _run_bridge_convergence(*, start_round: int, agent_review_context: str) -> bool:
+        for round_num in range(start_round, max_bridge_rounds + 1):
+            bridge_job_id = f"phase-a-r{round_num}-{uuid.uuid4().hex[:8]}"
+            log(f"Bridge design review round {round_num}/{max_bridge_rounds} (job={bridge_job_id})...")
+            result["bridge_rounds"] = round_num
 
-        rendered_path = repo_root / ".agent_bus" / "rendered" / f"{bridge_job_id}.md"
-        if rendered_path.exists():
-            render_content = rendered_path.read_text(encoding="utf-8")
-            bridge_decision = _extract_bridge_decision(render_content)
-            if bridge_decision == "GO":
-                if bridge_result["exit_code"] != 0:
-                    log(
-                        f"Bridge returned GO with unexpected exit {bridge_result['exit_code']} "
-                        "— failing closed"
-                    )
-                    result["status"] = "error"
-                    result["error"] = (
-                        f"Bridge subprocess failed in round {round_num} "
-                        f"(exit={bridge_result['exit_code']}, decision=GO). "
-                        f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
-                    )
-                    result["rendered_path"] = str(rendered_path)
-                    return result
-                log("Bridge converged: GO")
-                result["status"] = "converged"
-                break
-            elif bridge_decision in {"REQUEST_CHANGES", "NO_GO"}:
+            bridge_result = run_bridge_design_review(
+                repo_root, rel_plan_path, round_num,
+                job_id=bridge_job_id,
+                agent_review_context=agent_review_context,
+            )
+            log(f"Bridge exit code: {bridge_result['exit_code']}")
+
+            rendered_path = repo_root / ".agent_bus" / "rendered" / f"{bridge_job_id}.md"
+            if rendered_path.exists():
+                render_content = rendered_path.read_text(encoding="utf-8")
+                bridge_decision = _extract_bridge_decision(render_content)
+                if bridge_decision == "GO":
+                    if bridge_result["exit_code"] != 0:
+                        log(
+                            f"Bridge returned GO with unexpected exit {bridge_result['exit_code']} "
+                            "— failing closed"
+                        )
+                        result["status"] = "error"
+                        result["error"] = (
+                            f"Bridge subprocess failed in round {round_num} "
+                            f"(exit={bridge_result['exit_code']}, decision=GO). "
+                            f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
+                        )
+                        result["rendered_path"] = str(rendered_path)
+                        return False
+                    log("Bridge converged: GO")
+                    result["status"] = "converged"
+                    return True
+                elif bridge_decision in {"REQUEST_CHANGES", "NO_GO"}:
                 # bridge_supervisor.py review returns exit=1 for non-GO decisions.
                 # Treat REQUEST_CHANGES/NO_GO as recoverable review outcomes when
                 # the exit code matches that CLI contract; only unexpected codes
                 # are infrastructure failures here.
-                if bridge_result["exit_code"] not in (0, 1):
-                    log(
-                        f"Bridge subprocess failed (exit {bridge_result['exit_code']}) "
-                        f"with decision {bridge_decision} — failing closed"
-                    )
-                    result["status"] = "error"
-                    result["error"] = (
-                        f"Bridge subprocess failed in round {round_num} "
-                        f"(exit={bridge_result['exit_code']}, decision={bridge_decision}). "
-                        f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
-                    )
-                    result["rendered_path"] = str(rendered_path)
-                    return result
-                # Classify findings as blocking vs non-blocking.
-                # If only non-blockers remain, converge — design advisory
-                # findings don't need to block plan convergence.
-                # Read raw reviewer output for finding parsing — the JSON
-                # envelope (BEGIN_AGENT_ENVELOPE) is in the raw output,
-                # not in the rendered markdown.
-                raw_dir = repo_root / ".agent_bus" / "raw" / bridge_job_id
-                raw_content = ""
-                if raw_dir.is_dir():
-                    for raw_file in sorted(raw_dir.iterdir()):
-                        if "reviewer" in raw_file.name:
-                            raw_content = raw_file.read_text(encoding="utf-8")
-                            break
-                parsed_findings = _parse_phase_a_findings(
-                    raw_content if raw_content else render_content)
-                blocking = [f for f in parsed_findings if f.get("disposition") == "blocking"
-                            or (f.get("disposition") not in ("blocking", "non_blocking")
-                                and f.get("severity") in ("critical", "high"))]
-                non_blocking = [f for f in parsed_findings if f not in blocking]
-                log(f"Bridge: REQUEST_CHANGES — {len(blocking)} blocking, {len(non_blocking)} non-blocking")
-
-                if parsed_findings and not blocking:
-                    log(f"Bridge: all {len(non_blocking)} findings are non-blocking — treating as GO")
-                    result["status"] = "converged"
-                    result["non_blocking_count"] = len(non_blocking)
-                    break
-
-                # Invoke Claude implementer to fix blocking findings
-                if _invoke_implementer is not None and blocking:
-                    plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
-                    plan_hash_before = hash(plan_content)
-                    blocking_text = "\n".join(
-                        f"- [{f.get('severity','?')}] {f.get('title','untitled')}: {f.get('detail','')[:200]}"
-                        for f in blocking
-                    )
-                    # Derive task_id from routing record or plan content
-                    _task_id = scope.get("task_id", "")
-                    if not _task_id:
-                        for line in plan_content.splitlines():
-                            if line.strip().startswith("Task:"):
-                                _task_id = line.split("Task:", 1)[1].strip()
+                    if bridge_result["exit_code"] not in (0, 1):
+                        log(
+                            f"Bridge subprocess failed (exit {bridge_result['exit_code']}) "
+                            f"with decision {bridge_decision} — failing closed"
+                        )
+                        result["status"] = "error"
+                        result["error"] = (
+                            f"Bridge subprocess failed in round {round_num} "
+                            f"(exit={bridge_result['exit_code']}, decision={bridge_decision}). "
+                            f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
+                        )
+                        result["rendered_path"] = str(rendered_path)
+                        return False
+                    # Classify findings as blocking vs non-blocking.
+                    # If only non-blockers remain, converge — design advisory
+                    # findings don't need to block plan convergence.
+                    # Read raw reviewer output for finding parsing — the JSON
+                    # envelope (BEGIN_AGENT_ENVELOPE) is in the raw output,
+                    # not in the rendered markdown.
+                    raw_dir = repo_root / ".agent_bus" / "raw" / bridge_job_id
+                    raw_content = ""
+                    if raw_dir.is_dir():
+                        for raw_file in sorted(raw_dir.iterdir()):
+                            if "reviewer" in raw_file.name:
+                                raw_content = raw_file.read_text(encoding="utf-8")
                                 break
-                    impl_prompt = (
-                        f"You are updating a Phase A plan at `{rel_plan_path}`.\n\n"
-                        f"IMPORTANT: Write ALL changes to `{rel_plan_path}` ONLY. "
-                        f"Do NOT create new files. Do NOT write to any other path.\n\n"
-                        f"The bridge reviewer returned REQUEST_CHANGES. Fix ONLY the blocking findings:\n\n"
-                        f"{blocking_text}\n\n"
-                        f"## Current plan content:\n\n{plan_content}\n\n"
-                        f"## Required plan sections:\n"
-                        "1. Scope: files/directories in scope\n"
-                        "2. Work items: concrete bounded tasks from TASKS.md current phase\n"
-                        "3. Constraints: what is NOT in scope\n"
-                        "4. Stop conditions\n"
-                        "5. Acceptance criteria\n"
-                        "6. Grounding: TASKS.md authorization + governing packet refs\n\n"
-                        f"Read TASKS.md for the current task ({_task_id or 'see NEXT section'}) "
-                        f"and use the plan file at `{rel_plan_path}` as the governing packet. "
-                        f"Update ONLY `{rel_plan_path}`. Do NOT create new files."
+                    parsed_findings = _parse_phase_a_findings(
+                        raw_content if raw_content else render_content
                     )
-                    log("Invoking implementer to fix blocking findings...")
-                    impl_result = _invoke_implementer(
-                        repo_root, impl_prompt,
-                        backend="claude",
-                        timeout=900,
-                        verbose=verbose,
-                    )
-                    if impl_result["status"] != "success":
-                        log(f"Implementer failed: {impl_result['status']} — continuing with unmodified plan")
+                    blocking = [
+                        f
+                        for f in parsed_findings
+                        if f.get("disposition") == "blocking"
+                        or (
+                            f.get("disposition") not in ("blocking", "non_blocking")
+                            and f.get("severity") in ("critical", "high")
+                        )
+                    ]
+                    non_blocking = [f for f in parsed_findings if f not in blocking]
+                    if parsed_findings:
+                        log(
+                            f"Bridge: REQUEST_CHANGES — {len(blocking)} blocking, "
+                            f"{len(non_blocking)} non-blocking"
+                        )
                     else:
-                        # Verify the implementer actually modified rel_plan_path
-                        new_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
-                        if hash(new_content) == plan_hash_before:
-                            log(f"WARNING: Implementer returned success but {rel_plan_path} "
-                                f"was NOT modified. Plan may have been written elsewhere. "
-                                f"Failing closed to prevent infinite stub loop.")
-                            result["status"] = "error"
-                            result["error"] = (
-                                f"Implementer did not modify {rel_plan_path}. "
-                                f"Check if plan was written to a different file."
+                        log(
+                            f"Bridge: {bridge_decision} without structured findings — "
+                            "continuing review loop"
+                        )
+
+                    if parsed_findings and not blocking:
+                        log(
+                            f"Bridge: all {len(non_blocking)} findings are non-blocking — "
+                            "treating as GO"
+                        )
+                        result["status"] = "converged"
+                        result["non_blocking_count"] = len(non_blocking)
+                        return True
+
+                    if _invoke_implementer is not None and blocking:
+                        current_plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
+                        plan_hash_before = hash(current_plan_content)
+                        blocking_text = _format_phase_a_blocking_findings(blocking)
+                        _task_id = scope.get("task_id", "")
+                        if not _task_id:
+                            for line in current_plan_content.splitlines():
+                                if line.strip().startswith("Task:"):
+                                    _task_id = line.split("Task:", 1)[1].strip()
+                                    break
+                        impl_prompt = (
+                            f"You are updating a Phase A plan at `{rel_plan_path}`.\n\n"
+                            f"IMPORTANT: Write ALL changes to `{rel_plan_path}` ONLY. "
+                            f"Do NOT create new files. Do NOT write to any other path.\n\n"
+                            "The bridge reviewer returned REQUEST_CHANGES. "
+                            "Fix ONLY the blocking findings below.\n"
+                            "Treat the reviewer evidence below as authoritative for this rewrite.\n\n"
+                            f"{blocking_text}\n\n"
+                            "This is a packet rewrite task, not a broad repo investigation.\n"
+                            "Use ONLY the minimum repo-local evidence needed to rewrite the packet:\n"
+                            f"- `{rel_plan_path}`\n"
+                            f"- exact TASKS.md lines for `{_task_id or 'the current task'}`\n"
+                            "- files, lines, and docs explicitly cited in the blocking findings above\n\n"
+                            "TASKS.md authorizes the wave, but it does NOT prove every listed item "
+                            "is still unlanded. If a blocking finding proves a work item is already "
+                            "implemented in current code, remove it from pending work items and "
+                            "acceptance criteria instead of re-listing it as unresolved.\n"
+                            "Prefer current code truth over stale packet wording when they conflict.\n\n"
+                            "Do NOT inspect unrelated dirty files, `git diff`, `git status`, "
+                            "or unrelated executor/test changes. Do NOT widen scope beyond the "
+                            "blocking findings. Search TASKS.md for the exact task id instead of "
+                            "reading the entire file when targeted lookup is enough.\n\n"
+                            f"## Current plan content:\n\n{current_plan_content}\n\n"
+                            f"## Required plan sections:\n"
+                            "1. Scope: files/directories in scope\n"
+                            "2. Work items: concrete bounded tasks from TASKS.md current phase\n"
+                            "3. Constraints: what is NOT in scope\n"
+                            "4. Stop conditions\n"
+                            "5. Acceptance criteria\n"
+                            "6. Grounding: TASKS.md authorization + governing packet refs\n\n"
+                            f"Read TASKS.md for the current task ({_task_id or 'see NEXT section'}) "
+                            f"and use the plan file at `{rel_plan_path}` as the governing packet. "
+                            f"Update ONLY `{rel_plan_path}`. Do NOT create new files. "
+                            "Replace the stub with the real plan directly in that file."
+                        )
+                        log("Invoking implementer to fix blocking findings...")
+                        impl_result = _invoke_implementer(
+                            repo_root, impl_prompt,
+                            backend="claude",
+                            timeout=900,
+                            verbose=verbose,
+                        )
+                        if impl_result["status"] != "success":
+                            log(
+                                f"Implementer failed: {impl_result['status']} — continuing "
+                                "with unmodified plan"
                             )
-                            break
-                        log(f"Implementer updated plan ({len(new_content.splitlines())} lines) "
-                            f"— continuing to next bridge round")
-                elif not _invoke_implementer:
-                    log("Bridge: REQUEST_CHANGES — no implementer available, continuing with unmodified plan")
-                continue
-            elif bridge_decision == "QUESTION":
-                if bridge_result["exit_code"] not in (0, 1):
-                    log(
-                        f"Bridge subprocess failed (exit {bridge_result['exit_code']}) "
-                        "with QUESTION decision — failing closed"
-                    )
+                        else:
+                            new_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
+                            if hash(new_content) == plan_hash_before:
+                                log(f"WARNING: Implementer returned success but {rel_plan_path} "
+                                    f"was NOT modified. Plan may have been written elsewhere. "
+                                    f"Failing closed to prevent infinite stub loop.")
+                                result["status"] = "error"
+                                result["error"] = (
+                                    f"Implementer did not modify {rel_plan_path}. "
+                                    f"Check if plan was written to a different file."
+                                )
+                                return False
+                            log(f"Implementer updated plan ({len(new_content.splitlines())} lines) "
+                                f"— continuing to next bridge round")
+                    elif not _invoke_implementer and blocking:
+                        log(
+                            "Bridge: REQUEST_CHANGES — no implementer available, "
+                            "continuing with unmodified plan"
+                        )
+                    continue
+                elif bridge_decision == "QUESTION":
+                    if bridge_result["exit_code"] not in (0, 1):
+                        log(
+                            f"Bridge subprocess failed (exit {bridge_result['exit_code']}) "
+                            "with QUESTION decision — failing closed"
+                        )
+                        result["status"] = "error"
+                        result["error"] = (
+                            f"Bridge subprocess failed in round {round_num} "
+                            f"(exit={bridge_result['exit_code']}, decision=QUESTION). "
+                            f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
+                        )
+                        result["rendered_path"] = str(rendered_path)
+                        return False
+                    log("Bridge: QUESTION — fail-closed (unresolved question)")
                     result["status"] = "error"
-                    result["error"] = (
-                        f"Bridge subprocess failed in round {round_num} "
-                        f"(exit={bridge_result['exit_code']}, decision=QUESTION). "
-                        f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
-                    )
+                    result["error"] = "Bridge returned QUESTION decision — requires human resolution"
                     result["rendered_path"] = str(rendered_path)
-                    return result
-                log("Bridge: QUESTION — fail-closed (unresolved question)")
-                result["status"] = "error"
-                result["error"] = "Bridge returned QUESTION decision — requires human resolution"
-                result["rendered_path"] = str(rendered_path)
-                return result
-            elif bridge_decision in {"STALE", "ERROR", "SYNTHETIC"}:
-                if bridge_result["exit_code"] not in (0, 1):
-                    log(
-                        f"Bridge subprocess failed (exit {bridge_result['exit_code']}) "
-                        f"with {bridge_decision} decision — failing closed"
-                    )
+                    return False
+                elif bridge_decision in {"STALE", "ERROR", "SYNTHETIC"}:
+                    if bridge_result["exit_code"] not in (0, 1):
+                        log(
+                            f"Bridge subprocess failed (exit {bridge_result['exit_code']}) "
+                            f"with {bridge_decision} decision — failing closed"
+                        )
+                        result["status"] = "error"
+                        result["error"] = (
+                            f"Bridge subprocess failed in round {round_num} "
+                            f"(exit={bridge_result['exit_code']}, decision={bridge_decision}). "
+                            f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
+                        )
+                        result["rendered_path"] = str(rendered_path)
+                        return False
+                    log(f"Bridge: {bridge_decision} — fail-closed")
                     result["status"] = "error"
-                    result["error"] = (
-                        f"Bridge subprocess failed in round {round_num} "
-                        f"(exit={bridge_result['exit_code']}, decision={bridge_decision}). "
-                        f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
-                    )
+                    if bridge_decision == "SYNTHETIC":
+                        result["error"] = (
+                            "Bridge returned SYNTHETIC-only decision (decision=SYNTHETIC) — reviewer turn missing"
+                        )
+                    else:
+                        result["error"] = (
+                            f"Bridge returned {bridge_decision} decision (decision={bridge_decision}) — cannot proceed"
+                        )
                     result["rendered_path"] = str(rendered_path)
-                    return result
-                log(f"Bridge: {bridge_decision} — fail-closed")
-                result["status"] = "error"
-                if bridge_decision == "SYNTHETIC":
-                    result["error"] = (
-                        "Bridge returned SYNTHETIC-only decision (decision=SYNTHETIC) — reviewer turn missing"
-                    )
+                    return False
                 else:
-                    result["error"] = (
-                        f"Bridge returned {bridge_decision} decision (decision={bridge_decision}) — cannot proceed"
-                    )
-                result["rendered_path"] = str(rendered_path)
-                return result
+                    if bridge_result["exit_code"] != 0:
+                        log(
+                            f"Bridge failed (exit {bridge_result['exit_code']}) with "
+                            f"unrecognized decision {bridge_decision!r} — failing closed"
+                        )
+                        result["status"] = "error"
+                        result["error"] = (
+                            f"Bridge subprocess failed in round {round_num} "
+                            f"(exit={bridge_result['exit_code']}). "
+                            f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
+                        )
+                        result["rendered_path"] = str(rendered_path)
+                        return False
+                    log("Bridge: unrecognized decision — fail-closed")
+                    result["status"] = "error"
+                    result["error"] = "Bridge returned unrecognized decision — cannot proceed"
+                    result["rendered_path"] = str(rendered_path)
+                    return False
             else:
                 if bridge_result["exit_code"] != 0:
-                    log(
-                        f"Bridge failed (exit {bridge_result['exit_code']}) with "
-                        f"unrecognized decision {bridge_decision!r} — failing closed"
-                    )
+                    log(f"Bridge failed (exit {bridge_result['exit_code']}) — failing closed")
                     result["status"] = "error"
                     result["error"] = (
                         f"Bridge subprocess failed in round {round_num} "
                         f"(exit={bridge_result['exit_code']}). "
                         f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
                     )
-                    result["rendered_path"] = str(rendered_path)
-                    return result
-                # Unrecognized decision — fail closed, do not burn rounds
-                log("Bridge: unrecognized decision — fail-closed")
+                    return False
+                log("Bridge exited 0 without rendered output — fail-closed")
                 result["status"] = "error"
-                result["error"] = "Bridge returned unrecognized decision — cannot proceed"
-                result["rendered_path"] = str(rendered_path)
-                return result
-        else:
-            if bridge_result["exit_code"] != 0:
-                log(f"Bridge failed (exit {bridge_result['exit_code']}) — failing closed")
-                result["status"] = "error"
-                result["error"] = (
-                    f"Bridge subprocess failed in round {round_num} "
-                    f"(exit={bridge_result['exit_code']}). "
-                    f"stderr: {_trim_stderr(bridge_result.get('stderr', ''), tail=True)}"
-                )
-                return result
-            log("Bridge exited 0 without rendered output — fail-closed")
-            result["status"] = "error"
-            result["error"] = "Bridge exited 0 but produced no rendered output"
-            return result
+                result["error"] = "Bridge exited 0 but produced no rendered output"
+                return False
 
-        if round_num >= max_bridge_rounds:
-            result["status"] = "max_rounds_reached"
-            log(f"Max bridge rounds ({max_bridge_rounds}) reached")
-            return result
+            if round_num >= max_bridge_rounds:
+                result["status"] = "max_rounds_reached"
+                log(f"Max bridge rounds ({max_bridge_rounds}) reached")
+                return False
 
-    # If the bridge loop exhausted without converging (e.g. all rounds were
-    # REQUEST_CHANGES which `continue` past the max-rounds guard), the status
-    # is still the initial "success" — which is a false positive.  Fail closed.
-    if result.get("status") != "converged":
         result["status"] = "max_rounds_reached"
         result["error"] = (
             f"Bridge did not converge after {max_bridge_rounds} rounds. "
             "Plan was never locked."
         )
         log(f"Max bridge rounds ({max_bridge_rounds}) reached without convergence")
+        return False
+
+    agent_review_bridge_ctx = ""
+    if defer_agent_review:
+        log(
+            "Plan draft is still a placeholder stub — deferring SDK agent review "
+            "until bridge/implementer produces a real plan"
+        )
+    else:
+        review_ok, agent_review_bridge_ctx = _run_phase_a_agent_review(
+            f"Running SDK agent review on plan (depth={review_depth})..."
+        )
+        if not review_ok:
+            return result
+
+    if not _run_bridge_convergence(start_round=1, agent_review_context=agent_review_bridge_ctx):
         return result
+
+    if defer_agent_review and not result["agent_review_ran"]:
+        refined_plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
+        if _plan_is_placeholder_stub(refined_plan_content):
+            result["status"] = "error"
+            result["error"] = (
+                "Bridge converged but the plan is still a placeholder stub. "
+                "Phase A requires stub rejection and same-file rewrite before "
+                "deferred SDK review can run."
+            )
+            return result
+        review_ok, agent_review_bridge_ctx = _run_phase_a_agent_review(
+            f"Running deferred SDK agent review on refined plan (depth={review_depth})..."
+        )
+        if not review_ok:
+            return result
+        if result.get("agent_review_warning_only"):
+            if not _run_bridge_convergence(
+                start_round=result["bridge_rounds"] + 1,
+                agent_review_context=agent_review_bridge_ctx,
+            ):
+                return result
 
     # Lock the plan
     try:

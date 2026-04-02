@@ -364,6 +364,22 @@ def test_agent_review_mode_env_preserves_existing_marker(monkeypatch):
     assert rr_mod.os.environ["RCX_AGENT_REVIEW_MODE"] == "existing"
 
 
+def test_build_query_options_uses_plan_permission_mode(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_build_sdk_options(options_cls, **kwargs):
+        seen.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(rr_mod, "build_sdk_options", fake_build_sdk_options)
+    agent_def = types.SimpleNamespace(model="sonnet")
+
+    rr_mod.build_query_options(agent_def, max_turns=7)
+
+    assert seen["permission_mode"] == "plan"
+    assert seen["allowed_tools"] == ["Read", "Grep", "Glob", "Bash"]
+
+
 def test_review_timeout_env_is_bounded_on_import(monkeypatch):
     monkeypatch.setenv("RCX_REVIEW_AGENT_TIMEOUT", "999999999")
     reloaded = importlib.reload(rr_mod)

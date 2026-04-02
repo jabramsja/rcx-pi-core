@@ -292,6 +292,7 @@ def build_query_options(agent_def: AgentDefinition, max_turns: int) -> ClaudeAge
         allowed_tools=["Read", "Grep", "Glob", "Bash"],
         max_turns=max_turns,
         model=model,
+        permission_mode="plan",
         require_model_kwarg=True,
     )
 

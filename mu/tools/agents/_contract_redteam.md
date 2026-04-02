@@ -49,3 +49,8 @@ When reporting an issue, use:
 1. No fabricated files, lines, or code.
 2. No hidden assumptions; put uncertainty in `NOT_CHECKED`.
 3. No hedging as evidence (`probably`, `likely`, `might`) for approval claims.
+4. Review execution is repo-state read-only. Do not modify tracked files, the git index, branches, stashes, commits, hooks, or other repo state while reviewing.
+5. Never use repo-mutating git commands during review (`git stash`, `git checkout`, `git restore`, `git reset`, `git commit`, `git merge`, `git rebase`, `git clean`, `git push`, or equivalents).
+6. If a validation step would require mutating repo state or cleaning the worktree, report that limit in `NOT_CHECKED` instead of changing state.
+7. If you need a temporary artifact for proof, keep it under `.scratch/` only.
+8. File paths in findings must match the current checkout. Use the absolute path inside the active repo root, not a hardcoded example path from another machine or worktree.

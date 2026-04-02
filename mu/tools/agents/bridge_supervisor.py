@@ -268,6 +268,39 @@ Evidence available:
 Classify findings as DEFECT (design flaw), POLICY_BOUND (needs founder decision), or DOC_ACCURACY (factual error in proposal)."""
 
 
+def _build_packet_review_instructions(
+    changed_actual: str,
+    staged: str,
+    unstaged: str,
+    validation_results_text: str,
+    reader_summary: str,
+) -> str:
+    return f"""\
+THIS IS A PACKET REVIEW, NOT A BROAD REPO RED-TEAM.
+
+Review the task packet and only the repo-local evidence needed to validate that packet.
+
+Evidence available:
+- CHANGED_FILES_ACTUAL: {changed_actual}
+- STAGED_FILES: {staged}
+- UNSTAGED_FILES: {unstaged}
+- VALIDATION_RESULTS: {validation_results_text}
+- READER_OUTPUT: {reader_summary}
+
+Required review scope:
+- review the packet itself first
+- use `TASKS.md` as the authorization source
+- inspect only files explicitly referenced by the packet or needed to verify a concrete packet claim
+
+Packet-review discipline:
+- If the packet is obviously a stub or placeholder, reject it from the packet text plus `TASKS.md` evidence alone.
+- Do NOT broaden into adjacent repo sweeps, architecture reviews, or control-surface audits unless the packet itself makes a concrete claim that requires that evidence.
+- Do NOT infer extra scope merely because the packet file is changed.
+- Stay repo-local; do not browse the web for packet review.
+
+Classify findings as DEFECT, POLICY_BOUND, or DOC_ACCURACY."""
+
+
 class BridgeError(RuntimeError):
     """Raised when supervisor execution cannot continue."""
 
@@ -853,22 +886,32 @@ def build_reviewer_prompt(
     validation_results: list[dict[str, Any]],
     *,
     include_diff: bool = True,
+    design_deliberation: bool = False,
+    packet_review: bool = False,
 ) -> str:
     template = load_template("bridge_reviewer_prompt.txt")
     reader_envelope = latest_envelope(conn, job["job_id"], role="reader") or {}
     validation_text = _validation_results_text(validation_results)
     reader_summary = reader_envelope.get("summary", "(none)")
-    if include_diff:
-        diff_text = staged_diff_content(paths.repo_root)
-        changed_actual = _format_list(changed_files(paths.repo_root, staged=False) + changed_files(paths.repo_root, staged=True))
-        staged = _format_list(changed_files(paths.repo_root, staged=True))
-        unstaged = _format_list(changed_files(paths.repo_root, staged=False))
-        review_mode_instructions = _build_code_review_instructions(
-            changed_actual, staged, unstaged, validation_text, reader_summary, diff_text,
-        )
-    else:
+    changed_actual = _format_list(changed_files(paths.repo_root, staged=False) + changed_files(paths.repo_root, staged=True))
+    staged = _format_list(changed_files(paths.repo_root, staged=True))
+    unstaged = _format_list(changed_files(paths.repo_root, staged=False))
+    if design_deliberation:
         review_mode_instructions = _build_design_deliberation_instructions(
             validation_text, reader_summary,
+        )
+    elif packet_review:
+        review_mode_instructions = _build_packet_review_instructions(
+            changed_actual, staged, unstaged, validation_text, reader_summary,
+        )
+    else:
+        diff_text = (
+            staged_diff_content(paths.repo_root)
+            if include_diff
+            else "(git diff omitted by caller; review against task text, packet content, changed-file inventory, and repo-local evidence.)"
+        )
+        review_mode_instructions = _build_code_review_instructions(
+            changed_actual, staged, unstaged, validation_text, reader_summary, diff_text,
         )
     # Inject prior-finding lifecycle context when available (round > 1)
     lifecycle_section = ""
@@ -1311,6 +1354,8 @@ def _run_reviewer_phase(
     verbose: bool,
     stream: bool = False,
     include_diff: bool = True,
+    design_deliberation: bool = False,
+    packet_review: bool = False,
 ) -> str | None:
     """Run reviewer (with staleness retry). Returns terminal decision or None for REQUEST_CHANGES continuation."""
     reviewer_attempt = 0
@@ -1321,7 +1366,16 @@ def _run_reviewer_phase(
             update_job_status(conn, job_id, "REVIEWER_RUNNING", current_round=round_no)
             _log(verbose, f"Round {round_no}/{job['max_rounds']}: starting reviewer ({job['reviewer_agent']})...")
             review_state_start = compute_repo_state(paths.repo_root)
-            reviewer_prompt = build_reviewer_prompt(conn, paths, read_job(conn, job_id), round_no, validation_results, include_diff=include_diff)
+            reviewer_prompt = build_reviewer_prompt(
+                conn,
+                paths,
+                read_job(conn, job_id),
+                round_no,
+                validation_results,
+                include_diff=include_diff,
+                design_deliberation=design_deliberation,
+                packet_review=packet_review,
+            )
             reviewer_turn_id, reviewer_envelope, _, raw_path, _ = execute_agent_turn(
                 conn,
                 paths,
@@ -1627,6 +1681,8 @@ def review_job(
     verbose: bool = False,
     job_id: str | None = None,
     include_diff: bool = True,
+    design_deliberation: bool = False,
+    packet_review: bool = False,
 ) -> str:
     """Hybrid review: record synthetic reader turn from interactive session, then run reviewer."""
     init_db(paths)
@@ -1724,6 +1780,8 @@ def review_job(
                 conn, paths, final_job_id, job, round_no,
                 validation_results, verbose, stream=verbose,
                 include_diff=include_diff,
+                design_deliberation=design_deliberation,
+                packet_review=packet_review,
             )
             if result is not None:
                 rendered = paths.rendered_dir / f"{final_job_id}.md"
@@ -2452,6 +2510,11 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--job-id")
     review.add_argument("--verbose", "-v", action="store_true", help="Print structured envelope output inline")
     review.add_argument("--no-diff", action="store_true", help="Omit git diff from reviewer prompt (for design deliberation, questions, non-code review)")
+    review.add_argument(
+        "--packet-review",
+        action="store_true",
+        help="Keep reviewer in bounded packet/code-review mode even when --no-diff suppresses the git diff",
+    )
 
     render = sub.add_parser("render", help="Render markdown transcript for a job")
     render.add_argument("job_id")
@@ -2525,6 +2588,8 @@ def main(argv: list[str] | None = None) -> int:
                 verbose=args.verbose,
                 job_id=args.job_id,
                 include_diff=not args.no_diff,
+                design_deliberation=args.no_diff and not args.packet_review,
+                packet_review=args.packet_review,
             )
             print(decision)
             return 0 if decision == "GO" else 1

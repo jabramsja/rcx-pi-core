@@ -108,6 +108,39 @@ def _extract_claude_stream_json_output(stdout_text: str) -> str | None:
     return None
 
 
+def _extract_codex_json_output(stdout_text: str) -> str | None:
+    """Normalize codex exec --json stdout into assistant plain text."""
+    raw_lines = [line for line in stdout_text.splitlines() if line.strip()]
+    if not raw_lines:
+        return None
+
+    assistant_messages: list[str] = []
+    for line in raw_lines:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        event_type = payload.get("type")
+        if not isinstance(event_type, str):
+            return None
+        if event_type != "item.completed":
+            continue
+        item = payload.get("item")
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "agent_message":
+            continue
+        text = item.get("text")
+        if isinstance(text, str) and text.strip():
+            assistant_messages.append(text.strip())
+
+    if assistant_messages:
+        return "\n".join(assistant_messages).strip()
+    return None
+
+
 def _normalize_stdout_for_adapter(
     spec: AdapterSpec,
     cmd: list[str],
@@ -122,11 +155,19 @@ def _normalize_stdout_for_adapter(
         and "--output-format" in cmd
         and "stream-json" in cmd
     )
-    if not uses_claude_stream_json:
-        return stdout_text
+    if uses_claude_stream_json:
+        normalized = _extract_claude_stream_json_output(stdout_text)
+        return normalized if normalized is not None else stdout_text
 
-    normalized = _extract_claude_stream_json_output(stdout_text)
-    return normalized if normalized is not None else stdout_text
+    uses_codex_json = (
+        spec.name == "codex"
+        and "--json" in cmd
+    )
+    if uses_codex_json:
+        normalized = _extract_codex_json_output(stdout_text)
+        return normalized if normalized is not None else stdout_text
+
+    return stdout_text
 
 
 def _parse_ps_time_seconds(value: str) -> float:

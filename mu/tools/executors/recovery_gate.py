@@ -92,7 +92,8 @@ def tier_for(fc: FailureClass) -> int:
 def classify_failure(result: dict[str, Any]) -> FailureClass:
     """Classify an executor failure result into a FailureClass."""
     outer_statuses = _normalize_status_values(result.get("status", ""))
-    status = outer_statuses[0] if outer_statuses else ""
+    outer_status = outer_statuses[0] if outer_statuses else ""
+    status = outer_status
     stderr = result.get("stderr", "")
     exit_code = result.get("exit_code")
     step = result.get("step", "")
@@ -114,20 +115,22 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     combined_text = _collect_error_text(result, embedded)
     combined_lower = combined_text.lower()
 
+    # Tier 4: terminal policy outcomes (check first, never recover)
+    if outer_status in _TERMINAL_STATUSES:
+        return FailureClass.TERMINAL_POLICY
+    if set(outer_statuses) & _TERMINAL_STATUSES:
+        return FailureClass.TERMINAL_POLICY
+    if status in _TERMINAL_STATUSES:
+        return FailureClass.TERMINAL_POLICY
+    if embedded_statuses & _TERMINAL_STATUSES:
+        return FailureClass.TERMINAL_POLICY
+
     if status == FailureClass.NEEDS_PHASE_B.value:
         return FailureClass.NEEDS_PHASE_B
     if FailureClass.NEEDS_PHASE_B.value in outer_statuses:
         return FailureClass.NEEDS_PHASE_B
     if FailureClass.NEEDS_PHASE_B.value in embedded_statuses:
         return FailureClass.NEEDS_PHASE_B
-
-    # Tier 4: terminal policy outcomes (check first, never recover)
-    if status in _TERMINAL_STATUSES:
-        return FailureClass.TERMINAL_POLICY
-    if set(outer_statuses) & _TERMINAL_STATUSES:
-        return FailureClass.TERMINAL_POLICY
-    if embedded_statuses & _TERMINAL_STATUSES:
-        return FailureClass.TERMINAL_POLICY
 
     # Tier 1: deterministic lock/state issues
     if "bridge.lock" in combined_lower:
@@ -143,6 +146,8 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
 
     # Tier 2: transient / timeout issues
     if status == "timeout":
+        return FailureClass.PROCESS_TIMEOUT
+    if "timed out" in combined_lower and "agent review" in combined_lower:
         return FailureClass.PROCESS_TIMEOUT
     if exit_code is not None and exit_code in _TRANSIENT_KILL_CODES:
         return FailureClass.TRANSIENT_KILL
@@ -397,6 +402,34 @@ def _load_config_timeouts(repo_root: Path) -> dict[str, Any]:
         return {}
 
 
+def _timeout_key_for_result(result: dict[str, Any], timeouts: dict[str, Any]) -> str:
+    """Select the timeout knob that corresponds to the observed failure."""
+    stdout = result.get("stdout", "")
+    embedded = _extract_embedded_result(stdout if isinstance(stdout, str) else "")
+    outer_statuses = _normalize_status_values(result.get("status", ""))
+    status = outer_statuses[0] if outer_statuses else ""
+    embedded_status = embedded.get("status")
+    if isinstance(embedded_status, str) and embedded_status.strip():
+        status = embedded_status.strip()
+    step = result.get("step", "")
+    embedded_step = embedded.get("step")
+    if (not isinstance(step, str) or not step.strip()) and isinstance(embedded_step, str):
+        step = embedded_step.strip()
+    combined_lower = _collect_error_text(result, embedded).lower()
+
+    if "agent review" in combined_lower and "agent_review" in timeouts:
+        return "agent_review"
+
+    executor = result.get("executor", "")
+    if isinstance(executor, str) and executor in timeouts:
+        return executor
+    if isinstance(step, str) and step in timeouts:
+        return step
+    if status == "timeout" and "phase_b_executor" in timeouts:
+        return "phase_b_executor"
+    return next(iter(timeouts), "phase_b_executor")
+
+
 def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     """Increase timeout by 50% (capped at 2x original) via env var override.
 
@@ -413,8 +446,7 @@ def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     timeouts = _load_config_timeouts(repo_root)
     # Determine which executor timed out from the result
     result = kw.get("result", {})
-    executor = result.get("executor", "phase_b_executor")
-    timeout_key = executor if executor in timeouts else "phase_b_executor"
+    timeout_key = _timeout_key_for_result(result, timeouts)
     current = timeouts.get(timeout_key, 3600)
     # Track original baseline across sequential recoveries.  On the first
     # call the env var is absent so we seed it from the (still-original)
@@ -535,6 +567,7 @@ _DANGEROUS_COMMANDS = frozenset({
     "> /dev/sd", ":(){ :|:& };:",
 })
 _DANGEROUS_COMMAND_PATTERNS = (
+    re.compile(r"\bgit\s+push\b"),
     re.compile(r"\bgit\s+reset\b"),
     re.compile(r"\bgit\s+checkout\b(?:[^\n]*\s)?--(?:\s|$)"),
     re.compile(
@@ -599,6 +632,22 @@ def _is_sensitive_repo_path(relative_path: str) -> bool:
     )
 
 
+def _trim_prompt_block(text: str, *, max_lines: int, max_chars_per_line: int = 240) -> str:
+    """Trim prompt context by line count and per-line width."""
+    lines = text.strip().splitlines()
+    if not lines:
+        return ""
+    if len(lines) > max_lines:
+        lines = [f"[truncated {len(lines) - max_lines} earlier lines]"] + lines[-max_lines:]
+    trimmed_lines: list[str] = []
+    for line in lines:
+        if len(line) > max_chars_per_line:
+            trimmed_lines.append(f"{line[:max_chars_per_line]}...[truncated]")
+        else:
+            trimmed_lines.append(line)
+    return "\n".join(trimmed_lines)
+
+
 def _build_diagnosis_prompt(
     result: dict[str, Any], wave_id: str, iteration: int,
     repo_root: Path, prior_invalid_response: str = "",
@@ -609,9 +658,8 @@ def _build_diagnosis_prompt(
     step = result.get("step", "unknown")
     stderr = result.get("stderr", "")
     stdout = result.get("stdout", "")
-    # Truncate to keep within token budget
-    stderr_lines = stderr.strip().splitlines()[-100:]
-    stdout_lines = stdout.strip().splitlines()[-50:]
+    stderr_block = _trim_prompt_block(stderr if isinstance(stderr, str) else "", max_lines=40)
+    stdout_block = _trim_prompt_block(stdout if isinstance(stdout, str) else "", max_lines=20)
     # Get git status
     try:
         git_proc = subprocess.run(
@@ -642,10 +690,10 @@ Iteration: {iteration + 1}/{MAX_RECOVERY_ITERATIONS}
 Wave: {wave_id}
 
 STDERR (last 100 lines):
-{chr(10).join(stderr_lines)}
+{stderr_block}
 
 STDOUT (last 50 lines):
-{chr(10).join(stdout_lines)}
+{stdout_block}
 
 Git status:
 {git_status}

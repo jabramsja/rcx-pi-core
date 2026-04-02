@@ -44,6 +44,12 @@ class TestClassifyFailure:
         assert rg_mod.classify_failure(
             {"status": "failed", "stdout": inner, "stderr": ""}) == FailureClass.TERMINAL_POLICY
 
+    def test_terminal_outer_status_beats_embedded_needs_phase_b(self):
+        inner = json.dumps({"status": "needs_phase_b"})
+        assert rg_mod.classify_failure(
+            {"status": "question_for_founder", "stdout": inner, "stderr": ""}
+        ) == FailureClass.TERMINAL_POLICY
+
     def test_stale_bridge_lock_in_stderr(self):
         assert rg_mod.classify_failure(
             {"status": "error", "stderr": "cannot acquire bridge.lock",
@@ -132,6 +138,21 @@ class TestClassifyFailure:
         assert rg_mod.classify_failure(
             {"status": "failed", "step": "", "stdout": stdout, "stderr": ""}
         ) == FailureClass.AGENT_REVIEW_CRASH
+
+    def test_embedded_phase_a_agent_review_timeout_is_process_timeout(self):
+        stdout = json.dumps({
+            "status": "error",
+            "error": (
+                "SDK agent review failed (exit=-1). "
+                "Hard gate: agents must pass before bridge review. "
+                "agent_status: phase=retry:adversary status=running "
+                "running_agents=['adversary'] last_progress=2026-04-02T04:58:58Z | "
+                "stderr_tail: Agent review timed out after 900s"
+            ),
+        })
+        assert rg_mod.classify_failure(
+            {"status": "failed", "step": "phase_a", "stdout": stdout, "stderr": ""}
+        ) == FailureClass.PROCESS_TIMEOUT
 
     def test_unknown_error(self):
         assert rg_mod.classify_failure(
@@ -476,6 +497,39 @@ class TestFixProcessTimeout:
         assert os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] == "5400"
         assert os.environ["RCX_RECOVERY_TIMEOUT_KEY"] == "commit_executor"
         assert "commit_executor" in r["detail"]
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+
+    def test_increases_timeout_agent_review_when_inner_sdk_timeout(self, tmp_path, monkeypatch):
+        """Wrapped Phase A SDK timeouts should bump the inner agent_review budget."""
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "executor_config.json").write_text(json.dumps({
+            "timeouts": {"phase_a_executor": 1800, "agent_review": 900}
+        }))
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_TIMEOUT_agent_review", raising=False)
+        result = {
+            "status": "failed",
+            "executor": "phase_a_executor",
+            "step": "phase_a",
+            "stdout": json.dumps({
+                "status": "error",
+                "error": (
+                    "SDK agent review failed (exit=-1). Hard gate: agents must pass "
+                    "before bridge review. agent_status: phase=retry:adversary "
+                    "status=running running_agents=['adversary'] last_progress=now | "
+                    "stderr_tail: Agent review timed out after 900s"
+                ),
+            }),
+            "stderr": "",
+        }
+        r = rg_mod.fix_process_timeout(tmp_path, result=result)
+        assert r["fixed"] is True
+        assert os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] == "1350"
+        assert os.environ["RCX_RECOVERY_TIMEOUT_KEY"] == "agent_review"
+        assert "agent_review" in r["detail"]
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
 
@@ -864,6 +918,26 @@ class TestRecoveryLoop:
         assert len(r["log"]) == 1
         assert r["log"][0]["action"] == "timeout"
 
+    def test_diagnosis_prompt_trims_large_blocks(self, tmp_path):
+        result = {
+            "status": "failed",
+            "step": "phase_a",
+            "stderr": "\n".join(f"heartbeat {i} " + ("x" * 400) for i in range(80)),
+            "stdout": "\n".join(f"stdout {i} " + ("y" * 400) for i in range(30)),
+        }
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run.return_value = MagicMock(returncode=0, stdout=" M packet.md\n")
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            prompt = rg_mod._build_diagnosis_prompt(  # ANTICHEAT_OK: prompt budget helper
+                result, "wave-x", 0, tmp_path)
+
+        assert "[truncated 40 earlier lines]" in prompt
+        assert "[truncated 10 earlier lines]" in prompt
+        assert "heartbeat 79 " in prompt
+        assert ("x" * 260) not in prompt
+        assert ("y" * 260) not in prompt
+
 
 class TestDangerousCommandDetection:
     @pytest.mark.parametrize("cmd", [
@@ -874,6 +948,7 @@ class TestDangerousCommandDetection:
         "git restore --staged foo.py", "git restore --source=HEAD foo.py",
         "git clean -fd", "dd if=/dev/zero of=/dev/sda",
         "chmod 777 /etc/passwd", "cat .git/config", "ls .git/hooks/",
+        "git  push origin main", "git\tpush origin main", "git\npush origin main",
     ])
     def test_dangerous_blocked(self, cmd):
         assert rg_mod._is_dangerous_command(cmd) is True  # ANTICHEAT_OK

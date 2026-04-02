@@ -624,6 +624,44 @@ class TestPhaseABridgeLoopFailClosed:
         bus_dir.mkdir(parents=True)
         routing = {"decision": "ROUTE_PHASE_A", "summary": "test"}
         (bus_dir / "post_merge_routing.json").write_text(json.dumps(routing))
+        plan_path = phase_a_mod.create_plan_draft(
+            tmp_path,
+            "test_plan",
+            {"request": "test", "summary": "test"},
+        )
+        plan_path.write_text(
+            """# Test Plan
+
+Date: 2026-04-02
+Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
+Phase-A-Lock: UNLOCKED
+
+## Scope
+
+- `mu/tools/executors/phase_a_executor.py`
+
+## Work Items
+
+- Exercise bridge-loop control flow for a real Phase A plan.
+
+## Constraints
+
+- No implementation changes in this fixture.
+
+## Stop Conditions
+
+- Stop if bridge decisions are misclassified.
+
+## Acceptance Criteria
+
+- The mocked bridge path converges or fails exactly as asserted by the test.
+
+## Grounding
+
+- Phase A bridge loop regression fixture.
+""",
+            encoding="utf-8",
+        )
         # Mock checkpoint commit (tmp_path is not a git repo)
         if monkeypatch is not None:
             monkeypatch.setattr(
@@ -772,6 +810,90 @@ class TestPhaseABridgeLoopFailClosed:
         result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
         assert result["status"] == "converged"
         assert call_count["n"] == 3
+
+    def test_phase_a_implementer_prompt_stays_packet_scoped(self, tmp_path, monkeypatch):
+        """Phase A implementer prompt must forbid unrelated dirty-diff spelunking."""
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
+        captured: dict[str, str] = {}
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: REQUEST_CHANGES\n\nPacket is still stubby.\n")
+            return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": ""}
+
+        def fake_parse_findings(_content):
+            return [{
+                "disposition": "blocking",
+                "severity": "critical",
+                "title": "Stub packet",
+                "detail": "Replace the stub with a real Phase A plan.",
+                "class": "DOC_ACCURACY",
+                "file": "reports/control_plane/test_plan_2026-04-02.md",
+                "line_start": 12,
+                "evidence_cmd": "nl -ba reports/control_plane/test_plan_2026-04-02.md | sed -n '1,40p'",
+                "evidence_result": "The packet is still a stub and needs a real plan rewrite.",
+            }]
+
+        def fake_invoke(repo_root, prompt, *, backend="claude", timeout=900, verbose=False):
+            captured["prompt"] = prompt
+            return {"status": "error", "stderr": "stop after prompt capture"}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+        monkeypatch.setattr(phase_a_mod, "_parse_phase_a_findings", fake_parse_findings)
+        monkeypatch.setattr(phase_a_mod, "_invoke_implementer", fake_invoke)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=1)
+        assert result["status"] == "max_rounds_reached"
+        prompt = captured["prompt"]
+        assert "Do NOT inspect unrelated dirty files" in prompt
+        assert "Search TASKS.md for the exact task id" in prompt
+        assert "Replace the stub with the real plan directly in that file." in prompt
+        assert "files, lines, and docs explicitly cited in the blocking findings above" in prompt
+        assert "Prefer current code truth over stale packet wording when they conflict." in prompt
+        assert "If a blocking finding proves a work item is already implemented in current code" in prompt
+        assert "Reproduce with: nl -ba reports/control_plane/test_plan_2026-04-02.md" in prompt
+        assert "Evidence result: The packet is still a stub" in prompt
+
+    def test_parse_phase_a_findings_preserves_reviewer_evidence(self):
+        """Phase A finding parser must preserve reviewer evidence for implementer rewrites."""
+        content = """BEGIN_AGENT_ENVELOPE
+{
+  "findings": [
+    {
+      "class": "DOC_ACCURACY",
+      "severity": "high",
+      "title": "Already landed item",
+      "detail": "Remove the stale TODO from the packet.",
+      "disposition": "blocking",
+      "file": "reports/control_plane/example.md",
+      "line_start": 41,
+      "line_end": 45,
+      "evidence_cmd": "nl -ba mu/tools/executors/commit_executor.py | sed -n '2672,2698p'",
+      "evidence_result": "Targeted pytest gate already exists.",
+      "status": "new"
+    }
+  ]
+}
+END_AGENT_ENVELOPE"""
+
+        findings = phase_a_mod._parse_phase_a_findings(content)  # ANTICHEAT_OK: testing internal Phase A finding parser
+        assert findings == [{
+            "class": "DOC_ACCURACY",
+            "severity": "high",
+            "title": "Already landed item",
+            "detail": "Remove the stale TODO from the packet.",
+            "disposition": "blocking",
+            "file": "reports/control_plane/example.md",
+            "line_start": 41,
+            "line_end": 45,
+            "evidence_cmd": "nl -ba mu/tools/executors/commit_executor.py | sed -n '2672,2698p'",
+            "evidence_result": "Targeted pytest gate already exists.",
+            "status": "new",
+        }]
 
     def test_bridge_failure_no_rendered_output_fails_closed(self, tmp_path, monkeypatch):
         """Bridge failure with no rendered output fails closed."""
@@ -4719,6 +4841,44 @@ class TestBridgeR6Finding2PhaseAAgentGate:
         bus_dir.mkdir(parents=True)
         routing = {"decision": "ROUTE_PHASE_A", "summary": "test"}
         (bus_dir / "post_merge_routing.json").write_text(json.dumps(routing))
+        plan_path = phase_a_mod.create_plan_draft(
+            tmp_path,
+            "test_plan",
+            {"request": "test", "summary": "test"},
+        )
+        plan_path.write_text(
+            """# Test Plan
+
+Date: 2026-04-02
+Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
+Phase-A-Lock: UNLOCKED
+
+## Scope
+
+- `mu/tools/executors/recovery_gate.py`
+
+## Work Items
+
+- Route SDK review findings into the bridge context.
+
+## Constraints
+
+- No unrelated files.
+
+## Stop Conditions
+
+- Stop if bridge cannot classify findings.
+
+## Acceptance Criteria
+
+- Phase A runs SDK review before bridge for real plans.
+
+## Grounding
+
+- TASKS.md route under test.
+""",
+            encoding="utf-8",
+        )
         if monkeypatch is not None:
             monkeypatch.setattr(
                 phase_a_mod, "checkpoint_commit_plan",
@@ -4965,6 +5125,44 @@ class TestBridgeR6Finding3PhaseARequestChangesSilentSuccess:
         bus_dir.mkdir(parents=True)
         routing = {"decision": "ROUTE_PHASE_A", "summary": "test"}
         (bus_dir / "post_merge_routing.json").write_text(json.dumps(routing))
+        plan_path = phase_a_mod.create_plan_draft(
+            tmp_path,
+            "test_plan",
+            {"request": "test", "summary": "test"},
+        )
+        plan_path.write_text(
+            """# Test Plan
+
+Date: 2026-04-02
+Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
+Phase-A-Lock: UNLOCKED
+
+## Scope
+
+- `mu/tools/executors/phase_a_executor.py`
+
+## Work Items
+
+- Exercise REQUEST_CHANGES / NO_GO loop accounting on a real plan packet.
+
+## Constraints
+
+- No stub packet in this fixture.
+
+## Stop Conditions
+
+- Stop if bridge loop silently succeeds without convergence.
+
+## Acceptance Criteria
+
+- Repeated non-GO decisions either consume rounds or converge honestly.
+
+## Grounding
+
+- Phase A bridge loop silent-success regression fixture.
+""",
+            encoding="utf-8",
+        )
         if monkeypatch is not None:
             monkeypatch.setattr(
                 phase_a_mod, "checkpoint_commit_plan",
@@ -5082,7 +5280,30 @@ class TestPhaseATrackedPacketReuse:
             "# My Plan\n"
             "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)\n"
             "Phase-A-Lock: LOCKED\n"
-            "\nReal content here.\n",
+            "\n"
+            "## Scope\n"
+            "\n"
+            "- `mu/tools/executors/phase_a_executor.py`\n"
+            "\n"
+            "## Work Items\n"
+            "\n"
+            "- Reuse this locked packet without creating a new stub.\n"
+            "\n"
+            "## Constraints\n"
+            "\n"
+            "- No extra packets.\n"
+            "\n"
+            "## Stop Conditions\n"
+            "\n"
+            "- Stop if Phase A rewrites a locked packet path.\n"
+            "\n"
+            "## Acceptance Criteria\n"
+            "\n"
+            "- Locked tracked packet stays canonical.\n"
+            "\n"
+            "## Grounding\n"
+            "\n"
+            "- Tracked packet reuse regression fixture.\n",
             encoding="utf-8",
         )
 
