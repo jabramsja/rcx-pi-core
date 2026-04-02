@@ -556,7 +556,7 @@ class TestCommitExecutorPytestGate:
         mock_client.run_meta_bridge_package = lambda *a, **kw: fake_result
         mock_client.MetaBridgeClientError = Exception
 
-        real_run = commit_mod._run
+        real_run = commit_mod._run  # ANTICHEAT_OK: testing commit gate behavior via private runner helper
         seen_commands: list[list[str]] = []
 
         def intercept_run(args, cwd, check=True, timeout=120, env=None):
@@ -610,7 +610,7 @@ class TestCommitExecutorPytestGate:
             encoding="utf-8",
         )
 
-        result = commit_mod._run_pytest_on_files(
+        result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing targeted pytest helper with duplicate basenames
             repo,
             ["mu/tests/tools/test_dup.py", "tests/test_dup.py"],
         )
@@ -628,7 +628,7 @@ class TestCommitExecutorPytestGate:
             "run",
             return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
         ) as mock_run:
-            result = commit_mod._run_pytest_on_files(
+            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing targeted pytest timeout scaling helper
                 repo,
                 [
                     "mu/tests/tools/test_agent_bridge_supervisor.py",

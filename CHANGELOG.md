@@ -26,6 +26,16 @@ All notable changes to RCX are documented in this file.
 - repo-root `conftest.py` now provides a fallback `mock_routing_record`
   fixture so the mirrored dispatcher suites keep the same Phase B routing stub
   when that targeted gate runs both trees together
+- `mu/tests/tools/test_commit_executor_receipt.py`,
+  `mu/tests/tools/test_executor_dispatch.py`, and
+  `mu/tests/tools/test_agent_bridge_supervisor.py` now mark the intentional
+  private-helper proof lines with `# ANTICHEAT_OK`, so the post-commit
+  `pre-push-fast` hook treats those tests as explicit proof surfaces instead of
+  policy violations
+- the bridge wall-time override regression test now emits an immediate stdout
+  heartbeat before its intentional sleep, so it still proves
+  `RCX_BRIDGE_MAX_TURN_WALL_TIME_S` widening without accidentally depending on
+  the separate zero-output watchdog under xdist startup jitter
 - `mu/tests/tools/test_executor_dispatch.py` and
   `mu/tests/tools/test_agent_bridge_supervisor.py` now lock the stub-scoping,
   bounded packet-review, and interrupt-cleanup regressions surfaced by the live

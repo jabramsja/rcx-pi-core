@@ -4876,7 +4876,7 @@ class TestDispatcherExecutorGroupCleanup:
              patch.object(dispatch_mod.os, "killpg") as mock_killpg, \
              patch.object(dispatch_mod, "terminate_process_tree") as mock_terminate:
             with pytest.raises(subprocess.TimeoutExpired):
-                dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)
+                dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)  # ANTICHEAT_OK: testing direct executor-group timeout cleanup helper
 
         _, kwargs = mock_popen.call_args
         assert kwargs["start_new_session"] is True
@@ -4906,7 +4906,7 @@ class TestDispatcherExecutorGroupCleanup:
              patch.object(dispatch_mod, "terminate_process_tree") as mock_terminate, \
              patch.object(dispatch_mod.signal, "signal", side_effect=fake_signal):
             with pytest.raises(SystemExit) as exc:
-                dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)
+                dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)  # ANTICHEAT_OK: testing direct executor-group signal cleanup helper
 
         assert exc.value.code == 128 + signal.SIGTERM
         mock_terminate.assert_called_with(4321, cwd=Path("."))

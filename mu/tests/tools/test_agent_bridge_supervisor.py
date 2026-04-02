@@ -133,17 +133,17 @@ END_AGENT_ENVELOPE"""
 
 def test_timeout_override_rejects_non_finite_values(monkeypatch) -> None:
     monkeypatch.setenv("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", "nan")
-    assert bridge._resolve_timeout_override("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", 12.0) == 12.0
+    assert bridge._resolve_timeout_override("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", 12.0) == 12.0  # ANTICHEAT_OK: testing timeout override helper rejects NaN input
     monkeypatch.setenv("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", "inf")
-    assert bridge._resolve_timeout_override("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", 12.0) == 12.0
+    assert bridge._resolve_timeout_override("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", 12.0) == 12.0  # ANTICHEAT_OK: testing timeout override helper rejects Inf input
 
 
 def test_zero_output_timeout_is_clamped_below_turn_budget(monkeypatch) -> None:
     monkeypatch.delenv("RCX_BRIDGE_ZERO_OUTPUT_TIMEOUT_S", raising=False)
     monkeypatch.setattr(bridge, "BRIDGE_ZERO_OUTPUT_TIMEOUT_S", 450.0)
-    assert bridge._bridge_zero_output_timeout_s(300.0) == 299.0
-    assert bridge._bridge_zero_output_timeout_s(1.0) == 0.5
-    assert bridge._bridge_zero_output_timeout_s(0.05) is None
+    assert bridge._bridge_zero_output_timeout_s(300.0) == 299.0  # ANTICHEAT_OK: testing zero-output timeout clamp helper under large budget
+    assert bridge._bridge_zero_output_timeout_s(1.0) == 0.5  # ANTICHEAT_OK: testing zero-output timeout clamp helper under small budget
+    assert bridge._bridge_zero_output_timeout_s(0.05) is None  # ANTICHEAT_OK: testing zero-output timeout clamp helper disables impossible budget
 
 
 def test_terminal_dashboard_treats_pre_commit_supervisor_as_commit(monkeypatch) -> None:
@@ -2855,6 +2855,8 @@ def test_bridge_turn_timeout_env_override_allows_longer_reviewer_turn(
         "import sys\n"
         "import time\n"
         "sys.stdin.read()\n"
+        "print('reviewer starting')\n"
+        "sys.stdout.flush()\n"
         "time.sleep(0.2)\n"
         "print('BEGIN_AGENT_ENVELOPE')\n"
         "print('{')\n"

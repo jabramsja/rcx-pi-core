@@ -71,6 +71,15 @@ keeps the actual E5/E6 rerun deferred until the repo baseline is clean again.
     both trees together
   - the targeted pytest timeout now scales with the number of affected test
     files instead of failing at a fixed 120 second ceiling
+- Post-commit hook hardening:
+  - the intentional private-helper proofs in the bridge, dispatcher, and
+    commit-gate tests now carry explicit `# ANTICHEAT_OK` markers so
+    `pre-push-fast` treats them as reviewed proof surfaces instead of policy
+    violations
+  - the bridge wall-time override regression test now emits an immediate stdout
+    heartbeat before its intentional sleep, so it still proves widened
+    reviewer-turn budgets without flaking on the separate zero-output watchdog
+    under xdist startup jitter
 
 ## Live Replay Proof
 
@@ -89,12 +98,26 @@ That stop is correct. It means the clean rerun must restart from a fresh
 baseline after this slice lands, rather than pretending E5/E6 can continue from
 a worktree already contaminated by new control-surface edits.
 
+The first closeout rerun then surfaced two more proof-surface defects after the
+local follow-up commit existed:
+
+1. `pre-push-fast` still failed on intentional private-helper tests that lacked
+   explicit `# ANTICHEAT_OK` markers.
+2. the bridge wall-time override regression test could still fail late in the
+   full xdist suite because it unintentionally relied on the zero-output
+   watchdog not firing before the reviewer printed anything.
+
+Both defects are now fixed in the test surface, and the full `pre-push-fast`
+rerun passes.
+
 ## Validation
 
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py -q --tb=short`
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_agent_bridge_supervisor.py -q --tb=short`
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_commit_executor_receipt.py -q --tb=short`
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_agent_bridge_supervisor.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py tests/tools/test_commit_executor_receipt.py tests/tools/test_executor_dispatch.py -q --tb=short`
+- `PYTHONHASHSEED=0 python3 -m pytest tests/tools/test_agent_bridge_supervisor.py -q --tb=short -k bridge_turn_timeout_env_override_allows_longer_reviewer_turn`
+- `./tools/hooks/pre-push-fast`
 - `./tools/checks/check_docs_consistency.sh`
 - `./tools/session/founder_session_guard.sh closeout --run`
 - `./tools/session/founder_session_attest.sh closeout`
