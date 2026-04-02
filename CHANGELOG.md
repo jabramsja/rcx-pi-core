@@ -4,6 +4,12 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-04-02
 
+### Deferred Consolidation Phase B Fail-Closed Hardening
+
+- `phase_b_executor.py` now applies the critical/high severity floor before governance/doc-path downgrades, so `POLICY_BOUND` / `DOC_ACCURACY` findings on reports or tracker files can no longer smuggle high-severity bridge feedback into the non-blocking bucket
+- `phase_b_executor.py` `_stage_files()` now fails closed when `git add` rejects a path instead of retrying with `git add -f`, so Phase B cannot force-stage ignored files
+- `mu/tests/tools/test_phase_b_executor.py` now locks the severity-floor ordering, the ignored-file staging rejection, normal staging success, and the previously added job-scoped raw-reviewer fallback
+
 ### Deferred Consolidation Control-Surface Fail-Closed Hardening
 
 - `phase_b_executor.py` now reloads reviewer raw transcripts referenced by rendered bridge markdown before classifying findings, so explicit reviewer fields like `class` and `disposition` survive Phase B blocking/non-blocking decisions instead of being lost in rendered-summary fallback

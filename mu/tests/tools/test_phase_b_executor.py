@@ -61,6 +61,12 @@ def _make_mock_impl():
     return mock_impl
 
 
+def _init_git_repo(repo: Path) -> None:
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+
+
 class TestBuildImplementationPrompt:
     """Test that the implementer prompt is structured correctly."""
 
@@ -1537,12 +1543,12 @@ class TestGovernanceDowngrade:
     A POLICY_BOUND finding on actual code stays blocking.
     """
 
-    def test_policy_bound_on_report_path_is_non_blocking(self):
-        """POLICY_BOUND on reports/ is governance — non-blocking."""
+    def test_policy_bound_on_report_path_is_non_blocking_below_severity_floor(self):
+        """POLICY_BOUND on reports/ stays non-blocking only below high severity."""
         findings = [{
             "title": "Plan file has unchecked boxes",
             "class": "POLICY_BOUND",
-            "severity": "high",
+            "severity": "medium",
             "file": "reports/control_plane/wave1a_pipeline_validation_2026-03-31.md",
         }]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
@@ -1561,12 +1567,12 @@ class TestGovernanceDowngrade:
         assert len(blocking) == 1, "POLICY_BOUND on code file must stay blocking"
         assert len(non_blocking) == 0
 
-    def test_doc_accuracy_on_tasks_md_is_non_blocking(self):
-        """DOC_ACCURACY on TASKS.md is governance — non-blocking."""
+    def test_doc_accuracy_on_tasks_md_is_non_blocking_below_severity_floor(self):
+        """DOC_ACCURACY on TASKS.md stays non-blocking only below high severity."""
         findings = [{
             "title": "TASKS.md missing tracker sync note",
             "class": "DOC_ACCURACY",
-            "severity": "high",
+            "severity": "medium",
             "file": "TASKS.md",
         }]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
@@ -1602,12 +1608,64 @@ class TestGovernanceDowngrade:
         disp, reason = pb_mod._disposition_for_finding({  # ANTICHEAT_OK: testing internal executor functions
             "title": "Stale reference",
             "class": "POLICY_BOUND",
-            "severity": "high",
+            "severity": "medium",
             "file": "reports/deferred/README.md",
         })
         assert disp == "non_blocking"
         assert "governance" in reason.lower()
         assert "reports/deferred/README.md" in reason
+
+    @pytest.mark.parametrize("severity", ["high", "critical"])
+    def test_governance_path_cannot_downgrade_severity_floor(self, severity):
+        """High/critical governance findings stay blocking despite report paths."""
+        findings = [{
+            "title": "Critical governance downgrade",
+            "class": "POLICY_BOUND",
+            "severity": severity,
+            "file": "reports/control_plane/example.md",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 1
+        assert len(non_blocking) == 0
+
+
+class TestStageFiles:
+    """Staging must respect repo ignore rules and fail closed."""
+
+    def test_stage_files_stages_normal_file(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / "ok.txt").write_text("x", encoding="utf-8")
+
+        assert pb_mod._stage_files(repo, ["ok.txt"]) is True  # ANTICHEAT_OK: testing internal executor functions
+
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.splitlines()
+        assert staged == ["ok.txt"]
+
+    def test_stage_files_rejects_ignored_file_without_force_add(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+        (repo / "ignored.txt").write_text("x", encoding="utf-8")
+
+        assert pb_mod._stage_files(repo, ["ignored.txt"]) is False  # ANTICHEAT_OK: testing internal executor functions
+
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.splitlines()
+        assert staged == []
 
 
 class TestHighSeverityDetailHeuristic:
@@ -1973,6 +2031,7 @@ class TestOnlyBlockingToImplementer:
 
         mock_impl = _make_mock_impl()
         bridge_calls = [0]
+        first_job_id = [""]
 
         # Mixed findings: one blocking, one non-blocking
         envelope = json.dumps({
@@ -1992,17 +2051,23 @@ class TestOnlyBlockingToImplementer:
         def bridge_side(*a, **kw):
             bridge_calls[0] += 1
             if bridge_calls[0] == 1:
+                first_job_id[0] = kw["job_id"]
                 return {"exit_code": 0, "stdout": "REQUEST_CHANGES\n", "stderr": "",
-                        "decision": "REQUEST_CHANGES", "job_id": "j1"}
+                        "decision": "REQUEST_CHANGES", "job_id": first_job_id[0]}
             return {"exit_code": 0, "stdout": "GO\n", "stderr": "",
-                    "decision": "GO", "job_id": "j2"}
+                    "decision": "GO", "job_id": kw["job_id"]}
+
+        def read_render_side_effect(_repo_root, current_job_id):
+            if current_job_id == first_job_id[0]:
+                return render_text
+            return ""
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
              patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
-             patch.object(pb_mod, "_read_bridge_render", side_effect=[render_text, ""]), \
+             patch.object(pb_mod, "_read_bridge_render", side_effect=read_render_side_effect), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
              patch.object(pb_mod, "_run_pytest_on_files", return_value={"exit_code": 0, "passed": True, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
@@ -2082,6 +2147,106 @@ class TestOnlyBlockingToImplementer:
 
         assert mock_impl.invoke_implementer.call_count >= 2
         assert result.get("deferred_packet_path") is None
+
+    def test_stale_render_still_uses_job_raw_reviewer_findings(self, tmp_path):
+        """Phase B must prefer raw reviewer files by job id when the render is stale."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        bridge_calls = [0]
+        first_job_id = [""]
+        stale_render = [""]
+
+        def bridge_side(*args, **kwargs):
+            bridge_calls[0] += 1
+            if bridge_calls[0] == 1:
+                first_job_id[0] = kwargs["job_id"]
+                raw_dir = repo / ".agent_bus" / "raw" / first_job_id[0]
+                raw_dir.mkdir(parents=True, exist_ok=True)
+                reader_path = raw_dir / f"{first_job_id[0]}--r1-reader-11111111.txt"
+                reviewer_path = raw_dir / f"{first_job_id[0]}--r1-reviewer-22222222.txt"
+                reader_path.write_text(
+                    "BEGIN_AGENT_ENVELOPE\n"
+                    '{"findings": []}\n'
+                    "END_AGENT_ENVELOPE\n",
+                    encoding="utf-8",
+                )
+                reviewer_envelope = json.dumps({
+                    "job_id": first_job_id[0],
+                    "turn_id": f"{first_job_id[0]}--r1-reviewer-22222222",
+                    "agent_role": "reviewer",
+                    "decision": "REQUEST_CHANGES",
+                    "summary": "real blocker present",
+                    "touched_files_claimed": [],
+                    "validations_claimed": [],
+                    "request_for_next_agent": "",
+                    "findings": [
+                        {
+                            "title": "Real blocker from raw reviewer",
+                            "class": "POLICY_BOUND",
+                            "severity": "medium",
+                            "file": "mu/tools/observability/_pane_prci.sh",
+                            "disposition": "blocking",
+                            "status": "persisting",
+                        }
+                    ],
+                })
+                reviewer_path.write_text(
+                    "noise\nBEGIN_AGENT_ENVELOPE\n"
+                    f"{reviewer_envelope}\n"
+                    "END_AGENT_ENVELOPE\n",
+                    encoding="utf-8",
+                )
+                stale_render[0] = (
+                    f"# Bridge Job {first_job_id[0]}\n\n"
+                    "### reader\n"
+                    "- Status: completed\n"
+                    "- Decision: SYNTHETIC\n"
+                    f"- Raw output: {reader_path}\n"
+                )
+                return {
+                    "exit_code": 1,
+                    "stdout": "REQUEST_CHANGES\n",
+                    "stderr": "",
+                    "decision": "REQUEST_CHANGES",
+                    "job_id": first_job_id[0],
+                }
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": kwargs["job_id"],
+            }
+
+        def read_render_side_effect(_repo_root, current_job_id):
+            if current_job_id == first_job_id[0]:
+                return stale_render[0]
+            return ""
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_read_bridge_render", side_effect=read_render_side_effect), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={"exit_code": 0, "passed": True, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert mock_impl.invoke_implementer.call_count >= 2
+        fix_prompt = mock_impl.build_implementation_prompt.call_args_list[-1][0][0]
+        assert "Real blocker from raw reviewer" in fix_prompt
+        assert "Malformed AGENT_ENVELOPE" not in fix_prompt
 
     def test_go_low_doc_accuracy_crash_title_does_not_fail_closed(self, tmp_path):
         """A GO transcript with only low DOC_ACCURACY crash-wording findings remains non-blocking."""
