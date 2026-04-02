@@ -222,14 +222,23 @@ def _run_pytest_on_files(
     """Run pytest on specific test files. Returns exit_code and output."""
     if not test_files:
         return {"exit_code": 0, "stdout": "", "stderr": "", "passed": True}
+    effective_timeout = max(timeout, 45 * len(test_files))
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pytest", "-x", "--tb=short", *test_files],
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-x",
+                "--tb=short",
+                "--import-mode=importlib",
+                *test_files,
+            ],
             cwd=repo_root,
             capture_output=True,
             text=True,
             check=False,
-            timeout=timeout,
+            timeout=effective_timeout,
             env={**os.environ, "PYTHONHASHSEED": "0"},
         )
         return {

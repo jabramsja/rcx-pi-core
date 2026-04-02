@@ -307,6 +307,8 @@ Required review scope:
 
 Packet-review discipline:
 - If the packet is obviously a stub or placeholder, reject it from the packet text plus `TASKS.md` evidence alone.
+- Search `TASKS.md` for the exact task block or tracked-packet reference instead of reading unrelated sections when targeted lookup is enough.
+- For an obvious stub, do NOT open governing packets, prior replay/hardening notes, or downstream implementation files before issuing `REQUEST_CHANGES`.
 - Do NOT broaden into adjacent repo sweeps, architecture reviews, or control-surface audits unless the packet itself makes a concrete claim that requires that evidence.
 - Do NOT infer extra scope merely because the packet file is changed.
 - Stay repo-local; do not browse the web for packet review.

@@ -2137,6 +2137,8 @@ def test_no_diff_packet_review_omits_diff_without_design_marker(tmp_path: Path) 
     assert "THIS IS A PACKET REVIEW, NOT A BROAD REPO RED-TEAM." in prompt
     assert "Do NOT broaden into adjacent repo sweeps" in prompt
     assert "If the packet is obviously a stub or placeholder, reject it from the packet text plus `TASKS.md` evidence alone." in prompt
+    assert "Search `TASKS.md` for the exact task block or tracked-packet reference" in prompt
+    assert "do NOT open governing packets, prior replay/hardening notes, or downstream implementation files" in prompt
 
 
 # ---------------------------------------------------------------------------

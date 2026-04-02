@@ -743,6 +743,26 @@ def _run_executor_in_group(
         text=True,
         start_new_session=True,
     )
+    previous_handlers = {
+        signum: signal.getsignal(signum)
+        for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+
+    def _cleanup_for_signal(signum: int, _frame: Any) -> None:
+        try:
+            terminate_process_tree(proc.pid, cwd=cwd)
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=1)
+        except Exception:
+            pass
+        if signum == signal.SIGINT:
+            raise KeyboardInterrupt()
+        raise SystemExit(128 + signum)
+
+    for signum in previous_handlers:
+        signal.signal(signum, _cleanup_for_signal)
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -761,6 +781,19 @@ def _run_executor_in_group(
             pass
         proc.wait()
         raise
+    except BaseException:
+        try:
+            terminate_process_tree(proc.pid, cwd=cwd)
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=1)
+        except Exception:
+            pass
+        raise
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
     return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
 
 

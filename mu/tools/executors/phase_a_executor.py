@@ -582,11 +582,14 @@ def run_bridge_design_review(
         "A plan with only routing metadata, supervisor request echoes, or empty sections\n"
         "is NOT a plan — it is a stub. Reject stubs with REQUEST_CHANGES.\n\n"
         "## Review Protocol\n\n"
-        "- Read TASKS.md for the current phase description and authorization\n"
-        "- Read the governing tracked packet for sequence and supporting inputs\n"
+        "- Read only the exact TASKS.md block needed to confirm current-task authorization\n"
+        "- Read the governing tracked packet only if the plan is not an obvious stub and "
+        "you need sequence/supporting input to verify a concrete plan claim\n"
         "- Treat this as a plan-packet review, not a broad repo red-team pass\n"
         "- If the packet is obviously a stub, reject it immediately from the packet "
         "and TASKS.md evidence; do not spend review budget on unrelated repo sweeps\n"
+        "- For an obvious stub, do NOT open governing packets, prior replay notes, "
+        "or downstream implementation files before issuing REQUEST_CHANGES\n"
         "- Verify plan work items are grounded in actual codebase state using only "
         "the plan, TASKS.md, and files explicitly referenced by the plan or task\n"
         "- Use repo-local evidence only. Do not browse the web or query external\n"
@@ -1181,12 +1184,23 @@ def run_phase_a(
                         current_plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
                         plan_hash_before = hash(current_plan_content)
                         blocking_text = _format_phase_a_blocking_findings(blocking)
+                        stub_rewrite = _plan_is_placeholder_stub(current_plan_content)
                         _task_id = scope.get("task_id", "")
                         if not _task_id:
                             for line in current_plan_content.splitlines():
                                 if line.strip().startswith("Task:"):
                                     _task_id = line.split("Task:", 1)[1].strip()
                                     break
+                        stub_rewrite_guidance = ""
+                        if stub_rewrite:
+                            stub_rewrite_guidance = (
+                                "Because the current packet is still a stub, do NOT inspect downstream "
+                                "implementation files just to decide whether work items are already "
+                                "landed. Use the cited TASKS.md lines, governing packet, and "
+                                "blocking-finding evidence to draft the first real plan. Stop after "
+                                "rewriting the packet with the required Phase A sections; do NOT try "
+                                "to solve the underlying implementation in this turn.\n\n"
+                            )
                         impl_prompt = (
                             f"You are updating a Phase A plan at `{rel_plan_path}`.\n\n"
                             f"IMPORTANT: Write ALL changes to `{rel_plan_path}` ONLY. "
@@ -1205,6 +1219,7 @@ def run_phase_a(
                             "implemented in current code, remove it from pending work items and "
                             "acceptance criteria instead of re-listing it as unresolved.\n"
                             "Prefer current code truth over stale packet wording when they conflict.\n\n"
+                            f"{stub_rewrite_guidance}"
                             "Do NOT inspect unrelated dirty files, `git diff`, `git status`, "
                             "or unrelated executor/test changes. Do NOT widen scope beyond the "
                             "blocking findings. Search TASKS.md for the exact task id instead of "

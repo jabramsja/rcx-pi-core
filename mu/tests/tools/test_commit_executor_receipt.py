@@ -586,3 +586,58 @@ class TestCommitExecutorPytestGate:
         assert "git_commit" not in result.get("steps_completed", [])
         assert mock_pytest.call_args[0][1] == ["tests/test_file.py"]
         assert not any(cmd[:2] == ["git", "commit"] for cmd in seen_commands)
+
+    def test_run_pytest_on_files_handles_duplicate_basenames(self, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / "mu" / "tests" / "tools").mkdir(parents=True)
+        (repo / "tests").mkdir(parents=True)
+        (repo / "mu" / "tests" / "tools" / "test_dup.py").write_text(
+            "import pytest\n\n"
+            "@pytest.fixture\n"
+            "def foo():\n"
+            "    return 1\n\n"
+            "def test_one(foo):\n"
+            "    assert foo == 1\n",
+            encoding="utf-8",
+        )
+        (repo / "tests" / "test_dup.py").write_text(
+            "import pytest\n\n"
+            "@pytest.fixture\n"
+            "def bar():\n"
+            "    return 2\n\n"
+            "def test_two(bar):\n"
+            "    assert bar == 2\n",
+            encoding="utf-8",
+        )
+
+        result = commit_mod._run_pytest_on_files(
+            repo,
+            ["mu/tests/tools/test_dup.py", "tests/test_dup.py"],
+        )
+
+        assert result["passed"] is True, result
+
+    def test_run_pytest_on_files_scales_timeout_with_file_count(self, tmp_path):
+        from types import SimpleNamespace
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        with patch.object(
+            commit_mod.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ) as mock_run:
+            result = commit_mod._run_pytest_on_files(
+                repo,
+                [
+                    "mu/tests/tools/test_agent_bridge_supervisor.py",
+                    "mu/tests/tools/test_executor_dispatch.py",
+                    "tests/tools/test_executor_dispatch.py",
+                    "mu/tests/tools/test_commit_executor_receipt.py",
+                    "tests/test_extra.py",
+                ],
+            )
+
+        assert result["passed"] is True
+        assert mock_run.call_args.kwargs["timeout"] == 225

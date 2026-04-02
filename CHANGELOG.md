@@ -4,6 +4,34 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-04-02
 
+### Deferred Clean Replay Hardening
+
+- `phase_a_executor.py` now gives stub rewrites an explicit packet-scoped mode:
+  while the current packet is still a placeholder, the implementer must use the
+  cited `TASKS.md` and governing-plan evidence to rewrite the packet first
+  instead of spelunking downstream implementation files
+- `bridge_supervisor.py` and the Phase A bridge task now keep obvious packet
+  reviews narrowly scoped to the exact authorization block plus packet evidence,
+  instead of broadening into governing packets, prior replay notes, or
+  downstream implementation files before issuing `REQUEST_CHANGES`
+- `executor_dispatch.py` now reaps the child executor process tree on direct
+  `SIGINT` / `SIGTERM` or other abrupt interruption, preventing orphaned
+  Phase A / bridge processes from leaving stale bridge locks across replays
+- `commit_executor.py` now runs targeted pytest gates with
+  `--import-mode=importlib`, so mirrored legacy and modern test files with the
+  same basename no longer fail during collection inside the commit gate
+- `commit_executor.py` now scales the targeted pytest timeout with the number
+  of affected files, so the mirrored control-surface gate no longer times out
+  at the old fixed 120 second ceiling
+- repo-root `conftest.py` now provides a fallback `mock_routing_record`
+  fixture so the mirrored dispatcher suites keep the same Phase B routing stub
+  when that targeted gate runs both trees together
+- `mu/tests/tools/test_executor_dispatch.py` and
+  `mu/tests/tools/test_agent_bridge_supervisor.py` now lock the stub-scoping,
+  bounded packet-review, and interrupt-cleanup regressions surfaced by the live
+  clean E5/E6 replay, while `mu/tests/tools/test_commit_executor_receipt.py`
+  locks the duplicate-basename targeted-pytest regression
+
 ### Deferred Replay Hardening
 
 - `run_review.py`, `shared_agent_utils.py`, `_contract_redteam.md`, and `validate_agent_compliance.py` now force in-band self-contained review output, inject the active repo root into review prompts, reject off-checkout redirect patterns, and require the `CHECKED` / `NOT_CHECKED` / `VERDICT` scaffold before a hard-gate agent result is accepted

@@ -611,7 +611,7 @@ class TestPhaseAScopeExtraction:
 class TestPhaseABridgeLoopFailClosed:
     """Phase A bridge loop fails closed on QUESTION and unrecognized decisions."""
 
-    def _setup_phase_a(self, tmp_path, monkeypatch=None):
+    def _setup_phase_a(self, tmp_path, monkeypatch=None, *, placeholder_stub: bool = False):
         """Create minimal structure for run_phase_a."""
         # Create plan directory
         plan_dir = tmp_path / "reports" / "control_plane"
@@ -629,8 +629,9 @@ class TestPhaseABridgeLoopFailClosed:
             "test_plan",
             {"request": "test", "summary": "test"},
         )
-        plan_path.write_text(
-            """# Test Plan
+        if not placeholder_stub:
+            plan_path.write_text(
+                """# Test Plan
 
 Date: 2026-04-02
 Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
@@ -660,8 +661,8 @@ Phase-A-Lock: UNLOCKED
 
 - Phase A bridge loop regression fixture.
 """,
-            encoding="utf-8",
-        )
+                encoding="utf-8",
+            )
         # Mock checkpoint commit (tmp_path is not a git repo)
         if monkeypatch is not None:
             monkeypatch.setattr(
@@ -813,7 +814,7 @@ Phase-A-Lock: UNLOCKED
 
     def test_phase_a_implementer_prompt_stays_packet_scoped(self, tmp_path, monkeypatch):
         """Phase A implementer prompt must forbid unrelated dirty-diff spelunking."""
-        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch, placeholder_stub=True)
         captured: dict[str, str] = {}
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
@@ -855,6 +856,9 @@ Phase-A-Lock: UNLOCKED
         assert "files, lines, and docs explicitly cited in the blocking findings above" in prompt
         assert "Prefer current code truth over stale packet wording when they conflict." in prompt
         assert "If a blocking finding proves a work item is already implemented in current code" in prompt
+        assert "Because the current packet is still a stub" in prompt
+        assert "do NOT inspect downstream implementation files" in prompt
+        assert "do NOT try to solve the underlying implementation in this turn" in prompt
         assert "Reproduce with: nl -ba reports/control_plane/test_plan_2026-04-02.md" in prompt
         assert "Evidence result: The packet is still a stub" in prompt
 
@@ -1179,6 +1183,9 @@ END_AGENT_ENVELOPE"""
         task_text = (tmp_path / ".scratch" / "phase_a_bridge_r1.md").read_text(encoding="utf-8")
         assert "Use repo-local evidence only." in task_text
         assert "Do not browse the web" in task_text
+        assert "Read only the exact TASKS.md block needed to confirm current-task authorization" in task_text
+        assert "Read the governing tracked packet only if the plan is not an obvious stub" in task_text
+        assert "do NOT open governing packets, prior replay notes, or downstream implementation files" in task_text
         assert result["exit_code"] == 0
 
     def test_bridge_design_review_uses_configured_reviewer(self, tmp_path):
@@ -4876,6 +4883,34 @@ class TestDispatcherExecutorGroupCleanup:
         mock_killpg.assert_called_once_with(4321, signal.SIGTERM)
         mock_terminate.assert_called_once_with(4321, cwd=Path("."))
         mock_proc.kill.assert_called_once()
+
+    def test_interrupt_calls_terminate_process_tree(self):
+        """Direct dispatcher interruption must reap the child executor tree."""
+        mock_proc = MagicMock()
+        mock_proc.pid = 4321
+        installed_handlers: dict[int, Any] = {}
+
+        def fake_signal(signum, handler):
+            previous = installed_handlers.get(signum, signal.SIG_DFL)
+            installed_handlers[signum] = handler
+            return previous
+
+        def fake_communicate(timeout):
+            installed_handlers[signal.SIGTERM](signal.SIGTERM, None)
+            raise AssertionError("signal handler should not return")
+
+        mock_proc.communicate.side_effect = fake_communicate
+        mock_proc.wait.return_value = None
+
+        with patch.object(dispatch_mod.subprocess, "Popen", return_value=mock_proc), \
+             patch.object(dispatch_mod, "terminate_process_tree") as mock_terminate, \
+             patch.object(dispatch_mod.signal, "signal", side_effect=fake_signal):
+            with pytest.raises(SystemExit) as exc:
+                dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)
+
+        assert exc.value.code == 128 + signal.SIGTERM
+        mock_terminate.assert_called_with(4321, cwd=Path("."))
+        mock_proc.wait.assert_called()
 
 
 # --- Phase B handoff new schema test ---
