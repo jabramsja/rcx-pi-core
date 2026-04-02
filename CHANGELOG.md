@@ -36,6 +36,11 @@ All notable changes to RCX are documented in this file.
   heartbeat before its intentional sleep, so it still proves
   `RCX_BRIDGE_MAX_TURN_WALL_TIME_S` widening without accidentally depending on
   the separate zero-output watchdog under xdist startup jitter
+- `mu/tests/tools/test_run_review.py` now injects a sentinel
+  `ClaudeAgentOptions` class before asserting `build_query_options()`
+  permission-mode wiring, matching the already-hardened legacy
+  `tests/tools/test_run_review.py` mirror so the proof no longer depends on
+  `claude_agent_sdk` being installed in the test environment
 - `mu/tests/tools/test_executor_dispatch.py` and
   `mu/tests/tools/test_agent_bridge_supervisor.py` now lock the stub-scoping,
   bounded packet-review, and interrupt-cleanup regressions surfaced by the live

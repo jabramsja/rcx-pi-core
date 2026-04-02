@@ -372,6 +372,7 @@ def test_build_query_options_uses_plan_permission_mode(monkeypatch):
         return object()
 
     monkeypatch.setattr(rr_mod, "build_sdk_options", fake_build_sdk_options)
+    monkeypatch.setattr(rr_mod, "ClaudeAgentOptions", object)
     agent_def = types.SimpleNamespace(model="sonnet")
 
     rr_mod.build_query_options(agent_def, max_turns=7)

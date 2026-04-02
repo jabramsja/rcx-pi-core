@@ -39,6 +39,7 @@ keeps the actual E5/E6 rerun deferred until the repo baseline is clean again.
 - `mu/tests/tools/test_agent_bridge_supervisor.py`
 - `mu/tests/tools/test_commit_executor_receipt.py`
 - `mu/tests/tools/test_executor_dispatch.py`
+- `mu/tests/tools/test_run_review.py`
 
 ## What Landed
 
@@ -80,6 +81,15 @@ keeps the actual E5/E6 rerun deferred until the repo baseline is clean again.
     heartbeat before its intentional sleep, so it still proves widened
     reviewer-turn budgets without flaking on the separate zero-output watchdog
     under xdist startup jitter
+- CI environment hardening:
+  - this packet stages the missing `mu/tests/tools/test_run_review.py`
+    sentinel for the `run_review` permission-mode regression proof
+  - the legacy `tests/tools/test_run_review.py` mirror already carried the same
+    guard in repo state, so the proof surface is aligned again without
+    overstating this packet's staged scope
+  - together that keeps the proof focused on `permission_mode="plan"` wiring
+    instead of accidentally depending on `claude_agent_sdk` being installed in
+    the test environment
 
 ## Live Replay Proof
 
@@ -110,6 +120,18 @@ local follow-up commit existed:
 Both defects are now fixed in the test surface, and the full `pre-push-fast`
 rerun passes.
 
+The next pushed follow-up then exposed one more environment-dependent proof
+surface in GitHub Actions:
+
+1. `tests/tools/test_run_review.py::test_build_query_options_uses_plan_permission_mode`
+   passed locally only because `claude_agent_sdk` happened to be installed.
+2. CI runs that same proof without the SDK and correctly surfaced that the test
+   was not isolating the behavior it claimed to verify.
+
+This packet stages the missing `mu/tests/...` half of that proof, while the
+legacy `tests/...` mirror already matched in repo truth, so the CI environment
+no longer changes the result.
+
 ## Validation
 
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py -q --tb=short`
@@ -117,6 +139,7 @@ rerun passes.
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_commit_executor_receipt.py -q --tb=short`
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_agent_bridge_supervisor.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py tests/tools/test_commit_executor_receipt.py tests/tools/test_executor_dispatch.py -q --tb=short`
 - `PYTHONHASHSEED=0 python3 -m pytest tests/tools/test_agent_bridge_supervisor.py -q --tb=short -k bridge_turn_timeout_env_override_allows_longer_reviewer_turn`
+- `PYTHONHASHSEED=0 python3 -m pytest tests/tools/test_run_review.py mu/tests/tools/test_run_review.py -q --tb=short`
 - `./tools/hooks/pre-push-fast`
 - `./tools/checks/check_docs_consistency.sh`
 - `./tools/session/founder_session_guard.sh closeout --run`
