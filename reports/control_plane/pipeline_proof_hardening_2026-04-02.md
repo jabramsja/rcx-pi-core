@@ -1,7 +1,7 @@
 # Pipeline Proof Hardening
 
 Date: 2026-04-02
-Status: ACTIVE
+Status: CLOSED (implemented in `57e242f4`)
 Phase-A-Lock: UNLOCKED
 Task: [PIPELINE-PROOF-HARDENING]
 Purpose: Harden the live Phase A/bridge/recovery proof surfaces so packet review stays bounded, Codex reviewer output is parsed correctly, and routed recovery proof does not collapse on wrapper noise.
@@ -71,3 +71,4 @@ Purpose: Harden the live Phase A/bridge/recovery proof surfaces so packet review
 - **Supporting proof packet:** `reports/control_plane/recovery_tier3_recovery_probe_2026-04-02.md`.
 - **Closed packet synced by this wave:** `reports/control_plane/recovery_tier3_wiring_2026-04-01.md`.
 - **Parent context:** `[PIPELINE-RECOVERY]` remains open only for the learning-store follow-on.
+- **Implementation commit:** `57e242f4` (`fix: harden phase-a packet review and recovery proofs`).
