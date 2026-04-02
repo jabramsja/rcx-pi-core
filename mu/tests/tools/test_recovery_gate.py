@@ -29,6 +29,11 @@ class TestClassifyFailure:
             {"status": "needs_phase_b", "step": "phase_b"}
         ) == FailureClass.NEEDS_PHASE_B
 
+    def test_needs_phase_b_sequence_does_not_crash(self):
+        assert rg_mod.classify_failure(
+            {"status": ["needs_phase_b"], "step": "phase_b"}
+        ) == FailureClass.NEEDS_PHASE_B
+
     def test_needs_phase_b_in_stdout_status_line(self):
         assert rg_mod.classify_failure(
             {"status": "failed", "stdout": "[phase-b] Status: needs_phase_b\n", "stderr": ""}
@@ -880,6 +885,14 @@ class TestDangerousCommandDetection:
     def test_safe_allowed(self, cmd):
         assert rg_mod._is_dangerous_command(cmd) is False  # ANTICHEAT_OK
 
+    @pytest.mark.parametrize("cmd", [
+        "echo Z2l0IHB1c2g= | base64 -d | sh",
+        "git config alias.x \"push --force\" && git x",
+        "X=push; git $X",
+    ])
+    def test_obfuscated_git_commands_blocked(self, cmd):
+        assert rg_mod._is_dangerous_command(cmd) is True  # ANTICHEAT_OK
+
 
 class TestApplyEditRepoEscape:
     def test_edit_within_repo(self, tmp_path):
@@ -923,6 +936,26 @@ class TestApplyEditRepoEscape:
         )
         assert ok is False
         assert "sensitive path blocked" in msg
+
+    def test_sensitive_hook_symlink_edit_blocked(self, tmp_path):
+        git_hooks = tmp_path / ".git" / "hooks"
+        git_hooks.mkdir(parents=True)
+        target = tmp_path / "mu" / "tools" / "hooks"
+        target.mkdir(parents=True)
+        target_file = target / "pre-commit-doc-check"
+        target_file.write_text("old")
+        (git_hooks / "pre-commit").symlink_to(target_file)
+        ok, msg = rg_mod._apply_edit(  # ANTICHEAT_OK
+            {
+                "file_path": ".git/hooks/pre-commit",
+                "old_text": "old",
+                "new_text": "new",
+            },
+            tmp_path,
+        )
+        assert ok is False
+        assert "sensitive path blocked" in msg
+        assert target_file.read_text() == "old"
 
 
 class TestRecoveryLoopDurableLogging:

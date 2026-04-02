@@ -91,11 +91,18 @@ def tier_for(fc: FailureClass) -> int:
 
 def classify_failure(result: dict[str, Any]) -> FailureClass:
     """Classify an executor failure result into a FailureClass."""
-    status = result.get("status", "")
+    outer_statuses = _normalize_status_values(result.get("status", ""))
+    status = outer_statuses[0] if outer_statuses else ""
     stderr = result.get("stderr", "")
     exit_code = result.get("exit_code")
     step = result.get("step", "")
     stdout = result.get("stdout", "")
+    if not isinstance(stderr, str):
+        stderr = ""
+    if not isinstance(step, str):
+        step = ""
+    if not isinstance(stdout, str):
+        stdout = ""
     embedded = _extract_embedded_result(stdout)
     embedded_statuses = _extract_embedded_statuses(stdout)
     embedded_status = embedded.get("status")
@@ -109,11 +116,15 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
 
     if status == FailureClass.NEEDS_PHASE_B.value:
         return FailureClass.NEEDS_PHASE_B
+    if FailureClass.NEEDS_PHASE_B.value in outer_statuses:
+        return FailureClass.NEEDS_PHASE_B
     if FailureClass.NEEDS_PHASE_B.value in embedded_statuses:
         return FailureClass.NEEDS_PHASE_B
 
     # Tier 4: terminal policy outcomes (check first, never recover)
     if status in _TERMINAL_STATUSES:
+        return FailureClass.TERMINAL_POLICY
+    if set(outer_statuses) & _TERMINAL_STATUSES:
         return FailureClass.TERMINAL_POLICY
     if embedded_statuses & _TERMINAL_STATUSES:
         return FailureClass.TERMINAL_POLICY
@@ -178,6 +189,20 @@ def _extract_embedded_result(stdout: str) -> dict[str, Any]:
         except (json.JSONDecodeError, ValueError):
             continue
     return {}
+
+
+def _normalize_status_values(value: Any) -> list[str]:
+    """Return string status values without throwing on malformed executor data."""
+    if isinstance(value, str):
+        normalized = value.strip()
+        return [normalized] if normalized else []
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [
+            item.strip()
+            for item in value
+            if isinstance(item, str) and item.strip()
+        ]
+    return []
 
 
 def _extract_embedded_statuses(stdout: str) -> set[str]:
@@ -516,6 +541,11 @@ _DANGEROUS_COMMAND_PATTERNS = (
         r"\bgit\s+restore\b"
         r"(?=[^\n]*\s--source(?:=|\s)|[^\n]*\s--staged(?:=|\s|$))"
     ),
+    re.compile(r"\|\s*(?:sh|bash)\b"),
+    re.compile(r"\bbase64\b"),
+    re.compile(r"\beval\b"),
+    re.compile(r"\bgit\s+config\b[^\n]*\balias\."),
+    re.compile(r"\bgit\s+\$"),
 )
 _SENSITIVE_RELATIVE_PATHS = (
     ".git/config",
@@ -552,10 +582,17 @@ def _touches_sensitive_path_text(text: str) -> bool:
 
 
 def _is_sensitive_repo_path(relative_path: str) -> bool:
-    normalized = relative_path.replace("\\", "/").lower()
-    while normalized.startswith("./"):
-        normalized = normalized[2:]
-    normalized = normalized.lstrip("/")
+    normalized = relative_path.replace("\\", "/").strip().lower()
+    parts: list[str] = []
+    for part in normalized.split("/"):
+        if not part or part == ".":
+            continue
+        if part == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(part)
+    normalized = "/".join(parts)
     return any(
         normalized == denied or normalized.startswith(f"{denied}/")
         for denied in _SENSITIVE_RELATIVE_PATHS
@@ -696,6 +733,13 @@ def _apply_edit(edit: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
     Safety: file_path must resolve to within repo_root (no symlink escape).
     """
     raw_path = edit.get("file_path", "")
+    if not isinstance(raw_path, str):
+        return False, "file_path must be a string"
+    raw_path = raw_path.strip()
+    if not raw_path:
+        return False, "file_path is required"
+    if _is_sensitive_repo_path(raw_path):
+        return False, f"sensitive path blocked: {raw_path}"
     file_path = (repo_root / raw_path).resolve()
     repo_resolved = repo_root.resolve()
     if not str(file_path).startswith(str(repo_resolved) + os.sep) and file_path != repo_resolved:
