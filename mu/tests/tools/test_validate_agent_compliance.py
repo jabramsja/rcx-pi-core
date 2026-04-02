@@ -1029,10 +1029,10 @@ class TestHookExecutionAgainstMalformedPayloads:
         payload = json.dumps({"agent_transcript_path": "/tmp/fake.jsonl"})
         stdout, exit_code = self._run_hook(hook_path, payload)
         assert exit_code == 0, "Hook should exit 0 (decision is in JSON)"
-        if stdout:
-            decision = json.loads(stdout)
-            assert decision["decision"] == "block", \
-                f"Missing agent_type should block, got: {decision}"
+        assert stdout, "Missing agent_type should produce block JSON"
+        decision = json.loads(stdout)
+        assert decision["decision"] == "block", \
+            f"Missing agent_type should block, got: {decision}"
 
     def test_unknown_agent_type_blocks(self, hook_path):
         """Payload with unrecognized agent_type must be blocked (fail-closed)."""
@@ -1054,10 +1054,10 @@ class TestHookExecutionAgainstMalformedPayloads:
         payload = json.dumps({})
         stdout, exit_code = self._run_hook(hook_path, payload)
         assert exit_code == 0
-        if stdout:
-            decision = json.loads(stdout)
-            assert decision["decision"] == "block", \
-                f"Empty payload should block, got: {decision}"
+        assert stdout, "Empty payload should produce block JSON"
+        decision = json.loads(stdout)
+        assert decision["decision"] == "block", \
+            f"Empty payload should block, got: {decision}"
 
     def test_valid_agent_type_missing_transcript_blocks(self, hook_path):
         """Known review agent_type with empty transcript should block (fail-closed)."""

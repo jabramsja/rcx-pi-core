@@ -7,6 +7,7 @@ import argparse
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -86,7 +87,7 @@ AUTHORIZED_DECISIONS = frozenset(
 # This keeps reviewer/reader turns from sitting silently for 20 minutes when no
 # outer executor watchdog is present.
 BRIDGE_MAX_TURN_WALL_TIME_S = 300.0
-BRIDGE_ZERO_OUTPUT_TIMEOUT_S = 1200.0
+BRIDGE_ZERO_OUTPUT_TIMEOUT_S = 450.0
 
 
 def _resolve_timeout_override(name: str, default: float) -> float:
@@ -98,7 +99,7 @@ def _resolve_timeout_override(name: str, default: float) -> float:
         value = float(raw)
     except ValueError:
         return default
-    return value if value > 0 else default
+    return value if value > 0 and math.isfinite(value) else default
 
 
 def _bridge_max_turn_wall_time_s() -> float:
@@ -107,6 +108,18 @@ def _bridge_max_turn_wall_time_s() -> float:
         "RCX_BRIDGE_MAX_TURN_WALL_TIME_S",
         BRIDGE_MAX_TURN_WALL_TIME_S,
     )
+
+
+def _bridge_zero_output_timeout_s(turn_timeout_s: float) -> float | None:
+    """Keep the reviewer zero-output watchdog inside the active turn budget."""
+    configured = _resolve_timeout_override(
+        "RCX_BRIDGE_ZERO_OUTPUT_TIMEOUT_S",
+        BRIDGE_ZERO_OUTPUT_TIMEOUT_S,
+    )
+    if turn_timeout_s <= 0.1:
+        return None
+    margin = 1.0 if turn_timeout_s > 2.0 else (turn_timeout_s / 2.0)
+    return max(0.05, min(configured, turn_timeout_s - margin))
 
 
 def _lock_metadata_payload(holder: str, lock_path: Path) -> dict[str, Any]:
@@ -1210,7 +1223,11 @@ def execute_agent_turn(
     config = load_bridge_config(paths.config_path)
     adapter = get_adapter(config, adapter_name)
     turn_timeout_s = min(adapter.timeout_s, _bridge_max_turn_wall_time_s())
-    zero_output_timeout_s = BRIDGE_ZERO_OUTPUT_TIMEOUT_S if agent_role == "reviewer" else None
+    zero_output_timeout_s = (
+        _bridge_zero_output_timeout_s(turn_timeout_s)
+        if agent_role == "reviewer"
+        else None
+    )
 
     # Pre-allocate raw output file so it exists from adapter start
     raw_dir = paths.raw_dir / job["job_id"]

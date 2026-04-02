@@ -1432,7 +1432,7 @@ def _stage_files(repo_root: Path, files: list[str]) -> bool:
         )
         return True
     except subprocess.CalledProcessError:
-        # Retry with -f for tracked-but-gitignored files (e.g. .claude/hooks/)
+        # Retry with -f when paths are excluded by ignore rules or sparse settings.
         try:
             subprocess.run(
                 ["git", "add", "-f", "--", *files],

@@ -2,6 +2,15 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-04-02
+
+### Deferred Consolidation Observability Hardening
+
+- `bridge_supervisor.py` now uses a 450s reviewer zero-output watchdog baseline, clamps that watchdog inside the active turn budget, and rejects non-finite timeout overrides instead of accepting `NaN` / `Inf`
+- `pipeline_dashboard.py` and `pipeline_dashboard_web.py` now distinguish pre-commit versus post-merge `meta_bridge_supervisor.py` runs by real process args instead of treating every supervisor process as post-merge routing
+- terminal/web dashboards and the tmux findings pane now fall back to rendered reviewer markdown when Codex raw transcripts do not contain a direct envelope block, so completed historical review rounds no longer render as false `In progress...`
+- `mu/tests/tools/test_validate_agent_compliance.py` now removes the vacuous `if stdout:` guards from the hook fail-closed checks, and `phase_b_executor.py` now carries an accurate comment about the `git add -f` fallback path
+
 ## 2026-04-01
 
 ### Tier 3 Recovery Response Hardening

@@ -490,6 +490,7 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   Consolidate 6 overlapping deferred files. Wave 1A (9 critical/high) ~~**Landed**~~ (PR #703). Wave 1B (18 medium/low) queued.
   **Plans:** `reports/control_plane/wave1b_pipeline_cleanup_2026-03-31.md`
   **Lane:** control-surface (deferred cleanup).
+  Tracker sync note (2026-04-02, deferred-consolidation-observability-2026-04-02): Wave 1B observability/control-plane slice landed on staged surface. Evidence: pre-commit supervisor `COMMIT_GO`, rendered bridge transcript fallback for stale tmux findings pane, pre-commit/post-merge classification fix, zero-output timeout clamp, non-finite timeout override rejection, compliance test guard cleanup. Remaining open from this parent task: Cluster C, Cluster D, E5, E6.
 
 - **[NEXT-CODEX-POST-REDTEAM]** **UNPARKED** (2026-03-28, founder-authorized).
   Structural follow-on queue: `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.

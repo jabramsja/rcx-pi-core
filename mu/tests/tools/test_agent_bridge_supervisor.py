@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import fcntl
 import json
 import os
@@ -22,6 +23,24 @@ bridge = load_module("bridge_supervisor", REPO_ROOT / "tools" / "agents" / "brid
 migrations = load_module("bridge_migrations", REPO_ROOT / "tools" / "agents" / "bridge_migrations.py")
 
 
+def _load_file_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+terminal_dashboard = _load_file_module(
+    "pipeline_dashboard_mod",
+    REPO_ROOT / "mu" / "tools" / "observability" / "pipeline_dashboard.py",
+)
+web_dashboard = _load_file_module(
+    "pipeline_dashboard_web_mod",
+    REPO_ROOT / "tools" / "observability" / "pipeline_dashboard_web.py",
+)
+
+
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True)
     return result.stdout
@@ -34,6 +53,26 @@ def _init_temp_repo(repo: Path) -> None:
     (repo / "README.md").write_text("bridge test repo\n", encoding="utf-8")
     _git(repo, "add", "README.md")
     _git(repo, "commit", "-m", "init")
+
+
+def _write_rendered_envelope(path: Path, decision: str, summary: str = "summary") -> None:
+    envelope = {
+        "decision": decision,
+        "summary": summary,
+        "findings": [
+            {
+                "disposition": "blocking",
+                "severity": "high",
+                "title": "blocking finding",
+            }
+        ],
+    }
+    path.write_text(
+        "BEGIN_AGENT_ENVELOPE\n"
+        f"{json.dumps(envelope)}\n"
+        "END_AGENT_ENVELOPE\n",
+        encoding="utf-8",
+    )
 
 
 def test_parse_envelope_from_mixed_output() -> None:
@@ -90,6 +129,119 @@ BEGIN_AGENT_ENVELOPE
 END_AGENT_ENVELOPE"""
     with pytest.raises(bridge.BridgeError, match="multiple differing envelope blocks"):
         bridge.parse_envelope(output)
+
+
+def test_timeout_override_rejects_non_finite_values(monkeypatch) -> None:
+    monkeypatch.setenv("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", "nan")
+    assert bridge._resolve_timeout_override("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", 12.0) == 12.0
+    monkeypatch.setenv("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", "inf")
+    assert bridge._resolve_timeout_override("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", 12.0) == 12.0
+
+
+def test_zero_output_timeout_is_clamped_below_turn_budget(monkeypatch) -> None:
+    monkeypatch.delenv("RCX_BRIDGE_ZERO_OUTPUT_TIMEOUT_S", raising=False)
+    monkeypatch.setattr(bridge, "BRIDGE_ZERO_OUTPUT_TIMEOUT_S", 450.0)
+    assert bridge._bridge_zero_output_timeout_s(300.0) == 299.0
+    assert bridge._bridge_zero_output_timeout_s(1.0) == 0.5
+    assert bridge._bridge_zero_output_timeout_s(0.05) is None
+
+
+def test_terminal_dashboard_treats_pre_commit_supervisor_as_commit(monkeypatch) -> None:
+    monkeypatch.setattr(terminal_dashboard, "pid_start", lambda pid: 123.0)
+    phase, pid, started = terminal_dashboard.detect_phase(
+        [
+            "jeff 4242 0.0 0.1 python3 mu/tools/agents/meta_bridge_supervisor.py --package foo.json",
+        ]
+    )
+    assert phase == "commit"
+    assert pid == 4242
+    assert started == 123.0
+
+
+def test_terminal_dashboard_detects_post_merge_supervisor(monkeypatch) -> None:
+    monkeypatch.setattr(terminal_dashboard, "pid_start", lambda pid: 456.0)
+    phase, pid, started = terminal_dashboard.detect_phase(
+        [
+            "jeff 5151 0.0 0.1 python3 mu/tools/agents/meta_bridge_supervisor.py --mode post-merge --package foo.json",
+        ]
+    )
+    assert phase == "post-merge"
+    assert pid == 5151
+    assert started == 456.0
+
+
+def test_web_dashboard_treats_pre_commit_supervisor_as_commit(monkeypatch) -> None:
+    monkeypatch.setattr(web_dashboard, "pid_start", lambda pid: 321.0)
+    phase = web_dashboard.detect_phase(
+        [
+            "jeff 6262 0.0 0.1 python3 mu/tools/agents/meta_bridge_supervisor.py --package foo.json",
+        ]
+    )
+    assert phase == {"phase": "commit", "pid": 6262, "started": 321.0}
+
+
+def test_web_dashboard_detects_post_merge_supervisor(monkeypatch) -> None:
+    monkeypatch.setattr(web_dashboard, "pid_start", lambda pid: 654.0)
+    phase = web_dashboard.detect_phase(
+        [
+            "jeff 7373 0.0 0.1 python3 mu/tools/agents/meta_bridge_supervisor.py --mode post-merge --package foo.json",
+        ]
+    )
+    assert phase == {"phase": "post-merge", "pid": 7373, "started": 654.0}
+
+
+def test_terminal_dashboard_prefers_rendered_envelope_when_raw_has_no_envelope(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo_root = tmp_path
+    raw_dir = repo_root / ".agent_bus" / "raw" / "phase-a-r2-deadbeef"
+    raw_dir.mkdir(parents=True)
+    reviewer = raw_dir / "phase-a-r2-deadbeef--r1-reviewer.txt"
+    reviewer.write_text(
+        '{"type":"turn.completed","item":{"completed":{"agent_message":{"text":"no envelope here"}}}}',
+        encoding="utf-8",
+    )
+    rendered = repo_root / ".agent_bus" / "rendered" / "phase-a-r2-deadbeef.md"
+    rendered.parent.mkdir(parents=True)
+    _write_rendered_envelope(rendered, "GO", "rendered summary")
+    monkeypatch.setattr(terminal_dashboard, "REPO_ROOT", repo_root)
+
+    history = terminal_dashboard.bridge_round_history()
+    latest = terminal_dashboard.latest_bridge_summary()
+
+    assert len(history) == 1
+    assert history[0]["job_id"] == "phase-a-r2-deadbeef"
+    assert history[0]["decision"] == "GO"
+    assert latest == (
+        "phase-a-r2-deadbeef",
+        "GO",
+        "rendered summary",
+        [{"disposition": "blocking", "severity": "high", "title": "blocking finding"}],
+        [],
+    )
+
+
+def test_web_dashboard_prefers_rendered_envelope_when_raw_has_no_envelope(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo_root = tmp_path
+    raw_dir = repo_root / ".agent_bus" / "raw" / "phase-b-r1-feedface"
+    raw_dir.mkdir(parents=True)
+    reviewer = raw_dir / "phase-b-r1-feedface--r1-reviewer.txt"
+    reviewer.write_text(
+        '{"type":"turn.completed","item":{"completed":{"agent_message":{"text":"still no envelope"}}}}',
+        encoding="utf-8",
+    )
+    rendered = repo_root / ".agent_bus" / "rendered" / "phase-b-r1-feedface.md"
+    rendered.parent.mkdir(parents=True)
+    _write_rendered_envelope(rendered, "REQUEST_CHANGES", "rendered web summary")
+    monkeypatch.setattr(web_dashboard, "REPO_ROOT", repo_root)
+
+    history = web_dashboard.bridge_round_history()
+
+    assert len(history) == 1
+    assert history[0]["job_id"] == "phase-b-r1-feedface"
+    assert history[0]["decision"] == "REQUEST_CHANGES"
 
 
 def test_parse_envelope_ignores_prompt_template_placeholder_block() -> None:
@@ -2573,7 +2725,11 @@ def test_bridge_turn_wall_time_cap_fails_closed(tmp_path: Path, monkeypatch: pyt
         "import sys\n"
         "import time\n"
         "sys.stdin.read()\n"
-        "time.sleep(10.0)\n",  # Long sleep ensures timer always fires first
+        "deadline = time.time() + 10.0\n"
+        "while time.time() < deadline:\n"
+        "    sys.stdout.write('heartbeat\\n')\n"
+        "    sys.stdout.flush()\n"
+        "    time.sleep(0.05)\n",
         encoding="utf-8",
     )
     config = json.loads(paths.config_path.read_text(encoding="utf-8"))

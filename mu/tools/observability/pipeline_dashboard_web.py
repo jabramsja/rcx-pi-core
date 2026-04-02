@@ -39,14 +39,105 @@ def pid_start(pid):
         return None
 
 
+def _parse_agent_envelope(text):
+    matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", text, re.DOTALL))
+    if not matches:
+        return None
+    for match in reversed(matches):
+        try:
+            env = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        decision = env.get("decision", "")
+        if decision and "|" not in decision:
+            return env
+    return None
+
+
+def _parse_rendered_reviewer_section(text):
+    section_re = re.compile(r"(?ms)^### .*? — reviewer\n(.*?)(?=^### |\Z)")
+    decision_re = re.compile(
+        r"(?m)^\s*-\s*Decision:\s*"
+        r"(GO|REQUEST_CHANGES|NO_GO|QUESTION|STALE|ERROR|SYNTHETIC)\b"
+    )
+    summary_re = re.compile(r"(?m)^\s*-\s*Summary:\s*(.*)")
+    finding_re = re.compile(
+        r"(?m)^\s*\d+\.\s+\*\*(DEFECT|POLICY_BOUND|DOC_ACCURACY)\*\* "
+        r"\(([^)]+)\):\s*(.*)$"
+    )
+    sections = list(section_re.finditer(text))
+    for section in reversed(sections):
+        block = section.group(1)
+        decision_match = decision_re.search(block)
+        if not decision_match:
+            continue
+        decision = decision_match.group(1)
+        if decision == "SYNTHETIC":
+            continue
+        summary_match = summary_re.search(block)
+        disposition = "non_blocking" if decision == "GO" else "blocking"
+        findings = [
+            {
+                "class": cls,
+                "severity": severity.strip().lower(),
+                "title": title.strip(),
+                "disposition": disposition,
+            }
+            for cls, severity, title in finding_re.findall(block)
+        ]
+        return {
+            "decision": decision,
+            "summary": (summary_match.group(1).strip() if summary_match else ""),
+            "findings": findings,
+        }
+    return None
+
+
+def _parse_review_payload(text):
+    return _parse_agent_envelope(text) or _parse_rendered_reviewer_section(text)
+
+
+def _is_bridge_round_dir(name):
+    return (
+        name.startswith("phase-a-r")
+        or name.startswith("phase-b-r")
+        or name.startswith("phase-a-reentry-r")
+        or name.startswith("phase-b-reentry-r")
+    )
+
+
+def _bridge_review_artifact(job_id, reviewer_file):
+    rendered = REPO_ROOT / ".agent_bus" / "rendered" / f"{job_id}.md"
+    candidates = [rendered]
+    if reviewer_file is not None:
+        candidates.append(reviewer_file)
+    for path in candidates:
+        if path is None or not path.exists():
+            continue
+        try:
+            env = _parse_review_payload(path.read_text())
+        except Exception:
+            continue
+        if env is not None:
+            return env, path.stat().st_mtime
+    return None, None
+
+
 def detect_phase(lines):
     for name, pattern in [("phase-a", "phase_a_executor"), ("phase-b", "phase_b_executor"),
-                          ("commit", "commit_executor"), ("post-merge", "meta_bridge_supervisor"),
+                          ("commit", "commit_executor"),
                           ("bridge", "bridge_supervisor")]:
         for l in lines:
             if pattern in l and "grep" not in l and "test_" not in l:
+                if pattern == "bridge_supervisor" and "meta_bridge_supervisor" in l:
+                    continue
                 pid = int(l.split()[1])
                 return {"phase": name, "pid": pid, "started": pid_start(pid)}
+    for l in lines:
+        if "meta_bridge_supervisor" in l and "grep" not in l and "test_" not in l:
+            pid = int(l.split()[1])
+            phase = "post-merge" if "--mode post-merge" in l or " post-merge " in l else "commit"
+            return {"phase": phase, "pid": pid, "started": pid_start(pid)}
     for l in lines:
         if "executor_dispatch" in l and "grep" not in l:
             return {"phase": "dispatch", "pid": int(l.split()[1]), "started": pid_start(int(l.split()[1]))}
@@ -86,44 +177,29 @@ def bridge_round_history():
         return []
     rounds = []
     for d in sorted(raw_dir.iterdir()):
-        if not d.is_dir() or not (d.name.startswith("phase-b-r") or d.name.startswith("phase-a-r")):
+        if not d.is_dir() or not _is_bridge_round_dir(d.name):
             continue
-        for f in d.iterdir():
-            if "reviewer" not in f.name:
-                continue
-            try:
-                content = f.read_text()
-                matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", content, re.DOTALL))
-                if not matches:
-                    continue
-                env = None
-                for m in reversed(matches):
-                    try:
-                        candidate = json.loads(m.group(1))
-                        if "|" not in candidate.get("decision", ""):
-                            env = candidate
-                            break
-                    except (json.JSONDecodeError, KeyError):
-                        continue
-                if env is None:
-                    continue
-                dec = env.get("decision", "")
-                if not dec:
-                    continue
-                findings = env.get("findings", [])
-                blk = [x for x in findings if x.get("disposition") == "blocking"]
-                nblk = [x for x in findings if x.get("disposition") != "blocking"]
-                rounds.append({
-                    "job_id": d.name,
-                    "decision": dec,
-                    "summary": env.get("summary", ""),
-                    "blocking": blk,
-                    "non_blocking": nblk,
-                    "timestamp": f.stat().st_mtime,
-                    "time_str": datetime.fromtimestamp(f.stat().st_mtime).strftime("%H:%M:%S"),
-                })
-            except Exception:
-                pass
+        reviewer_files = sorted(
+            (f for f in d.iterdir() if "reviewer" in f.name),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        reviewer_file = reviewer_files[0] if reviewer_files else None
+        env, mtime = _bridge_review_artifact(d.name, reviewer_file)
+        if env is None or mtime is None:
+            continue
+        findings = env.get("findings", [])
+        blk = [x for x in findings if x.get("disposition") == "blocking"]
+        nblk = [x for x in findings if x.get("disposition") != "blocking"]
+        rounds.append({
+            "job_id": d.name,
+            "decision": env.get("decision", ""),
+            "summary": env.get("summary", ""),
+            "blocking": blk,
+            "non_blocking": nblk,
+            "timestamp": mtime,
+            "time_str": datetime.fromtimestamp(mtime).strftime("%H:%M:%S"),
+        })
     rounds.sort(key=lambda r: r["timestamp"])
     return rounds
 
