@@ -4,6 +4,13 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-04-02
 
+### Deferred Replay Hardening
+
+- `run_review.py`, `shared_agent_utils.py`, `_contract_redteam.md`, and `validate_agent_compliance.py` now force in-band self-contained review output, inject the active repo root into review prompts, reject off-checkout redirect patterns, and require the `CHECKED` / `NOT_CHECKED` / `VERDICT` scaffold before a hard-gate agent result is accepted
+- `phase_a_executor.py` now treats `Grounding / Authorization` as satisfying the required grounding section, and `executor_dispatch.py` now extracts `plan_path` from mixed stdout + JSON Phase A output instead of only clean JSON lines
+- `phase_b_executor.py` now parses raw JSONL agent-message findings before falling back to rendered bridge text, bounds local pytest gate timeouts, and limits bridge-fix pytest runs to tests changed in the current fix round; `phase_b_implementer.py` now applies an explicit zero-output timeout to silent helper hangs
+- `mu/tests/tools/test_executor_dispatch.py`, `mu/tests/tools/test_phase_b_executor.py`, `mu/tests/tools/test_run_review.py`, `mu/tests/tools/test_validate_agent_compliance.py`, and `mu/tests/tools/test_agent_prompt_contract_injection.py` now lock the replay-hardening regressions surfaced by the live deferred E5/E6 rerun
+
 ### Deferred Consolidation Phase B Fail-Closed Hardening
 
 - `phase_b_executor.py` now applies the critical/high severity floor before governance/doc-path downgrades, so `POLICY_BOUND` / `DOC_ACCURACY` findings on reports or tracker files can no longer smuggle high-severity bridge feedback into the non-blocking bucket

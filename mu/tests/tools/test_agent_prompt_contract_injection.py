@@ -34,6 +34,10 @@ def test_contract_injected_for_all_runtime_agents():
         assert "active repo root" in prompt or "current repo root" in prompt, (
             f"Current-checkout path rule missing for {agent}"
         )
+        assert str(Path.cwd().resolve()) in prompt, f"Active checkout path missing for {agent}"
+        assert "Do not redirect to external plan/report files" in prompt, (
+            f"In-band review rule missing for {agent}"
+        )
         assert "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/" not in prompt, (
             f"Hardcoded checkout path still present for {agent}"
         )

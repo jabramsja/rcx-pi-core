@@ -1015,17 +1015,21 @@ def _auto_refresh_routing(
 
 def _extract_plan_path(phase_a_stdout: str, repo_root: Path) -> str | None:
     """Parse plan_path from Phase A executor output (JSON or text)."""
-    # Try JSON first
-    for line in phase_a_stdout.strip().splitlines():
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                data = json.loads(line)
-                pp = data.get("plan_path")
-                if isinstance(pp, str) and pp:
-                    return pp
-            except json.JSONDecodeError:
-                pass
+    decoder = json.JSONDecoder()
+    cursor = 0
+    while True:
+        start = phase_a_stdout.find("{", cursor)
+        if start == -1:
+            break
+        try:
+            data, end = decoder.raw_decode(phase_a_stdout[start:])
+        except json.JSONDecodeError:
+            cursor = start + 1
+            continue
+        pp = data.get("plan_path") if isinstance(data, dict) else None
+        if isinstance(pp, str) and pp:
+            return pp
+        cursor = start + max(end, 1)
     # Try full output as JSON
     try:
         data = json.loads(phase_a_stdout)

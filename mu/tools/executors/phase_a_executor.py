@@ -281,6 +281,10 @@ _REQUIRED_PHASE_A_SECTION_TITLES = frozenset({
     "grounding",
 })
 
+_PHASE_A_SECTION_TITLE_ALIASES = {
+    "authorization": "grounding",
+}
+
 
 def _extract_phase_a_section_titles(content: str) -> set[str]:
     titles: set[str] = set()
@@ -301,6 +305,16 @@ def _extract_phase_a_section_titles(content: str) -> set[str]:
             ):
                 canonical = required
                 break
+        if canonical == title:
+            for alias, target in _PHASE_A_SECTION_TITLE_ALIASES.items():
+                if (
+                    title == alias
+                    or title.startswith(f"{alias} ")
+                    or title.startswith(f"{alias}(")
+                    or title.startswith(f"{alias}:")
+                ):
+                    canonical = target
+                    break
         if canonical:
             titles.add(canonical)
     return titles
@@ -563,7 +577,8 @@ def run_bridge_design_review(
         "3. **Constraints**: what is NOT in scope\n"
         "4. **Stop conditions**: when to stop\n"
         "5. **Acceptance criteria**: how to know it's done\n"
-        "6. **Grounding**: references to TASKS.md authorization and governing packet\n\n"
+        "6. **Grounding / Authorization**: references to TASKS.md authorization "
+        "and governing packet\n\n"
         "A plan with only routing metadata, supervisor request echoes, or empty sections\n"
         "is NOT a plan — it is a stub. Reject stubs with REQUEST_CHANGES.\n\n"
         "## Review Protocol\n\n"
@@ -1201,7 +1216,8 @@ def run_phase_a(
                             "3. Constraints: what is NOT in scope\n"
                             "4. Stop conditions\n"
                             "5. Acceptance criteria\n"
-                            "6. Grounding: TASKS.md authorization + governing packet refs\n\n"
+                            "6. Grounding / Authorization: TASKS.md authorization "
+                            "+ governing packet refs\n\n"
                             f"Read TASKS.md for the current task ({_task_id or 'see NEXT section'}) "
                             f"and use the plan file at `{rel_plan_path}` as the governing packet. "
                             f"Update ONLY `{rel_plan_path}`. Do NOT create new files. "

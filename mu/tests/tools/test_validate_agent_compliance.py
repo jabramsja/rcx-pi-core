@@ -143,6 +143,38 @@ VERIFIED: Yes
         assert result["findings"] == 0
         assert result["compliant"] is True
 
+    def test_strict_mode_requires_review_scaffold(self):
+        """Strict mode should reject outputs missing CHECKED/NOT_CHECKED/VERDICT."""
+        output = "STATUS.md mentioned. Just some text, no findings."
+
+        result = check_compliance(output, strict=True)
+
+        assert result["compliant"] is False
+        assert any("missing CHECKED section" in v for v in result["violations"])
+        assert any("missing NOT_CHECKED section" in v for v in result["violations"])
+        assert any("missing explicit VERDICT line" in v for v in result["violations"])
+
+    def test_strict_mode_rejects_external_review_redirect(self, tmp_path, monkeypatch):
+        """Strict mode should reject outputs that redirect review to external files."""
+        monkeypatch.chdir(tmp_path)
+        output = """
+### CHECKED
+- Reviewed the scoped change.
+
+The review plan file is ready for your review at `/Users/jeffabrams/.claude/plans/glowing-fluttering-owl.md`.
+
+### NOT_CHECKED
+- No live exploit was attempted.
+
+### Verdict
+VERDICT: SECURE
+"""
+
+        result = check_compliance(output, strict=True)
+
+        assert result["compliant"] is False
+        assert any("external path outside current project directory" in v for v in result["violations"])
+
 
 class TestStatusMdCheck:
     """Test STATUS.md mention detection."""
@@ -767,11 +799,20 @@ VERIFIED: Yes
         output = f"""
 STATUS.md reviewed.
 
+### CHECKED
+- Verified inline code extraction.
+
+### NOT_CHECKED
+- No additional runtime evidence required.
+
 FINDING: Inline code issue
 FILE: {file_path}
 LINES: {line_no}
 CODE: inline_code_sentinel = "inline-code-sentinel"
 VERIFIED: Yes
+
+### Verdict
+VERDICT: REQUEST_CHANGES
 """
         result = check_compliance(
             output,
@@ -796,6 +837,12 @@ VERIFIED: Yes
         output = f"""
 STATUS.md reviewed.
 
+### CHECKED
+- Verified ellipsis excerpt parsing.
+
+### NOT_CHECKED
+- No broader code review needed.
+
 FINDING: Ellipsis excerpt
 FILE: {file_path}
 LINES: {start_line}-{end_line}
@@ -804,6 +851,9 @@ CODE:
     ...
     ellipsis_omega = "omega"
 VERIFIED: Yes
+
+### Verdict
+VERDICT: REQUEST_CHANGES
 """
         result = check_compliance(output, verify_files=True, verify_code=True, strict=True)
         assert result["compliant"] is True
@@ -1129,6 +1179,12 @@ class TestImpreciseCitationClassification:
             output = f"""
 STATUS.md reviewed.
 
+### CHECKED
+- Verified near-match citation handling.
+
+### NOT_CHECKED
+- No exact-code match expected in this fixture.
+
 FINDING: Near-match code
 FILE: {tmp_path}
 LINES: 1-3
@@ -1137,6 +1193,9 @@ CODE:
     MIN_ITERATIONS = 200
     DEADLINE = 8000
 VERIFIED: Yes
+
+### Verdict
+VERDICT: REQUEST_CHANGES
 """
             result = check_compliance(output, verify_files=True, verify_code=True, strict=True)
             # Must NOT be blocked — imprecise citation is a warning

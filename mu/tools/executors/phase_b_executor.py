@@ -105,6 +105,8 @@ BRIDGE_REVIEW_POLL_INTERVAL = 30.0
 BRIDGE_REVIEW_POLL_SLEEP = 5.0
 BRIDGE_REVIEW_STALE_TIMEOUT = 120.0
 BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT = 60.0
+DEFAULT_PYTEST_GATE_TIMEOUT_S = 300
+MAX_PYTEST_GATE_TIMEOUT_S = 900
 
 
 # ---------------------------------------------------------------------------
@@ -409,6 +411,27 @@ def _normalize_agent_envelope_payload(payload: str) -> str:
     return "\n".join(lines).strip()
 
 
+def _iter_agent_message_texts(text: str) -> list[str]:
+    """Extract agent_message payloads from a JSONL bridge raw transcript."""
+    texts: list[str] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict) or item.get("type") != "agent_message":
+            continue
+        message_text = item.get("text")
+        if isinstance(message_text, str) and message_text.strip():
+            texts.append(message_text)
+    return texts
+
+
 def _iter_bridge_raw_texts_from_render(render_text: str) -> list[str]:
     """Load raw bridge turn outputs referenced by a rendered transcript.
 
@@ -545,6 +568,14 @@ def _parse_findings_from_text(text: str) -> list[dict[str, Any]]:
             - File: path/to/file.py
             - Evidence: description of evidence
     """
+    agent_messages = _iter_agent_message_texts(text)
+    if agent_messages:
+        for message_text in reversed(agent_messages):
+            findings = _parse_findings_from_text(message_text)
+            if findings:
+                return findings
+        return []
+
     # Strategy 1: JSON envelope
     # Parse envelope blocks structurally so malformed markers cannot swallow
     # later payloads, and fail closed if multiple conflicting valid envelopes
@@ -683,6 +714,17 @@ def _run_pytest_on_files(
         }
     except subprocess.TimeoutExpired:
         return {"exit_code": -1, "stdout": "", "stderr": "pytest timed out", "passed": False}
+
+
+def _resolve_pytest_gate_timeout(raw_timeout: Any) -> int:
+    """Bound local pytest gates to a sane floor/cap inside Phase B."""
+    try:
+        timeout_s = int(float(raw_timeout))
+    except (TypeError, ValueError):
+        return DEFAULT_PYTEST_GATE_TIMEOUT_S
+    if timeout_s <= 0:
+        return DEFAULT_PYTEST_GATE_TIMEOUT_S
+    return max(DEFAULT_PYTEST_GATE_TIMEOUT_S, min(timeout_s, MAX_PYTEST_GATE_TIMEOUT_S))
 
 
 def _summarize_pytest_failure(result: dict[str, Any], *, stdout_limit: int = 1000, stderr_limit: int = 1000) -> str:
@@ -2052,6 +2094,7 @@ def run_phase_b(
     backend = config.get("backends", {}).get("phase_b_executor", "codex")
     model = config.get("model_overrides", {}).get("phase_b_executor")
     timeout = config.get("timeouts", {}).get("phase_b_executor", 1200)
+    pytest_gate_timeout = _resolve_pytest_gate_timeout(timeout)
 
     # Extract wave governance fields from routing record (not hardcoded)
     wave_class = routing_record.get("wave_class", "L4_ENABLER")
@@ -2580,9 +2623,12 @@ def run_phase_b(
                     ],
                 }
 
-            # Track what the fix round changed
+            # Track what the fix round changed. The local pytest pass should only
+            # exercise tests introduced or edited by this fix round, not every
+            # pre-existing test file already present in the broader replay scope.
             post_fix_files = set(_collect_changed_files(repo_root))
-            implementer_changed |= (post_fix_files - pre_fix_files)
+            current_fix_changed = sorted(post_fix_files - pre_fix_files)
+            implementer_changed |= set(current_fix_changed)
             # Recollect changed files after implementer fix (scoped to wave outputs)
             changed_files = _collect_wave_owned_files(
                 repo_root,
@@ -2592,13 +2638,19 @@ def run_phase_b(
                 executor_created or None,
                 baseline_wave_files or None,
             )
-            log(f"Changed files after bridge fix: {len(changed_files)}")
+            log(
+                f"Changed files after bridge fix: {len(changed_files)} "
+                f"(current fix touched {len(current_fix_changed)})"
+            )
 
-            # Run pytest on changed test files mechanically
-            test_files = [f for f in changed_files if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")]
+            # Run pytest only on test files changed by this bridge-fix pass.
+            test_files = [
+                f for f in current_fix_changed
+                if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")
+            ]
             if test_files:
-                log(f"Running pytest on {len(test_files)} test file(s)...")
-                pytest_result = _run_pytest_on_files(repo_root, test_files)
+                log(f"Running pytest on {len(test_files)} newly changed test file(s)...")
+                pytest_result = _run_pytest_on_files(repo_root, test_files, timeout=pytest_gate_timeout)
                 if not pytest_result["passed"]:
                     log(f"pytest FAILED (exit={pytest_result['exit_code']}) — feeding back to implementer as blocking")
                     # Feed pytest failure back as a blocking finding for next round
@@ -2766,7 +2818,7 @@ def run_phase_b(
         final_test_files = [f for f in changed_files if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")]
         if final_test_files:
             log(f"Final pytest gate: running {len(final_test_files)} test file(s)...")
-            final_pytest = _run_pytest_on_files(repo_root, final_test_files)
+            final_pytest = _run_pytest_on_files(repo_root, final_test_files, timeout=pytest_gate_timeout)
             if not final_pytest["passed"]:
                 return {
                     "status": "error",
@@ -3132,7 +3184,7 @@ def run_phase_b(
         reentry_test_files = [f for f in changed_files if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")]
         if reentry_test_files:
             log(f"Re-entry pytest gate: running {len(reentry_test_files)} test file(s)...")
-            reentry_pytest = _run_pytest_on_files(repo_root, reentry_test_files)
+            reentry_pytest = _run_pytest_on_files(repo_root, reentry_test_files, timeout=pytest_gate_timeout)
             if not reentry_pytest["passed"]:
                 _clear_state(repo_root)
                 return {

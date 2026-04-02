@@ -270,8 +270,8 @@ class TestInvokeImplementer:
             assert result["status"] == "stale"
             assert result["exit_code"] == -2
 
-    def test_passes_configured_stale_timeout_to_adapter(self, tmp_path):
-        """Executor config can bound implementer stall detection independently of wall time."""
+    def test_passes_configured_output_watchdogs_to_adapter(self, tmp_path):
+        """Implementer output watchdogs inherit the configured stale budget."""
         self._setup_bridge_config(tmp_path)
         config_dir = tmp_path / "mu" / "tools" / "executors"
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -288,6 +288,7 @@ class TestInvokeImplementer:
 
         assert result["status"] == "success"
         assert mock_ba.run_adapter.call_args.kwargs["stale_timeout_s"] == 123.0
+        assert mock_ba.run_adapter.call_args.kwargs["zero_output_timeout_s"] == 123.0
 
     def test_nonzero_exit_returns_error(self, tmp_path):
         """Non-timeout failure from bridge adapter returns error status."""
@@ -779,7 +780,7 @@ class TestFinalPytestGate:
              }), \
              patch.object(pb_mod, "_run_pytest_on_files", return_value={
                  "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
-             }), \
+             }) as mock_pytest, \
              patch.object(pb_mod, "_stage_files", return_value=True), \
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
                  "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
@@ -788,6 +789,7 @@ class TestFinalPytestGate:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
         assert result["status"] == "commit_ready"
+        mock_pytest.assert_called_once_with(repo, ["mu/tests/tools/test_foo.py"], timeout=300)
 
 
 class TestBridgeRenderAssociation:
@@ -2340,6 +2342,122 @@ class TestSupervisorReasonSurfacing:
 class TestValidationRunsMechanically:
     """Validation (pytest) runs mechanically in the loop after each implementer fix."""
 
+    def test_bridge_fix_pytest_skips_stale_baseline_test_files(self, tmp_path):
+        """Bridge-fix pytest must ignore test files that predate the current fix round."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        bridge_calls = [0]
+
+        def bridge_side(*a, **kw):
+            bridge_calls[0] += 1
+            if bridge_calls[0] == 1:
+                return {"exit_code": 0, "stdout": "REQUEST_CHANGES\n", "stderr": "",
+                        "decision": "REQUEST_CHANGES", "job_id": "j1"}
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": "",
+                    "decision": "GO", "job_id": "j2"}
+
+        changed_files_calls = [0]
+
+        def changed_files_side(_repo_root):
+            changed_files_calls[0] += 1
+            if changed_files_calls[0] == 1:
+                return []
+            if changed_files_calls[0] <= 4:
+                return ["mu/tests/tools/test_baseline.py"]
+            return ["mu/tests/tools/test_baseline.py", "mu/tools/observability/_pane_prci.sh"]
+
+        wave_owned_calls = [0]
+
+        def wave_owned_side(*_a, **_kw):
+            wave_owned_calls[0] += 1
+            if wave_owned_calls[0] <= 2:
+                return ["mu/tests/tools/test_baseline.py"]
+            return ["mu/tools/observability/_pane_prci.sh"]
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", side_effect=changed_files_side), \
+             patch.object(pb_mod, "_collect_wave_owned_files", side_effect=wave_owned_side), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_read_bridge_render", return_value="some findings"), \
+             patch.object(pb_mod, "_run_pytest_on_files") as mock_pytest, \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        mock_pytest.assert_not_called()
+
+    def test_bridge_fix_pytest_runs_only_new_test_files_from_current_fix(self, tmp_path):
+        """Bridge-fix pytest must scope to tests introduced by the current fix pass."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        bridge_calls = [0]
+
+        def bridge_side(*a, **kw):
+            bridge_calls[0] += 1
+            if bridge_calls[0] == 1:
+                return {"exit_code": 0, "stdout": "REQUEST_CHANGES\n", "stderr": "",
+                        "decision": "REQUEST_CHANGES", "job_id": "j1"}
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": "",
+                    "decision": "GO", "job_id": "j2"}
+
+        changed_files_calls = [0]
+
+        def changed_files_side(_repo_root):
+            changed_files_calls[0] += 1
+            if changed_files_calls[0] == 1:
+                return []
+            if changed_files_calls[0] <= 4:
+                return ["mu/tests/tools/test_baseline.py"]
+            return ["mu/tests/tools/test_baseline.py", "mu/tests/tools/test_fix_round.py"]
+
+        wave_owned_calls = [0]
+
+        def wave_owned_side(*_a, **_kw):
+            wave_owned_calls[0] += 1
+            if wave_owned_calls[0] <= 2:
+                return ["mu/tests/tools/test_baseline.py"]
+            return ["mu/tools/observability/_pane_prci.sh"]
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", side_effect=changed_files_side), \
+             patch.object(pb_mod, "_collect_wave_owned_files", side_effect=wave_owned_side), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_read_bridge_render", return_value="some findings"), \
+             patch.object(
+                 pb_mod,
+                 "_run_pytest_on_files",
+                 return_value={"exit_code": 0, "stdout": "passed", "stderr": "", "passed": True},
+             ) as mock_pytest, \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        mock_pytest.assert_called_once_with(
+            repo,
+            ["mu/tests/tools/test_fix_round.py"],
+            timeout=300,
+        )
+
     def test_pytest_failure_fed_back_as_blocking(self, tmp_path):
         """pytest failure after implementer fix becomes a blocking finding."""
         repo = tmp_path / "repo"
@@ -2365,9 +2483,33 @@ class TestValidationRunsMechanically:
                 return {"exit_code": 1, "stdout": "FAILED test_foo.py", "stderr": "", "passed": False}
             return {"exit_code": 0, "stdout": "passed", "stderr": "", "passed": True}
 
+        changed_files_calls = [0]
+
+        def changed_files_side(_repo_root):
+            changed_files_calls[0] += 1
+            if changed_files_calls[0] == 1:
+                return []
+            if changed_files_calls[0] <= 4:
+                return ["mu/tests/tools/test_existing.py"]
+            if changed_files_calls[0] == 5:
+                return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+            if changed_files_calls[0] == 6:
+                return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+            return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+
+        wave_owned_calls = [0]
+
+        def wave_owned_side(*_a, **_kw):
+            wave_owned_calls[0] += 1
+            if wave_owned_calls[0] <= 2:
+                return ["mu/tests/tools/test_existing.py"]
+            if wave_owned_calls[0] == 3:
+                return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+            return ["mu/tools/observability/_pane_prci.sh"]
+
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
-             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tests/tools/test_foo.py"]), \
-             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "_collect_changed_files", side_effect=changed_files_side), \
+             patch.object(pb_mod, "_collect_wave_owned_files", side_effect=wave_owned_side), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
              patch.object(pb_mod, "_read_bridge_render", return_value="some findings"), \
@@ -2376,13 +2518,13 @@ class TestValidationRunsMechanically:
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
                  "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
                  "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
-             }):
+            }):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
         # pytest was called (at least once)
         assert pytest_calls[0] >= 1
         # Implementer re-invoked to fix pytest failure
-        assert mock_impl.invoke_implementer.call_count >= 2
+        assert mock_impl.invoke_implementer.call_count >= 3
 
 
 @pytest.mark.usefixtures("mock_routing_record")
@@ -2788,6 +2930,66 @@ class TestSdkReviewScopeSelection:
         assert findings[0]["class"] == "DEFECT"
         assert findings[0]["disposition"] == "blocking"
 
+    def test_raw_jsonl_agent_message_beats_command_output_marker_noise(self, tmp_path):
+        """JSONL raw transcripts must ignore echoed envelope markers in command output."""
+        raw_path = tmp_path / "reviewer-jsonl.txt"
+        real_envelope = json.dumps({
+            "findings": [
+                {
+                    "title": "FromAgentMessage",
+                    "class": "DOC_ACCURACY",
+                    "severity": "low",
+                    "disposition": "non_blocking",
+                }
+            ]
+        })
+        raw_path.write_text(
+            "\n".join([
+                json.dumps({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item_1",
+                        "type": "command_execution",
+                        "command": "sed -n '1,40p' mu/tools/executors/phase_b_executor.py",
+                        "aggregated_output": (
+                            'if stripped == "BEGIN_AGENT_ENVELOPE":\\n'
+                            'if stripped == "END_AGENT_ENVELOPE":\\n'
+                            'return [{"title": "Malformed AGENT_ENVELOPE blocked structured bridge findings parsing"}]'
+                        ),
+                        "exit_code": 0,
+                        "status": "completed",
+                    },
+                }),
+                json.dumps({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item_2",
+                        "type": "agent_message",
+                        "text": (
+                            "Bootstrap summary\n\n"
+                            "BEGIN_AGENT_ENVELOPE\n"
+                            f"{real_envelope}\n"
+                            "END_AGENT_ENVELOPE"
+                        ),
+                    },
+                }),
+            ]) + "\n",
+            encoding="utf-8",
+        )
+        render = (
+            "### reviewer\n"
+            "- Decision: GO\n"
+            "- **Findings (1):**\n"
+            "  1. **DOC_ACCURACY** (low): FromRenderedMarkdown\n"
+            "     - File: a.py\n"
+            f"- Raw output: {raw_path}\n"
+        )
+        findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(findings) == 1
+        assert findings[0]["title"] == "FromAgentMessage"
+        assert findings[0]["class"] == "DOC_ACCURACY"
+        assert findings[0]["disposition"] == "non_blocking"
+
 
 class TestWaveOwnedFilesIncludesDeferredPackets:
     """INV-5: _collect_wave_owned_files must include executor-authored deferred packets."""
@@ -2945,17 +3147,20 @@ class TestPytestFixTracksChangedFiles:
 
         # Simulate: _collect_changed_files returns progressively more files
         # to create diffs that populate implementer_changed.
-        # Calls: 1=pre-impl, 2=post-impl, 3=wave_owned(internal), 4=pre-bridge-fix,
-        # 5=post-bridge-fix, 6=wave_owned(internal), 7=pre-pytest-fix,
-        # 8=post-pytest-fix (new file appears here), 9+=wave_owned(internal)
+        # Calls: 1=pre-impl, 2=post-impl, 3=pre-bridge-fix, 4=post-bridge-fix,
+        # 5=pre-pytest-fix, 6=post-pytest-fix (new helper appears here), 7+=stable
         changed_files_calls = [0]
         def changed_files_side(root):
             changed_files_calls[0] += 1
             if changed_files_calls[0] == 1:
                 return []  # pre-implementer
-            if changed_files_calls[0] <= 7:
-                return ["mu/tests/tools/test_foo.py"]
-            # Call 8+: post-pytest-fix — new helper file appears
+            if changed_files_calls[0] <= 4:
+                return ["mu/tests/tools/test_existing.py"]
+            if changed_files_calls[0] == 5:
+                return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+            if changed_files_calls[0] == 6:
+                return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+            # Call 7+: post-pytest-fix — new helper file appears
             return ["mu/tests/tools/test_foo.py", "mu/tools/executors/new_helper.py"]
 
         pytest_calls = [0]
@@ -2965,11 +3170,18 @@ class TestPytestFixTracksChangedFiles:
                 return {"exit_code": 1, "stdout": "FAILED", "stderr": "", "passed": False}
             return {"exit_code": 0, "stdout": "passed", "stderr": "", "passed": True}
 
-        # Track what _collect_wave_owned_files receives for implementer_changed_files
-        original_collect = pb_mod._collect_wave_owned_files  # ANTICHEAT_OK: testing internal executor functions
+        # Track what _collect_wave_owned_files returns across the bridge/pytest-fix path.
         wave_owned_results = []
+        wave_owned_calls = [0]
+
         def tracking_collect(*a, **kw):
-            result = original_collect(*a, **kw)
+            wave_owned_calls[0] += 1
+            if wave_owned_calls[0] <= 2:
+                result = ["mu/tests/tools/test_existing.py"]
+            elif wave_owned_calls[0] == 3:
+                result = ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+            else:
+                result = ["mu/tools/executors/new_helper.py"]
             wave_owned_results.append(result)
             return result
 

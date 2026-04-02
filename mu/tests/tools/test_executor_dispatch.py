@@ -858,6 +858,104 @@ Phase-A-Lock: UNLOCKED
         assert "Reproduce with: nl -ba reports/control_plane/test_plan_2026-04-02.md" in prompt
         assert "Evidence result: The packet is still a stub" in prompt
 
+    def test_deferred_agent_review_accepts_authorization_section_alias(self, tmp_path, monkeypatch):
+        """Deferred Phase A review must treat Authorization as equivalent to Grounding."""
+        rendered_dir = tmp_path / ".agent_bus" / "rendered"
+        rendered_dir.mkdir(parents=True)
+        bus_dir = tmp_path / ".agent_bus" / "meta"
+        bus_dir.mkdir(parents=True)
+        routing = {"decision": "ROUTE_PHASE_A", "summary": "test"}
+        (bus_dir / "post_merge_routing.json").write_text(json.dumps(routing))
+        plan_path = phase_a_mod.create_plan_draft(
+            tmp_path,
+            "test_plan",
+            {"request": "test", "summary": "test"},
+        )
+        rel_plan_path = str(plan_path.relative_to(tmp_path))
+        bridge_calls = {"n": 0}
+        agent_calls = {"n": 0, "files": []}
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            agent_calls["n"] += 1
+            agent_calls["files"] = list(files)
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path_arg, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            bridge_calls["n"] += 1
+            rendered = rendered_dir / f"{job_id}.md"
+            if bridge_calls["n"] == 1:
+                rendered.write_text("Decision: REQUEST_CHANGES\n\nStub packet.\n", encoding="utf-8")
+                return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": ""}
+            rendered.write_text("Decision: GO\n\nReal plan accepted.\n", encoding="utf-8")
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": ""}
+
+        def fake_parse_findings(_content):
+            return [{
+                "disposition": "blocking",
+                "severity": "high",
+                "title": "Stub packet",
+                "detail": "Replace the stub with a real Phase A plan.",
+                "class": "DOC_ACCURACY",
+                "file": rel_plan_path,
+                "line_start": 1,
+                "evidence_cmd": f"nl -ba {rel_plan_path} | sed -n '1,80p'",
+                "evidence_result": "The packet is still a placeholder stub.",
+            }]
+
+        def fake_invoke(repo_root, prompt, *, backend="claude", timeout=900, verbose=False):
+            plan_path.write_text(
+                """# Test Plan
+
+Date: 2026-04-02
+Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
+Phase-A-Lock: UNLOCKED
+Purpose: Exercise deferred SDK review after same-file stub rewrite.
+
+## Authorization
+
+- Parent task: `[DEFERRED-CONSOLIDATION]`
+- Governing packet: `reports/control_plane/wave1b_pipeline_cleanup_2026-03-31.md`
+
+## Scope
+
+- `mu/tools/observability/_pane_prci.sh`
+
+## Work Items
+
+- Close E5 and E6 in the single observability script.
+
+## Constraints
+
+- Do not widen scope outside `_pane_prci.sh`.
+
+## Stop Conditions
+
+- Stop if the fix requires executor changes.
+
+## Acceptance Criteria
+
+- Deferred SDK review runs after the rewritten plan passes bridge review.
+""",
+                encoding="utf-8",
+            )
+            return {"status": "success", "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(
+            phase_a_mod, "checkpoint_commit_plan",
+            lambda *a, **kw: {"sha": "fake_checkpoint_sha"},
+        )
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+        monkeypatch.setattr(phase_a_mod, "_parse_phase_a_findings", fake_parse_findings)
+        monkeypatch.setattr(phase_a_mod, "_invoke_implementer", fake_invoke)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        assert bridge_calls["n"] == 2
+        assert agent_calls["n"] == 1
+        assert agent_calls["files"] == [rel_plan_path]
+        assert result["agent_review_ran"] is True
+
     def test_parse_phase_a_findings_preserves_reviewer_evidence(self):
         """Phase A finding parser must preserve reviewer evidence for implementer rewrites."""
         content = """BEGIN_AGENT_ENVELOPE
@@ -4537,6 +4635,57 @@ class TestModularSurfaceEntrypoints:
             str(dispatch_mod.SCRIPT_DIR / "commit_executor.py"),
         ]
         assert "--handoff" in calls[2]
+
+    def test_phase_a_surface_success_chains_with_pretty_json_stdout(self, tmp_path):
+        plan_path = tmp_path / "reports" / "control_plane" / "plan.md"
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text("# plan\n", encoding="utf-8")
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["phase-a", "--plan-name", "surface-wave", "--json"]
+        )
+        phase_a_stdout = "\n".join(
+            [
+                f"[phase-a] Plan draft: {plan_path}",
+                "[phase-a] Bridge converged: GO",
+                json.dumps({"status": "converged", "plan_path": str(plan_path)}, indent=2),
+            ]
+        )
+        phase_a_ok = subprocess.CompletedProcess(["phase-a"], 0, phase_a_stdout, "")
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+        commit_ok = subprocess.CompletedProcess(
+            ["commit"], 0, "[commit-executor] Status: success\n", ""
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, *, cwd, timeout):
+            calls.append(cmd)
+            return [phase_a_ok, phase_b_ok, commit_ok][len(calls) - 1]
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=fake_run) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery") as mock_recovery:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={
+                    "timeouts": {
+                        "phase_a_executor": 300,
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+            )
+
+        assert exit_code == 0
+        assert mock_run.call_count == 3
+        mock_recovery.assert_not_called()
+        assert "--plan" in calls[1]
+        assert str(plan_path) in calls[1]
 
     def test_phase_b_surface_success_chains_to_commit(self, tmp_path):
         handoff_dir = tmp_path / ".agent_bus" / "executors"

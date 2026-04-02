@@ -389,7 +389,14 @@ def load_agent_prompt_with_contract(agent_name: str) -> str:
         return prompt_text
 
     contract_text = REDTEAM_CONTRACT_PATH.read_text().strip()
-    return f"{contract_text}\n\n---\n\n{prompt_text}"
+    active_repo_root = Path.cwd().resolve()
+    active_checkout_text = (
+        "## Active Checkout (Injected)\n\n"
+        f"- Current repo root for this run: `{active_repo_root}`\n"
+        "- Keep all file reads, evidence, and absolute paths inside this checkout.\n"
+        "- Return the full review in-band in the final response. Do not redirect to external plan/report files.\n"
+    )
+    return f"{contract_text}\n\n{active_checkout_text}\n---\n\n{prompt_text}"
 
 
 # =============================================================================

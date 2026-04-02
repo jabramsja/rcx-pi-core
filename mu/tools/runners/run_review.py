@@ -257,6 +257,23 @@ def should_include_grounding(files: list[str]) -> bool:
             return True
     return len(files) >= 20
 
+
+def build_report_packet_context(files: list[str]) -> str:
+    """Add tighter review discipline for markdown control-plane packets."""
+    normalized = [f.replace("\\", "/") for f in files]
+    if not normalized:
+        return ""
+    if not all(path.startswith("reports/") and path.endswith(".md") for path in normalized):
+        return ""
+    return """
+---
+REPORT-PACKET REVIEW MODE: The targets are scoped markdown packets, not implementation files.
+- Verify the packet's claims against the cited evidence only; do not treat the packet as permission to roam the repo.
+- Keep the review self-contained in the final response. Do not write or redirect to external plan/report files.
+- Do not invent alternate checkout roots. Use only the active repo root supplied in this prompt.
+- If the packet makes no structural/runtime claim, say so directly. Structural-proof should return `VERDICT: NO_STRUCTURAL_CLAIMS` instead of requesting verbatim file dumps or broad structural sweeps.
+---"""
+
 # =============================================================================
 # Compliance Validation
 # =============================================================================
@@ -656,6 +673,13 @@ class ReviewOrchestrator:
             print(f"  Starting {agent_name}...")
 
         file_list = ", ".join(sanitize_files(self.files))
+        active_repo_root = Path.cwd().resolve()
+        absolute_review_targets = []
+        for raw_path in self.files:
+            path_obj = Path(raw_path)
+            resolved = path_obj.resolve() if path_obj.is_absolute() else (active_repo_root / path_obj).resolve()
+            absolute_review_targets.append(str(resolved))
+        review_target_lines = "\n".join(f"- {path}" for path in absolute_review_targets)
         agent_def = self.agent_definitions[agent_name]
 
         # Build memory context (past findings + patterns)
@@ -686,6 +710,7 @@ Please address these issues in your response. Ensure you:
 
         # Inject control-surface review context when high-risk files are in scope
         cs_context = _build_control_surface_context(self.files)
+        report_packet_context = build_report_packet_context(self.files)
 
         prompt = f"""You are the RCX {agent_name.replace('-', ' ').title()} Agent.
 
@@ -693,9 +718,17 @@ Please address these issues in your response. Ensure you:
 {memory_context}
 {retry_section}
 {cs_context}
+{report_packet_context}
 ---
 
-Now review these files: {file_list}
+Active repo root for this review: {active_repo_root}
+Review targets (absolute paths in this checkout only):
+{review_target_lines}
+
+Original target list: {file_list}
+
+Return the full review in this response only. Do not write or redirect your report to external plan/report files.
+Do not invent another repo root, another checkout path, or a placeholder path from a different machine.
 
 Produce a report following the format in your instructions.
 
@@ -803,10 +836,7 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                 print(f"    ⚠️  {agent_name}: {imprecise_count} imprecise citation(s) (non-blocking)")
 
         # Cancelled agents: mark compliant to skip retry (cancellation ≠ format failure)
-        # but override verdict to CANCELLED so partial output can't falsely pass a gate.
-        if was_cancelled or timed_out:
-            is_compliant = True
-            compliance_error = None
+        # but override verdict so partial output can't falsely pass a gate.
 
         # Extract verdict
         verdict = extract_verdict(agent_name, result_text)

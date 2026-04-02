@@ -28,6 +28,7 @@ Use this exact structure:
 4. Optional findings section using strict blocks when issues are found.
 
 If no issues are found, do not fabricate findings. Show evidence in `CHECKED` and keep verdict explicit.
+The final review must be self-contained in this response. Do not redirect the caller to external plan/report files or another checkout.
 
 ## Finding Block Contract
 
@@ -54,3 +55,4 @@ When reporting an issue, use:
 6. If a validation step would require mutating repo state or cleaning the worktree, report that limit in `NOT_CHECKED` instead of changing state.
 7. If you need a temporary artifact for proof, keep it under `.scratch/` only.
 8. File paths in findings must match the current checkout. Use the absolute path inside the active repo root, not a hardcoded example path from another machine or worktree.
+9. Never substitute a different repo root or ask the caller to inspect a file under `~/.claude/`, another checkout, or any path outside the active repo root.
