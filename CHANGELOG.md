@@ -4,6 +4,13 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-04-02
 
+### Deferred Consolidation Control-Surface Fail-Closed Hardening
+
+- `phase_b_executor.py` now reloads reviewer raw transcripts referenced by rendered bridge markdown before classifying findings, so explicit reviewer fields like `class` and `disposition` survive Phase B blocking/non-blocking decisions instead of being lost in rendered-summary fallback
+- Phase B rendered-markdown fallback now preserves finding class and defaults missing disposition metadata to `blocking`, so unreadable/missing raw transcripts fail closed instead of silently downgrading medium-severity bridge defects
+- `executor_dispatch.py` now routes successful direct `phase-a` and `phase-b` control-surface invocations through the same chained A→B→commit path as the main dispatcher, and recoverable chained commit failures retry the commit leg instead of re-running the full surface
+- `mu/tests/tools/test_phase_b_executor.py` and `mu/tests/tools/test_executor_dispatch.py` now lock the raw-transcript preference, fail-closed markdown fallback, direct-surface chaining, and chained-commit retry behavior that surfaced during the live `[DEFERRED-CONSOLIDATION]` E5/E6 rerun
+
 ### Deferred Consolidation Observability Hardening
 
 - `bridge_supervisor.py` now uses a 450s reviewer zero-output watchdog baseline, clamps that watchdog inside the active turn budget, and rejects non-finite timeout overrides instead of accepting `NaN` / `Inf`

@@ -2002,7 +2002,7 @@ class TestOnlyBlockingToImplementer:
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
-             patch.object(pb_mod, "_read_bridge_render", return_value=render_text), \
+             patch.object(pb_mod, "_read_bridge_render", side_effect=[render_text, ""]), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
              patch.object(pb_mod, "_run_pytest_on_files", return_value={"exit_code": 0, "passed": True, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
@@ -2018,6 +2018,70 @@ class TestOnlyBlockingToImplementer:
         prompt_text = fix_call_prompt[0][0] if fix_call_prompt[0] else ""
         # The blocking finding title should appear in prompt
         assert "Real bug" in prompt_text or "BLOCKING" in prompt_text
+
+    def test_rendered_raw_output_preserves_blocking_disposition(self, tmp_path):
+        """Rendered REQUEST_CHANGES must honor blocking disposition from reviewer raw output."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        raw_path = repo / ".agent_bus" / "raw" / "j1" / "reviewer.txt"
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        raw_envelope = json.dumps({
+            "job_id": "j1", "turn_id": "t1", "agent_role": "reviewer",
+            "decision": "REQUEST_CHANGES", "summary": "issues",
+            "touched_files_claimed": [], "validations_claimed": [],
+            "request_for_next_agent": "",
+            "findings": [
+                {"title": "Raw blocker", "class": "DEFECT", "severity": "medium",
+                 "file": "f.py", "disposition": "blocking", "status": "persisting"},
+            ],
+        })
+        raw_path.write_text(
+            "noise\nBEGIN_AGENT_ENVELOPE\n"
+            f"{raw_envelope}\n"
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+        render_text = (
+            "### reviewer\n"
+            "- Status: completed\n"
+            "- Decision: REQUEST_CHANGES\n"
+            "- **Findings (1):**\n"
+            "  1. **DEFECT** (medium): Raw blocker\n"
+            "     - File: `f.py:1` | Status: persisting\n"
+            "     - Evidence: preserved via raw output\n"
+            f"- Raw output: {raw_path}\n"
+        )
+
+        mock_impl = _make_mock_impl()
+        bridge_calls = [0]
+
+        def bridge_side(*a, **kw):
+            bridge_calls[0] += 1
+            if bridge_calls[0] == 1:
+                return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "",
+                        "decision": "REQUEST_CHANGES", "job_id": "j1"}
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": "",
+                    "decision": "GO", "job_id": "j2"}
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_read_bridge_render", return_value=render_text), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={"exit_code": 0, "passed": True, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert mock_impl.invoke_implementer.call_count >= 2
+        assert result.get("deferred_packet_path") is None
 
     def test_go_low_doc_accuracy_crash_title_does_not_fail_closed(self, tmp_path):
         """A GO transcript with only low DOC_ACCURACY crash-wording findings remains non-blocking."""
@@ -2484,6 +2548,8 @@ class TestSdkReviewScopeSelection:
         assert findings[0]["title"] == "Missing validation on input"
         assert findings[0]["severity"] == "critical"
         assert findings[0]["type"] == "DEFECT"
+        assert findings[0]["class"] == "DEFECT"
+        assert findings[0]["disposition"] == "blocking"
         assert findings[0]["file"] == "mu/tools/executors/phase_b_executor.py"
         assert findings[0]["evidence"] == "No check for None before calling .strip()"
         assert findings[1]["severity"] == "high"
@@ -2497,6 +2563,7 @@ class TestSdkReviewScopeSelection:
         assert findings[0]["title"] == "Minor nit"
         assert findings[0]["severity"] == "low"
         assert findings[0]["file"] == "foo.py"
+        assert findings[0]["disposition"] == "blocking"
 
     def test_parse_markdown_with_disposition(self):
         render = (
@@ -2522,6 +2589,39 @@ class TestSdkReviewScopeSelection:
         findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
         assert len(findings) == 1
         assert findings[0]["title"] == "FromEnvelope"
+
+    def test_raw_output_reference_preferred_over_rendered_markdown(self, tmp_path):
+        """Rendered transcripts must reload reviewer raw output to preserve disposition."""
+        raw_path = tmp_path / "reviewer.txt"
+        raw_envelope = json.dumps({
+            "findings": [
+                {
+                    "title": "FromRawEnvelope",
+                    "class": "DEFECT",
+                    "severity": "medium",
+                    "disposition": "blocking",
+                }
+            ]
+        })
+        raw_path.write_text(
+            "noise\nBEGIN_AGENT_ENVELOPE\n"
+            f"{raw_envelope}\n"
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+        render = (
+            "### reviewer\n"
+            "- Decision: REQUEST_CHANGES\n"
+            "- **Findings (1):**\n"
+            "  1. **DEFECT** (medium): FromRenderedMarkdown\n"
+            "     - File: a.py\n"
+            f"- Raw output: {raw_path}\n"
+        )
+        findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(findings) == 1
+        assert findings[0]["title"] == "FromRawEnvelope"
+        assert findings[0]["class"] == "DEFECT"
+        assert findings[0]["disposition"] == "blocking"
 
 
 class TestWaveOwnedFilesIncludesDeferredPackets:

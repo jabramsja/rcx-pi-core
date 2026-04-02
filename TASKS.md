@@ -491,6 +491,7 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   **Plans:** `reports/control_plane/wave1b_pipeline_cleanup_2026-03-31.md`
   **Lane:** control-surface (deferred cleanup).
   Tracker sync note (2026-04-02, deferred-consolidation-observability-2026-04-02): Wave 1B observability/control-plane slice landed on staged surface. Evidence: pre-commit supervisor `COMMIT_GO`, rendered bridge transcript fallback for stale tmux findings pane, pre-commit/post-merge classification fix, zero-output timeout clamp, non-finite timeout override rejection, compliance test guard cleanup. Remaining open from this parent task: Cluster C, Cluster D, E5, E6.
+  Tracker sync note (2026-04-02, deferred-consolidation-control-surface-fail-closed-2026-04-02): Live E5/E6 rerun surfaced a Phase B fail-open defect and a direct-surface chaining gap; both are now fixed on the control surface. Evidence: `phase_b_executor.py` reloads raw reviewer envelopes before classifying findings, rendered fallback now defaults missing disposition metadata to blocking, and `executor_dispatch.py phase-a|phase-b` now chains through commit with recovery-aware commit-only retry. Deferred E5/E6 rerun still pending.
 
 - **[NEXT-CODEX-POST-REDTEAM]** **UNPARKED** (2026-03-28, founder-authorized).
   Structural follow-on queue: `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.

@@ -409,8 +409,33 @@ def _normalize_agent_envelope_payload(payload: str) -> str:
     return "\n".join(lines).strip()
 
 
-def _parse_findings_from_render(render_text: str) -> list[dict[str, Any]]:
-    """Extract structured findings from bridge render text.
+def _iter_bridge_raw_texts_from_render(render_text: str) -> list[str]:
+    """Load raw bridge turn outputs referenced by a rendered transcript.
+
+    The rendered markdown summary omits machine fields like `disposition`, so
+    Phase B must prefer the raw reviewer transcript when it is available.
+    """
+    raw_output_re = re.compile(r"^\s*-\s+Raw output:\s+(.+)$", re.MULTILINE)
+    texts: list[str] = []
+    seen: set[str] = set()
+    for match in reversed(list(raw_output_re.finditer(render_text))):
+        raw_ref = match.group(1).strip()
+        path = Path(raw_ref)
+        if not path.is_absolute():
+            continue
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            texts.append(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    return texts
+
+
+def _parse_findings_from_text(text: str) -> list[dict[str, Any]]:
+    """Extract structured findings from raw bridge text or rendered markdown.
 
     Tries two strategies in order:
     1. JSON envelope between BEGIN_AGENT_ENVELOPE / END_AGENT_ENVELOPE markers.
@@ -423,7 +448,7 @@ def _parse_findings_from_render(render_text: str) -> list[dict[str, Any]]:
     # Parse envelope blocks structurally so malformed markers cannot swallow
     # later payloads, and fail closed if multiple conflicting valid envelopes
     # appear in a single render.
-    envelope_payloads, saw_envelope_markers, saw_nested_markers = _extract_agent_envelope_payloads(render_text)
+    envelope_payloads, saw_envelope_markers, saw_nested_markers = _extract_agent_envelope_payloads(text)
     if saw_nested_markers:
         return [{
             "title": "Nested AGENT_ENVELOPE markers blocked structured bridge findings parsing",
@@ -466,15 +491,20 @@ def _parse_findings_from_render(render_text: str) -> list[dict[str, Any]]:
         re.MULTILINE,
     )
     findings: list[dict[str, Any]] = []
-    lines = render_text.split("\n")
+    lines = text.split("\n")
     i = 0
     while i < len(lines):
         m = finding_re.match(lines[i])
         if m:
+            finding_class = m.group(1).strip()
             finding: dict[str, Any] = {
                 "title": m.group(3).strip(),
                 "severity": m.group(2).strip(),
-                "type": m.group(1).strip(),
+                "type": finding_class,
+                "class": finding_class,
+                # Markdown render summaries do not preserve reviewer disposition.
+                # Fail closed when envelope data is unavailable.
+                "disposition": "blocking",
             }
             # Collect indented detail lines (  - Key: value)
             i += 1
@@ -505,6 +535,20 @@ def _parse_findings_from_render(render_text: str) -> list[dict[str, Any]]:
             "detail": "Bridge render contained AGENT_ENVELOPE markers but no valid JSON findings payload.",
         }]
     return findings
+
+
+def _parse_findings_from_render(render_text: str) -> list[dict[str, Any]]:
+    """Extract structured findings from bridge render text.
+
+    Prefer raw reviewer transcripts referenced by the render so explicit bridge
+    metadata like `disposition` survives classification. Fall back to rendered
+    markdown parsing only when raw outputs are unavailable.
+    """
+    for raw_text in _iter_bridge_raw_texts_from_render(render_text):
+        findings = _parse_findings_from_text(raw_text)
+        if findings:
+            return findings
+    return _parse_findings_from_text(render_text)
 
 
 def _run_pytest_on_files(

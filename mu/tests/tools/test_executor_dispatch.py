@@ -4439,6 +4439,9 @@ class TestModularSurfaceEntrypoints:
         assert "--verbose" in cmd
 
     def test_phase_b_surface_recovery_retries_after_tier3_success(self, tmp_path):
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
         args = dispatch_mod.build_surface_parser().parse_args(
             [
                 "phase-b",
@@ -4456,8 +4459,11 @@ class TestModularSurfaceEntrypoints:
         }
         failed = subprocess.CompletedProcess(["phase-b"], 1, stdout="", stderr="")
         succeeded = subprocess.CompletedProcess(["phase-b"], 0, stdout="", stderr="")
+        commit_ok = subprocess.CompletedProcess(
+            ["commit"], 0, "[commit-executor] Status: success\n", ""
+        )
 
-        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=[failed, succeeded]) as mock_run, \
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=[failed, succeeded, commit_ok]) as mock_run, \
              patch.object(dispatch_mod, "attempt_recovery", return_value=recovery) as mock_recovery, \
              patch.object(dispatch_mod, "_clear_phase_b_state_for_retry") as mock_clear:
             exit_code = dispatch_mod.run_recoverable_surface_command(
@@ -4467,9 +4473,180 @@ class TestModularSurfaceEntrypoints:
             )
 
         assert exit_code == 0
-        assert mock_run.call_count == 2
+        assert mock_run.call_count == 3
         assert mock_recovery.call_args[0][2] == "surface-wave"
         mock_clear.assert_called_once()
+
+    def test_phase_a_surface_success_chains_to_phase_b_and_commit(self, tmp_path):
+        plan_path = tmp_path / "reports" / "control_plane" / "plan.md"
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text("# plan\n", encoding="utf-8")
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["phase-a", "--plan-name", "surface-wave", "--json"]
+        )
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"], 0, json.dumps({"plan_path": str(plan_path)}), ""
+        )
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+        commit_ok = subprocess.CompletedProcess(
+            ["commit"], 0, "[commit-executor] Status: success\n", ""
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, *, cwd, timeout):
+            calls.append(cmd)
+            return [phase_a_ok, phase_b_ok, commit_ok][len(calls) - 1]
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=fake_run) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery") as mock_recovery:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={
+                    "timeouts": {
+                        "phase_a_executor": 300,
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+            )
+
+        assert exit_code == 0
+        assert mock_run.call_count == 3
+        mock_recovery.assert_not_called()
+        assert calls[0][:2] == [
+            dispatch_mod.sys.executable,
+            str(dispatch_mod.SCRIPT_DIR / "phase_a_executor.py"),
+        ]
+        assert calls[1][:2] == [
+            dispatch_mod.sys.executable,
+            str(dispatch_mod.SCRIPT_DIR / "phase_b_executor.py"),
+        ]
+        assert "--plan" in calls[1]
+        assert str(plan_path) in calls[1]
+        phase_b_record = json.loads(calls[1][calls[1].index("--routing-record") + 1])
+        assert phase_b_record["decision"] == "ROUTE_PHASE_B"
+        assert calls[2][:2] == [
+            dispatch_mod.sys.executable,
+            str(dispatch_mod.SCRIPT_DIR / "commit_executor.py"),
+        ]
+        assert "--handoff" in calls[2]
+
+    def test_phase_b_surface_success_chains_to_commit(self, tmp_path):
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-b",
+                "--plan", "reports/control_plane/example.md",
+                "--routing-record-json", '{"wave_name":"surface-wave","decision":"ROUTE_PHASE_B"}',
+                "--json",
+            ]
+        )
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+        commit_ok = subprocess.CompletedProcess(
+            ["commit"], 0, "[commit-executor] Status: success\n", ""
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, *, cwd, timeout):
+            calls.append(cmd)
+            return [phase_b_ok, commit_ok][len(calls) - 1]
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=fake_run) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery") as mock_recovery:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={
+                    "timeouts": {
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+            )
+
+        assert exit_code == 0
+        assert mock_run.call_count == 2
+        mock_recovery.assert_not_called()
+        assert calls[0][:2] == [
+            dispatch_mod.sys.executable,
+            str(dispatch_mod.SCRIPT_DIR / "phase_b_executor.py"),
+        ]
+        assert calls[1][:2] == [
+            dispatch_mod.sys.executable,
+            str(dispatch_mod.SCRIPT_DIR / "commit_executor.py"),
+        ]
+
+    def test_phase_a_surface_chained_commit_failure_retries_commit_only(self, tmp_path):
+        plan_path = tmp_path / "reports" / "control_plane" / "plan.md"
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text("# plan\n", encoding="utf-8")
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["phase-a", "--plan-name", "surface-wave", "--json"]
+        )
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"], 0, json.dumps({"plan_path": str(plan_path)}), ""
+        )
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+        commit_fail = subprocess.CompletedProcess(
+            ["commit"], 1, "[commit-executor] Status: failed\n", "boom"
+        )
+        recovery = {
+            "recovered": True,
+            "exhausted": False,
+            "failure_class": "unknown_error",
+            "tier": 3,
+            "action": "recovery_loop",
+            "detail": "retry commit only",
+        }
+        retried_commit = {
+            "status": "success",
+            "decision": "COMMIT_GO",
+            "executor": "commit_executor",
+            "stdout": "[commit-executor] Status: success\n",
+            "stderr": "",
+            "chained_from": "retry_commit_only",
+        }
+
+        with patch.object(
+            dispatch_mod,
+            "_run_executor_in_group",
+            side_effect=[phase_a_ok, phase_b_ok, commit_fail],
+        ) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery", return_value=recovery) as mock_recovery, \
+             patch.object(dispatch_mod, "_retry_commit_only", return_value=retried_commit) as mock_retry:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={
+                    "timeouts": {
+                        "phase_a_executor": 300,
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+            )
+
+        assert exit_code == 0
+        assert mock_run.call_count == 3
+        mock_recovery.assert_called_once()
+        mock_retry.assert_called_once()
 
     def test_commit_surface_requires_exactly_one_handoff_or_routing_record(self, tmp_path):
         handoff_path = tmp_path / "handoff.json"
