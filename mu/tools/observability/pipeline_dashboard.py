@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real-time pipeline dashboard. Read-only — safe to run alongside active pipeline."""
 
+import argparse
 import glob as _glob
 import json
 import os
@@ -11,9 +12,12 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 REFRESH_INTERVAL = 5
+RECOVERY_STATUS_REL = Path(".agent_bus") / "recovery" / "recovery_status.json"
+_HUNG_THRESHOLD_SECONDS = 90
 
 # Colors
 R = "\033[0m"    # reset
@@ -48,6 +52,182 @@ def elapsed(t):
     return f"{h}h{m:02d}m" if h else f"{m}m{s:02d}s"
 
 
+def _read_recovery_status(repo_root: Path) -> dict[str, Any]:
+    path = repo_root / RECOVERY_STATUS_REL
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _parse_iso(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _age_seconds(value: str, *, now: datetime) -> int | None:
+    parsed = _parse_iso(value)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return max(0, int((now - parsed).total_seconds()))
+
+
+def _elapsed_seconds(seconds: int | None) -> str:
+    if seconds is None:
+        return "unknown"
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        minutes, rem = divmod(seconds, 60)
+        return f"{minutes}m {rem:02d}s"
+    hours, rem = divmod(seconds, 3600)
+    minutes = rem // 60
+    return f"{hours}h {minutes:02d}m"
+
+
+def _excerpt(value: Any, limit: int = 110) -> str:
+    if value is None:
+        return ""
+    text = str(value).replace("\r", "\n").strip()
+    if not text:
+        return ""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    excerpt = lines[-1] if lines else text
+    if len(excerpt) <= limit:
+        return excerpt
+    return excerpt[: limit - 3].rstrip() + "..."
+
+
+def _pid_state(pid_value: Any) -> tuple[int, str]:
+    try:
+        pid = int(pid_value)
+    except (TypeError, ValueError):
+        return 0, ""
+    if pid <= 0:
+        return 0, ""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return pid, "dead"
+    return pid, "alive"
+
+
+def _human_target(target: str) -> str:
+    cleaned = (target or "").strip()
+    mapping = {
+        "phase_a_executor": "Phase A",
+        "phase_a": "Phase A",
+        "phase_b_executor": "Phase B",
+        "phase_b": "Phase B",
+        "commit_executor": "Commit",
+        "commit": "Commit",
+        "executor_dispatch": "Dispatch",
+    }
+    return mapping.get(cleaned, cleaned.replace("_", " "))
+
+
+def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> list[str]:
+    now = now or datetime.now(timezone.utc)
+    status = _read_recovery_status(repo_root)
+    lines = [
+        "RECOVERY",
+        "─────────────────────────────────────",
+    ]
+    if not status:
+        lines.append("  No recovery activity recorded yet.")
+        return lines
+
+    active = bool(status.get("active"))
+    age = _age_seconds(status.get("updated_at", ""), now=now)
+    label = "ACTIVE"
+    if active and age is not None and age >= _HUNG_THRESHOLD_SECONDS:
+        label = "POSSIBLY HUNG"
+    elif not active:
+        label = "LAST RECOVERY"
+
+    tier = status.get("tier", "?")
+    failure_class = status.get("failure_class", "?")
+    lines.append(f"  {label} — Tier {tier} {failure_class}")
+
+    wave_id = _excerpt(status.get("wave_id", ""), 80)
+    if wave_id:
+        lines.append(f"  Wave: {wave_id}")
+
+    invocations = status.get("wave_invocation_count")
+    tuple_attempt = status.get("tuple_attempt_index")
+    if invocations or tuple_attempt:
+        lines.append(
+            f"  Invocation: {invocations or '?'} in wave · tuple attempt {tuple_attempt or '?'}"
+        )
+
+    retry_target = _human_target(str(status.get("retry_target", "")))
+    if retry_target:
+        prefix = "Retry target" if active or status.get("recovered") else "Last target"
+        lines.append(f"  {prefix}: {retry_target}")
+
+    state = _excerpt(status.get("state", ""), 80)
+    current_iteration = status.get("current_iteration") or 0
+    max_iterations = status.get("max_iterations") or 0
+    if state:
+        if max_iterations:
+            lines.append(f"  State: {state} · loop {current_iteration}/{max_iterations}")
+        else:
+            lines.append(f"  State: {state}")
+
+    owner_pid, owner_state = _pid_state(status.get("owner_pid"))
+    child_pid, child_state = _pid_state(status.get("child_pid"))
+    child_role = _excerpt(status.get("child_role", ""), 24)
+    if owner_pid:
+        pid_line = f"  Owner PID: {owner_pid}"
+        if owner_state:
+            pid_line += f" ({owner_state})"
+        if child_pid:
+            pid_line += f" · {child_role or 'child'} PID: {child_pid}"
+            if child_state:
+                pid_line += f" ({child_state})"
+        lines.append(pid_line)
+
+    reason = _excerpt(status.get("reason", ""))
+    if reason:
+        lines.append(f"  Reason: {reason}")
+
+    explanation = _excerpt(status.get("explanation", ""))
+    if explanation:
+        lines.append(f"  Recovery note: {explanation}")
+
+    current_command = _excerpt(status.get("current_command", ""))
+    if current_command:
+        lines.append(f"  Command: {current_command}")
+
+    last_action = _excerpt(status.get("last_action", ""), 60)
+    outcome = _excerpt(status.get("outcome", ""), 60)
+    detail = _excerpt(status.get("detail", ""))
+    if active:
+        lines.append(f"  Updated: {_elapsed_seconds(age)} ago")
+    else:
+        finished_age = _age_seconds(
+            status.get("finished_at", "") or status.get("updated_at", ""),
+            now=now,
+        )
+        summary = outcome or "completed"
+        if last_action:
+            summary += f" via {last_action}"
+        lines.append(f"  Outcome: {summary} · {_elapsed_seconds(finished_age)} ago")
+    if detail and detail != reason and detail != explanation:
+        lines.append(f"  Detail: {detail}")
+
+    return lines
+
+
 def ps_lines():
     try:
         return subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=5).stdout.splitlines()
@@ -65,15 +245,25 @@ def pid_start(pid):
     return None
 
 
+def _is_observability_noise(line: str) -> bool:
+    lowered = line.lower()
+    return (
+        "tail -f " in lowered
+        or "rcx_log_watcher.sh" in lowered
+        or "_pane_" in lowered
+        or "pipeline_monitor.sh" in lowered
+    )
+
+
 def detect_phase(lines):
     for name, pattern in [("phase-a", "phase_a_executor"), ("phase-b", "phase_b_executor"),
                           ("commit", "commit_executor"), ("post-merge", "meta_bridge_supervisor")]:
         for l in lines:
-            if pattern in l and "grep" not in l and "test_" not in l:
+            if pattern in l and "grep" not in l and "test_" not in l and not _is_observability_noise(l):
                 pid = int(l.split()[1])
                 return name, pid, pid_start(pid)
     for l in lines:
-        if "executor_dispatch" in l and "grep" not in l:
+        if "executor_dispatch" in l and "grep" not in l and not _is_observability_noise(l):
             return "dispatch", int(l.split()[1]), pid_start(int(l.split()[1]))
     return "idle", None, None
 
@@ -81,7 +271,8 @@ def detect_phase(lines):
 def detect_subs(lines):
     subs = []
     for l in lines:
-        if "grep" in l: continue
+        if "grep" in l or _is_observability_noise(l):
+            continue
         if "codex exec" in l:
             pid = int(l.split()[1])
             subs.append(("codex-review", pid, pid_start(pid)))
@@ -249,6 +440,13 @@ def render():
 
     out.append(box_mid())
 
+    recovery_lines = render_recovery_lines(REPO_ROOT)
+    if len(recovery_lines) > 2:
+        out.append(section("RECOVERY"))
+        for line in recovery_lines[2:]:
+            out.append(box_line(line))
+        out.append(box_mid())
+
     # Routing
     routing = read_json(REPO_ROOT / ".agent_bus" / "meta" / "post_merge_routing.json")
     if routing:
@@ -378,8 +576,21 @@ def render():
     return "\n".join(out)
 
 
-def main():
-    interval = int(sys.argv[1]) if len(sys.argv) > 1 else REFRESH_INTERVAL
+def main(argv: list[str] | None = None):
+    global REPO_ROOT
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("interval", nargs="?", type=int, default=REFRESH_INTERVAL)
+    parser.add_argument("--repo-root", default=str(REPO_ROOT), help="Repo root to inspect")
+    parser.add_argument("--render-recovery", action="store_true", help="Print recovery lines once and exit")
+    args = parser.parse_args(argv)
+    REPO_ROOT = Path(args.repo_root).resolve()
+
+    if args.render_recovery:
+        for line in render_recovery_lines(REPO_ROOT):
+            print(line)
+        return
+
+    interval = args.interval
     try:
         while True:
             os.system("clear")

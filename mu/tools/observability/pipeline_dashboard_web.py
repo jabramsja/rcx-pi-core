@@ -39,16 +39,26 @@ def pid_start(pid):
         return None
 
 
+def _is_observability_noise(line):
+    lowered = line.lower()
+    return (
+        "tail -f " in lowered
+        or "rcx_log_watcher.sh" in lowered
+        or "_pane_" in lowered
+        or "pipeline_monitor.sh" in lowered
+    )
+
+
 def detect_phase(lines):
     for name, pattern in [("phase-a", "phase_a_executor"), ("phase-b", "phase_b_executor"),
                           ("commit", "commit_executor"), ("post-merge", "meta_bridge_supervisor"),
                           ("bridge", "bridge_supervisor")]:
         for l in lines:
-            if pattern in l and "grep" not in l and "test_" not in l:
+            if pattern in l and "grep" not in l and "test_" not in l and not _is_observability_noise(l):
                 pid = int(l.split()[1])
                 return {"phase": name, "pid": pid, "started": pid_start(pid)}
     for l in lines:
-        if "executor_dispatch" in l and "grep" not in l:
+        if "executor_dispatch" in l and "grep" not in l and not _is_observability_noise(l):
             return {"phase": "dispatch", "pid": int(l.split()[1]), "started": pid_start(int(l.split()[1]))}
     return {"phase": "idle", "pid": None, "started": None}
 
@@ -56,7 +66,7 @@ def detect_phase(lines):
 def detect_subs(lines):
     subs = []
     for l in lines:
-        if "grep" in l:
+        if "grep" in l or _is_observability_noise(l):
             continue
         # Codex CLI reviewer: must have "codex exec" + "gpt" (not Codex.app desktop helpers)
         if "codex" in l.lower() and "exec" in l and "gpt" in l and "Codex.app" not in l and "Codex Helper" not in l:
