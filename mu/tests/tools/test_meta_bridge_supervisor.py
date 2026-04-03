@@ -250,6 +250,12 @@ class TestDryRunBehavior:
 class TestParseMetaEnvelope:
     """parse_meta_envelope validates decision is in template-authorized set."""
 
+    def test_filesystem_safe_token_replaces_path_separators(self):
+        token = meta._filesystem_safe_token("[PIPELINE-RECOVERY/pipeline-monitor-worktree-rebind-2026-04-03]")
+        assert "/" not in token
+        assert "\\" not in token
+        assert "PIPELINE-RECOVERY" in token
+
     def test_valid_routing_decision(self):
         output = 'BEGIN_META_ENVELOPE\n{"decision": "NEEDS_PHASE_A", "summary": "Plan is wrong"}\nEND_META_ENVELOPE'
         envelope = meta.parse_meta_envelope(output)
@@ -826,6 +832,30 @@ def test_run_meta_review_threads_timeout_and_watchdogs_into_adapter(pkg_in_repo)
     assert "zero_output_timeout_s" not in kwargs or kwargs["zero_output_timeout_s"] is None
 
 
+def test_run_meta_review_sanitizes_slash_task_ids_for_prompt_paths(pkg_in_repo):
+    pkg_path, isolated_paths = pkg_in_repo
+    validation_results = _make_validation_results(["dirty_state"], [])
+    package = json.loads(pkg_path.read_text(encoding="utf-8"))
+    package["task_id"] = "[PIPELINE-RECOVERY/pipeline-monitor-worktree-rebind-2026-04-03]"
+    envelope = (
+        "BEGIN_META_ENVELOPE\n"
+        '{"decision": "COMMIT_GO", "summary": "ok", "findings": [], "request_for_claude": "Proceed"}\n'
+        "END_META_ENVELOPE\n"
+    )
+
+    with patch.object(meta, "load_bridge_config", return_value={"agents": {}}), \
+         patch.object(meta, "get_adapter", return_value=MagicMock()), \
+         patch.object(meta, "run_adapter", return_value=envelope) as mock_run:
+        parsed = meta.run_meta_review(isolated_paths, package, validation_results, timeout_s=90)
+
+    assert parsed["decision"] == "COMMIT_GO"
+    kwargs = mock_run.call_args.kwargs
+    assert "/" not in kwargs["job_id"]
+    assert "/" not in kwargs["turn_id"]
+    assert kwargs["prompt_path"].exists()
+    assert kwargs["raw_output_path"].parent.exists()
+
+
 def test_run_post_merge_review_recovers_authoritative_envelope_from_raw_output(tmp_path):
     bus_dir = tmp_path / "meta_bus"
     bus_dir.mkdir(parents=True, exist_ok=True)
@@ -1018,6 +1048,55 @@ def test_run_post_merge_review_threads_timeout_and_watchdogs_into_adapter(tmp_pa
     assert kwargs["timeout_override_s"] == 75
     assert kwargs["stale_timeout_s"] == 75
     assert "zero_output_timeout_s" not in kwargs or kwargs["zero_output_timeout_s"] is None
+
+
+def test_run_post_merge_review_sanitizes_slash_task_ids_for_prompt_paths(tmp_path):
+    bus_dir = tmp_path / "meta_bus"
+    bus_dir.mkdir(parents=True, exist_ok=True)
+    paths = meta.MetaBridgePaths(
+        repo_root=REPO_ROOT,
+        bus_dir=bus_dir,
+        db_path=bus_dir / "meta_bridge.db",
+        lock_path=bus_dir / "meta_bridge.lock",
+    )
+    package = {
+        "task_id": "[POST-MERGE/parallel-pipeline]",
+        "wave_name": "wave",
+        "lane": "hooks/agents/bridge control-surface",
+        "merged_pr": 1,
+        "merge_sha": "abc1234",
+        "rollout_packet_path": "reports/control_plane/post_merge_supervisor_plan_2026-03-21.md",
+        "deferred_items": [],
+        "next_candidates": [],
+        "tracker_state_summary": "stable",
+        "blocker_report_paths": [],
+    }
+    validation_results = _make_validation_results(["gate1"], [])
+    envelope = (
+        "BEGIN_META_ENVELOPE\n"
+        '{"decision": "CONTINUE_DIALECTIC", "summary": "ok", "findings": [], "request_for_claude": "Continue"}\n'
+        "END_META_ENVELOPE\n"
+    )
+
+    with patch.object(meta, "build_post_merge_prompt", return_value="prompt"), \
+         patch.object(meta, "load_bridge_config", return_value={"agents": {}}), \
+         patch.object(meta, "get_adapter", return_value=MagicMock()), \
+         patch.object(meta, "run_adapter", return_value=envelope) as mock_run:
+        parsed = meta.run_post_merge_review(
+            paths,
+            package,
+            validation_results,
+            derived_files=["TASKS.md"],
+            rollout_order="1. Continue",
+            timeout_s=75,
+        )
+
+    assert parsed["decision"] == "CONTINUE_DIALECTIC"
+    kwargs = mock_run.call_args.kwargs
+    assert "/" not in kwargs["job_id"]
+    assert "/" not in kwargs["turn_id"]
+    assert kwargs["prompt_path"].exists()
+    assert kwargs["raw_output_path"].parent.exists()
 
 
 # ===========================================================================

@@ -4,6 +4,18 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-04-03
 
+### Meta-Bridge Task-ID Path Safety
+
+- `meta_bridge_supervisor.py` now sanitizes slash-bearing `task_id` values
+  before embedding them in pre-commit and post-merge reviewer `job_id` /
+  `turn_id` filenames, so exact tracker task IDs like
+  `[PIPELINE-RECOVERY/pipeline-monitor-worktree-rebind-2026-04-03]` no longer
+  crash prompt/raw-output path creation
+- `mu/tests/tools/test_meta_bridge_supervisor.py` now locks slash-bearing task
+  IDs for the filename token helper and for both the pre-commit and post-merge
+  reviewer launch paths, so the supervisor cannot regress back to raw
+  slash-bearing filenames silently
+
 ### Recovery Observability And Watcher-Noise Hardening
 
 - `recovery_gate.py` now writes a structured

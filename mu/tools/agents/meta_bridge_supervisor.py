@@ -106,6 +106,15 @@ def _bounded_watchdog_timeout(timeout_s: int, watchdog_s: float) -> float:
     return min(float(timeout_s), watchdog_s)
 
 
+def _filesystem_safe_token(value: Any) -> str:
+    """Make human-readable ids safe to embed in prompt/raw filenames."""
+    text = str(value or "unknown")
+    text = re.sub(r"[\\/]+", "-", text)
+    text = re.sub(r"[^A-Za-z0-9._\-\[\]]+", "-", text)
+    text = text.strip("-.")
+    return text or "unknown"
+
+
 class MetaBridgeState(Enum):
     """Slice 1 state machine states.
 
@@ -2092,7 +2101,8 @@ def run_post_merge_review(
     if verbose:
         print(f"[post-merge] Running Codex post-merge review (timeout: {timeout_s}s)...")
 
-    job_id = f"postmerge-{package.get('task_id', 'unknown')}-{uuid.uuid4().hex[:8]}"
+    task_token = _filesystem_safe_token(package.get("task_id", "unknown"))
+    job_id = f"postmerge-{task_token}-{uuid.uuid4().hex[:8]}"
     turn_id = f"{job_id}--r1-postmerge"
 
     prompt_dir = paths.bus_dir / "prompts"
@@ -2400,7 +2410,8 @@ def run_meta_review(
         print(f"[meta-bridge] Running Codex meta-review (timeout: {timeout_s}s)...")
 
     # Generate job/turn IDs for this meta-review
-    job_id = f"meta-{package.get('task_id', 'unknown')}-{uuid.uuid4().hex[:8]}"
+    task_token = _filesystem_safe_token(package.get("task_id", "unknown"))
+    job_id = f"meta-{task_token}-{uuid.uuid4().hex[:8]}"
     turn_id = f"{job_id}--r1-meta"
 
     # Write prompt to file for adapter

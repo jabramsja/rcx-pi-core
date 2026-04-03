@@ -1,0 +1,24 @@
+{
+  "wave_id": "meta-bridge-taskid-path-safety-2026-04-03",
+  "repeat_run_speedup_ratio": 1.251576,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.387017,
+  "repeat_run_raw_seconds": [
+    0.484381,
+    0.387017
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.484381
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.871398
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-04-03T22:20:44Z",
+  "collector_version": "2.2.0"
+}
