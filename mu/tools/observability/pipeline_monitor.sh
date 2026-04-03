@@ -49,13 +49,8 @@ resolve_repo_root() {
     fi
   fi
 
-  root="$(find_worktree_for_branch dev || true)"
-  if [ -n "$root" ]; then
-    printf '%s\n' "$root"
-    return 0
-  fi
-
-  pwd
+  echo "ERROR: cannot resolve repo root — git toplevel failed and no worktree found for branch '${branch:-<detached>}'" >&2
+  return 1
 }
 
 REPO_ROOT="$(resolve_repo_root)"
