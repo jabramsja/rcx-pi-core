@@ -379,87 +379,89 @@ def run_recoverable_surface_command(
     }
     result: dict[str, Any] | None = None
 
-    while True:
-        if result is not None and _is_chained_commit_failure(result):
-            retried = _retry_commit_only(
-                repo_root,
-                config,
-                verbose=getattr(args, "verbose", False),
-            )
-            if retried.get("stdout"):
-                sys.stdout.write(retried["stdout"])
-            if retried.get("stderr"):
-                sys.stderr.write(retried["stderr"])
-            if retried.get("status") in {"success", "held"}:
-                return 0
-            result = retried
-        else:
-            timeout = config.get("timeouts", {}).get(executor_name, 600)
-            try:
-                completed = _run_executor_in_group(cmd, cwd=repo_root, timeout=timeout)
-                _emit_completed_process_output(completed)
-                if completed.returncode == 0:
-                    result = _continue_successful_executor_chain(
-                        executor_name,
-                        completed,
-                        repo_root=repo_root,
-                        config=config,
-                        record=surface_record,
-                        verbose=getattr(args, "verbose", False),
-                        emit_output=True,
-                    )
-                    if result.get("status") in {"success", "held"}:
-                        return 0
-                else:
+    try:
+        while True:
+            if result is not None and _is_chained_commit_failure(result):
+                retried = _retry_commit_only(
+                    repo_root,
+                    config,
+                    verbose=getattr(args, "verbose", False),
+                )
+                if retried.get("stdout"):
+                    sys.stdout.write(retried["stdout"])
+                if retried.get("stderr"):
+                    sys.stderr.write(retried["stderr"])
+                if retried.get("status") in {"success", "held"}:
+                    return 0
+                result = retried
+            else:
+                timeout = config.get("timeouts", {}).get(executor_name, 600)
+                try:
+                    completed = _run_executor_in_group(cmd, cwd=repo_root, timeout=timeout)
+                    _emit_completed_process_output(completed)
+                    if completed.returncode == 0:
+                        result = _continue_successful_executor_chain(
+                            executor_name,
+                            completed,
+                            repo_root=repo_root,
+                            config=config,
+                            record=surface_record,
+                            verbose=getattr(args, "verbose", False),
+                            emit_output=True,
+                        )
+                        if result.get("status") in {"success", "held"}:
+                            return 0
+                    else:
+                        result = {
+                            "status": "failed",
+                            "decision": decision,
+                            "executor": executor_name,
+                            "step": args.surface.replace("-", "_"),
+                            "exit_code": completed.returncode,
+                            "stdout": completed.stdout,
+                            "stderr": completed.stderr,
+                        }
+                except subprocess.TimeoutExpired:
                     result = {
-                        "status": "failed",
+                        "status": "timeout",
                         "decision": decision,
                         "executor": executor_name,
                         "step": args.surface.replace("-", "_"),
-                        "exit_code": completed.returncode,
-                        "stdout": completed.stdout,
-                        "stderr": completed.stderr,
+                        "message": f"Executor {executor_name} timed out after {timeout}s",
+                        "stdout": "",
+                        "stderr": "",
                     }
-            except subprocess.TimeoutExpired:
-                result = {
-                    "status": "timeout",
-                    "decision": decision,
-                    "executor": executor_name,
-                    "step": args.surface.replace("-", "_"),
-                    "message": f"Executor {executor_name} timed out after {timeout}s",
-                    "stdout": "",
-                    "stderr": "",
-                }
 
-        if result.get("status") == "failed" and _is_terminal_executor_outcome(result):
-            break
+            if result.get("status") == "failed" and _is_terminal_executor_outcome(result):
+                break
 
-        recovery = attempt_recovery(repo_root, result, wave_id)
-        result["recovery"] = recovery
-        if getattr(args, "verbose", False):
-            print(
-                f"[dispatch] Surface recovery: class={recovery.get('failure_class')} "
-                f"tier={recovery.get('tier')} recovered={recovery.get('recovered')}"
+            recovery = attempt_recovery(repo_root, result, wave_id)
+            result["recovery"] = recovery
+            if getattr(args, "verbose", False):
+                print(
+                    f"[dispatch] Surface recovery: class={recovery.get('failure_class')} "
+                    f"tier={recovery.get('tier')} recovered={recovery.get('recovered')}"
+                )
+            if not recovery.get("recovered"):
+                break
+
+            new_orig = _apply_recovery_overrides(
+                config, repo_root=repo_root, verbose=getattr(args, "verbose", False))
+            if original_timeouts is None:
+                original_timeouts = new_orig
+            _clear_phase_b_state_for_retry(repo_root, result, verbose=getattr(args, "verbose", False))
+
+        return 1
+    finally:
+        if original_timeouts is not None:
+            _restore_config_on_disk(
+                repo_root, original_timeouts,
+                verbose=getattr(args, "verbose", False),
             )
-        if not recovery.get("recovered"):
-            break
-
-        new_orig = _apply_recovery_overrides(
-            config, repo_root=repo_root, verbose=getattr(args, "verbose", False))
-        if original_timeouts is None:
-            original_timeouts = new_orig
-        _clear_phase_b_state_for_retry(repo_root, result, verbose=getattr(args, "verbose", False))
-
-    if original_timeouts is not None:
-        _restore_config_on_disk(
-            repo_root, original_timeouts,
-            verbose=getattr(args, "verbose", False),
-        )
-        config["timeouts"] = dict(original_timeouts)
-    for env_key in list(os.environ):
-        if env_key.startswith("RCX_RECOVERY_ORIGINAL_TIMEOUT_"):
-            os.environ.pop(env_key, None)
-    return 1
+            config["timeouts"] = dict(original_timeouts)
+        for env_key in list(os.environ):
+            if env_key.startswith("RCX_RECOVERY_ORIGINAL_TIMEOUT_"):
+                os.environ.pop(env_key, None)
 
 
 def _validate_phase_b_handoff_identity(handoff_path: Path, record: dict[str, Any]) -> tuple[bool, str]:

@@ -4582,6 +4582,47 @@ class TestModularSurfaceEntrypoints:
         assert mock_recovery.call_args[0][2] == "surface-wave"
         mock_clear.assert_called_once()
 
+    def test_phase_surface_success_after_recovery_restores_overrides(self, tmp_path, monkeypatch):
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["phase-a", "--plan-name", "surface-wave", "--json"]
+        )
+        fail = subprocess.CompletedProcess(["phase-a"], 1, stdout="", stderr="boom")
+        succeed = subprocess.CompletedProcess(["phase-a"], 0, stdout='{"status":"converged"}', stderr="")
+        recovery = {
+            "recovered": True,
+            "exhausted": False,
+            "failure_class": "process_timeout",
+            "tier": 2,
+            "action": "increase_timeout",
+            "detail": "retry with bumped timeout",
+        }
+        config = {"timeouts": {"phase_a_executor": 300}}
+        orig = {"phase_a_executor": 300}
+
+        def fake_apply(cfg, *, repo_root, verbose=False):
+            cfg["timeouts"]["phase_a_executor"] = 450
+            os.environ["RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_a_executor"] = "300"
+            return orig
+
+        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_a_executor", raising=False)
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=[fail, succeed]), \
+             patch.object(dispatch_mod, "attempt_recovery", return_value=recovery), \
+             patch.object(dispatch_mod, "_apply_recovery_overrides", side_effect=fake_apply), \
+             patch.object(dispatch_mod, "_continue_successful_executor_chain", return_value={"status": "success"}), \
+             patch.object(dispatch_mod, "_clear_phase_b_state_for_retry") as mock_clear, \
+             patch.object(dispatch_mod, "_restore_config_on_disk") as mock_restore:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config=config,
+            )
+
+        assert exit_code == 0
+        mock_clear.assert_called_once()
+        mock_restore.assert_called_once_with(tmp_path, orig, verbose=False)
+        assert config["timeouts"] == orig
+        assert "RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_a_executor" not in os.environ
+
     def test_phase_a_surface_success_chains_to_phase_b_and_commit(self, tmp_path):
         plan_path = tmp_path / "reports" / "control_plane" / "plan.md"
         plan_path.parent.mkdir(parents=True)
