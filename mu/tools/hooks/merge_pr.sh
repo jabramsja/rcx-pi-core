@@ -26,6 +26,7 @@ set -euo pipefail
 
 REPO_OWNER="jabramsja"
 REPO_NAME="rcx-pi-core"
+GH_REPO="${REPO_OWNER}/${REPO_NAME}"
 SWEEP_COUNT=10
 POST_MERGE_WAIT=75
 
@@ -135,7 +136,7 @@ if [ "$FLAG" = "--sweep-only" ]; then
     echo "=== Sweep-only mode ==="
     echo ""
     echo "--- Sweeping last $SWEEP_COUNT merged PRs ---"
-    merged_prs=$(gh pr list --state merged --limit "$SWEEP_COUNT" --json number --jq '.[].number' 2>/dev/null || true)
+    merged_prs=$(gh pr list --repo "$GH_REPO" --state merged --limit "$SWEEP_COUNT" --json number --jq '.[].number' 2>/dev/null || true)
     if [ -z "$merged_prs" ]; then
         echo "  No merged PRs found"
     else
@@ -159,7 +160,7 @@ echo ""
 
 # Step 2: Merge
 echo "--- Step 2: Merging ---"
-if ! gh pr merge "$PR_NUM" --merge --delete-branch --admin; then
+if ! gh pr merge "$PR_NUM" --repo "$GH_REPO" --merge --delete-branch --admin; then
     echo ""
     echo "❌ Merge failed. Check for remaining blockers:"
     echo "   gh pr checks $PR_NUM"
@@ -178,7 +179,7 @@ echo ""
 # Step 4: Sweep recent merged PRs (opt-in via --sweep)
 if [ "$FLAG" = "--sweep" ]; then
     echo "--- Step 4: Sweeping last $SWEEP_COUNT merged PRs ---"
-    merged_prs=$(gh pr list --state merged --limit "$SWEEP_COUNT" --json number --jq '.[].number' 2>/dev/null || true)
+    merged_prs=$(gh pr list --repo "$GH_REPO" --state merged --limit "$SWEEP_COUNT" --json number --jq '.[].number' 2>/dev/null || true)
     if [ -z "$merged_prs" ]; then
         echo "  No merged PRs found"
     else
