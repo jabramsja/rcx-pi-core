@@ -35,6 +35,7 @@ try:
         ensure_not_agent_review_mode,
         ExecutorCommonError,
         normalize_wave_id,
+        terminate_process_tree,
     )
 except ImportError:
     import importlib.util as _ilu
@@ -48,6 +49,7 @@ except ImportError:
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
     normalize_wave_id = _mod.normalize_wave_id
+    terminate_process_tree = _mod.terminate_process_tree
 
 try:
     from recovery_gate import attempt_recovery
@@ -101,17 +103,15 @@ _NON_RETRYABLE_DISPATCH_STATUSES = frozenset({
 # - max_rounds_reached: bridge loop exhausted without convergence
 # - supervisor_rejected: pre-commit supervisor returned non-COMMIT_GO
 #   (e.g. STOP_FOR_FOUNDER) — founder decision required
-# - needs_phase_b: supervisor returned NEEDS_PHASE_B after reentry
-#   convergence — manual intervention required
 _TERMINAL_EXECUTOR_STATUSES = frozenset({
     "question_for_founder",
     "max_rounds_reached",
     "supervisor_rejected",
-    "needs_phase_b",
 })
 
 # Available executor scripts
 AVAILABLE_EXECUTORS = {"commit_executor", "phase_b_executor", "phase_a_executor", "dialectic_executor"}
+_JSON_EXECUTORS = frozenset({"commit_executor", "phase_b_executor", "phase_a_executor"})
 SURFACE_COMMANDS = {
     "phase-a",
     "phase-b",
@@ -333,6 +333,137 @@ def run_surface_command(cmd: list[str], *, repo_root: Path) -> int:
     return result.returncode
 
 
+def _surface_wave_id(args: argparse.Namespace, repo_root: Path) -> str:
+    """Derive a stable wave_id for recoverable surface invocations."""
+    if args.surface == "phase-a":
+        return normalize_wave_id(args.plan_name)
+    if args.surface == "phase-b":
+        payload = _load_routing_record_payload(
+            path_value=args.routing_record_path,
+            json_value=args.routing_record_json,
+        )
+        if payload:
+            try:
+                record = json.loads(payload)
+                wave_name = record.get("wave_name") or record.get("wave_id", "")
+                if isinstance(wave_name, str) and wave_name.strip():
+                    return normalize_wave_id(wave_name)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+        if args.plan:
+            return normalize_wave_id(Path(args.plan).stem)
+    return "wave-unknown"
+
+
+def run_recoverable_surface_command(
+    args: argparse.Namespace,
+    *,
+    repo_root: Path,
+    config: dict[str, Any],
+) -> int:
+    """Run Phase A/B surfaces through the dispatcher recovery gate."""
+    cmd = build_surface_command(args)
+    executor_name = {
+        "phase-a": "phase_a_executor",
+        "phase-b": "phase_b_executor",
+    }[args.surface]
+    decision = {
+        "phase-a": "ROUTE_PHASE_A",
+        "phase-b": "ROUTE_PHASE_B",
+    }[args.surface]
+    wave_id = _surface_wave_id(args, repo_root)
+    original_timeouts = None
+    surface_record = {
+        "decision": decision,
+        "wave_name": wave_id,
+    }
+    result: dict[str, Any] | None = None
+
+    try:
+        while True:
+            if result is not None and _is_chained_commit_failure(result):
+                retried = _retry_commit_only(
+                    repo_root,
+                    config,
+                    verbose=getattr(args, "verbose", False),
+                )
+                if retried.get("stdout"):
+                    sys.stdout.write(retried["stdout"])
+                if retried.get("stderr"):
+                    sys.stderr.write(retried["stderr"])
+                if retried.get("status") in {"success", "held"}:
+                    return 0
+                result = retried
+            else:
+                timeout = config.get("timeouts", {}).get(executor_name, 600)
+                try:
+                    completed = _run_executor_in_group(cmd, cwd=repo_root, timeout=timeout)
+                    _emit_completed_process_output(completed)
+                    if completed.returncode == 0:
+                        result = _continue_successful_executor_chain(
+                            executor_name,
+                            completed,
+                            repo_root=repo_root,
+                            config=config,
+                            record=surface_record,
+                            verbose=getattr(args, "verbose", False),
+                            emit_output=True,
+                        )
+                        if result.get("status") in {"success", "held"}:
+                            return 0
+                    else:
+                        result = {
+                            "status": "failed",
+                            "decision": decision,
+                            "executor": executor_name,
+                            "step": args.surface.replace("-", "_"),
+                            "exit_code": completed.returncode,
+                            "stdout": completed.stdout,
+                            "stderr": completed.stderr,
+                        }
+                except subprocess.TimeoutExpired:
+                    result = {
+                        "status": "timeout",
+                        "decision": decision,
+                        "executor": executor_name,
+                        "step": args.surface.replace("-", "_"),
+                        "message": f"Executor {executor_name} timed out after {timeout}s",
+                        "stdout": "",
+                        "stderr": "",
+                    }
+
+            if result.get("status") == "failed" and _is_terminal_executor_outcome(result):
+                break
+
+            recovery = attempt_recovery(repo_root, result, wave_id)
+            result["recovery"] = recovery
+            if getattr(args, "verbose", False):
+                print(
+                    f"[dispatch] Surface recovery: class={recovery.get('failure_class')} "
+                    f"tier={recovery.get('tier')} recovered={recovery.get('recovered')}"
+                )
+            if not recovery.get("recovered"):
+                break
+
+            new_orig = _apply_recovery_overrides(
+                config, repo_root=repo_root, verbose=getattr(args, "verbose", False))
+            if original_timeouts is None:
+                original_timeouts = new_orig
+            _clear_phase_b_state_for_retry(repo_root, result, verbose=getattr(args, "verbose", False))
+
+        return 1
+    finally:
+        if original_timeouts is not None:
+            _restore_config_on_disk(
+                repo_root, original_timeouts,
+                verbose=getattr(args, "verbose", False),
+            )
+            config["timeouts"] = dict(original_timeouts)
+        for env_key in list(os.environ):
+            if env_key.startswith("RCX_RECOVERY_ORIGINAL_TIMEOUT_"):
+                os.environ.pop(env_key, None)
+
+
 def _validate_phase_b_handoff_identity(handoff_path: Path, record: dict[str, Any]) -> tuple[bool, str]:
     """Fail closed if a stale handoff file does not match the current routing identity."""
     try:
@@ -429,9 +560,296 @@ def _classify_commit_executor_result(
     if commit_result.returncode != 0:
         return "failed", "COMMIT_GO"
     stdout = commit_result.stdout or ""
+    try:
+        payload = json.loads(stdout)
+        if isinstance(payload, dict):
+            status = payload.get("status")
+            if status == "held":
+                return "held", "COMMIT_HELD"
+            if status == "success":
+                return "success", "COMMIT_GO"
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("{"):
+            continue
+        try:
+            payload = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        status = payload.get("status")
+        if status == "held":
+            return "held", "COMMIT_HELD"
+        if status == "success":
+            return "success", "COMMIT_GO"
     if "[commit-executor] Status: held" in stdout:
         return "held", "COMMIT_HELD"
     return "success", "COMMIT_GO"
+
+
+def _parse_worktree_list(output: str) -> list[dict[str, str]]:
+    """Parse `git worktree list --porcelain` into entry dicts."""
+    entries: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for raw_line in output.splitlines():
+        line = raw_line.rstrip()
+        if not line:
+            if current:
+                entries.append(current)
+                current = {}
+            continue
+        key, _, value = line.partition(" ")
+        if key == "worktree":
+            if current:
+                entries.append(current)
+                current = {}
+            current["worktree"] = value
+            continue
+        current[key] = value or "true"
+    if current:
+        entries.append(current)
+    return entries
+
+
+def resolve_repo_root_for_dispatch(*, verbose: bool = False) -> Path:
+    """Resolve the active worktree root for dispatcher execution.
+
+    When invoked from the bare/common git dir, fall back to a linked worktree
+    for the current branch if and only if exactly one exists.
+    """
+    try:
+        top_level = Path(subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip())
+        inside_work_tree = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            capture_output=True, text=True, check=False,
+        )
+        is_bare = subprocess.run(
+            ["git", "rev-parse", "--is-bare-repository"],
+            capture_output=True, text=True, check=False,
+        )
+        if (
+            inside_work_tree.returncode == 0
+            and inside_work_tree.stdout.strip() == "true"
+            and not (
+                is_bare.returncode == 0
+                and is_bare.stdout.strip() == "true"
+            )
+        ):
+            return top_level
+    except subprocess.CalledProcessError:
+        pass
+
+    branch_proc = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+        capture_output=True, text=True, check=False,
+    )
+    if branch_proc.returncode != 0 or not branch_proc.stdout.strip():
+        raise DispatchError(
+            "Not in a git worktree, and no current branch is available to resolve a linked worktree"
+        )
+    branch = branch_proc.stdout.strip()
+
+    worktree_proc = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        capture_output=True, text=True, check=False,
+    )
+    if worktree_proc.returncode != 0:
+        raise DispatchError(
+            "Not in a git worktree, and linked worktrees could not be enumerated"
+        )
+
+    target_ref = f"refs/heads/{branch}"
+    matches = [
+        Path(entry["worktree"])
+        for entry in _parse_worktree_list(worktree_proc.stdout)
+        if entry.get("worktree")
+        and entry.get("bare") != "true"
+        and entry.get("branch") == target_ref
+    ]
+    if len(matches) == 1:
+        if verbose:
+            print(
+                f"[dispatch] Resolved linked worktree for branch {branch}: {matches[0]}",
+                file=sys.stderr,
+            )
+        return matches[0]
+    if not matches:
+        raise DispatchError(
+            "Current repository is a bare/common git dir. Run from a linked worktree "
+            f"or create one for {branch!r} with `git worktree add <path> {branch}`."
+        )
+    match_list = ", ".join(str(path) for path in matches)
+    raise DispatchError(
+        f"Multiple linked worktrees found for branch {branch!r}: {match_list}. "
+        "Run the dispatcher from the intended linked worktree."
+    )
+
+
+def _emit_completed_process_output(
+    completed: subprocess.CompletedProcess[str],
+) -> None:
+    """Mirror a completed subprocess's captured output to the caller."""
+    if completed.stdout:
+        sys.stdout.write(completed.stdout)
+    if completed.stderr:
+        sys.stderr.write(completed.stderr)
+
+
+def _continue_successful_executor_chain(
+    executor_name: str,
+    completed: subprocess.CompletedProcess[str],
+    *,
+    repo_root: Path,
+    config: dict[str, Any],
+    record: dict[str, Any] | None = None,
+    verbose: bool = False,
+    emit_output: bool = False,
+    chain_origin: str | None = None,
+) -> dict[str, Any]:
+    """Continue the A→B→commit chain after a successful executor leg."""
+    if executor_name == "phase_a_executor":
+        plan_path = _extract_plan_path(completed.stdout, repo_root)
+        if plan_path is None:
+            return {
+                "status": "failed",
+                "decision": "ROUTE_PHASE_A",
+                "executor": executor_name,
+                "exit_code": 0,
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+                "message": "Phase A converged but no plan_path found in output",
+            }
+
+        if verbose:
+            print(f"[dispatch] Phase A converged → chaining to Phase B with plan: {plan_path}")
+
+        phase_b_timeout = config.get("timeouts", {}).get("phase_b_executor", 3600)
+        phase_b_routing = {
+            "decision": "ROUTE_PHASE_B",
+            "wave_name": (record or {}).get("wave_name", ""),
+            "task_id": (record or {}).get("task_id", ""),
+            "summary": "Chained from Phase A convergence",
+            "next_candidates": (record or {}).get("next_candidates", []),
+        }
+        phase_b_args = [
+            sys.executable,
+            str(SCRIPT_DIR / "phase_b_executor.py"),
+            "--plan", plan_path,
+            "--routing-record", json.dumps(phase_b_routing),
+            "--json",
+        ]
+        try:
+            phase_b_result = _run_executor_in_group(
+                phase_b_args, cwd=repo_root, timeout=phase_b_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "status": "timeout",
+                "decision": "ROUTE_PHASE_B",
+                "executor": "phase_b_executor",
+                "message": f"Phase B executor timed out after {phase_b_timeout}s",
+                "chained_from": "phase_a_executor",
+            }
+        if emit_output:
+            _emit_completed_process_output(phase_b_result)
+        if phase_b_result.returncode != 0:
+            return {
+                "status": "failed",
+                "decision": "ROUTE_PHASE_B",
+                "executor": "phase_b_executor",
+                "exit_code": phase_b_result.returncode,
+                "stdout": phase_b_result.stdout,
+                "stderr": phase_b_result.stderr,
+                "chained_from": "phase_a_executor",
+            }
+        return _continue_successful_executor_chain(
+            "phase_b_executor",
+            phase_b_result,
+            repo_root=repo_root,
+            config=config,
+            record=phase_b_routing,
+            verbose=verbose,
+            emit_output=emit_output,
+            chain_origin="phase_a_executor",
+        )
+
+    if executor_name == "phase_b_executor":
+        handoff_path = repo_root / ".agent_bus" / "executors" / "phase_b_handoff.json"
+        if not handoff_path.exists():
+            origin = chain_origin or "phase_b_executor"
+            return {
+                "status": "failed",
+                "decision": "ROUTE_PHASE_B",
+                "executor": executor_name,
+                "exit_code": 0,
+                "message": "Phase B converged but no handoff file found",
+                "chained_from": (
+                    "phase_a_executor" if origin == "phase_a_executor" else None
+                ),
+            }
+
+        if verbose:
+            print("[dispatch] Phase B converged → chaining to commit executor")
+
+        commit_timeout = config.get("timeouts", {}).get("commit_executor", 300)
+        commit_args = [
+            sys.executable,
+            str(SCRIPT_DIR / "commit_executor.py"),
+            "--handoff", str(handoff_path),
+            "--json",
+        ]
+        try:
+            commit_result = _run_executor_in_group(
+                commit_args, cwd=repo_root, timeout=commit_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            origin = chain_origin or "phase_b_executor"
+            return {
+                "status": "timeout",
+                "decision": "COMMIT_GO",
+                "executor": "commit_executor",
+                "message": f"Commit executor timed out after {commit_timeout}s",
+                "chained_from": (
+                    "phase_a_executor → phase_b_executor"
+                    if origin == "phase_a_executor"
+                    else "phase_b_executor"
+                ),
+            }
+        if emit_output:
+            _emit_completed_process_output(commit_result)
+        c_status, c_decision = _classify_commit_executor_result(commit_result)
+        origin = chain_origin or "phase_b_executor"
+        return {
+            "status": c_status,
+            "decision": c_decision,
+            "executor": "commit_executor",
+            "exit_code": commit_result.returncode,
+            "stdout": commit_result.stdout,
+            "stderr": commit_result.stderr,
+            "chained_from": (
+                "phase_a_executor → phase_b_executor"
+                if origin == "phase_a_executor"
+                else "phase_b_executor"
+            ),
+        }
+
+    nc_status, nc_decision = ("success", record.get("decision", "") if record else "")
+    if executor_name == "commit_executor":
+        nc_status, nc_decision = _classify_commit_executor_result(completed)
+    return {
+        "status": nc_status,
+        "decision": nc_decision,
+        "executor": executor_name,
+        "exit_code": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
 
 
 def _run_executor_in_group(
@@ -461,7 +879,14 @@ def _run_executor_in_group(
             os.killpg(proc.pid, signal.SIGTERM)
         except OSError:
             pass
-        proc.kill()
+        try:
+            terminate_process_tree(proc.pid, cwd=cwd)
+        except Exception:
+            pass
+        try:
+            proc.kill()
+        except OSError:
+            pass
         proc.wait()
         raise
     return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
@@ -896,10 +1321,31 @@ def dispatch(
                 # can prepare a tracker-only handoff internally.
                 executor_args.extend(["--routing-record", json.dumps(record)])
         elif executor_name == "phase_a_executor":
-            # Phase A needs --plan-name
+            # Phase A needs --plan-name. When a candidate already declares a
+            # tracked packet, prefer that canonical packet stem so Phase A
+            # reuses the tracked file instead of minting a date-slug duplicate.
             candidates = record.get("next_candidates", [])
             plan_name = None
             for c in candidates:
+                tp = c.get("tracked_packet")
+                if tp and isinstance(tp, str):
+                    tp_resolved = (repo / tp).resolve()
+                    if ".." in Path(tp).parts:
+                        return {
+                            "status": "error",
+                            "decision": decision,
+                            "executor": executor_name,
+                            "message": f"Path traversal in tracked_packet: {tp}",
+                        }
+                    if not tp_resolved.is_relative_to(repo.resolve()):
+                        return {
+                            "status": "error",
+                            "decision": decision,
+                            "executor": executor_name,
+                            "message": f"tracked_packet escapes repo root: {tp}",
+                        }
+                    plan_name = Path(tp).stem
+                    break
                 candidate_text = c.get("candidate", "")
                 if candidate_text:
                     plan_name = _sanitize_plan_name(candidate_text)
@@ -945,6 +1391,8 @@ def dispatch(
                 executor_args.extend(["--routing-record", json.dumps(record)])
         else:
             executor_args.extend(["--routing-record", json.dumps(record)])
+        if executor_name in _JSON_EXECUTORS:
+            executor_args.append("--json")
 
         result = _run_executor_in_group(
             executor_args, cwd=repo, timeout=timeout,
@@ -958,169 +1406,14 @@ def dispatch(
                 "stdout": result.stdout,
                 "stderr": result.stderr,
             }
-
-        # ── Phase chain: A → B → commit ─────────────────────────
-        # After Phase A converges, immediately invoke Phase B with the
-        # locked plan.  After Phase B produces a commit handoff, invoke
-        # the commit executor.  This is the full pipeline cycle without
-        # requiring separate dispatch invocations between phases.
-
-        if executor_name == "phase_a_executor":
-            # Parse plan_path from Phase A JSON output
-            plan_path = _extract_plan_path(result.stdout, repo)
-            if plan_path is None:
-                return {
-                    "status": "failed",
-                    "decision": decision,
-                    "executor": executor_name,
-                    "exit_code": 0,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                    "message": "Phase A converged but no plan_path found in output",
-                }
-
-            if verbose:
-                print(f"[dispatch] Phase A converged → chaining to Phase B with plan: {plan_path}")
-
-            phase_b_timeout = cfg.get("timeouts", {}).get("phase_b_executor", 3600)
-            # Synthesize a ROUTE_PHASE_B routing record so Phase B's
-            # routing validation passes.
-            phase_b_routing = json.dumps({
-                "decision": "ROUTE_PHASE_B",
-                "wave_name": record.get("wave_name", ""),
-                "task_id": record.get("task_id", ""),
-                "summary": "Chained from Phase A convergence",
-                "next_candidates": record.get("next_candidates", []),
-            })
-            phase_b_args = [
-                sys.executable,
-                str(SCRIPT_DIR / "phase_b_executor.py"),
-                "--plan", plan_path,
-                "--routing-record", phase_b_routing,
-            ]
-            try:
-                phase_b_result = _run_executor_in_group(
-                    phase_b_args, cwd=repo, timeout=phase_b_timeout,
-                )
-            except subprocess.TimeoutExpired:
-                return {
-                    "status": "timeout",
-                    "decision": "ROUTE_PHASE_B",
-                    "executor": "phase_b_executor",
-                    "message": f"Phase B executor timed out after {phase_b_timeout}s",
-                    "chained_from": "phase_a_executor",
-                }
-            if phase_b_result.returncode != 0:
-                return {
-                    "status": "failed",
-                    "decision": "ROUTE_PHASE_B",
-                    "executor": "phase_b_executor",
-                    "exit_code": phase_b_result.returncode,
-                    "stdout": phase_b_result.stdout,
-                    "stderr": phase_b_result.stderr,
-                    "chained_from": "phase_a_executor",
-                }
-
-            if verbose:
-                print("[dispatch] Phase B converged → chaining to commit executor")
-
-            # Phase B writes handoff to canonical location
-            handoff_path = repo / ".agent_bus" / "executors" / "phase_b_handoff.json"
-            if not handoff_path.exists():
-                return {
-                    "status": "failed",
-                    "decision": "ROUTE_PHASE_B",
-                    "executor": "phase_b_executor",
-                    "exit_code": 0,
-                    "message": "Phase B converged but no handoff file found",
-                    "chained_from": "phase_a_executor",
-                }
-
-            commit_timeout = cfg.get("timeouts", {}).get("commit_executor", 300)
-            commit_args = [
-                sys.executable,
-                str(SCRIPT_DIR / "commit_executor.py"),
-                "--handoff", str(handoff_path),
-            ]
-            try:
-                commit_result = _run_executor_in_group(
-                    commit_args, cwd=repo, timeout=commit_timeout,
-                )
-            except subprocess.TimeoutExpired:
-                return {
-                    "status": "timeout",
-                    "decision": "COMMIT_GO",
-                    "executor": "commit_executor",
-                    "message": f"Commit executor timed out after {commit_timeout}s",
-                    "chained_from": "phase_a_executor → phase_b_executor",
-                }
-            c_status, c_decision = _classify_commit_executor_result(commit_result)
-            return {
-                "status": c_status,
-                "decision": c_decision,
-                "executor": "commit_executor",
-                "exit_code": commit_result.returncode,
-                "stdout": commit_result.stdout,
-                "stderr": commit_result.stderr,
-                "chained_from": "phase_a_executor → phase_b_executor",
-            }
-
-        elif executor_name == "phase_b_executor":
-            # Phase B succeeded — chain to commit executor
-            handoff_path = repo / ".agent_bus" / "executors" / "phase_b_handoff.json"
-            if not handoff_path.exists():
-                return {
-                    "status": "failed",
-                    "decision": decision,
-                    "executor": executor_name,
-                    "exit_code": 0,
-                    "message": "Phase B converged but no handoff file found",
-                }
-
-            if verbose:
-                print("[dispatch] Phase B converged → chaining to commit executor")
-
-            commit_timeout = cfg.get("timeouts", {}).get("commit_executor", 300)
-            commit_args = [
-                sys.executable,
-                str(SCRIPT_DIR / "commit_executor.py"),
-                "--handoff", str(handoff_path),
-            ]
-            try:
-                commit_result = _run_executor_in_group(
-                    commit_args, cwd=repo, timeout=commit_timeout,
-                )
-            except subprocess.TimeoutExpired:
-                return {
-                    "status": "timeout",
-                    "decision": "COMMIT_GO",
-                    "executor": "commit_executor",
-                    "message": f"Commit executor timed out after {commit_timeout}s",
-                    "chained_from": "phase_b_executor",
-                }
-            c_status, c_decision = _classify_commit_executor_result(commit_result)
-            return {
-                "status": c_status,
-                "decision": c_decision,
-                "executor": "commit_executor",
-                "exit_code": commit_result.returncode,
-                "stdout": commit_result.stdout,
-                "stderr": commit_result.stderr,
-                "chained_from": "phase_b_executor",
-            }
-
-        # Non-chained executor (commit, dialectic, etc.)
-        nc_status, nc_decision = ("success", decision)
-        if executor_name == "commit_executor":
-            nc_status, nc_decision = _classify_commit_executor_result(result)
-        return {
-            "status": nc_status,
-            "decision": nc_decision,
-            "executor": executor_name,
-            "exit_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-        }
+        return _continue_successful_executor_chain(
+            executor_name,
+            result,
+            repo_root=repo,
+            config=cfg,
+            record=record,
+            verbose=verbose,
+        )
     except subprocess.TimeoutExpired:
         return {
             "status": "timeout",
@@ -1143,14 +1436,18 @@ def main(argv: list[str] | None = None) -> int:
         parser = build_surface_parser()
         args = parser.parse_args(argv)
         try:
-            repo_root = Path(subprocess.run(
-                ["git", "rev-parse", "--show-toplevel"],
-                capture_output=True, text=True, check=True,
-            ).stdout.strip())
-        except subprocess.CalledProcessError:
-            print("[error] Not in a git repository", file=sys.stderr)
+            repo_root = resolve_repo_root_for_dispatch(verbose=getattr(args, "verbose", False))
+        except DispatchError as exc:
+            print(f"[error] {exc}", file=sys.stderr)
             return 1
         try:
+            if args.surface in {"phase-a", "phase-b"}:
+                config = load_config()
+                return run_recoverable_surface_command(
+                    args,
+                    repo_root=repo_root,
+                    config=config,
+                )
             cmd = build_surface_command(args)
         except ControlSurfaceError as exc:
             print(f"[executor-dispatch] Error: {exc}", file=sys.stderr)

@@ -624,6 +624,44 @@ class TestPhaseABridgeLoopFailClosed:
         bus_dir.mkdir(parents=True)
         routing = {"decision": "ROUTE_PHASE_A", "summary": "test"}
         (bus_dir / "post_merge_routing.json").write_text(json.dumps(routing))
+        plan_path = phase_a_mod.create_plan_draft(
+            tmp_path,
+            "test_plan",
+            {"request": "test", "summary": "test"},
+        )
+        plan_path.write_text(
+            """# Test Plan
+
+Date: 2026-04-02
+Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
+Phase-A-Lock: UNLOCKED
+
+## Scope
+
+- `mu/tools/executors/phase_a_executor.py`
+
+## Work Items
+
+- Exercise bridge-loop control flow for a real Phase A plan.
+
+## Constraints
+
+- No implementation changes in this fixture.
+
+## Stop Conditions
+
+- Stop if bridge decisions are misclassified.
+
+## Acceptance Criteria
+
+- The mocked bridge path converges or fails exactly as asserted by the test.
+
+## Grounding
+
+- Phase A bridge loop regression fixture.
+""",
+            encoding="utf-8",
+        )
         # Mock checkpoint commit (tmp_path is not a git repo)
         if monkeypatch is not None:
             monkeypatch.setattr(
@@ -772,6 +810,90 @@ class TestPhaseABridgeLoopFailClosed:
         result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
         assert result["status"] == "converged"
         assert call_count["n"] == 3
+
+    def test_phase_a_implementer_prompt_stays_packet_scoped(self, tmp_path, monkeypatch):
+        """Phase A implementer prompt must forbid unrelated dirty-diff spelunking."""
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
+        captured: dict[str, str] = {}
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: REQUEST_CHANGES\n\nPacket is still stubby.\n")
+            return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": ""}
+
+        def fake_parse_findings(_content):
+            return [{
+                "disposition": "blocking",
+                "severity": "critical",
+                "title": "Stub packet",
+                "detail": "Replace the stub with a real Phase A plan.",
+                "class": "DOC_ACCURACY",
+                "file": "reports/control_plane/test_plan_2026-04-02.md",
+                "line_start": 12,
+                "evidence_cmd": "nl -ba reports/control_plane/test_plan_2026-04-02.md | sed -n '1,40p'",
+                "evidence_result": "The packet is still a stub and needs a real plan rewrite.",
+            }]
+
+        def fake_invoke(repo_root, prompt, *, backend="claude", timeout=900, verbose=False):
+            captured["prompt"] = prompt
+            return {"status": "error", "stderr": "stop after prompt capture"}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+        monkeypatch.setattr(phase_a_mod, "_parse_phase_a_findings", fake_parse_findings)
+        monkeypatch.setattr(phase_a_mod, "_invoke_implementer", fake_invoke)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=1)
+        assert result["status"] == "max_rounds_reached"
+        prompt = captured["prompt"]
+        assert "Do NOT inspect unrelated dirty files" in prompt
+        assert "Search TASKS.md for the exact task id" in prompt
+        assert "Replace the stub with the real plan directly in that file." in prompt
+        assert "files, lines, and docs explicitly cited in the blocking findings above" in prompt
+        assert "Prefer current code truth over stale packet wording when they conflict." in prompt
+        assert "If a blocking finding proves a work item is already implemented in current code" in prompt
+        assert "Reproduce with: nl -ba reports/control_plane/test_plan_2026-04-02.md" in prompt
+        assert "Evidence result: The packet is still a stub" in prompt
+
+    def test_parse_phase_a_findings_preserves_reviewer_evidence(self):
+        """Phase A finding parser must preserve reviewer evidence for implementer rewrites."""
+        content = """BEGIN_AGENT_ENVELOPE
+{
+  "findings": [
+    {
+      "class": "DOC_ACCURACY",
+      "severity": "high",
+      "title": "Already landed item",
+      "detail": "Remove the stale TODO from the packet.",
+      "disposition": "blocking",
+      "file": "reports/control_plane/example.md",
+      "line_start": 41,
+      "line_end": 45,
+      "evidence_cmd": "nl -ba mu/tools/executors/commit_executor.py | sed -n '2672,2698p'",
+      "evidence_result": "Targeted pytest gate already exists.",
+      "status": "new"
+    }
+  ]
+}
+END_AGENT_ENVELOPE"""
+
+        findings = phase_a_mod._parse_phase_a_findings(content)  # ANTICHEAT_OK: testing internal Phase A finding parser
+        assert findings == [{
+            "class": "DOC_ACCURACY",
+            "severity": "high",
+            "title": "Already landed item",
+            "detail": "Remove the stale TODO from the packet.",
+            "disposition": "blocking",
+            "file": "reports/control_plane/example.md",
+            "line_start": 41,
+            "line_end": 45,
+            "evidence_cmd": "nl -ba mu/tools/executors/commit_executor.py | sed -n '2672,2698p'",
+            "evidence_result": "Targeted pytest gate already exists.",
+            "status": "new",
+        }]
 
     def test_bridge_failure_no_rendered_output_fails_closed(self, tmp_path, monkeypatch):
         """Bridge failure with no rendered output fails closed."""
@@ -1654,6 +1776,58 @@ class TestDispatcherPlanNameSanitization:
         assert "/" not in plan_name
         assert "\\" not in plan_name
         assert plan_name == "unsafe_plan_v1"
+
+    def test_phase_a_prefers_tracked_packet_stem(self, tmp_path, monkeypatch):
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "state_sha": "ignored",
+            "wave_name": "tracked-wave",
+            "next_candidates": [{
+                "candidate": "ignored candidate",
+                "tracked_packet": "reports/control_plane/recovery_tier3_wiring_2026-04-01.md",
+            }],
+        }
+
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout="[phase-a] Status: converged\n[phase-a] Plan: reports/control_plane/recovery_tier3_wiring_2026-04-01.md\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(dispatch_mod, "validate_routing_record_freshness", lambda *a, **k: (True, "fresh"))
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+
+        dispatch_mod.dispatch(record, repo_root=tmp_path, skip_freshness=True)
+
+        phase_a_args = calls[0]
+        assert "--json" in phase_a_args
+        plan_name = phase_a_args[phase_a_args.index("--plan-name") + 1]
+        assert plan_name == "recovery_tier3_wiring_2026-04-01"
+
+    def test_phase_b_dispatch_requests_json_output(self, tmp_path, monkeypatch):
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "wave_name": "tracked-wave",
+            "next_candidates": [{
+                "tracked_packet": "reports/control_plane/recovery_tier3_wiring_2026-04-01.md",
+            }],
+        }
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 1, stdout="{}", stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "validate_routing_record_freshness", lambda *a, **k: (True, "fresh"))
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+
+        dispatch_mod.dispatch(record, repo_root=tmp_path, skip_freshness=True)
+
+        assert "--json" in calls[0]
 
 
 # --- Tests 16-19: stage_files (Step 4) and collect_indicator (Step 5) ---
@@ -4264,6 +4438,257 @@ class TestModularSurfaceEntrypoints:
         assert "post-merge" in cmd
         assert "--verbose" in cmd
 
+    def test_phase_b_surface_recovery_retries_after_tier3_success(self, tmp_path):
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-b",
+                "--routing-record-json",
+                '{"wave_name":"surface-wave","decision":"ROUTE_PHASE_B"}',
+            ]
+        )
+        recovery = {
+            "recovered": True,
+            "exhausted": False,
+            "failure_class": "needs_phase_b",
+            "tier": 3,
+            "action": "recovery_loop",
+            "detail": "phase-b re-entry succeeded",
+        }
+        failed = subprocess.CompletedProcess(["phase-b"], 1, stdout="", stderr="")
+        succeeded = subprocess.CompletedProcess(["phase-b"], 0, stdout="", stderr="")
+        commit_ok = subprocess.CompletedProcess(
+            ["commit"], 0, "[commit-executor] Status: success\n", ""
+        )
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=[failed, succeeded, commit_ok]) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery", return_value=recovery) as mock_recovery, \
+             patch.object(dispatch_mod, "_clear_phase_b_state_for_retry") as mock_clear:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={"timeouts": {"phase_b_executor": 300}},
+            )
+
+        assert exit_code == 0
+        assert mock_run.call_count == 3
+        assert mock_recovery.call_args[0][2] == "surface-wave"
+        mock_clear.assert_called_once()
+
+    def test_phase_surface_success_after_recovery_restores_overrides(self, tmp_path, monkeypatch):
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["phase-a", "--plan-name", "surface-wave", "--json"]
+        )
+        fail = subprocess.CompletedProcess(["phase-a"], 1, stdout="", stderr="boom")
+        succeed = subprocess.CompletedProcess(["phase-a"], 0, stdout='{"status":"converged"}', stderr="")
+        recovery = {
+            "recovered": True,
+            "exhausted": False,
+            "failure_class": "process_timeout",
+            "tier": 2,
+            "action": "increase_timeout",
+            "detail": "retry with bumped timeout",
+        }
+        config = {"timeouts": {"phase_a_executor": 300}}
+        orig = {"phase_a_executor": 300}
+
+        def fake_apply(cfg, *, repo_root, verbose=False):
+            cfg["timeouts"]["phase_a_executor"] = 450
+            os.environ["RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_a_executor"] = "300"
+            return orig
+
+        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_a_executor", raising=False)
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=[fail, succeed]), \
+             patch.object(dispatch_mod, "attempt_recovery", return_value=recovery), \
+             patch.object(dispatch_mod, "_apply_recovery_overrides", side_effect=fake_apply), \
+             patch.object(dispatch_mod, "_continue_successful_executor_chain", return_value={"status": "success"}), \
+             patch.object(dispatch_mod, "_clear_phase_b_state_for_retry") as mock_clear, \
+             patch.object(dispatch_mod, "_restore_config_on_disk") as mock_restore:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config=config,
+            )
+
+        assert exit_code == 0
+        mock_clear.assert_called_once()
+        mock_restore.assert_called_once_with(tmp_path, orig, verbose=False)
+        assert config["timeouts"] == orig
+        assert "RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_a_executor" not in os.environ
+
+    def test_phase_a_surface_success_chains_to_phase_b_and_commit(self, tmp_path):
+        plan_path = tmp_path / "reports" / "control_plane" / "plan.md"
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text("# plan\n", encoding="utf-8")
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["phase-a", "--plan-name", "surface-wave", "--json"]
+        )
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"], 0, json.dumps({"plan_path": str(plan_path)}), ""
+        )
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+        commit_ok = subprocess.CompletedProcess(
+            ["commit"], 0, "[commit-executor] Status: success\n", ""
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, *, cwd, timeout):
+            calls.append(cmd)
+            return [phase_a_ok, phase_b_ok, commit_ok][len(calls) - 1]
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=fake_run) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery") as mock_recovery:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={
+                    "timeouts": {
+                        "phase_a_executor": 300,
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+            )
+
+        assert exit_code == 0
+        assert mock_run.call_count == 3
+        mock_recovery.assert_not_called()
+        assert calls[0][:2] == [
+            dispatch_mod.sys.executable,
+            str(dispatch_mod.SCRIPT_DIR / "phase_a_executor.py"),
+        ]
+        assert calls[1][:2] == [
+            dispatch_mod.sys.executable,
+            str(dispatch_mod.SCRIPT_DIR / "phase_b_executor.py"),
+        ]
+        assert "--plan" in calls[1]
+        assert str(plan_path) in calls[1]
+        phase_b_record = json.loads(calls[1][calls[1].index("--routing-record") + 1])
+        assert phase_b_record["decision"] == "ROUTE_PHASE_B"
+        assert calls[2][:2] == [
+            dispatch_mod.sys.executable,
+            str(dispatch_mod.SCRIPT_DIR / "commit_executor.py"),
+        ]
+        assert "--handoff" in calls[2]
+
+    def test_phase_b_surface_success_chains_to_commit(self, tmp_path):
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-b",
+                "--plan", "reports/control_plane/example.md",
+                "--routing-record-json", '{"wave_name":"surface-wave","decision":"ROUTE_PHASE_B"}',
+                "--json",
+            ]
+        )
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+        commit_ok = subprocess.CompletedProcess(
+            ["commit"], 0, "[commit-executor] Status: success\n", ""
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, *, cwd, timeout):
+            calls.append(cmd)
+            return [phase_b_ok, commit_ok][len(calls) - 1]
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=fake_run) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery") as mock_recovery:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={
+                    "timeouts": {
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+            )
+
+        assert exit_code == 0
+        assert mock_run.call_count == 2
+        mock_recovery.assert_not_called()
+        assert calls[0][:2] == [
+            dispatch_mod.sys.executable,
+            str(dispatch_mod.SCRIPT_DIR / "phase_b_executor.py"),
+        ]
+        assert calls[1][:2] == [
+            dispatch_mod.sys.executable,
+            str(dispatch_mod.SCRIPT_DIR / "commit_executor.py"),
+        ]
+
+    def test_phase_a_surface_chained_commit_failure_retries_commit_only(self, tmp_path):
+        plan_path = tmp_path / "reports" / "control_plane" / "plan.md"
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text("# plan\n", encoding="utf-8")
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["phase-a", "--plan-name", "surface-wave", "--json"]
+        )
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"], 0, json.dumps({"plan_path": str(plan_path)}), ""
+        )
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+        commit_fail = subprocess.CompletedProcess(
+            ["commit"], 1, "[commit-executor] Status: failed\n", "boom"
+        )
+        recovery = {
+            "recovered": True,
+            "exhausted": False,
+            "failure_class": "unknown_error",
+            "tier": 3,
+            "action": "recovery_loop",
+            "detail": "retry commit only",
+        }
+        retried_commit = {
+            "status": "success",
+            "decision": "COMMIT_GO",
+            "executor": "commit_executor",
+            "stdout": "[commit-executor] Status: success\n",
+            "stderr": "",
+            "chained_from": "retry_commit_only",
+        }
+
+        with patch.object(
+            dispatch_mod,
+            "_run_executor_in_group",
+            side_effect=[phase_a_ok, phase_b_ok, commit_fail],
+        ) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery", return_value=recovery) as mock_recovery, \
+             patch.object(dispatch_mod, "_retry_commit_only", return_value=retried_commit) as mock_retry:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={
+                    "timeouts": {
+                        "phase_a_executor": 300,
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+            )
+
+        assert exit_code == 0
+        assert mock_run.call_count == 3
+        mock_recovery.assert_called_once()
+        mock_retry.assert_called_once()
+
     def test_commit_surface_requires_exactly_one_handoff_or_routing_record(self, tmp_path):
         handoff_path = tmp_path / "handoff.json"
         handoff_path.write_text("{}", encoding="utf-8")
@@ -4291,15 +4716,102 @@ class TestModularSurfaceEntrypoints:
         assert str(handoff_path) in cmd
         assert "--json" in cmd
 
-    def test_main_surface_mode_runs_forwarded_command(self):
-        with patch.object(dispatch_mod, "run_surface_command", return_value=0) as mock_run, \
-             patch.object(dispatch_mod.subprocess, "run") as mock_subprocess_run:
-            mock_subprocess_run.return_value = subprocess.CompletedProcess(
-                args=["git"], returncode=0, stdout=str(REPO_ROOT), stderr=""
-            )
+    def test_classify_commit_executor_result_detects_json_held(self):
+        commit_result = subprocess.CompletedProcess(
+            ["commit"], 0, json.dumps({"status": "held"}), ""
+        )
+        assert dispatch_mod._classify_commit_executor_result(commit_result) == (
+            "held",
+            "COMMIT_HELD",
+        )
+
+    def test_resolve_repo_root_for_dispatch_uses_linked_worktree_from_bare_common_dir(self):
+        branch = "jabramsja/recovery-tier3-wiring-closeout-2026-04-01"
+        linked = "/tmp/workingrcx_surface_linked"
+        worktree_output = (
+            "worktree /repo/common\n"
+            "bare\n\n"
+            f"worktree {linked}\n"
+            "HEAD 6061a20f5577da91909753fb51c117d0d6938db5\n"
+            f"branch refs/heads/{branch}\n"
+        )
+
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, capture_output=False, text=False, check=False, **kwargs):
+            calls.append(cmd)
+            if cmd == ["git", "rev-parse", "--show-toplevel"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="/repo/common\n", stderr="")
+            if cmd == ["git", "rev-parse", "--is-inside-work-tree"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="false\n", stderr="")
+            if cmd == ["git", "rev-parse", "--is-bare-repository"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="true\n", stderr="")
+            if cmd == ["git", "symbolic-ref", "--quiet", "--short", "HEAD"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout=f"{branch}\n", stderr="")
+            if cmd == ["git", "worktree", "list", "--porcelain"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout=worktree_output, stderr="")
+            raise AssertionError(f"unexpected git command: {cmd}")
+
+        with patch.object(dispatch_mod.subprocess, "run", side_effect=fake_run):
+            repo_root = dispatch_mod.resolve_repo_root_for_dispatch()
+
+        assert repo_root == Path(linked)
+        assert calls[:3] == [
+            ["git", "rev-parse", "--show-toplevel"],
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            ["git", "rev-parse", "--is-bare-repository"],
+        ]
+        assert calls[3:] == [
+            ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+            ["git", "worktree", "list", "--porcelain"],
+        ]
+
+    def test_main_phase_surface_mode_runs_recoverable_command(self):
+        with patch.object(dispatch_mod, "run_recoverable_surface_command", return_value=0) as mock_run, \
+             patch.object(dispatch_mod, "run_surface_command") as mock_surface, \
+             patch.object(dispatch_mod, "load_config", return_value={"timeouts": {}}), \
+             patch.object(dispatch_mod, "resolve_repo_root_for_dispatch", return_value=REPO_ROOT):
             exit_code = dispatch_mod.main(["phase-a", "--plan-name", "example"])
         assert exit_code == 0
         mock_run.assert_called_once()
+        mock_surface.assert_not_called()
+
+    def test_main_non_phase_surface_runs_forwarded_command(self, tmp_path):
+        package_path = tmp_path / "package.json"
+        package_path.write_text("{}", encoding="utf-8")
+        with patch.object(dispatch_mod, "run_recoverable_surface_command") as mock_recoverable, \
+             patch.object(dispatch_mod, "run_surface_command", return_value=0) as mock_run, \
+             patch.object(dispatch_mod, "resolve_repo_root_for_dispatch", return_value=REPO_ROOT):
+            exit_code = dispatch_mod.main(
+                ["pre-commit-supervisor", "--package", str(package_path)]
+            )
+        assert exit_code == 0
+        mock_recoverable.assert_not_called()
+        mock_run.assert_called_once()
+
+
+class TestDispatcherExecutorGroupCleanup:
+    """Dispatcher timeout cleanup must reap the process tree before retry."""
+
+    def test_timeout_calls_terminate_process_tree(self):
+        mock_proc = MagicMock()
+        mock_proc.communicate.side_effect = subprocess.TimeoutExpired(
+            cmd=["test"], timeout=1
+        )
+        mock_proc.pid = 4321
+        mock_proc.wait.return_value = None
+
+        with patch.object(dispatch_mod.subprocess, "Popen", return_value=mock_proc) as mock_popen, \
+             patch.object(dispatch_mod.os, "killpg") as mock_killpg, \
+             patch.object(dispatch_mod, "terminate_process_tree") as mock_terminate:
+            with pytest.raises(subprocess.TimeoutExpired):
+                dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)
+
+        _, kwargs = mock_popen.call_args
+        assert kwargs["start_new_session"] is True
+        mock_killpg.assert_called_once_with(4321, signal.SIGTERM)
+        mock_terminate.assert_called_once_with(4321, cwd=Path("."))
+        mock_proc.kill.assert_called_once()
 
 
 # --- Phase B handoff new schema test ---
@@ -4591,6 +5103,44 @@ class TestBridgeR6Finding2PhaseAAgentGate:
         bus_dir.mkdir(parents=True)
         routing = {"decision": "ROUTE_PHASE_A", "summary": "test"}
         (bus_dir / "post_merge_routing.json").write_text(json.dumps(routing))
+        plan_path = phase_a_mod.create_plan_draft(
+            tmp_path,
+            "test_plan",
+            {"request": "test", "summary": "test"},
+        )
+        plan_path.write_text(
+            """# Test Plan
+
+Date: 2026-04-02
+Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
+Phase-A-Lock: UNLOCKED
+
+## Scope
+
+- `mu/tools/executors/recovery_gate.py`
+
+## Work Items
+
+- Route SDK review findings into the bridge context.
+
+## Constraints
+
+- No unrelated files.
+
+## Stop Conditions
+
+- Stop if bridge cannot classify findings.
+
+## Acceptance Criteria
+
+- Phase A runs SDK review before bridge for real plans.
+
+## Grounding
+
+- TASKS.md route under test.
+""",
+            encoding="utf-8",
+        )
         if monkeypatch is not None:
             monkeypatch.setattr(
                 phase_a_mod, "checkpoint_commit_plan",
@@ -4837,6 +5387,44 @@ class TestBridgeR6Finding3PhaseARequestChangesSilentSuccess:
         bus_dir.mkdir(parents=True)
         routing = {"decision": "ROUTE_PHASE_A", "summary": "test"}
         (bus_dir / "post_merge_routing.json").write_text(json.dumps(routing))
+        plan_path = phase_a_mod.create_plan_draft(
+            tmp_path,
+            "test_plan",
+            {"request": "test", "summary": "test"},
+        )
+        plan_path.write_text(
+            """# Test Plan
+
+Date: 2026-04-02
+Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
+Phase-A-Lock: UNLOCKED
+
+## Scope
+
+- `mu/tools/executors/phase_a_executor.py`
+
+## Work Items
+
+- Exercise REQUEST_CHANGES / NO_GO loop accounting on a real plan packet.
+
+## Constraints
+
+- No stub packet in this fixture.
+
+## Stop Conditions
+
+- Stop if bridge loop silently succeeds without convergence.
+
+## Acceptance Criteria
+
+- Repeated non-GO decisions either consume rounds or converge honestly.
+
+## Grounding
+
+- Phase A bridge loop silent-success regression fixture.
+""",
+            encoding="utf-8",
+        )
         if monkeypatch is not None:
             monkeypatch.setattr(
                 phase_a_mod, "checkpoint_commit_plan",
@@ -4954,7 +5542,30 @@ class TestPhaseATrackedPacketReuse:
             "# My Plan\n"
             "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)\n"
             "Phase-A-Lock: LOCKED\n"
-            "\nReal content here.\n",
+            "\n"
+            "## Scope\n"
+            "\n"
+            "- `mu/tools/executors/phase_a_executor.py`\n"
+            "\n"
+            "## Work Items\n"
+            "\n"
+            "- Reuse this locked packet without creating a new stub.\n"
+            "\n"
+            "## Constraints\n"
+            "\n"
+            "- No extra packets.\n"
+            "\n"
+            "## Stop Conditions\n"
+            "\n"
+            "- Stop if Phase A rewrites a locked packet path.\n"
+            "\n"
+            "## Acceptance Criteria\n"
+            "\n"
+            "- Locked tracked packet stays canonical.\n"
+            "\n"
+            "## Grounding\n"
+            "\n"
+            "- Tracked packet reuse regression fixture.\n",
             encoding="utf-8",
         )
 
@@ -4986,6 +5597,14 @@ class TestFindTrackedPacket:
     def test_returns_none_when_no_directory(self, tmp_path):
         result = phase_a_mod._find_tracked_packet(tmp_path / "nonexistent", "test")  # ANTICHEAT_OK: testing tracked packet reuse
         assert result is None
+
+    def test_returns_exact_packet_match(self, tmp_path):
+        plan_dir = tmp_path / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        exact = plan_dir / "my_plan.md"
+        exact.write_text("# Plan\nPhase-A-Lock: UNLOCKED\n")
+        result = phase_a_mod._find_tracked_packet(plan_dir, "my_plan")  # ANTICHEAT_OK: testing tracked packet reuse
+        assert result == exact
 
     def test_returns_none_when_no_matches(self, tmp_path):
         plan_dir = tmp_path / "reports" / "control_plane"
@@ -5807,8 +6426,8 @@ class TestRecoveryGateWiring:
         assert disk["timeouts"]["phase_b_executor"] == 3600
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
 
-    def test_tier3_still_not_implemented(self, tmp_path):
-        """Tier 3 fails closed — not retried even with --retries (R6 Finding 2)."""
+    def test_tier3_unrecovered_fails_closed_under_retries(self, tmp_path):
+        """Tier 3 non-recovery still fails closed under --retries."""
         routing_file = self._routing_file(tmp_path)
         fail_result = {
             "status": "failed", "decision": "ROUTE_PHASE_B",
@@ -5819,7 +6438,7 @@ class TestRecoveryGateWiring:
         recovery_tier3 = {
             "recovered": False, "exhausted": False,
             "failure_class": "test_failure", "tier": 3,
-            "action": "not_implemented", "detail": "tier 3 not wired",
+            "action": "recovery_loop", "detail": "no safe fix proposed",
         }
         mock_proc = MagicMock()
         mock_proc.stdout = str(tmp_path)
@@ -5834,6 +6453,38 @@ class TestRecoveryGateWiring:
             assert exit_code == 1  # not recovered, not retried
             assert mock_dispatch.call_count == 1, (
                 "tier 3 non-recovery must fail closed, not retry")
+
+    def test_tier3_recovery_loop_grants_retry(self, tmp_path):
+        """Recovered Tier 3 failures retry immediately without consuming retry budget."""
+        routing_file = self._routing_file(tmp_path)
+        fail_result = {
+            "status": "failed", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "stderr": "FAILED test_x - AssertionError",
+            "step": "pre_commit",
+        }
+        success_result = {
+            "status": "success", "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+        }
+        recovery_tier3 = {
+            "recovered": True, "exhausted": False,
+            "failure_class": "needs_phase_b", "tier": 3,
+            "action": "recovery_loop", "detail": "phase b re-entry succeeded",
+        }
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch",
+                          side_effect=[fail_result, success_result]) as mock_dispatch, \
+             patch.object(dispatch_mod, "attempt_recovery",
+                          return_value=recovery_tier3), \
+             patch.object(dispatch_mod, "_clear_phase_b_state_for_retry") as mock_clear, \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            args = self._base_args(routing_file) + ["--retries", "2"]
+            exit_code = dispatch_mod.main(args)
+            assert exit_code == 0
+            assert mock_dispatch.call_count == 2
+            mock_clear.assert_called_once()
 
     def test_tier4_escalate_fails_closed_under_retries(self, tmp_path):
         """Tier 4 escalate must fail closed — never retried (R6 Finding 2).
@@ -5881,9 +6532,11 @@ class TestRecoveryGateWiring:
             returncode=0, stdout=phase_a_stdout, stderr="")
 
         call_count = {"n": 0}
+        calls = []
 
         def mock_run(args, cwd, timeout):
             call_count["n"] += 1
+            calls.append(args)
             if call_count["n"] == 1:
                 # Phase A succeeds
                 return phase_a_ok
@@ -5899,6 +6552,8 @@ class TestRecoveryGateWiring:
         assert result["executor"] == "phase_b_executor"
         assert result.get("chained_from") == "phase_a_executor"
         assert "Phase B" in result.get("message", "")
+        assert "--json" in calls[0]
+        assert "--json" in calls[1]
 
     def test_chained_commit_timeout_reports_commit_executor(self, tmp_path):
         """Chained commit timeout (from Phase B chain) reports commit_executor.
@@ -5914,9 +6569,11 @@ class TestRecoveryGateWiring:
         (handoff_dir / "phase_b_handoff.json").write_text("{}")
 
         call_count = {"n": 0}
+        calls = []
 
         def mock_run(args, cwd, timeout):
             call_count["n"] += 1
+            calls.append(args)
             if call_count["n"] == 1:
                 return phase_b_ok
             # Commit times out
@@ -5931,3 +6588,5 @@ class TestRecoveryGateWiring:
         assert result["executor"] == "commit_executor"
         assert result.get("chained_from") == "phase_b_executor"
         assert "Commit" in result.get("message", "")
+        assert "--json" in calls[0]
+        assert "--json" in calls[1]
