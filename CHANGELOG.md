@@ -2,6 +2,25 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-04-03
+
+### Recovery Observability And Watcher-Noise Hardening
+
+- `recovery_gate.py` now writes a structured
+  `.agent_bus/recovery/recovery_status.json` file with the current recovery
+  tier, failure class, retry target, wave invocation count, tuple attempt
+  index, owner PID, live child PID/role, current state, and terminal outcome
+- `pipeline_dashboard.py` now renders that status into plain-English recovery
+  lines for tmux and other text dashboards, and `_pane_processes.sh` now shows
+  the recovery section directly by calling the existing dashboard surface
+- `_pane_processes.sh`, `pipeline_dashboard.py`,
+  `pipeline_dashboard_web.py`, and `pipeline_status.sh` now ignore `tail -f`
+  log watchers and other observability helper processes when detecting the
+  active pipeline phase, so stale panes no longer report fake live executors
+- `mu/tests/tools/test_recovery_gate.py` now locks both the recovery-status
+  rendering contract and the watcher-noise regression directly, without adding
+  new test files
+
 ## 2026-03-27
 
 ### Pipeline Test Run Review-Cycle Floor, Cleanup Wait, And Post-Commit Follow-Ups

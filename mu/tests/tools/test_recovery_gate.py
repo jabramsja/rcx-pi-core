@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json, os, sqlite3, subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
@@ -9,8 +10,38 @@ import pytest
 from mu.tests.tools.module_loader import load_module
 
 _EXECUTORS_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "executors"
+_OBSERVABILITY_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "observability"
 rg_mod = load_module("recovery_gate", _EXECUTORS_DIR / "recovery_gate.py")
+dash_mod = load_module("pipeline_dashboard_observability", _OBSERVABILITY_DIR / "pipeline_dashboard.py")
+web_mod = load_module("pipeline_dashboard_web_observability", _OBSERVABILITY_DIR / "pipeline_dashboard_web.py")
 FailureClass = rg_mod.FailureClass
+
+
+class FakePopen:
+    def __init__(
+        self,
+        *,
+        stdout: str = "",
+        stderr: str = "",
+        pid: int = 4242,
+        communicate_exc: Exception | None = None,
+    ):
+        self._stdout = stdout
+        self._stderr = stderr
+        self.pid = pid
+        self.returncode = 0
+        self._communicate_exc = communicate_exc
+        self._communicate_calls = 0
+        self.killed = False
+
+    def communicate(self, timeout=None):
+        self._communicate_calls += 1
+        if self._communicate_exc is not None and self._communicate_calls == 1:
+            raise self._communicate_exc
+        return self._stdout, self._stderr
+
+    def kill(self):
+        self.killed = True
 
 
 class TestClassifyFailure:
@@ -252,6 +283,24 @@ class TestRecoveryLog:
         assert rg_mod._count_prior_attempts(attempts, "w2", "s1", "x") == 0 # ANTICHEAT_OK
 
 
+class TestRecoveryStatus:
+    def test_status_round_trip_and_wave_invocation_count(self, tmp_path):
+        rg_mod._save_recovery_status(  # ANTICHEAT_OK: status file is the public pane substrate
+            tmp_path,
+            {"active": True, "wave_id": "w1"},
+        )
+        loaded = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert loaded["wave_id"] == "w1"
+        attempts = [
+            {"wave_id": "w1", "invocation_id": "inv-a"},
+            {"wave_id": "w1", "invocation_id": "inv-a"},
+            {"wave_id": "w1", "invocation_id": "inv-b"},
+            {"wave_id": "w1"},
+            {"wave_id": "w2", "invocation_id": "inv-z"},
+        ]
+        assert rg_mod._count_wave_invocations(attempts, "w1") == 3  # ANTICHEAT_OK
+
+
 class TestAttemptRecovery:
     def test_tier4_escalates(self, tmp_path):
         r = rg_mod.attempt_recovery(tmp_path, {"status": "question_for_founder", "step": "b"}, "w1")
@@ -314,6 +363,11 @@ class TestAttemptRecovery:
         entries = rg_mod._load_recovery_log(tmp_path) # ANTICHEAT_OK
         assert len(entries) == 1
         assert entries[0]["wave_id"] == "w1" and entries[0]["tier"] == 1
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["active"] is False
+        assert status["outcome"] == "success"
+        assert status["failure_class"] == "stale_bridge_lock"
+        assert status["wave_invocation_count"] == 1
 
     def test_unclassified_escalates(self, tmp_path):
         r = rg_mod.attempt_recovery(tmp_path, {"status": "banana"}, "w1")
@@ -650,24 +704,31 @@ class TestRecoveryLoop:
             "explanation": "applying fix"
         })
         verify_ok = MagicMock(returncode=0, stdout="", stderr="")
-        call_count = {"n": 0}
 
         def mock_run(cmd, **kw):
-            call_count["n"] += 1
-            if isinstance(cmd, list) and "claude" in cmd:
-                return MagicMock(stdout=claude_response, stderr="", returncode=0)
             if isinstance(cmd, list):  # verify command
                 return verify_ok
             # shell=True command
             return MagicMock(stdout="ok", stderr="", returncode=0)
 
+        popen_factory = lambda *args, **kwargs: FakePopen(stdout=claude_response, pid=4242)
+        orig_update = rg_mod._update_recovery_status  # ANTICHEAT_OK: capture live recovery status transitions
         with patch.object(rg_mod, "subprocess") as mock_sp:
             mock_sp.run = mock_run
+            mock_sp.Popen = popen_factory
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
-            r = rg_mod.run_recovery_loop(
-                tmp_path, result, "w1", verify_command=["echo", "verify"])
+            with patch.object(rg_mod, "_update_recovery_status", wraps=orig_update) as update_spy:
+                r = rg_mod.run_recovery_loop(
+                    tmp_path, result, "w1", verify_command=["echo", "verify"])
         assert r["recovered"] is True
         assert r["iterations"] == 1
+        assert any(call.kwargs.get("child_pid") == 4242 for call in update_spy.mock_calls if call.kwargs)
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["active"] is False
+        assert status["outcome"] == "success"
+        assert status["child_pid"] == 0
+        assert status["last_action"] == "shell"
 
     def test_max_iterations(self, tmp_path):
         """Verify loop stops after max_iterations."""
@@ -678,14 +739,14 @@ class TestRecoveryLoop:
         verify_fail = MagicMock(returncode=1, stdout="", stderr="still fails")
 
         def mock_run(cmd, **kw):
-            if isinstance(cmd, list) and "claude" in cmd:
-                return MagicMock(stdout=claude_response, stderr="", returncode=0)
             if isinstance(cmd, list):  # verify
                 return verify_fail
             return MagicMock(stdout="", stderr="", returncode=0)
 
         with patch.object(rg_mod, "subprocess") as mock_sp:
             mock_sp.run = mock_run
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response, pid=31337)
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
             r = rg_mod.run_recovery_loop(
                 tmp_path, result, "w1", max_iterations=3,
@@ -693,6 +754,10 @@ class TestRecoveryLoop:
         assert r["recovered"] is False
         assert r["exhausted"] is True
         assert r["iterations"] == 3
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "exhausted"
+        assert status["state"] == "tier3_exhausted"
+        assert status["current_iteration"] == 3
 
     def test_escalate_action(self, tmp_path):
         """Verify escalate action returns exhausted=True."""
@@ -701,16 +766,18 @@ class TestRecoveryLoop:
             "action": "escalate", "commands": [], "explanation": "need human"
         })
 
-        def mock_run(cmd, **kw):
-            return MagicMock(stdout=claude_response, stderr="", returncode=0)
-
         with patch.object(rg_mod, "subprocess") as mock_sp:
-            mock_sp.run = mock_run
+            mock_sp.run = lambda *args, **kwargs: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response)
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
             r = rg_mod.run_recovery_loop(tmp_path, result, "w1")
         assert r["recovered"] is False
         assert r["exhausted"] is True
         assert r["iterations"] == 1
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "escalated"
+        assert status["state"] == "tier3_escalated"
 
     def test_dangerous_command_blocked(self, tmp_path):
         """Verify denylist blocks rm -rf etc."""
@@ -723,14 +790,14 @@ class TestRecoveryLoop:
         verify_fail = MagicMock(returncode=1, stdout="", stderr="nope")
 
         def mock_run(cmd, **kw):
-            if isinstance(cmd, list) and "claude" in cmd:
-                return MagicMock(stdout=claude_response, stderr="", returncode=0)
             if isinstance(cmd, list):  # verify
                 return verify_fail
             return MagicMock(stdout="ok", stderr="", returncode=0)
 
         with patch.object(rg_mod, "subprocess") as mock_sp:
             mock_sp.run = mock_run
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response)
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
             r = rg_mod.run_recovery_loop(
                 tmp_path, result, "w1", max_iterations=1,
@@ -746,17 +813,22 @@ class TestRecoveryLoop:
         """Verify claude call timeout is handled gracefully."""
         result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
 
-        def mock_run(cmd, **kw):
-            raise subprocess.TimeoutExpired(cmd="claude", timeout=60)
-
         with patch.object(rg_mod, "subprocess") as mock_sp:
-            mock_sp.run = mock_run
+            mock_sp.run = lambda *args, **kwargs: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(
+                communicate_exc=subprocess.TimeoutExpired(cmd="claude", timeout=60),
+                pid=9999,
+            )
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
             r = rg_mod.run_recovery_loop(
                 tmp_path, result, "w1", max_iterations=1)
         assert r["recovered"] is False
         assert len(r["log"]) == 1
         assert r["log"][0]["action"] == "timeout"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "exhausted"
+        assert status["last_action"] == "exhausted"
 
 
 class TestDangerousCommandDetection:
@@ -822,14 +894,14 @@ class TestRecoveryLoopDurableLogging:
         verify_fail = MagicMock(returncode=1, stdout="", stderr="still fails")
 
         def mock_run(cmd, **kw):
-            if isinstance(cmd, list) and "claude" in cmd:
-                return MagicMock(stdout=claude_response, stderr="", returncode=0)
             if isinstance(cmd, list):
                 return verify_fail
             return MagicMock(stdout="ok", stderr="", returncode=0)
 
         with patch.object(rg_mod, "subprocess") as mock_sp:
             mock_sp.run = mock_run
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response)
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
             rg_mod.run_recovery_loop(
                 tmp_path, result, "w-log-test", max_iterations=2,
@@ -839,6 +911,7 @@ class TestRecoveryLoopDurableLogging:
         assert len(entries) == 2
         assert all(e["tier"] == 3 for e in entries)
         assert all(e["wave_id"] == "w-log-test" for e in entries)
+        assert entries[0]["invocation_id"] == entries[1]["invocation_id"]
 
     def test_escalate_persisted(self, tmp_path):
         """Escalate action is durably logged."""
@@ -847,11 +920,10 @@ class TestRecoveryLoopDurableLogging:
             "action": "escalate", "commands": [], "explanation": "need human"
         })
 
-        def mock_run(cmd, **kw):
-            return MagicMock(stdout=claude_response, stderr="", returncode=0)
-
         with patch.object(rg_mod, "subprocess") as mock_sp:
-            mock_sp.run = mock_run
+            mock_sp.run = lambda *args, **kwargs: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response)
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
             rg_mod.run_recovery_loop(tmp_path, result, "w-esc")
 
@@ -859,3 +931,145 @@ class TestRecoveryLoopDurableLogging:
         assert len(entries) == 1
         assert "escalate" in entries[0]["action"]
         assert entries[0]["outcome"] == "escalated"
+
+
+class TestRecoveryStatusRendering:
+    def test_no_status_file(self, tmp_path):
+        lines = dash_mod.render_recovery_lines(tmp_path)
+        assert lines[0] == "RECOVERY"
+        assert "No recovery activity recorded yet." in lines[-1]
+
+    def test_active_looping_recovery(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime(2026, 4, 3, 21, 0, tzinfo=timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": True,
+                    "wave_id": "wave-alpha",
+                    "failure_class": "process_timeout",
+                    "tier": 2,
+                    "wave_invocation_count": 2,
+                    "tuple_attempt_index": 1,
+                    "retry_target": "phase_a_executor",
+                    "state": "tier2_fixing",
+                    "owner_pid": 1,
+                    "reason": "phase_a timed out",
+                    "updated_at": (now - timedelta(seconds=12)).isoformat(),
+                    "current_iteration": 0,
+                    "max_iterations": 0,
+                    "current_command": "",
+                    "explanation": "",
+                    "detail": "",
+                }
+            ),
+            encoding="utf-8",
+        )
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+        assert "ACTIVE — Tier 2 process_timeout" in rendered
+        assert "Retry target: Phase A" in rendered
+        assert "Invocation: 2 in wave" in rendered
+        assert "Reason: phase_a timed out" in rendered
+
+    def test_hung_child_pid_and_completed_outcome(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime(2026, 4, 3, 21, 0, tzinfo=timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": True,
+                    "wave_id": "wave-beta",
+                    "failure_class": "agent_review_crash",
+                    "tier": 3,
+                    "wave_invocation_count": 1,
+                    "tuple_attempt_index": 1,
+                    "retry_target": "commit_executor",
+                    "state": "tier3_waiting_on_claude",
+                    "owner_pid": 999999,
+                    "child_pid": 888888,
+                    "child_role": "claude",
+                    "reason": "connector stalled",
+                    "updated_at": (now - timedelta(seconds=120)).isoformat(),
+                    "current_iteration": 2,
+                    "max_iterations": 3,
+                    "current_command": "claude --print",
+                    "explanation": "trying a narrower fix",
+                    "detail": "",
+                }
+            ),
+            encoding="utf-8",
+        )
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+        assert "POSSIBLY HUNG — Tier 3 agent_review_crash" in rendered
+        assert "loop 2/3" in rendered
+        assert "claude PID: 888888 (dead)" in rendered
+
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "wave_id": "wave-beta",
+                    "failure_class": "agent_review_crash",
+                    "tier": 3,
+                    "wave_invocation_count": 1,
+                    "tuple_attempt_index": 1,
+                    "retry_target": "commit_executor",
+                    "state": "tier3_verify_pass",
+                    "owner_pid": 1234,
+                    "child_pid": 0,
+                    "reason": "connector stalled",
+                    "updated_at": (now - timedelta(seconds=20)).isoformat(),
+                    "finished_at": (now - timedelta(seconds=20)).isoformat(),
+                    "current_iteration": 1,
+                    "max_iterations": 3,
+                    "current_command": "",
+                    "explanation": "narrowed the fix",
+                    "detail": "verification passed",
+                    "outcome": "success",
+                    "last_action": "shell",
+                    "recovered": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+        assert "LAST RECOVERY — Tier 3 agent_review_crash" in rendered
+        assert "Outcome: success via shell" in rendered
+        assert "Recovery note: narrowed the fix" in rendered
+
+
+class TestObservabilityNoiseFilters:
+    def test_terminal_dashboard_ignores_tail_watchers(self):
+        lines = [
+            "jeff 15571 0.0 0.0 ?? Ss 0:00.00 tail -f /repo/.scratch/phase_a_executor_live.log",
+            "jeff 20001 0.0 0.0 ?? Ss 0:00.00 python mu/tools/executors/commit_executor.py",
+        ]
+        with patch.object(dash_mod, "pid_start", return_value=123.0):
+            phase, pid, started = dash_mod.detect_phase(lines)
+        assert phase == "commit"
+        assert pid == 20001
+        assert started == 123.0
+
+    def test_web_dashboard_ignores_tail_watchers(self):
+        lines = [
+            "jeff 15571 0.0 0.0 ?? Ss 0:00.00 tail -f /repo/.scratch/phase_a_executor_live.log",
+            "jeff 20002 0.0 0.0 ?? Ss 0:00.00 python mu/tools/executors/phase_b_executor.py",
+        ]
+        with patch.object(web_mod, "pid_start", return_value=456.0):
+            phase = web_mod.detect_phase(lines)
+        assert phase["phase"] == "phase-b"
+        assert phase["pid"] == 20002
+        assert phase["started"] == 456.0
+
+    def test_only_watcher_noise_reports_idle(self):
+        lines = [
+            "jeff 15571 0.0 0.0 ?? Ss 0:00.00 tail -f /repo/.scratch/phase_a_executor_live.log",
+            "jeff 15572 0.0 0.0 ?? Ss 0:00.00 bash /tmp/rcx_log_watcher.sh",
+        ]
+        with patch.object(dash_mod, "pid_start", return_value=789.0):
+            phase, pid, started = dash_mod.detect_phase(lines)
+        assert phase == "idle"
+        assert pid is None
+        assert started is None

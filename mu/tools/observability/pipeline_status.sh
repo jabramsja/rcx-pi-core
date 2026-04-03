@@ -95,6 +95,12 @@ EXEC_PIDS=$(pgrep -f "executor_dispatch\|commit_executor\|phase_b_executor\|phas
 if [ -n "$EXEC_PIDS" ]; then
   echo -e "${BOLD}Active Processes:${RESET}"
   for pid in $EXEC_PIDS; do
+    FULL_CMD=$(ps -p "$pid" -o command= 2>/dev/null)
+    case "$FULL_CMD" in
+      *"tail -f "*|*"rcx_log_watcher.sh"*|*"_pane_"*|*"pipeline_monitor.sh"*)
+        continue
+        ;;
+    esac
     CMD=$(ps -p "$pid" -o command= 2>/dev/null | sed 's|.*/||' | cut -c1-70)
     ELAPSED=$(ps -p "$pid" -o etime= 2>/dev/null | xargs)
     echo -e "  PID $pid (${ELAPSED}) $CMD"

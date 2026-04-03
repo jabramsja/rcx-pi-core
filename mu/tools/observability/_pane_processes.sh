@@ -30,6 +30,24 @@ elapsed_str() {
   fi
 }
 
+find_live_pid() {
+  local kw="$1" pid cmd
+  while IFS= read -r pid; do
+    [ -z "$pid" ] && continue
+    cmd=$(ps -p "$pid" -o command= 2>/dev/null) || continue
+    case "$cmd" in
+      *"tail -f "*|*"rcx_log_watcher.sh"*|*"_pane_"*|*"pipeline_monitor.sh"*)
+        continue
+        ;;
+    esac
+    if echo "$cmd" | grep -q "$kw"; then
+      printf "%s\n" "$pid"
+      return 0
+    fi
+  done < <(pgrep -f "$kw" 2>/dev/null || true)
+  return 1
+}
+
 while true; do
   # Build output to temp file, only redraw if content changed
   {
@@ -41,7 +59,7 @@ while true; do
   phase="idle"
   phase_pid=""
   for kw in phase_a_executor phase_b_executor commit_executor meta_bridge_supervisor bridge_supervisor executor_dispatch; do
-    pid=$(pgrep -f "$kw" 2>/dev/null | head -1) || true
+    pid=$(find_live_pid "$kw") || true
     if [ -n "$pid" ]; then
       case "$kw" in
         phase_a_executor) phase="Phase A: Planning" ;;
@@ -194,6 +212,11 @@ while true; do
   fi
 
   echo ""
+
+  if [ -f "$REPO_ROOT/mu/tools/observability/pipeline_dashboard.py" ]; then
+    python3 "$REPO_ROOT/mu/tools/observability/pipeline_dashboard.py" --render-recovery --repo-root "$REPO_ROOT" 2>/dev/null || true
+    echo ""
+  fi
 
   } > "$TMPOUT" 2>/dev/null
 
