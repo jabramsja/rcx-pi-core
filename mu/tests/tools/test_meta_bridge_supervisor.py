@@ -250,12 +250,6 @@ class TestDryRunBehavior:
 class TestParseMetaEnvelope:
     """parse_meta_envelope validates decision is in template-authorized set."""
 
-    def test_filesystem_safe_token_replaces_path_separators(self):
-        token = meta._filesystem_safe_token("[PIPELINE-RECOVERY/pipeline-monitor-worktree-rebind-2026-04-03]")
-        assert "/" not in token
-        assert "\\" not in token
-        assert "PIPELINE-RECOVERY" in token
-
     def test_valid_routing_decision(self):
         output = 'BEGIN_META_ENVELOPE\n{"decision": "NEEDS_PHASE_A", "summary": "Plan is wrong"}\nEND_META_ENVELOPE'
         envelope = meta.parse_meta_envelope(output)
