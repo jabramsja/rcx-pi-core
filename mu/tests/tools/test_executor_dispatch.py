@@ -4720,7 +4720,7 @@ class TestModularSurfaceEntrypoints:
         commit_result = subprocess.CompletedProcess(
             ["commit"], 0, json.dumps({"status": "held"}), ""
         )
-        assert dispatch_mod._classify_commit_executor_result(commit_result) == (
+        assert dispatch_mod._classify_commit_executor_result(commit_result) == (  # ANTICHEAT_OK: testing internal commit-result classifier
             "held",
             "COMMIT_HELD",
         )
@@ -4805,7 +4805,7 @@ class TestDispatcherExecutorGroupCleanup:
              patch.object(dispatch_mod.os, "killpg") as mock_killpg, \
              patch.object(dispatch_mod, "terminate_process_tree") as mock_terminate:
             with pytest.raises(subprocess.TimeoutExpired):
-                dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)
+                dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)  # ANTICHEAT_OK: testing executor-group timeout cleanup helper
 
         _, kwargs = mock_popen.call_args
         assert kwargs["start_new_session"] is True
