@@ -560,11 +560,134 @@ def _classify_commit_executor_result(
     if commit_result.returncode != 0:
         return "failed", "COMMIT_GO"
     stdout = commit_result.stdout or ""
+    try:
+        payload = json.loads(stdout)
+        if isinstance(payload, dict):
+            status = payload.get("status")
+            if status == "held":
+                return "held", "COMMIT_HELD"
+            if status == "success":
+                return "success", "COMMIT_GO"
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("{"):
+            continue
+        try:
+            payload = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        status = payload.get("status")
+        if status == "held":
+            return "held", "COMMIT_HELD"
+        if status == "success":
+            return "success", "COMMIT_GO"
     if "[commit-executor] Status: held" in stdout:
         return "held", "COMMIT_HELD"
     return "success", "COMMIT_GO"
 
+def _parse_worktree_list(output: str) -> list[dict[str, str]]:
+    """Parse `git worktree list --porcelain` into entry dicts."""
+    entries: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for raw_line in output.splitlines():
+        line = raw_line.rstrip()
+        if not line:
+            if current:
+                entries.append(current)
+                current = {}
+            continue
+        key, _, value = line.partition(" ")
+        if key == "worktree":
+            if current:
+                entries.append(current)
+                current = {}
+            current["worktree"] = value
+            continue
+        current[key] = value or "true"
+    if current:
+        entries.append(current)
+    return entries
 
+
+def resolve_repo_root_for_dispatch(*, verbose: bool = False) -> Path:
+    """Resolve the active worktree root for dispatcher execution.
+
+    When invoked from the bare/common git dir, fall back to a linked worktree
+    for the current branch if and only if exactly one exists.
+    """
+    try:
+        top_level = Path(subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip())
+        inside_work_tree = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            capture_output=True, text=True, check=False,
+        )
+        is_bare = subprocess.run(
+            ["git", "rev-parse", "--is-bare-repository"],
+            capture_output=True, text=True, check=False,
+        )
+        if (
+            inside_work_tree.returncode == 0
+            and inside_work_tree.stdout.strip() == "true"
+            and not (
+                is_bare.returncode == 0
+                and is_bare.stdout.strip() == "true"
+            )
+        ):
+            return top_level
+    except subprocess.CalledProcessError:
+        pass
+
+    branch_proc = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+        capture_output=True, text=True, check=False,
+    )
+    if branch_proc.returncode != 0 or not branch_proc.stdout.strip():
+        raise DispatchError(
+            "Not in a git worktree, and no current branch is available to resolve a linked worktree"
+        )
+    branch = branch_proc.stdout.strip()
+
+    worktree_proc = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        capture_output=True, text=True, check=False,
+    )
+    if worktree_proc.returncode != 0:
+        raise DispatchError(
+            "Not in a git worktree, and linked worktrees could not be enumerated"
+        )
+
+    target_ref = f"refs/heads/{branch}"
+    matches = [
+        Path(entry["worktree"])
+        for entry in _parse_worktree_list(worktree_proc.stdout)
+        if entry.get("worktree")
+        and entry.get("bare") != "true"
+        and entry.get("branch") == target_ref
+    ]
+    if len(matches) == 1:
+        if verbose:
+            print(
+                f"[dispatch] Resolved linked worktree for branch {branch}: {matches[0]}",
+                file=sys.stderr,
+            )
+        return matches[0]
+    if not matches:
+        raise DispatchError(
+            "Current repository is a bare/common git dir. Run from a linked worktree "
+            f"or create one for {branch!r} with `git worktree add <path> {branch}`."
+        )
+    match_list = ", ".join(str(path) for path in matches)
+    raise DispatchError(
+        f"Multiple linked worktrees found for branch {branch!r}: {match_list}. "
+        "Run the dispatcher from the intended linked worktree."
+    )
 def _emit_completed_process_output(
     completed: subprocess.CompletedProcess[str],
 ) -> None:
@@ -1347,12 +1470,9 @@ def main(argv: list[str] | None = None) -> int:
         parser = build_surface_parser()
         args = parser.parse_args(argv)
         try:
-            repo_root = Path(subprocess.run(
-                ["git", "rev-parse", "--show-toplevel"],
-                capture_output=True, text=True, check=True,
-            ).stdout.strip())
-        except subprocess.CalledProcessError:
-            print("[error] Not in a git repository", file=sys.stderr)
+            repo_root = resolve_repo_root_for_dispatch(verbose=getattr(args, "verbose", False))
+        except DispatchError as exc:
+            print(f"[error] {exc}", file=sys.stderr)
             return 1
         try:
             if args.surface in {"phase-a", "phase-b"}:

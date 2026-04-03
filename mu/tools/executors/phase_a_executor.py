@@ -285,7 +285,6 @@ _PHASE_A_SECTION_TITLE_ALIASES = {
     "authorization": "grounding",
 }
 
-
 def _extract_phase_a_section_titles(content: str) -> set[str]:
     titles: set[str] = set()
     for line in content.splitlines():

@@ -959,7 +959,6 @@ Purpose: Exercise deferred SDK review after same-file stub rewrite.
         assert agent_calls["n"] == 1
         assert agent_calls["files"] == [rel_plan_path]
         assert result["agent_review_ran"] is True
-
     def test_parse_phase_a_findings_preserves_reviewer_evidence(self):
         """Phase A finding parser must preserve reviewer evidence for implementer rewrites."""
         content = """BEGIN_AGENT_ENVELOPE
@@ -4482,6 +4481,111 @@ class TestCommitContinuationAndBotFreshness:
         assert "timed out" in post_commit["errors"][0]
         assert "wait_ci" in post_commit["steps_completed"]
 
+    def test_post_commit_uses_linked_base_worktree_for_merge_verification(self, tmp_path, monkeypatch):
+        repo = tmp_path / "feature-worktree"
+        repo.mkdir()
+        dev_worktree = tmp_path / "dev-worktree"
+        dev_worktree.mkdir()
+        handoff = _make_new_handoff()
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        result = {
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "git_commit",
+                "hold_check",
+                "run_pre_push_script",
+                "git_push",
+                "ensure_pr",
+                "wait_ci",
+            ],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+            "pr_number": "673",
+        }
+        merge_cwds = []
+        pull_cwds = []
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                if cwd == dev_worktree:
+                    return completed(cmd, stdout="merge456\n")
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="jabramsja/test-wave-id\n")
+            if cmd[:4] == ["git", "worktree", "list", "--porcelain"]:
+                stdout = (
+                    f"worktree {repo}\n"
+                    "HEAD abc123\n"
+                    "branch refs/heads/jabramsja/test-wave-id\n\n"
+                    f"worktree {dev_worktree}\n"
+                    "HEAD merge456\n"
+                    "branch refs/heads/dev\n\n"
+                )
+                return completed(cmd, stdout=stdout)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                payload = {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "headRefOid": "abc123",
+                                "reviewDecision": "",
+                                "latestReviews": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                            "state": "COMMENTED",
+                                            "commit": {"oid": "abc123"},
+                                        }
+                                    ]
+                                },
+                                "reviewThreads": {"nodes": []},
+                                "comments": {"nodes": []},
+                            }
+                        }
+                    }
+                }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                merge_cwds.append(cwd)
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                pull_cwds.append(cwd)
+                return completed(cmd)
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "checkout"]:
+                raise AssertionError("post-merge verify should not checkout dev in feature worktree")
+            raise AssertionError(f"unexpected command: {cmd} cwd={cwd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising linked-worktree merge verification path
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert "step" not in post_commit
+        assert post_commit["merge_sha"] == "merge456"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert merge_cwds == [repo.parent]
+        assert pull_cwds == [dev_worktree]
+
 
 class TestModularSurfaceEntrypoints:
     """executor_dispatch.py also acts as the modular control-plane entrypoint."""
@@ -4872,14 +4976,61 @@ class TestModularSurfaceEntrypoints:
         assert str(handoff_path) in cmd
         assert "--json" in cmd
 
+    def test_classify_commit_executor_result_detects_json_held(self):
+        commit_result = subprocess.CompletedProcess(
+            ["commit"], 0, json.dumps({"status": "held"}), ""
+        )
+        assert dispatch_mod._classify_commit_executor_result(commit_result) == (  # ANTICHEAT_OK: testing internal commit-result classifier
+            "held",
+            "COMMIT_HELD",
+        )
+
+    def test_resolve_repo_root_for_dispatch_uses_linked_worktree_from_bare_common_dir(self):
+        branch = "jabramsja/recovery-tier3-wiring-closeout-2026-04-01"
+        linked = "/tmp/workingrcx_surface_linked"
+        worktree_output = (
+            "worktree /repo/common\n"
+            "bare\n\n"
+            f"worktree {linked}\n"
+            "HEAD 6061a20f5577da91909753fb51c117d0d6938db5\n"
+            f"branch refs/heads/{branch}\n"
+        )
+
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, capture_output=False, text=False, check=False, **kwargs):
+            calls.append(cmd)
+            if cmd == ["git", "rev-parse", "--show-toplevel"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="/repo/common\n", stderr="")
+            if cmd == ["git", "rev-parse", "--is-inside-work-tree"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="false\n", stderr="")
+            if cmd == ["git", "rev-parse", "--is-bare-repository"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="true\n", stderr="")
+            if cmd == ["git", "symbolic-ref", "--quiet", "--short", "HEAD"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout=f"{branch}\n", stderr="")
+            if cmd == ["git", "worktree", "list", "--porcelain"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout=worktree_output, stderr="")
+            raise AssertionError(f"unexpected git command: {cmd}")
+
+        with patch.object(dispatch_mod.subprocess, "run", side_effect=fake_run):
+            repo_root = dispatch_mod.resolve_repo_root_for_dispatch()
+
+        assert repo_root == Path(linked)
+        assert calls[:3] == [
+            ["git", "rev-parse", "--show-toplevel"],
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            ["git", "rev-parse", "--is-bare-repository"],
+        ]
+        assert calls[3:] == [
+            ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+            ["git", "worktree", "list", "--porcelain"],
+        ]
+
     def test_main_phase_surface_mode_runs_recoverable_command(self):
         with patch.object(dispatch_mod, "run_recoverable_surface_command", return_value=0) as mock_run, \
              patch.object(dispatch_mod, "run_surface_command") as mock_surface, \
              patch.object(dispatch_mod, "load_config", return_value={"timeouts": {}}), \
-             patch.object(dispatch_mod.subprocess, "run") as mock_subprocess_run:
-            mock_subprocess_run.return_value = subprocess.CompletedProcess(
-                args=["git"], returncode=0, stdout=str(REPO_ROOT), stderr=""
-            )
+             patch.object(dispatch_mod, "resolve_repo_root_for_dispatch", return_value=REPO_ROOT):
             exit_code = dispatch_mod.main(["phase-a", "--plan-name", "example"])
         assert exit_code == 0
         mock_run.assert_called_once()
@@ -4890,10 +5041,7 @@ class TestModularSurfaceEntrypoints:
         package_path.write_text("{}", encoding="utf-8")
         with patch.object(dispatch_mod, "run_recoverable_surface_command") as mock_recoverable, \
              patch.object(dispatch_mod, "run_surface_command", return_value=0) as mock_run, \
-             patch.object(dispatch_mod.subprocess, "run") as mock_subprocess_run:
-            mock_subprocess_run.return_value = subprocess.CompletedProcess(
-                args=["git"], returncode=0, stdout=str(REPO_ROOT), stderr=""
-            )
+             patch.object(dispatch_mod, "resolve_repo_root_for_dispatch", return_value=REPO_ROOT):
             exit_code = dispatch_mod.main(
                 ["pre-commit-supervisor", "--package", str(package_path)]
             )

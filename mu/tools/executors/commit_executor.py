@@ -181,7 +181,6 @@ def _run(
         timeout=timeout, env=run_env,
     )
 
-
 def _is_test_file(path: str) -> bool:
     normalized = path.replace("\\", "/")
     return (
@@ -249,6 +248,75 @@ def _run_pytest_on_files(
         }
     except subprocess.TimeoutExpired:
         return {"exit_code": -1, "stdout": "", "stderr": "pytest timed out", "passed": False}
+
+
+def _parse_worktree_list(output: str) -> list[dict[str, str]]:
+    """Parse `git worktree list --porcelain` into entry dicts."""
+    entries: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for raw_line in output.splitlines():
+        line = raw_line.rstrip()
+        if not line:
+            if current:
+                entries.append(current)
+                current = {}
+            continue
+        key, _, value = line.partition(" ")
+        if key == "worktree":
+            if current:
+                entries.append(current)
+                current = {}
+            current["worktree"] = value
+            continue
+        current[key] = value or "true"
+    if current:
+        entries.append(current)
+    return entries
+
+
+def _find_linked_worktree_for_branch(repo_root: Path, branch: str) -> Path | None:
+    """Return the linked worktree path for `branch`, if exactly one exists."""
+    try:
+        worktree_proc = _run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=repo_root,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    if worktree_proc.returncode != 0:
+        return None
+    target_ref = f"refs/heads/{branch}"
+    matches = [
+        Path(entry["worktree"])
+        for entry in _parse_worktree_list(worktree_proc.stdout)
+        if entry.get("worktree")
+        and entry.get("bare") != "true"
+        and entry.get("prunable") is None
+        and entry.get("branch") == target_ref
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _resolve_post_merge_verify_root(repo_root: Path, base_branch: str, *, log: Any) -> Path:
+    """Choose a safe worktree for post-merge verification of the base branch."""
+    current_after = _run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=repo_root,
+    ).stdout.strip()
+    if current_after == base_branch:
+        return repo_root
+    branch_worktree = _find_linked_worktree_for_branch(repo_root, base_branch)
+    if branch_worktree is not None and branch_worktree != repo_root:
+        log(
+            f"Step 15: using linked {base_branch} worktree for verification: {branch_worktree}"
+        )
+        return branch_worktree
+    _run(["git", "checkout", base_branch], cwd=repo_root)
+    return repo_root
 
 
 def _handoff_sha(handoff: dict[str, Any]) -> str:
@@ -2147,7 +2215,7 @@ def _run_post_commit_pipeline(
     try:
         _run(
             ["bash", str(merge_script), pr_number, "--sweep"],
-            cwd=repo_root, timeout=120,
+            cwd=repo_root.parent, timeout=120,
         )
     except subprocess.CalledProcessError as exc:
         return {"status": "error", "step": "ensure_review_clear_and_merge",
@@ -2156,25 +2224,20 @@ def _run_post_commit_pipeline(
                 "pr_number": pr_number}
 
     try:
-        current_after = _run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root
-        ).stdout.strip()
-        if current_after != base_branch:
-            _run(["git", "checkout", base_branch], cwd=repo_root)
-            _run(["git", "pull"], cwd=repo_root, timeout=60)
-
-        head_sha = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
-        status_output = _run(["git", "status", "--short"], cwd=repo_root).stdout.strip()
+        verify_root = _resolve_post_merge_verify_root(repo_root, base_branch, log=log)
+        _run(["git", "pull"], cwd=verify_root, timeout=60)
+        head_sha = _run(["git", "rev-parse", "HEAD"], cwd=verify_root).stdout.strip()
+        status_output = _run(["git", "status", "--short"], cwd=verify_root).stdout.strip()
         if status_output:
             return {"status": "error", "step": "ensure_review_clear_and_merge",
-                    "errors": [f"Post-merge working tree is dirty:\n{status_output}"],
+                    "errors": [f"Post-merge working tree is dirty at {verify_root}:\n{status_output}"],
                     "steps_completed": result["steps_completed"],
                     "pr_number": pr_number}
         result["merge_sha"] = head_sha
         if "ensure_review_clear_and_merge" not in result["steps_completed"]:
             result["steps_completed"].append("ensure_review_clear_and_merge")
         _clear_continuation_record(continuation_path)
-        log(f"Step 15: merged, HEAD={head_sha[:8]}, clean tree verified")
+        log(f"Step 15: merged, HEAD={head_sha[:8]}, clean tree verified at {verify_root}")
     except subprocess.CalledProcessError as exc:
         return {"status": "error", "step": "ensure_review_clear_and_merge",
                 "errors": [f"Post-merge verify failed: {exc.stderr.strip()}"],
