@@ -1169,6 +1169,33 @@ META_ENVELOPE_RE = re.compile(
 _STDERR_SENTINEL = "\n[stderr]\n"
 
 
+def _extract_codex_event_stream_text(output: str) -> str | None:
+    """Best-effort extraction of agent message text from Codex JSONL event streams."""
+    raw_lines = [line for line in output.splitlines() if line.strip()]
+    if not raw_lines:
+        return None
+
+    messages: list[str] = []
+    for line in raw_lines:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        item = payload.get("item")
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "agent_message":
+            continue
+        text = item.get("text")
+        if isinstance(text, str) and text.strip():
+            messages.append(text.strip())
+    if not messages:
+        return None
+    return "\n".join(messages).strip()
+
+
 def _preferred_authoritative_output(output: str) -> str:
     """Prefer stdout and reject stderr-only envelopes as authoritative output."""
     stdout_only = output
@@ -1276,12 +1303,18 @@ def _recover_adapter_envelope(
     candidates: list[tuple[str, str]] = []
     if exc.output:
         candidates.append(("adapter output", exc.output))
+        normalized = _extract_codex_event_stream_text(exc.output)
+        if normalized and all(normalized != existing for _, existing in candidates):
+            candidates.append(("adapter output event stream", normalized))
     try:
         raw_output = raw_output_path.read_text(encoding="utf-8")
     except OSError:
         raw_output = ""
     if raw_output and all(raw_output != existing for _, existing in candidates):
         candidates.append(("raw output file", raw_output))
+        normalized = _extract_codex_event_stream_text(raw_output)
+        if normalized and all(normalized != existing for _, existing in candidates):
+            candidates.append(("raw output event stream", normalized))
 
     parse_errors: list[str] = []
     for source, output in candidates:
@@ -2096,7 +2129,15 @@ def run_post_merge_review(
     except Exception as exc:
         raise MetaBridgeError(f"Codex adapter failed: {exc}") from exc
 
-    return parse_post_merge_envelope(output)
+    try:
+        return parse_post_merge_envelope(output)
+    except MetaBridgeError as exc:
+        return _recover_adapter_envelope(
+            BridgeAdapterError(str(exc), output=output),
+            raw_output_path,
+            parser=parse_post_merge_envelope,
+            label="Post-merge review",
+        )
 
 
 def run_post_merge_bridge(
@@ -2399,7 +2440,15 @@ def run_meta_review(
     except Exception as exc:
         raise MetaBridgeError(f"Codex adapter failed: {exc}") from exc
 
-    return parse_meta_envelope(output)
+    try:
+        return parse_meta_envelope(output)
+    except MetaBridgeError as exc:
+        return _recover_adapter_envelope(
+            BridgeAdapterError(str(exc), output=output),
+            raw_output_path,
+            parser=parse_meta_envelope,
+            label="Meta-review",
+        )
 
 
 def run_meta_bridge(
