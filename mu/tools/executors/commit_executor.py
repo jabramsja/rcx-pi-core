@@ -225,6 +225,7 @@ def _find_linked_worktree_for_branch(repo_root: Path, branch: str) -> Path | Non
         for entry in _parse_worktree_list(worktree_proc.stdout)
         if entry.get("worktree")
         and entry.get("bare") != "true"
+        and entry.get("prunable") is None
         and entry.get("branch") == target_ref
     ]
     if len(matches) == 1:
