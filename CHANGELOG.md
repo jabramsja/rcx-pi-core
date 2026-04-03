@@ -4,6 +4,19 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-04-03
 
+### Pipeline Monitor Linked-Worktree Rebind
+
+- `pipeline_monitor.sh` now resolves a real linked worktree when launched from
+  the bare/common repo path, and the tmux pane commands explicitly `cd` into
+  that resolved worktree before starting the watcher, findings, timeline, and
+  process panes
+- `pipeline_status.sh` now uses the same linked-worktree resolver, so the
+  one-shot pipeline summary works from the bare/common repo path instead of
+  failing on an empty `git rev-parse --show-toplevel`
+- this closes the concrete stale-pane failure mode where tmux started from the
+  bare/common path launched `/mu/tools/observability/...` commands and never
+  showed the new recovery-aware pane state
+
 ### Recovery Observability And Watcher-Noise Hardening
 
 - `recovery_gate.py` now writes a structured

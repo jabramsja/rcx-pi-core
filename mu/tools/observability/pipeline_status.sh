@@ -3,7 +3,62 @@
 # Read-only: never modifies state, only reads .agent_bus/ and process info.
 set -uo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+find_worktree_for_branch() {
+  local target="$1"
+  local current_path="" current_branch="" match="" matches=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      worktree\ *)
+        current_path="${line#worktree }"
+        current_branch=""
+        ;;
+      branch\ refs/heads/*)
+        current_branch="${line#branch refs/heads/}"
+        if [ "$current_branch" = "$target" ] && [ -n "$current_path" ]; then
+          match="$current_path"
+          matches=$((matches + 1))
+        fi
+        ;;
+      "")
+        current_path=""
+        current_branch=""
+        ;;
+    esac
+  done < <(git worktree list --porcelain 2>/dev/null || true)
+
+  if [ "$matches" -eq 1 ] && [ -n "$match" ]; then
+    printf '%s\n' "$match"
+    return 0
+  fi
+  return 1
+}
+
+resolve_repo_root() {
+  local root="" branch=""
+  if root="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -n "$root" ]; then
+    printf '%s\n' "$root"
+    return 0
+  fi
+
+  branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  if [ -n "$branch" ]; then
+    root="$(find_worktree_for_branch "$branch" || true)"
+    if [ -n "$root" ]; then
+      printf '%s\n' "$root"
+      return 0
+    fi
+  fi
+
+  root="$(find_worktree_for_branch dev || true)"
+  if [ -n "$root" ]; then
+    printf '%s\n' "$root"
+    return 0
+  fi
+
+  pwd
+}
+
+REPO_ROOT="$(resolve_repo_root)"
 BUS="$REPO_ROOT/.agent_bus"
 
 # Colors (disable if not tty)
