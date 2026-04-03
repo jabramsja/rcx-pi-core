@@ -4377,6 +4377,111 @@ class TestCommitContinuationAndBotFreshness:
         assert "timed out" in post_commit["errors"][0]
         assert "wait_ci" in post_commit["steps_completed"]
 
+    def test_post_commit_uses_linked_base_worktree_for_merge_verification(self, tmp_path, monkeypatch):
+        repo = tmp_path / "feature-worktree"
+        repo.mkdir()
+        dev_worktree = tmp_path / "dev-worktree"
+        dev_worktree.mkdir()
+        handoff = _make_new_handoff()
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        result = {
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "git_commit",
+                "hold_check",
+                "run_pre_push_script",
+                "git_push",
+                "ensure_pr",
+                "wait_ci",
+            ],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+            "pr_number": "673",
+        }
+        merge_cwds = []
+        pull_cwds = []
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                if cwd == dev_worktree:
+                    return completed(cmd, stdout="merge456\n")
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="jabramsja/test-wave-id\n")
+            if cmd[:4] == ["git", "worktree", "list", "--porcelain"]:
+                stdout = (
+                    f"worktree {repo}\n"
+                    "HEAD abc123\n"
+                    "branch refs/heads/jabramsja/test-wave-id\n\n"
+                    f"worktree {dev_worktree}\n"
+                    "HEAD merge456\n"
+                    "branch refs/heads/dev\n\n"
+                )
+                return completed(cmd, stdout=stdout)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                payload = {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "headRefOid": "abc123",
+                                "reviewDecision": "",
+                                "latestReviews": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                            "state": "COMMENTED",
+                                            "commit": {"oid": "abc123"},
+                                        }
+                                    ]
+                                },
+                                "reviewThreads": {"nodes": []},
+                                "comments": {"nodes": []},
+                            }
+                        }
+                    }
+                }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                merge_cwds.append(cwd)
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                pull_cwds.append(cwd)
+                return completed(cmd)
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "checkout"]:
+                raise AssertionError("post-merge verify should not checkout dev in feature worktree")
+            raise AssertionError(f"unexpected command: {cmd} cwd={cwd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising linked-worktree merge verification path
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert "step" not in post_commit
+        assert post_commit["merge_sha"] == "merge456"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert merge_cwds == [repo.parent]
+        assert pull_cwds == [dev_worktree]
+
 
 class TestModularSurfaceEntrypoints:
     """executor_dispatch.py also acts as the modular control-plane entrypoint."""
