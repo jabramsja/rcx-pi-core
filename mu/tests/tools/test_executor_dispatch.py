@@ -4818,6 +4818,88 @@ class TestModularSurfaceEntrypoints:
             str(dispatch_mod.SCRIPT_DIR / "commit_executor.py"),
         ]
 
+    def test_commit_surface_failure_routes_to_recovery_and_retries(self, tmp_path):
+        handoff_path = tmp_path / "handoff.json"
+        handoff_path.write_text(
+            json.dumps({"wave_id": "commit-surface-wave", "task_id": "[PIPELINE-RECOVERY]"}),
+            encoding="utf-8",
+        )
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["commit", "--handoff", str(handoff_path), "--json"]
+        )
+        commit_fail = subprocess.CompletedProcess(
+            ["commit"], 1, json.dumps({"status": "error", "step": "wait_ci"}), "CI failed"
+        )
+        commit_ok = subprocess.CompletedProcess(
+            ["commit"], 0, json.dumps({"status": "success"}), ""
+        )
+        recovery = {
+            "recovered": True,
+            "exhausted": False,
+            "failure_class": "test_failure",
+            "tier": 3,
+            "action": "recovery_loop",
+            "detail": "resume commit surface",
+        }
+
+        with patch.object(
+            dispatch_mod,
+            "_run_executor_in_group",
+            side_effect=[commit_fail, commit_ok],
+        ) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery", return_value=recovery) as mock_recovery:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={"timeouts": {"commit_executor": 300}},
+            )
+
+        assert exit_code == 0
+        assert mock_run.call_count == 2
+        mock_recovery.assert_called_once()
+        assert mock_recovery.call_args[0][2] == "commit-surface-wave"
+
+    def test_commit_surface_stderr_only_failure_routes_to_recovery(self, tmp_path):
+        handoff_path = tmp_path / "handoff.json"
+        handoff_path.write_text(
+            json.dumps({"wave_id": "commit-surface-wave", "task_id": "[PIPELINE-RECOVERY]"}),
+            encoding="utf-8",
+        )
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["commit", "--handoff", str(handoff_path), "--json"]
+        )
+        commit_fail = subprocess.CompletedProcess(
+            ["commit"], 1, "", "fatal: remote rejected push"
+        )
+        recovery = {
+            "recovered": False,
+            "exhausted": True,
+            "failure_class": "unknown_error",
+            "tier": 3,
+            "action": "recovery_loop",
+            "detail": "raw failure reached recovery",
+        }
+
+        with patch.object(
+            dispatch_mod,
+            "_run_executor_in_group",
+            return_value=commit_fail,
+        ) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery", return_value=recovery) as mock_recovery:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={"timeouts": {"commit_executor": 300}},
+            )
+
+        assert exit_code == 1
+        assert mock_run.call_count == 1
+        mock_recovery.assert_called_once()
+        result = mock_recovery.call_args[0][1]
+        assert result["status"] == "failed"
+        assert result["stdout"] == ""
+        assert result["stderr"] == "fatal: remote rejected push"
+
     def test_phase_a_surface_chained_commit_failure_retries_commit_only(self, tmp_path):
         plan_path = tmp_path / "reports" / "control_plane" / "plan.md"
         plan_path.parent.mkdir(parents=True)
@@ -4914,6 +4996,34 @@ class TestModularSurfaceEntrypoints:
             "held",
             "COMMIT_HELD",
         )
+
+    def test_classify_commit_executor_result_detects_json_error(self):
+        commit_result = subprocess.CompletedProcess(
+            ["commit"], 0, json.dumps({"status": "error"}), ""
+        )
+        assert dispatch_mod._classify_commit_executor_result(commit_result) == (  # ANTICHEAT_OK: testing internal commit-result classifier
+            "failed",
+            "COMMIT_GO",
+        )
+
+    def test_main_routes_commit_surface_through_recovery_wrapper(self, tmp_path):
+        handoff_path = tmp_path / "handoff.json"
+        handoff_path.write_text(json.dumps({"wave_id": "commit-surface-wave"}), encoding="utf-8")
+        config = {"timeouts": {"commit_executor": 300}}
+
+        with patch.object(dispatch_mod, "resolve_repo_root_for_dispatch", return_value=tmp_path), \
+             patch.object(dispatch_mod, "load_config", return_value=config) as mock_load, \
+             patch.object(dispatch_mod, "run_recoverable_surface_command", return_value=0) as mock_run:
+            exit_code = dispatch_mod.main(
+                ["commit", "--handoff", str(handoff_path), "--json"]
+            )
+
+        assert exit_code == 0
+        mock_load.assert_called_once()
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args
+        assert call_args.kwargs["repo_root"] == tmp_path
+        assert call_args.kwargs["config"] == config
 
     def test_resolve_repo_root_for_dispatch_uses_linked_worktree_from_bare_common_dir(self):
         branch = "jabramsja/recovery-tier3-wiring-closeout-2026-04-01"

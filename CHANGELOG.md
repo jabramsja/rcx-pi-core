@@ -57,6 +57,25 @@ All notable changes to RCX are documented in this file.
   bare/common path launched `/mu/tools/observability/...` commands or kept
   showing ancient root-worktree state instead of the live recovery-aware pane
 
+### Routed Commit Recovery And Bridge Watchdog Hardening
+
+- `executor_dispatch.py` now routes the modular `commit` surface through the
+  same recovery wrapper used by `phase-a` / `phase-b`, derives commit-wave
+  identity from the handoff or routing record, and treats structured commit
+  `status:error` output as a real failed commit surface instead of a silent
+  success
+- `bridge_adapters.py` now starts the zero-output watchdog after prompt
+  delivery and writes stderr to the raw transcript incrementally with the
+  normal `[stderr]` sentinel, so noisy reviewers no longer fail closed with an
+  empty raw transcript just because CI process startup consumed the original
+  timer budget
+- `mu/tests/tools/test_agent_bridge_supervisor.py` now gives the zero-output
+  bridge watchdog proof a realistic CI margin and locks the stderr-only raw
+  transcript prefix directly
+- `mu/tests/tools/test_executor_dispatch.py` now locks commit-surface recovery,
+  commit-surface recovery-wrapper routing from `main()`, and structured
+  commit-status error classification directly
+
 ### Recovery Observability And Watcher-Noise Hardening
 
 - `recovery_gate.py` now writes a structured

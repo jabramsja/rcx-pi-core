@@ -402,20 +402,57 @@ def _tee_stream(
     source: io.TextIOWrapper,
     sink: io.StringIO,
     tty: Any,
-    raw_file: Any = None,
+    raw_writer: Any = None,
     on_line: Any = None,
 ) -> None:
-    """Read from source, write to sink (capture), tty (live display), and raw_file (incremental persist)."""
+    """Read from source, write to sink, tty, and optional raw transcript writer."""
     for line in source:
         sink.write(line)
-        if raw_file is not None:
-            raw_file.write(line)
-            raw_file.flush()
+        if raw_writer is not None:
+            raw_writer(line)
         if on_line is not None:
             on_line(line, sink)
         if tty is not None:
             tty.write(line)
             tty.flush()
+
+
+def _build_raw_transcript_writers(raw_file: Any) -> tuple[Any, Any, Any]:
+    """Create locked stdout/stderr raw transcript writers for a shared file handle."""
+    lock = threading.Lock()
+    state = {
+        "has_output": False,
+        "stderr_written": False,
+    }
+
+    def _write(text: str) -> None:
+        if raw_file is None or not text:
+            return
+        raw_file.write(text)
+        raw_file.flush()
+
+    def write_stdout(text: str) -> None:
+        if raw_file is None or not text:
+            return
+        with lock:
+            _write(text)
+            state["has_output"] = True
+
+    def write_stderr(text: str) -> None:
+        if raw_file is None or not text:
+            return
+        with lock:
+            if not state["stderr_written"]:
+                header = "\n[stderr]\n" if state["has_output"] else "[stderr]\n"
+                _write(header)
+                state["stderr_written"] = True
+                state["has_output"] = True
+            _write(text)
+
+    def stderr_written() -> bool:
+        return bool(state["stderr_written"])
+
+    return write_stdout, write_stderr, stderr_written
 
 
 def _run_adapter_buffered(
@@ -433,6 +470,7 @@ def _run_adapter_buffered(
     raw_fh = None
     if raw_output_path is not None:
         raw_fh = open(raw_output_path, "w", encoding="utf-8")
+    write_stdout_raw, write_stderr_raw, stderr_written_raw = _build_raw_transcript_writers(raw_fh)
 
     try:
         proc = subprocess.Popen(
@@ -466,7 +504,7 @@ def _run_adapter_buffered(
     # heavily to stderr while we block reading stdout line-by-line.
     stderr_thread = threading.Thread(
         target=_tee_stream,
-        args=(proc.stderr, stderr_buf, None),
+        args=(proc.stderr, stderr_buf, None, write_stderr_raw),
         daemon=True,
     )
     stderr_thread.start()
@@ -498,13 +536,6 @@ def _run_adapter_buffered(
     watchdog.daemon = True
     watchdog.start()
     zero_output_watchdog = None
-    if zero_output_timeout_s is not None and raw_output_path is not None:
-        zero_output_watchdog = threading.Timer(
-            zero_output_timeout_s,
-            _kill_after_zero_output_timeout,
-        )
-        zero_output_watchdog.daemon = True
-        zero_output_watchdog.start()
 
     try:
         if spec.prompt_via_stdin and proc.stdin is not None:
@@ -513,12 +544,17 @@ def _run_adapter_buffered(
                 proc.stdin.close()
             except BrokenPipeError:
                 pass  # Process exited early; continue to read remaining output
+        if zero_output_timeout_s is not None and raw_output_path is not None:
+            zero_output_watchdog = threading.Timer(
+                zero_output_timeout_s,
+                _kill_after_zero_output_timeout,
+            )
+            zero_output_watchdog.daemon = True
+            zero_output_watchdog.start()
         for line in proc.stdout:
             stdout_lines.append(line)
             stdout_progress.set()
-            if raw_fh is not None:
-                raw_fh.write(line)
-                raw_fh.flush()
+            write_stdout_raw(line)
             if (
                 stop_after_envelope
                 and not envelope_terminated.is_set()
@@ -570,9 +606,8 @@ def _run_adapter_buffered(
     stderr_text = stderr_buf.getvalue()
     if stderr_text:
         output = f"{output}\n[stderr]\n{stderr_text}".strip()
-        if raw_fh is not None:
-            raw_fh.write(f"\n[stderr]\n{stderr_text}")
-            raw_fh.flush()
+        if raw_fh is not None and not stderr_written_raw():
+            write_stderr_raw(stderr_text)
     if zero_output_timed_out.is_set():
         if raw_fh is not None:
             raw_fh.close()
@@ -620,6 +655,7 @@ def _run_adapter_streaming(
     raw_fh = None
     if raw_output_path is not None:
         raw_fh = open(raw_output_path, "w", encoding="utf-8")
+    write_stdout_raw, write_stderr_raw, stderr_written_raw = _build_raw_transcript_writers(raw_fh)
 
     try:
         proc = subprocess.Popen(
@@ -671,12 +707,12 @@ def _run_adapter_streaming(
 
     stdout_thread = threading.Thread(
         target=_tee_stream,
-        args=(proc.stdout, stdout_buf, sys.stdout, raw_fh, _record_stdout_progress),
+        args=(proc.stdout, stdout_buf, sys.stdout, write_stdout_raw, _record_stdout_progress),
         daemon=True,
     )
     stderr_thread = threading.Thread(
         target=_tee_stream,
-        args=(proc.stderr, stderr_buf, sys.stderr),
+        args=(proc.stderr, stderr_buf, sys.stderr, write_stderr_raw),
         daemon=True,
     )
     stdout_thread.start()
@@ -698,13 +734,6 @@ def _run_adapter_streaming(
         _kill_process_group(proc, wait_for_exit=True)
 
     zero_output_watchdog = None
-    if zero_output_timeout_s is not None and raw_output_path is not None:
-        zero_output_watchdog = threading.Timer(
-            zero_output_timeout_s,
-            _kill_after_zero_output_timeout,
-        )
-        zero_output_watchdog.daemon = True
-        zero_output_watchdog.start()
 
     try:
         if spec.prompt_via_stdin and proc.stdin is not None:
@@ -713,6 +742,13 @@ def _run_adapter_streaming(
                 proc.stdin.close()
             except BrokenPipeError:
                 pass  # Process exited early; continue to wait for remaining output
+        if zero_output_timeout_s is not None and raw_output_path is not None:
+            zero_output_watchdog = threading.Timer(
+                zero_output_timeout_s,
+                _kill_after_zero_output_timeout,
+            )
+            zero_output_watchdog.daemon = True
+            zero_output_watchdog.start()
         proc.wait(timeout=spec.timeout_s)
         if zero_output_watchdog is not None:
             zero_output_watchdog.cancel()
@@ -743,9 +779,8 @@ def _run_adapter_streaming(
     stderr_text = stderr_buf.getvalue()
     if stderr_text:
         output = f"{output}\n[stderr]\n{stderr_text}".strip()
-        if raw_fh is not None:
-            raw_fh.write(f"\n[stderr]\n{stderr_text}")
-            raw_fh.flush()
+        if raw_fh is not None and not stderr_written_raw():
+            write_stderr_raw(stderr_text)
     if zero_output_timed_out.is_set():
         if raw_fh is not None:
             raw_fh.close()
