@@ -11,6 +11,17 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+sanitize_local_git_env() {
+    local git_local_env
+    git_local_env="$(git rev-parse --local-env-vars 2>/dev/null || true)"
+    if [ -n "$git_local_env" ]; then
+        # shellcheck disable=SC2086
+        unset $git_local_env
+    fi
+}
+
+sanitize_local_git_env
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
