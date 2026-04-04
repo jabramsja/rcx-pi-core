@@ -1776,3 +1776,59 @@ esac
 
         assert result.returncode == 0
         assert "post_commit_pending" in result.stdout
+
+    def test_pane_findings_renders_fallback_when_no_bridge_rounds_exist(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        (repo_root / ".agent_bus" / "meta" / "raw").mkdir(parents=True, exist_ok=True)
+        (repo_root / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo_root / ".scratch" / "commit_executor_live.log").write_text(
+            "[commit-executor] Step 14: waiting for CI on PR #719...\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        assert "No active Phase A/Phase B bridge rounds" in result.stdout
+        assert "Commit path" in result.stdout
+        assert "Step 14: waiting for CI on PR #719..." in result.stdout
+
+    def test_pane_findings_renders_latest_meta_review_when_bridge_rounds_are_idle(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        meta_dir = repo_root / ".agent_bus" / "meta" / "raw"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        (repo_root / ".scratch").mkdir(parents=True, exist_ok=True)
+        (meta_dir / "meta-wave.txt").write_text(
+            "BEGIN_META_ENVELOPE\n"
+            '{\n'
+            '  "decision": "COMMIT_GO",\n'
+            '  "summary": "Bounded review closed cleanly."\n'
+            '}\n'
+            "END_META_ENVELOPE\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        assert "Latest meta review" in result.stdout
+        assert "COMMIT_GO" in result.stdout
+        assert "Bounded review closed cleanly." in result.stdout

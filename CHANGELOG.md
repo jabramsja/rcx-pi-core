@@ -4,6 +4,19 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-04-04
 
+### Findings Pane Fallback
+
+- `_pane_findings.sh` now renders a plain-English fallback state when there is
+  no active Phase A / Phase B bridge round, instead of looping back to a blank
+  shell prompt
+- that fallback now surfaces the latest meta-review decision and the latest
+  commit-path state, so the pane stays useful during supervisor/commit-only
+  waves
+- `RCX_PANE_ONESHOT=1` now renders the pane once and exits, which gives the
+  observability suite a stable non-interactive proof surface
+- `mu/tests/tools/test_recovery_gate.py` now locks both the no-bridge fallback
+  and the meta-review rendering path directly
+
 ### Tracker-Only Handoff Compatibility
 
 - `prepare_handoff_from_routing_record()` now builds a contract-complete

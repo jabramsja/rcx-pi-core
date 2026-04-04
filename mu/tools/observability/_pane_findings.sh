@@ -14,6 +14,7 @@ LAST_HASH=""
 TMPOUT="/tmp/rcx_pane_findings_$$.txt"
 NOTIFY_MARKER="/tmp/rcx_last_notified_round.txt"
 LAST_NOTIFIED_ROUND=$(cat "$NOTIFY_MARKER" 2>/dev/null || echo "")
+ONESHOT="${RCX_PANE_ONESHOT:-0}"
 
 notify() {
   local title="$1" msg="$2" round="$3"
@@ -26,22 +27,14 @@ while true; do
   {
   echo -e "${BOLD}REVIEW FINDINGS${RESET}  $(date '+%H:%M:%S')"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-  if [ ! -d "$RAW_DIR" ]; then
-    echo -e "  ${DIM}No bridge rounds yet${RESET}"
-    sleep 5
-    continue
-  fi
+  echo ""
 
   # Find the 5 most recent round dirs (newest first)
   # Match phase-a-rN and phase-b-rN dirs, plus reentry dirs
   # Only show the LATEST round — newest first, pick first valid one
-  ROUND_DIRS=$(ls -dt "$RAW_DIR"/phase-?-r[0-9]* "$RAW_DIR"/phase-?-reentry-r[0-9]* 2>/dev/null | head -10)
-
-  if [ -z "$ROUND_DIRS" ]; then
-    echo -e "  ${DIM}No bridge rounds yet${RESET}"
-    sleep 5
-    continue
+  ROUND_DIRS=""
+  if [ -d "$RAW_DIR" ]; then
+    ROUND_DIRS=$(ls -dt "$RAW_DIR"/phase-?-r[0-9]* "$RAW_DIR"/phase-?-reentry-r[0-9]* 2>/dev/null | head -10)
   fi
 
   found_any=false
@@ -181,7 +174,84 @@ for f in nb:
   done
 
   if [ "$found_any" = false ]; then
-    echo -e "  ${DIM}No reviewer output yet${RESET}"
+    echo -e "  ${DIM}No active Phase A/Phase B bridge rounds${RESET}"
+
+    META_DIR="$REPO_ROOT/.agent_bus/meta/raw"
+    META_FILE=$(ls -t "$META_DIR"/meta-*.txt 2>/dev/null | head -1) || true
+    if [ -n "$META_FILE" ] && [ -s "$META_FILE" ]; then
+      meta_age=$(( $(date +%s) - $(stat -f%m "$META_FILE" 2>/dev/null || stat -c%Y "$META_FILE" 2>/dev/null || echo 0) ))
+      if [ "$meta_age" -lt 60 ]; then
+        meta_age_str="${meta_age}s ago"
+      elif [ "$meta_age" -lt 3600 ]; then
+        meta_age_str="$(( meta_age / 60 ))m ago"
+      else
+        meta_age_str="$(( meta_age / 3600 ))h ago"
+      fi
+
+      META_ENVELOPE=$(python3 -c "
+import json, re, sys
+content = open('$META_FILE', errors='replace').read()
+matches = list(re.finditer(r'BEGIN_META_ENVELOPE\s*\n(.*?)\nEND_META_ENVELOPE', content, re.DOTALL))
+env = None
+for m in reversed(matches):
+    try:
+        candidate = json.loads(m.group(1))
+        dec = candidate.get('decision', '')
+        if '|' not in dec and dec:
+            env = candidate
+            break
+    except (json.JSONDecodeError, KeyError):
+        continue
+if env is None:
+    sys.exit(0)
+print(f'DECISION={env.get(\"decision\", \"?\")}')
+print(f'SUMMARY={(env.get(\"summary\", \"\") or \"\")[:120]}')
+" 2>/dev/null)
+
+      if [ -n "$META_ENVELOPE" ]; then
+        META_DECISION=$(echo "$META_ENVELOPE" | grep "^DECISION=" | cut -d= -f2-)
+        META_SUMMARY=$(echo "$META_ENVELOPE" | grep "^SUMMARY=" | cut -d= -f2-)
+        case "$META_DECISION" in
+          COMMIT_GO|COMMIT_GO_HOLD_PUSH|NO_ACTION) meta_color="$GREEN" ;;
+          NEEDS_PHASE_A|NEEDS_PHASE_B|STOP_FOR_FOUNDER|STOP_FOR_TRIAGE_DISCUSSION) meta_color="$YELLOW" ;;
+          ERROR_VALIDATION_FAILED) meta_color="$RED" ;;
+          *) meta_color="$CYAN" ;;
+        esac
+        echo ""
+        echo -e "  ${CYAN}Latest meta review${RESET} ${DIM}($meta_age_str)${RESET}"
+        echo -e "  Decision: ${meta_color}${BOLD}${META_DECISION}${RESET}"
+        [ -n "$META_SUMMARY" ] && echo -e "  ${DIM}$META_SUMMARY${RESET}"
+      else
+        SIZE=$(wc -c < "$META_FILE" | xargs)
+        echo ""
+        echo -e "  ${CYAN}Meta review${RESET} ${DIM}($meta_age_str, ${SIZE}B)${RESET}"
+        echo -e "  ${YELLOW}In progress...${RESET}"
+      fi
+    fi
+
+    COMMIT_LOG="$REPO_ROOT/.scratch/commit_executor_live.log"
+    if [ -f "$COMMIT_LOG" ]; then
+      COMMIT_STATE=$(python3 -c "
+import sys
+path = '$COMMIT_LOG'
+lines = []
+with open(path, errors='replace') as fh:
+    for raw in fh:
+        raw = raw.strip()
+        if not raw.startswith('[commit-executor]'):
+            continue
+        if 'Waiting for chatgpt-codex-connector review signal' in raw:
+            continue
+        lines.append(raw.replace('[commit-executor] ', '', 1))
+if lines:
+    print(lines[-1][:160])
+" 2>/dev/null)
+      if [ -n "$COMMIT_STATE" ]; then
+        echo ""
+        echo -e "  ${CYAN}Commit path${RESET}"
+        echo -e "  ${DIM}${COMMIT_STATE}${RESET}"
+      fi
+    fi
   fi
 
   echo ""
@@ -231,6 +301,11 @@ if not completed and not running:
     rm -f "$TMPOUT"
     sleep 1
     exec bash "$SELF"
+  fi
+
+  if [ "$ONESHOT" = "1" ]; then
+    rm -f "$TMPOUT"
+    exit 0
   fi
 
   sleep 5
