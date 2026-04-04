@@ -69,6 +69,16 @@ normalize_path() {
   ) || printf '%s\n' "$path"
 }
 
+pinned_repo_root() {
+  local pinned="${RCX_OBS_REPO_ROOT:-}"
+  [ -n "$pinned" ] || return 1
+  if [ ! -d "$pinned" ]; then
+    echo "ERROR: pinned observability repo root does not exist: $pinned" >&2
+    return 1
+  fi
+  normalize_path "$pinned"
+}
+
 pid_cwd() {
   local pid="$1"
   lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
@@ -308,6 +318,12 @@ fi
 
 resolve_observability_repo_root() {
   local root="" branch="" current_root="" current_score=0 best_score=0 branch_root="" branch_score=0
+  if [ -n "${RCX_OBS_REPO_ROOT:-}" ]; then
+    root="$(pinned_repo_root)" || return 1
+    printf '%s\n' "$root"
+    return 0
+  fi
+
   if current_root="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -n "$current_root" ]; then
     current_score=$(worktree_activity_timestamp "$current_root" 2>/dev/null || echo 0)
     root="$(find_active_worktree || true)"

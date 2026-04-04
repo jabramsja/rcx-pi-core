@@ -51,6 +51,8 @@ RED="\033[31m" CYAN="\033[36m" PURPLE="\033[35m" RESET="\033[0m"
 LAST_HASH=""
 TMPOUT="/tmp/rcx_pane_processes_$$.txt"
 ONESHOT="${RCX_PANE_ONESHOT:-0}"
+FAST_ONESHOT=0
+[ "$ONESHOT" = "1" ] && FAST_ONESHOT=1
 
 elapsed_str() {
   local started="$1"
@@ -117,20 +119,22 @@ while true; do
   # Detect active phase
   phase="idle"
   phase_pid=""
-  for kw in phase_a_executor phase_b_executor commit_executor meta_bridge_supervisor bridge_supervisor executor_dispatch; do
-    pid=$(find_live_pid "$kw") || true
-    if [ -n "$pid" ]; then
-      case "$kw" in
-        phase_a_executor) phase="Phase A: Planning" ;;
-        phase_b_executor) phase="Phase B: Implement + Review" ;;
-        commit_executor) phase="Commit: Pushing through gates" ;;
-        meta_bridge_supervisor|bridge_supervisor) phase="Bridge: Review in progress" ;;
-        executor_dispatch) phase="Dispatch: Selecting wave" ;;
-      esac
-      phase_pid="$pid"
-      break
-    fi
-  done
+  if [ "$FAST_ONESHOT" != "1" ]; then
+    for kw in phase_a_executor phase_b_executor commit_executor meta_bridge_supervisor bridge_supervisor executor_dispatch; do
+      pid=$(find_live_pid "$kw") || true
+      if [ -n "$pid" ]; then
+        case "$kw" in
+          phase_a_executor) phase="Phase A: Planning" ;;
+          phase_b_executor) phase="Phase B: Implement + Review" ;;
+          commit_executor) phase="Commit: Pushing through gates" ;;
+          meta_bridge_supervisor|bridge_supervisor) phase="Bridge: Review in progress" ;;
+          executor_dispatch) phase="Dispatch: Selecting wave" ;;
+        esac
+        phase_pid="$pid"
+        break
+      fi
+    done
+  fi
 
   if [ "$phase" = "idle" ]; then
     echo -e "  ${DIM}Pipeline is idle. No active work.${RESET}"
@@ -154,16 +158,18 @@ while true; do
   codex_pids=""
   codex_count=0
   codex_start=""
-  while IFS= read -r pid; do
-    [ -z "$pid" ] && continue
-    pid_matches_repo_root "$pid" || continue
-    codex_pids="${codex_pids}${pid} "
-    codex_count=$((codex_count + 1))
-    if [ -z "$codex_start" ]; then
-      s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
-      codex_start=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
-    fi
-  done < <(pgrep -f "codex.*exec.*gpt" 2>/dev/null | head -5 || true)
+  if [ "$FAST_ONESHOT" != "1" ]; then
+    while IFS= read -r pid; do
+      [ -z "$pid" ] && continue
+      pid_matches_repo_root "$pid" || continue
+      codex_pids="${codex_pids}${pid} "
+      codex_count=$((codex_count + 1))
+      if [ -z "$codex_start" ]; then
+        s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
+        codex_start=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
+      fi
+    done < <(pgrep -f "codex.*exec.*gpt" 2>/dev/null | head -5 || true)
+  fi
   if [ "$codex_count" -gt 0 ]; then
     echo -e ""
     echo -e "  ${YELLOW}REVIEWING${RESET}  Codex GPT-5.4 xhigh"
@@ -176,20 +182,22 @@ while true; do
   claude_pids=""
   claude_count=0
   claude_start=""
-  while IFS= read -r pid; do
-    [ -z "$pid" ] && continue
-    pid_matches_repo_root "$pid" || continue
-    cmd=$(ps -p "$pid" -o command= 2>/dev/null) || continue
-    # Only count implementer processes (have --print), skip interactive sessions
-    if echo "$cmd" | grep -q "\-\-print"; then
-      claude_pids="${claude_pids}${pid} "
-      claude_count=$((claude_count + 1))
-      if [ -z "$claude_start" ]; then
-        s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
-        claude_start=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
+  if [ "$FAST_ONESHOT" != "1" ]; then
+    while IFS= read -r pid; do
+      [ -z "$pid" ] && continue
+      pid_matches_repo_root "$pid" || continue
+      cmd=$(ps -p "$pid" -o command= 2>/dev/null) || continue
+      # Only count implementer processes (have --print), skip interactive sessions
+      if echo "$cmd" | grep -q "\-\-print"; then
+        claude_pids="${claude_pids}${pid} "
+        claude_count=$((claude_count + 1))
+        if [ -z "$claude_start" ]; then
+          s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
+          claude_start=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
+        fi
       fi
-    fi
-  done < <(pgrep -f "claude.*--print" 2>/dev/null | head -3 || true)
+    done < <(pgrep -f "claude.*--print" 2>/dev/null | head -3 || true)
+  fi
   if [ "$claude_count" -gt 0 ]; then
     # Collect PIDs into a comma-separated string
     claude_pid_list=$(echo "${claude_pids%% }" | tr ' ' ',')
@@ -201,12 +209,14 @@ while true; do
 
   # Check for SDK agents
   agent_pid=""
-  while IFS= read -r pid; do
-    [ -z "$pid" ] && continue
-    pid_matches_repo_root "$pid" || continue
-    agent_pid="$pid"
-    break
-  done < <(pgrep -f "run_review.py" 2>/dev/null || true)
+  if [ "$FAST_ONESHOT" != "1" ]; then
+    while IFS= read -r pid; do
+      [ -z "$pid" ] && continue
+      pid_matches_repo_root "$pid" || continue
+      agent_pid="$pid"
+      break
+    done < <(pgrep -f "run_review.py" 2>/dev/null || true)
+  fi
   if [ -n "$agent_pid" ]; then
     echo -e ""
     echo -e "  ${CYAN}AUDITING${RESET}  9 Native SDK Agents"
@@ -309,7 +319,7 @@ while true; do
     fi
   done
 
-  if [ -n "$activity_source" ]; then
+  if [ "$FAST_ONESHOT" != "1" ] && [ -n "$activity_source" ]; then
     # Determine label
     case "$activity_source" in
       *implementer*) activity_label="${PURPLE}IMPLEMENTING${RESET}" ;;

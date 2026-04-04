@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import sqlite3
 import subprocess
 import time
@@ -596,7 +597,7 @@ _DANGEROUS_COMMANDS = frozenset({
 })
 
 MAX_RECOVERY_ITERATIONS = 3
-_CLAUDE_TIMEOUT = 60
+_CLAUDE_TIMEOUT = 180
 _SHELL_TIMEOUT = 30
 _TRIVIAL_EXCERPTS = frozenset({"{", "}", "[", "]", ",", '"', '",', "{}", "[]"})
 
@@ -649,6 +650,10 @@ STDOUT (last 50 lines):
 Git status:
 {git_status}
 
+Do not run tools or shell commands yourself during this diagnosis turn.
+Use only the evidence above, decide the smallest honest next action, and
+return the JSON plan immediately.
+
 Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
 {{"action": "shell"|"edit"|"skip"|"escalate", "commands": ["cmd1", "cmd2"], "explanation": "why"}}
 
@@ -658,6 +663,34 @@ Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
 - "escalate": need human intervention
 
 Safety: no rm -rf, no git push, no git reset --hard. Max 30s per command."""
+
+
+def _terminate_process_tree(proc: Any) -> None:
+    """Best-effort kill for a timed-out subprocess plus its descendants."""
+    if proc is None:
+        return
+    pid = int(getattr(proc, "pid", 0) or 0)
+    killed_group = False
+    if pid > 0:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+            killed_group = True
+        except OSError:
+            killed_group = False
+    if not killed_group:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    try:
+        proc.communicate(timeout=1)
+    except TypeError:
+        try:
+            proc.communicate()
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 def _apply_edit(edit: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
@@ -762,7 +795,9 @@ def run_recovery_loop(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                cwd=repo_root)
+                cwd=repo_root,
+                start_new_session=True,
+            )
             _update_recovery_status(
                 repo_root,
                 child_pid=claude_proc.pid,
@@ -771,9 +806,7 @@ def run_recovery_loop(
             stdout, _stderr = claude_proc.communicate(timeout=_CLAUDE_TIMEOUT)
             raw_response = stdout.strip()
         except subprocess.TimeoutExpired:
-            if claude_proc is not None:
-                claude_proc.kill()
-                claude_proc.communicate()
+            _terminate_process_tree(claude_proc)
             dur = round(time.monotonic() - iteration_t0, 3)
             loop_log.append({
                 "iteration": i + 1, "action": "timeout",
@@ -1138,6 +1171,10 @@ def _summarize_json_value(value: Any) -> str:
 
 def _summarize_result_reason(result: dict[str, Any]) -> str:
     def _usable_excerpt(value: Any) -> str:
+        if isinstance(value, (list, dict)):
+            excerpt = _summarize_json_value(value)
+            if excerpt:
+                return excerpt
         excerpt = _excerpt(value)
         if not excerpt:
             return ""
@@ -1145,7 +1182,7 @@ def _summarize_result_reason(result: dict[str, Any]) -> str:
             return ""
         return excerpt
 
-    for key in ("error", "stderr", "detail", "message"):
+    for key in ("error", "errors", "stderr", "detail", "message"):
         excerpt = _usable_excerpt(result.get(key, ""))
         if excerpt:
             return excerpt

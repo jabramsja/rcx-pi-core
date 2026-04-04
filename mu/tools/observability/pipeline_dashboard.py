@@ -291,6 +291,45 @@ def _is_trivial_recovery_attempt(attempt: dict[str, Any]) -> bool:
     return action in {"noop", "no_fix_registered"} and outcome in {"failed", "skipped"}
 
 
+def _human_recovery_attempt_action(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    if not cleaned:
+        return "unknown step"
+    mapping = {
+        "noop": "no automatic fix was attempted",
+        "no_fix_registered": "no registered automatic fix was available",
+        "tier1_fix": "ran the simple automatic fix",
+        "tier2_fix": "ran the deterministic fix",
+        "tier2_verify": "checked the deterministic fix",
+        "shell": "ran a shell fix",
+        "edit": "applied a file edit",
+        "parse_error": "the recovery agent answered in the wrong format",
+        "timeout": "the recovery agent timed out",
+        "error": "the recovery agent hit an execution error",
+        "skip": "recovery skipped this automatically",
+        "escalate": "recovery escalated for human follow-up",
+        "verify": "recovery checked whether the fix worked",
+    }
+    iter_match = re.fullmatch(r"tier(\d+)_iter(\d+)_(.+)", cleaned)
+    if iter_match:
+        _tier, iteration, suffix = iter_match.groups()
+        action = mapping.get(suffix, suffix.replace("_", " "))
+        return f"Try {iteration}: {action}"
+    return mapping.get(cleaned, cleaned.replace("_", " "))
+
+
+def _human_recovery_attempt_outcome(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    mapping = {
+        "success": "worked",
+        "failed": "failed",
+        "retry_requested": "asked the pipeline to retry",
+        "skipped": "skipped",
+        "partial": "partly worked",
+    }
+    return mapping.get(cleaned, cleaned.replace("_", " ") if cleaned else "unknown")
+
+
 def _recent_recovery_attempt_lines(
     repo_root: Path, status: dict[str, Any], *, limit: int = 3,
 ) -> list[str]:
@@ -339,8 +378,8 @@ def _recent_recovery_attempt_lines(
 
     lines = ["  Recent attempts in wave:" if used_wave_fallback else "  Recent attempts:"]
     for attempt in reversed(matches):
-        action = _excerpt(attempt.get("action", ""), 40) or "unknown"
-        outcome = _excerpt(attempt.get("outcome", ""), 32) or "unknown"
+        action = _human_recovery_attempt_action(attempt.get("action", ""))
+        outcome = _human_recovery_attempt_outcome(attempt.get("outcome", ""))
         detail = _excerpt(attempt.get("detail", ""), 72)
         duration = attempt.get("duration_s")
         summary = f"  - {action} -> {outcome}"
