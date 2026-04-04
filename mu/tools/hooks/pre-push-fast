@@ -10,6 +10,21 @@ echo ""
 
 # Get repo root
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+sanitize_local_git_env() {
+    local git_local_env
+    git_local_env="$(git rev-parse --local-env-vars 2>/dev/null || true)"
+    if [ -n "$git_local_env" ]; then
+        # shellcheck disable=SC2086
+        unset $git_local_env
+    fi
+}
+
+# Git hooks export repository-local env vars for the hook itself. Clear them
+# before spawning deeper audits so nested git-aware tests rediscover the
+# worktree normally instead of inheriting hook-local state.
+sanitize_local_git_env
 
 # Enforce tracker sync for commits being pushed
 RANGE=""

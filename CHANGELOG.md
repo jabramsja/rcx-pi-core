@@ -16,6 +16,18 @@ All notable changes to RCX are documented in this file.
   reviewer launch paths, so the supervisor cannot regress back to raw
   slash-bearing filenames silently
 
+### Hook Audit Env Sanitization
+
+- `mu/tools/hooks/pre-push-fast`, `dev.sh`, `mu/tools/audits/audit_fast.sh`,
+  and `mu/tools/audits/audit_all.sh` now clear Git hook-local `GIT_*`
+  variables before
+  spawning deeper audits, so nested git-aware tests rediscover the worktree
+  normally instead of inheriting hook-only state
+- `mu/tests/structural/test_subtree_root_guard.py` now locks that hook-env
+  sanitization contract without duplicating the new structural checks
+- a simulated hook-env proof shows representative untracked-artifact,
+  meta-bridge, and ensure_feature_branch tests return to green once the
+  inherited hook-local vars are cleared
 ### Recovery Observability And Watcher-Noise Hardening
 
 - `recovery_gate.py` now writes a structured
