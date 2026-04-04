@@ -5,10 +5,15 @@ set -uo pipefail
 
 LIVE_STATE_MAX_AGE_SECONDS=21600
 
+file_mtime_seconds() {
+  local path="$1"
+  stat -f%m "$path" 2>/dev/null || stat -c%Y "$path" 2>/dev/null || echo ""
+}
+
 file_age_seconds() {
   local path="$1"
   local mtime="" now=""
-  mtime=$(stat -f%m "$path" 2>/dev/null || stat -c%Y "$path" 2>/dev/null || echo "")
+  mtime=$(file_mtime_seconds "$path")
   [ -n "$mtime" ] || return 1
   now=$(date +%s)
   printf '%s\n' "$((now - mtime))"
@@ -62,6 +67,40 @@ normalize_path() {
   (
     cd "$path" 2>/dev/null && pwd -P
   ) || printf '%s\n' "$path"
+}
+
+pid_cwd() {
+  local pid="$1"
+  lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
+}
+
+pid_matches_worktree() {
+  local pid="$1" path="$2" cmd="" cwd="" normalized=""
+  normalized="$(normalize_path "$path")"
+  cmd=$(ps -p "$pid" -o command= 2>/dev/null || true)
+  case "$cmd" in
+    *"tail -f "*|*"rcx_log_watcher.sh"*|*"_pane_"*|*"pipeline_monitor.sh"*)
+      return 1
+      ;;
+  esac
+  case "$cmd" in
+    *"$normalized"/*|*"$normalized "'*|*"$normalized\""*|*"$normalized"\'*|*"$normalized") return 0 ;;
+  esac
+  cwd="$(pid_cwd "$pid")"
+  [ -n "$cwd" ] && [ "$(normalize_path "$cwd")" = "$normalized" ]
+}
+
+worktree_has_live_process() {
+  local path="$1" pid=""
+  while IFS= read -r pid; do
+    [ -z "$pid" ] && continue
+    pid_matches_worktree "$pid" "$path" && return 0
+  done < <(
+    pgrep -f \
+      'executor_dispatch|commit_executor|phase_b_executor|phase_a_executor|meta_bridge_supervisor|bridge_supervisor|claude.*--print|run_review.py|codex.*exec.*gpt' \
+      2>/dev/null || true
+  )
+  return 1
 }
 
 branch_for_worktree_path() {
@@ -131,50 +170,104 @@ find_worktree_for_branch() {
   return 1
 }
 
-worktree_has_live_pipeline_state() {
+worktree_activity_timestamp() {
   local path="$1"
   local lock=""
+  local best=0
+  local signal=""
+  local reviewer=""
+  local commit_state=""
+  local status=""
+  local mtime=""
+
+  if worktree_has_live_process "$path"; then
+    best=$(( $(date +%s) + LIVE_STATE_MAX_AGE_SECONDS + 1 ))
+  fi
+
   for lock in "$path/.agent_bus/meta/meta_bridge.lock" "$path/.agent_bus/bridge.lock"; do
-    lock_file_is_live "$lock" && return 0
+    if lock_file_is_live "$lock"; then
+      mtime=$(file_mtime_seconds "$lock")
+      if [ -n "$mtime" ] && [ "$mtime" -gt "$best" ]; then
+        best="$mtime"
+      fi
+    fi
   done
 
   if [ -s "$path/.agent_bus/meta/continuation.json" ] && file_is_recent "$path/.agent_bus/meta/continuation.json"; then
-    return 0
+    mtime=$(file_mtime_seconds "$path/.agent_bus/meta/continuation.json")
+    if [ -n "$mtime" ] && [ "$mtime" -gt "$best" ]; then
+      best="$mtime"
+    fi
   fi
 
-  local commit_state=""
   commit_state=$(ls -t "$path"/.agent_bus/executors/commit_executor_*.json 2>/dev/null | head -1) || true
   if [ -n "$commit_state" ]; then
-    local status=""
     status=$(jq -r '.status // ""' "$commit_state" 2>/dev/null || true)
     case "$status" in
       ""|success|held|error)
         ;;
       *)
-        file_is_recent "$commit_state" && return 0
+        if file_is_recent "$commit_state"; then
+          mtime=$(file_mtime_seconds "$commit_state")
+          if [ -n "$mtime" ] && [ "$mtime" -gt "$best" ]; then
+            best="$mtime"
+          fi
+        fi
         ;;
     esac
   fi
 
-  return 1
+  for signal in \
+    "$path/.agent_bus/executors/phase_b_state.json" \
+    "$path/.agent_bus/recovery/recovery_status.json" \
+    "$path/.scratch/phase_a_executor_live.log" \
+    "$path/.scratch/phase_b_executor_live.log" \
+    "$path/.scratch/commit_executor_live.log"
+  do
+    if [ -f "$signal" ] && file_is_recent "$signal"; then
+      mtime=$(file_mtime_seconds "$signal")
+      if [ -n "$mtime" ] && [ "$mtime" -gt "$best" ]; then
+        best="$mtime"
+      fi
+    fi
+  done
+
+  reviewer=$(ls -t \
+    "$path"/.agent_bus/raw/phase-?-r[0-9]*/*reviewer*.txt \
+    "$path"/.agent_bus/raw/phase-?-reentry-r[0-9]*/*reviewer*.txt \
+    2>/dev/null | head -1) || true
+  if [ -n "$reviewer" ] && file_is_recent "$reviewer"; then
+    mtime=$(file_mtime_seconds "$reviewer")
+    if [ -n "$mtime" ] && [ "$mtime" -gt "$best" ]; then
+      best="$mtime"
+    fi
+  fi
+
+  printf '%s\n' "$best"
+}
+
+worktree_has_live_pipeline_state() {
+  local ts=""
+  ts=$(worktree_activity_timestamp "$1" 2>/dev/null || echo 0)
+  [ -n "$ts" ] && [ "$ts" -gt 0 ] 2>/dev/null
 }
 
 find_active_worktree() {
-  local match="" matches=0
+  local best_path="" best_score=0 path="" score=0
 
   while IFS= read -r path; do
     [ -z "$path" ] && continue
-    worktree_has_live_pipeline_state "$path" || continue
-    match="$path"
-    matches=$((matches + 1))
+    score=$(worktree_activity_timestamp "$path" 2>/dev/null || echo 0)
+    [ -n "$score" ] || score=0
+    if [ "$score" -gt "$best_score" ] 2>/dev/null; then
+      best_path="$path"
+      best_score="$score"
+    fi
   done < <(list_linked_worktrees)
 
-  if [ "$matches" -eq 1 ] && [ -n "$match" ]; then
-    printf '%s\n' "$match"
+  if [ -n "$best_path" ] && [ "$best_score" -gt 0 ] 2>/dev/null; then
+    printf '%s\n' "$best_path"
     return 0
-  fi
-  if [ "$matches" -gt 1 ]; then
-    return 2
   fi
   return 1
 }
@@ -214,24 +307,18 @@ if [ "${1:-}" = "--print-branch-for-root" ]; then
 fi
 
 resolve_observability_repo_root() {
-  local root="" branch="" current_root=""
+  local root="" branch="" current_root="" current_score=0 best_score=0 branch_root="" branch_score=0
   if current_root="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -n "$current_root" ]; then
-    if worktree_has_live_pipeline_state "$current_root"; then
-      printf '%s\n' "$current_root"
-      return 0
-    fi
-
-    if root="$(find_active_worktree)"; then
-      if [ -n "$root" ] && [ "$root" != "$current_root" ]; then
-        printf '%s\n' "$root"
+    current_score=$(worktree_activity_timestamp "$current_root" 2>/dev/null || echo 0)
+    root="$(find_active_worktree || true)"
+    if [ -n "$root" ]; then
+      best_score=$(worktree_activity_timestamp "$root" 2>/dev/null || echo 0)
+      if [ "$current_score" -ge "$best_score" ] 2>/dev/null && [ "$current_score" -gt 0 ] 2>/dev/null; then
+        printf '%s\n' "$current_root"
         return 0
       fi
-    else
-      local active_rc=$?
-      if [ "$active_rc" -eq 2 ]; then
-        echo "ERROR: cannot resolve repo root — multiple active pipeline worktrees found while current worktree is idle" >&2
-        return 1
-      fi
+      printf '%s\n' "$root"
+      return 0
     fi
 
     printf '%s\n' "$current_root"
@@ -240,24 +327,27 @@ resolve_observability_repo_root() {
 
   branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
   if [ -n "$branch" ]; then
-    root="$(find_worktree_for_branch "$branch" || true)"
-    if [ -n "$root" ]; then
-      printf '%s\n' "$root"
-      return 0
+    branch_root="$(find_worktree_for_branch "$branch" || true)"
+    if [ -n "$branch_root" ]; then
+      branch_score=$(worktree_activity_timestamp "$branch_root" 2>/dev/null || echo 0)
     fi
   fi
 
   if root="$(find_active_worktree)"; then
     if [ -n "$root" ]; then
+      best_score=$(worktree_activity_timestamp "$root" 2>/dev/null || echo 0)
+      if [ -n "$branch_root" ] && [ "$branch_score" -ge "$best_score" ] 2>/dev/null; then
+        printf '%s\n' "$branch_root"
+        return 0
+      fi
       printf '%s\n' "$root"
       return 0
     fi
-  else
-    local active_rc=$?
-    if [ "$active_rc" -eq 2 ]; then
-      echo "ERROR: cannot resolve repo root — multiple active pipeline worktrees found" >&2
-      return 1
-    fi
+  fi
+
+  if [ -n "$branch_root" ]; then
+    printf '%s\n' "$branch_root"
+    return 0
   fi
 
   root="$(find_sole_linked_worktree || true)"
@@ -378,15 +468,20 @@ _show_lock_status "$LOCK" "meta" || _show_lock_status "$LOCK2" "bridge" || \
 # ── Active Processes ──
 echo ""
 EXEC_PIDS=$(pgrep -f "executor_dispatch\|commit_executor\|phase_b_executor\|phase_a_executor\|meta_bridge_supervisor" 2>/dev/null || true)
+printed_process=false
 if [ -n "$EXEC_PIDS" ]; then
-  echo -e "${BOLD}Active Processes:${RESET}"
   for pid in $EXEC_PIDS; do
     FULL_CMD=$(ps -p "$pid" -o command= 2>/dev/null)
+    [ -n "$FULL_CMD" ] || continue
     case "$FULL_CMD" in
       *"tail -f "*|*"rcx_log_watcher.sh"*|*"_pane_"*|*"pipeline_monitor.sh"*)
         continue
         ;;
     esac
+    if [ "$printed_process" = false ]; then
+      echo -e "${BOLD}Active Processes:${RESET}"
+      printed_process=true
+    fi
     CMD=$(ps -p "$pid" -o command= 2>/dev/null | sed 's|.*/||' | cut -c1-70)
     ELAPSED=$(ps -p "$pid" -o etime= 2>/dev/null | xargs)
     echo -e "  PID $pid (${ELAPSED}) $CMD"
@@ -397,7 +492,8 @@ if [ -n "$EXEC_PIDS" ]; then
       echo -e "    └─ PID $cpid $CCMD"
     done
   done
-else
+fi
+if [ "$printed_process" = false ]; then
   echo -e "${DIM}No active pipeline processes${RESET}"
 fi
 

@@ -15,21 +15,34 @@ resolve_repo_root() {
   fi
   git rev-parse --show-toplevel 2>/dev/null || pwd
 }
-resolve_branch_name() {
+resolve_branch_name_for_root() {
+  local root="${1:-$REPO_ROOT}"
   local helper="$SCRIPT_DIR/pipeline_status.sh"
   local branch=""
   if [ -f "$helper" ]; then
-    branch=$(bash "$helper" --print-branch-for-root "$REPO_ROOT" 2>/dev/null || true)
+    branch=$(bash "$helper" --print-branch-for-root "$root" 2>/dev/null || true)
   fi
   if [ -n "$branch" ]; then
     printf '%s\n' "$branch"
     return 0
   fi
-  git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
+  git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
 }
-REPO_ROOT="$(resolve_repo_root)"
-BUS="$REPO_ROOT/.agent_bus"
-BRANCH_NAME="$(resolve_branch_name)"
+refresh_context() {
+  local next_root="" next_branch=""
+  next_root="$(resolve_repo_root)"
+  [ -n "$next_root" ] || next_root="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+  next_branch="$(resolve_branch_name_for_root "$next_root")"
+  if [ "${REPO_ROOT:-}" != "$next_root" ] || [ "${BRANCH_NAME:-}" != "$next_branch" ]; then
+    LAST_HASH=""
+  fi
+  REPO_ROOT="$next_root"
+  BUS="$REPO_ROOT/.agent_bus"
+  BRANCH_NAME="$next_branch"
+}
+REPO_ROOT=""
+BUS=""
+BRANCH_NAME=""
 SELF="$SCRIPT_DIR/$(basename "$0")"
 SELF_MTIME=$(stat -f%m "$SELF" 2>/dev/null || stat -c%Y "$SELF" 2>/dev/null || echo 0)
 
@@ -92,6 +105,7 @@ pid_matches_repo_root() {
 }
 
 while true; do
+  refresh_context
   # Build output to temp file, only redraw if content changed
   {
   echo -e "${BOLD}WHAT'S HAPPENING${RESET}  $(date '+%H:%M:%S')"
