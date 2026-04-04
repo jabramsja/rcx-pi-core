@@ -2,15 +2,42 @@
 # _pane_processes.sh — Human-readable pipeline status pane for tmux
 # Shows what's happening in plain language, not just PIDs
 # Auto-reloads when the script file changes on disk.
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+resolve_repo_root() {
+  local helper="$SCRIPT_DIR/pipeline_status.sh"
+  local root=""
+  if [ -f "$helper" ]; then
+    root=$(bash "$helper" --print-root 2>/dev/null || true)
+  fi
+  if [ -n "$root" ]; then
+    printf '%s\n' "$root"
+    return 0
+  fi
+  git rev-parse --show-toplevel 2>/dev/null || pwd
+}
+resolve_branch_name() {
+  local helper="$SCRIPT_DIR/pipeline_status.sh"
+  local branch=""
+  if [ -f "$helper" ]; then
+    branch=$(bash "$helper" --print-branch-for-root "$REPO_ROOT" 2>/dev/null || true)
+  fi
+  if [ -n "$branch" ]; then
+    printf '%s\n' "$branch"
+    return 0
+  fi
+  git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
+}
+REPO_ROOT="$(resolve_repo_root)"
 BUS="$REPO_ROOT/.agent_bus"
-SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+BRANCH_NAME="$(resolve_branch_name)"
+SELF="$SCRIPT_DIR/$(basename "$0")"
 SELF_MTIME=$(stat -f%m "$SELF" 2>/dev/null || stat -c%Y "$SELF" 2>/dev/null || echo 0)
 
 BOLD="\033[1m" DIM="\033[2m" GREEN="\033[32m" YELLOW="\033[33m"
 RED="\033[31m" CYAN="\033[36m" PURPLE="\033[35m" RESET="\033[0m"
 LAST_HASH=""
 TMPOUT="/tmp/rcx_pane_processes_$$.txt"
+ONESHOT="${RCX_PANE_ONESHOT:-0}"
 
 elapsed_str() {
   local started="$1"
@@ -40,6 +67,7 @@ find_live_pid() {
         continue
         ;;
     esac
+    pid_matches_repo_root "$pid" || continue
     if echo "$cmd" | grep -q "$kw"; then
       printf "%s\n" "$pid"
       return 0
@@ -48,11 +76,28 @@ find_live_pid() {
   return 1
 }
 
+pid_cwd() {
+  local pid="$1"
+  lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
+}
+
+pid_matches_repo_root() {
+  local pid="$1" cmd cwd
+  cmd=$(ps -p "$pid" -o command= 2>/dev/null || true)
+  case "$cmd" in
+    *"$REPO_ROOT"*) return 0 ;;
+  esac
+  cwd="$(pid_cwd "$pid")"
+  [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ]
+}
+
 while true; do
   # Build output to temp file, only redraw if content changed
   {
   echo -e "${BOLD}WHAT'S HAPPENING${RESET}  $(date '+%H:%M:%S')"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo -e "  ${DIM}Watching:${RESET} $BRANCH_NAME"
+  echo -e "  ${DIM}Worktree:${RESET} $REPO_ROOT"
   echo ""
 
   # Detect active phase
@@ -92,42 +137,48 @@ while true; do
   echo "─────────────────────────────────────"
 
   # Check for Codex (reviewer)
-  codex_pids=$(pgrep -f "codex.*exec.*gpt" 2>/dev/null | head -5) || codex_pids=""
+  codex_pids=""
   codex_count=0
   codex_start=""
-  for pid in $codex_pids; do
+  while IFS= read -r pid; do
+    [ -z "$pid" ] && continue
+    pid_matches_repo_root "$pid" || continue
+    codex_pids="${codex_pids}${pid} "
     codex_count=$((codex_count + 1))
     if [ -z "$codex_start" ]; then
       s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
       codex_start=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
     fi
-  done
+  done < <(pgrep -f "codex.*exec.*gpt" 2>/dev/null | head -5 || true)
   if [ "$codex_count" -gt 0 ]; then
     echo -e ""
     echo -e "  ${YELLOW}REVIEWING${RESET}  Codex GPT-5.4 xhigh"
-    echo -e "  ${DIM}$codex_count process(es)$([ -n "$codex_start" ] && echo " · $(elapsed_str "$codex_start")") | PIDs: $codex_pids${RESET}"
+    echo -e "  ${DIM}$codex_count process(es)$([ -n "$codex_start" ] && echo " · $(elapsed_str "$codex_start")") | PIDs: ${codex_pids%% }${RESET}"
     echo -e "  ${DIM}Checking implementation for bugs, security issues,${RESET}"
     echo -e "  ${DIM}protocol violations, and code quality.${RESET}"
   fi
 
   # Check for Claude (implementer — must have --print flag, not interactive sessions)
-  claude_pids=$(pgrep -f "claude.*--print" 2>/dev/null | head -3) || claude_pids=""
+  claude_pids=""
   claude_count=0
   claude_start=""
-  for pid in $claude_pids; do
+  while IFS= read -r pid; do
+    [ -z "$pid" ] && continue
+    pid_matches_repo_root "$pid" || continue
     cmd=$(ps -p "$pid" -o command= 2>/dev/null) || continue
     # Only count implementer processes (have --print), skip interactive sessions
     if echo "$cmd" | grep -q "\-\-print"; then
+      claude_pids="${claude_pids}${pid} "
       claude_count=$((claude_count + 1))
       if [ -z "$claude_start" ]; then
         s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
         claude_start=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
       fi
     fi
-  done
+  done < <(pgrep -f "claude.*--print" 2>/dev/null | head -3 || true)
   if [ "$claude_count" -gt 0 ]; then
     # Collect PIDs into a comma-separated string
-    claude_pid_list=$(echo $claude_pids | tr ' ' ',')
+    claude_pid_list=$(echo "${claude_pids%% }" | tr ' ' ',')
     echo -e ""
     echo -e "  ${PURPLE}IMPLEMENTING${RESET}  Claude Opus 4.6 max"
     echo -e "  ${DIM}$claude_count process(es)$([ -n "$claude_start" ] && echo " · $(elapsed_str "$claude_start")") | PIDs: $claude_pid_list${RESET}"
@@ -135,7 +186,13 @@ while true; do
   fi
 
   # Check for SDK agents
-  agent_pid=$(pgrep -f "run_review.py" 2>/dev/null | head -1) || agent_pid=""
+  agent_pid=""
+  while IFS= read -r pid; do
+    [ -z "$pid" ] && continue
+    pid_matches_repo_root "$pid" || continue
+    agent_pid="$pid"
+    break
+  done < <(pgrep -f "run_review.py" 2>/dev/null || true)
   if [ -n "$agent_pid" ]; then
     echo -e ""
     echo -e "  ${CYAN}AUDITING${RESET}  9 Native SDK Agents"
@@ -213,8 +270,9 @@ while true; do
 
   echo ""
 
-  if [ -f "$REPO_ROOT/mu/tools/observability/pipeline_dashboard.py" ]; then
-    python3 "$REPO_ROOT/mu/tools/observability/pipeline_dashboard.py" --render-recovery --repo-root "$REPO_ROOT" 2>/dev/null || true
+  DASHBOARD_PY="$SCRIPT_DIR/pipeline_dashboard.py"
+  if [ -f "$DASHBOARD_PY" ]; then
+    python3 "$DASHBOARD_PY" --render-recovery --repo-root "$REPO_ROOT" 2>/dev/null || true
     echo ""
   fi
 
@@ -224,17 +282,11 @@ while true; do
   # Pick the most recently modified source
   IMPL=$(ls -t "$REPO_ROOT/.scratch/phase_b_implementer_output_"*.txt 2>/dev/null | head -1) || true
   REVIEWER=$(ls -t "$REPO_ROOT/.agent_bus/raw"/phase-?-r[0-9]*/*reviewer*.txt 2>/dev/null | head -1) || true
-  CODEX_JSONL=""
-  CODEX_DIR="$HOME/.codex/sessions/$(date '+%Y/%m/%d')"
-  if [ -d "$CODEX_DIR" ]; then
-    CODEX_JSONL=$(ls -t "$CODEX_DIR"/*.jsonl 2>/dev/null | head -1) || true
-  fi
-
   # Find which source is freshest
   activity_source=""
   activity_label=""
   activity_age=9999
-  for candidate_file in "$IMPL" "$REVIEWER" "$CODEX_JSONL"; do
+  for candidate_file in "$IMPL" "$REVIEWER"; do
     [ -z "$candidate_file" ] || [ ! -f "$candidate_file" ] && continue
     age=$(( $(date +%s) - $(stat -f%m "$candidate_file" 2>/dev/null || stat -c%Y "$candidate_file" 2>/dev/null || echo 0) ))
     if [ "$age" -lt "$activity_age" ] && [ "$age" -lt 600 ]; then
@@ -320,6 +372,11 @@ for line in sys.stdin:
     clear
     cat "$TMPOUT"
     LAST_HASH="$NEW_HASH"
+  fi
+
+  if [ "$ONESHOT" = "1" ]; then
+    rm -f "$TMPOUT"
+    exit 0
   fi
 
   # Auto-reload: if script changed on disk, re-exec

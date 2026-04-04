@@ -150,6 +150,51 @@ def _human_target(target: str) -> str:
     return mapping.get(cleaned, cleaned.replace("_", " "))
 
 
+def _human_failure_class(value: str) -> str:
+    cleaned = (value or "").strip()
+    mapping = {
+        "process_timeout": "a step timed out",
+        "agent_review_crash": "a review subprocess crashed",
+        "test_failure": "a validation step failed",
+        "transient_kill": "a process was killed unexpectedly",
+        "mixed_staging": "git staging got into a mixed state",
+        "stale_bridge_lock": "a stale bridge lock blocked progress",
+        "stale_executor_state": "stale executor state blocked progress",
+        "stale_continuation": "a stale continuation file blocked progress",
+        "git_staging_conflict": "git staging failed",
+        "aggregation_hang": "bridge aggregation stalled",
+        "implementer_stale": "the implementer output went stale",
+        "unknown_error": "an unknown control-plane error happened",
+    }
+    return mapping.get(cleaned, cleaned.replace("_", " "))
+
+
+def _human_recovery_state(value: str) -> str:
+    cleaned = (value or "").strip()
+    mapping = {
+        "tier1_unhandled": "could not apply the simple automatic fix",
+        "tier2_fixing": "applying a deterministic fix",
+        "tier2_fixed": "applied the deterministic fix",
+        "tier2_failed": "the deterministic fix failed",
+        "tier2_unhandled": "no safe deterministic fix was available",
+        "tier3_waiting_on_claude": "asking the recovery agent what to try",
+        "tier3_timeout": "the recovery agent timed out",
+        "tier3_error": "the recovery agent hit an execution error",
+        "tier3_parse_error": "the recovery agent answered in the wrong format",
+        "tier3_running_shell": "running a shell fix",
+        "tier3_applying_edit": "applying a file edit",
+        "tier3_verifying": "checking whether the fix worked",
+        "tier3_verify_pass": "verified that the fix worked",
+        "tier3_verify_failed": "the proposed fix did not verify",
+        "tier3_retry_requested": "asked the pipeline to retry the failed step",
+        "tier3_skipped": "decided recovery should not touch this",
+        "tier3_escalated": "gave the problem back for human follow-up",
+        "tier3_exhausted": "used all allowed recovery tries",
+        "tier4_escalated": "stopped because policy says not to recover this",
+    }
+    return mapping.get(cleaned, cleaned.replace("_", " "))
+
+
 def _recent_recovery_attempt_lines(
     repo_root: Path, status: dict[str, Any], *, limit: int = 3,
 ) -> list[str]:
@@ -216,8 +261,9 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
         label = "LAST RECOVERY"
 
     tier = status.get("tier", "?")
-    failure_class = status.get("failure_class", "?")
-    lines.append(f"  {label} — Tier {tier} {failure_class}")
+    failure_class = str(status.get("failure_class", "?"))
+    lines.append(f"  {label} — Tier {tier} recovery ({failure_class})")
+    lines.append(f"  Problem: {_human_failure_class(failure_class)}")
 
     wave_id = _excerpt(status.get("wave_id", ""), 80)
     if wave_id:
@@ -232,27 +278,28 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
 
     retry_target = _human_target(str(status.get("retry_target", "")))
     if retry_target:
-        prefix = "Retry target" if active or status.get("recovered") else "Last target"
+        prefix = "If recovery works, go back to" if active or status.get("recovered") else "Last retry target"
         lines.append(f"  {prefix}: {retry_target}")
 
     state = _excerpt(status.get("state", ""), 80)
     current_iteration = status.get("current_iteration") or 0
     max_iterations = status.get("max_iterations") or 0
     if state:
+        doing_now = _human_recovery_state(state)
         if max_iterations:
-            lines.append(f"  State: {state} · loop {current_iteration}/{max_iterations}")
+            lines.append(f"  Doing now: {doing_now} · loop {current_iteration}/{max_iterations}")
         else:
-            lines.append(f"  State: {state}")
+            lines.append(f"  Doing now: {doing_now}")
 
     owner_pid, owner_state = _pid_state(status.get("owner_pid"))
     child_pid, child_state = _pid_state(status.get("child_pid"))
     child_role = _excerpt(status.get("child_role", ""), 24)
     if owner_pid:
-        pid_line = f"  Owner PID: {owner_pid}"
+        pid_line = f"  PIDs: owner {owner_pid}"
         if owner_state:
             pid_line += f" ({owner_state})"
         if child_pid:
-            pid_line += f" · {child_role or 'child'} PID: {child_pid}"
+            pid_line += f" · {child_role or 'child'} {child_pid}"
             if child_state:
                 pid_line += f" ({child_state})"
         lines.append(pid_line)

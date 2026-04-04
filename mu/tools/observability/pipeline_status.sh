@@ -57,6 +57,50 @@ list_linked_worktrees() {
   fi
 }
 
+normalize_path() {
+  local path="$1"
+  (
+    cd "$path" 2>/dev/null && pwd -P
+  ) || printf '%s\n' "$path"
+}
+
+branch_for_worktree_path() {
+  local target="$1" normalized_target="" current_path="" current_branch="" normalized_current=""
+  normalized_target="$(normalize_path "$target")"
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      worktree\ *)
+        current_path="${line#worktree }"
+        current_branch=""
+        ;;
+      branch\ refs/heads/*)
+        current_branch="${line#branch refs/heads/}"
+        ;;
+      "")
+        if [ -n "$current_path" ] && [ -n "$current_branch" ]; then
+          normalized_current="$(normalize_path "$current_path")"
+          if [ "$normalized_current" = "$normalized_target" ]; then
+            printf '%s\n' "$current_branch"
+            return 0
+          fi
+        fi
+        current_path=""
+        current_branch=""
+        ;;
+    esac
+  done < <(git worktree list --porcelain 2>/dev/null || true)
+
+  if [ -n "$current_path" ] && [ -n "$current_branch" ]; then
+    normalized_current="$(normalize_path "$current_path")"
+    if [ "$normalized_current" = "$normalized_target" ]; then
+      printf '%s\n' "$current_branch"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 find_worktree_for_branch() {
   local target="$1"
   local current_path="" current_branch="" match="" matches=0
@@ -151,6 +195,24 @@ find_sole_linked_worktree() {
   return 1
 }
 
+print_branch_for_root() {
+  local target_root="$1" branch_name=""
+  branch_name="$(branch_for_worktree_path "$target_root" || true)"
+  if [ -z "$branch_name" ]; then
+    branch_name="$(git -C "$target_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")"
+  fi
+  printf '%s\n' "$branch_name"
+}
+
+if [ "${1:-}" = "--print-branch-for-root" ]; then
+  if [ -z "${2:-}" ]; then
+    echo "ERROR: --print-branch-for-root requires a path" >&2
+    exit 1
+  fi
+  print_branch_for_root "$2"
+  exit 0
+fi
+
 resolve_observability_repo_root() {
   local root="" branch="" current_root=""
   if current_root="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -n "$current_root" ]; then
@@ -217,6 +279,17 @@ resolve_observability_repo_root() {
 if ! REPO_ROOT="$(resolve_observability_repo_root)"; then
   exit 1
 fi
+
+if [ "${1:-}" = "--print-root" ]; then
+  printf '%s\n' "$REPO_ROOT"
+  exit 0
+fi
+
+if [ "${1:-}" = "--print-branch" ]; then
+  print_branch_for_root "$REPO_ROOT"
+  exit 0
+fi
+
 BUS="$REPO_ROOT/.agent_bus"
 
 # Colors (disable if not tty)
