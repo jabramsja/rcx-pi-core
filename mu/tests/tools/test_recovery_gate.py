@@ -341,6 +341,15 @@ class TestRecoveryStatus:
         ]
         assert rg_mod._count_wave_invocations(attempts, "w1") == 3  # ANTICHEAT_OK
 
+    def test_summarize_result_reason_ignores_numeric_stdout_trailer(self):
+        result = {
+            "status": "error",
+            "step": "commit",
+            "stdout": "tokens used\n40,304\n",
+            "stderr": "",
+        }
+        assert rg_mod._summarize_result_reason(result) == "commit: error"  # ANTICHEAT_OK
+
 
 class TestAttemptRecovery:
     def test_tier4_escalates(self, tmp_path):
@@ -1216,6 +1225,93 @@ class TestRecoveryStatusRendering:
         assert "tier3_iter2_shell -> retry_requested" in rendered
         assert "old unrelated invocation" not in rendered
 
+    def test_inactive_trivial_invocation_uses_detail_and_wave_history(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime(2026, 4, 4, 5, 0, tzinfo=timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "invocation_id": "wave-delta-commit-stale-continuation-01",
+                    "wave_id": "wave-delta",
+                    "step": "commit",
+                    "failure_class": "stale_continuation",
+                    "tier": 1,
+                    "wave_invocation_count": 2,
+                    "tuple_attempt_index": 1,
+                    "retry_target": "commit_executor",
+                    "state": "tier1_failed",
+                    "owner_pid": 999999,
+                    "child_pid": 0,
+                    "reason": "40,304",
+                    "updated_at": (now - timedelta(seconds=30)).isoformat(),
+                    "finished_at": (now - timedelta(seconds=30)).isoformat(),
+                    "current_iteration": 0,
+                    "max_iterations": 0,
+                    "current_command": "",
+                    "explanation": "",
+                    "detail": "phase_b_state.json not found",
+                    "outcome": "failed",
+                    "last_action": "noop",
+                    "recovered": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (status_path / "recovery_log.json").write_text(
+            json.dumps(
+                {
+                    "attempts": [
+                        {
+                            "timestamp": (now - timedelta(seconds=80)).isoformat(),
+                            "wave_id": "wave-delta",
+                            "step": "commit",
+                            "failure_class": "test_failure",
+                            "tier": 3,
+                            "action": "tier3_iter1_parse_error",
+                            "outcome": "failed",
+                            "duration_s": 1.25,
+                            "detail": "claude returned prose instead of json",
+                            "invocation_id": "wave-delta-commit-test-failure-01",
+                        },
+                        {
+                            "timestamp": (now - timedelta(seconds=45)).isoformat(),
+                            "wave_id": "wave-delta",
+                            "step": "commit",
+                            "failure_class": "test_failure",
+                            "tier": 3,
+                            "action": "tier3_iter2_edit",
+                            "outcome": "retry_requested",
+                            "duration_s": 2.5,
+                            "detail": "lane metadata corrected",
+                            "invocation_id": "wave-delta-commit-test-failure-01",
+                        },
+                        {
+                            "timestamp": (now - timedelta(seconds=30)).isoformat(),
+                            "wave_id": "wave-delta",
+                            "step": "commit",
+                            "failure_class": "stale_continuation",
+                            "tier": 1,
+                            "action": "noop",
+                            "outcome": "failed",
+                            "duration_s": 0.003,
+                            "detail": "phase_b_state.json not found",
+                            "invocation_id": "wave-delta-commit-stale-continuation-01",
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+        assert "Reason: phase_b_state.json not found" in rendered
+        assert "40,304" not in rendered
+        assert "Owner PID: 999999 (dead, historical)" in rendered
+        assert "Recent attempts in wave:" in rendered
+        assert "tier3_iter2_edit -> retry_requested" in rendered
+
 
 class TestRecoveryWebSnapshot:
     def test_missing_snapshot_returns_none(self, tmp_path):
@@ -1258,6 +1354,40 @@ class TestRecoveryWebSnapshot:
         assert snapshot["current_iteration"] == 2
         assert snapshot["max_iterations"] == 3
         assert snapshot["child_role"] == "claude"
+
+    def test_snapshot_reason_prefers_detail_over_numeric_reason(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime.now(timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "tier": 1,
+                    "failure_class": "stale_continuation",
+                    "wave_id": "wave-recovery",
+                    "wave_invocation_count": 2,
+                    "tuple_attempt_index": 1,
+                    "retry_target": "commit_executor",
+                    "state": "tier1_failed",
+                    "reason": "40,304",
+                    "detail": "phase_b_state.json not found",
+                    "explanation": "",
+                    "current_iteration": 0,
+                    "max_iterations": 0,
+                    "owner_pid": 999999,
+                    "child_pid": 0,
+                    "current_command": "",
+                    "updated_at": now.isoformat(),
+                }
+            ),
+            encoding="utf-8",
+        )
+        with patch.object(web_mod, "REPO_ROOT", tmp_path):
+            snapshot = web_mod.recovery_snapshot()  # ANTICHEAT_OK
+        assert snapshot["reason"] == "phase_b_state.json not found"
+        assert snapshot["detail"] == ""
+        assert snapshot["owner_state"] == "dead"
 
 
 class TestObservabilityNoiseFilters:

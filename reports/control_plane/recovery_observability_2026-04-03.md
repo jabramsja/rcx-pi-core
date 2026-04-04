@@ -1,7 +1,7 @@
 # Recovery Observability Hardening
 
 Date: 2026-04-03
-Status: Routed live proof complete; routed closeout hardening ready
+Status: Routed live proof complete; live pane follow-on locally proved; routed closeout pending
 Task: [PIPELINE-RECOVERY]
 Wave ID: recovery-observability-2026-04-03
 
@@ -57,6 +57,11 @@ reports claiming it was already live.
    gave `pre-push-fast` 300 seconds, which is too short for the real fast audit
    path on this repo. `commit_executor.py` now gives that gate a longer budget
    and the dispatcher regression suite locks the timeout contract directly.
+9. Recovery reason rendering now rejects useless numeric transcript trailers such
+   as `40,304`, prefers meaningful `detail` text like
+   `phase_b_state.json not found`, labels dead inactive PIDs as historical, and
+   falls back to recent same-wave same-step attempts when the current
+   invocation's final action is only a trivial `noop`/`no_fix_registered`.
 
 ## Validation
 
@@ -69,6 +74,13 @@ reports claiming it was already live.
 - live pane smoke: `_pane_processes.sh` shows `Pipeline is idle` while the stale
   `tail -f ...phase_a_executor_live.log` watcher still exists, proving watcher
   noise no longer fakes an active Phase A
+- live pane smoke follow-on:
+  `python3 mu/tools/observability/pipeline_dashboard.py --render-recovery --repo-root .`
+  now renders
+  `Reason: phase_b_state.json not found`,
+  `Owner PID: ... (dead, historical)`,
+  and `Recent attempts in wave:`
+  instead of the previous useless `Reason: 40,304`
 - live routed dispatcher proof:
   `env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR RCX_AGENT_PREFLIGHT_FORCE_FAIL=1 PYTHONHASHSEED=0 python3 mu/tools/executors/executor_dispatch.py phase-a --plan-name recovery_live_probe_2026-04-03 --json -v`
   during the run `pipeline_status.sh` showed:

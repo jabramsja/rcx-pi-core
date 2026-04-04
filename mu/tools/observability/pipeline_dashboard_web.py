@@ -720,6 +720,66 @@ def _human_recovery_target(target):
     return mapping.get(cleaned, cleaned.replace("_", " "))
 
 
+def _excerpt(text, limit=110):
+    if text is None:
+        return ""
+    cleaned = str(text).replace("\r", "\n").strip()
+    if not cleaned:
+        return ""
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    excerpt = lines[-1] if lines else cleaned
+    if len(excerpt) <= limit:
+        return excerpt
+    return excerpt[: limit - 3].rstrip() + "..."
+
+
+def _is_unhelpful_recovery_text(text):
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return True
+    if re.fullmatch(r"[\d,\s]+", cleaned):
+        return True
+    if cleaned.lower().startswith("tokens used"):
+        return True
+    return False
+
+
+def _is_generic_recovery_reason(text):
+    return bool(re.fullmatch(
+        r"[a-z0-9_-]+:\s+(failed|error|partial|success|held|unknown)",
+        (text or "").strip().lower(),
+    ))
+
+
+def _pid_state(pid_value):
+    try:
+        pid = int(pid_value)
+    except (TypeError, ValueError):
+        return 0, ""
+    if pid <= 0:
+        return 0, ""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return pid, "dead"
+    return pid, "alive"
+
+
+def _rendered_recovery_reason(status):
+    reason = _excerpt(status.get("reason", ""))
+    detail = _excerpt(status.get("detail", ""))
+    explanation = _excerpt(status.get("explanation", ""))
+    if reason and not _is_unhelpful_recovery_text(reason) and not _is_generic_recovery_reason(reason):
+        return reason, "reason"
+    if detail and not _is_unhelpful_recovery_text(detail):
+        return detail, "detail"
+    if reason and not _is_unhelpful_recovery_text(reason):
+        return reason, "reason"
+    if explanation and not _is_unhelpful_recovery_text(explanation):
+        return explanation, "explanation"
+    return "", ""
+
+
 def recovery_snapshot():
     status = read_json_safe(REPO_ROOT / ".agent_bus" / "recovery" / "recovery_status.json")
     if not isinstance(status, dict) or not status:
@@ -731,6 +791,13 @@ def recovery_snapshot():
         label = "POSSIBLY HUNG"
     elif not active:
         label = "LAST RECOVERY"
+    owner_pid, owner_state = _pid_state(status.get("owner_pid", 0))
+    child_pid, child_state = _pid_state(status.get("child_pid", 0))
+    reason_display, reason_source = _rendered_recovery_reason(status)
+    detail_display = _excerpt(status.get("detail", ""))
+    explanation = _excerpt(status.get("explanation", ""))
+    if reason_source == "detail" or detail_display == reason_display or detail_display == explanation:
+        detail_display = ""
     return {
         "label": label,
         "active": active,
@@ -741,16 +808,18 @@ def recovery_snapshot():
         "tuple_attempt_index": status.get("tuple_attempt_index", 0),
         "retry_target": _human_recovery_target(status.get("retry_target", "")),
         "state": status.get("state", ""),
-        "reason": status.get("reason", ""),
-        "explanation": status.get("explanation", ""),
-        "detail": status.get("detail", ""),
+        "reason": reason_display,
+        "explanation": explanation,
+        "detail": detail_display,
         "outcome": status.get("outcome", ""),
         "last_action": status.get("last_action", ""),
         "current_iteration": status.get("current_iteration", 0),
         "max_iterations": status.get("max_iterations", 0),
-        "owner_pid": status.get("owner_pid", 0),
-        "child_pid": status.get("child_pid", 0),
-        "child_role": status.get("child_role", ""),
+        "owner_pid": owner_pid,
+        "owner_state": owner_state,
+        "child_pid": child_pid,
+        "child_state": child_state,
+        "child_role": _excerpt(status.get("child_role", ""), 24),
         "current_command": status.get("current_command", ""),
         "updated_age_seconds": age,
     }
@@ -1211,7 +1280,19 @@ function renderSidebar(data) {
     }
     if (recovery.owner_pid) {
       let pidText = `owner ${recovery.owner_pid}`;
-      if (recovery.child_pid) pidText += ` · ${(recovery.child_role||'child')} ${recovery.child_pid}`;
+      if (recovery.owner_state) {
+        pidText += (!recovery.active && recovery.owner_state === 'dead')
+          ? ' (dead, historical)'
+          : ` (${recovery.owner_state})`;
+      }
+      if (recovery.child_pid) {
+        pidText += ` · ${(recovery.child_role||'child')} ${recovery.child_pid}`;
+        if (recovery.child_state) {
+          pidText += (!recovery.active && recovery.child_state === 'dead')
+            ? ' (dead, historical)'
+            : ` (${recovery.child_state})`;
+        }
+      }
       html += `<div class="kv"><span class="k">PIDs</span><span class="v">${esc(pidText)}</span></div>`;
     }
     if (recovery.reason) html += `<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">Reason: ${esc(recovery.reason)}</div>`;
