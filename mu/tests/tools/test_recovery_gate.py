@@ -1687,6 +1687,60 @@ esac
         script.write_text((_OBSERVABILITY_DIR / name).read_text(encoding="utf-8"), encoding="utf-8")
         script.chmod(script.stat().st_mode | 0o111)
 
+    def _fake_tmux_dir(self, tmp_path: Path, *, log_path: Path) -> Path:
+        bin_dir = tmp_path / "tmux-bin"
+        bin_dir.mkdir(exist_ok=True)
+        counter_path = tmp_path / "tmux-split-counter.txt"
+        script = f"""#!/usr/bin/env bash
+set -eu
+log_path={str(log_path)!r}
+counter_path={str(counter_path)!r}
+printf '%s\\n' "$*" >> "$log_path"
+cmd="${{1:-}}"
+shift || true
+case "$cmd" in
+  kill-session|new-session|select-pane|setw|attach-session)
+    exit 0
+    ;;
+  display-message)
+    [ "${{1:-}}" = "-p" ] && shift
+    if [ "${{1:-}}" = "-t" ]; then
+      shift 2
+    fi
+    case "${{1:-}}" in
+      '#{{window_id}}')
+        printf '@1\\n'
+        ;;
+      '#{{pane_id}}')
+        printf '%%10\\n'
+        ;;
+      *)
+        exit 1
+        ;;
+    esac
+    ;;
+  split-window)
+    count=0
+    if [ -f "$counter_path" ]; then
+      count=$(cat "$counter_path")
+    fi
+    count=$((count + 1))
+    printf '%s' "$count" > "$counter_path"
+    case "$count" in
+      1) printf '%%11\\n' ;;
+      2) printf '%%12\\n' ;;
+      3) printf '%%13\\n' ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+"""
+        self._write_executable(bin_dir / "tmux", script)
+        return bin_dir
+
     def _write_commit_state(self, repo_root: Path, *, status: str) -> None:
         state = repo_root / ".agent_bus" / "executors" / "commit_executor_test.json"
         state.write_text(f'{{"status": "{status}"}}\\n', encoding="utf-8")
@@ -2223,6 +2277,33 @@ esac
         assert result.returncode == 0
         assert "bot_findings_pending" in result.stdout
 
+    def test_pipeline_monitor_start_resolves_window_and_pane_ids_from_tmux(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        git_bin = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/test-wave",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        env = os.environ | {"PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        log_lines = tmux_log.read_text(encoding="utf-8").splitlines()
+        assert "display-message -p -t rcx-pipeline #{window_id}" in log_lines
+        assert "display-message -p -t @1 #{pane_id}" in log_lines
+        assert not any("display-message -p -t rcx-pipeline:1.1 #{pane_id}" in line for line in log_lines)
+
     def test_pane_findings_renders_fallback_when_no_bridge_rounds_exist(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -2278,6 +2359,81 @@ esac
         assert "Latest meta review" in result.stdout
         assert "COMMIT_GO" in result.stdout
         assert "Bounded review closed cleanly." in result.stdout
+
+    def test_pane_findings_humanizes_validation_failure_reason(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        meta_dir = repo_root / ".agent_bus" / "meta" / "raw"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        (repo_root / ".scratch").mkdir(parents=True, exist_ok=True)
+        (meta_dir / "meta-wave.txt").write_text(
+            "Validation Gate Results\n"
+            "- TASKS.md auth: FAIL (task_id missing)\n"
+            "BEGIN_META_ENVELOPE\n"
+            '{\n'
+            '  "decision": "ERROR_VALIDATION_FAILED",\n'
+            '  "summary": "The package is blocked.",\n'
+            '  "findings": [\n'
+            '    {"severity": "high", "title": "TASKS authorization is still missing for the packaged task_id"}\n'
+            '  ],\n'
+            '  "request_for_claude": "Add the exact task_id to active NOW or NEXT."\n'
+            '}\n'
+            "END_META_ENVELOPE\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        assert "Meaning: The package was stopped by a failed validation check." in result.stdout
+        assert "Why it stopped: TASKS.md does not list this wave as an active NOW or NEXT item yet." in result.stdout
+        assert "Next fix: Add this wave's exact task id to active NOW or NEXT in TASKS.md." in result.stdout
+
+    def test_pane_findings_uses_real_meta_finding_for_non_validation_redirects(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        meta_dir = repo_root / ".agent_bus" / "meta" / "raw"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        (repo_root / ".scratch").mkdir(parents=True, exist_ok=True)
+        (meta_dir / "meta-wave.txt").write_text(
+            "Validation Gate Results\n"
+            "- TASKS.md auth: FAIL (stale historical text that should be ignored for this decision)\n"
+            "BEGIN_META_ENVELOPE\n"
+            '{\n'
+            '  "decision": "NEEDS_PHASE_B",\n'
+            '  "summary": "Package truth drift remains.",\n'
+            '  "findings": [\n'
+            '    {"severity": "medium", "title": "Pane border titles are bound to the wrong tmux panes"}\n'
+            '  ],\n'
+            '  "request_for_claude": "Fix the tmux pane-title mapping and rerun the package."\n'
+            '}\n'
+            "END_META_ENVELOPE\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        assert "Meaning: The implementation needs more work before continuing." in result.stdout
+        assert "Why it stopped: Pane border titles are bound to the wrong tmux panes" in result.stdout
+        assert "Next fix: Fix the tmux pane-title mapping and rerun the package." in result.stdout
+        assert "TASKS.md does not list this wave as an active NOW or NEXT item yet." not in result.stdout
 
     def test_pane_findings_uses_active_worktree_when_current_root_is_quiet(self, tmp_path):
         quiet = tmp_path / "quiet"
@@ -2585,3 +2741,102 @@ esac
         assert "Watching: jabramsja/quiet-wave" in clean_stdout
         assert "ACTIVE — Tier 3 recovery (agent_review_crash)" not in clean_stdout
         assert "No recovery activity recorded yet." in clean_stdout
+
+    def test_pane_processes_trims_long_output_to_keep_header_visible(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_processes.sh")
+        self._install_observability_script(repo_root, "pipeline_status.sh")
+        self._install_observability_script(repo_root, "pipeline_dashboard.py")
+
+        recovery_dir = repo_root / ".agent_bus" / "recovery"
+        recovery_dir.mkdir(parents=True, exist_ok=True)
+        now = datetime.now(timezone.utc)
+        (recovery_dir / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "tier": 3,
+                    "failure_class": "unknown_error",
+                    "wave_id": "wave-long",
+                    "wave_invocation_count": 4,
+                    "tuple_attempt_index": 3,
+                    "retry_target": "commit",
+                    "state": "tier3_exhausted",
+                    "reason": "On branch wrong-branch, expected dev or the active feature branch.",
+                    "detail": "max 2 attempts reached for (wave-long, commit, unknown_error)",
+                    "updated_at": now.isoformat(),
+                    "finished_at": now.isoformat(),
+                    "outcome": "exhausted",
+                    "invocation_id": "wave-long-commit-unknown_error-04",
+                }
+            ),
+            encoding="utf-8",
+        )
+        (recovery_dir / "recovery_log.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "invocation_id": "wave-long-commit-unknown_error-04",
+                        "wave_id": "wave-long",
+                        "step": "commit",
+                        "failure_class": "unknown_error",
+                        "action": "shell_fix",
+                        "outcome": "failed",
+                        "duration_s": 10.494,
+                        "detail": "Commit executor failed because the branch name drifted away from the expected wave branch.",
+                    },
+                    {
+                        "invocation_id": "wave-long-commit-unknown_error-04",
+                        "wave_id": "wave-long",
+                        "step": "commit",
+                        "failure_class": "unknown_error",
+                        "action": "retry",
+                        "outcome": "retry_requested",
+                        "duration_s": 22.920,
+                        "detail": "The merge failed because required status checks were still pending.",
+                    },
+                    {
+                        "invocation_id": "wave-long-commit-unknown_error-04",
+                        "wave_id": "wave-long",
+                        "step": "commit",
+                        "failure_class": "unknown_error",
+                        "action": "skip",
+                        "outcome": "failed",
+                        "duration_s": 0.009,
+                        "detail": "bridge.lock not found",
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\nHEAD 1111111111111111\nbranch refs/heads/jabramsja/repo-wave\n",
+        )
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_PANE_ONESHOT": "1",
+            "RCX_PANE_MAX_LINES": "18",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_processes.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Pane 3: plain-English status" in clean_stdout
+        assert "Watching: jabramsja/repo-wave" in clean_stdout
+        assert "More detail is hidden to keep this pane readable." in clean_stdout
+        assert len(clean_stdout.splitlines()) <= 18

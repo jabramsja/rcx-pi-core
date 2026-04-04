@@ -92,7 +92,7 @@ repo_has_process() {
 while true; do
   refresh_context
   {
-  echo -e "${BOLD}PANE 3 · SESSION TIMELINE${RESET}"
+  echo -e "${BOLD}Pane 4: session timeline${RESET}"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo -e "  ${DIM}This pane shows the recent milestones in time order.${RESET}"
   echo -e "  ${DIM}Watching:${RESET} $BRANCH_NAME"
@@ -253,7 +253,7 @@ else:
   # Only redraw if content changed (ignore first line with title)
   NEW_HASH=$(tail -n +2 "$TMPOUT" 2>/dev/null | md5 -q 2>/dev/null || tail -n +2 "$TMPOUT" | md5sum 2>/dev/null | cut -d' ' -f1)
   if [ "$NEW_HASH" != "$LAST_HASH" ]; then
-    clear
+    printf '\033[H\033[2J\033[3J'
     cat "$TMPOUT"
     LAST_HASH="$NEW_HASH"
   fi
