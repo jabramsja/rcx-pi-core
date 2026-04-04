@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import time
@@ -997,15 +998,23 @@ def _summarize_json_value(value: Any) -> str:
 
 
 def _summarize_result_reason(result: dict[str, Any]) -> str:
+    def _usable_excerpt(value: Any) -> str:
+        excerpt = _excerpt(value)
+        if not excerpt:
+            return ""
+        if re.fullmatch(r"[\d,\s]+", excerpt):
+            return ""
+        return excerpt
+
     for key in ("error", "stderr", "detail", "message"):
-        excerpt = _excerpt(result.get(key, ""))
+        excerpt = _usable_excerpt(result.get(key, ""))
         if excerpt:
             return excerpt
     for key in ("stdout", "stderr"):
         excerpt = _summarize_json_value(_parse_json_object(result.get(key, "")))
         if excerpt:
             return excerpt
-    excerpt = _excerpt(result.get("stdout", ""))
+    excerpt = _usable_excerpt(result.get("stdout", ""))
     if excerpt:
         return excerpt
     status = _excerpt(result.get("status", ""))
