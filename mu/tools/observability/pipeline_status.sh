@@ -26,6 +26,25 @@ file_is_recent() {
   [ "$age" -le "$LIVE_STATE_MAX_AGE_SECONDS" ]
 }
 
+format_age_compact() {
+  local age="$1"
+  local days hours minutes
+  if ! [[ "$age" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "unknown age"
+    return 0
+  fi
+  days=$((age / 86400))
+  hours=$(((age % 86400) / 3600))
+  minutes=$(((age % 3600) / 60))
+  if [ "$days" -gt 0 ]; then
+    printf '%sd %sh\n' "$days" "$hours"
+  elif [ "$hours" -gt 0 ]; then
+    printf '%sh %sm\n' "$hours" "$minutes"
+  else
+    printf '%sm\n' "$minutes"
+  fi
+}
+
 lock_file_is_live() {
   local lock="$1" lock_pid=""
   [ -s "$lock" ] || return 1
@@ -262,6 +281,18 @@ worktree_has_live_pipeline_state() {
   [ -n "$ts" ] && [ "$ts" -gt 0 ] 2>/dev/null
 }
 
+commit_state_is_current() {
+  local repo_root="$1" state_path="$2"
+  [ -f "$state_path" ] || return 1
+  if worktree_has_live_process "$repo_root"; then
+    return 0
+  fi
+  if [ -f "$repo_root/.scratch/commit_executor_live.log" ] && file_is_recent "$repo_root/.scratch/commit_executor_live.log"; then
+    return 0
+  fi
+  file_is_recent "$state_path"
+}
+
 find_active_worktree() {
   local best_path="" best_score=0 path="" score=0
 
@@ -397,6 +428,7 @@ if [ "${1:-}" = "--print-branch" ]; then
 fi
 
 BUS="$REPO_ROOT/.agent_bus"
+CURRENT_BRANCH="$(print_branch_for_root "$REPO_ROOT")"
 
 # Colors (disable if not tty)
 if [ -t 1 ]; then
@@ -410,9 +442,25 @@ echo -e "${BOLD}PIPELINE STATUS${RESET} ($(date '+%Y-%m-%d %H:%M:%S'))"
 echo "────────────────────────────────────────"
 
 # ── Executor State ──
-EXEC_FILES=$(find "$BUS/executors" -name 'commit_executor_*.json' -newer "$BUS/executors" 2>/dev/null | head -1)
-if [ -z "$EXEC_FILES" ]; then
-  EXEC_FILES=$(ls -t "$BUS/executors"/commit_executor_*.json 2>/dev/null | head -1)
+EXEC_IS_CURRENT=0
+EXEC_FILES=""
+EXEC_BRANCHLESS_FALLBACK=""
+while IFS= read -r candidate; do
+  [ -n "$candidate" ] || continue
+  target_branch=$(jq -r '.target_branch // ""' "$candidate" 2>/dev/null || true)
+  if [ -z "$target_branch" ] || [ "$target_branch" = "null" ]; then
+    if [ -z "$EXEC_BRANCHLESS_FALLBACK" ]; then
+      EXEC_BRANCHLESS_FALLBACK="$candidate"
+    fi
+    continue
+  fi
+  if [ "$target_branch" = "$CURRENT_BRANCH" ]; then
+    EXEC_FILES="$candidate"
+    break
+  fi
+done < <(ls -t "$BUS/executors"/commit_executor_*.json 2>/dev/null || true)
+if [ -z "$EXEC_FILES" ] && [ -n "$EXEC_BRANCHLESS_FALLBACK" ]; then
+  EXEC_FILES="$EXEC_BRANCHLESS_FALLBACK"
 fi
 
 if [ -n "$EXEC_FILES" ] && [ -f "$EXEC_FILES" ]; then
@@ -421,20 +469,28 @@ if [ -n "$EXEC_FILES" ] && [ -f "$EXEC_FILES" ]; then
   STEPS=$(jq -r '.steps_completed | length' "$EXEC_FILES" 2>/dev/null)
   LAST_STEP=$(jq -r '.steps_completed[-1] // "none"' "$EXEC_FILES" 2>/dev/null)
   PR=$(jq -r '.pr_number // "none"' "$EXEC_FILES" 2>/dev/null)
-  echo -e "${CYAN}Executor:${RESET} $WAVE"
-  echo -e "  Step: ${BOLD}$STEPS/15${RESET} ($LAST_STEP) | Status: $STATUS | PR: #$PR"
+  if commit_state_is_current "$REPO_ROOT" "$EXEC_FILES"; then
+    EXEC_IS_CURRENT=1
+    echo -e "${CYAN}Executor:${RESET} $WAVE"
+    echo -e "  Step: ${BOLD}$STEPS/15${RESET} ($LAST_STEP) | Status: $STATUS | PR: #$PR"
+  else
+    EXEC_AGE=$(file_age_seconds "$EXEC_FILES" 2>/dev/null || true)
+    EXEC_AGE_HUMAN=$(format_age_compact "${EXEC_AGE:-0}")
+    echo -e "${DIM}Executor: idle${RESET}"
+    echo -e "  ${DIM}Last saved executor state: $STATUS for $WAVE (${EXEC_AGE_HUMAN} old)${RESET}"
+  fi
 else
   echo -e "${DIM}Executor: idle (no active commit state)${RESET}"
 fi
 
 # ── Phase B Handoff ──
 HANDOFF="$BUS/executors/phase_b_handoff.json"
-if [ -f "$HANDOFF" ]; then
+if [ -f "$HANDOFF" ] && file_is_recent "$HANDOFF"; then
   HO_WAVE=$(jq -r '.wave_id // "unknown"' "$HANDOFF" 2>/dev/null)
   HO_TASK=$(jq -r '.task_id // "unknown"' "$HANDOFF" 2>/dev/null)
   echo -e "${CYAN}Handoff:${RESET} $HO_WAVE ($HO_TASK)"
 else
-  echo -e "${DIM}Handoff: none${RESET}"
+  echo -e "${DIM}Handoff: none active${RESET}"
 fi
 
 # ── Supervisor Receipt ──
@@ -453,12 +509,12 @@ fi
 
 # ── Post-Merge Routing ──
 ROUTING="$BUS/meta/post_merge_routing.json"
-if [ -f "$ROUTING" ]; then
+if [ -f "$ROUTING" ] && file_is_recent "$ROUTING"; then
   ROUTE_DEC=$(jq -r '.decision // "unknown"' "$ROUTING" 2>/dev/null)
   ROUTE_TS=$(jq -r '.timestamp_utc // "unknown"' "$ROUTING" 2>/dev/null)
   echo -e "${CYAN}Routing:${RESET} $ROUTE_DEC ($ROUTE_TS)"
 else
-  echo -e "${DIM}Routing: none${RESET}"
+  echo -e "${DIM}Routing: none active${RESET}"
 fi
 
 # ── Bridge Lock ──
@@ -522,7 +578,7 @@ if [ -f "$REPO_ROOT/mu/tools/observability/pipeline_dashboard.py" ]; then
 fi
 
 # ── PR / CI Status ──
-if [ -n "$EXEC_FILES" ] && [ -f "$EXEC_FILES" ]; then
+if [ "$EXEC_IS_CURRENT" -eq 1 ] && [ -n "$EXEC_FILES" ] && [ -f "$EXEC_FILES" ]; then
   PR_NUM=$(jq -r '.pr_number // ""' "$EXEC_FILES" 2>/dev/null)
   if [ -n "$PR_NUM" ] && [ "$PR_NUM" != "null" ] && [ "$PR_NUM" != "none" ]; then
     echo ""

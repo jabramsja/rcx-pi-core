@@ -124,6 +124,7 @@ human_phase_b_step() {
     agent_review) printf '%s\n' "native SDK agents are auditing the code" ;;
     implementer) printf '%s\n' "Claude is writing the fix" ;;
     bridge_review) printf '%s\n' "Codex is reviewing the fix" ;;
+    needs_phase_b_reentry) printf '%s\n' "waiting to restart Phase B" ;;
     *)
       printf '%s\n' "${step//_/ }"
       ;;
@@ -351,24 +352,37 @@ while true; do
     mr=$(jq -r '.max_bridge_rounds // 0' "$PB_STATE" 2>/dev/null) || mr=0
     step=$(jq -r '.completed_step // "?"' "$PB_STATE" 2>/dev/null) || step="?"
     pb_age=$(( $(date +%s) - $(stat -f%m "$PB_STATE" 2>/dev/null || stat -c%Y "$PB_STATE" 2>/dev/null || echo 0) ))
+    phase_b_is_live=0
+    case "$phase" in
+      "Phase B: Implement + Review"|"Bridge: Review in progress")
+        phase_b_is_live=1
+        ;;
+    esac
 
     # Override step with live process detection (state file can be stale)
     if [ -n "$agent_pid" ]; then
       step="agent_review"
+      phase_b_is_live=1
     elif [ "$claude_count" -gt 0 ]; then
       step="implementer"
+      phase_b_is_live=1
     elif [ "$codex_count" -gt 0 ]; then
       step="bridge_review"
+      phase_b_is_live=1
     fi
 
     if [ "$mr" -gt 0 ]; then
       echo -e "  Review pass: ${BOLD}$br / $mr${RESET}"
     fi
     human_step=$(human_phase_b_step "$step")
+    step_label="Current step"
+    if [ "$phase_b_is_live" -eq 0 ]; then
+      step_label="Last saved Phase B checkpoint"
+    fi
     if [ "$pb_age" -gt 600 ]; then
-      echo -e "  Current step: $human_step ${DIM}(saved state is $(( pb_age / 60 ))m old)${RESET}"
+      echo -e "  $step_label: $human_step ${DIM}(saved state is $(( pb_age / 60 ))m old)${RESET}"
     else
-      echo -e "  Current step: $human_step"
+      echo -e "  $step_label: $human_step"
     fi
   fi
 
