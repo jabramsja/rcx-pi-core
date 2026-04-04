@@ -737,6 +737,8 @@ def _is_unhelpful_recovery_text(text):
     cleaned = (text or "").strip()
     if not cleaned:
         return True
+    if len(cleaned) <= 2 and " " not in cleaned:
+        return True
     if re.fullmatch(r"[\d,\s]+", cleaned):
         return True
     if cleaned.lower().startswith("tokens used"):

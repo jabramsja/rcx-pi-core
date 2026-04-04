@@ -1285,6 +1285,77 @@ def _finish_recovery_status(
     )
 
 
+def _human_recovery_target_label(target: str) -> str:
+    cleaned = str(target or "").strip()
+    mapping = {
+        "phase_a_executor": "Phase A",
+        "phase_a": "Phase A",
+        "phase_b_executor": "Phase B",
+        "phase_b": "Phase B",
+        "commit_executor": "Commit",
+        "commit": "Commit",
+        "executor_dispatch": "Dispatch",
+    }
+    if cleaned in mapping:
+        return mapping[cleaned]
+    normalized = cleaned.replace("_executor", "").replace("_", " ").strip()
+    return normalized or "pipeline step"
+
+
+def clear_stale_recovery_status_on_success(
+    repo_root: Path,
+    *,
+    wave_id: str = "",
+    success_target: str = "",
+) -> dict[str, Any]:
+    """Mark an old inactive recovery record as cleared by a later success.
+
+    This keeps the pane honest after a retry eventually works. Without this,
+    observability keeps showing the last exhausted recovery tuple even though
+    the pipeline has already moved on and succeeded.
+    """
+    status = _load_recovery_status(repo_root)
+    if not status or bool(status.get("active")):
+        return status
+
+    status_wave = str(status.get("wave_id", "")).strip()
+    if wave_id and status_wave and status_wave != wave_id:
+        return status
+
+    step = str(status.get("step", "")).strip()
+    retry_target = str(status.get("retry_target", "")).strip()
+    normalized_target = str(success_target or "").strip()
+    if normalized_target and normalized_target not in {step, retry_target}:
+        return status
+
+    if (
+        bool(status.get("recovered"))
+        and str(status.get("outcome", "")).strip().lower() == "cleared"
+        and str(status.get("state", "")).strip() == "resolved_by_later_success"
+    ):
+        return status
+
+    target_label = _human_recovery_target_label(normalized_target or retry_target or step)
+    detail = (
+        f"{target_label} later succeeded, so this older recovery record is "
+        "historical only."
+    )
+    return _update_recovery_status(
+        repo_root,
+        active=False,
+        recovered=True,
+        exhausted=False,
+        outcome="cleared",
+        state="resolved_by_later_success",
+        last_action="later_success",
+        detail=_excerpt(detail),
+        child_pid=0,
+        child_role="",
+        current_command="",
+        finished_at=_now_iso(),
+    )
+
+
 def _load_recovery_log(repo_root: Path) -> list[dict[str, Any]]:
     """Load recovery log, returning empty list on missing/corrupt file."""
     log_path = repo_root / RECOVERY_LOG_FILE

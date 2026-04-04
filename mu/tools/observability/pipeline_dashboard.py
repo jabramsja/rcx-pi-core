@@ -126,6 +126,8 @@ def _is_unhelpful_recovery_text(text: str) -> bool:
     cleaned = (text or "").strip()
     if not cleaned:
         return True
+    if len(cleaned) <= 2 and " " not in cleaned:
+        return True
     if re.fullmatch(r"[\d,\s]+", cleaned):
         return True
     if cleaned.lower().startswith("tokens used"):
@@ -212,6 +214,25 @@ def _human_recovery_state(value: str) -> str:
         "tier4_escalated": "stopped because policy says not to recover this",
     }
     return mapping.get(cleaned, cleaned.replace("_", " "))
+
+
+def _human_recovery_outcome(value: str, *, recovered: bool) -> str:
+    cleaned = (value or "").strip().lower()
+    if cleaned == "cleared":
+        return "a later success cleared the earlier issue"
+    if cleaned == "success":
+        return "recovery worked"
+    if cleaned == "failed":
+        return "recovery failed"
+    if cleaned == "exhausted":
+        return "recovery ran out of tries"
+    if cleaned == "escalated":
+        return "recovery stopped for human follow-up"
+    if cleaned and recovered:
+        return f"recovery finished with {cleaned}"
+    if cleaned:
+        return cleaned.replace("_", " ")
+    return "completed"
 
 
 def _rendered_recovery_reason(status: dict[str, Any]) -> tuple[str, str]:
@@ -354,6 +375,8 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
     failure_class = str(status.get("failure_class", "?"))
     lines.append(f"  {label} — Tier {tier} recovery ({failure_class})")
     lines.append(f"  Problem: {_human_failure_class(failure_class)}")
+    if not active:
+        lines.append("  No recovery is running now.")
 
     wave_id = _excerpt(status.get("wave_id", ""), 80)
     if wave_id:
@@ -368,7 +391,12 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
 
     retry_target = _human_target(str(status.get("retry_target", "")))
     if retry_target:
-        prefix = "If recovery works, go back to" if active or status.get("recovered") else "Last retry target"
+        if active:
+            prefix = "If recovery works, go back to"
+        elif status.get("recovered"):
+            prefix = "Recovery sent work back to"
+        else:
+            prefix = "Last retry target"
         lines.append(f"  {prefix}: {retry_target}")
 
     state = _excerpt(status.get("state", ""), 80)
@@ -376,10 +404,11 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
     max_iterations = status.get("max_iterations") or 0
     if state:
         doing_now = _human_recovery_state(state)
+        prefix = "Doing now" if active else "Last state"
         if max_iterations:
-            lines.append(f"  Doing now: {doing_now} · loop {current_iteration}/{max_iterations}")
+            lines.append(f"  {prefix}: {doing_now} · loop {current_iteration}/{max_iterations}")
         else:
-            lines.append(f"  Doing now: {doing_now}")
+            lines.append(f"  {prefix}: {doing_now}")
 
     pid_line = _format_recovery_pid_line(status, active=active)
     if pid_line:
@@ -409,8 +438,8 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
             status.get("finished_at", "") or status.get("updated_at", ""),
             now=now,
         )
-        summary = outcome or "completed"
-        if last_action:
+        summary = _human_recovery_outcome(outcome, recovered=bool(status.get("recovered")))
+        if last_action and outcome not in {"cleared"}:
             summary += f" via {last_action}"
         lines.append(f"  Outcome: {summary} · {_elapsed_seconds(finished_age)} ago")
     if detail and detail != reason and detail != explanation and reason_source != "detail":

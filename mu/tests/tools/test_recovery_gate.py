@@ -1211,7 +1211,7 @@ class TestRecoveryStatusRendering:
         )
         rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
         assert "LAST RECOVERY — Tier 3 recovery (agent_review_crash)" in rendered
-        assert "Outcome: success via shell" in rendered
+        assert "Outcome: recovery worked via shell" in rendered
         assert "Recovery note: narrowed the fix" in rendered
 
     def test_recent_attempts_rendered_for_matching_invocation(self, tmp_path):
@@ -1384,6 +1384,48 @@ class TestRecoveryStatusRendering:
         assert "Recent attempts in wave:" in rendered
         assert "tier3_iter2_edit -> retry_requested" in rendered
 
+    def test_cleared_recovery_reads_as_historical_and_plain_english(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime(2026, 4, 4, 13, 10, tzinfo=timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "wave_id": "wave-epsilon",
+                    "step": "commit_executor",
+                    "failure_class": "unknown_error",
+                    "tier": 3,
+                    "wave_invocation_count": 4,
+                    "tuple_attempt_index": 3,
+                    "retry_target": "commit_executor",
+                    "state": "resolved_by_later_success",
+                    "owner_pid": 999999,
+                    "child_pid": 0,
+                    "reason": "R",
+                    "updated_at": (now - timedelta(seconds=45)).isoformat(),
+                    "finished_at": (now - timedelta(seconds=45)).isoformat(),
+                    "current_iteration": 0,
+                    "max_iterations": 3,
+                    "current_command": "",
+                    "explanation": "",
+                    "detail": "Commit later succeeded, so this older recovery record is historical only.",
+                    "outcome": "cleared",
+                    "last_action": "later_success",
+                    "recovered": True,
+                    "exhausted": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+        assert "No recovery is running now." in rendered
+        assert "Recovery sent work back to: Commit" in rendered
+        assert "Reason: Commit later succeeded, so this older recovery record is historical only." in rendered
+        assert "Reason: R" not in rendered
+        assert "Outcome: a later success cleared the earlier issue" in rendered
+
 
 class TestRecoveryWebSnapshot:
     def test_missing_snapshot_returns_none(self, tmp_path):
@@ -1460,6 +1502,43 @@ class TestRecoveryWebSnapshot:
         assert snapshot["reason"] == "phase_b_state.json not found"
         assert snapshot["detail"] == ""
         assert snapshot["owner_state"] == "dead"
+
+    def test_snapshot_reason_prefers_detail_over_short_reason(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime.now(timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "tier": 3,
+                    "failure_class": "unknown_error",
+                    "wave_id": "wave-recovery",
+                    "wave_invocation_count": 4,
+                    "tuple_attempt_index": 3,
+                    "retry_target": "commit_executor",
+                    "state": "resolved_by_later_success",
+                    "reason": "R",
+                    "detail": "Commit later succeeded, so this older recovery record is historical only.",
+                    "explanation": "",
+                    "current_iteration": 0,
+                    "max_iterations": 3,
+                    "owner_pid": 999999,
+                    "child_pid": 0,
+                    "current_command": "",
+                    "updated_at": now.isoformat(),
+                    "outcome": "cleared",
+                    "recovered": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        with patch.object(web_mod, "REPO_ROOT", tmp_path):
+            snapshot = web_mod.recovery_snapshot()  # ANTICHEAT_OK
+        assert snapshot["reason"] == (
+            "Commit later succeeded, so this older recovery record is historical only."
+        )
+        assert snapshot["detail"] == ""
 
 
 class TestObservabilityNoiseFilters:

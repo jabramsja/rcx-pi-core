@@ -6753,6 +6753,52 @@ class TestRecoveryGateWiring:
             dispatch_mod.main(self._base_args(routing_file))
             mock_recovery.assert_not_called()
 
+    def test_success_clears_matching_stale_recovery_status(self, tmp_path):
+        """A later success marks the old matching recovery record as historical."""
+        routing_file = self._routing_file(tmp_path)
+        recovery_dir = tmp_path / ".agent_bus" / "recovery"
+        recovery_dir.mkdir(parents=True)
+        (recovery_dir / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "wave_id": "test-wave",
+                    "step": "commit_executor",
+                    "failure_class": "unknown_error",
+                    "tier": 3,
+                    "retry_target": "commit_executor",
+                    "state": "tier3_exhausted",
+                    "reason": "R",
+                    "detail": "max 2 attempts reached",
+                    "outcome": "exhausted",
+                    "last_action": "exhausted",
+                    "recovered": False,
+                    "exhausted": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        success_result = {
+            "status": "success",
+            "decision": "ROUTE_PHASE_B",
+            "executor": "commit_executor",
+        }
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+        with patch.object(dispatch_mod, "dispatch", return_value=success_result), \
+             patch.object(dispatch_mod, "attempt_recovery") as mock_recovery, \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            exit_code = dispatch_mod.main(self._base_args(routing_file))
+
+        status = json.loads((recovery_dir / "recovery_status.json").read_text())
+        assert exit_code == 0
+        mock_recovery.assert_not_called()
+        assert status["recovered"] is True
+        assert status["exhausted"] is False
+        assert status["outcome"] == "cleared"
+        assert status["state"] == "resolved_by_later_success"
+        assert "historical only" in status["detail"]
+
     def test_recovery_not_called_on_terminal(self, tmp_path):
         """Terminal executor outcomes bypass recovery entirely."""
         routing_file = self._routing_file(tmp_path)
