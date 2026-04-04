@@ -9,7 +9,7 @@ Control flow:
 1. Read routing record and rollout context
 2. Create a plan packet draft in reports/control_plane/
 3. Run SDK agent review on the plan
-4. Send plan + agent findings to bridge (--no-diff packet review)
+4. Send plan + agent findings to bridge (--no-diff review)
 5. Fix blockers, defer non-blockers
 6. Loop bridge until only non-blockers remain
 7. Set Phase-A-Lock: LOCKED
@@ -606,7 +606,7 @@ def run_bridge_design_review(
         "--task-file", str(task_path),
         "--summary", f"Phase A plan review R{round_num}",
         "--reviewer", reviewer,
-        "-v", "--no-diff", "--packet-review",
+        "-v", "--no-diff",
     ]
     if job_id:
         cmd.extend(["--job-id", job_id])
@@ -765,18 +765,24 @@ def _parse_phase_a_findings(render_content: str) -> list[dict[str, Any]]:
     def _extract_direct_envelope(text: str) -> dict[str, Any] | None:
         import re as _re
 
-        envelope_match = _re.search(
+        matches = _re.finditer(
             r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE",
             text,
             _re.DOTALL,
         )
-        if not envelope_match:
-            return None
-        try:
-            payload = json.loads(envelope_match.group(1))
-        except (json.JSONDecodeError, TypeError):
-            return None
-        return payload if isinstance(payload, dict) else None
+        chosen: dict[str, Any] | None = None
+        for envelope_match in matches:
+            try:
+                payload = json.loads(envelope_match.group(1))
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            decision = payload.get("decision")
+            if isinstance(decision, str) and "|" in decision:
+                continue
+            chosen = payload
+        return chosen
 
     envelope = _extract_direct_envelope(render_content)
     if envelope is not None:
