@@ -7,7 +7,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STATUS_SCRIPT="$SCRIPT_DIR/pipeline_status.sh"
 
 resolve_observability_repo_root() {
-  local root=""
+  local root="" current_root=""
+  current_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$current_root" ]; then
+    printf '%s\n' "$current_root"
+    return 0
+  fi
   if [ -f "$STATUS_SCRIPT" ]; then
     root=$(bash "$STATUS_SCRIPT" --print-root 2>/dev/null || true)
   fi
@@ -66,6 +71,12 @@ tail_pid=""
 
 resolve_repo_root() {
   local root=""
+  if [ -n "${RCX_OBS_REPO_ROOT:-}" ] && [ -d "${RCX_OBS_REPO_ROOT:-}" ]; then
+    (
+      cd "${RCX_OBS_REPO_ROOT}" 2>/dev/null && pwd -P
+    ) || printf '%s\n' "${RCX_OBS_REPO_ROOT}"
+    return 0
+  fi
   if [ -n "${RCX_OBS_STATUS_SCRIPT:-}" ] && [ -f "${RCX_OBS_STATUS_SCRIPT:-}" ]; then
     root=$(bash "$RCX_OBS_STATUS_SCRIPT" --print-root 2>/dev/null || true)
   fi
@@ -169,22 +180,23 @@ cmd_start() {
   local W="$SESSION:1"  # window 1 (base-index=1 on macOS)
 
   local OBS_DIR="$REPO_ROOT/mu/tools/observability"
+  local PINNED_ROOT="$REPO_ROOT"
 
   # Pane 1 (top-left): Auto-switching live output
-  tmux send-keys -t "$W" "cd '$REPO_ROOT' && RCX_OBS_STATUS_SCRIPT='$OBS_DIR/pipeline_status.sh' bash '$watcher'" Enter
+  tmux send-keys -t "$W" "cd '$REPO_ROOT' && RCX_OBS_REPO_ROOT='$PINNED_ROOT' RCX_OBS_STATUS_SCRIPT='$OBS_DIR/pipeline_status.sh' bash '$watcher'" Enter
 
   # Split horizontally → pane 2 (right): Review Findings
   tmux split-window -h -t "$W"
-  tmux send-keys "cd '$REPO_ROOT' && bash '$OBS_DIR/_pane_findings.sh'" Enter
+  tmux send-keys "cd '$REPO_ROOT' && RCX_OBS_REPO_ROOT='$PINNED_ROOT' bash '$OBS_DIR/_pane_findings.sh'" Enter
 
   # Split right pane vertically → pane 3 (bottom-right): Session Timeline
   tmux split-window -v -t "$W"
-  tmux send-keys "cd '$REPO_ROOT' && bash '$OBS_DIR/_pane_timeline.sh'" Enter
+  tmux send-keys "cd '$REPO_ROOT' && RCX_OBS_REPO_ROOT='$PINNED_ROOT' bash '$OBS_DIR/_pane_timeline.sh'" Enter
 
   # Select left pane (pane 1) and split vertically → pane 4 (bottom-left): Status + Activity
   tmux select-pane -t "$W.1"
   tmux split-window -v -t "$W"
-  tmux send-keys "cd '$REPO_ROOT' && bash '$OBS_DIR/_pane_processes.sh'" Enter
+  tmux send-keys "cd '$REPO_ROOT' && RCX_OBS_REPO_ROOT='$PINNED_ROOT' bash '$OBS_DIR/_pane_processes.sh'" Enter
 
   # Select top-left pane for initial focus
   tmux select-pane -t "$W.1"

@@ -52,7 +52,7 @@ except ImportError:
     terminate_process_tree = _mod.terminate_process_tree
 
 try:
-    from recovery_gate import attempt_recovery
+    from recovery_gate import attempt_recovery, clear_stale_recovery_status_on_success
 except ImportError:
     import importlib.util as _ilu
     _recovery_path = SCRIPT_DIR / "recovery_gate.py"
@@ -62,6 +62,7 @@ except ImportError:
     sys.modules["recovery_gate"] = _recovery_mod
     _recovery_spec.loader.exec_module(_recovery_mod)
     attempt_recovery = _recovery_mod.attempt_recovery
+    clear_stale_recovery_status_on_success = _recovery_mod.clear_stale_recovery_status_on_success
 
 try:
     from meta_bridge_supervisor import compute_repo_state as _compute_repo_state
@@ -1753,6 +1754,16 @@ def main(argv: list[str] | None = None) -> int:
         for _env_key in list(os.environ):
             if _env_key.startswith("RCX_RECOVERY_ORIGINAL_TIMEOUT_"):
                 os.environ.pop(_env_key, None)
+
+        if result.get("status") in ("success", "held"):
+            _wave_id = normalize_wave_id(
+                record.get("wave_name") or record.get("wave_id", "")
+            )
+            clear_stale_recovery_status_on_success(
+                repo_root,
+                wave_id=_wave_id,
+                success_target=result.get("executor") or result.get("step", ""),
+            )
 
         if args.json:
             print(json.dumps(result, indent=2))

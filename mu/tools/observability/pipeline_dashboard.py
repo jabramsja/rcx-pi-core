@@ -126,6 +126,8 @@ def _is_unhelpful_recovery_text(text: str) -> bool:
     cleaned = (text or "").strip()
     if not cleaned:
         return True
+    if len(cleaned) <= 2 and " " not in cleaned:
+        return True
     if re.fullmatch(r"[\d,\s]+", cleaned):
         return True
     if cleaned.lower().startswith("tokens used"):
@@ -214,6 +216,25 @@ def _human_recovery_state(value: str) -> str:
     return mapping.get(cleaned, cleaned.replace("_", " "))
 
 
+def _human_recovery_outcome(value: str, *, recovered: bool) -> str:
+    cleaned = (value or "").strip().lower()
+    if cleaned == "cleared":
+        return "a later success cleared the earlier issue"
+    if cleaned == "success":
+        return "recovery worked"
+    if cleaned == "failed":
+        return "recovery failed"
+    if cleaned == "exhausted":
+        return "recovery ran out of tries"
+    if cleaned == "escalated":
+        return "recovery stopped for human follow-up"
+    if cleaned and recovered:
+        return f"recovery finished with {cleaned}"
+    if cleaned:
+        return cleaned.replace("_", " ")
+    return "completed"
+
+
 def _rendered_recovery_reason(status: dict[str, Any]) -> tuple[str, str]:
     reason = _excerpt(status.get("reason", ""))
     detail = _excerpt(status.get("detail", ""))
@@ -270,6 +291,45 @@ def _is_trivial_recovery_attempt(attempt: dict[str, Any]) -> bool:
     return action in {"noop", "no_fix_registered"} and outcome in {"failed", "skipped"}
 
 
+def _human_recovery_attempt_action(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    if not cleaned:
+        return "unknown step"
+    mapping = {
+        "noop": "no automatic fix was attempted",
+        "no_fix_registered": "no registered automatic fix was available",
+        "tier1_fix": "ran the simple automatic fix",
+        "tier2_fix": "ran the deterministic fix",
+        "tier2_verify": "checked the deterministic fix",
+        "shell": "ran a shell fix",
+        "edit": "applied a file edit",
+        "parse_error": "the recovery agent answered in the wrong format",
+        "timeout": "the recovery agent timed out",
+        "error": "the recovery agent hit an execution error",
+        "skip": "recovery skipped this automatically",
+        "escalate": "recovery escalated for human follow-up",
+        "verify": "recovery checked whether the fix worked",
+    }
+    iter_match = re.fullmatch(r"tier(\d+)_iter(\d+)_(.+)", cleaned)
+    if iter_match:
+        _tier, iteration, suffix = iter_match.groups()
+        action = mapping.get(suffix, suffix.replace("_", " "))
+        return f"Try {iteration}: {action}"
+    return mapping.get(cleaned, cleaned.replace("_", " "))
+
+
+def _human_recovery_attempt_outcome(value: Any) -> str:
+    cleaned = str(value or "").strip().lower()
+    mapping = {
+        "success": "worked",
+        "failed": "failed",
+        "retry_requested": "asked the pipeline to retry",
+        "skipped": "skipped",
+        "partial": "partly worked",
+    }
+    return mapping.get(cleaned, cleaned.replace("_", " ") if cleaned else "unknown")
+
+
 def _recent_recovery_attempt_lines(
     repo_root: Path, status: dict[str, Any], *, limit: int = 3,
 ) -> list[str]:
@@ -318,8 +378,8 @@ def _recent_recovery_attempt_lines(
 
     lines = ["  Recent attempts in wave:" if used_wave_fallback else "  Recent attempts:"]
     for attempt in reversed(matches):
-        action = _excerpt(attempt.get("action", ""), 40) or "unknown"
-        outcome = _excerpt(attempt.get("outcome", ""), 32) or "unknown"
+        action = _human_recovery_attempt_action(attempt.get("action", ""))
+        outcome = _human_recovery_attempt_outcome(attempt.get("outcome", ""))
         detail = _excerpt(attempt.get("detail", ""), 72)
         duration = attempt.get("duration_s")
         summary = f"  - {action} -> {outcome}"
@@ -354,6 +414,8 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
     failure_class = str(status.get("failure_class", "?"))
     lines.append(f"  {label} — Tier {tier} recovery ({failure_class})")
     lines.append(f"  Problem: {_human_failure_class(failure_class)}")
+    if not active:
+        lines.append("  No recovery is running now.")
 
     wave_id = _excerpt(status.get("wave_id", ""), 80)
     if wave_id:
@@ -368,7 +430,12 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
 
     retry_target = _human_target(str(status.get("retry_target", "")))
     if retry_target:
-        prefix = "If recovery works, go back to" if active or status.get("recovered") else "Last retry target"
+        if active:
+            prefix = "If recovery works, go back to"
+        elif status.get("recovered"):
+            prefix = "Recovery sent work back to"
+        else:
+            prefix = "Last retry target"
         lines.append(f"  {prefix}: {retry_target}")
 
     state = _excerpt(status.get("state", ""), 80)
@@ -376,10 +443,11 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
     max_iterations = status.get("max_iterations") or 0
     if state:
         doing_now = _human_recovery_state(state)
+        prefix = "Doing now" if active else "Last state"
         if max_iterations:
-            lines.append(f"  Doing now: {doing_now} · loop {current_iteration}/{max_iterations}")
+            lines.append(f"  {prefix}: {doing_now} · loop {current_iteration}/{max_iterations}")
         else:
-            lines.append(f"  Doing now: {doing_now}")
+            lines.append(f"  {prefix}: {doing_now}")
 
     pid_line = _format_recovery_pid_line(status, active=active)
     if pid_line:
@@ -409,8 +477,8 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
             status.get("finished_at", "") or status.get("updated_at", ""),
             now=now,
         )
-        summary = outcome or "completed"
-        if last_action:
+        summary = _human_recovery_outcome(outcome, recovered=bool(status.get("recovered")))
+        if last_action and outcome not in {"cleared"}:
             summary += f" via {last_action}"
         lines.append(f"  Outcome: {summary} · {_elapsed_seconds(finished_age)} ago")
     if detail and detail != reason and detail != explanation and reason_source != "detail":

@@ -180,6 +180,18 @@ class TestClassifyFailure:
 
 
 class TestReasonSummaries:
+    def test_reason_prefers_errors_list(self):
+        result = {
+            "status": "error",
+            "step": "commit",
+            "errors": [
+                "pre-push-fast failed: Running pre-push check (dev.sh -> audit_fast.sh)..."
+            ],
+            "stdout": "tokens used\n40,304\n",
+        }
+        reason = rg_mod._summarize_result_reason(result)  # ANTICHEAT_OK
+        assert reason.startswith("pre-push-fast failed:")
+
     def test_embedded_json_reason_prefers_error_field(self):
         stdout = json.dumps({
             "status": "error",
@@ -985,20 +997,28 @@ class TestRecoveryLoop:
     def test_timeout_handled(self, tmp_path):
         """Verify claude call timeout is handled gracefully."""
         result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
+        fake = FakePopen(
+            communicate_exc=subprocess.TimeoutExpired(cmd="claude", timeout=60),
+            pid=9999,
+        )
+        popen_kwargs = {}
 
         with patch.object(rg_mod, "subprocess") as mock_sp:
             mock_sp.run = lambda *args, **kwargs: MagicMock(returncode=0, stdout="", stderr="")
-            mock_sp.Popen = lambda *args, **kwargs: FakePopen(
-                communicate_exc=subprocess.TimeoutExpired(cmd="claude", timeout=60),
-                pid=9999,
-            )
+            def _fake_popen(*args, **kwargs):
+                popen_kwargs.update(kwargs)
+                return fake
+            mock_sp.Popen = _fake_popen
             mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
-            r = rg_mod.run_recovery_loop(
-                tmp_path, result, "w1", max_iterations=1)
+            with patch.object(rg_mod.os, "killpg", side_effect=ProcessLookupError):
+                r = rg_mod.run_recovery_loop(
+                    tmp_path, result, "w1", max_iterations=1)
         assert r["recovered"] is False
         assert len(r["log"]) == 1
         assert r["log"][0]["action"] == "timeout"
+        assert popen_kwargs["start_new_session"] is True
+        assert fake.killed is True
         status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
         assert status["outcome"] == "exhausted"
         assert status["last_action"] == "exhausted"
@@ -1211,7 +1231,7 @@ class TestRecoveryStatusRendering:
         )
         rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
         assert "LAST RECOVERY — Tier 3 recovery (agent_review_crash)" in rendered
-        assert "Outcome: success via shell" in rendered
+        assert "Outcome: recovery worked via shell" in rendered
         assert "Recovery note: narrowed the fix" in rendered
 
     def test_recent_attempts_rendered_for_matching_invocation(self, tmp_path):
@@ -1293,8 +1313,8 @@ class TestRecoveryStatusRendering:
 
         rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
         assert "Recent attempts:" in rendered
-        assert "tier3_iter1_parse_error -> failed" in rendered
-        assert "tier3_iter2_shell -> retry_requested" in rendered
+        assert "Try 1: the recovery agent answered in the wrong format -> failed" in rendered
+        assert "Try 2: ran a shell fix -> asked the pipeline to retry" in rendered
         assert "old unrelated invocation" not in rendered
 
     def test_inactive_trivial_invocation_uses_detail_and_wave_history(self, tmp_path):
@@ -1382,7 +1402,49 @@ class TestRecoveryStatusRendering:
         assert "40,304" not in rendered
         assert "Owner PID: 999999 (dead, historical)" in rendered
         assert "Recent attempts in wave:" in rendered
-        assert "tier3_iter2_edit -> retry_requested" in rendered
+        assert "Try 2: applied a file edit -> asked the pipeline to retry" in rendered
+
+    def test_cleared_recovery_reads_as_historical_and_plain_english(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime(2026, 4, 4, 13, 10, tzinfo=timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "wave_id": "wave-epsilon",
+                    "step": "commit_executor",
+                    "failure_class": "unknown_error",
+                    "tier": 3,
+                    "wave_invocation_count": 4,
+                    "tuple_attempt_index": 3,
+                    "retry_target": "commit_executor",
+                    "state": "resolved_by_later_success",
+                    "owner_pid": 999999,
+                    "child_pid": 0,
+                    "reason": "R",
+                    "updated_at": (now - timedelta(seconds=45)).isoformat(),
+                    "finished_at": (now - timedelta(seconds=45)).isoformat(),
+                    "current_iteration": 0,
+                    "max_iterations": 3,
+                    "current_command": "",
+                    "explanation": "",
+                    "detail": "Commit later succeeded, so this older recovery record is historical only.",
+                    "outcome": "cleared",
+                    "last_action": "later_success",
+                    "recovered": True,
+                    "exhausted": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+        assert "No recovery is running now." in rendered
+        assert "Recovery sent work back to: Commit" in rendered
+        assert "Reason: Commit later succeeded, so this older recovery record is historical only." in rendered
+        assert "Reason: R" not in rendered
+        assert "Outcome: a later success cleared the earlier issue" in rendered
 
 
 class TestRecoveryWebSnapshot:
@@ -1460,6 +1522,43 @@ class TestRecoveryWebSnapshot:
         assert snapshot["reason"] == "phase_b_state.json not found"
         assert snapshot["detail"] == ""
         assert snapshot["owner_state"] == "dead"
+
+    def test_snapshot_reason_prefers_detail_over_short_reason(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime.now(timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "tier": 3,
+                    "failure_class": "unknown_error",
+                    "wave_id": "wave-recovery",
+                    "wave_invocation_count": 4,
+                    "tuple_attempt_index": 3,
+                    "retry_target": "commit_executor",
+                    "state": "resolved_by_later_success",
+                    "reason": "R",
+                    "detail": "Commit later succeeded, so this older recovery record is historical only.",
+                    "explanation": "",
+                    "current_iteration": 0,
+                    "max_iterations": 3,
+                    "owner_pid": 999999,
+                    "child_pid": 0,
+                    "current_command": "",
+                    "updated_at": now.isoformat(),
+                    "outcome": "cleared",
+                    "recovered": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        with patch.object(web_mod, "REPO_ROOT", tmp_path):
+            snapshot = web_mod.recovery_snapshot()  # ANTICHEAT_OK
+        assert snapshot["reason"] == (
+            "Commit later succeeded, so this older recovery record is historical only."
+        )
+        assert snapshot["detail"] == ""
 
 
 class TestObservabilityNoiseFilters:
@@ -1907,6 +2006,44 @@ esac
         assert result.returncode == 0
         assert result.stdout.strip() == str(current)
 
+    def test_pipeline_status_honors_pinned_repo_root_env_over_active_worktree(self, tmp_path):
+        quiet = tmp_path / "quiet"
+        active = tmp_path / "active"
+        quiet.mkdir()
+        active.mkdir()
+        self._minimal_bus(quiet)
+        self._minimal_bus(active)
+        self._write_commit_state(active, status="post_commit_pending")
+        worktree_output = (
+            f"worktree {quiet}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/quiet-wave\n\n"
+            f"worktree {active}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(quiet),
+            branch="jabramsja/quiet-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_OBS_REPO_ROOT": str(quiet),
+        }
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh"), "--print-root"],
+            cwd=quiet,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == str(quiet)
+
     def test_pipeline_monitor_fails_closed_when_branch_is_unresolved(self, tmp_path):
         common = tmp_path / "common"
         common.mkdir()
@@ -2163,6 +2300,66 @@ esac
         assert "REQUEST_CHANGES" in clean_stdout
         assert "Meaning: Needs fixes before continuing." in clean_stdout
 
+    def test_pane_findings_honors_pinned_repo_root_env(self, tmp_path):
+        quiet = tmp_path / "quiet"
+        active = tmp_path / "active"
+        quiet.mkdir()
+        active.mkdir()
+        self._minimal_bus(quiet)
+        self._minimal_bus(active)
+        self._write_commit_state(active, status="post_commit_pending")
+        self._install_observability_script(quiet, "_pane_findings.sh")
+        self._install_observability_script(quiet, "pipeline_status.sh")
+        raw_dir = active / ".agent_bus" / "raw" / "phase-a-r1-1234abcd"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "phase-a-r1-1234abcd--r1-reviewer.txt").write_text(
+            "BEGIN_AGENT_ENVELOPE\n"
+            '{\n'
+            '  "decision": "REQUEST_CHANGES",\n'
+            '  "summary": "Stub packet rejected until the real plan is written.",\n'
+            '  "findings": [\n'
+            '    {"disposition": "blocking", "severity": "high", "title": "Replace stub with real plan"}\n'
+            '  ]\n'
+            '}\n'
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+        worktree_output = (
+            f"worktree {quiet}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/quiet-wave\n\n"
+            f"worktree {active}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(quiet),
+            branch="jabramsja/quiet-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_OBS_REPO_ROOT": str(quiet),
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(quiet / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=quiet,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Watching: jabramsja/quiet-wave" in clean_stdout
+        assert "REQUEST_CHANGES" not in clean_stdout
+        assert "No active Phase A/Phase B bridge rounds" in clean_stdout
+
     def test_pane_processes_ignores_unrelated_global_codex_session_logs(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -2282,3 +2479,71 @@ esac
         assert "Watching: jabramsja/active-wave" in clean_stdout
         assert "ACTIVE — Tier 3 recovery (agent_review_crash)" in clean_stdout
         assert "Problem: a review subprocess crashed" in clean_stdout
+
+    def test_pane_processes_honors_pinned_repo_root_env(self, tmp_path):
+        quiet = tmp_path / "quiet"
+        active = tmp_path / "active"
+        quiet.mkdir()
+        active.mkdir()
+        self._minimal_bus(quiet)
+        self._minimal_bus(active)
+        self._write_commit_state(active, status="post_commit_pending")
+        self._install_observability_script(quiet, "_pane_processes.sh")
+        self._install_observability_script(quiet, "pipeline_status.sh")
+        self._install_observability_script(quiet, "pipeline_dashboard.py")
+
+        recovery_dir = active / ".agent_bus" / "recovery"
+        recovery_dir.mkdir(parents=True, exist_ok=True)
+        (recovery_dir / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": True,
+                    "tier": 3,
+                    "failure_class": "agent_review_crash",
+                    "wave_id": "wave-active",
+                    "wave_invocation_count": 2,
+                    "tuple_attempt_index": 1,
+                    "retry_target": "phase_b_executor",
+                    "state": "tier3_waiting_on_claude",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "invocation_id": "wave-active-phase_b_executor-agent_review_crash-01",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        worktree_output = (
+            f"worktree {quiet}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/quiet-wave\n\n"
+            f"worktree {active}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(quiet),
+            branch="jabramsja/quiet-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_OBS_REPO_ROOT": str(quiet),
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(quiet / "mu" / "tools" / "observability" / "_pane_processes.sh")],
+            cwd=quiet,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Watching: jabramsja/quiet-wave" in clean_stdout
+        assert "ACTIVE — Tier 3 recovery (agent_review_crash)" not in clean_stdout
+        assert "No recovery activity recorded yet." in clean_stdout
