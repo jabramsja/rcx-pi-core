@@ -34,6 +34,9 @@ All notable changes to RCX are documented in this file.
   `.agent_bus/recovery/recovery_status.json` file with the current recovery
   tier, failure class, retry target, wave invocation count, tuple attempt
   index, owner PID, live child PID/role, current state, and terminal outcome
+- `recovery_gate.py` on current `dev` now also restores live Tier 3 wiring in
+  `attempt_recovery()`, so routed dispatcher failures actually enter the
+  recovery loop instead of returning `not_implemented`
 - `pipeline_dashboard.py` now renders that status into plain-English recovery
   lines for tmux and other text dashboards, and `_pane_processes.sh` now shows
   the recovery section directly by calling the existing dashboard surface
@@ -41,6 +44,12 @@ All notable changes to RCX are documented in this file.
   `pipeline_dashboard_web.py`, and `pipeline_status.sh` now ignore `tail -f`
   log watchers and other observability helper processes when detecting the
   active pipeline phase, so stale panes no longer report fake live executors
+- `pipeline_dashboard_web.py` and `pipeline_status.sh` now surface the same
+  live recovery facts directly, including tier, target, loop counter, live
+  PIDs, plain-English reason, and terminal outcome
+- recovery reason extraction now pulls the embedded executor error from routed
+  Phase A JSON output, so the pane shows the actual bridge failure string
+  instead of a useless trailing `}` line
 - `mu/tests/tools/test_recovery_gate.py` now locks both the recovery-status
   rendering contract and the watcher-noise regression directly, without adding
   new test files

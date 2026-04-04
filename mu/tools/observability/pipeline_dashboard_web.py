@@ -690,6 +690,72 @@ def lock_status():
     return None
 
 
+def _parse_iso8601(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _age_seconds(value):
+    parsed = _parse_iso8601(value)
+    if parsed is None:
+        return None
+    return max(0, int(time.time() - parsed.timestamp()))
+
+
+def _human_recovery_target(target):
+    mapping = {
+        "phase_a_executor": "Phase A",
+        "phase_a": "Phase A",
+        "phase_b_executor": "Phase B",
+        "phase_b": "Phase B",
+        "commit_executor": "Commit",
+        "commit": "Commit",
+        "executor_dispatch": "Dispatch",
+    }
+    cleaned = (target or "").strip()
+    return mapping.get(cleaned, cleaned.replace("_", " "))
+
+
+def recovery_snapshot():
+    status = read_json_safe(REPO_ROOT / ".agent_bus" / "recovery" / "recovery_status.json")
+    if not isinstance(status, dict) or not status:
+        return None
+    active = bool(status.get("active"))
+    age = _age_seconds(status.get("updated_at", ""))
+    label = "ACTIVE"
+    if active and age is not None and age >= 90:
+        label = "POSSIBLY HUNG"
+    elif not active:
+        label = "LAST RECOVERY"
+    return {
+        "label": label,
+        "active": active,
+        "tier": status.get("tier"),
+        "failure_class": status.get("failure_class", ""),
+        "wave_id": status.get("wave_id", ""),
+        "wave_invocation_count": status.get("wave_invocation_count", 0),
+        "tuple_attempt_index": status.get("tuple_attempt_index", 0),
+        "retry_target": _human_recovery_target(status.get("retry_target", "")),
+        "state": status.get("state", ""),
+        "reason": status.get("reason", ""),
+        "explanation": status.get("explanation", ""),
+        "detail": status.get("detail", ""),
+        "outcome": status.get("outcome", ""),
+        "last_action": status.get("last_action", ""),
+        "current_iteration": status.get("current_iteration", 0),
+        "max_iterations": status.get("max_iterations", 0),
+        "owner_pid": status.get("owner_pid", 0),
+        "child_pid": status.get("child_pid", 0),
+        "child_role": status.get("child_role", ""),
+        "current_command": status.get("current_command", ""),
+        "updated_age_seconds": age,
+    }
+
+
 def get_state():
     psl = ps_lines()
     phase = detect_phase(psl)
@@ -701,11 +767,31 @@ def get_state():
     log = active_log_tail()
     wave = wave_context()
     lock = lock_status()
+    recovery = recovery_snapshot()
     branch = git_branch()
     commits = git_log_short()
 
     history = bridge_round_history()
     narrative = build_narrative(phase, subs, wave, lock, history)
+    if recovery and recovery.get("active"):
+        loop = ""
+        if recovery.get("max_iterations"):
+            loop = (
+                f" Loop {recovery.get('current_iteration', 0)}"
+                f"/{recovery.get('max_iterations', 0)}."
+            )
+        narrative.append({
+            "text": (
+                f"Recovery agent active: Tier {recovery.get('tier')} "
+                f"{recovery.get('failure_class')} for {recovery.get('retry_target')}.{loop}"
+            ),
+            "style": "detail",
+        })
+        if recovery.get("reason"):
+            narrative.append({
+                "text": f"Recovery reason: {recovery.get('reason')}",
+                "style": "dim",
+            })
     impl_files = implementer_changes()
     activity = model_activity()
     timeline = session_timeline()
@@ -724,6 +810,7 @@ def get_state():
         "log_tail": log,
         "wave": wave,
         "lock": lock,
+        "recovery": recovery,
         "narrative": narrative,
         "impl_files": impl_files,
         "model_activity": activity,
@@ -1004,6 +1091,7 @@ function renderSidebar(data) {
   const p = data.phase || {};
   const subs = data.subprocesses || [];
   const wave = data.wave;
+  const recovery = data.recovery;
   const agents = data.agents;
   const jobs = data.db_jobs || [];
   const gs = data.git_status || [];
@@ -1106,6 +1194,37 @@ function renderSidebar(data) {
       html += `<div class="progress-bar"><div class="progress-fill active" style="width:${pct}%;background:var(--purple)"></div></div>`;
     }
     if (wave.target_branch) html += `<div class="kv"><span class="k">Branch</span><span class="v" style="color:var(--accent)">${esc(wave.target_branch)}</span></div>`;
+    html += '</div></div>';
+  }
+
+  if (recovery) {
+    const summary = `${recovery.label} — Tier ${recovery.tier} ${recovery.failure_class || ''}`.trim();
+    html += '<div class="section"><div class="section-header">Recovery</div><div class="section-body">';
+    html += `<div style="font-size:11px;font-weight:700;color:${recovery.active ? 'var(--yellow)' : 'var(--cyan)'};margin-bottom:6px">${esc(summary)}</div>`;
+    if (recovery.retry_target) html += `<div class="kv"><span class="k">Target</span><span class="v">${esc(recovery.retry_target)}</span></div>`;
+    if (recovery.wave_invocation_count || recovery.tuple_attempt_index) {
+      html += `<div class="kv"><span class="k">Count</span><span class="v">${recovery.wave_invocation_count||'?'} in wave · try ${recovery.tuple_attempt_index||'?'}</span></div>`;
+    }
+    if (recovery.state) {
+      const loop = recovery.max_iterations ? ` · ${recovery.current_iteration||0}/${recovery.max_iterations}` : '';
+      html += `<div class="kv"><span class="k">State</span><span class="v">${esc(recovery.state + loop)}</span></div>`;
+    }
+    if (recovery.owner_pid) {
+      let pidText = `owner ${recovery.owner_pid}`;
+      if (recovery.child_pid) pidText += ` · ${(recovery.child_role||'child')} ${recovery.child_pid}`;
+      html += `<div class="kv"><span class="k">PIDs</span><span class="v">${esc(pidText)}</span></div>`;
+    }
+    if (recovery.reason) html += `<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">Reason: ${esc(recovery.reason)}</div>`;
+    if (recovery.explanation) html += `<div style="margin-top:4px;font-size:11px;color:var(--text-dim)">Note: ${esc(recovery.explanation)}</div>`;
+    if (recovery.current_command) html += `<div style="margin-top:4px;font-size:10px;color:var(--text-muted)">Cmd: ${esc(recovery.current_command)}</div>`;
+    if (!recovery.active && recovery.outcome) {
+      let outcome = recovery.outcome;
+      if (recovery.last_action) outcome += ` via ${recovery.last_action}`;
+      html += `<div style="margin-top:6px;font-size:11px;color:var(--cyan)">Outcome: ${esc(outcome)}</div>`;
+    }
+    if (recovery.detail && recovery.detail !== recovery.reason && recovery.detail !== recovery.explanation) {
+      html += `<div style="margin-top:4px;font-size:10px;color:var(--text-muted)">Detail: ${esc(recovery.detail)}</div>`;
+    }
     html += '</div></div>';
   }
 

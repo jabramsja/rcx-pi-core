@@ -141,9 +141,50 @@ class TestClassifyFailure:
             {"status": "error", "step": "some_step",
              "stderr": "something unexpected"}) == FailureClass.UNKNOWN_ERROR
 
+    def test_embedded_bridge_error_classified_as_agent_review_crash(self):
+        stdout = json.dumps({
+            "status": "error",
+            "error": (
+                "Bridge subprocess failed in round 1 (exit=2). "
+                "bridge_supervisor.py: error: unrecognized arguments: --packet-review"
+            ),
+            "executor": "phase_a_executor",
+        }, indent=2)
+        assert rg_mod.classify_failure(
+            {"status": "failed", "step": "phase_a_executor", "stdout": stdout}
+        ) == FailureClass.AGENT_REVIEW_CRASH
+
     def test_unclassified(self):
         assert rg_mod.classify_failure({"status": "weird"}) == FailureClass.UNCLASSIFIED
         assert rg_mod.classify_failure({}) == FailureClass.UNCLASSIFIED
+
+
+class TestReasonSummaries:
+    def test_embedded_json_reason_prefers_error_field(self):
+        stdout = json.dumps({
+            "status": "error",
+            "error": (
+                "Bridge subprocess failed in round 1 (exit=2). "
+                "bridge_supervisor.py: error: unrecognized arguments: --packet-review"
+            ),
+            "rendered_path": ".agent_bus/rendered/phase-a-r1-123.md",
+        }, indent=2)
+        reason = rg_mod._summarize_result_reason({"stdout": stdout})  # ANTICHEAT_OK
+        assert "Bridge subprocess failed in round 1" in reason
+        assert reason != "}"
+
+    def test_embedded_json_reason_ignores_leading_log_lines(self):
+        payload = json.dumps({
+            "status": "error",
+            "error": "Bridge subprocess failed in round 1 (exit=2).",
+        }, indent=2)
+        stdout = (
+            "[phase-a] Bridge exit code: 2\n"
+            "[phase-a] Bridge failed (exit 2) — failing closed\n"
+            f"{payload}\n"
+        )
+        reason = rg_mod._summarize_result_reason({"stdout": stdout})  # ANTICHEAT_OK
+        assert reason == "Bridge subprocess failed in round 1 (exit=2)."
 
 
 class TestTierMapping:
@@ -372,6 +413,25 @@ class TestAttemptRecovery:
     def test_unclassified_escalates(self, tmp_path):
         r = rg_mod.attempt_recovery(tmp_path, {"status": "banana"}, "w1")
         assert r["recovered"] is False and r["tier"] == 4 and r["failure_class"] == "unclassified"
+
+    def test_tier3_attempt_recovery_invokes_live_loop(self, tmp_path):
+        loop_result = {
+            "recovered": True,
+            "exhausted": False,
+            "iterations": 1,
+            "log": [{"action": "shell", "detail": "retrying phase_b_executor"}],
+        }
+        with patch.object(rg_mod, "run_recovery_loop", return_value=loop_result) as mock_loop:
+            r = rg_mod.attempt_recovery(
+                tmp_path,
+                {"status": "failed", "step": "phase_b", "stderr": "FAILED test_x"},
+                "w1",
+            )
+        mock_loop.assert_called_once()
+        assert r["recovered"] is True
+        assert r["tier"] == 3
+        assert r["action"] == "recovery_loop"
+        assert "retrying phase_b_executor" in r["detail"]
 
     def test_distinct_executor_timeouts_separate_buckets(self, tmp_path, monkeypatch):
         """Timeout results with different executors don't share exhaustion bucket.
@@ -730,6 +790,40 @@ class TestRecoveryLoop:
         assert status["child_pid"] == 0
         assert status["last_action"] == "shell"
 
+    def test_successful_shell_fix_requests_retry_without_verify(self, tmp_path):
+        result = {
+            "status": "failed",
+            "step": "phase_b_executor",
+            "executor": "phase_b_executor",
+            "stderr": "FAILED test_x",
+            "stdout": "",
+        }
+        claude_response = json.dumps({
+            "action": "shell",
+            "commands": ["echo fixed"],
+            "explanation": "apply fix and retry",
+        })
+
+        def mock_run(cmd, **kw):
+            return MagicMock(stdout="ok", stderr="", returncode=0)
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = mock_run
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response, pid=5151)
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(tmp_path, result, "w-retry")
+        assert r["recovered"] is True
+        assert r["exhausted"] is False
+        assert r["iterations"] == 1
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["active"] is False
+        assert status["outcome"] == "retry_requested"
+        assert status["state"] == "tier3_retry_requested"
+        assert status["retry_target"] == "phase_b_executor"
+        entries = rg_mod._load_recovery_log(tmp_path)  # ANTICHEAT_OK
+        assert entries[-1]["outcome"] == "retry_requested"
+
     def test_max_iterations(self, tmp_path):
         """Verify loop stops after max_iterations."""
         result = {"status": "failed", "step": "test", "stderr": "fail", "stdout": ""}
@@ -1038,6 +1132,49 @@ class TestRecoveryStatusRendering:
         assert "LAST RECOVERY — Tier 3 agent_review_crash" in rendered
         assert "Outcome: success via shell" in rendered
         assert "Recovery note: narrowed the fix" in rendered
+
+
+class TestRecoveryWebSnapshot:
+    def test_missing_snapshot_returns_none(self, tmp_path):
+        with patch.object(web_mod, "REPO_ROOT", tmp_path):
+            assert web_mod.recovery_snapshot() is None  # ANTICHEAT_OK
+
+    def test_active_snapshot_exposes_plain_recovery_fields(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime.now(timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": True,
+                    "tier": 3,
+                    "failure_class": "agent_review_crash",
+                    "wave_id": "wave-recovery",
+                    "wave_invocation_count": 4,
+                    "tuple_attempt_index": 2,
+                    "retry_target": "phase_a_executor",
+                    "state": "tier3_waiting_on_claude",
+                    "reason": "Bridge subprocess failed in round 1",
+                    "explanation": "trying a narrower fix",
+                    "current_iteration": 2,
+                    "max_iterations": 3,
+                    "owner_pid": 123,
+                    "child_pid": 456,
+                    "child_role": "claude",
+                    "current_command": "claude --print",
+                    "updated_at": now.isoformat(),
+                }
+            ),
+            encoding="utf-8",
+        )
+        with patch.object(web_mod, "REPO_ROOT", tmp_path):
+            snapshot = web_mod.recovery_snapshot()  # ANTICHEAT_OK
+        assert snapshot["label"] == "ACTIVE"
+        assert snapshot["retry_target"] == "Phase A"
+        assert snapshot["reason"] == "Bridge subprocess failed in round 1"
+        assert snapshot["current_iteration"] == 2
+        assert snapshot["max_iterations"] == 3
+        assert snapshot["child_role"] == "claude"
 
 
 class TestObservabilityNoiseFilters:
