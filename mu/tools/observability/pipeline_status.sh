@@ -3,7 +3,220 @@
 # Read-only: never modifies state, only reads .agent_bus/ and process info.
 set -uo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+LIVE_STATE_MAX_AGE_SECONDS=21600
+
+file_age_seconds() {
+  local path="$1"
+  local mtime="" now=""
+  mtime=$(stat -f%m "$path" 2>/dev/null || stat -c%Y "$path" 2>/dev/null || echo "")
+  [ -n "$mtime" ] || return 1
+  now=$(date +%s)
+  printf '%s\n' "$((now - mtime))"
+}
+
+file_is_recent() {
+  local path="$1" age=""
+  age=$(file_age_seconds "$path" 2>/dev/null || true)
+  [ -n "$age" ] || return 1
+  [ "$age" -le "$LIVE_STATE_MAX_AGE_SECONDS" ]
+}
+
+lock_file_is_live() {
+  local lock="$1" lock_pid=""
+  [ -s "$lock" ] || return 1
+  lock_pid=$(jq -r '.pid // "0"' "$lock" 2>/dev/null || printf '0')
+  if [ "$lock_pid" != "0" ] && kill -0 "$lock_pid" 2>/dev/null; then
+    return 0
+  fi
+  file_is_recent "$lock"
+}
+
+list_linked_worktrees() {
+  local current_path="" is_bare=false
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      worktree\ *)
+        current_path="${line#worktree }"
+        is_bare=false
+        ;;
+      bare)
+        is_bare=true
+        ;;
+      "")
+        if [ "$is_bare" = false ] && [ -n "$current_path" ]; then
+          printf '%s\n' "$current_path"
+        fi
+        current_path=""
+        is_bare=false
+        ;;
+    esac
+  done < <(git worktree list --porcelain 2>/dev/null || true)
+
+  if [ "$is_bare" = false ] && [ -n "$current_path" ]; then
+    printf '%s\n' "$current_path"
+  fi
+}
+
+find_worktree_for_branch() {
+  local target="$1"
+  local current_path="" current_branch="" match="" matches=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      worktree\ *)
+        current_path="${line#worktree }"
+        current_branch=""
+        ;;
+      branch\ refs/heads/*)
+        current_branch="${line#branch refs/heads/}"
+        if [ "$current_branch" = "$target" ] && [ -n "$current_path" ]; then
+          match="$current_path"
+          matches=$((matches + 1))
+        fi
+        ;;
+      "")
+        current_path=""
+        current_branch=""
+        ;;
+    esac
+  done < <(git worktree list --porcelain 2>/dev/null || true)
+
+  if [ "$matches" -eq 1 ] && [ -n "$match" ]; then
+    printf '%s\n' "$match"
+    return 0
+  fi
+  return 1
+}
+
+worktree_has_live_pipeline_state() {
+  local path="$1"
+  local lock=""
+  for lock in "$path/.agent_bus/meta/meta_bridge.lock" "$path/.agent_bus/bridge.lock"; do
+    lock_file_is_live "$lock" && return 0
+  done
+
+  if [ -s "$path/.agent_bus/meta/continuation.json" ] && file_is_recent "$path/.agent_bus/meta/continuation.json"; then
+    return 0
+  fi
+
+  local commit_state=""
+  commit_state=$(ls -t "$path"/.agent_bus/executors/commit_executor_*.json 2>/dev/null | head -1) || true
+  if [ -n "$commit_state" ]; then
+    local status=""
+    status=$(jq -r '.status // ""' "$commit_state" 2>/dev/null || true)
+    case "$status" in
+      ""|success|held|error)
+        ;;
+      *)
+        file_is_recent "$commit_state" && return 0
+        ;;
+    esac
+  fi
+
+  return 1
+}
+
+find_active_worktree() {
+  local match="" matches=0
+
+  while IFS= read -r path; do
+    [ -z "$path" ] && continue
+    worktree_has_live_pipeline_state "$path" || continue
+    match="$path"
+    matches=$((matches + 1))
+  done < <(list_linked_worktrees)
+
+  if [ "$matches" -eq 1 ] && [ -n "$match" ]; then
+    printf '%s\n' "$match"
+    return 0
+  fi
+  if [ "$matches" -gt 1 ]; then
+    return 2
+  fi
+  return 1
+}
+
+find_sole_linked_worktree() {
+  local match="" matches=0
+
+  while IFS= read -r path; do
+    [ -z "$path" ] && continue
+    match="$path"
+    matches=$((matches + 1))
+  done < <(list_linked_worktrees)
+
+  if [ "$matches" -eq 1 ] && [ -n "$match" ]; then
+    printf '%s\n' "$match"
+    return 0
+  fi
+  return 1
+}
+
+resolve_observability_repo_root() {
+  local root="" branch="" current_root=""
+  if current_root="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -n "$current_root" ]; then
+    if worktree_has_live_pipeline_state "$current_root"; then
+      printf '%s\n' "$current_root"
+      return 0
+    fi
+
+    if root="$(find_active_worktree)"; then
+      if [ -n "$root" ] && [ "$root" != "$current_root" ]; then
+        printf '%s\n' "$root"
+        return 0
+      fi
+    else
+      local active_rc=$?
+      if [ "$active_rc" -eq 2 ]; then
+        echo "ERROR: cannot resolve repo root — multiple active pipeline worktrees found while current worktree is idle" >&2
+        return 1
+      fi
+    fi
+
+    printf '%s\n' "$current_root"
+    return 0
+  fi
+
+  branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  if [ -n "$branch" ]; then
+    root="$(find_worktree_for_branch "$branch" || true)"
+    if [ -n "$root" ]; then
+      printf '%s\n' "$root"
+      return 0
+    fi
+  fi
+
+  if root="$(find_active_worktree)"; then
+    if [ -n "$root" ]; then
+      printf '%s\n' "$root"
+      return 0
+    fi
+  else
+    local active_rc=$?
+    if [ "$active_rc" -eq 2 ]; then
+      echo "ERROR: cannot resolve repo root — multiple active pipeline worktrees found" >&2
+      return 1
+    fi
+  fi
+
+  root="$(find_sole_linked_worktree || true)"
+  if [ -n "$root" ]; then
+    printf '%s\n' "$root"
+    return 0
+  fi
+
+  root="$(find_worktree_for_branch dev || true)"
+  if [ -n "$root" ]; then
+    printf '%s\n' "$root"
+    return 0
+  fi
+
+  echo "ERROR: cannot resolve repo root — no exact branch worktree, unique active pipeline worktree, sole linked worktree, or unique dev worktree found for '${branch:-<detached>}'" >&2
+  return 1
+}
+
+if ! REPO_ROOT="$(resolve_observability_repo_root)"; then
+  exit 1
+fi
 BUS="$REPO_ROOT/.agent_bus"
 
 # Colors (disable if not tty)
@@ -118,7 +331,9 @@ fi
 # ── Recovery ──
 if [ -f "$REPO_ROOT/mu/tools/observability/pipeline_dashboard.py" ]; then
   echo ""
-  python3 "$REPO_ROOT/mu/tools/observability/pipeline_dashboard.py" --render-recovery --repo-root "$REPO_ROOT" 2>/dev/null || true
+  python3 "$REPO_ROOT/mu/tools/observability/pipeline_dashboard.py" \
+    --render-recovery \
+    --repo-root "$REPO_ROOT" 2>/dev/null || true
 fi
 
 # ── PR / CI Status ──

@@ -477,7 +477,9 @@ time.sleep(10.0)
     elapsed = time.monotonic() - start
 
     assert elapsed < 2.0
-    assert "warming up" in raw_output_path.read_text(encoding="utf-8")
+    raw_text = raw_output_path.read_text(encoding="utf-8")
+    assert raw_text.startswith("[stderr]\n")
+    assert "warming up" in raw_text
 
 
 def test_run_adapter_stale_timeout_kills_detached_descendants(tmp_path: Path) -> None:
@@ -2442,13 +2444,15 @@ def test_bridge_zero_output_watchdog_fails_closed(tmp_path: Path, monkeypatch: p
     config = json.loads(paths.config_path.read_text(encoding="utf-8"))
     config["agents"]["codex"] = {
         "mode": "live",
-        "cmd": [sys.executable, str(noisy_agent)],
+        "cmd": [sys.executable, "-u", str(noisy_agent)],
         "prompt_via_stdin": True,
         "timeout_s": 30,
         "env": {},
     }
     paths.config_path.write_text(json.dumps(config), encoding="utf-8")
-    monkeypatch.setattr(bridge, "BRIDGE_ZERO_OUTPUT_TIMEOUT_S", 0.05)
+    # Keep the watchdog aggressive while giving CI enough process-start headroom
+    # for the noisy reviewer to emit at least one stderr line.
+    monkeypatch.setattr(bridge, "BRIDGE_ZERO_OUTPUT_TIMEOUT_S", 0.2)
     monkeypatch.setattr(bridge, "BRIDGE_MAX_TURN_WALL_TIME_S", 1.0)
 
     job_id = bridge.submit_job(
@@ -2478,6 +2482,7 @@ def test_bridge_zero_output_watchdog_fails_closed(tmp_path: Path, monkeypatch: p
     assert reviewer_turn is not None
     assert reviewer_turn["status"] == "FAILED"
     raw_text = Path(reviewer_turn["raw_output_path"]).read_text(encoding="utf-8")
+    assert raw_text.startswith("[stderr]\n")
     assert "noise" in raw_text
     assert "BEGIN_AGENT_ENVELOPE" not in raw_text
     assert job is not None

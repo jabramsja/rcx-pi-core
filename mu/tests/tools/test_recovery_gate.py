@@ -1133,6 +1133,89 @@ class TestRecoveryStatusRendering:
         assert "Outcome: success via shell" in rendered
         assert "Recovery note: narrowed the fix" in rendered
 
+    def test_recent_attempts_rendered_for_matching_invocation(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime(2026, 4, 3, 21, 0, tzinfo=timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": True,
+                    "invocation_id": "wave-gamma-phase_b_executor-process_timeout-01",
+                    "wave_id": "wave-gamma",
+                    "step": "phase_b_executor",
+                    "failure_class": "process_timeout",
+                    "tier": 3,
+                    "wave_invocation_count": 3,
+                    "tuple_attempt_index": 2,
+                    "retry_target": "phase_b_executor",
+                    "state": "tier3_verifying",
+                    "owner_pid": 1234,
+                    "child_pid": 5678,
+                    "child_role": "claude",
+                    "reason": "phase_b timed out",
+                    "updated_at": (now - timedelta(seconds=8)).isoformat(),
+                    "current_iteration": 2,
+                    "max_iterations": 3,
+                    "current_command": "pytest mu/tests/tools/test_executor_dispatch.py -q",
+                    "explanation": "retry with narrower timeout override",
+                    "detail": "",
+                }
+            ),
+            encoding="utf-8",
+        )
+        (status_path / "recovery_log.json").write_text(
+            json.dumps(
+                {
+                    "attempts": [
+                        {
+                            "timestamp": (now - timedelta(seconds=40)).isoformat(),
+                            "wave_id": "wave-old",
+                            "step": "phase_b_executor",
+                            "failure_class": "process_timeout",
+                            "tier": 3,
+                            "action": "tier3_iter1_skip",
+                            "outcome": "skipped",
+                            "duration_s": 0.5,
+                            "detail": "old unrelated invocation",
+                            "invocation_id": "wave-old-phase_b_executor-process_timeout-01",
+                        },
+                        {
+                            "timestamp": (now - timedelta(seconds=20)).isoformat(),
+                            "wave_id": "wave-gamma",
+                            "step": "phase_b_executor",
+                            "failure_class": "process_timeout",
+                            "tier": 3,
+                            "action": "tier3_iter1_parse_error",
+                            "outcome": "failed",
+                            "duration_s": 1.25,
+                            "detail": "claude returned prose instead of json",
+                            "invocation_id": "wave-gamma-phase_b_executor-process_timeout-01",
+                        },
+                        {
+                            "timestamp": (now - timedelta(seconds=5)).isoformat(),
+                            "wave_id": "wave-gamma",
+                            "step": "phase_b_executor",
+                            "failure_class": "process_timeout",
+                            "tier": 3,
+                            "action": "tier3_iter2_shell",
+                            "outcome": "retry_requested",
+                            "duration_s": 2.75,
+                            "detail": "timeout override applied; retrying Phase B",
+                            "invocation_id": "wave-gamma-phase_b_executor-process_timeout-01",
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+        assert "Recent attempts:" in rendered
+        assert "tier3_iter1_parse_error -> failed" in rendered
+        assert "tier3_iter2_shell -> retry_requested" in rendered
+        assert "old unrelated invocation" not in rendered
+
 
 class TestRecoveryWebSnapshot:
     def test_missing_snapshot_returns_none(self, tmp_path):
@@ -1210,3 +1293,486 @@ class TestObservabilityNoiseFilters:
         assert phase == "idle"
         assert pid is None
         assert started is None
+
+
+class TestObservabilityWorktreeResolution:
+    def _write_executable(self, path: Path, content: str) -> None:
+        path.write_text(content, encoding="utf-8")
+        path.chmod(path.stat().st_mode | 0o111)
+
+    def _fake_git_dir(
+        self,
+        tmp_path: Path,
+        *,
+        show_toplevel: str | None,
+        branch: str | None,
+        worktree_output: str = "",
+    ) -> Path:
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        script = f"""#!/usr/bin/env bash
+set -eu
+case "$*" in
+  "rev-parse --show-toplevel")
+    {"printf '%s\\n' " + repr(show_toplevel) if show_toplevel is not None else "exit 128"}
+    ;;
+  "symbolic-ref --quiet --short HEAD")
+    {"printf '%s\\n' " + repr(branch) if branch is not None else "exit 1"}
+    ;;
+  "worktree list --porcelain")
+    printf '%b' {worktree_output!r}
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+"""
+        self._write_executable(bin_dir / "git", script)
+        return bin_dir
+
+    def _minimal_bus(self, repo_root: Path) -> None:
+        (repo_root / ".agent_bus" / "executors").mkdir(parents=True, exist_ok=True)
+        (repo_root / ".agent_bus" / "meta" / "pre_commit_receipts").mkdir(parents=True, exist_ok=True)
+
+    def _install_observability_script(self, repo_root: Path, name: str) -> None:
+        target = repo_root / "mu" / "tools" / "observability"
+        target.mkdir(parents=True, exist_ok=True)
+        script = target / name
+        script.write_text((_OBSERVABILITY_DIR / name).read_text(encoding="utf-8"), encoding="utf-8")
+        script.chmod(script.stat().st_mode | 0o111)
+
+    def _write_commit_state(self, repo_root: Path, *, status: str) -> None:
+        state = repo_root / ".agent_bus" / "executors" / "commit_executor_test.json"
+        state.write_text(f'{{"status": "{status}"}}\\n', encoding="utf-8")
+
+    def _set_age_seconds(self, path: Path, *, age_seconds: int) -> None:
+        now = datetime.now(timezone.utc).timestamp()
+        aged = now - age_seconds
+        os.utime(path, (aged, aged))
+
+    def test_pipeline_status_fails_closed_when_branch_is_unresolved(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        bin_dir = self._fake_git_dir(tmp_path, show_toplevel=None, branch=None)
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode != 0
+        assert "cannot resolve repo root" in result.stderr.lower()
+
+    def test_pipeline_status_uses_exact_linked_worktree_from_common_dir(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        linked = tmp_path / "linked"
+        linked.mkdir()
+        self._minimal_bus(linked)
+        branch = "jabramsja/pipeline-monitor-worktree-rebind-2026-04-03"
+        worktree_output = (
+            f"worktree {common}\n"
+            "bare\n\n"
+            f"worktree {linked}\n"
+            "HEAD 0123456789abcdef\n"
+            f"branch refs/heads/{branch}\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=None,
+            branch=branch,
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "PIPELINE STATUS" in result.stdout
+
+    def test_pipeline_status_uses_unique_active_worktree_when_branch_is_stale(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        stale = tmp_path / "stale"
+        active = tmp_path / "active"
+        stale.mkdir()
+        active.mkdir()
+        self._minimal_bus(active)
+        self._write_commit_state(active, status="post_commit_pending")
+        worktree_output = (
+            f"worktree {common}\n"
+            "bare\n\n"
+            f"worktree {stale}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/stale-wave\n\n"
+            f"worktree {active}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=None,
+            branch="jabramsja/missing-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "PIPELINE STATUS" in result.stdout
+        assert "post_commit_pending" in result.stdout
+
+    def test_pipeline_status_prefers_unique_active_worktree_over_quiet_current_root(self, tmp_path):
+        stale = tmp_path / "stale"
+        active = tmp_path / "active"
+        stale.mkdir()
+        active.mkdir()
+        self._minimal_bus(stale)
+        self._minimal_bus(active)
+        self._write_commit_state(stale, status="post_commit_pending")
+        self._set_age_seconds(
+            stale / ".agent_bus" / "executors" / "commit_executor_test.json",
+            age_seconds=7 * 60 * 60,
+        )
+        self._write_commit_state(active, status="post_commit_pending")
+        worktree_output = (
+            f"worktree {stale}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/stale-wave\n\n"
+            f"worktree {active}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(stale),
+            branch="jabramsja/stale-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=stale,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "post_commit_pending" in result.stdout
+
+    def test_pipeline_status_renders_recovery_block_when_dashboard_is_present(self, tmp_path):
+        repo_root = tmp_path / "active"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "pipeline_status.sh")
+        self._install_observability_script(repo_root, "pipeline_dashboard.py")
+        recovery_dir = repo_root / ".agent_bus" / "recovery"
+        recovery_dir.mkdir(parents=True)
+        now = datetime.now(timezone.utc)
+        (recovery_dir / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": True,
+                    "tier": 3,
+                    "failure_class": "agent_review_crash",
+                    "wave_id": "wave-recovery",
+                    "retry_target": "phase_a_executor",
+                    "state": "tier3_waiting_on_claude",
+                    "reason": "Bridge subprocess failed in round 1",
+                    "current_iteration": 2,
+                    "max_iterations": 3,
+                    "updated_at": now.isoformat(),
+                }
+            ),
+            encoding="utf-8",
+        )
+        worktree_output = (
+            f"worktree {repo_root}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/recovery-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/recovery-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_status.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "RECOVERY" in result.stdout
+        assert "Tier 3 agent_review_crash" in result.stdout
+
+    def test_pipeline_status_uses_sole_linked_worktree_when_only_one_exists(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        linked = tmp_path / "linked"
+        linked.mkdir()
+        self._minimal_bus(linked)
+        worktree_output = (
+            f"worktree {common}\n"
+            "bare\n\n"
+            f"worktree {linked}\n"
+            "HEAD 3333333333333333\n"
+            "branch refs/heads/dev\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=None,
+            branch="main",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "PIPELINE STATUS" in result.stdout
+
+    def test_pipeline_status_uses_unique_dev_worktree_when_common_head_is_unattached(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        feature = tmp_path / "feature"
+        dev = tmp_path / "dev"
+        feature.mkdir()
+        dev.mkdir()
+        self._minimal_bus(dev)
+        worktree_output = (
+            f"worktree {common}\n"
+            "bare\n\n"
+            f"worktree {feature}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/feature-wave\n\n"
+            f"worktree {dev}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/dev\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=None,
+            branch="main",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "PIPELINE STATUS" in result.stdout
+
+    def test_pipeline_status_fails_closed_when_multiple_active_worktrees_exist(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        active_one = tmp_path / "active-one"
+        active_two = tmp_path / "active-two"
+        active_one.mkdir()
+        active_two.mkdir()
+        self._minimal_bus(active_one)
+        self._minimal_bus(active_two)
+        self._write_commit_state(active_one, status="post_commit_pending")
+        self._write_commit_state(active_two, status="bot_findings_pending")
+        worktree_output = (
+            f"worktree {common}\n"
+            "bare\n\n"
+            f"worktree {active_one}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/active-one\n\n"
+            f"worktree {active_two}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-two\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=None,
+            branch="jabramsja/missing-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode != 0
+        assert "multiple active pipeline worktrees" in result.stderr.lower()
+
+    def test_pipeline_status_fails_closed_when_current_root_is_quiet_and_multiple_active_worktrees_exist(self, tmp_path):
+        quiet = tmp_path / "quiet"
+        active_one = tmp_path / "active-one"
+        active_two = tmp_path / "active-two"
+        quiet.mkdir()
+        active_one.mkdir()
+        active_two.mkdir()
+        self._minimal_bus(quiet)
+        self._minimal_bus(active_one)
+        self._minimal_bus(active_two)
+        self._write_commit_state(active_one, status="post_commit_pending")
+        self._write_commit_state(active_two, status="bot_findings_pending")
+        worktree_output = (
+            f"worktree {quiet}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/quiet-wave\n\n"
+            f"worktree {active_one}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-one\n\n"
+            f"worktree {active_two}\n"
+            "HEAD 3333333333333333\n"
+            "branch refs/heads/jabramsja/active-two\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(quiet),
+            branch="jabramsja/quiet-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=quiet,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode != 0
+        assert "multiple active pipeline worktrees found while current worktree is idle" in result.stderr.lower()
+
+    def test_pipeline_monitor_fails_closed_when_branch_is_unresolved(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        bin_dir = self._fake_git_dir(tmp_path, show_toplevel=None, branch=None)
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_monitor.sh"), "status"],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode != 0
+        assert "cannot resolve repo root" in result.stderr.lower()
+
+    def test_pipeline_monitor_status_uses_unique_dev_worktree_when_common_head_is_unattached(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        feature = tmp_path / "feature"
+        dev = tmp_path / "dev"
+        feature.mkdir()
+        dev.mkdir()
+        self._minimal_bus(dev)
+        self._install_observability_script(dev, "pipeline_status.sh")
+        worktree_output = (
+            f"worktree {common}\n"
+            "bare\n\n"
+            f"worktree {feature}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/feature-wave\n\n"
+            f"worktree {dev}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/dev\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=None,
+            branch="main",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_monitor.sh"), "status"],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "PIPELINE STATUS" in result.stdout
+
+    def test_pipeline_monitor_status_prefers_unique_active_worktree_over_quiet_current_root(self, tmp_path):
+        stale = tmp_path / "stale"
+        active = tmp_path / "active"
+        stale.mkdir()
+        active.mkdir()
+        self._minimal_bus(stale)
+        self._minimal_bus(active)
+        self._install_observability_script(active, "pipeline_status.sh")
+        self._write_commit_state(stale, status="post_commit_pending")
+        self._set_age_seconds(
+            stale / ".agent_bus" / "executors" / "commit_executor_test.json",
+            age_seconds=7 * 60 * 60,
+        )
+        self._write_commit_state(active, status="post_commit_pending")
+        worktree_output = (
+            f"worktree {stale}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/stale-wave\n\n"
+            f"worktree {active}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(stale),
+            branch="jabramsja/stale-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_monitor.sh"), "status"],
+            cwd=stale,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "post_commit_pending" in result.stdout

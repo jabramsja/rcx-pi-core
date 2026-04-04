@@ -352,7 +352,52 @@ def _surface_wave_id(args: argparse.Namespace, repo_root: Path) -> str:
                 pass
         if args.plan:
             return normalize_wave_id(Path(args.plan).stem)
+    if args.surface == "commit":
+        if args.handoff:
+            try:
+                handoff = json.loads(args.handoff.read_text(encoding="utf-8"))
+                wave_id = handoff.get("wave_id")
+                if isinstance(wave_id, str) and wave_id.strip():
+                    return normalize_wave_id(wave_id)
+            except (json.JSONDecodeError, OSError, TypeError, ValueError):
+                pass
+            return normalize_wave_id(args.handoff.stem)
+        payload = _load_routing_record_payload(
+            path_value=args.routing_record_path,
+            json_value=args.routing_record_json,
+        )
+        if payload:
+            try:
+                record = json.loads(payload)
+                wave_name = record.get("wave_name") or record.get("wave_id", "")
+                if isinstance(wave_name, str) and wave_name.strip():
+                    return normalize_wave_id(wave_name)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
     return "wave-unknown"
+
+
+def _surface_decision(args: argparse.Namespace) -> str:
+    """Derive the logical dispatcher decision for a modular surface invocation."""
+    if args.surface == "phase-a":
+        return "ROUTE_PHASE_A"
+    if args.surface == "phase-b":
+        return "ROUTE_PHASE_B"
+    if args.surface == "commit":
+        payload = _load_routing_record_payload(
+            path_value=args.routing_record_path,
+            json_value=args.routing_record_json,
+        )
+        if payload:
+            try:
+                record = json.loads(payload)
+                decision = record.get("decision")
+                if isinstance(decision, str) and decision.strip():
+                    return decision
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+        return "COMMIT_GO"
+    raise ControlSurfaceError(f"Unsupported recoverable surface: {args.surface}")
 
 
 def run_recoverable_surface_command(
@@ -361,16 +406,14 @@ def run_recoverable_surface_command(
     repo_root: Path,
     config: dict[str, Any],
 ) -> int:
-    """Run Phase A/B surfaces through the dispatcher recovery gate."""
+    """Run recoverable control surfaces through the dispatcher recovery gate."""
     cmd = build_surface_command(args)
     executor_name = {
         "phase-a": "phase_a_executor",
         "phase-b": "phase_b_executor",
+        "commit": "commit_executor",
     }[args.surface]
-    decision = {
-        "phase-a": "ROUTE_PHASE_A",
-        "phase-b": "ROUTE_PHASE_B",
-    }[args.surface]
+    decision = _surface_decision(args)
     wave_id = _surface_wave_id(args, repo_root)
     original_timeouts = None
     surface_record = {
@@ -399,7 +442,31 @@ def run_recoverable_surface_command(
                 try:
                     completed = _run_executor_in_group(cmd, cwd=repo_root, timeout=timeout)
                     _emit_completed_process_output(completed)
-                    if completed.returncode == 0:
+                    if executor_name == "commit_executor":
+                        if completed.returncode != 0:
+                            result = {
+                                "status": "failed",
+                                "decision": decision,
+                                "executor": executor_name,
+                                "step": args.surface.replace("-", "_"),
+                                "exit_code": completed.returncode,
+                                "stdout": completed.stdout,
+                                "stderr": completed.stderr,
+                            }
+                        else:
+                            c_status, c_decision = _classify_commit_executor_result(completed)
+                            if c_status in {"success", "held"}:
+                                return 0
+                            result = {
+                                "status": c_status,
+                                "decision": c_decision,
+                                "executor": executor_name,
+                                "step": args.surface.replace("-", "_"),
+                                "exit_code": completed.returncode,
+                                "stdout": completed.stdout,
+                                "stderr": completed.stderr,
+                            }
+                    elif completed.returncode == 0:
                         result = _continue_successful_executor_chain(
                             executor_name,
                             completed,
@@ -568,6 +635,8 @@ def _classify_commit_executor_result(
                 return "held", "COMMIT_HELD"
             if status == "success":
                 return "success", "COMMIT_GO"
+            if status in {"error", "failed", "timeout"}:
+                return "failed", "COMMIT_GO"
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
     for line in stdout.splitlines():
@@ -585,8 +654,12 @@ def _classify_commit_executor_result(
             return "held", "COMMIT_HELD"
         if status == "success":
             return "success", "COMMIT_GO"
+        if status in {"error", "failed", "timeout"}:
+            return "failed", "COMMIT_GO"
     if "[commit-executor] Status: held" in stdout:
         return "held", "COMMIT_HELD"
+    if "[commit-executor] Status: error" in stdout:
+        return "failed", "COMMIT_GO"
     return "success", "COMMIT_GO"
 
 
@@ -1441,7 +1514,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[error] {exc}", file=sys.stderr)
             return 1
         try:
-            if args.surface in {"phase-a", "phase-b"}:
+            if args.surface in {"phase-a", "phase-b", "commit"}:
                 config = load_config()
                 return run_recoverable_surface_command(
                     args,

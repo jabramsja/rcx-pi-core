@@ -28,6 +28,54 @@ All notable changes to RCX are documented in this file.
 - a simulated hook-env proof shows representative untracked-artifact,
   meta-bridge, and ensure_feature_branch tests return to green once the
   inherited hook-local vars are cleared
+
+### Pipeline Monitor Linked-Worktree Rebind
+
+- `pipeline_monitor.sh` now resolves a real linked worktree when launched from
+  the bare/common repo path, and the tmux pane commands explicitly `cd` into
+  that resolved worktree before starting the watcher, findings, timeline, and
+  process panes
+- `pipeline_status.sh` now uses the same linked-worktree resolver, so the
+  one-shot pipeline summary works from the bare/common repo path instead of
+  failing on an empty `git rev-parse --show-toplevel`
+- both entrypoints now ignore stale non-final executor state after a bounded
+  age window, so ancient root-worktree `post_commit_pending` artifacts stop
+  masking the real live pipeline in another linked worktree
+- both observability entrypoints now implement the same resolver rules:
+  prefer the exact current-branch worktree, then a uniquely active pipeline
+  worktree, then a sole linked worktree, then the unique linked `dev`
+  worktree, and only then fail closed
+- `pipeline_dashboard.py --render-recovery` now shows recent matching recovery
+  attempts from `.agent_bus/recovery/recovery_log.json`, giving the tmux
+  recovery block loop/outcome detail instead of only a static status snapshot
+- `mu/tests/tools/test_recovery_gate.py` now locks the exact linked-worktree
+  success path, the stale-branch active-worktree fallback, the sole-linked
+  fallback, the unique-`dev` fallback, the quiet-current-root stale-state
+  override, and recent-attempt recovery rendering without increasing test-file
+  count
+- this closes the concrete stale-pane failure mode where tmux started from the
+  bare/common path launched `/mu/tools/observability/...` commands or kept
+  showing ancient root-worktree state instead of the live recovery-aware pane
+
+### Routed Commit Recovery And Bridge Watchdog Hardening
+
+- `executor_dispatch.py` now routes the modular `commit` surface through the
+  same recovery wrapper used by `phase-a` / `phase-b`, derives commit-wave
+  identity from the handoff or routing record, and treats structured commit
+  `status:error` output as a real failed commit surface instead of a silent
+  success
+- `bridge_adapters.py` now starts the zero-output watchdog after prompt
+  delivery and writes stderr to the raw transcript incrementally with the
+  normal `[stderr]` sentinel, so noisy reviewers no longer fail closed with an
+  empty raw transcript just because CI process startup consumed the original
+  timer budget
+- `mu/tests/tools/test_agent_bridge_supervisor.py` now gives the zero-output
+  bridge watchdog proof a realistic CI margin and locks the stderr-only raw
+  transcript prefix directly
+- `mu/tests/tools/test_executor_dispatch.py` now locks commit-surface recovery,
+  commit-surface recovery-wrapper routing from `main()`, and structured
+  commit-status error classification directly
+
 ### Recovery Observability And Watcher-Noise Hardening
 
 - `recovery_gate.py` now writes a structured
