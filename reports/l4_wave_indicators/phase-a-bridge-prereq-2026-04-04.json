@@ -1,24 +1,24 @@
 {
-  "wave_id": "recovery-observability-2026-04-03",
-  "repeat_run_speedup_ratio": 1.387897,
+  "wave_id": "phase-a-bridge-prereq-2026-04-04",
+  "repeat_run_speedup_ratio": 1.28722,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.402968,
+  "step_growth_slope": 0.380705,
   "repeat_run_raw_seconds": [
-    0.559278,
-    0.402968
+    0.490051,
+    0.380705
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.559278
+      "elapsed_seconds": 0.490051
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.962246
+      "elapsed_seconds": 0.870756
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-04T05:27:21Z",
+  "collection_timestamp_utc": "2026-04-04T09:44:40Z",
   "collector_version": "2.2.0"
 }

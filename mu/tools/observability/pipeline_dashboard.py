@@ -122,6 +122,24 @@ def _excerpt(value: Any, limit: int = 110) -> str:
     return excerpt[: limit - 3].rstrip() + "..."
 
 
+def _is_unhelpful_recovery_text(text: str) -> bool:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return True
+    if re.fullmatch(r"[\d,\s]+", cleaned):
+        return True
+    if cleaned.lower().startswith("tokens used"):
+        return True
+    return False
+
+
+def _is_generic_recovery_reason(text: str) -> bool:
+    return bool(re.fullmatch(
+        r"[a-z0-9_-]+:\s+(failed|error|partial|success|held|unknown)",
+        (text or "").strip().lower(),
+    ))
+
+
 def _pid_state(pid_value: Any) -> tuple[int, str]:
     try:
         pid = int(pid_value)
@@ -195,6 +213,62 @@ def _human_recovery_state(value: str) -> str:
     return mapping.get(cleaned, cleaned.replace("_", " "))
 
 
+def _rendered_recovery_reason(status: dict[str, Any]) -> tuple[str, str]:
+    reason = _excerpt(status.get("reason", ""))
+    detail = _excerpt(status.get("detail", ""))
+    explanation = _excerpt(status.get("explanation", ""))
+    if reason and not _is_unhelpful_recovery_text(reason) and not _is_generic_recovery_reason(reason):
+        return reason, "reason"
+    if detail and not _is_unhelpful_recovery_text(detail):
+        return detail, "detail"
+    if reason and not _is_unhelpful_recovery_text(reason):
+        return reason, "reason"
+    if explanation and not _is_unhelpful_recovery_text(explanation):
+        return explanation, "explanation"
+    return "", ""
+
+
+def _format_recovery_pid_line(status: dict[str, Any], *, active: bool) -> str:
+    owner_pid, owner_state = _pid_state(status.get("owner_pid"))
+    child_pid, child_state = _pid_state(status.get("child_pid"))
+    child_role = _excerpt(status.get("child_role", ""), 24)
+    if not owner_pid and not child_pid:
+        return ""
+
+    parts: list[str] = []
+    if owner_pid:
+        owner_label = f"Owner PID: {owner_pid}"
+        if owner_state:
+            if not active and owner_state == "dead":
+                owner_label += " (dead, historical)"
+            else:
+                owner_label += f" ({owner_state})"
+        parts.append(owner_label)
+    if child_pid:
+        child_label = f"{child_role or 'child'} PID: {child_pid}"
+        if child_state:
+            if not active and child_state == "dead":
+                child_label += " (dead, historical)"
+            else:
+                child_label += f" ({child_state})"
+        parts.append(child_label)
+    return "  " + " · ".join(parts)
+
+
+def _attempt_matches_wave_step(attempt: dict[str, Any], wave_id: str, step: str) -> bool:
+    if wave_id and str(attempt.get("wave_id", "")).strip() != wave_id:
+        return False
+    if step and str(attempt.get("step", "")).strip() != step:
+        return False
+    return True
+
+
+def _is_trivial_recovery_attempt(attempt: dict[str, Any]) -> bool:
+    action = str(attempt.get("action", "")).strip().lower()
+    outcome = str(attempt.get("outcome", "")).strip().lower()
+    return action in {"noop", "no_fix_registered"} and outcome in {"failed", "skipped"}
+
+
 def _recent_recovery_attempt_lines(
     repo_root: Path, status: dict[str, Any], *, limit: int = 3,
 ) -> list[str]:
@@ -223,10 +297,25 @@ def _recent_recovery_attempt_lines(
         if len(matches) >= limit:
             break
 
+    used_wave_fallback = False
+    if (
+        invocation_id
+        and not bool(status.get("active"))
+        and (not matches or all(_is_trivial_recovery_attempt(attempt) for attempt in matches))
+    ):
+        matches = []
+        for attempt in reversed(attempts):
+            if not _attempt_matches_wave_step(attempt, wave_id, step):
+                continue
+            matches.append(attempt)
+            if len(matches) >= limit:
+                break
+        used_wave_fallback = bool(matches)
+
     if not matches:
         return []
 
-    lines = ["  Recent attempts:"]
+    lines = ["  Recent attempts in wave:" if used_wave_fallback else "  Recent attempts:"]
     for attempt in reversed(matches):
         action = _excerpt(attempt.get("action", ""), 40) or "unknown"
         outcome = _excerpt(attempt.get("outcome", ""), 32) or "unknown"
@@ -291,25 +380,16 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
         else:
             lines.append(f"  Doing now: {doing_now}")
 
-    owner_pid, owner_state = _pid_state(status.get("owner_pid"))
-    child_pid, child_state = _pid_state(status.get("child_pid"))
-    child_role = _excerpt(status.get("child_role", ""), 24)
-    if owner_pid:
-        pid_line = f"  PIDs: owner {owner_pid}"
-        if owner_state:
-            pid_line += f" ({owner_state})"
-        if child_pid:
-            pid_line += f" · {child_role or 'child'} {child_pid}"
-            if child_state:
-                pid_line += f" ({child_state})"
+    pid_line = _format_recovery_pid_line(status, active=active)
+    if pid_line:
         lines.append(pid_line)
 
-    reason = _excerpt(status.get("reason", ""))
+    reason, reason_source = _rendered_recovery_reason(status)
     if reason:
         lines.append(f"  Reason: {reason}")
 
     explanation = _excerpt(status.get("explanation", ""))
-    if explanation:
+    if explanation and reason_source != "explanation":
         lines.append(f"  Recovery note: {explanation}")
 
     current_command = _excerpt(status.get("current_command", ""))
@@ -332,7 +412,7 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
         if last_action:
             summary += f" via {last_action}"
         lines.append(f"  Outcome: {summary} · {_elapsed_seconds(finished_age)} ago")
-    if detail and detail != reason and detail != explanation:
+    if detail and detail != reason and detail != explanation and reason_source != "detail":
         lines.append(f"  Detail: {detail}")
 
     return lines

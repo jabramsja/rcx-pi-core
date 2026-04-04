@@ -49,7 +49,7 @@ When claiming dead code or unused abstractions, **verify with execution.**
 
    ```
    FINDING: <one-line description of the issue>
-   FILE: /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/<path>
+   FILE: <absolute path inside the current repo root>/<path>
    LINES: <start>-<end>
    CODE: <paste the actual code from the file using Read tool>
    VERIFIED: Yes
@@ -62,6 +62,7 @@ When claiming dead code or unused abstractions, **verify with execution.**
    - Prose descriptions without FINDING blocks = REJECTED
 
    Use the Read tool to get actual code for the CODE field. Do not paraphrase.
+   Use the absolute path for the current checkout, not a hardcoded example path.
 
    Additional compliance discipline:
 

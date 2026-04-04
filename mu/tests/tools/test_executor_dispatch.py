@@ -666,7 +666,7 @@ class TestPhaseAScopeExtraction:
 class TestPhaseABridgeLoopFailClosed:
     """Phase A bridge loop fails closed on QUESTION and unrecognized decisions."""
 
-    def _setup_phase_a(self, tmp_path, monkeypatch=None):
+    def _setup_phase_a(self, tmp_path, monkeypatch=None, *, placeholder_stub: bool = False):
         """Create minimal structure for run_phase_a."""
         # Create plan directory
         plan_dir = tmp_path / "reports" / "control_plane"
@@ -684,8 +684,9 @@ class TestPhaseABridgeLoopFailClosed:
             "test_plan",
             {"request": "test", "summary": "test"},
         )
-        plan_path.write_text(
-            """# Test Plan
+        if not placeholder_stub:
+            plan_path.write_text(
+                """# Test Plan
 
 Date: 2026-04-02
 Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
@@ -715,8 +716,8 @@ Phase-A-Lock: UNLOCKED
 
 - Phase A bridge loop regression fixture.
 """,
-            encoding="utf-8",
-        )
+                encoding="utf-8",
+            )
         # Mock checkpoint commit (tmp_path is not a git repo)
         if monkeypatch is not None:
             monkeypatch.setattr(
@@ -868,7 +869,7 @@ Phase-A-Lock: UNLOCKED
 
     def test_phase_a_implementer_prompt_stays_packet_scoped(self, tmp_path, monkeypatch):
         """Phase A implementer prompt must forbid unrelated dirty-diff spelunking."""
-        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch, placeholder_stub=True)
         captured: dict[str, str] = {}
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
@@ -910,9 +911,109 @@ Phase-A-Lock: UNLOCKED
         assert "files, lines, and docs explicitly cited in the blocking findings above" in prompt
         assert "Prefer current code truth over stale packet wording when they conflict." in prompt
         assert "If a blocking finding proves a work item is already implemented in current code" in prompt
+        assert "Because the current packet is still a stub" in prompt
+        assert "do NOT inspect downstream implementation files" in prompt
+        assert "do NOT try to solve the underlying implementation in this turn" in prompt
         assert "Reproduce with: nl -ba reports/control_plane/test_plan_2026-04-02.md" in prompt
         assert "Evidence result: The packet is still a stub" in prompt
 
+    def test_deferred_agent_review_accepts_authorization_section_alias(self, tmp_path, monkeypatch):
+        """Deferred Phase A review must treat Authorization as equivalent to Grounding."""
+        rendered_dir = tmp_path / ".agent_bus" / "rendered"
+        rendered_dir.mkdir(parents=True)
+        bus_dir = tmp_path / ".agent_bus" / "meta"
+        bus_dir.mkdir(parents=True)
+        routing = {"decision": "ROUTE_PHASE_A", "summary": "test"}
+        (bus_dir / "post_merge_routing.json").write_text(json.dumps(routing))
+        plan_path = phase_a_mod.create_plan_draft(
+            tmp_path,
+            "test_plan",
+            {"request": "test", "summary": "test"},
+        )
+        rel_plan_path = str(plan_path.relative_to(tmp_path))
+        bridge_calls = {"n": 0}
+        agent_calls = {"n": 0, "files": []}
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            agent_calls["n"] += 1
+            agent_calls["files"] = list(files)
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path_arg, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            bridge_calls["n"] += 1
+            rendered = rendered_dir / f"{job_id}.md"
+            if bridge_calls["n"] == 1:
+                rendered.write_text("Decision: REQUEST_CHANGES\n\nStub packet.\n", encoding="utf-8")
+                return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": ""}
+            rendered.write_text("Decision: GO\n\nReal plan accepted.\n", encoding="utf-8")
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": ""}
+
+        def fake_parse_findings(_content):
+            return [{
+                "disposition": "blocking",
+                "severity": "high",
+                "title": "Stub packet",
+                "detail": "Replace the stub with a real Phase A plan.",
+                "class": "DOC_ACCURACY",
+                "file": rel_plan_path,
+                "line_start": 1,
+                "evidence_cmd": f"nl -ba {rel_plan_path} | sed -n '1,80p'",
+                "evidence_result": "The packet is still a placeholder stub.",
+            }]
+
+        def fake_invoke(repo_root, prompt, *, backend="claude", timeout=900, verbose=False):
+            plan_path.write_text(
+                """# Test Plan
+
+Date: 2026-04-02
+Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
+Phase-A-Lock: UNLOCKED
+Purpose: Exercise deferred SDK review after same-file stub rewrite.
+
+## Authorization
+
+- Parent task: `[DEFERRED-CONSOLIDATION]`
+- Governing packet: `reports/control_plane/wave1b_pipeline_cleanup_2026-03-31.md`
+
+## Scope
+
+- `mu/tools/observability/_pane_prci.sh`
+
+## Work Items
+
+- Close E5 and E6 in the single observability script.
+
+## Constraints
+
+- Do not widen scope outside `_pane_prci.sh`.
+
+## Stop Conditions
+
+- Stop if the fix requires executor changes.
+
+## Acceptance Criteria
+
+- Deferred SDK review runs after the rewritten plan passes bridge review.
+""",
+                encoding="utf-8",
+            )
+            return {"status": "success", "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(
+            phase_a_mod, "checkpoint_commit_plan",
+            lambda *a, **kw: {"sha": "fake_checkpoint_sha"},
+        )
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+        monkeypatch.setattr(phase_a_mod, "_parse_phase_a_findings", fake_parse_findings)
+        monkeypatch.setattr(phase_a_mod, "_invoke_implementer", fake_invoke)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        assert result["status"] == "converged"
+        assert bridge_calls["n"] == 2
+        assert agent_calls["n"] == 1
+        assert agent_calls["files"] == [rel_plan_path]
+        assert result["agent_review_ran"] is True
     def test_parse_phase_a_findings_preserves_reviewer_evidence(self):
         """Phase A finding parser must preserve reviewer evidence for implementer rewrites."""
         content = """BEGIN_AGENT_ENVELOPE
@@ -947,6 +1048,77 @@ END_AGENT_ENVELOPE"""
             "line_end": 45,
             "evidence_cmd": "nl -ba mu/tools/executors/commit_executor.py | sed -n '2672,2698p'",
             "evidence_result": "Targeted pytest gate already exists.",
+            "status": "new",
+        }]
+
+    def test_parse_phase_a_findings_ignores_template_envelope_and_uses_real_reviewer_envelope(self):
+        """Phase A must ignore prompt template envelopes and parse the real reviewer findings."""
+        content = """BEGIN_AGENT_ENVELOPE
+{
+  "job_id": "string",
+  "turn_id": "string",
+  "agent_role": "reader|reviewer",
+  "decision": "GO|NO_GO|REQUEST_CHANGES|QUESTION|STALE|ERROR|SYNTHETIC",
+  "summary": "string",
+  "touched_files_claimed": ["string"],
+  "findings": [
+    {
+      "class": "DEFECT|POLICY_BOUND|DOC_ACCURACY",
+      "severity": "low|medium|high|critical",
+      "title": "string",
+      "file": "string",
+      "line_start": 1,
+      "line_end": 1,
+      "evidence_cmd": "string",
+      "evidence_result": "string",
+      "status": "new|addressed|persisting|blocked"
+    }
+  ]
+}
+END_AGENT_ENVELOPE
+
+noise
+
+BEGIN_AGENT_ENVELOPE
+{
+  "job_id": "phase-a-r1-123",
+  "turn_id": "phase-a-r1-123-t1",
+  "agent_role": "reviewer",
+  "decision": "REQUEST_CHANGES",
+  "summary": "real finding",
+  "touched_files_claimed": ["reports/control_plane/example.md"],
+  "findings": [
+    {
+      "class": "DEFECT",
+      "severity": "high",
+      "title": "Real blocking finding",
+      "detail": "The packet is still a stub.",
+      "disposition": "blocking",
+      "file": "reports/control_plane/example.md",
+      "line_start": 8,
+      "line_end": 20,
+      "evidence_cmd": "rg -n '^## ' reports/control_plane/example.md",
+      "evidence_result": "Missing required sections.",
+      "status": "new"
+    }
+  ],
+  "validations_claimed": [],
+  "request_for_next_agent": "Rewrite the packet."
+}
+END_AGENT_ENVELOPE"""
+
+        findings = phase_a_mod._parse_phase_a_findings(content)  # ANTICHEAT_OK: testing internal Phase A finding parser
+        assert findings == [{
+            "class": "DEFECT",
+            "severity": "high",
+            "title": "Real blocking finding",
+            "detail": "The packet is still a stub.",
+            "disposition": "blocking",
+            "file": "reports/control_plane/example.md",
+            "line_start": 8,
+            "line_end": 20,
+            "evidence_cmd": "rg -n '^## ' reports/control_plane/example.md",
+            "evidence_result": "Missing required sections.",
             "status": "new",
         }]
 
@@ -1136,6 +1308,9 @@ END_AGENT_ENVELOPE"""
         task_text = (tmp_path / ".scratch" / "phase_a_bridge_r1.md").read_text(encoding="utf-8")
         assert "Use repo-local evidence only." in task_text
         assert "Do not browse the web" in task_text
+        assert "Read only the exact TASKS.md block needed to confirm current-task authorization" in task_text
+        assert "Read the governing tracked packet only if the plan is not an obvious stub" in task_text
+        assert "do NOT open governing packets, prior replay notes, or downstream implementation files" in task_text
         assert result["exit_code"] == 0
 
     def test_bridge_design_review_uses_configured_reviewer(self, tmp_path):
@@ -4769,6 +4944,57 @@ class TestModularSurfaceEntrypoints:
         ]
         assert "--handoff" in calls[2]
 
+    def test_phase_a_surface_success_chains_with_pretty_json_stdout(self, tmp_path):
+        plan_path = tmp_path / "reports" / "control_plane" / "plan.md"
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text("# plan\n", encoding="utf-8")
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["phase-a", "--plan-name", "surface-wave", "--json"]
+        )
+        phase_a_stdout = "\n".join(
+            [
+                f"[phase-a] Plan draft: {plan_path}",
+                "[phase-a] Bridge converged: GO",
+                json.dumps({"status": "converged", "plan_path": str(plan_path)}, indent=2),
+            ]
+        )
+        phase_a_ok = subprocess.CompletedProcess(["phase-a"], 0, phase_a_stdout, "")
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+        commit_ok = subprocess.CompletedProcess(
+            ["commit"], 0, "[commit-executor] Status: success\n", ""
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, *, cwd, timeout):
+            calls.append(cmd)
+            return [phase_a_ok, phase_b_ok, commit_ok][len(calls) - 1]
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=fake_run) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery") as mock_recovery:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={
+                    "timeouts": {
+                        "phase_a_executor": 300,
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+            )
+
+        assert exit_code == 0
+        assert mock_run.call_count == 3
+        mock_recovery.assert_not_called()
+        assert "--plan" in calls[1]
+        assert str(plan_path) in calls[1]
+
     def test_phase_b_surface_success_chains_to_commit(self, tmp_path):
         handoff_dir = tmp_path / ".agent_bus" / "executors"
         handoff_dir.mkdir(parents=True)
@@ -5105,13 +5331,41 @@ class TestDispatcherExecutorGroupCleanup:
              patch.object(dispatch_mod.os, "killpg") as mock_killpg, \
              patch.object(dispatch_mod, "terminate_process_tree") as mock_terminate:
             with pytest.raises(subprocess.TimeoutExpired):
-                dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)  # ANTICHEAT_OK: testing executor-group timeout cleanup helper
+                dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)  # ANTICHEAT_OK: testing direct executor-group timeout cleanup helper
 
         _, kwargs = mock_popen.call_args
         assert kwargs["start_new_session"] is True
         mock_killpg.assert_called_once_with(4321, signal.SIGTERM)
         mock_terminate.assert_called_once_with(4321, cwd=Path("."))
         mock_proc.kill.assert_called_once()
+
+    def test_interrupt_calls_terminate_process_tree(self):
+        """Direct dispatcher interruption must reap the child executor tree."""
+        mock_proc = MagicMock()
+        mock_proc.pid = 4321
+        installed_handlers: dict[int, Any] = {}
+
+        def fake_signal(signum, handler):
+            previous = installed_handlers.get(signum, signal.SIG_DFL)
+            installed_handlers[signum] = handler
+            return previous
+
+        def fake_communicate(timeout):
+            installed_handlers[signal.SIGTERM](signal.SIGTERM, None)
+            raise AssertionError("signal handler should not return")
+
+        mock_proc.communicate.side_effect = fake_communicate
+        mock_proc.wait.return_value = None
+
+        with patch.object(dispatch_mod.subprocess, "Popen", return_value=mock_proc), \
+             patch.object(dispatch_mod, "terminate_process_tree") as mock_terminate, \
+             patch.object(dispatch_mod.signal, "signal", side_effect=fake_signal):
+            with pytest.raises(SystemExit) as exc:
+                dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)  # ANTICHEAT_OK: testing direct executor-group signal cleanup helper
+
+        assert exc.value.code == 128 + signal.SIGTERM
+        mock_terminate.assert_called_with(4321, cwd=Path("."))
+        mock_proc.wait.assert_called()
 
 
 # --- Phase B handoff new schema test ---
@@ -5279,6 +5533,39 @@ class TestExecutorsUseBridgeSubprocess:
 
     def test_phase_b_imports_run_bridge_subprocess(self):
         assert hasattr(phase_b_mod, "run_bridge_subprocess")
+
+
+class TestPhaseABridgeCommandShape:
+    def test_phase_a_bridge_review_does_not_pass_removed_packet_review_flag(self, tmp_path, monkeypatch):
+        """Phase A bridge review must not pass the removed --packet-review flag."""
+
+        class _Proc:
+            pid = 12345
+
+            def poll(self):
+                return 0
+
+        captured: dict[str, list[str]] = {}
+
+        def fake_popen(cmd, **kwargs):
+            captured["cmd"] = list(cmd)
+            return _Proc()
+
+        monkeypatch.setattr(phase_a_mod, "load_executor_config", lambda repo_root: {})
+        monkeypatch.setattr(phase_a_mod, "process_descendants", lambda *a, **k: [])
+        monkeypatch.setattr(phase_a_mod.subprocess, "Popen", fake_popen)
+
+        result = phase_a_mod.run_bridge_design_review(
+            tmp_path,
+            "reports/control_plane/test_plan.md",
+            1,
+            job_id="phase-a-r1-test",
+            timeout=10,
+        )
+
+        assert result["exit_code"] == 0
+        assert "--no-diff" in captured["cmd"]
+        assert "--packet-review" not in captured["cmd"]
 
 
 # ===========================================================================

@@ -63,6 +63,27 @@ HALLUCINATION_WORDS = (
     r')\b'
 )
 
+_CHECKED_SECTION_RE = re.compile(
+    r'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:###?\s*)?(?:\*\*)?CHECKED(?:\*\*)?\s*:?',
+    re.IGNORECASE,
+)
+_NOT_CHECKED_SECTION_RE = re.compile(
+    r'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:###?\s*)?(?:\*\*)?NOT(?:[_ ]+)CHECKED(?:\*\*)?\s*:?',
+    re.IGNORECASE,
+)
+_VERDICT_LINE_RE = re.compile(
+    r'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:\*\*)?(?:###?\s*)?VERDICT\s*:\s*\w+',
+    re.IGNORECASE,
+)
+_EXTERNAL_REDIRECT_PATTERNS = (
+    re.compile(
+        r'(?i)\b(?:plan|report|review)\s+file\s+(?:is\s+ready|ready)\b[^\n]*?\bat\b\s+`?((?:/[^\s`]+|[A-Za-z]:[\\/][^\s`]+))`?'
+    ),
+    re.compile(
+        r'(?i)\b(?:repo\s+root|target\s+file|working\s+directory)\s*:\s*`?((?:/[^\s`]+|[A-Za-z]:[\\/][^\s`]+))`?'
+    ),
+)
+
 
 class FindingBlock(NamedTuple):
     """Structured representation of a FINDING block."""
@@ -523,6 +544,38 @@ def verify_all_code_citations(blocks: list[FindingBlock]) -> tuple[list[str], li
     return fabrications, imprecise_citations
 
 
+def _path_is_within_project(path_str: str, project_root: Path) -> bool:
+    """Return True when an absolute path stays within the active project root."""
+    try:
+        candidate = Path(path_str).expanduser().resolve()
+        root = project_root.resolve()
+        return candidate.is_relative_to(root)
+    except (OSError, ValueError):
+        return False
+
+
+def _strict_contract_violations(output: str, project_root: Path) -> list[str]:
+    """Return strict-mode output contract violations."""
+    violations: list[str] = []
+
+    if not _CHECKED_SECTION_RE.search(output):
+        violations.append("STRICT MODE: missing CHECKED section")
+    if not _NOT_CHECKED_SECTION_RE.search(output):
+        violations.append("STRICT MODE: missing NOT_CHECKED section")
+    if not _VERDICT_LINE_RE.search(output):
+        violations.append("STRICT MODE: missing explicit VERDICT line")
+
+    for pattern in _EXTERNAL_REDIRECT_PATTERNS:
+        for match in pattern.finditer(output):
+            path_str = match.group(1)
+            if not _path_is_within_project(path_str, project_root):
+                violations.append(
+                    f"STRICT MODE: external path outside current project directory: {path_str}"
+                )
+
+    return violations
+
+
 def check_compliance(output: str, verify_files: bool = False, verify_code: bool = False, strict: bool = False) -> dict:
     """
     Check agent output for guardrail compliance.
@@ -637,6 +690,9 @@ def check_compliance(output: str, verify_files: bool = False, verify_code: bool 
     # Only flag truly excessive usage (>10) that suggests unsupported claims
     if hallucination_words > 10:
         violations.append(f"High hallucination word count: {hallucination_words}")
+
+    if strict:
+        violations.extend(_strict_contract_violations(output, Path.cwd().resolve()))
 
     # === CRITICAL: Approval verdicts require evidence ===
     # Security fix: Prevent rubber-stamp approvals without findings

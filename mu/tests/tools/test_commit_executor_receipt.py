@@ -560,3 +560,142 @@ class TestHandoffReceiptContainment:
         assert result["status"] == "error"
         assert result["step"] == "validate_receipt"
         assert any("escapes repo" in e.lower() for e in result["errors"])
+
+
+class TestCommitExecutorPytestGate:
+    """Step 8 runs targeted pytest before allowing git commit."""
+
+    def test_collect_commit_test_files_includes_direct_and_mirrored_tests(self, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / "mu" / "tools").mkdir(parents=True)
+        (repo / "mu" / "tests" / "tools").mkdir(parents=True)
+        (repo / "tests").mkdir(parents=True)
+        (repo / "mu" / "tools" / "example.py").write_text("# code\n")
+        (repo / "mu" / "tests" / "tools" / "test_example_executor.py").write_text("def test_example(): pass\n")
+        (repo / "tests" / "test_direct_stage.py").write_text("def test_direct(): pass\n")
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: testing targeted pytest collection
+            repo,
+            ["mu/tools/example.py", "tests/test_direct_stage.py", "README.md"],
+        )
+
+        assert result == [
+            "mu/tests/tools/test_example_executor.py",
+            "tests/test_direct_stage.py",
+        ]
+
+    def test_run_commit_pipeline_blocks_on_targeted_pytest_failure(self, tmp_path):
+        from collections import namedtuple
+        import types
+
+        repo = _setup_repo(tmp_path)
+        (repo / "tests").mkdir(parents=True, exist_ok=True)
+        (repo / "tests" / "test_file.py").write_text(
+            "def test_smoke():\n    assert True\n",
+            encoding="utf-8",
+        )
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(json.dumps({
+            "decision": "COMMIT_GO",
+            "staged_sha": "fresh_sha",
+            "timestamp_utc": "2026-03-24T00:00:00+00:00",
+        }))
+
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+        fake_result = SupervisorResult(
+            decision="COMMIT_GO",
+            summary="test",
+            receipt_path=sup_receipt_path,
+        )
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = lambda *a, **kw: fake_result
+        mock_client.MetaBridgeClientError = Exception
+
+        real_run = commit_mod._run  # ANTICHEAT_OK: testing commit gate behavior via private runner helper
+        seen_commands: list[list[str]] = []
+
+        def intercept_run(args, cwd, check=True, timeout=120, env=None):
+            seen_commands.append(list(args))
+            if list(args[:2]) == ["git", "commit"]:
+                raise AssertionError("git commit should not run after pytest gate failure")
+            return real_run(args, cwd=cwd, check=check, timeout=timeout, env=env)
+
+        handoff = _make_new_schema_handoff()
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), \
+             patch.object(
+                 commit_mod,
+                 "_run_pytest_on_files",
+                 return_value={
+                     "exit_code": 1,
+                     "stdout": "FAILED tests/test_file.py::test_smoke",
+                     "stderr": "",
+                     "passed": False,
+                 },
+             ) as mock_pytest, \
+             patch.object(commit_mod, "_run", side_effect=intercept_run):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "run_pre_commit_script"
+        assert "targeted pytest gate failed" in result["errors"][0]
+        assert "git_commit" not in result.get("steps_completed", [])
+        assert mock_pytest.call_args[0][1] == ["tests/test_file.py"]
+        assert not any(cmd[:2] == ["git", "commit"] for cmd in seen_commands)
+
+    def test_run_pytest_on_files_handles_duplicate_basenames(self, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / "mu" / "tests" / "tools").mkdir(parents=True)
+        (repo / "tests").mkdir(parents=True)
+        (repo / "mu" / "tests" / "tools" / "test_dup.py").write_text(
+            "import pytest\n\n"
+            "@pytest.fixture\n"
+            "def foo():\n"
+            "    return 1\n\n"
+            "def test_one(foo):\n"
+            "    assert foo == 1\n",
+            encoding="utf-8",
+        )
+        (repo / "tests" / "test_dup.py").write_text(
+            "import pytest\n\n"
+            "@pytest.fixture\n"
+            "def bar():\n"
+            "    return 2\n\n"
+            "def test_two(bar):\n"
+            "    assert bar == 2\n",
+            encoding="utf-8",
+        )
+
+        result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing targeted pytest helper with duplicate basenames
+            repo,
+            ["mu/tests/tools/test_dup.py", "tests/test_dup.py"],
+        )
+
+        assert result["passed"] is True, result
+
+    def test_run_pytest_on_files_scales_timeout_with_file_count(self, tmp_path):
+        from types import SimpleNamespace
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        with patch.object(
+            commit_mod.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ) as mock_run:
+            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing targeted pytest timeout scaling helper
+                repo,
+                [
+                    "mu/tests/tools/test_agent_bridge_supervisor.py",
+                    "mu/tests/tools/test_executor_dispatch.py",
+                    "tests/tools/test_executor_dispatch.py",
+                    "mu/tests/tools/test_commit_executor_receipt.py",
+                    "tests/test_extra.py",
+                ],
+            )
+
+        assert result["passed"] is True
+        assert mock_run.call_args.kwargs["timeout"] == 225

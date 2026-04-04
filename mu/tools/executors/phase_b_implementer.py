@@ -222,6 +222,9 @@ def invoke_implementer(
     if stale_timeout_s <= 0:
         stale_timeout_s = DEFAULT_IMPLEMENTER_STALE_TIMEOUT_S
     stale_timeout_s = min(float(timeout), stale_timeout_s)
+    # Silent no-output hangs should trip even if helper subprocesses keep the
+    # adapter process tree "active" enough to defeat stale fingerprint checks.
+    zero_output_timeout_s = stale_timeout_s
 
     AdapterSpec = _bridge_adapters.AdapterSpec
     BridgeAdapterError = _bridge_adapters.BridgeAdapterError
@@ -281,6 +284,7 @@ def invoke_implementer(
         print(
             f"[implementer] Invoking {backend} (timeout={adapter_timeout}s, "
             f"stale_timeout={stale_timeout_s}s, "
+            f"zero_output_timeout={zero_output_timeout_s}s, "
             f"model_override={model_override!r}, applied={model_applied})"
         )
 
@@ -294,6 +298,7 @@ def invoke_implementer(
             turn_id="impl",
             agent_role="implementer",
             raw_output_path=raw_output_path,
+            zero_output_timeout_s=zero_output_timeout_s,
             stale_timeout_s=stale_timeout_s,
         )
         return {

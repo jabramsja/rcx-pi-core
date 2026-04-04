@@ -107,13 +107,16 @@ while true; do
     fi
 
     # Parse the AGENT_ENVELOPE for decision and findings
+    REVIEW_SOURCE="$REVIEWER_FILE"
+    RENDERED_FILE="$REPO_ROOT/.agent_bus/rendered/$ROUND_NAME.md"
+    if [ -s "$RENDERED_FILE" ]; then
+      REVIEW_SOURCE="$RENDERED_FILE"
+    fi
+
     ENVELOPE=$(python3 -c "
 import json, re, sys
-content = open('$REVIEWER_FILE', errors='replace').read()
+content = open('$REVIEW_SOURCE', errors='replace').read()
 matches = list(re.finditer(r'BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE', content, re.DOTALL))
-if not matches:
-    sys.exit(0)
-# Find the last VALID envelope with a real decision (skip schema examples)
 env = None
 for m in reversed(matches):
     try:
@@ -124,6 +127,35 @@ for m in reversed(matches):
             break
     except (json.JSONDecodeError, KeyError):
         continue
+if env is None:
+    sections = list(re.finditer(r'(?ms)^### .*? — reviewer\n(.*?)(?=^### |\Z)', content))
+    decision_re = re.compile(r'(?m)^\s*-\s*Decision:\s*(GO|REQUEST_CHANGES|NO_GO|QUESTION|STALE|ERROR|SYNTHETIC)\b')
+    summary_re = re.compile(r'(?m)^\s*-\s*Summary:\s*(.*)')
+    finding_re = re.compile(r'(?m)^\s*\d+\.\s+\*\*(DEFECT|POLICY_BOUND|DOC_ACCURACY)\*\* \(([^)]+)\):\s*(.*)$')
+    for section in reversed(sections):
+        block = section.group(1)
+        decision_match = decision_re.search(block)
+        if not decision_match:
+            continue
+        dec = decision_match.group(1)
+        if dec == 'SYNTHETIC':
+            continue
+        summary_match = summary_re.search(block)
+        disposition = 'non_blocking' if dec == 'GO' else 'blocking'
+        env = {
+            'decision': dec,
+            'summary': summary_match.group(1).strip() if summary_match else '',
+            'findings': [
+                {
+                    'class': cls,
+                    'severity': sev.strip().lower(),
+                    'title': title.strip(),
+                    'disposition': disposition,
+                }
+                for cls, sev, title in finding_re.findall(block)
+            ],
+        }
+        break
 if env is None:
     sys.exit(0)
 dec = env.get('decision', '?')
@@ -147,7 +179,7 @@ for f in nb:
 
     if [ -z "$ENVELOPE" ]; then
       # No envelope yet — review still in progress. Show this and stop.
-      SIZE=$(wc -c < "$REVIEWER_FILE" | xargs)
+      SIZE=$(wc -c < "$REVIEW_SOURCE" | xargs)
       echo -e ""
       echo -e "  ${CYAN}$ROUND_NAME${RESET} ${DIM}($age_str, ${SIZE}B)${RESET}"
       echo -e "  ${YELLOW}In progress...${RESET}"
