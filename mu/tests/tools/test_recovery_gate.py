@@ -1109,7 +1109,7 @@ class TestRecoveryStatusRendering:
         assert "POSSIBLY HUNG — Tier 3 recovery (agent_review_crash)" in rendered
         assert "asking the recovery agent what to try" in rendered
         assert "loop 2/3" in rendered
-        assert "claude 888888 (dead)" in rendered
+        assert "claude PID: 888888 (dead)" in rendered
 
         (status_path / "recovery_status.json").write_text(
             json.dumps(
