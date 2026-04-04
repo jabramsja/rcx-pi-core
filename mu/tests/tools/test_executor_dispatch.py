@@ -2446,6 +2446,36 @@ class TestReceiptAndCommit:
         assert result["step"] == "run_pre_push_script"
         assert any("tracker note contract failed" in e for e in result["errors"])
 
+    def test_step11_uses_extended_pre_push_timeout(self, tmp_path):
+        """Step 11 must give pre-push-fast enough time for the real fast audit path."""
+        repo, env, mock_result = self._setup_repo_through_supervisor(tmp_path, "COMMIT_GO")
+
+        hooks_dir = repo / "mu" / "tools" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        script = hooks_dir / "pre-push-fast"
+        script.write_text("#!/bin/bash\nexit 0\n")
+        script.chmod(0o755)
+
+        orig_run = commit_mod._run  # ANTICHEAT_OK: asserting Step 11 timeout contract
+        seen_timeout = {"value": None}
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:2] == ["bash", str(script)]:
+                seen_timeout["value"] = timeout
+                raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+            return orig_run(cmd, cwd=cwd, timeout=timeout, check=check, env=env)
+
+        with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
+            sys.modules["meta_bridge_client"].run_meta_bridge_package = MagicMock(return_value=mock_result)
+            sys.modules["meta_bridge_client"].MetaBridgeClientError = Exception
+            with patch.object(commit_mod, "_run", side_effect=fake_run):
+                result = commit_mod.run_commit_pipeline(_make_new_handoff(), repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "run_pre_push_script"
+        assert any("timed out" in e for e in result["errors"])
+        assert seen_timeout["value"] == commit_mod.PRE_PUSH_FAST_TIMEOUT_S
+
     def _setup_repo_through_supervisor(self, tmp_path, receipt_decision="COMMIT_GO"):
         """Helper: create repo, pre-insert wave_id, create receipt, return (repo, env, mock)."""
         repo, env = _init_git_repo(tmp_path)

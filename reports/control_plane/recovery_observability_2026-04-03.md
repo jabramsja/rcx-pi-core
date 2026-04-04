@@ -53,6 +53,10 @@ reports claiming it was already live.
    now generates contract-complete tracker notes by default and rejects
    incomplete notes during input validation before the pipeline makes a local
    commit.
+8. The next routed closeout exposed a second commit-surface defect: Step 11 only
+   gave `pre-push-fast` 300 seconds, which is too short for the real fast audit
+   path on this repo. `commit_executor.py` now gives that gate a longer budget
+   and the dispatcher regression suite locks the timeout contract directly.
 
 ## Validation
 

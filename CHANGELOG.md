@@ -54,9 +54,14 @@ All notable changes to RCX are documented in this file.
   routed commit handoffs by default and rejects incomplete tracker notes during
   input validation, so the commit surface fails early instead of getting all
   the way to pre-push before the L4 tracker-note contract trips
+- `commit_executor.py` now gives `pre-push-fast` a longer Step 11 timeout, so
+  the real fast-audit path can finish instead of being misreported as a failed
+  push gate when the audit is still making forward progress
 - `mu/tests/tools/test_executor_dispatch.py` and
   `mu/tests/tools/test_commit_executor_receipt.py` now lock both the stronger
   handoff-note validation and the default note-generation path directly
+- `mu/tests/tools/test_executor_dispatch.py` now also locks the extended
+  `pre-push-fast` timeout contract directly
 - `mu/tests/tools/test_recovery_gate.py` now locks both the recovery-status
   rendering contract and the watcher-noise regression directly, without adding
   new test files

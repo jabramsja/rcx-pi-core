@@ -156,6 +156,7 @@ BOT_REVIEW_POLL_SECONDS = 5
 BOT_REVIEW_ACK_REACTION = "eyes"
 CI_CHECK_REGISTRATION_WAIT_SECONDS = 120
 CI_CHECK_REGISTRATION_POLL_SECONDS = 5
+PRE_PUSH_FAST_TIMEOUT_S = 900
 BOT_NO_ISSUES_COMMENT_RE = re.compile(
     r"Codex Review:\s*.*did(?:n't| not) find any major issues",
     re.IGNORECASE | re.DOTALL,
@@ -2047,7 +2048,7 @@ def _run_post_commit_pipeline(
         pre_push_script = repo_root / "mu" / "tools" / "hooks" / "pre-push-fast"
         if pre_push_script.exists():
             try:
-                _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=300)
+                _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=PRE_PUSH_FAST_TIMEOUT_S)
             except subprocess.CalledProcessError as exc:
                 detail = (exc.stderr or exc.stdout or "").strip()
                 if not detail:
