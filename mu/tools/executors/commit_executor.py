@@ -1735,18 +1735,22 @@ def prepare_handoff_from_routing_record(
     wave_id = normalize_wave_id(wave_name)
     wave_class = record.get("wave_class", "MAINTENANCE")
     target_gate_id = record.get("target_gate_id", "NONE")
-    commit_message = record.get(
-        "commit_message",
-        f"chore: {summary}\n\nCo-Authored-By: Claude <noreply@anthropic.com>",
+    default_commit_message = (
+        f"chore: {summary}\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
     )
-    if not isinstance(commit_message, str):
-        commit_message = str(commit_message) if commit_message is not None else f"chore: {summary}"
+    commit_message = record.get("commit_message", default_commit_message)
+    if commit_message is None:
+        commit_message = default_commit_message
+    elif not isinstance(commit_message, str):
+        commit_message = str(commit_message)
+    raw_force_add_files = record.get("force_add_files")
+    force_add_files = [] if raw_force_add_files is None else raw_force_add_files
 
     # UPDATE_TRACKER_ONLY routing records may omit tracker_note_text. In that
     # case, synthesize the same contract-complete note shape that validate_handoff
     # now requires instead of the older one-line fallback.
     if decision == "UPDATE_TRACKER_ONLY" and not tracker_note:
-        force_add = record.get("force_add_files") or []
+        force_add = force_add_files if isinstance(force_add_files, list) else []
         tracker_note = _build_default_tracker_note_text(
             wave_id=wave_id,
             wave_class=wave_class,
@@ -1765,7 +1769,7 @@ def prepare_handoff_from_routing_record(
         "tracker_note_text": tracker_note,
         "fixes_implemented": record.get("fixes_implemented", [summary]),
         "files_to_stage": files_to_stage,
-        "force_add_files": record.get("force_add_files", []),
+        "force_add_files": force_add_files,
         "commit_message": commit_message,
         "pr_title": record.get("pr_title", f"chore: {summary}"[:70]),
         "pr_body": record.get("pr_body", f"## Summary\n\n- {summary}"),

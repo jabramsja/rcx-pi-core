@@ -335,6 +335,34 @@ class TestWaveIdBounds:
         assert "no_op_proof:" in handoff["tracker_note_text"]
         assert "defer_reason_code:" in handoff["tracker_note_text"]
 
+    def test_prepare_handoff_tracker_only_null_force_add_files_treated_as_empty(self, tmp_path):
+        record = {
+            "wave_name": "tracker-only-wave",
+            "summary": "sync tracker only",
+            "decision": "UPDATE_TRACKER_ONLY",
+            "force_add_files": None,
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert errors == []
+        assert handoff is not None
+        assert handoff["force_add_files"] == []
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
+    def test_prepare_handoff_tracker_only_coerces_non_string_commit_message(self, tmp_path):
+        record = {
+            "wave_name": "tracker-only-wave",
+            "summary": "sync tracker only",
+            "decision": "UPDATE_TRACKER_ONLY",
+            "commit_message": 123,
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert errors == []
+        assert handoff is not None
+        assert handoff["commit_message"] == "123"
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
     def test_has_path_traversal_decodes_percent_escapes(self):
         assert commit_mod._has_path_traversal("..%2F..%2Fetc%2Fpasswd") is True  # ANTICHEAT_OK: testing path traversal detection
         assert commit_mod._has_path_traversal("%2e%2e/foo") is True  # ANTICHEAT_OK: testing path traversal detection
