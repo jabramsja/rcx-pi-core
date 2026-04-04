@@ -61,6 +61,12 @@ def _make_mock_impl():
     return mock_impl
 
 
+def _init_git_repo(repo: Path) -> None:
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+
+
 class TestBuildImplementationPrompt:
     """Test that the implementer prompt is structured correctly."""
 
@@ -264,8 +270,8 @@ class TestInvokeImplementer:
             assert result["status"] == "stale"
             assert result["exit_code"] == -2
 
-    def test_passes_configured_stale_timeout_to_adapter(self, tmp_path):
-        """Executor config can bound implementer stall detection independently of wall time."""
+    def test_passes_configured_output_watchdogs_to_adapter(self, tmp_path):
+        """Implementer output watchdogs inherit the configured stale budget."""
         self._setup_bridge_config(tmp_path)
         config_dir = tmp_path / "mu" / "tools" / "executors"
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -282,6 +288,7 @@ class TestInvokeImplementer:
 
         assert result["status"] == "success"
         assert mock_ba.run_adapter.call_args.kwargs["stale_timeout_s"] == 123.0
+        assert mock_ba.run_adapter.call_args.kwargs["zero_output_timeout_s"] == 123.0
 
     def test_nonzero_exit_returns_error(self, tmp_path):
         """Non-timeout failure from bridge adapter returns error status."""
@@ -773,7 +780,7 @@ class TestFinalPytestGate:
              }), \
              patch.object(pb_mod, "_run_pytest_on_files", return_value={
                  "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
-             }), \
+             }) as mock_pytest, \
              patch.object(pb_mod, "_stage_files", return_value=True), \
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
                  "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
@@ -782,6 +789,7 @@ class TestFinalPytestGate:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
         assert result["status"] == "commit_ready"
+        mock_pytest.assert_called_once_with(repo, ["mu/tests/tools/test_foo.py"], timeout=300)
 
 
 class TestBridgeRenderAssociation:
@@ -1537,12 +1545,12 @@ class TestGovernanceDowngrade:
     A POLICY_BOUND finding on actual code stays blocking.
     """
 
-    def test_policy_bound_on_report_path_is_non_blocking(self):
-        """POLICY_BOUND on reports/ is governance — non-blocking."""
+    def test_policy_bound_on_report_path_is_non_blocking_below_severity_floor(self):
+        """POLICY_BOUND on reports/ stays non-blocking only below high severity."""
         findings = [{
             "title": "Plan file has unchecked boxes",
             "class": "POLICY_BOUND",
-            "severity": "high",
+            "severity": "medium",
             "file": "reports/control_plane/wave1a_pipeline_validation_2026-03-31.md",
         }]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
@@ -1561,12 +1569,12 @@ class TestGovernanceDowngrade:
         assert len(blocking) == 1, "POLICY_BOUND on code file must stay blocking"
         assert len(non_blocking) == 0
 
-    def test_doc_accuracy_on_tasks_md_is_non_blocking(self):
-        """DOC_ACCURACY on TASKS.md is governance — non-blocking."""
+    def test_doc_accuracy_on_tasks_md_is_non_blocking_below_severity_floor(self):
+        """DOC_ACCURACY on TASKS.md stays non-blocking only below high severity."""
         findings = [{
             "title": "TASKS.md missing tracker sync note",
             "class": "DOC_ACCURACY",
-            "severity": "high",
+            "severity": "medium",
             "file": "TASKS.md",
         }]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
@@ -1602,12 +1610,64 @@ class TestGovernanceDowngrade:
         disp, reason = pb_mod._disposition_for_finding({  # ANTICHEAT_OK: testing internal executor functions
             "title": "Stale reference",
             "class": "POLICY_BOUND",
-            "severity": "high",
+            "severity": "medium",
             "file": "reports/deferred/README.md",
         })
         assert disp == "non_blocking"
         assert "governance" in reason.lower()
         assert "reports/deferred/README.md" in reason
+
+    @pytest.mark.parametrize("severity", ["high", "critical"])
+    def test_governance_path_cannot_downgrade_severity_floor(self, severity):
+        """High/critical governance findings stay blocking despite report paths."""
+        findings = [{
+            "title": "Critical governance downgrade",
+            "class": "POLICY_BOUND",
+            "severity": severity,
+            "file": "reports/control_plane/example.md",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 1
+        assert len(non_blocking) == 0
+
+
+class TestStageFiles:
+    """Staging must respect repo ignore rules and fail closed."""
+
+    def test_stage_files_stages_normal_file(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / "ok.txt").write_text("x", encoding="utf-8")
+
+        assert pb_mod._stage_files(repo, ["ok.txt"]) is True  # ANTICHEAT_OK: testing internal executor functions
+
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.splitlines()
+        assert staged == ["ok.txt"]
+
+    def test_stage_files_rejects_ignored_file_without_force_add(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+        (repo / "ignored.txt").write_text("x", encoding="utf-8")
+
+        assert pb_mod._stage_files(repo, ["ignored.txt"]) is False  # ANTICHEAT_OK: testing internal executor functions
+
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.splitlines()
+        assert staged == []
 
 
 class TestHighSeverityDetailHeuristic:
@@ -1973,6 +2033,7 @@ class TestOnlyBlockingToImplementer:
 
         mock_impl = _make_mock_impl()
         bridge_calls = [0]
+        first_job_id = [""]
 
         # Mixed findings: one blocking, one non-blocking
         envelope = json.dumps({
@@ -1992,7 +2053,82 @@ class TestOnlyBlockingToImplementer:
         def bridge_side(*a, **kw):
             bridge_calls[0] += 1
             if bridge_calls[0] == 1:
+                first_job_id[0] = kw["job_id"]
                 return {"exit_code": 0, "stdout": "REQUEST_CHANGES\n", "stderr": "",
+                        "decision": "REQUEST_CHANGES", "job_id": first_job_id[0]}
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": "",
+                    "decision": "GO", "job_id": kw["job_id"]}
+
+        def read_render_side_effect(_repo_root, current_job_id):
+            if current_job_id == first_job_id[0]:
+                return render_text
+            return ""
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_read_bridge_render", side_effect=read_render_side_effect), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={"exit_code": 0, "passed": True, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        # Implementer re-invoked (only blocking findings sent)
+        assert mock_impl.invoke_implementer.call_count >= 2
+        # Check that the fix prompt contained "BLOCKING" but not non-blocking title
+        fix_call_prompt = mock_impl.build_implementation_prompt.call_args_list[-1]
+        prompt_text = fix_call_prompt[0][0] if fix_call_prompt[0] else ""
+        # The blocking finding title should appear in prompt
+        assert "Real bug" in prompt_text or "BLOCKING" in prompt_text
+
+    def test_rendered_raw_output_preserves_blocking_disposition(self, tmp_path):
+        """Rendered REQUEST_CHANGES must honor blocking disposition from reviewer raw output."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        raw_path = repo / ".agent_bus" / "raw" / "j1" / "reviewer.txt"
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        raw_envelope = json.dumps({
+            "job_id": "j1", "turn_id": "t1", "agent_role": "reviewer",
+            "decision": "REQUEST_CHANGES", "summary": "issues",
+            "touched_files_claimed": [], "validations_claimed": [],
+            "request_for_next_agent": "",
+            "findings": [
+                {"title": "Raw blocker", "class": "DEFECT", "severity": "medium",
+                 "file": "f.py", "disposition": "blocking", "status": "persisting"},
+            ],
+        })
+        raw_path.write_text(
+            "noise\nBEGIN_AGENT_ENVELOPE\n"
+            f"{raw_envelope}\n"
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+        render_text = (
+            "### reviewer\n"
+            "- Status: completed\n"
+            "- Decision: REQUEST_CHANGES\n"
+            "- **Findings (1):**\n"
+            "  1. **DEFECT** (medium): Raw blocker\n"
+            "     - File: `f.py:1` | Status: persisting\n"
+            "     - Evidence: preserved via raw output\n"
+            f"- Raw output: {raw_path}\n"
+        )
+
+        mock_impl = _make_mock_impl()
+        bridge_calls = [0]
+
+        def bridge_side(*a, **kw):
+            bridge_calls[0] += 1
+            if bridge_calls[0] == 1:
+                return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "",
                         "decision": "REQUEST_CHANGES", "job_id": "j1"}
             return {"exit_code": 0, "stdout": "GO\n", "stderr": "",
                     "decision": "GO", "job_id": "j2"}
@@ -2011,13 +2147,108 @@ class TestOnlyBlockingToImplementer:
              }):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
-        # Implementer re-invoked (only blocking findings sent)
         assert mock_impl.invoke_implementer.call_count >= 2
-        # Check that the fix prompt contained "BLOCKING" but not non-blocking title
-        fix_call_prompt = mock_impl.build_implementation_prompt.call_args_list[-1]
-        prompt_text = fix_call_prompt[0][0] if fix_call_prompt[0] else ""
-        # The blocking finding title should appear in prompt
-        assert "Real bug" in prompt_text or "BLOCKING" in prompt_text
+        assert result.get("deferred_packet_path") is None
+
+    def test_stale_render_still_uses_job_raw_reviewer_findings(self, tmp_path):
+        """Phase B must prefer raw reviewer files by job id when the render is stale."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        bridge_calls = [0]
+        first_job_id = [""]
+        stale_render = [""]
+
+        def bridge_side(*args, **kwargs):
+            bridge_calls[0] += 1
+            if bridge_calls[0] == 1:
+                first_job_id[0] = kwargs["job_id"]
+                raw_dir = repo / ".agent_bus" / "raw" / first_job_id[0]
+                raw_dir.mkdir(parents=True, exist_ok=True)
+                reader_path = raw_dir / f"{first_job_id[0]}--r1-reader-11111111.txt"
+                reviewer_path = raw_dir / f"{first_job_id[0]}--r1-reviewer-22222222.txt"
+                reader_path.write_text(
+                    "BEGIN_AGENT_ENVELOPE\n"
+                    '{"findings": []}\n'
+                    "END_AGENT_ENVELOPE\n",
+                    encoding="utf-8",
+                )
+                reviewer_envelope = json.dumps({
+                    "job_id": first_job_id[0],
+                    "turn_id": f"{first_job_id[0]}--r1-reviewer-22222222",
+                    "agent_role": "reviewer",
+                    "decision": "REQUEST_CHANGES",
+                    "summary": "real blocker present",
+                    "touched_files_claimed": [],
+                    "validations_claimed": [],
+                    "request_for_next_agent": "",
+                    "findings": [
+                        {
+                            "title": "Real blocker from raw reviewer",
+                            "class": "POLICY_BOUND",
+                            "severity": "medium",
+                            "file": "mu/tools/observability/_pane_prci.sh",
+                            "disposition": "blocking",
+                            "status": "persisting",
+                        }
+                    ],
+                })
+                reviewer_path.write_text(
+                    "noise\nBEGIN_AGENT_ENVELOPE\n"
+                    f"{reviewer_envelope}\n"
+                    "END_AGENT_ENVELOPE\n",
+                    encoding="utf-8",
+                )
+                stale_render[0] = (
+                    f"# Bridge Job {first_job_id[0]}\n\n"
+                    "### reader\n"
+                    "- Status: completed\n"
+                    "- Decision: SYNTHETIC\n"
+                    f"- Raw output: {reader_path}\n"
+                )
+                return {
+                    "exit_code": 1,
+                    "stdout": "REQUEST_CHANGES\n",
+                    "stderr": "",
+                    "decision": "REQUEST_CHANGES",
+                    "job_id": first_job_id[0],
+                }
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": kwargs["job_id"],
+            }
+
+        def read_render_side_effect(_repo_root, current_job_id):
+            if current_job_id == first_job_id[0]:
+                return stale_render[0]
+            return ""
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_read_bridge_render", side_effect=read_render_side_effect), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={"exit_code": 0, "passed": True, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert mock_impl.invoke_implementer.call_count >= 2
+        fix_prompt = mock_impl.build_implementation_prompt.call_args_list[-1][0][0]
+        assert "Real blocker from raw reviewer" in fix_prompt
+        assert "Malformed AGENT_ENVELOPE" not in fix_prompt
 
     def test_go_low_doc_accuracy_crash_title_does_not_fail_closed(self, tmp_path):
         """A GO transcript with only low DOC_ACCURACY crash-wording findings remains non-blocking."""
@@ -2111,6 +2342,122 @@ class TestSupervisorReasonSurfacing:
 class TestValidationRunsMechanically:
     """Validation (pytest) runs mechanically in the loop after each implementer fix."""
 
+    def test_bridge_fix_pytest_skips_stale_baseline_test_files(self, tmp_path):
+        """Bridge-fix pytest must ignore test files that predate the current fix round."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        bridge_calls = [0]
+
+        def bridge_side(*a, **kw):
+            bridge_calls[0] += 1
+            if bridge_calls[0] == 1:
+                return {"exit_code": 0, "stdout": "REQUEST_CHANGES\n", "stderr": "",
+                        "decision": "REQUEST_CHANGES", "job_id": "j1"}
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": "",
+                    "decision": "GO", "job_id": "j2"}
+
+        changed_files_calls = [0]
+
+        def changed_files_side(_repo_root):
+            changed_files_calls[0] += 1
+            if changed_files_calls[0] == 1:
+                return []
+            if changed_files_calls[0] <= 4:
+                return ["mu/tests/tools/test_baseline.py"]
+            return ["mu/tests/tools/test_baseline.py", "mu/tools/observability/_pane_prci.sh"]
+
+        wave_owned_calls = [0]
+
+        def wave_owned_side(*_a, **_kw):
+            wave_owned_calls[0] += 1
+            if wave_owned_calls[0] <= 2:
+                return ["mu/tests/tools/test_baseline.py"]
+            return ["mu/tools/observability/_pane_prci.sh"]
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", side_effect=changed_files_side), \
+             patch.object(pb_mod, "_collect_wave_owned_files", side_effect=wave_owned_side), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_read_bridge_render", return_value="some findings"), \
+             patch.object(pb_mod, "_run_pytest_on_files") as mock_pytest, \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        mock_pytest.assert_not_called()
+
+    def test_bridge_fix_pytest_runs_only_new_test_files_from_current_fix(self, tmp_path):
+        """Bridge-fix pytest must scope to tests introduced by the current fix pass."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        bridge_calls = [0]
+
+        def bridge_side(*a, **kw):
+            bridge_calls[0] += 1
+            if bridge_calls[0] == 1:
+                return {"exit_code": 0, "stdout": "REQUEST_CHANGES\n", "stderr": "",
+                        "decision": "REQUEST_CHANGES", "job_id": "j1"}
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": "",
+                    "decision": "GO", "job_id": "j2"}
+
+        changed_files_calls = [0]
+
+        def changed_files_side(_repo_root):
+            changed_files_calls[0] += 1
+            if changed_files_calls[0] == 1:
+                return []
+            if changed_files_calls[0] <= 4:
+                return ["mu/tests/tools/test_baseline.py"]
+            return ["mu/tests/tools/test_baseline.py", "mu/tests/tools/test_fix_round.py"]
+
+        wave_owned_calls = [0]
+
+        def wave_owned_side(*_a, **_kw):
+            wave_owned_calls[0] += 1
+            if wave_owned_calls[0] <= 2:
+                return ["mu/tests/tools/test_baseline.py"]
+            return ["mu/tools/observability/_pane_prci.sh"]
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", side_effect=changed_files_side), \
+             patch.object(pb_mod, "_collect_wave_owned_files", side_effect=wave_owned_side), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_read_bridge_render", return_value="some findings"), \
+             patch.object(
+                 pb_mod,
+                 "_run_pytest_on_files",
+                 return_value={"exit_code": 0, "stdout": "passed", "stderr": "", "passed": True},
+             ) as mock_pytest, \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        mock_pytest.assert_called_once_with(
+            repo,
+            ["mu/tests/tools/test_fix_round.py"],
+            timeout=300,
+        )
+
     def test_pytest_failure_fed_back_as_blocking(self, tmp_path):
         """pytest failure after implementer fix becomes a blocking finding."""
         repo = tmp_path / "repo"
@@ -2136,9 +2483,33 @@ class TestValidationRunsMechanically:
                 return {"exit_code": 1, "stdout": "FAILED test_foo.py", "stderr": "", "passed": False}
             return {"exit_code": 0, "stdout": "passed", "stderr": "", "passed": True}
 
+        changed_files_calls = [0]
+
+        def changed_files_side(_repo_root):
+            changed_files_calls[0] += 1
+            if changed_files_calls[0] == 1:
+                return []
+            if changed_files_calls[0] <= 4:
+                return ["mu/tests/tools/test_existing.py"]
+            if changed_files_calls[0] == 5:
+                return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+            if changed_files_calls[0] == 6:
+                return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+            return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+
+        wave_owned_calls = [0]
+
+        def wave_owned_side(*_a, **_kw):
+            wave_owned_calls[0] += 1
+            if wave_owned_calls[0] <= 2:
+                return ["mu/tests/tools/test_existing.py"]
+            if wave_owned_calls[0] == 3:
+                return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+            return ["mu/tools/observability/_pane_prci.sh"]
+
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
-             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tests/tools/test_foo.py"]), \
-             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "_collect_changed_files", side_effect=changed_files_side), \
+             patch.object(pb_mod, "_collect_wave_owned_files", side_effect=wave_owned_side), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
              patch.object(pb_mod, "_read_bridge_render", return_value="some findings"), \
@@ -2147,13 +2518,13 @@ class TestValidationRunsMechanically:
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
                  "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
                  "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
-             }):
+            }):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
         # pytest was called (at least once)
         assert pytest_calls[0] >= 1
         # Implementer re-invoked to fix pytest failure
-        assert mock_impl.invoke_implementer.call_count >= 2
+        assert mock_impl.invoke_implementer.call_count >= 3
 
 
 @pytest.mark.usefixtures("mock_routing_record")
@@ -2484,6 +2855,8 @@ class TestSdkReviewScopeSelection:
         assert findings[0]["title"] == "Missing validation on input"
         assert findings[0]["severity"] == "critical"
         assert findings[0]["type"] == "DEFECT"
+        assert findings[0]["class"] == "DEFECT"
+        assert findings[0]["disposition"] == "blocking"
         assert findings[0]["file"] == "mu/tools/executors/phase_b_executor.py"
         assert findings[0]["evidence"] == "No check for None before calling .strip()"
         assert findings[1]["severity"] == "high"
@@ -2497,6 +2870,7 @@ class TestSdkReviewScopeSelection:
         assert findings[0]["title"] == "Minor nit"
         assert findings[0]["severity"] == "low"
         assert findings[0]["file"] == "foo.py"
+        assert findings[0]["disposition"] == "blocking"
 
     def test_parse_markdown_with_disposition(self):
         render = (
@@ -2522,6 +2896,99 @@ class TestSdkReviewScopeSelection:
         findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
         assert len(findings) == 1
         assert findings[0]["title"] == "FromEnvelope"
+
+    def test_raw_output_reference_preferred_over_rendered_markdown(self, tmp_path):
+        """Rendered transcripts must reload reviewer raw output to preserve disposition."""
+        raw_path = tmp_path / "reviewer.txt"
+        raw_envelope = json.dumps({
+            "findings": [
+                {
+                    "title": "FromRawEnvelope",
+                    "class": "DEFECT",
+                    "severity": "medium",
+                    "disposition": "blocking",
+                }
+            ]
+        })
+        raw_path.write_text(
+            "noise\nBEGIN_AGENT_ENVELOPE\n"
+            f"{raw_envelope}\n"
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+        render = (
+            "### reviewer\n"
+            "- Decision: REQUEST_CHANGES\n"
+            "- **Findings (1):**\n"
+            "  1. **DEFECT** (medium): FromRenderedMarkdown\n"
+            "     - File: a.py\n"
+            f"- Raw output: {raw_path}\n"
+        )
+        findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(findings) == 1
+        assert findings[0]["title"] == "FromRawEnvelope"
+        assert findings[0]["class"] == "DEFECT"
+        assert findings[0]["disposition"] == "blocking"
+
+    def test_raw_jsonl_agent_message_beats_command_output_marker_noise(self, tmp_path):
+        """JSONL raw transcripts must ignore echoed envelope markers in command output."""
+        raw_path = tmp_path / "reviewer-jsonl.txt"
+        real_envelope = json.dumps({
+            "findings": [
+                {
+                    "title": "FromAgentMessage",
+                    "class": "DOC_ACCURACY",
+                    "severity": "low",
+                    "disposition": "non_blocking",
+                }
+            ]
+        })
+        raw_path.write_text(
+            "\n".join([
+                json.dumps({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item_1",
+                        "type": "command_execution",
+                        "command": "sed -n '1,40p' mu/tools/executors/phase_b_executor.py",
+                        "aggregated_output": (
+                            'if stripped == "BEGIN_AGENT_ENVELOPE":\\n'
+                            'if stripped == "END_AGENT_ENVELOPE":\\n'
+                            'return [{"title": "Malformed AGENT_ENVELOPE blocked structured bridge findings parsing"}]'
+                        ),
+                        "exit_code": 0,
+                        "status": "completed",
+                    },
+                }),
+                json.dumps({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item_2",
+                        "type": "agent_message",
+                        "text": (
+                            "Bootstrap summary\n\n"
+                            "BEGIN_AGENT_ENVELOPE\n"
+                            f"{real_envelope}\n"
+                            "END_AGENT_ENVELOPE"
+                        ),
+                    },
+                }),
+            ]) + "\n",
+            encoding="utf-8",
+        )
+        render = (
+            "### reviewer\n"
+            "- Decision: GO\n"
+            "- **Findings (1):**\n"
+            "  1. **DOC_ACCURACY** (low): FromRenderedMarkdown\n"
+            "     - File: a.py\n"
+            f"- Raw output: {raw_path}\n"
+        )
+        findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(findings) == 1
+        assert findings[0]["title"] == "FromAgentMessage"
+        assert findings[0]["class"] == "DOC_ACCURACY"
+        assert findings[0]["disposition"] == "non_blocking"
 
 
 class TestWaveOwnedFilesIncludesDeferredPackets:
@@ -2680,17 +3147,20 @@ class TestPytestFixTracksChangedFiles:
 
         # Simulate: _collect_changed_files returns progressively more files
         # to create diffs that populate implementer_changed.
-        # Calls: 1=pre-impl, 2=post-impl, 3=wave_owned(internal), 4=pre-bridge-fix,
-        # 5=post-bridge-fix, 6=wave_owned(internal), 7=pre-pytest-fix,
-        # 8=post-pytest-fix (new file appears here), 9+=wave_owned(internal)
+        # Calls: 1=pre-impl, 2=post-impl, 3=pre-bridge-fix, 4=post-bridge-fix,
+        # 5=pre-pytest-fix, 6=post-pytest-fix (new helper appears here), 7+=stable
         changed_files_calls = [0]
         def changed_files_side(root):
             changed_files_calls[0] += 1
             if changed_files_calls[0] == 1:
                 return []  # pre-implementer
-            if changed_files_calls[0] <= 7:
-                return ["mu/tests/tools/test_foo.py"]
-            # Call 8+: post-pytest-fix — new helper file appears
+            if changed_files_calls[0] <= 4:
+                return ["mu/tests/tools/test_existing.py"]
+            if changed_files_calls[0] == 5:
+                return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+            if changed_files_calls[0] == 6:
+                return ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+            # Call 7+: post-pytest-fix — new helper file appears
             return ["mu/tests/tools/test_foo.py", "mu/tools/executors/new_helper.py"]
 
         pytest_calls = [0]
@@ -2700,11 +3170,18 @@ class TestPytestFixTracksChangedFiles:
                 return {"exit_code": 1, "stdout": "FAILED", "stderr": "", "passed": False}
             return {"exit_code": 0, "stdout": "passed", "stderr": "", "passed": True}
 
-        # Track what _collect_wave_owned_files receives for implementer_changed_files
-        original_collect = pb_mod._collect_wave_owned_files  # ANTICHEAT_OK: testing internal executor functions
+        # Track what _collect_wave_owned_files returns across the bridge/pytest-fix path.
         wave_owned_results = []
+        wave_owned_calls = [0]
+
         def tracking_collect(*a, **kw):
-            result = original_collect(*a, **kw)
+            wave_owned_calls[0] += 1
+            if wave_owned_calls[0] <= 2:
+                result = ["mu/tests/tools/test_existing.py"]
+            elif wave_owned_calls[0] == 3:
+                result = ["mu/tests/tools/test_existing.py", "mu/tests/tools/test_foo.py"]
+            else:
+                result = ["mu/tools/executors/new_helper.py"]
             wave_owned_results.append(result)
             return result
 

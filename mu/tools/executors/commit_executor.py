@@ -12,7 +12,7 @@ Steps:
  5  collect_and_stage_indicator  Run indicator collector, force-add artifact
  6  build_and_run_supervisor  Build 11-field package, run supervisor
  7  validate_receipt          Read receipt JSON, check decision
- 8  run_pre_commit_script     Explicit pre-commit-doc-check run
+ 8  run_pre_commit_script     Explicit pre-commit-doc-check + targeted pytest gate
  9  git_commit                git commit -m <message>
 10  hold_check                COMMIT_GO_HOLD_PUSH = terminal stop
 11  run_pre_push_script       Explicit pre-push-fast run
@@ -191,6 +191,74 @@ def _run(
         args, cwd=cwd, capture_output=True, text=True, check=check,
         timeout=timeout, env=run_env,
     )
+
+def _is_test_file(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    return (
+        normalized.startswith("mu/tests/")
+        or normalized.startswith("tests/")
+        or "/test_" in normalized
+        or normalized.endswith("_test.py")
+    )
+
+
+def _collect_commit_test_files(repo_root: Path, staged_files: list[str]) -> list[str]:
+    """Collect staged test files and mirrored test files for staged Python code."""
+    candidates: set[str] = set()
+    for path in staged_files:
+        normalized = path.replace("\\", "/")
+        if _is_test_file(normalized) and normalized.endswith(".py"):
+            candidates.add(normalized)
+            continue
+        if not normalized.endswith(".py"):
+            continue
+        stem = Path(normalized).stem
+        for test_root in ("mu/tests", "tests"):
+            root_path = repo_root / test_root
+            if not root_path.is_dir():
+                continue
+            for match in root_path.rglob(f"test_{stem}*.py"):
+                if match.is_file():
+                    candidates.add(match.relative_to(repo_root).as_posix())
+    return sorted(candidates)
+
+
+def _run_pytest_on_files(
+    repo_root: Path,
+    test_files: list[str],
+    *,
+    timeout: int = 120,
+) -> dict[str, Any]:
+    """Run pytest on specific test files. Returns exit_code and output."""
+    if not test_files:
+        return {"exit_code": 0, "stdout": "", "stderr": "", "passed": True}
+    effective_timeout = max(timeout, 45 * len(test_files))
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-x",
+                "--tb=short",
+                "--import-mode=importlib",
+                *test_files,
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=effective_timeout,
+            env={**os.environ, "PYTHONHASHSEED": "0"},
+        )
+        return {
+            "exit_code": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "passed": result.returncode == 0,
+        }
+    except subprocess.TimeoutExpired:
+        return {"exit_code": -1, "stdout": "", "stderr": "pytest timed out", "passed": False}
 
 
 def _parse_worktree_list(output: str) -> list[dict[str, str]]:
@@ -2877,6 +2945,31 @@ def run_commit_pipeline(
             return {"status": "error", "step": "run_pre_commit_script",
                     "errors": ["pre-commit-doc-check timed out"],
                     "steps_completed": result["steps_completed"]}
+
+    try:
+        staged_python_files = _run(
+            ["git", "diff", "--cached", "--name-only"], cwd=repo_root
+        ).stdout.strip().splitlines()
+    except subprocess.CalledProcessError:
+        staged_python_files = []
+
+    commit_test_files = _collect_commit_test_files(repo_root, staged_python_files)
+    if commit_test_files:
+        log(f"Step 8b: running pytest on {len(commit_test_files)} affected test file(s)")
+        pytest_result = _run_pytest_on_files(repo_root, commit_test_files)
+        if not pytest_result["passed"]:
+            stderr = (pytest_result.get("stderr") or "").strip()
+            stdout = (pytest_result.get("stdout") or "").strip()
+            failure_detail = stderr[:1000] if stderr else stdout[:1000]
+            return {
+                "status": "error",
+                "step": "run_pre_commit_script",
+                "errors": [
+                    f"targeted pytest gate failed (exit={pytest_result['exit_code']}): {failure_detail}"
+                ],
+                "steps_completed": result["steps_completed"],
+            }
+
     result["steps_completed"].append("run_pre_commit_script")
     log("Step 8: pre-commit script passed")
 

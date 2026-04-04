@@ -105,6 +105,8 @@ BRIDGE_REVIEW_POLL_INTERVAL = 30.0
 BRIDGE_REVIEW_POLL_SLEEP = 5.0
 BRIDGE_REVIEW_STALE_TIMEOUT = 120.0
 BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT = 60.0
+DEFAULT_PYTEST_GATE_TIMEOUT_S = 300
+MAX_PYTEST_GATE_TIMEOUT_S = 900
 
 
 # ---------------------------------------------------------------------------
@@ -127,10 +129,24 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
     disposition = finding.get("disposition")
     finding_class = str(finding.get("class") or "").upper()
 
-    # Governance/doc-only findings are never blocking regardless of severity.
-    # Must satisfy BOTH conditions: governance class AND governance file path.
-    # A POLICY_BOUND finding on actual code (e.g. phase_b_executor.py) stays blocking.
-    # Only POLICY_BOUND/DOC_ACCURACY on reports/, TASKS.md, .claude/ are downgraded.
+    # Critical/high findings stay blocking even if an explicit disposition tries
+    # to soften them. This is the fail-closed floor for bridge feedback.
+    # IMPORTANT: this check runs BEFORE governance downgrades and the generic
+    # disposition check so critical/high findings cannot be softened merely by
+    # pointing at a report/TASKS path or by carrying a disposition.
+    if severity == "critical":
+        if disposition == "non_blocking":
+            return "blocking", "critical severity overrides explicit non_blocking disposition"
+        return "blocking", "critical severity (always blocking)"
+
+    if severity == "high":
+        if disposition == "non_blocking":
+            return "blocking", "high severity overrides explicit non_blocking disposition"
+        return "blocking", "high severity (always blocking)"
+
+    # Governance/doc-only findings are non-blocking only below the severity
+    # floor. Must satisfy BOTH conditions: governance class AND governance file
+    # path. A POLICY_BOUND finding on actual code stays blocking.
     _GOV_CLASSES = {"POLICY_BOUND", "DOC_ACCURACY"}
     _GOV_PATH_PREFIXES = ("reports/", "TASKS.md", ".claude/", "CHANGELOG.md", "STATUS.md")
     finding_file = str(finding.get("file") or "")
@@ -141,20 +157,6 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
             f"{severity} {finding_class} on governance/doc path — "
             f"downgraded to non-blocking (file: {finding_file})"
         )
-
-    # Critical/high findings stay blocking even if an explicit disposition tries
-    # to soften them. This is the fail-closed floor for bridge feedback.
-    # IMPORTANT: this check runs BEFORE the generic disposition check so that
-    # an explicit disposition field cannot downgrade critical/high severity.
-    if severity == "critical":
-        if disposition == "non_blocking":
-            return "blocking", "critical severity overrides explicit non_blocking disposition"
-        return "blocking", "critical severity (always blocking)"
-
-    if severity == "high":
-        if disposition == "non_blocking":
-            return "blocking", "high severity overrides explicit non_blocking disposition"
-        return "blocking", "high severity (always blocking)"
 
     if disposition is not None:
         if disposition in ALLOWED_FINDING_DISPOSITIONS:
@@ -409,8 +411,155 @@ def _normalize_agent_envelope_payload(payload: str) -> str:
     return "\n".join(lines).strip()
 
 
-def _parse_findings_from_render(render_text: str) -> list[dict[str, Any]]:
-    """Extract structured findings from bridge render text.
+def _iter_agent_message_texts(text: str) -> list[str]:
+    """Extract agent_message payloads from a JSONL bridge raw transcript."""
+    texts: list[str] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict) or item.get("type") != "agent_message":
+            continue
+        message_text = item.get("text")
+        if isinstance(message_text, str) and message_text.strip():
+            texts.append(message_text)
+    return texts
+
+
+def _iter_bridge_raw_texts_from_render(render_text: str) -> list[str]:
+    """Load raw bridge turn outputs referenced by a rendered transcript.
+
+    The rendered markdown summary omits machine fields like `disposition`, so
+    Phase B must prefer the raw reviewer transcript when it is available.
+    """
+    raw_output_re = re.compile(r"^\s*-\s+Raw output:\s+(.+)$", re.MULTILINE)
+    texts: list[str] = []
+    seen: set[str] = set()
+    for match in reversed(list(raw_output_re.finditer(render_text))):
+        raw_ref = match.group(1).strip()
+        path = Path(raw_ref)
+        if not path.is_absolute():
+            continue
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            texts.append(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    return texts
+
+
+def _iter_bridge_raw_texts(
+    repo_root: Path,
+    job_id: str,
+    render_text: str = "",
+) -> list[str]:
+    """Load raw bridge reviewer outputs for a job id, falling back to render refs.
+
+    The rendered markdown can lag the raw reviewer transcript briefly after the
+    bridge subprocess exits. Prefer direct raw reviewer files by job id so Phase B
+    can still classify the authoritative findings when the render is stale.
+    """
+    texts: list[str] = []
+    seen_paths: set[str] = set()
+
+    if BRIDGE_JOB_ID_RE.fullmatch(job_id or ""):
+        raw_dir = repo_root / ".agent_bus" / "raw" / job_id
+        if raw_dir.is_dir():
+            reviewer_files = sorted(
+                (
+                    path for path in raw_dir.iterdir()
+                    if path.is_file() and "reviewer" in path.name
+                ),
+                reverse=True,
+            )
+            other_files = sorted(
+                (
+                    path for path in raw_dir.iterdir()
+                    if path.is_file() and path not in reviewer_files
+                ),
+                reverse=True,
+            )
+            for path in reviewer_files + other_files:
+                key = str(path.resolve())
+                if key in seen_paths:
+                    continue
+                seen_paths.add(key)
+                try:
+                    texts.append(path.read_text(encoding="utf-8"))
+                except OSError:
+                    continue
+
+    raw_output_re = re.compile(r"^\s*-\s+Raw output:\s+(.+)$", re.MULTILINE)
+    for match in reversed(list(raw_output_re.finditer(render_text))):
+        raw_ref = match.group(1).strip()
+        path = Path(raw_ref)
+        if not path.is_absolute():
+            continue
+        try:
+            key = str(path.resolve())
+        except OSError:
+            key = str(path)
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        try:
+            texts.append(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+
+    return texts
+
+
+def _has_parse_ready_bridge_raw_text(raw_text: str) -> bool:
+    """Return True when a raw reviewer transcript is ready for findings parsing."""
+    return (
+        ("BEGIN_AGENT_ENVELOPE" in raw_text and "END_AGENT_ENVELOPE" in raw_text)
+        or bool(re.search(r"^\s*\d+\.\s+\*\*(\w+)\*\*\s*\(([^)]+)\)\s*:\s*(.+)", raw_text, re.MULTILINE))
+    )
+
+
+def _read_bridge_review_material(
+    repo_root: Path,
+    job_id: str,
+    *,
+    settle_timeout: float = 2.0,
+    poll_sleep: float = 0.05,
+) -> tuple[str, list[str]]:
+    """Read rendered + raw bridge artifacts, allowing a brief post-exit settle window.
+
+    Bridge subprocess exit can race the final render/raw artifact flush. Poll
+    briefly so Phase B reads the completed reviewer envelope instead of treating a
+    stale partial view as malformed.
+    """
+    deadline = time.monotonic() + max(settle_timeout, 0.0)
+    best_render = ""
+    best_raw_texts: list[str] = []
+
+    while True:
+        render_text = _read_bridge_render(repo_root, job_id)
+        raw_texts = _iter_bridge_raw_texts(repo_root, job_id, render_text)
+        if render_text:
+            best_render = render_text
+        if raw_texts:
+            best_raw_texts = raw_texts
+        if any(_has_parse_ready_bridge_raw_text(text) for text in raw_texts):
+            return render_text or best_render, raw_texts
+        if time.monotonic() >= deadline:
+            return render_text or best_render, raw_texts or best_raw_texts
+        time.sleep(poll_sleep)
+
+
+def _parse_findings_from_text(text: str) -> list[dict[str, Any]]:
+    """Extract structured findings from raw bridge text or rendered markdown.
 
     Tries two strategies in order:
     1. JSON envelope between BEGIN_AGENT_ENVELOPE / END_AGENT_ENVELOPE markers.
@@ -419,11 +568,19 @@ def _parse_findings_from_render(render_text: str) -> list[dict[str, Any]]:
             - File: path/to/file.py
             - Evidence: description of evidence
     """
+    agent_messages = _iter_agent_message_texts(text)
+    if agent_messages:
+        for message_text in reversed(agent_messages):
+            findings = _parse_findings_from_text(message_text)
+            if findings:
+                return findings
+        return []
+
     # Strategy 1: JSON envelope
     # Parse envelope blocks structurally so malformed markers cannot swallow
     # later payloads, and fail closed if multiple conflicting valid envelopes
     # appear in a single render.
-    envelope_payloads, saw_envelope_markers, saw_nested_markers = _extract_agent_envelope_payloads(render_text)
+    envelope_payloads, saw_envelope_markers, saw_nested_markers = _extract_agent_envelope_payloads(text)
     if saw_nested_markers:
         return [{
             "title": "Nested AGENT_ENVELOPE markers blocked structured bridge findings parsing",
@@ -466,15 +623,20 @@ def _parse_findings_from_render(render_text: str) -> list[dict[str, Any]]:
         re.MULTILINE,
     )
     findings: list[dict[str, Any]] = []
-    lines = render_text.split("\n")
+    lines = text.split("\n")
     i = 0
     while i < len(lines):
         m = finding_re.match(lines[i])
         if m:
+            finding_class = m.group(1).strip()
             finding: dict[str, Any] = {
                 "title": m.group(3).strip(),
                 "severity": m.group(2).strip(),
-                "type": m.group(1).strip(),
+                "type": finding_class,
+                "class": finding_class,
+                # Markdown render summaries do not preserve reviewer disposition.
+                # Fail closed when envelope data is unavailable.
+                "disposition": "blocking",
             }
             # Collect indented detail lines (  - Key: value)
             i += 1
@@ -507,6 +669,24 @@ def _parse_findings_from_render(render_text: str) -> list[dict[str, Any]]:
     return findings
 
 
+def _parse_findings_from_render(
+    render_text: str,
+    raw_texts: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Extract structured findings from bridge render text.
+
+    Prefer raw reviewer transcripts referenced by the render so explicit bridge
+    metadata like `disposition` survives classification. Fall back to rendered
+    markdown parsing only when raw outputs are unavailable.
+    """
+    preferred_raw_texts = raw_texts if raw_texts is not None else _iter_bridge_raw_texts_from_render(render_text)
+    for raw_text in preferred_raw_texts:
+        findings = _parse_findings_from_text(raw_text)
+        if findings:
+            return findings
+    return _parse_findings_from_text(render_text)
+
+
 def _run_pytest_on_files(
     repo_root: Path,
     test_files: list[str],
@@ -534,6 +714,17 @@ def _run_pytest_on_files(
         }
     except subprocess.TimeoutExpired:
         return {"exit_code": -1, "stdout": "", "stderr": "pytest timed out", "passed": False}
+
+
+def _resolve_pytest_gate_timeout(raw_timeout: Any) -> int:
+    """Bound local pytest gates to a sane floor/cap inside Phase B."""
+    try:
+        timeout_s = int(float(raw_timeout))
+    except (TypeError, ValueError):
+        return DEFAULT_PYTEST_GATE_TIMEOUT_S
+    if timeout_s <= 0:
+        return DEFAULT_PYTEST_GATE_TIMEOUT_S
+    return max(DEFAULT_PYTEST_GATE_TIMEOUT_S, min(timeout_s, MAX_PYTEST_GATE_TIMEOUT_S))
 
 
 def _summarize_pytest_failure(result: dict[str, Any], *, stdout_limit: int = 1000, stderr_limit: int = 1000) -> str:
@@ -1432,15 +1623,9 @@ def _stage_files(repo_root: Path, files: list[str]) -> bool:
         )
         return True
     except subprocess.CalledProcessError:
-        # Retry with -f for tracked-but-gitignored files (e.g. .claude/hooks/)
-        try:
-            subprocess.run(
-                ["git", "add", "-f", "--", *files],
-                cwd=repo_root, capture_output=True, text=True, check=True,
-            )
-            return True
-        except subprocess.CalledProcessError:
-            return False
+        # Fail closed. Phase B must not bypass ignore rules by force-adding
+        # files the repo has explicitly excluded from normal staging.
+        return False
 
 
 def _agent_review_scope_fingerprint(repo_root: Path, files: list[str], *, depth: str) -> str:
@@ -1909,6 +2094,7 @@ def run_phase_b(
     backend = config.get("backends", {}).get("phase_b_executor", "codex")
     model = config.get("model_overrides", {}).get("phase_b_executor")
     timeout = config.get("timeouts", {}).get("phase_b_executor", 1200)
+    pytest_gate_timeout = _resolve_pytest_gate_timeout(timeout)
 
     # Extract wave governance fields from routing record (not hardcoded)
     wave_class = routing_record.get("wave_class", "L4_ENABLER")
@@ -2282,8 +2468,8 @@ def run_phase_b(
             return result
 
         if bridge_result["exit_code"] == 0 and bridge_decision == "GO":
-            render = _read_bridge_render(repo_root, bridge_job_id)
-            parsed_findings = _parse_findings_from_render(render) if render else []
+            render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
+            parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
             blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
             if blocking_findings:
                 result["status"] = "error"
@@ -2350,11 +2536,11 @@ def run_phase_b(
                 return result
 
             # Read findings from the exact bridge render for this job
-            render = _read_bridge_render(repo_root, bridge_job_id)
+            render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
             findings_text = render if render else bridge_result.get("stdout", "")
 
             # Parse and classify findings by disposition
-            parsed_findings = _parse_findings_from_render(render) if render else []
+            parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
             blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
 
             # Fail-closed: if any blocking finding has hit the repeat cap,
@@ -2437,9 +2623,12 @@ def run_phase_b(
                     ],
                 }
 
-            # Track what the fix round changed
+            # Track what the fix round changed. The local pytest pass should only
+            # exercise tests introduced or edited by this fix round, not every
+            # pre-existing test file already present in the broader replay scope.
             post_fix_files = set(_collect_changed_files(repo_root))
-            implementer_changed |= (post_fix_files - pre_fix_files)
+            current_fix_changed = sorted(post_fix_files - pre_fix_files)
+            implementer_changed |= set(current_fix_changed)
             # Recollect changed files after implementer fix (scoped to wave outputs)
             changed_files = _collect_wave_owned_files(
                 repo_root,
@@ -2449,13 +2638,19 @@ def run_phase_b(
                 executor_created or None,
                 baseline_wave_files or None,
             )
-            log(f"Changed files after bridge fix: {len(changed_files)}")
+            log(
+                f"Changed files after bridge fix: {len(changed_files)} "
+                f"(current fix touched {len(current_fix_changed)})"
+            )
 
-            # Run pytest on changed test files mechanically
-            test_files = [f for f in changed_files if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")]
+            # Run pytest only on test files changed by this bridge-fix pass.
+            test_files = [
+                f for f in current_fix_changed
+                if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")
+            ]
             if test_files:
-                log(f"Running pytest on {len(test_files)} test file(s)...")
-                pytest_result = _run_pytest_on_files(repo_root, test_files)
+                log(f"Running pytest on {len(test_files)} newly changed test file(s)...")
+                pytest_result = _run_pytest_on_files(repo_root, test_files, timeout=pytest_gate_timeout)
                 if not pytest_result["passed"]:
                     log(f"pytest FAILED (exit={pytest_result['exit_code']}) — feeding back to implementer as blocking")
                     # Feed pytest failure back as a blocking finding for next round
@@ -2623,7 +2818,7 @@ def run_phase_b(
         final_test_files = [f for f in changed_files if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")]
         if final_test_files:
             log(f"Final pytest gate: running {len(final_test_files)} test file(s)...")
-            final_pytest = _run_pytest_on_files(repo_root, final_test_files)
+            final_pytest = _run_pytest_on_files(repo_root, final_test_files, timeout=pytest_gate_timeout)
             if not final_pytest["passed"]:
                 return {
                     "status": "error",
@@ -2808,8 +3003,8 @@ def run_phase_b(
                 return result
 
             if bridge_result["exit_code"] == 0 and bridge_decision == "GO":
-                render = _read_bridge_render(repo_root, bridge_job_id)
-                parsed_findings = _parse_findings_from_render(render) if render else []
+                render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
+                parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
                 blocking_findings, non_blocking_findings = _classify_findings(parsed_findings)
                 if blocking_findings:
                     result["status"] = "error"
@@ -2876,10 +3071,10 @@ def run_phase_b(
                     return result
 
                 # Mirror initial loop: classify findings, defer non-blockers
-                render = _read_bridge_render(repo_root, bridge_job_id)
+                render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
                 findings_text = render if render else bridge_result.get("stdout", "")
 
-                parsed_findings = _parse_findings_from_render(render) if render else []
+                parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
                 blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
 
                 if blocking_findings and finding_history:
@@ -2989,7 +3184,7 @@ def run_phase_b(
         reentry_test_files = [f for f in changed_files if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")]
         if reentry_test_files:
             log(f"Re-entry pytest gate: running {len(reentry_test_files)} test file(s)...")
-            reentry_pytest = _run_pytest_on_files(repo_root, reentry_test_files)
+            reentry_pytest = _run_pytest_on_files(repo_root, reentry_test_files, timeout=pytest_gate_timeout)
             if not reentry_pytest["passed"]:
                 _clear_state(repo_root)
                 return {

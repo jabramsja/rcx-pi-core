@@ -662,7 +662,6 @@ def _classify_commit_executor_result(
         return "failed", "COMMIT_GO"
     return "success", "COMMIT_GO"
 
-
 def _parse_worktree_list(output: str) -> list[dict[str, str]]:
     """Parse `git worktree list --porcelain` into entry dicts."""
     entries: list[dict[str, str]] = []
@@ -762,8 +761,6 @@ def resolve_repo_root_for_dispatch(*, verbose: bool = False) -> Path:
         f"Multiple linked worktrees found for branch {branch!r}: {match_list}. "
         "Run the dispatcher from the intended linked worktree."
     )
-
-
 def _emit_completed_process_output(
     completed: subprocess.CompletedProcess[str],
 ) -> None:
@@ -944,6 +941,26 @@ def _run_executor_in_group(
         text=True,
         start_new_session=True,
     )
+    previous_handlers = {
+        signum: signal.getsignal(signum)
+        for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+
+    def _cleanup_for_signal(signum: int, _frame: Any) -> None:
+        try:
+            terminate_process_tree(proc.pid, cwd=cwd)
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=1)
+        except Exception:
+            pass
+        if signum == signal.SIGINT:
+            raise KeyboardInterrupt()
+        raise SystemExit(128 + signum)
+
+    for signum in previous_handlers:
+        signal.signal(signum, _cleanup_for_signal)
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -962,6 +979,19 @@ def _run_executor_in_group(
             pass
         proc.wait()
         raise
+    except BaseException:
+        try:
+            terminate_process_tree(proc.pid, cwd=cwd)
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=1)
+        except Exception:
+            pass
+        raise
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
     return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
 
 
@@ -1216,17 +1246,21 @@ def _auto_refresh_routing(
 
 def _extract_plan_path(phase_a_stdout: str, repo_root: Path) -> str | None:
     """Parse plan_path from Phase A executor output (JSON or text)."""
-    # Try JSON first
-    for line in phase_a_stdout.strip().splitlines():
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                data = json.loads(line)
-                pp = data.get("plan_path")
-                if isinstance(pp, str) and pp:
-                    return pp
-            except json.JSONDecodeError:
-                pass
+    decoder = json.JSONDecoder()
+    cursor = 0
+    while True:
+        start = phase_a_stdout.find("{", cursor)
+        if start == -1:
+            break
+        try:
+            data, end = decoder.raw_decode(phase_a_stdout[start:])
+        except json.JSONDecodeError:
+            cursor = start + 1
+            continue
+        pp = data.get("plan_path") if isinstance(data, dict) else None
+        if isinstance(pp, str) and pp:
+            return pp
+        cursor = start + max(end, 1)
     # Try full output as JSON
     try:
         data = json.loads(phase_a_stdout)

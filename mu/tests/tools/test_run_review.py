@@ -364,6 +364,23 @@ def test_agent_review_mode_env_preserves_existing_marker(monkeypatch):
     assert rr_mod.os.environ["RCX_AGENT_REVIEW_MODE"] == "existing"
 
 
+def test_build_query_options_uses_plan_permission_mode(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_build_sdk_options(options_cls, **kwargs):
+        seen.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(rr_mod, "build_sdk_options", fake_build_sdk_options)
+    monkeypatch.setattr(rr_mod, "ClaudeAgentOptions", object)
+    agent_def = types.SimpleNamespace(model="sonnet")
+
+    rr_mod.build_query_options(agent_def, max_turns=7)
+
+    assert seen["permission_mode"] == "plan"
+    assert seen["allowed_tools"] == ["Read", "Grep", "Glob", "Bash"]
+
+
 def test_review_timeout_env_is_bounded_on_import(monkeypatch):
     monkeypatch.setenv("RCX_REVIEW_AGENT_TIMEOUT", "999999999")
     reloaded = importlib.reload(rr_mod)
@@ -444,15 +461,106 @@ def test_validate_compliance_accepts_inline_code_finding():
     output = f"""
 STATUS.md reviewed.
 
+### CHECKED
+- Verified inline CODE parsing against the cited file.
+
+### NOT_CHECKED
+- No additional review context required.
+
 FINDING: Inline code finding
 FILE: {Path(__file__).resolve()}
 LINES: {line_no}
 CODE: inline_code_sentinel = "inline-code-sentinel"
 VERIFIED: Yes
 
+### Verdict
 VERDICT: REQUEST_CHANGES
 """
     compliant, error, metrics = rr_mod.validate_compliance(output)
     assert compliant is True, error
     assert metrics["blocks_with_code"] == 1
     assert metrics["incomplete_blocks"] == 0
+
+
+def test_run_single_agent_prompt_injects_active_checkout_and_in_band_rule(monkeypatch):
+    async def _run() -> None:
+        captured: dict[str, str] = {}
+
+        async def fake_query(*, prompt, options):
+            captured["prompt"] = prompt
+            yield types.SimpleNamespace(
+                result=(
+                    "### CHECKED\n"
+                    "- Reviewed the scoped packet.\n"
+                    "### NOT_CHECKED\n"
+                    "- No live commands needed.\n"
+                    "### Verdict\n"
+                    "VERDICT: NO_STRUCTURAL_CLAIMS"
+                )
+            )
+
+        monkeypatch.setattr(rr_mod, "query", fake_query)
+        monkeypatch.setattr(rr_mod, "build_query_options", lambda *args, **kwargs: object())
+
+        orchestrator = rr_mod.ReviewOrchestrator(
+            ["reports/control_plane/example_packet.md"],
+            depth="quick",
+            verbose=False,
+            use_memory=False,
+        )
+        await orchestrator.run_single_agent("structural-proof")
+
+        prompt = captured["prompt"]
+        assert f"Active repo root for this review: {Path.cwd().resolve()}" in prompt
+        assert "Return the full review in this response only." in prompt
+        assert "REPORT-PACKET REVIEW MODE" in prompt
+
+    asyncio.run(_run())
+
+
+def test_run_agent_group_retries_timed_out_partial_noncompliant_gate(monkeypatch):
+    async def _run() -> None:
+        calls = {"count": 0}
+
+        async def fake_query(*, prompt, options):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                yield types.SimpleNamespace(
+                    content=[
+                        types.SimpleNamespace(
+                            text="The adversary review plan file is ready for your review at `/Users/jeffabrams/.claude/plans/glowing-fluttering-owl.md`."
+                        )
+                    ]
+                )
+                await asyncio.sleep(2)
+                return
+            yield types.SimpleNamespace(
+                result=(
+                    "### CHECKED\n"
+                    "- Attempted scoped adversary review in the active checkout.\n"
+                    "### NOT_CHECKED\n"
+                    "- No exploit reproduced.\n"
+                    "### Verdict\n"
+                    "VERDICT: SECURE"
+                )
+            )
+
+        monkeypatch.setattr(rr_mod, "query", fake_query)
+        monkeypatch.setattr(rr_mod, "build_query_options", lambda *args, **kwargs: object())
+
+        orchestrator = rr_mod.ReviewOrchestrator(
+            ["reports/control_plane/example_packet.md"],
+            depth="quick",
+            verbose=False,
+            use_memory=False,
+            agent_timeout_s=1,
+            single_tail_timeout_s=5,
+            group_stale_timeout_s=10,
+        )
+
+        results = await orchestrator.run_agent_group(["adversary"])
+        assert calls["count"] == 2
+        assert results[0].verdict == "SECURE"
+        assert results[0].passed is True
+
+    asyncio.run(_run())
