@@ -73,11 +73,69 @@ decision_meaning() {
   esac
 }
 
+meta_decision_meaning() {
+  case "$1" in
+    COMMIT_GO|COMMIT_GO_HOLD_PUSH|NO_ACTION) echo "Ready to continue." ;;
+    NEEDS_PHASE_A) echo "The plan needs more work before continuing." ;;
+    NEEDS_PHASE_B) echo "The implementation needs more work before continuing." ;;
+    STOP_FOR_FOUNDER) echo "A founder decision is needed before continuing." ;;
+    STOP_FOR_TRIAGE_DISCUSSION) echo "This needs a human triage decision." ;;
+    ERROR_VALIDATION_FAILED) echo "The package was stopped by a failed validation check." ;;
+    *) echo "Waiting for the next decision." ;;
+  esac
+}
+
+meta_failure_reason() {
+  local file="$1"
+  if grep -q 'TASKS\.md auth: FAIL' "$file" 2>/dev/null; then
+    echo "TASKS.md does not list this wave as an active NOW or NEXT item yet."
+    return 0
+  fi
+  if grep -q 'dirty_state: FAIL' "$file" 2>/dev/null; then
+    echo "The worktree changed in a way the package did not expect."
+    return 0
+  fi
+  if grep -q 'deferred_blockers: FAIL' "$file" 2>/dev/null; then
+    echo "A blocking report is still open and not fully acknowledged."
+    return 0
+  fi
+  if grep -q 'L4 contract: FAIL' "$file" 2>/dev/null; then
+    echo "The staged diff breaks the L4 execution contract."
+    return 0
+  fi
+  if grep -q 'docs_consistency: FAIL' "$file" 2>/dev/null; then
+    echo "The docs and repo indexes disagree right now."
+    return 0
+  fi
+  if grep -q 'closeout_attestation: FAIL' "$file" 2>/dev/null; then
+    echo "The closeout proof does not match the claimed result yet."
+    return 0
+  fi
+  return 1
+}
+
+meta_next_fix() {
+  local file="$1"
+  if grep -q 'TASKS\.md auth: FAIL' "$file" 2>/dev/null; then
+    echo "Add this wave's exact task id to active NOW or NEXT in TASKS.md."
+    return 0
+  fi
+  if grep -q 'dirty_state: FAIL' "$file" 2>/dev/null; then
+    echo "Restage the real wave cleanly and rerun the package."
+    return 0
+  fi
+  if grep -q 'deferred_blockers: FAIL' "$file" 2>/dev/null; then
+    echo "Acknowledge or resolve the open blocking report before retrying."
+    return 0
+  fi
+  return 1
+}
+
 while true; do
   refresh_context
   # Build output to temp file, only redraw if content changed
   {
-  echo -e "${BOLD}PANE 2 · REVIEW FINDINGS${RESET}  $(date '+%H:%M:%S')"
+  echo -e "${BOLD}Pane 2: review findings${RESET}  $(date '+%H:%M:%S')"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo -e "  ${DIM}This pane shows the latest reviewer decision and why it passed or failed.${RESET}"
   echo -e "  ${DIM}Watching:${RESET} $BRANCH_NAME"
@@ -299,21 +357,47 @@ if env is None:
     sys.exit(0)
 print(f'DECISION={env.get(\"decision\", \"?\")}')
 print(f'SUMMARY={(env.get(\"summary\", \"\") or \"\")[:120]}')
+findings = env.get('findings', []) or []
+if findings:
+    print(f'FINDING={((findings[0].get(\"title\", \"\") or \"\")[:120])}')
+request = (env.get('request_for_claude', '') or '')[:120]
+if request:
+    print(f'NEXT={request}')
 " 2>/dev/null)
 
       if [ -n "$META_ENVELOPE" ]; then
         META_DECISION=$(echo "$META_ENVELOPE" | grep "^DECISION=" | cut -d= -f2-)
         META_SUMMARY=$(echo "$META_ENVELOPE" | grep "^SUMMARY=" | cut -d= -f2-)
+        META_FINDING=$(echo "$META_ENVELOPE" | grep "^FINDING=" | cut -d= -f2-)
+        META_NEXT=$(echo "$META_ENVELOPE" | grep "^NEXT=" | cut -d= -f2-)
         case "$META_DECISION" in
           COMMIT_GO|COMMIT_GO_HOLD_PUSH|NO_ACTION) meta_color="$GREEN" ;;
           NEEDS_PHASE_A|NEEDS_PHASE_B|STOP_FOR_FOUNDER|STOP_FOR_TRIAGE_DISCUSSION) meta_color="$YELLOW" ;;
           ERROR_VALIDATION_FAILED) meta_color="$RED" ;;
           *) meta_color="$CYAN" ;;
         esac
+        META_REASON=""
+        META_HINT=""
+        if [ "$META_DECISION" = "ERROR_VALIDATION_FAILED" ]; then
+          META_REASON="$(meta_failure_reason "$META_FILE" || true)"
+          META_HINT="$(meta_next_fix "$META_FILE" || true)"
+        fi
         echo ""
         echo -e "  ${CYAN}Latest meta review${RESET} ${DIM}($meta_age_str)${RESET}"
         echo -e "  Decision: ${meta_color}${BOLD}${META_DECISION}${RESET}"
-        [ -n "$META_SUMMARY" ] && echo -e "  ${DIM}$META_SUMMARY${RESET}"
+        echo -e "  ${DIM}Meaning: $(meta_decision_meaning "$META_DECISION")${RESET}"
+        if [ -n "$META_REASON" ]; then
+          echo -e "  Why it stopped: $META_REASON"
+        elif [ -n "$META_FINDING" ]; then
+          echo -e "  Why it stopped: $META_FINDING"
+        elif [ -n "$META_SUMMARY" ]; then
+          echo -e "  ${DIM}$META_SUMMARY${RESET}"
+        fi
+        if [ -n "$META_HINT" ]; then
+          echo -e "  ${DIM}Next fix: $META_HINT${RESET}"
+        elif [ -n "$META_NEXT" ]; then
+          echo -e "  ${DIM}Next fix: $META_NEXT${RESET}"
+        fi
       else
         SIZE=$(wc -c < "$META_FILE" | xargs)
         echo ""
@@ -379,13 +463,13 @@ if not completed and not running:
   # Only full redraw if content changed (skip title+separator for hash)
   NEW_HASH=$(tail -n +3 "$TMPOUT" 2>/dev/null | md5 -q 2>/dev/null || tail -n +3 "$TMPOUT" | md5sum 2>/dev/null | cut -d' ' -f1)
   if [ "$NEW_HASH" != "$LAST_HASH" ]; then
-    clear
+    printf '\033[H\033[2J\033[3J'
     cat "$TMPOUT"
     LAST_HASH="$NEW_HASH"
   else
     # Data unchanged — just update timestamp so user knows it's alive
     tput cup 0 0 2>/dev/null
-    echo -e "${BOLD}PANE 2 · REVIEW FINDINGS${RESET}  $(date '+%H:%M:%S')"
+    echo -e "${BOLD}Pane 2: review findings${RESET}  $(date '+%H:%M:%S')"
   fi
 
   # Auto-reload

@@ -29,6 +29,8 @@ if ! REPO_ROOT="$(resolve_observability_repo_root)"; then
 fi
 SESSION="rcx-pipeline"
 LIVE_LOG="/tmp/rcx_pipeline_live.txt"
+SESSION_WIDTH="${RCX_PIPELINE_TMUX_WIDTH:-240}"
+SESSION_HEIGHT="${RCX_PIPELINE_TMUX_HEIGHT:-70}"
 
 usage() {
   cat <<'EOF'
@@ -154,8 +156,8 @@ render_idle_screen() {
   repo_root="$(resolve_repo_root)"
   branch="$(resolve_branch_name)"
   now="$(date '+%H:%M:%S')"
-  clear
-  printf '\033[1;36mPANE 1 · LIVE PIPELINE LOG\033[0m  %s\n' "$now"
+  printf '\033[H\033[2J\033[3J'
+  printf '\033[1;36mPane 1: live pipeline log\033[0m  %s\n' "$now"
   echo ""
   echo "  This pane shows the raw live log from the active phase."
   echo "  No active pipeline log in the last 5 minutes."
@@ -171,8 +173,8 @@ switch_tail() {
   local new_log="$1"
   stop_tail
   if [ -f "$new_log" ]; then
-    clear
-    printf '\033[1;36mPANE 1 · LIVE PIPELINE LOG\033[0m\n'
+    printf '\033[H\033[2J\033[3J'
+    printf '\033[1;36mPane 1: live pipeline log\033[0m\n'
     printf '\033[1;36m── %s ──\033[0m\n' "$(basename "$new_log")"
     tail -f "$new_log" &
     tail_pid=$!
@@ -232,26 +234,37 @@ cmd_start() {
   local pane4_cmd=""
   pane1_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q RCX_OBS_STATUS_SCRIPT=$status_q bash $watcher_q"
   pane2_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q bash $obs_q/_pane_findings.sh"
-  pane3_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q bash $obs_q/_pane_timeline.sh"
-  pane4_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q bash $obs_q/_pane_processes.sh"
+  pane3_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q bash $obs_q/_pane_processes.sh"
+  pane4_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q bash $obs_q/_pane_timeline.sh"
 
   # Create session
-  tmux new-session -d -s "$SESSION" "$pane1_cmd"
+  tmux new-session -d -x "$SESSION_WIDTH" -y "$SESSION_HEIGHT" -s "$SESSION" "$pane1_cmd"
   local W="$SESSION:1"  # window 1 (base-index=1 on macOS)
+  local pane1_id="" pane2_id="" pane3_id="" pane4_id=""
+  pane1_id="$(tmux display-message -p -t "$W.1" '#{pane_id}')"
 
   # Pane 1 (top-left): Auto-switching live output
   # Split horizontally → pane 2 (right): Review Findings
-  tmux split-window -h -t "$W" "$pane2_cmd"
+  pane2_id="$(tmux split-window -h -t "$pane1_id" -P -F '#{pane_id}' "$pane2_cmd")"
 
-  # Split right pane vertically → pane 3 (bottom-right): Session Timeline
-  tmux split-window -v -t "$W" "$pane3_cmd"
+  # Split right pane vertically → pane 4 (bottom-right): Session Timeline
+  pane4_id="$(tmux split-window -v -t "$pane2_id" -P -F '#{pane_id}' "$pane4_cmd")"
 
-  # Select left pane (pane 1) and split vertically → pane 4 (bottom-left): Status + Activity
-  tmux select-pane -t "$W.1"
-  tmux split-window -v -t "$W" "$pane4_cmd"
+  # Split left pane vertically → pane 3 (bottom-left): Plain-English Status
+  pane3_id="$(tmux split-window -v -t "$pane1_id" -P -F '#{pane_id}' "$pane3_cmd")"
 
   # Select top-left pane for initial focus
-  tmux select-pane -t "$W.1"
+  tmux select-pane -t "$pane1_id"
+  tmux setw -t "$W" aggressive-resize on
+  tmux setw -t "$W" pane-border-status top
+  tmux setw -t "$W" pane-border-format '#{pane_title}'
+  # Use stable pane ids here. tmux numeric pane indexes reflect split history,
+  # but the founder-facing pane numbers are the visual 1/2/3/4 layout.
+  tmux select-pane -t "$pane1_id" -T "PANE 1 · LIVE PIPELINE LOG"
+  tmux select-pane -t "$pane2_id" -T "PANE 2 · REVIEW FINDINGS"
+  tmux select-pane -t "$pane3_id" -T "PANE 3 · PLAIN-ENGLISH STATUS"
+  tmux select-pane -t "$pane4_id" -T "PANE 4 · SESSION TIMELINE"
+  tmux select-pane -t "$pane1_id"
 
   echo "Pipeline monitor started (session: $SESSION)"
   if [ "$detach" = false ]; then

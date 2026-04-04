@@ -54,6 +54,52 @@ ONESHOT="${RCX_PANE_ONESHOT:-0}"
 FAST_ONESHOT=0
 [ "$ONESHOT" = "1" ] && FAST_ONESHOT=1
 
+pane_max_lines() {
+  local lines="${RCX_PANE_MAX_LINES:-}"
+  if ! [[ "$lines" =~ ^[0-9]+$ ]] || [ "$lines" -lt 12 ]; then
+    if [ -n "${TMUX_PANE:-}" ]; then
+      lines=$(tmux display-message -p -t "$TMUX_PANE" '#{pane_height}' 2>/dev/null || echo "")
+    fi
+  fi
+  if ! [[ "$lines" =~ ^[0-9]+$ ]] || [ "$lines" -lt 12 ]; then
+    lines="${LINES:-}"
+  fi
+  if ! [[ "$lines" =~ ^[0-9]+$ ]] || [ "$lines" -lt 12 ]; then
+    lines=$(tput lines 2>/dev/null || echo 35)
+  fi
+  if ! [[ "$lines" =~ ^[0-9]+$ ]] || [ "$lines" -lt 12 ]; then
+    lines=35
+  fi
+  printf '%s\n' "$lines"
+}
+
+fit_output_to_pane() {
+  local file="$1"
+  local max_lines="$2"
+  local total_lines head_keep tail_keep tmp
+
+  total_lines=$(wc -l < "$file" 2>/dev/null | xargs)
+  if ! [[ "$total_lines" =~ ^[0-9]+$ ]] || [ "$total_lines" -le "$max_lines" ]; then
+    return 0
+  fi
+
+  head_keep=16
+  if [ "$max_lines" -lt 22 ]; then
+    head_keep=$(( max_lines / 2 ))
+  fi
+  [ "$head_keep" -lt 8 ] && head_keep=8
+  tail_keep=$(( max_lines - head_keep - 1 ))
+  [ "$tail_keep" -lt 3 ] && tail_keep=3
+
+  tmp="${file}.trim"
+  {
+    head -n "$head_keep" "$file"
+    echo -e "  ${DIM}More detail is hidden to keep this pane readable.${RESET}"
+    tail -n "$tail_keep" "$file"
+  } > "$tmp"
+  mv "$tmp" "$file"
+}
+
 elapsed_str() {
   local started="$1"
   [ -z "$started" ] && return
@@ -139,7 +185,7 @@ while true; do
   refresh_context
   # Build output to temp file, only redraw if content changed
   {
-  echo -e "${BOLD}PANE 4 · PLAIN-ENGLISH STATUS${RESET}  $(date '+%H:%M:%S')"
+  echo -e "${BOLD}Pane 3: plain-English status${RESET}  $(date '+%H:%M:%S')"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo -e "  ${DIM}This pane shows what the pipeline is doing and what recovery last did.${RESET}"
   echo -e "  ${DIM}Watching:${RESET} $BRANCH_NAME"
@@ -180,9 +226,7 @@ while true; do
 
   echo ""
 
-  # Who's working
-  echo -e "${BOLD}WHO'S WORKING${RESET}"
-  echo "─────────────────────────────────────"
+  worker_lines=0
 
   # Check for Codex (reviewer)
   codex_pids=""
@@ -198,9 +242,14 @@ while true; do
         s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
         codex_start=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
       fi
-    done < <(pgrep -f "codex.*exec.*gpt" 2>/dev/null | head -5 || true)
+  done < <(pgrep -f "codex.*exec.*gpt" 2>/dev/null | head -5 || true)
   fi
   if [ "$codex_count" -gt 0 ]; then
+    if [ "$worker_lines" -eq 0 ]; then
+      echo -e "${BOLD}WHO'S WORKING${RESET}"
+      echo "─────────────────────────────────────"
+    fi
+    worker_lines=$((worker_lines + 1))
     echo -e ""
     echo -e "  ${YELLOW}REVIEWING${RESET}  Codex GPT-5.4 xhigh"
     echo -e "  ${DIM}$codex_count process(es)$([ -n "$codex_start" ] && echo " · $(elapsed_str "$codex_start")") | PIDs: ${codex_pids%% }${RESET}"
@@ -226,9 +275,14 @@ while true; do
           claude_start=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
         fi
       fi
-    done < <(pgrep -f "claude.*--print" 2>/dev/null | head -3 || true)
+  done < <(pgrep -f "claude.*--print" 2>/dev/null | head -3 || true)
   fi
   if [ "$claude_count" -gt 0 ]; then
+    if [ "$worker_lines" -eq 0 ]; then
+      echo -e "${BOLD}WHO'S WORKING${RESET}"
+      echo "─────────────────────────────────────"
+    fi
+    worker_lines=$((worker_lines + 1))
     # Collect PIDs into a comma-separated string
     claude_pid_list=$(echo "${claude_pids%% }" | tr ' ' ',')
     echo -e ""
@@ -245,9 +299,14 @@ while true; do
       pid_matches_repo_root "$pid" || continue
       agent_pid="$pid"
       break
-    done < <(pgrep -f "run_review.py" 2>/dev/null || true)
+  done < <(pgrep -f "run_review.py" 2>/dev/null || true)
   fi
   if [ -n "$agent_pid" ]; then
+    if [ "$worker_lines" -eq 0 ]; then
+      echo -e "${BOLD}WHO'S WORKING${RESET}"
+      echo "─────────────────────────────────────"
+    fi
+    worker_lines=$((worker_lines + 1))
     echo -e ""
     echo -e "  ${CYAN}AUDITING${RESET}  9 Native SDK Agents"
     echo -e "  ${DIM}PID: $agent_pid${RESET}"
@@ -256,7 +315,16 @@ while true; do
   fi
 
   if [ "$codex_count" -eq 0 ] && [ "$claude_count" -eq 0 ] && [ -z "$agent_pid" ] && [ "$phase" != "idle" ]; then
+    if [ "$worker_lines" -eq 0 ]; then
+      echo -e "${BOLD}WHO'S WORKING${RESET}"
+      echo "─────────────────────────────────────"
+    fi
+    worker_lines=$((worker_lines + 1))
     echo -e "  ${DIM}A pipeline step is running, but no model subprocess is active yet.${RESET}"
+  fi
+
+  if [ "$worker_lines" -eq 0 ]; then
+    echo -e "  ${DIM}Nobody is working right now.${RESET}"
   fi
 
   echo ""
@@ -328,8 +396,21 @@ while true; do
 
   DASHBOARD_PY="$SCRIPT_DIR/pipeline_dashboard.py"
   if [ -f "$DASHBOARD_PY" ]; then
-    python3 "$DASHBOARD_PY" --render-recovery --repo-root "$REPO_ROOT" 2>/dev/null || true
-    echo ""
+    RECOVERY_TMP="/tmp/rcx_pane_processes_recovery_$$.txt"
+    python3 "$DASHBOARD_PY" --render-recovery --repo-root "$REPO_ROOT" > "$RECOVERY_TMP" 2>/dev/null || true
+    recovery_line_count=$(wc -l < "$RECOVERY_TMP" 2>/dev/null | xargs)
+    if [[ "$recovery_line_count" =~ ^[0-9]+$ ]] && [ "$recovery_line_count" -gt 0 ]; then
+      max_recovery_lines=8
+      if [ "$phase" != "idle" ] || [ "$worker_lines" -gt 0 ]; then
+        max_recovery_lines=11
+      fi
+      head -n "$max_recovery_lines" "$RECOVERY_TMP"
+      if [ "$recovery_line_count" -gt "$max_recovery_lines" ]; then
+        echo -e "  ${DIM}More recovery detail is hidden to keep this pane readable.${RESET}"
+      fi
+      echo ""
+    fi
+    rm -f "$RECOVERY_TMP"
   fi
 
   } > "$TMPOUT" 2>/dev/null
@@ -422,10 +503,12 @@ for line in sys.stdin:
     echo "" >> "$TMPOUT"
   fi
 
+  fit_output_to_pane "$TMPOUT" "$(pane_max_lines)"
+
   # Only redraw if content changed (ignore timestamp line)
   NEW_HASH=$(tail -n +2 "$TMPOUT" 2>/dev/null | md5 -q 2>/dev/null || tail -n +2 "$TMPOUT" | md5sum 2>/dev/null | cut -d' ' -f1)
   if [ "$NEW_HASH" != "$LAST_HASH" ]; then
-    clear
+    printf '\033[H\033[2J\033[3J'
     cat "$TMPOUT"
     LAST_HASH="$NEW_HASH"
   fi

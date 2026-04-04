@@ -35,6 +35,7 @@ POST_MERGE_WAIT=75
 # ---------------------------------------------------------------------------
 
 BOT_LOGIN="chatgpt-codex-connector"
+BOT_NO_ISSUES_RE='Codex Review: Didn'"'"'t find any major issues'
 
 resolve_threads() {
     local pr_num="$1"
@@ -120,6 +121,71 @@ resolve_threads() {
     return 0
 }
 
+describe_latest_bot_issue_comment() {
+    local pr_num="$1"
+    local label="$2"
+    local response=""
+    local latest_kind=""
+    local latest_excerpt=""
+
+    response=$(gh api graphql -f query="{
+        repository(owner: \"$REPO_OWNER\", name: \"$REPO_NAME\") {
+            pullRequest(number: $pr_num) {
+                comments(last: 20) {
+                    nodes {
+                        author { login }
+                        body
+                        createdAt
+                    }
+                }
+            }
+        }
+    }" 2>/dev/null || true)
+
+    [ -n "$response" ] || return 0
+
+    latest_kind=$(echo "$response" | jq -r --arg bot "$BOT_LOGIN" --arg re "$BOT_NO_ISSUES_RE" '
+        [
+            .data.repository.pullRequest.comments.nodes[]
+            | select(.author.login == $bot)
+        ]
+        | sort_by(.createdAt)
+        | last
+        | if . == null then
+            ""
+          elif (.body | test($re; "i")) then
+            "clear"
+          else
+            "other"
+          end
+    ' 2>/dev/null || true)
+
+    case "$latest_kind" in
+        clear)
+            echo "  ℹ️  PR #$pr_num ($label): latest top-level Codex comment says no major issues"
+            echo "     This is historical record only, not a live unresolved thread."
+            ;;
+        other)
+            latest_excerpt=$(echo "$response" | jq -r --arg bot "$BOT_LOGIN" '
+                [
+                    .data.repository.pullRequest.comments.nodes[]
+                    | select(.author.login == $bot)
+                ]
+                | sort_by(.createdAt)
+                | last
+                | (.body // "")
+                | split("\n")[0]
+                | .[0:100]
+            ' 2>/dev/null || true)
+            if [ -n "$latest_excerpt" ]; then
+                echo "  ℹ️  PR #$pr_num ($label): latest top-level Codex comment is still visible"
+                echo "     \"$latest_excerpt\""
+                echo "     Top-level comments are historical record, not live unresolved threads."
+            fi
+            ;;
+    esac
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -143,6 +209,7 @@ if [ "$FLAG" = "--sweep-only" ]; then
         while IFS= read -r pr; do
             [ -z "$pr" ] && continue
             resolve_threads "$pr" "sweep"
+            describe_latest_bot_issue_comment "$pr" "sweep"
         done <<< "$merged_prs"
     fi
     echo ""
@@ -174,6 +241,7 @@ echo ""
 echo "--- Step 3: Post-merge sweep (waiting ${POST_MERGE_WAIT}s for bot) ---"
 sleep "$POST_MERGE_WAIT"
 resolve_threads "$PR_NUM" "post-merge"
+describe_latest_bot_issue_comment "$PR_NUM" "post-merge"
 echo ""
 
 # Step 4: Sweep recent merged PRs (opt-in via --sweep)
@@ -186,6 +254,7 @@ if [ "$FLAG" = "--sweep" ]; then
         while IFS= read -r pr; do
             [ -z "$pr" ] && continue
             resolve_threads "$pr" "sweep"
+            describe_latest_bot_issue_comment "$pr" "sweep"
         done <<< "$merged_prs"
     fi
     echo ""
