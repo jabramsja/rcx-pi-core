@@ -47,7 +47,12 @@ while true; do
     done
 
     if [ -z "$REVIEWER_FILE" ] || [ ! -s "$REVIEWER_FILE" ]; then
-      continue
+      # Round directory exists but reviewer file not yet written — still in progress
+      found_any=true
+      echo -e ""
+      echo -e "  ${CYAN}$ROUND_NAME${RESET} ${DIM}(awaiting reviewer output)${RESET}"
+      echo -e "  ${YELLOW}Starting...${RESET}"
+      break
     fi
 
     found_any=true
