@@ -16,6 +16,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 REFRESH_INTERVAL = 5
+RECOVERY_LOG_REL = Path(".agent_bus") / "recovery" / "recovery_log.json"
 RECOVERY_STATUS_REL = Path(".agent_bus") / "recovery" / "recovery_status.json"
 _HUNG_THRESHOLD_SECONDS = 90
 
@@ -61,6 +62,20 @@ def _read_recovery_status(repo_root: Path) -> dict[str, Any]:
     except (json.JSONDecodeError, OSError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _read_recovery_attempts(repo_root: Path) -> list[dict[str, Any]]:
+    path = repo_root / RECOVERY_LOG_REL
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    attempts = data.get("attempts", [])
+    return attempts if isinstance(attempts, list) else []
 
 
 def _parse_iso(value: str) -> datetime | None:
@@ -135,6 +150,52 @@ def _human_target(target: str) -> str:
     return mapping.get(cleaned, cleaned.replace("_", " "))
 
 
+def _recent_recovery_attempt_lines(
+    repo_root: Path, status: dict[str, Any], *, limit: int = 3,
+) -> list[str]:
+    attempts = _read_recovery_attempts(repo_root)
+    if not attempts:
+        return []
+
+    invocation_id = str(status.get("invocation_id", "")).strip()
+    wave_id = str(status.get("wave_id", "")).strip()
+    step = str(status.get("step", "")).strip()
+    failure_class = str(status.get("failure_class", "")).strip()
+
+    matches: list[dict[str, Any]] = []
+    for attempt in reversed(attempts):
+        if invocation_id:
+            if str(attempt.get("invocation_id", "")).strip() != invocation_id:
+                continue
+        else:
+            if wave_id and str(attempt.get("wave_id", "")).strip() != wave_id:
+                continue
+            if step and str(attempt.get("step", "")).strip() != step:
+                continue
+            if failure_class and str(attempt.get("failure_class", "")).strip() != failure_class:
+                continue
+        matches.append(attempt)
+        if len(matches) >= limit:
+            break
+
+    if not matches:
+        return []
+
+    lines = ["  Recent attempts:"]
+    for attempt in reversed(matches):
+        action = _excerpt(attempt.get("action", ""), 40) or "unknown"
+        outcome = _excerpt(attempt.get("outcome", ""), 32) or "unknown"
+        detail = _excerpt(attempt.get("detail", ""), 72)
+        duration = attempt.get("duration_s")
+        summary = f"  - {action} -> {outcome}"
+        if isinstance(duration, (int, float)):
+            summary += f" ({duration:.3f}s)"
+        if detail:
+            summary += f": {detail}"
+        lines.append(summary)
+    return lines
+
+
 def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> list[str]:
     now = now or datetime.now(timezone.utc)
     status = _read_recovery_status(repo_root)
@@ -207,6 +268,8 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
     current_command = _excerpt(status.get("current_command", ""))
     if current_command:
         lines.append(f"  Command: {current_command}")
+
+    lines.extend(_recent_recovery_attempt_lines(repo_root, status))
 
     last_action = _excerpt(status.get("last_action", ""), 60)
     outcome = _excerpt(status.get("outcome", ""), 60)
