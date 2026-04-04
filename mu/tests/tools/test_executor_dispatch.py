@@ -176,12 +176,28 @@ class TestDispatcherInputValidation:
 
 def _make_new_handoff(**overrides):
     """Create a valid new-schema handoff dict."""
+    wave_id = overrides.get("wave_id", "test-wave-id")
+    target_gate_id = overrides.get("target_gate_id", "G8")
     base = {
-        "wave_id": "test-wave-id",
+        "wave_id": wave_id,
         "wave_class": "L4_ENABLER",
-        "target_gate_id": "G8",
+        "target_gate_id": target_gate_id,
         "branch_prefix": "jabramsja",
-        "tracker_note_text": "- Tracker sync note (test, test-wave-id): test note.",
+        "tracker_note_text": (
+            f"- Tracker sync note (2026-04-03, {wave_id}): **TEST — valid handoff note.** "
+            f"Class: L4_ENABLER. target_gate_id: {target_gate_id}. "
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_executor_dispatch.py`. "
+            "evidence_delta: (1) Test handoff scopes one file. (2) Validation exercises the executor test module. "
+            "(3) Indicator artifact binds the wave. "
+            "progress_proof_before: Test handoff had no validated tracker note. "
+            "progress_proof_after: Test handoff now carries a canonical tracker note. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: reports/l4_wave_indicators/{wave_id}.json. "
+            f"indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} --output reports/l4_wave_indicators/{wave_id}.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        ),
         "fixes_implemented": ["test fix"],
         "files_to_stage": ["file1.py"],
         "force_add_files": [],
@@ -275,6 +291,45 @@ class TestCommitHandoffValidation:
     def test_valid_handoff_passes(self):
         valid, errors = commit_mod.validate_handoff(_make_new_handoff())
         assert valid, errors
+
+    def test_incomplete_l4_tracker_note_fails_early(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_handoff(
+                tracker_note_text=(
+                    "- Tracker sync note (2026-04-03, test-wave-id): **TEST — incomplete note.** "
+                    "Class: L4_ENABLER. target_gate_id: G8."
+                )
+            )
+        )
+        assert not valid
+        assert any("evidence_command" in e for e in errors)
+        assert any("progress_proof_before" in e for e in errors)
+
+    def test_build_commit_handoff_defaults_to_contract_complete_note(self, tmp_path):
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        test_file = repo / "mu" / "tests" / "tools" / "test_auto_note.py"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+        handoff, errors = commit_mod.build_commit_handoff(
+            wave_id="test-wave-id",
+            task_id="[TEST-1]",
+            files_to_stage=["mu/tests/tools/test_auto_note.py"],
+            commit_message="fix: auto note",
+            fixes_implemented=["auto tracker generation"],
+            repo_root=repo,
+        )
+        assert not errors, errors
+        note = handoff["tracker_note_text"]
+        assert "evidence_command:" in note
+        assert "progress_proof_before:" in note
+        assert "indicator_collection_command:" in note
+        assert "test_auto_note.py" in note
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
 
     def test_missing_fields_fails(self):
         valid, errors = commit_mod.validate_handoff({"files_to_stage": ["x"]})

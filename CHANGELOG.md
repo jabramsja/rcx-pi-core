@@ -50,6 +50,13 @@ All notable changes to RCX are documented in this file.
 - recovery reason extraction now pulls the embedded executor error from routed
   Phase A JSON output, so the pane shows the actual bridge failure string
   instead of a useless trailing `}` line
+- `commit_executor.py` now generates contract-complete tracker notes for ad hoc
+  routed commit handoffs by default and rejects incomplete tracker notes during
+  input validation, so the commit surface fails early instead of getting all
+  the way to pre-push before the L4 tracker-note contract trips
+- `mu/tests/tools/test_executor_dispatch.py` and
+  `mu/tests/tools/test_commit_executor_receipt.py` now lock both the stronger
+  handoff-note validation and the default note-generation path directly
 - `mu/tests/tools/test_recovery_gate.py` now locks both the recovery-status
   rendering contract and the watcher-noise regression directly, without adding
   new test files

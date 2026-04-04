@@ -1,7 +1,7 @@
 # Recovery Observability Hardening
 
 Date: 2026-04-03
-Status: Routed live proof complete; ready for routed supervisor
+Status: Routed live proof complete; routed closeout hardening ready
 Task: [PIPELINE-RECOVERY]
 Wave ID: recovery-observability-2026-04-03
 
@@ -16,11 +16,14 @@ reports claiming it was already live.
 ## Changed surfaces
 
 - `mu/tools/executors/recovery_gate.py`
+- `mu/tools/executors/commit_executor.py`
 - `mu/tools/observability/pipeline_dashboard.py`
 - `mu/tools/observability/_pane_processes.sh`
 - `mu/tools/observability/pipeline_dashboard_web.py`
 - `mu/tools/observability/pipeline_status.sh`
+- `mu/tests/tools/test_commit_executor_receipt.py`
 - `mu/tests/tools/test_recovery_gate.py`
+- `mu/tests/tools/test_executor_dispatch.py`
 
 ## Proof points
 
@@ -45,11 +48,18 @@ reports claiming it was already live.
 6. `attempt_recovery()` now actually calls `run_recovery_loop()` for Tier 3 on
    current `dev`, and the recovery reason extractor now pulls the real embedded
    executor error instead of useless trailing JSON punctuation.
+7. Routed closeout exposed an ad hoc commit-handoff gap: legacy default tracker
+   notes were too thin for the L4 pre-push contract, so `commit_executor.py`
+   now generates contract-complete tracker notes by default and rejects
+   incomplete notes during input validation before the pipeline makes a local
+   commit.
 
 ## Validation
 
 - `python3 -m py_compile mu/tools/executors/recovery_gate.py mu/tools/observability/pipeline_dashboard.py mu/tools/observability/pipeline_dashboard_web.py mu/tests/tools/test_recovery_gate.py`
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_recovery_gate.py -q --tb=short`
+- `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_commit_executor_receipt.py -q --tb=short`
+- `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py -q --tb=short`
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py -q --tb=short -k 'tier3_recovery_loop_grants_retry or tier3_unrecovered_fails_closed_under_retries or phase_b_surface_recovery_retries_after_tier3_success'`
 - `python3 mu/tools/observability/pipeline_dashboard.py --render-recovery --repo-root .`
 - live pane smoke: `_pane_processes.sh` shows `Pipeline is idle` while the stale

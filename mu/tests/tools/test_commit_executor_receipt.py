@@ -28,11 +28,13 @@ commit_mod = load_module(
 
 def _make_new_schema_handoff(**overrides):
     """Create a valid new-schema handoff for testing."""
+    wave_id = overrides.get("wave_id", "test-wave")
+    target_gate_id = overrides.get("target_gate_id", "G8")
     base = {
-        "wave_id": "test-wave",
+        "wave_id": wave_id,
         "task_id": "[TEST]",
         "wave_class": "L4_ENABLER",
-        "target_gate_id": "G8",
+        "target_gate_id": target_gate_id,
         "caller": "phase_b",
         "branch_prefix": "jabramsja",
         "files_to_stage": ["file.py"],
@@ -43,7 +45,21 @@ def _make_new_schema_handoff(**overrides):
         "base_branch": "dev",
         "pre_commit_receipt_path": ".agent_bus/meta/pre_commit_receipt.json",
         "fixes_implemented": ["test fix"],
-        "tracker_note_text": "- Tracker sync note (test-wave): test",
+        "tracker_note_text": (
+            f"- Tracker sync note (2026-04-03, {wave_id}): **TEST — receipt handoff note.** "
+            f"Class: L4_ENABLER. target_gate_id: {target_gate_id}. "
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py`. "
+            "evidence_delta: (1) Receipt tests scope the commit handoff. (2) Validation exercises the receipt test module. "
+            "(3) Indicator artifact binds the wave. "
+            "progress_proof_before: Receipt handoff had no validated tracker note. "
+            "progress_proof_after: Receipt handoff now carries a canonical tracker note. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: reports/l4_wave_indicators/{wave_id}.json. "
+            f"indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} --output reports/l4_wave_indicators/{wave_id}.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        ),
     }
     base.update(overrides)
     return base
