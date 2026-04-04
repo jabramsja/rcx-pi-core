@@ -1051,6 +1051,77 @@ END_AGENT_ENVELOPE"""
             "status": "new",
         }]
 
+    def test_parse_phase_a_findings_ignores_template_envelope_and_uses_real_reviewer_envelope(self):
+        """Phase A must ignore prompt template envelopes and parse the real reviewer findings."""
+        content = """BEGIN_AGENT_ENVELOPE
+{
+  "job_id": "string",
+  "turn_id": "string",
+  "agent_role": "reader|reviewer",
+  "decision": "GO|NO_GO|REQUEST_CHANGES|QUESTION|STALE|ERROR|SYNTHETIC",
+  "summary": "string",
+  "touched_files_claimed": ["string"],
+  "findings": [
+    {
+      "class": "DEFECT|POLICY_BOUND|DOC_ACCURACY",
+      "severity": "low|medium|high|critical",
+      "title": "string",
+      "file": "string",
+      "line_start": 1,
+      "line_end": 1,
+      "evidence_cmd": "string",
+      "evidence_result": "string",
+      "status": "new|addressed|persisting|blocked"
+    }
+  ]
+}
+END_AGENT_ENVELOPE
+
+noise
+
+BEGIN_AGENT_ENVELOPE
+{
+  "job_id": "phase-a-r1-123",
+  "turn_id": "phase-a-r1-123-t1",
+  "agent_role": "reviewer",
+  "decision": "REQUEST_CHANGES",
+  "summary": "real finding",
+  "touched_files_claimed": ["reports/control_plane/example.md"],
+  "findings": [
+    {
+      "class": "DEFECT",
+      "severity": "high",
+      "title": "Real blocking finding",
+      "detail": "The packet is still a stub.",
+      "disposition": "blocking",
+      "file": "reports/control_plane/example.md",
+      "line_start": 8,
+      "line_end": 20,
+      "evidence_cmd": "rg -n '^## ' reports/control_plane/example.md",
+      "evidence_result": "Missing required sections.",
+      "status": "new"
+    }
+  ],
+  "validations_claimed": [],
+  "request_for_next_agent": "Rewrite the packet."
+}
+END_AGENT_ENVELOPE"""
+
+        findings = phase_a_mod._parse_phase_a_findings(content)  # ANTICHEAT_OK: testing internal Phase A finding parser
+        assert findings == [{
+            "class": "DEFECT",
+            "severity": "high",
+            "title": "Real blocking finding",
+            "detail": "The packet is still a stub.",
+            "disposition": "blocking",
+            "file": "reports/control_plane/example.md",
+            "line_start": 8,
+            "line_end": 20,
+            "evidence_cmd": "rg -n '^## ' reports/control_plane/example.md",
+            "evidence_result": "Missing required sections.",
+            "status": "new",
+        }]
+
     def test_bridge_failure_no_rendered_output_fails_closed(self, tmp_path, monkeypatch):
         """Bridge failure with no rendered output fails closed."""
         self._setup_phase_a(tmp_path, monkeypatch)
@@ -5462,6 +5533,39 @@ class TestExecutorsUseBridgeSubprocess:
 
     def test_phase_b_imports_run_bridge_subprocess(self):
         assert hasattr(phase_b_mod, "run_bridge_subprocess")
+
+
+class TestPhaseABridgeCommandShape:
+    def test_phase_a_bridge_review_does_not_pass_removed_packet_review_flag(self, tmp_path, monkeypatch):
+        """Phase A bridge review must not pass the removed --packet-review flag."""
+
+        class _Proc:
+            pid = 12345
+
+            def poll(self):
+                return 0
+
+        captured: dict[str, list[str]] = {}
+
+        def fake_popen(cmd, **kwargs):
+            captured["cmd"] = list(cmd)
+            return _Proc()
+
+        monkeypatch.setattr(phase_a_mod, "load_executor_config", lambda repo_root: {})
+        monkeypatch.setattr(phase_a_mod, "process_descendants", lambda *a, **k: [])
+        monkeypatch.setattr(phase_a_mod.subprocess, "Popen", fake_popen)
+
+        result = phase_a_mod.run_bridge_design_review(
+            tmp_path,
+            "reports/control_plane/test_plan.md",
+            1,
+            job_id="phase-a-r1-test",
+            timeout=10,
+        )
+
+        assert result["exit_code"] == 0
+        assert "--no-diff" in captured["cmd"]
+        assert "--packet-review" not in captured["cmd"]
 
 
 # ===========================================================================
