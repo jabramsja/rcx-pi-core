@@ -126,7 +126,10 @@ def _is_unhelpful_recovery_text(text: str) -> bool:
     cleaned = (text or "").strip()
     if not cleaned:
         return True
+    normalized = cleaned.strip("\"'")
     if len(cleaned) <= 2 and " " not in cleaned:
+        return True
+    if re.fullmatch(r"[a-z0-9_-]{1,40}", normalized):
         return True
     if re.fullmatch(r"[\d,\s]+", cleaned):
         return True
@@ -259,7 +262,7 @@ def _format_recovery_pid_line(status: dict[str, Any], *, active: bool) -> str:
 
     parts: list[str] = []
     if owner_pid:
-        owner_label = f"Owner PID: {owner_pid}"
+        owner_label = f"owner {owner_pid}"
         if owner_state:
             if not active and owner_state == "dead":
                 owner_label += " (dead, historical)"
@@ -267,14 +270,14 @@ def _format_recovery_pid_line(status: dict[str, Any], *, active: bool) -> str:
                 owner_label += f" ({owner_state})"
         parts.append(owner_label)
     if child_pid:
-        child_label = f"{child_role or 'child'} PID: {child_pid}"
+        child_label = f"{child_role or 'child'} {child_pid}"
         if child_state:
             if not active and child_state == "dead":
                 child_label += " (dead, historical)"
             else:
                 child_label += f" ({child_state})"
         parts.append(child_label)
-    return "  " + " · ".join(parts)
+    return "  Process IDs: " + " · ".join(parts)
 
 
 def _attempt_matches_wave_step(attempt: dict[str, Any], wave_id: str, step: str) -> bool:
@@ -412,7 +415,7 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
 
     tier = status.get("tier", "?")
     failure_class = str(status.get("failure_class", "?"))
-    lines.append(f"  {label} — Tier {tier} recovery ({failure_class})")
+    lines.append(f"  {label} — Tier {tier} recovery")
     lines.append(f"  Problem: {_human_failure_class(failure_class)}")
     if not active:
         lines.append("  No recovery is running now.")
@@ -425,17 +428,17 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
     tuple_attempt = status.get("tuple_attempt_index")
     if invocations or tuple_attempt:
         lines.append(
-            f"  Invocation: {invocations or '?'} in wave · tuple attempt {tuple_attempt or '?'}"
+            f"  Recovery run: #{invocations or '?'} in this wave · step failure #{tuple_attempt or '?'}"
         )
 
     retry_target = _human_target(str(status.get("retry_target", "")))
     if retry_target:
         if active:
-            prefix = "If recovery works, go back to"
+            prefix = "Next step if this works"
         elif status.get("recovered"):
             prefix = "Recovery sent work back to"
         else:
-            prefix = "Last retry target"
+            prefix = "Last target"
         lines.append(f"  {prefix}: {retry_target}")
 
     state = _excerpt(status.get("state", ""), 80)
@@ -443,11 +446,10 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
     max_iterations = status.get("max_iterations") or 0
     if state:
         doing_now = _human_recovery_state(state)
-        prefix = "Doing now" if active else "Last state"
+        prefix = "Doing now" if active else "Last thing recovery tried"
+        lines.append(f"  {prefix}: {doing_now}")
         if max_iterations:
-            lines.append(f"  {prefix}: {doing_now} · loop {current_iteration}/{max_iterations}")
-        else:
-            lines.append(f"  {prefix}: {doing_now}")
+            lines.append(f"  Current try: {current_iteration}/{max_iterations}")
 
     pid_line = _format_recovery_pid_line(status, active=active)
     if pid_line:
@@ -459,11 +461,11 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
 
     explanation = _excerpt(status.get("explanation", ""))
     if explanation and reason_source != "explanation":
-        lines.append(f"  Recovery note: {explanation}")
+        lines.append(f"  Note: {explanation}")
 
     current_command = _excerpt(status.get("current_command", ""))
     if current_command:
-        lines.append(f"  Command: {current_command}")
+        lines.append(f"  Running command: {current_command}")
 
     lines.extend(_recent_recovery_attempt_lines(repo_root, status))
 
@@ -478,8 +480,14 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
             now=now,
         )
         summary = _human_recovery_outcome(outcome, recovered=bool(status.get("recovered")))
-        if last_action and outcome not in {"cleared"}:
-            summary += f" via {last_action}"
+        normalized_action = last_action.strip().lower().replace(" ", "_")
+        normalized_outcome = outcome.strip().lower().replace(" ", "_")
+        if (
+            last_action
+            and outcome not in {"cleared"}
+            and normalized_action not in {"", normalized_outcome, "exhausted", "later_success"}
+        ):
+            summary += f" via {last_action.replace('_', ' ')}"
         lines.append(f"  Outcome: {summary} · {_elapsed_seconds(finished_age)} ago")
     if detail and detail != reason and detail != explanation and reason_source != "detail":
         lines.append(f"  Detail: {detail}")

@@ -72,6 +72,35 @@ elapsed_str() {
   fi
 }
 
+human_phase_b_step() {
+  local step="$1"
+  case "$step" in
+    agent_review) printf '%s\n' "native SDK agents are auditing the code" ;;
+    implementer) printf '%s\n' "Claude is writing the fix" ;;
+    bridge_review) printf '%s\n' "Codex is reviewing the fix" ;;
+    *)
+      printf '%s\n' "${step//_/ }"
+      ;;
+  esac
+}
+
+human_gate_decision() {
+  local decision="$1"
+  case "$decision" in
+    COMMIT_GO) printf '%s\n' "approved to commit and merge" ;;
+    COMMIT_GO_HOLD_PUSH) printf '%s\n' "approved, but hold the push" ;;
+    REQUEST_CHANGES) printf '%s\n' "changes requested" ;;
+    NO_GO) printf '%s\n' "blocked" ;;
+    NEEDS_PHASE_B) printf '%s\n' "send it back to Phase B" ;;
+    NEEDS_PHASE_A) printf '%s\n' "send it back to Phase A" ;;
+    QUESTION) printf '%s\n' "waiting on a human answer" ;;
+    ERROR) printf '%s\n' "the gate hit an error" ;;
+    *)
+      printf '%s\n' "${decision//_/ }"
+      ;;
+  esac
+}
+
 find_live_pid() {
   local kw="$1" pid cmd
   while IFS= read -r pid; do
@@ -110,8 +139,9 @@ while true; do
   refresh_context
   # Build output to temp file, only redraw if content changed
   {
-  echo -e "${BOLD}WHAT'S HAPPENING${RESET}  $(date '+%H:%M:%S')"
+  echo -e "${BOLD}PANE 4 · PLAIN-ENGLISH STATUS${RESET}  $(date '+%H:%M:%S')"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo -e "  ${DIM}This pane shows what the pipeline is doing and what recovery last did.${RESET}"
   echo -e "  ${DIM}Watching:${RESET} $BRANCH_NAME"
   echo -e "  ${DIM}Worktree:${RESET} $REPO_ROOT"
   echo ""
@@ -137,7 +167,7 @@ while true; do
   fi
 
   if [ "$phase" = "idle" ]; then
-    echo -e "  ${DIM}Pipeline is idle. No active work.${RESET}"
+    echo -e "  ${DIM}No pipeline step is running. Waiting for the next wave.${RESET}"
   else
     started=$(ps -p "$phase_pid" -o lstart= 2>/dev/null | xargs)
     started_ts=""
@@ -226,7 +256,7 @@ while true; do
   fi
 
   if [ "$codex_count" -eq 0 ] && [ "$claude_count" -eq 0 ] && [ -z "$agent_pid" ] && [ "$phase" != "idle" ]; then
-    echo -e "  ${DIM}Executor running (no model subprocess detected yet)${RESET}"
+    echo -e "  ${DIM}A pipeline step is running, but no model subprocess is active yet.${RESET}"
   fi
 
   echo ""
@@ -239,9 +269,9 @@ while true; do
       holder=$(jq -r '.holder // "unknown"' "$lock" 2>/dev/null) || holder="?"
       lpid=$(jq -r '.pid // "0"' "$lock" 2>/dev/null) || lpid="0"
       if [ "$lpid" != "0" ] && kill -0 "$lpid" 2>/dev/null; then
-        echo -e "  ${YELLOW}LOCKED${RESET} — $holder (PID $lpid, alive)"
+        echo -e "  ${YELLOW}Bridge is busy${RESET} — $holder (PID $lpid, alive)"
       else
-        echo -e "  ${RED}STALE LOCK${RESET} — $holder (PID $lpid, dead)"
+        echo -e "  ${RED}Bridge lock looks stale${RESET} — $holder (PID $lpid, dead)"
       fi
     fi
   done
@@ -264,12 +294,13 @@ while true; do
     fi
 
     if [ "$mr" -gt 0 ]; then
-      echo -e "  Review round: ${BOLD}$br / $mr${RESET}"
+      echo -e "  Review pass: ${BOLD}$br / $mr${RESET}"
     fi
+    human_step=$(human_phase_b_step "$step")
     if [ "$pb_age" -gt 600 ]; then
-      echo -e "  Step: $step ${DIM}(state file $(( pb_age / 60 ))m old)${RESET}"
+      echo -e "  Current step: $human_step ${DIM}(saved state is $(( pb_age / 60 ))m old)${RESET}"
     else
-      echo -e "  Step: $step"
+      echo -e "  Current step: $human_step"
     fi
   fi
 
@@ -277,18 +308,19 @@ while true; do
   LATEST_RECEIPT=$(ls -t "$BUS/meta/pre_commit_receipts"/receipt_*.json 2>/dev/null | head -1) || true
   if [ -n "$LATEST_RECEIPT" ] && [ -f "$LATEST_RECEIPT" ]; then
     dec=$(jq -r '.decision // "?"' "$LATEST_RECEIPT" 2>/dev/null) || dec="?"
+    human_dec=$(human_gate_decision "$dec")
     receipt_age=$(( $(date +%s) - $(stat -f%m "$LATEST_RECEIPT" 2>/dev/null || stat -c%Y "$LATEST_RECEIPT" 2>/dev/null || echo 0) ))
     if [ "$receipt_age" -gt 600 ]; then
-      echo -e "  Last receipt: $dec ${DIM}($(( receipt_age / 60 ))m ago — stale)${RESET}"
+      echo -e "  Last gate decision: $human_dec ${DIM}($(( receipt_age / 60 ))m ago — stale)${RESET}"
     else
-      echo -e "  Last receipt: $dec ($(( receipt_age / 60 ))m ago)"
+      echo -e "  Last gate decision: $human_dec ($(( receipt_age / 60 ))m ago)"
     fi
   fi
 
   # No lock at all
   if [ ! -f "$BUS/bridge.lock" ] || [ ! -s "$BUS/bridge.lock" ]; then
     if [ ! -f "$BUS/meta/meta_bridge.lock" ] || [ ! -s "$BUS/meta/meta_bridge.lock" ]; then
-      echo -e "  ${DIM}Unlocked${RESET}"
+      echo -e "  ${DIM}Bridge is clear${RESET}"
     fi
   fi
 

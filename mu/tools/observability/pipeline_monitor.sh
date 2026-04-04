@@ -66,6 +66,7 @@ write_log_watcher() {
 # Resilient: never exits on transient errors
 set +e  # Do not exit on error
 LIVE_LOG="/tmp/rcx_pipeline_live.txt"
+IDLE_WINDOW_SECONDS=300
 current_log=""
 tail_pid=""
 
@@ -87,18 +88,35 @@ resolve_repo_root() {
   git rev-parse --show-toplevel 2>/dev/null || pwd
 }
 
+resolve_branch_name() {
+  local repo_root=""
+  repo_root="$(resolve_repo_root)"
+  [ -n "$repo_root" ] || {
+    echo "unknown"
+    return 0
+  }
+  git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
+}
+
+file_mtime_seconds() {
+  local path="$1"
+  stat -f%m "$path" 2>/dev/null || stat -c%Y "$path" 2>/dev/null || echo 0
+}
+
+file_is_recent() {
+  local path="$1"
+  [ -f "$path" ] || return 1
+  local age=$(( $(date +%s) - $(file_mtime_seconds "$path") ))
+  [ "$age" -lt "$IDLE_WINDOW_SECONDS" ]
+}
+
 find_newest_log() {
   local log=""
   local repo_root=""
   # Live tee output (from 'exec' command) takes priority
-  if [ -f "$LIVE_LOG" ]; then
-    local mtime
-    mtime=$(stat -f%m "$LIVE_LOG" 2>/dev/null || stat -c%Y "$LIVE_LOG" 2>/dev/null || echo 0)
-    local age=$(( $(date +%s) - mtime ))
-    if [ "$age" -lt 300 ]; then
-      echo "$LIVE_LOG"
-      return
-    fi
+  if file_is_recent "$LIVE_LOG"; then
+    echo "$LIVE_LOG"
+    return
   fi
   # Collect all recent pipeline logs and pick the most recently modified.
   # Avoids pinning to idle executor log while subprocess logs are still active.
@@ -115,24 +133,46 @@ find_newest_log() {
     "$repo_root"/.scratch/phase_b_agent_review_*.stdout.log \
     /tmp/phase_b_*.txt /tmp/commit_*.txt /tmp/phase_a_*.txt \
     2>/dev/null | head -1) || true
-  if [ -n "$newest" ]; then
-    local file_age=$(( $(date +%s) - $(stat -f%m "$newest" 2>/dev/null || stat -c%Y "$newest" 2>/dev/null || echo 0) ))
-    if [ "$file_age" -lt 300 ]; then
-      echo "$newest"
-      return
-    fi
+  if [ -n "$newest" ] && file_is_recent "$newest"; then
+    echo "$newest"
+    return
   fi
   echo ""
 }
 
-switch_tail() {
-  local new_log="$1"
+stop_tail() {
   if [ -n "$tail_pid" ] && kill -0 "$tail_pid" 2>/dev/null; then
     kill "$tail_pid" 2>/dev/null || true
     wait "$tail_pid" 2>/dev/null || true
   fi
   tail_pid=""
+  current_log=""
+}
+
+render_idle_screen() {
+  local repo_root="" branch="" now=""
+  repo_root="$(resolve_repo_root)"
+  branch="$(resolve_branch_name)"
+  now="$(date '+%H:%M:%S')"
+  clear
+  printf '\033[1;36mPANE 1 · LIVE PIPELINE LOG\033[0m  %s\n' "$now"
+  echo ""
+  echo "  This pane shows the raw live log from the active phase."
+  echo "  No active pipeline log in the last 5 minutes."
+  echo "  The last wave finished or went quiet."
+  echo ""
+  echo "  Branch: $branch"
+  echo "  Worktree: $repo_root"
+  echo ""
+  echo "  This pane will switch automatically when the next phase starts."
+}
+
+switch_tail() {
+  local new_log="$1"
+  stop_tail
   if [ -f "$new_log" ]; then
+    clear
+    printf '\033[1;36mPANE 1 · LIVE PIPELINE LOG\033[0m\n'
     printf '\033[1;36m── %s ──\033[0m\n' "$(basename "$new_log")"
     tail -f "$new_log" &
     tail_pid=$!
@@ -140,13 +180,15 @@ switch_tail() {
   fi
 }
 
-echo "Auto-switching log watcher — scanning for active logs..."
 while true; do
   newest=$(find_newest_log) || newest=""
   if [ -n "$newest" ] && [ "$newest" != "$current_log" ]; then
     switch_tail "$newest"
-  elif [ -z "$newest" ] && [ -z "$current_log" ]; then
-    printf '\r\033[2mWaiting for pipeline activity...\033[0m'
+  elif [ -z "$newest" ]; then
+    if [ -n "$current_log" ]; then
+      stop_tail
+    fi
+    render_idle_screen
   fi
   # Check if tail process died (file deleted/truncated)
   if [ -n "$tail_pid" ] && ! kill -0 "$tail_pid" 2>/dev/null; then
@@ -175,28 +217,38 @@ cmd_start() {
   write_log_watcher > "$watcher"
   chmod +x "$watcher"
 
-  # Create session
-  tmux new-session -d -s "$SESSION"
-  local W="$SESSION:1"  # window 1 (base-index=1 on macOS)
-
   local OBS_DIR="$REPO_ROOT/mu/tools/observability"
   local PINNED_ROOT="$REPO_ROOT"
+  local repo_q="" obs_q="" root_q="" watcher_q="" status_q=""
+  printf -v repo_q '%q' "$REPO_ROOT"
+  printf -v obs_q '%q' "$OBS_DIR"
+  printf -v root_q '%q' "$PINNED_ROOT"
+  printf -v watcher_q '%q' "$watcher"
+  printf -v status_q '%q' "$OBS_DIR/pipeline_status.sh"
+
+  local pane1_cmd=""
+  local pane2_cmd=""
+  local pane3_cmd=""
+  local pane4_cmd=""
+  pane1_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q RCX_OBS_STATUS_SCRIPT=$status_q bash $watcher_q"
+  pane2_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q bash $obs_q/_pane_findings.sh"
+  pane3_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q bash $obs_q/_pane_timeline.sh"
+  pane4_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q bash $obs_q/_pane_processes.sh"
+
+  # Create session
+  tmux new-session -d -s "$SESSION" "$pane1_cmd"
+  local W="$SESSION:1"  # window 1 (base-index=1 on macOS)
 
   # Pane 1 (top-left): Auto-switching live output
-  tmux send-keys -t "$W" "cd '$REPO_ROOT' && RCX_OBS_REPO_ROOT='$PINNED_ROOT' RCX_OBS_STATUS_SCRIPT='$OBS_DIR/pipeline_status.sh' bash '$watcher'" Enter
-
   # Split horizontally → pane 2 (right): Review Findings
-  tmux split-window -h -t "$W"
-  tmux send-keys "cd '$REPO_ROOT' && RCX_OBS_REPO_ROOT='$PINNED_ROOT' bash '$OBS_DIR/_pane_findings.sh'" Enter
+  tmux split-window -h -t "$W" "$pane2_cmd"
 
   # Split right pane vertically → pane 3 (bottom-right): Session Timeline
-  tmux split-window -v -t "$W"
-  tmux send-keys "cd '$REPO_ROOT' && RCX_OBS_REPO_ROOT='$PINNED_ROOT' bash '$OBS_DIR/_pane_timeline.sh'" Enter
+  tmux split-window -v -t "$W" "$pane3_cmd"
 
   # Select left pane (pane 1) and split vertically → pane 4 (bottom-left): Status + Activity
   tmux select-pane -t "$W.1"
-  tmux split-window -v -t "$W"
-  tmux send-keys "cd '$REPO_ROOT' && RCX_OBS_REPO_ROOT='$PINNED_ROOT' bash '$OBS_DIR/_pane_processes.sh'" Enter
+  tmux split-window -v -t "$W" "$pane4_cmd"
 
   # Select top-left pane for initial focus
   tmux select-pane -t "$W.1"
