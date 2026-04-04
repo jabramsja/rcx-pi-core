@@ -2996,6 +2996,65 @@ class TestCommitContinuationAndBotFreshness:
         assert resumed["receipt_decision"] == "COMMIT_GO"
         assert resumed["steps_completed"][-1] == "hold_check"
 
+    def test_post_commit_continuation_accepts_head_advanced_by_sync_commit(self, tmp_path):
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "wave commit"], cwd=repo, capture_output=True, env=env)
+        original_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+        handoff = _make_new_handoff()
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(json.dumps({
+            "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+            "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+            "handoff_sha": commit_mod._handoff_sha(handoff),  # ANTICHEAT_OK: testing continuation binding helper
+            "target_branch": "jabramsja/test-wave-id",
+            "commit_sha": original_head,
+            "receipt_decision": "COMMIT_GO",
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "ensure_tracker_note",
+                "stage_files",
+                "collect_and_stage_indicator",
+                "build_and_run_supervisor",
+                "validate_receipt",
+                "run_pre_commit_script",
+                "git_commit",
+                "hold_check",
+            ],
+        }))
+
+        (repo / "file2.py").write_text("x = 2\n")
+        subprocess.run(["git", "add", "file2.py"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "sync base"], cwd=repo, capture_output=True, env=env)
+        advanced_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+        captured: dict[str, object] = {}
+
+        def fake_post_commit_pipeline(**kwargs):
+            captured["result"] = kwargs["result"].copy()
+            return {"status": "continued", "steps_completed": kwargs["result"]["steps_completed"]}
+
+        with patch.object(commit_mod, "_run_post_commit_pipeline", side_effect=fake_post_commit_pipeline):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "continued"
+        resumed = captured["result"]
+        assert resumed["commit_sha"] == advanced_head
+        assert resumed["commit_sha"] != original_head
+        assert resumed["receipt_decision"] == "COMMIT_GO"
+
     def test_hold_continuation_returns_held_and_clears_record(self, tmp_path):
         repo, env = _init_git_repo(tmp_path)
         subprocess.run(
