@@ -1,24 +1,24 @@
 {
   "wave_id": "recovery-observability-2026-04-03",
-  "repeat_run_speedup_ratio": 1.290772,
+  "repeat_run_speedup_ratio": 1.387897,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.380852,
+  "step_growth_slope": 0.402968,
   "repeat_run_raw_seconds": [
-    0.491593,
-    0.380852
+    0.559278,
+    0.402968
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.491593
+      "elapsed_seconds": 0.559278
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.872445
+      "elapsed_seconds": 0.962246
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-04T05:20:40Z",
+  "collection_timestamp_utc": "2026-04-04T05:27:21Z",
   "collector_version": "2.2.0"
 }
