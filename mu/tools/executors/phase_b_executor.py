@@ -46,6 +46,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 try:
     from executor_common import (
         load_executor_config,
+        DEFAULT_EXECUTOR_CONFIG,
         load_routing_record, ExecutorCommonError,
         BLOCKING_KEYWORDS, NON_BLOCKING_KEYWORDS,
         REPEAT_FINDING_CAP,
@@ -65,6 +66,7 @@ except ImportError:
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     load_executor_config = _mod.load_executor_config
+    DEFAULT_EXECUTOR_CONFIG = _mod.DEFAULT_EXECUTOR_CONFIG
     load_routing_record = _mod.load_routing_record
     ExecutorCommonError = _mod.ExecutorCommonError
     BLOCKING_KEYWORDS = _mod.BLOCKING_KEYWORDS
@@ -2091,7 +2093,10 @@ def run_phase_b(
         )
 
     config = load_executor_config(repo_root)
-    backend = config.get("backends", {}).get("phase_b_executor", "codex")
+    backend = config.get("backends", {}).get(
+        "phase_b_executor",
+        DEFAULT_EXECUTOR_CONFIG["backends"]["phase_b_executor"],
+    )
     model = config.get("model_overrides", {}).get("phase_b_executor")
     timeout = config.get("timeouts", {}).get("phase_b_executor", 1200)
     pytest_gate_timeout = _resolve_pytest_gate_timeout(timeout)

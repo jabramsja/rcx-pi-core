@@ -698,4 +698,23 @@ class TestCommitExecutorPytestGate:
             )
 
         assert result["passed"] is True
-        assert mock_run.call_args.kwargs["timeout"] == 225
+        assert mock_run.call_args.kwargs["timeout"] == 450
+
+    def test_run_pytest_on_files_gives_single_large_file_real_slack(self, tmp_path):
+        from types import SimpleNamespace
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        with patch.object(
+            commit_mod.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ) as mock_run:
+            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing single-file timeout floor
+                repo,
+                ["mu/tests/tools/test_phase_b_executor.py"],
+            )
+
+        assert result["passed"] is True
+        assert mock_run.call_args.kwargs["timeout"] == 180
