@@ -91,26 +91,49 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     exit_code = result.get("exit_code")
     step = result.get("step", "")
     stdout = result.get("stdout", "")
+    embedded_stdout = _parse_json_object(stdout)
+    embedded_stderr = _parse_json_object(stderr)
+    embedded_status = (
+        embedded_stdout.get("status")
+        or embedded_stderr.get("status")
+        or ""
+    )
+    embedded_step = (
+        embedded_stdout.get("step")
+        or embedded_stdout.get("executor")
+        or embedded_stderr.get("step")
+        or embedded_stderr.get("executor")
+        or ""
+    )
+    embedded_reason = " ".join(
+        part
+        for part in (
+            _summarize_json_value(embedded_stdout),
+            _summarize_json_value(embedded_stderr),
+        )
+        if part
+    )
+    combined_text = " ".join(
+        part for part in (stderr, stdout, embedded_reason) if isinstance(part, str) and part
+    )
+    combined_lower = combined_text.lower()
+    step_lower = " ".join(part for part in (step, embedded_step) if part).lower()
+    status_failed = status in ("error", "failed") or embedded_status in ("error", "failed")
 
     # Tier 4: terminal policy outcomes (check first, never recover)
     if status in _TERMINAL_STATUSES:
         return FailureClass.TERMINAL_POLICY
-    if stdout:
-        try:
-            data = json.loads(stdout)
-            if isinstance(data, dict) and data.get("status") in _TERMINAL_STATUSES:
-                return FailureClass.TERMINAL_POLICY
-        except (json.JSONDecodeError, ValueError):
-            pass
+    if embedded_status in _TERMINAL_STATUSES:
+        return FailureClass.TERMINAL_POLICY
 
     # Tier 1: deterministic lock/state issues
-    if "bridge.lock" in stderr or "bridge.lock" in stdout:
+    if "bridge.lock" in combined_text:
         return FailureClass.STALE_BRIDGE_LOCK
-    if "index.lock" in stderr or "index.lock" in stdout:
+    if "index.lock" in combined_text:
         return FailureClass.STALE_GIT_INDEX_LOCK
-    if "phase_b_state.json" in stderr or "stale_state" in status:
+    if "phase_b_state.json" in combined_text or "stale_state" in status:
         return FailureClass.STALE_EXECUTOR_STATE
-    if "continuation" in stderr.lower() and "stale" in stderr.lower():
+    if "continuation" in combined_lower and "stale" in combined_lower:
         return FailureClass.STALE_CONTINUATION
     if _looks_like_mixed_staging(stderr, stdout, step):
         return FailureClass.MIXED_STAGING
@@ -120,19 +143,29 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.PROCESS_TIMEOUT
     if exit_code is not None and exit_code in _TRANSIENT_KILL_CODES:
         return FailureClass.TRANSIENT_KILL
-    if "aggregation" in stderr.lower():
+    if "aggregation" in combined_lower:
         return FailureClass.AGGREGATION_HANG
     if result.get("implementer_status") == "stale":
         return FailureClass.IMPLEMENTER_STALE
 
     # Tier 3: needs diagnosis
-    if step in ("stage_files", "git_commit") and "git add" in stderr.lower():
+    if step in ("stage_files", "git_commit") and "git add" in combined_lower:
         return FailureClass.GIT_STAGING_CONFLICT
-    if "test" in stderr.lower() and ("fail" in stderr.lower() or "error" in stderr.lower()):
+    if "test" in combined_lower and ("fail" in combined_lower or "error" in combined_lower):
         return FailureClass.TEST_FAILURE
-    if "agent" in step.lower() and status in ("error", "failed"):
+    review_crash_hints = (
+        "bridge subprocess failed",
+        "produced no stdout",
+        "adapter 'codex'",
+        'adapter "codex"',
+        "--packet-review",
+        "reviewer",
+    )
+    if status_failed and any(hint in combined_lower for hint in review_crash_hints):
         return FailureClass.AGENT_REVIEW_CRASH
-    if status in ("error", "failed"):
+    if status_failed and ("agent" in step_lower or "bridge" in step_lower):
+        return FailureClass.AGENT_REVIEW_CRASH
+    if status_failed:
         return FailureClass.UNKNOWN_ERROR
 
     return FailureClass.UNCLASSIFIED
@@ -425,6 +458,7 @@ _DANGEROUS_COMMANDS = frozenset({
 MAX_RECOVERY_ITERATIONS = 3
 _CLAUDE_TIMEOUT = 60
 _SHELL_TIMEOUT = 30
+_TRIVIAL_EXCERPTS = frozenset({"{", "}", "[", "]", ",", '"', '",', "{}", "[]"})
 
 
 def _is_dangerous_command(cmd: str) -> bool:
@@ -724,6 +758,8 @@ def run_recovery_loop(
         if action == "shell":
             cmd_results = []
             blocked = False
+            executed = 0
+            all_ok = True
             _update_recovery_status(
                 repo_root,
                 state="tier3_running_shell",
@@ -735,25 +771,34 @@ def run_recovery_loop(
                 if _is_dangerous_command(cmd):
                     cmd_results.append(f"BLOCKED: {cmd}")
                     blocked = True
+                    all_ok = False
                     continue
                 try:
                     cmd_proc = subprocess.run(
                         cmd, shell=True, capture_output=True, text=True,
                         timeout=_SHELL_TIMEOUT, cwd=repo_root)
+                    executed += 1
+                    if cmd_proc.returncode != 0:
+                        all_ok = False
                     cmd_results.append(
                         f"exit={cmd_proc.returncode}: {cmd_proc.stdout[:200]}")
                 except subprocess.TimeoutExpired:
+                    all_ok = False
                     cmd_results.append(f"TIMEOUT: {cmd}")
                 except OSError as exc:
+                    all_ok = False
                     cmd_results.append(f"ERROR: {exc}")
             loop_log.append({
                 "iteration": i + 1, "action": "shell",
                 "commands": commands, "results": cmd_results,
                 "blocked": blocked, "detail": explanation,
                 "duration_s": round(time.monotonic() - iteration_t0, 3)})
+            action_applied = executed > 0 and all_ok and not blocked
 
         elif action == "edit":
             edit_results = []
+            edit_successes = 0
+            edit_failures = 0
             _update_recovery_status(
                 repo_root,
                 state="tier3_applying_edit",
@@ -762,10 +807,17 @@ def run_recovery_loop(
                 if isinstance(edit, dict):
                     ok, msg = _apply_edit(edit, repo_root)
                     edit_results.append(msg)
+                    if ok:
+                        edit_successes += 1
+                    else:
+                        edit_failures += 1
             loop_log.append({
                 "iteration": i + 1, "action": "edit",
                 "results": edit_results, "detail": explanation,
                 "duration_s": round(time.monotonic() - iteration_t0, 3)})
+            action_applied = edit_successes > 0 and edit_failures == 0
+        else:
+            action_applied = False
 
         # Verify: re-run the failed gate/check if a verify command is provided
         if verify_command:
@@ -808,6 +860,30 @@ def run_recovery_loop(
                 )
             except (subprocess.TimeoutExpired, OSError):
                 pass
+        elif action in {"shell", "edit"} and action_applied:
+            dur = round(time.monotonic() - iteration_t0, 3)
+            retry_target = _retry_target(result, step)
+            detail = explanation or f"{action} applied; retrying {retry_target}"
+            _log_tier3_attempt(
+                repo_root, wave_id, step, fc, i + 1,
+                action, "retry_requested", dur, detail,
+                invocation_id=invocation_id,
+            )
+            _finish_recovery_status(
+                repo_root,
+                recovered=True,
+                exhausted=False,
+                outcome="retry_requested",
+                action=action,
+                detail=detail,
+                state="tier3_retry_requested",
+            )
+            return {
+                "recovered": True,
+                "exhausted": False,
+                "iterations": i + 1,
+                "log": loop_log,
+            }
         # Log iteration outcome (verify failed or no verify command)
         dur = round(time.monotonic() - iteration_t0, 3)
         _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
@@ -864,17 +940,74 @@ def _excerpt(value: Any, limit: int = 160) -> str:
     if not text:
         return ""
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    excerpt = lines[-1] if lines else text
+    excerpt = ""
+    for candidate in reversed(lines):
+        if candidate not in _TRIVIAL_EXCERPTS:
+            excerpt = candidate
+            break
+    if not excerpt:
+        excerpt = lines[-1] if lines else text
     if len(excerpt) <= limit:
         return excerpt
     return excerpt[: limit - 3].rstrip() + "..."
 
 
+def _parse_json_object(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str):
+        return {}
+    text = value.strip()
+    if not text:
+        return {}
+    candidates: list[str] = []
+    if text.startswith("{"):
+        candidates.append(text)
+    json_start = text.find("{")
+    json_end = text.rfind("}")
+    if json_start != -1 and json_end > json_start:
+        candidates.append(text[json_start:json_end + 1])
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _summarize_json_value(value: Any) -> str:
+    if isinstance(value, dict):
+        for key in ("error", "message", "detail", "reason", "stderr", "stdout"):
+            excerpt = _summarize_json_value(value.get(key))
+            if excerpt:
+                return excerpt
+        for nested in value.values():
+            excerpt = _summarize_json_value(nested)
+            if excerpt:
+                return excerpt
+        return ""
+    if isinstance(value, list):
+        for item in value:
+            excerpt = _summarize_json_value(item)
+            if excerpt:
+                return excerpt
+        return ""
+    excerpt = _excerpt(value)
+    return excerpt if excerpt not in _TRIVIAL_EXCERPTS else ""
+
+
 def _summarize_result_reason(result: dict[str, Any]) -> str:
-    for key in ("stderr", "detail", "message", "stdout"):
+    for key in ("error", "stderr", "detail", "message"):
         excerpt = _excerpt(result.get(key, ""))
         if excerpt:
             return excerpt
+    for key in ("stdout", "stderr"):
+        excerpt = _summarize_json_value(_parse_json_object(result.get(key, "")))
+        if excerpt:
+            return excerpt
+    excerpt = _excerpt(result.get("stdout", ""))
+    if excerpt:
+        return excerpt
     status = _excerpt(result.get("status", ""))
     step = _excerpt(result.get("step") or result.get("executor", ""))
     if status and step:
@@ -1120,17 +1253,28 @@ def attempt_recovery(
         )
         return _make_result(False, "escalate", 4, fc, detail, False)
     if tier == 3:
-        detail = "tier 3 recovery not yet wired into dispatcher"
-        _finish_recovery_status(
+        loop_result = run_recovery_loop(
             repo_root,
-            recovered=False,
-            exhausted=False,
-            outcome="not_available",
-            action="not_implemented",
-            detail=detail,
-            state="tier3_not_available",
+            {
+                **result,
+                "failure_class": fc.value,
+            },
+            wave_id,
+            invocation_id=invocation_id,
         )
-        return _make_result(False, "not_implemented", tier, fc, detail, False)
+        detail = ""
+        if loop_result.get("log"):
+            detail = str(loop_result["log"][-1].get("detail", "")).strip()
+        if not detail:
+            detail = _load_recovery_status(repo_root).get("detail", "")
+        return _make_result(
+            loop_result.get("recovered", False),
+            "recovery_loop",
+            tier,
+            fc,
+            detail,
+            loop_result.get("exhausted", False),
+        )
 
     # Tier 2: check _TIER2_FIXES before falling through
     if tier == 2:

@@ -115,6 +115,12 @@ else
   echo -e "${DIM}No active pipeline processes${RESET}"
 fi
 
+# ── Recovery ──
+if [ -f "$REPO_ROOT/mu/tools/observability/pipeline_dashboard.py" ]; then
+  echo ""
+  python3 "$REPO_ROOT/mu/tools/observability/pipeline_dashboard.py" --render-recovery --repo-root "$REPO_ROOT" 2>/dev/null || true
+fi
+
 # ── PR / CI Status ──
 if [ -n "$EXEC_FILES" ] && [ -f "$EXEC_FILES" ]; then
   PR_NUM=$(jq -r '.pr_number // ""' "$EXEC_FILES" 2>/dev/null)

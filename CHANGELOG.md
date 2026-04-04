@@ -34,6 +34,9 @@ All notable changes to RCX are documented in this file.
   `.agent_bus/recovery/recovery_status.json` file with the current recovery
   tier, failure class, retry target, wave invocation count, tuple attempt
   index, owner PID, live child PID/role, current state, and terminal outcome
+- `recovery_gate.py` on current `dev` now also restores live Tier 3 wiring in
+  `attempt_recovery()`, so routed dispatcher failures actually enter the
+  recovery loop instead of returning `not_implemented`
 - `pipeline_dashboard.py` now renders that status into plain-English recovery
   lines for tmux and other text dashboards, and `_pane_processes.sh` now shows
   the recovery section directly by calling the existing dashboard surface
@@ -41,6 +44,24 @@ All notable changes to RCX are documented in this file.
   `pipeline_dashboard_web.py`, and `pipeline_status.sh` now ignore `tail -f`
   log watchers and other observability helper processes when detecting the
   active pipeline phase, so stale panes no longer report fake live executors
+- `pipeline_dashboard_web.py` and `pipeline_status.sh` now surface the same
+  live recovery facts directly, including tier, target, loop counter, live
+  PIDs, plain-English reason, and terminal outcome
+- recovery reason extraction now pulls the embedded executor error from routed
+  Phase A JSON output, so the pane shows the actual bridge failure string
+  instead of a useless trailing `}` line
+- `commit_executor.py` now generates contract-complete tracker notes for ad hoc
+  routed commit handoffs by default and rejects incomplete tracker notes during
+  input validation, so the commit surface fails early instead of getting all
+  the way to pre-push before the L4 tracker-note contract trips
+- `commit_executor.py` now gives `pre-push-fast` a longer Step 11 timeout, so
+  the real fast-audit path can finish instead of being misreported as a failed
+  push gate when the audit is still making forward progress
+- `mu/tests/tools/test_executor_dispatch.py` and
+  `mu/tests/tools/test_commit_executor_receipt.py` now lock both the stronger
+  handoff-note validation and the default note-generation path directly
+- `mu/tests/tools/test_executor_dispatch.py` now also locks the extended
+  `pre-push-fast` timeout contract directly
 - `mu/tests/tools/test_recovery_gate.py` now locks both the recovery-status
   rendering contract and the watcher-noise regression directly, without adding
   new test files
