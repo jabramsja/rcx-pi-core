@@ -1160,10 +1160,10 @@ class TestRecoveryStatusRendering:
             encoding="utf-8",
         )
         rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
-        assert "ACTIVE — Tier 2 recovery (process_timeout)" in rendered
+        assert "ACTIVE — Tier 2 recovery" in rendered
         assert "Problem: a step timed out" in rendered
-        assert "If recovery works, go back to: Phase A" in rendered
-        assert "Invocation: 2 in wave" in rendered
+        assert "Next step if this works: Phase A" in rendered
+        assert "Recovery run: #2 in this wave · step failure #1" in rendered
         assert "Reason: phase_a timed out" in rendered
 
     def test_hung_child_pid_and_completed_outcome(self, tmp_path):
@@ -1196,10 +1196,10 @@ class TestRecoveryStatusRendering:
             encoding="utf-8",
         )
         rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
-        assert "POSSIBLY HUNG — Tier 3 recovery (agent_review_crash)" in rendered
+        assert "POSSIBLY HUNG — Tier 3 recovery" in rendered
         assert "asking the recovery agent what to try" in rendered
-        assert "loop 2/3" in rendered
-        assert "claude PID: 888888 (dead)" in rendered
+        assert "Current try: 2/3" in rendered
+        assert "Process IDs: owner 999999 (dead) · claude 888888 (dead)" in rendered
 
         (status_path / "recovery_status.json").write_text(
             json.dumps(
@@ -1230,9 +1230,9 @@ class TestRecoveryStatusRendering:
             encoding="utf-8",
         )
         rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
-        assert "LAST RECOVERY — Tier 3 recovery (agent_review_crash)" in rendered
+        assert "LAST RECOVERY — Tier 3 recovery" in rendered
         assert "Outcome: recovery worked via shell" in rendered
-        assert "Recovery note: narrowed the fix" in rendered
+        assert "Note: narrowed the fix" in rendered
 
     def test_recent_attempts_rendered_for_matching_invocation(self, tmp_path):
         status_path = tmp_path / ".agent_bus" / "recovery"
@@ -1400,7 +1400,7 @@ class TestRecoveryStatusRendering:
         rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
         assert "Reason: phase_b_state.json not found" in rendered
         assert "40,304" not in rendered
-        assert "Owner PID: 999999 (dead, historical)" in rendered
+        assert "Process IDs: owner 999999 (dead, historical)" in rendered
         assert "Recent attempts in wave:" in rendered
         assert "Try 2: applied a file edit -> asked the pipeline to retry" in rendered
 
@@ -1445,6 +1445,44 @@ class TestRecoveryStatusRendering:
         assert "Reason: Commit later succeeded, so this older recovery record is historical only." in rendered
         assert "Reason: R" not in rendered
         assert "Outcome: a later success cleared the earlier issue" in rendered
+
+    def test_internal_reason_codes_are_hidden_and_exhausted_reads_cleanly(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime(2026, 4, 4, 14, 0, tzinfo=timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "wave_id": "wave-zeta",
+                    "step": "commit_executor",
+                    "failure_class": "test_failure",
+                    "tier": 3,
+                    "wave_invocation_count": 1,
+                    "tuple_attempt_index": 1,
+                    "retry_target": "commit_executor",
+                    "state": "tier3_exhausted",
+                    "owner_pid": 999999,
+                    "reason": "\"hold_check\"",
+                    "detail": "max 3 Tier 3 iterations exhausted",
+                    "updated_at": (now - timedelta(minutes=4)).isoformat(),
+                    "finished_at": (now - timedelta(minutes=4)).isoformat(),
+                    "current_iteration": 3,
+                    "max_iterations": 3,
+                    "current_command": "",
+                    "explanation": "",
+                    "outcome": "exhausted",
+                    "last_action": "exhausted",
+                    "recovered": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+        assert "Reason: \"hold_check\"" not in rendered
+        assert "Reason: max 3 Tier 3 iterations exhausted" in rendered
+        assert "Outcome: recovery ran out of tries · 4m 00s ago" in rendered
 
 
 class TestRecoveryWebSnapshot:
@@ -1836,7 +1874,7 @@ esac
 
         assert result.returncode == 0
         assert "RECOVERY" in result.stdout
-        assert "Tier 3 recovery (agent_review_crash)" in result.stdout
+        assert "Tier 3 recovery" in result.stdout
 
     def test_pipeline_status_uses_sole_linked_worktree_when_only_one_exists(self, tmp_path):
         common = tmp_path / "common"
@@ -2410,7 +2448,7 @@ esac
 
         assert result.returncode == 0
         clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
-        assert "Pipeline is idle. No active work." in clean_stdout
+        assert "No pipeline step is running. Waiting for the next wave." in clean_stdout
         assert "unrelated global codex session" not in clean_stdout
 
     def test_pane_processes_uses_local_dashboard_code_for_active_worktree_data(self, tmp_path):
@@ -2477,7 +2515,7 @@ esac
         assert result.returncode == 0
         clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
         assert "Watching: jabramsja/active-wave" in clean_stdout
-        assert "ACTIVE — Tier 3 recovery (agent_review_crash)" in clean_stdout
+        assert "ACTIVE — Tier 3 recovery" in clean_stdout
         assert "Problem: a review subprocess crashed" in clean_stdout
 
     def test_pane_processes_honors_pinned_repo_root_env(self, tmp_path):

@@ -77,8 +77,9 @@ while true; do
   refresh_context
   # Build output to temp file, only redraw if content changed
   {
-  echo -e "${BOLD}REVIEW FINDINGS${RESET}  $(date '+%H:%M:%S')"
+  echo -e "${BOLD}PANE 2 · REVIEW FINDINGS${RESET}  $(date '+%H:%M:%S')"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo -e "  ${DIM}This pane shows the latest reviewer decision and why it passed or failed.${RESET}"
   echo -e "  ${DIM}Watching:${RESET} $BRANCH_NAME"
   echo -e "  ${DIM}Worktree:${RESET} $REPO_ROOT"
   echo ""
@@ -384,7 +385,7 @@ if not completed and not running:
   else
     # Data unchanged — just update timestamp so user knows it's alive
     tput cup 0 0 2>/dev/null
-    echo -e "${BOLD}REVIEW FINDINGS${RESET}  $(date '+%H:%M:%S')"
+    echo -e "${BOLD}PANE 2 · REVIEW FINDINGS${RESET}  $(date '+%H:%M:%S')"
   fi
 
   # Auto-reload

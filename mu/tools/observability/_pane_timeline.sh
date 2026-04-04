@@ -92,8 +92,9 @@ repo_has_process() {
 while true; do
   refresh_context
   {
-  echo -e "${BOLD}SESSION TIMELINE${RESET}"
+  echo -e "${BOLD}PANE 3 · SESSION TIMELINE${RESET}"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo -e "  ${DIM}This pane shows the recent milestones in time order.${RESET}"
   echo -e "  ${DIM}Watching:${RESET} $BRANCH_NAME"
   echo -e "  ${DIM}Worktree:${RESET} $REPO_ROOT"
   echo ""
