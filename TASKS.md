@@ -543,7 +543,7 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 
 - **[DEFERRED-CONSOLIDATION]** **IN PROGRESS** (2026-03-31).
   Consolidate 6 overlapping deferred files. Wave 1A (9 critical/high) ~~**Landed**~~ (PR #703). Wave 1B (18 medium/low) queued.
-  Tracker sync note (2026-04-04, deferred-clean-replay-hardening-2026-04-02): stale PR #711 refreshed from current `dev` so its remaining held-status bot finding is evaluated against the now-landed dispatcher/bridge/recovery/dashboard control-surface fixes instead of obsolete branch state. Branch-only catch-up over already-landed waves; no new product-surface claim, no debt/phase change.
+  - Tracker sync note (2026-04-04, deferred-clean-replay-hardening-2026-04-02): **DEFERRED-CLEAN-REPLAY-HARDENING — stale PR #711 tracker refresh after dev catch-up.** Class: MAINTENANCE. target_gate_id: G8. no_op_proof: tracker-only sync note over an already-landed branch refresh, no runtime/substrate files in this note commit. defer_reason_code: TRACKER_SYNC. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/deferred-clean-replay-hardening-2026-04-02.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id deferred-clean-replay-hardening-2026-04-02 --output reports/l4_wave_indicators/deferred-clean-replay-hardening-2026-04-02.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
   **Plans:** `reports/control_plane/wave1b_pipeline_cleanup_2026-03-31.md`
   **Lane:** control-surface (deferred cleanup).
 
