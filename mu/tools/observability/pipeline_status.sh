@@ -84,7 +84,7 @@ pid_matches_worktree() {
       ;;
   esac
   case "$cmd" in
-    *"$normalized"*) return 0 ;;
+    *"$normalized"/*|*"$normalized "'*|*"$normalized\""*|*"$normalized"\'*|*"$normalized") return 0 ;;
   esac
   cwd="$(pid_cwd "$pid")"
   [ -n "$cwd" ] && [ "$(normalize_path "$cwd")" = "$normalized" ]
