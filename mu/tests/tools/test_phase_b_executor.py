@@ -322,7 +322,7 @@ class TestLoadExecutorConfig:
 
     def test_missing_config_returns_defaults(self, tmp_path):
         config = impl_mod.load_executor_config(tmp_path)
-        assert config["backends"]["phase_b_executor"] == "codex"
+        assert config["backends"]["phase_b_executor"] == "claude"
 
     def test_existing_config_loaded(self, tmp_path):
         config_dir = tmp_path / "mu" / "tools" / "executors"
@@ -968,7 +968,7 @@ class TestImplementerIsConfigDriven:
 
     def test_config_driven_backend(self, tmp_path):
         config = impl_mod.load_executor_config(tmp_path)
-        backend = config.get("backends", {}).get("phase_b_executor", "codex")
+        backend = config.get("backends", {}).get("phase_b_executor", "claude")
         assert backend in ("codex", "claude", "sonnet")  # Valid backends
 
 

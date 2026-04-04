@@ -128,6 +128,13 @@ class TestDispatcherConfig:
         assert "bridge_turn_timeouts" in config
         assert "timeouts" in config
         assert "bridge_loop_limits" in config
+        assert config["backends"]["phase_b_executor"] == "claude"
+        assert config["bridge_reviewers"]["phase_a"] == "codex"
+        assert config["bridge_reviewers"]["phase_b"] == "codex"
+        assert config["bridge_turn_timeouts"]["phase_a"] == 600
+        assert config["timeouts"]["phase_a_executor"] == 3600
+        assert config["timeouts"]["phase_b_executor"] == 3600
+        assert config["timeouts"]["commit_executor"] == 3600
 
     def test_load_missing_config_returns_defaults(self, tmp_path):
         config = dispatch_mod.load_config(tmp_path / "nonexistent.json")

@@ -232,7 +232,9 @@ def _run_pytest_on_files(
     """Run pytest on specific test files. Returns exit_code and output."""
     if not test_files:
         return {"exit_code": 0, "stdout": "", "stderr": "", "passed": True}
-    effective_timeout = max(timeout, 45 * len(test_files))
+    # A single affected control-plane test file can legitimately take close to
+    # two minutes, so the gate needs real slack instead of a near-zero buffer.
+    effective_timeout = max(timeout, 180, 90 * len(test_files))
     try:
         result = subprocess.run(
             [

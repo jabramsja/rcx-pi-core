@@ -28,28 +28,30 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
         "post_merge_supervisor": "codex",
         "dialectic_executor": "codex",
         "phase_a_executor": "codex",
-        "phase_b_executor": "codex",
+        "phase_b_executor": "claude",
         "commit_executor": None,
     },
     "bridge_reviewers": {
-        "phase_a": "claude",
-        "phase_b": "claude",
+        "phase_a": "codex",
+        "phase_b": "codex",
     },
     "bridge_turn_timeouts": {
-        "phase_a": 300,
+        "phase_a": 600,
         "phase_b": 900,
     },
-    "model_overrides": {},
+    "model_overrides": {
+        "phase_b_executor": None,
+    },
     "review_depths": {
         "phase_a": "quick",
         "phase_b": "quick",
     },
     "timeouts": {
         "dialectic_executor": 600,
-        "phase_a_executor": 600,
-        "phase_b_executor": 1200,
+        "phase_a_executor": 3600,
+        "phase_b_executor": 3600,
         "phase_b_implementer_stale": 300,
-        "commit_executor": 300,
+        "commit_executor": 3600,
         "agent_review": 900,
     },
     "bridge_loop_limits": {

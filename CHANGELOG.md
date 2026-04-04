@@ -4,6 +4,17 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-04-04
 
+### Executor Fallback Config Truth Sync
+
+- `executor_common.py` fallback executor config now matches the checked-in
+  operational `executor_config.json` for Phase B backend/reviewer selection and
+  for the long-running Phase A / Phase B / commit timeouts
+- this closes the drift where a missing or partial executor config could fall
+  back to older short timeout budgets and older Phase B defaults, making the
+  routed control-plane behave differently from the repo's live configuration
+- `mu/tests/tools/test_executor_dispatch.py` now locks the default-load config
+  values directly so fallback config truth cannot silently regress
+
 ### Findings Pane Fallback
 
 - `_pane_findings.sh` now renders a plain-English fallback state when there is
