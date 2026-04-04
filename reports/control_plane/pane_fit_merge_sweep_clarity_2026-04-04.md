@@ -51,9 +51,12 @@ merge-sweep clarity, and regression coverage only.
    - `PANE 2 · REVIEW FINDINGS`
    - `PANE 3 · PLAIN-ENGLISH STATUS`
    - `PANE 4 · SESSION TIMELINE`
-   It now binds those titles to stable pane ids, so screen position, border
-   title, and in-pane body label all agree even when tmux pane indexes follow
-   split history instead of visual order.
+   It now builds the split tree in row order and binds titles to stable pane
+   ids, so tmux pane indexes, screen position, border title, and in-pane body
+   label all agree in the founder-facing `1 / 2 / 3 / 4` reading order.
+   It also resolves the new tmux window id and active pane id from tmux itself
+   during startup, so the dashboard still launches on setups that use non-default
+   `base-index` or `pane-base-index` values.
 2. The live tmux session now reports pane geometry as:
    - top-left `120x34`
    - bottom-left `120x34`
@@ -87,10 +90,11 @@ merge-sweep clarity, and regression coverage only.
    staged file is missing from the package scope.
 9. Live tmux proof on `/private/tmp/workingrcx_merge_recovery_fix.AMmqIw` after
    restart:
-   - pane 1 shows the pane-1 idle header and current branch/worktree
-   - pane 2 shows the pane-2 findings header cleanly
-   - pane 3 shows the pane-3 status header cleanly and keeps the label visible
-   - pane 4 shows the pane-4 timeline header cleanly
+   - tmux pane `1` is the top-left live log pane
+   - tmux pane `2` is the top-right findings pane
+   - tmux pane `3` is the bottom-left plain-English status pane
+   - tmux pane `4` is the bottom-right timeline pane
+   - each pane body starts with the matching `Pane N: ...` label
 
 ## Validation
 

@@ -1687,6 +1687,60 @@ esac
         script.write_text((_OBSERVABILITY_DIR / name).read_text(encoding="utf-8"), encoding="utf-8")
         script.chmod(script.stat().st_mode | 0o111)
 
+    def _fake_tmux_dir(self, tmp_path: Path, *, log_path: Path) -> Path:
+        bin_dir = tmp_path / "tmux-bin"
+        bin_dir.mkdir(exist_ok=True)
+        counter_path = tmp_path / "tmux-split-counter.txt"
+        script = f"""#!/usr/bin/env bash
+set -eu
+log_path={str(log_path)!r}
+counter_path={str(counter_path)!r}
+printf '%s\\n' "$*" >> "$log_path"
+cmd="${{1:-}}"
+shift || true
+case "$cmd" in
+  kill-session|new-session|select-pane|setw|attach-session)
+    exit 0
+    ;;
+  display-message)
+    [ "${{1:-}}" = "-p" ] && shift
+    if [ "${{1:-}}" = "-t" ]; then
+      shift 2
+    fi
+    case "${{1:-}}" in
+      '#{{window_id}}')
+        printf '@1\\n'
+        ;;
+      '#{{pane_id}}')
+        printf '%%10\\n'
+        ;;
+      *)
+        exit 1
+        ;;
+    esac
+    ;;
+  split-window)
+    count=0
+    if [ -f "$counter_path" ]; then
+      count=$(cat "$counter_path")
+    fi
+    count=$((count + 1))
+    printf '%s' "$count" > "$counter_path"
+    case "$count" in
+      1) printf '%%11\\n' ;;
+      2) printf '%%12\\n' ;;
+      3) printf '%%13\\n' ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+"""
+        self._write_executable(bin_dir / "tmux", script)
+        return bin_dir
+
     def _write_commit_state(self, repo_root: Path, *, status: str) -> None:
         state = repo_root / ".agent_bus" / "executors" / "commit_executor_test.json"
         state.write_text(f'{{"status": "{status}"}}\\n', encoding="utf-8")
@@ -2222,6 +2276,33 @@ esac
 
         assert result.returncode == 0
         assert "bot_findings_pending" in result.stdout
+
+    def test_pipeline_monitor_start_resolves_window_and_pane_ids_from_tmux(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        git_bin = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/test-wave",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        env = os.environ | {"PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        log_lines = tmux_log.read_text(encoding="utf-8").splitlines()
+        assert "display-message -p -t rcx-pipeline #{window_id}" in log_lines
+        assert "display-message -p -t @1 #{pane_id}" in log_lines
+        assert not any("display-message -p -t rcx-pipeline:1.1 #{pane_id}" in line for line in log_lines)
 
     def test_pane_findings_renders_fallback_when_no_bridge_rounds_exist(self, tmp_path):
         repo_root = tmp_path / "repo"

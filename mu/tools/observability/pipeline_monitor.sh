@@ -239,27 +239,38 @@ cmd_start() {
 
   # Create session
   tmux new-session -d -x "$SESSION_WIDTH" -y "$SESSION_HEIGHT" -s "$SESSION" "$pane1_cmd"
-  local W="$SESSION:1"  # window 1 (base-index=1 on macOS)
+  local W=""
   local pane1_id="" pane2_id="" pane3_id="" pane4_id=""
-  pane1_id="$(tmux display-message -p -t "$W.1" '#{pane_id}')"
+  # Resolve the new window and active pane from tmux itself instead of assuming
+  # window .1 or pane .1. This keeps startup working across base-index and
+  # pane-base-index variants.
+  W="$(tmux display-message -p -t "$SESSION" '#{window_id}')"
+  pane1_id="$(tmux display-message -p -t "$W" '#{pane_id}')"
 
-  # Pane 1 (top-left): Auto-switching live output
-  # Split horizontally → pane 2 (right): Review Findings
+  # Build the layout as a vertical split first, then split each row
+  # horizontally. On tmux/macOS this yields founder-facing pane numbers in the
+  # natural reading order: 1 top-left, 2 top-right, 3 bottom-left, 4 bottom-right.
+  local bottom_row_id=""
+
+  # Split vertically → bottom row placeholder (becomes pane 3 after the row split)
+  bottom_row_id="$(tmux split-window -v -t "$pane1_id" -P -F '#{pane_id}' "$pane3_cmd")"
+
+  # Split the top row horizontally → pane 2 (top-right): Review Findings
   pane2_id="$(tmux split-window -h -t "$pane1_id" -P -F '#{pane_id}' "$pane2_cmd")"
 
-  # Split right pane vertically → pane 4 (bottom-right): Session Timeline
-  pane4_id="$(tmux split-window -v -t "$pane2_id" -P -F '#{pane_id}' "$pane4_cmd")"
+  # The original bottom row becomes pane 3 (bottom-left): Plain-English Status
+  pane3_id="$bottom_row_id"
 
-  # Split left pane vertically → pane 3 (bottom-left): Plain-English Status
-  pane3_id="$(tmux split-window -v -t "$pane1_id" -P -F '#{pane_id}' "$pane3_cmd")"
+  # Split the bottom row horizontally → pane 4 (bottom-right): Session Timeline
+  pane4_id="$(tmux split-window -h -t "$pane3_id" -P -F '#{pane_id}' "$pane4_cmd")"
 
   # Select top-left pane for initial focus
   tmux select-pane -t "$pane1_id"
   tmux setw -t "$W" aggressive-resize on
   tmux setw -t "$W" pane-border-status top
   tmux setw -t "$W" pane-border-format '#{pane_title}'
-  # Use stable pane ids here. tmux numeric pane indexes reflect split history,
-  # but the founder-facing pane numbers are the visual 1/2/3/4 layout.
+  # Use stable pane ids here even though the split order now matches the
+  # founder-facing visual 1/2/3/4 layout. The ids keep title binding honest.
   tmux select-pane -t "$pane1_id" -T "PANE 1 · LIVE PIPELINE LOG"
   tmux select-pane -t "$pane2_id" -T "PANE 2 · REVIEW FINDINGS"
   tmux select-pane -t "$pane3_id" -T "PANE 3 · PLAIN-ENGLISH STATUS"
