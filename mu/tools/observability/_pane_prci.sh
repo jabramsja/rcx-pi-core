@@ -14,24 +14,27 @@ resolve_repo_root() {
   fi
   git rev-parse --show-toplevel 2>/dev/null || pwd
 }
-resolve_branch_name() {
+resolve_branch_name_for_root() {
+  local root="${1:-$REPO_ROOT}"
   local helper="$SCRIPT_DIR/pipeline_status.sh"
   local branch=""
   if [ -f "$helper" ]; then
-    branch=$(bash "$helper" --print-branch-for-root "$REPO_ROOT" 2>/dev/null || true)
+    branch=$(bash "$helper" --print-branch-for-root "$root" 2>/dev/null || true)
   fi
   if [ -n "$branch" ]; then
     printf '%s\n' "$branch"
     return 0
   fi
-  git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
+  git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
 }
-REPO_ROOT="$(resolve_repo_root)"
+REPO_ROOT=""
+BRANCH=""
 while true; do
+  REPO_ROOT="$(resolve_repo_root)"
+  BRANCH="$(resolve_branch_name_for_root "$REPO_ROOT")"
   clear
   echo "PR / CI STATUS"
   echo "──────────────"
-  BRANCH="$(resolve_branch_name)"
   echo "Watching: $BRANCH"
   echo "Worktree: $REPO_ROOT"
   echo ""

@@ -1738,7 +1738,7 @@ esac
         assert result.returncode == 0
         assert "PIPELINE STATUS" in result.stdout
 
-    def test_pipeline_status_fails_closed_when_multiple_active_worktrees_exist(self, tmp_path):
+    def test_pipeline_status_prefers_freshest_active_worktree_when_multiple_active_worktrees_exist(self, tmp_path):
         common = tmp_path / "common"
         common.mkdir()
         active_one = tmp_path / "active-one"
@@ -1749,6 +1749,10 @@ esac
         self._minimal_bus(active_two)
         self._write_commit_state(active_one, status="post_commit_pending")
         self._write_commit_state(active_two, status="bot_findings_pending")
+        self._set_age_seconds(
+            active_one / ".agent_bus" / "executors" / "commit_executor_test.json",
+            age_seconds=10 * 60,
+        )
         worktree_output = (
             f"worktree {common}\n"
             "bare\n\n"
@@ -1768,32 +1772,45 @@ esac
         env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
 
         result = subprocess.run(
-            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh"), "--print-root"],
             cwd=common,
             capture_output=True,
             text=True,
             env=env,
         )
 
-        assert result.returncode != 0
-        assert "multiple active pipeline worktrees" in result.stderr.lower()
+        assert result.returncode == 0
+        assert result.stdout.strip() == str(active_two)
 
-    def test_pipeline_status_fails_closed_when_current_root_is_quiet_and_multiple_active_worktrees_exist(self, tmp_path):
-        quiet = tmp_path / "quiet"
+    def test_pipeline_status_prefers_current_root_when_it_has_the_freshest_recent_signal(self, tmp_path):
+        current = tmp_path / "current"
         active_one = tmp_path / "active-one"
         active_two = tmp_path / "active-two"
-        quiet.mkdir()
+        current.mkdir()
         active_one.mkdir()
         active_two.mkdir()
-        self._minimal_bus(quiet)
+        self._minimal_bus(current)
         self._minimal_bus(active_one)
         self._minimal_bus(active_two)
         self._write_commit_state(active_one, status="post_commit_pending")
         self._write_commit_state(active_two, status="bot_findings_pending")
+        self._set_age_seconds(
+            active_one / ".agent_bus" / "executors" / "commit_executor_test.json",
+            age_seconds=20 * 60,
+        )
+        self._set_age_seconds(
+            active_two / ".agent_bus" / "executors" / "commit_executor_test.json",
+            age_seconds=10 * 60,
+        )
+        (current / ".scratch").mkdir(parents=True, exist_ok=True)
+        (current / ".scratch" / "commit_executor_live.log").write_text(
+            "[commit-executor] Step 15: merged\n",
+            encoding="utf-8",
+        )
         worktree_output = (
-            f"worktree {quiet}\n"
+            f"worktree {current}\n"
             "HEAD 1111111111111111\n"
-            "branch refs/heads/jabramsja/quiet-wave\n\n"
+            "branch refs/heads/jabramsja/current-wave\n\n"
             f"worktree {active_one}\n"
             "HEAD 2222222222222222\n"
             "branch refs/heads/jabramsja/active-one\n\n"
@@ -1803,22 +1820,22 @@ esac
         )
         bin_dir = self._fake_git_dir(
             tmp_path,
-            show_toplevel=str(quiet),
-            branch="jabramsja/quiet-wave",
+            show_toplevel=str(current),
+            branch="jabramsja/current-wave",
             worktree_output=worktree_output,
         )
         env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
 
         result = subprocess.run(
-            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
-            cwd=quiet,
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh"), "--print-root"],
+            cwd=current,
             capture_output=True,
             text=True,
             env=env,
         )
 
-        assert result.returncode != 0
-        assert "multiple active pipeline worktrees found while current worktree is idle" in result.stderr.lower()
+        assert result.returncode == 0
+        assert result.stdout.strip() == str(current)
 
     def test_pipeline_monitor_fails_closed_when_branch_is_unresolved(self, tmp_path):
         common = tmp_path / "common"
@@ -1915,6 +1932,51 @@ esac
 
         assert result.returncode == 0
         assert "post_commit_pending" in result.stdout
+
+    def test_pipeline_monitor_status_prefers_freshest_active_worktree_when_multiple_active_worktrees_exist(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        active_one = tmp_path / "active-one"
+        active_two = tmp_path / "active-two"
+        active_one.mkdir()
+        active_two.mkdir()
+        self._minimal_bus(active_one)
+        self._minimal_bus(active_two)
+        self._install_observability_script(active_two, "pipeline_status.sh")
+        self._write_commit_state(active_one, status="post_commit_pending")
+        self._write_commit_state(active_two, status="bot_findings_pending")
+        self._set_age_seconds(
+            active_one / ".agent_bus" / "executors" / "commit_executor_test.json",
+            age_seconds=15 * 60,
+        )
+        worktree_output = (
+            f"worktree {common}\n"
+            "bare\n\n"
+            f"worktree {active_one}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/active-one\n\n"
+            f"worktree {active_two}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-two\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=None,
+            branch="jabramsja/missing-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_monitor.sh"), "status"],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "bot_findings_pending" in result.stdout
 
     def test_pane_findings_renders_fallback_when_no_bridge_rounds_exist(self, tmp_path):
         repo_root = tmp_path / "repo"
