@@ -2,6 +2,19 @@
 
 All notable changes to RCX are documented in this file.
 
+## 2026-04-04
+
+### Tracker-Only Handoff Compatibility
+
+- `prepare_handoff_from_routing_record()` now builds a contract-complete
+  tracker note for routed `UPDATE_TRACKER_ONLY` handoffs when upstream omitted
+  `tracker_note_text`, instead of falling back to the older one-line note that
+  `validate_handoff()` now rejects
+- `mu/tests/tools/test_executor_dispatch.py` and
+  `mu/tests/tools/test_commit_executor_receipt.py` now lock that tracker-only
+  fallback path directly by proving the synthesized handoff validates cleanly
+  without a pre-populated tracker note
+
 ## 2026-04-03
 
 ### Meta-Bridge Task-ID Path Safety

@@ -321,6 +321,20 @@ class TestWaveIdBounds:
         assert len(handoff["wave_id"]) <= commit_mod.MAX_WAVE_ID_LEN
         assert commit_mod.WAVE_ID_RE.fullmatch(handoff["wave_id"])
 
+    def test_prepare_handoff_from_routing_record_builds_valid_tracker_only_note(self, tmp_path):
+        record = {
+            "wave_name": "tracker-only-wave",
+            "summary": "sync tracker only",
+            "decision": "UPDATE_TRACKER_ONLY",
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert errors == []
+        assert handoff is not None
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+        assert "no_op_proof:" in handoff["tracker_note_text"]
+        assert "defer_reason_code:" in handoff["tracker_note_text"]
+
     def test_has_path_traversal_decodes_percent_escapes(self):
         assert commit_mod._has_path_traversal("..%2F..%2Fetc%2Fpasswd") is True  # ANTICHEAT_OK: testing path traversal detection
         assert commit_mod._has_path_traversal("%2e%2e/foo") is True  # ANTICHEAT_OK: testing path traversal detection
