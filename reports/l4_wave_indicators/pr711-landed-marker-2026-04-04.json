@@ -1,24 +1,24 @@
 {
   "wave_id": "pr711-landed-marker-2026-04-04",
-  "repeat_run_speedup_ratio": 1.176864,
+  "repeat_run_speedup_ratio": 1.06614,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.401846,
+  "step_growth_slope": 0.371727,
   "repeat_run_raw_seconds": [
-    0.472918,
-    0.401846
+    0.396313,
+    0.371727
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.472918
+      "elapsed_seconds": 0.396313
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.874764
+      "elapsed_seconds": 0.76804
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-04T09:51:55Z",
+  "collection_timestamp_utc": "2026-04-04T10:16:33Z",
   "collector_version": "2.2.0"
 }
