@@ -179,6 +179,7 @@ def _human_failure_class(value: str) -> str:
         "stale_bridge_lock": "a stale bridge lock blocked progress",
         "stale_executor_state": "stale executor state blocked progress",
         "stale_continuation": "a stale continuation file blocked progress",
+        "pr_merge_conflict": "the PR could not merge cleanly after the base branch moved",
         "git_staging_conflict": "git staging failed",
         "aggregation_hang": "bridge aggregation stalled",
         "implementer_stale": "the implementer output went stale",

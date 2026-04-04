@@ -49,6 +49,7 @@ class FailureClass(Enum):
     TRANSIENT_KILL = "transient_kill"
     AGGREGATION_HANG = "aggregation_hang"
     IMPLEMENTER_STALE = "implementer_stale"
+    PR_MERGE_CONFLICT = "pr_merge_conflict"
     # Tier 3 -- LLM diagnosis (small focused prompt)
     GIT_STAGING_CONFLICT = "git_staging_conflict"
     TEST_FAILURE = "test_failure"
@@ -64,6 +65,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.MIXED_STAGING: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
     FailureClass.AGGREGATION_HANG: 2, FailureClass.IMPLEMENTER_STALE: 2,
+    FailureClass.PR_MERGE_CONFLICT: 2,
     FailureClass.GIT_STAGING_CONFLICT: 3, FailureClass.TEST_FAILURE: 3,
     FailureClass.AGENT_REVIEW_CRASH: 3, FailureClass.UNKNOWN_ERROR: 3,
     FailureClass.TERMINAL_POLICY: 4, FailureClass.UNCLASSIFIED: 4,
@@ -118,6 +120,8 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         part for part in (stderr, stdout, embedded_reason) if isinstance(part, str) and part
     )
     combined_lower = combined_text.lower()
+    reason_text = _summarize_result_reason(result)
+    reason_lower = reason_text.lower()
     step_lower = " ".join(part for part in (step, embedded_step) if part).lower()
     status_failed = status in ("error", "failed") or embedded_status in ("error", "failed")
 
@@ -127,14 +131,24 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     if embedded_status in _TERMINAL_STATUSES:
         return FailureClass.TERMINAL_POLICY
 
+    if status_failed and "merge_pr.sh failed" in reason_lower and (
+        "not mergeable" in reason_lower
+        or "cannot be cleanly created" in reason_lower
+        or "merge conflict" in reason_lower
+    ):
+        return FailureClass.PR_MERGE_CONFLICT
+
     # Tier 1: deterministic lock/state issues
-    if "bridge.lock" in combined_text:
+    if "bridge.lock" in reason_text:
         return FailureClass.STALE_BRIDGE_LOCK
-    if "index.lock" in combined_text:
+    if "index.lock" in reason_text:
         return FailureClass.STALE_GIT_INDEX_LOCK
-    if "phase_b_state.json" in combined_text or "stale_state" in status:
+    if "phase_b_state.json" in reason_text or "stale_state" in status:
         return FailureClass.STALE_EXECUTOR_STATE
-    if "continuation" in combined_lower and "stale" in combined_lower:
+    if (
+        "stale continuation" in reason_lower
+        or "continuation record is stale" in reason_lower
+    ):
         return FailureClass.STALE_CONTINUATION
     if _looks_like_mixed_staging(stderr, stdout, step):
         return FailureClass.MIXED_STAGING
@@ -437,11 +451,136 @@ def fix_implementer_stale(repo_root: Path, **kw: Any) -> dict[str, Any]:
                        f"via RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE")
 
 
+def _extract_result_pr_number(result: dict[str, Any]) -> str:
+    for candidate in (
+        result,
+        _parse_json_object(result.get("stdout", "")),
+        _parse_json_object(result.get("stderr", "")),
+    ):
+        if not isinstance(candidate, dict):
+            continue
+        pr_number = candidate.get("pr_number")
+        if isinstance(pr_number, (str, int)):
+            normalized = str(pr_number).strip()
+            if normalized:
+                return normalized
+    return ""
+
+
+def fix_pr_merge_conflict(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Sync the feature branch with the PR base branch when mergeability drifted."""
+    result = kw.get("result", {})
+    pr_number = _extract_result_pr_number(result)
+    if not pr_number:
+        return _fix_result(False, "missing_pr_number", "could not determine PR number")
+
+    try:
+        status_proc = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "status_failed", f"git status failed: {exc}")
+    if status_proc.returncode != 0:
+        return _fix_result(False, "status_failed", f"git status returned {status_proc.returncode}")
+    if status_proc.stdout.strip():
+        return _fix_result(False, "dirty_worktree", "worktree is not clean enough for auto-sync")
+
+    try:
+        pr_view = subprocess.run(
+            ["gh", "pr", "view", pr_number, "--json", "baseRefName,mergeStateStatus"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "pr_view_failed", f"gh pr view failed: {exc}")
+    if pr_view.returncode != 0:
+        detail = (pr_view.stderr or pr_view.stdout or "").strip()
+        return _fix_result(False, "pr_view_failed", detail or f"gh pr view returned {pr_view.returncode}")
+
+    try:
+        pr_payload = json.loads(pr_view.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        return _fix_result(False, "pr_view_invalid_json", f"gh pr view returned invalid JSON: {exc}")
+    if not isinstance(pr_payload, dict):
+        return _fix_result(False, "pr_view_invalid_json", "gh pr view payload was not an object")
+
+    base_branch = str(pr_payload.get("baseRefName", "")).strip()
+    merge_state = str(pr_payload.get("mergeStateStatus", "")).strip()
+    if not base_branch:
+        return _fix_result(False, "missing_base_branch", f"PR #{pr_number} has no baseRefName")
+
+    try:
+        fetch_proc = subprocess.run(
+            ["git", "fetch", "origin", base_branch],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "fetch_failed", f"git fetch origin {base_branch} failed: {exc}")
+    if fetch_proc.returncode != 0:
+        detail = (fetch_proc.stderr or fetch_proc.stdout or "").strip()
+        return _fix_result(False, "fetch_failed", detail or f"git fetch returned {fetch_proc.returncode}")
+
+    try:
+        merge_proc = subprocess.run(
+            ["git", "merge", "--no-edit", f"origin/{base_branch}"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "merge_failed", f"git merge origin/{base_branch} failed: {exc}")
+    if merge_proc.returncode != 0:
+        subprocess.run(
+            ["git", "merge", "--abort"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        detail = (merge_proc.stderr or merge_proc.stdout or "").strip()
+        return _fix_result(
+            False,
+            "merge_base_branch_failed",
+            detail or f"git merge returned {merge_proc.returncode}",
+        )
+
+    try:
+        push_proc = subprocess.run(
+            ["git", "push", "origin", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "push_failed", f"git push origin HEAD failed: {exc}")
+    if push_proc.returncode != 0:
+        detail = (push_proc.stderr or push_proc.stdout or "").strip()
+        return _fix_result(False, "push_failed", detail or f"git push returned {push_proc.returncode}")
+
+    merge_detail = f"merged origin/{base_branch} into the feature branch for PR #{pr_number}"
+    if merge_state:
+        merge_detail += f" (prior GitHub merge state: {merge_state})"
+    merge_detail += " and pushed the sync commit"
+    return _fix_result(True, "merge_base_branch_and_push", merge_detail)
+
+
 _TIER2_FIXES: dict[FailureClass, Any] = {
     FailureClass.PROCESS_TIMEOUT: fix_process_timeout,
     FailureClass.TRANSIENT_KILL: fix_transient_kill,
     FailureClass.AGGREGATION_HANG: fix_aggregation_hang,
     FailureClass.IMPLEMENTER_STALE: fix_implementer_stale,
+    FailureClass.PR_MERGE_CONFLICT: fix_pr_merge_conflict,
 }
 
 
@@ -978,7 +1117,7 @@ def _parse_json_object(value: Any) -> dict[str, Any]:
 
 def _summarize_json_value(value: Any) -> str:
     if isinstance(value, dict):
-        for key in ("error", "message", "detail", "reason", "stderr", "stdout"):
+        for key in ("error", "errors", "message", "detail", "reason", "stderr", "stdout"):
             excerpt = _summarize_json_value(value.get(key))
             if excerpt:
                 return excerpt
