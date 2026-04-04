@@ -3,8 +3,34 @@
 # Shows chronological history of what happened this pipeline run.
 # Auto-reloads when script changes on disk.
 set +e
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+resolve_repo_root() {
+  local helper="$SCRIPT_DIR/pipeline_status.sh"
+  local root=""
+  if [ -f "$helper" ]; then
+    root=$(bash "$helper" --print-root 2>/dev/null || true)
+  fi
+  if [ -n "$root" ]; then
+    printf '%s\n' "$root"
+    return 0
+  fi
+  git rev-parse --show-toplevel 2>/dev/null || pwd
+}
+REPO_ROOT="$(resolve_repo_root)"
+resolve_branch_name() {
+  local helper="$SCRIPT_DIR/pipeline_status.sh"
+  local branch=""
+  if [ -f "$helper" ]; then
+    branch=$(bash "$helper" --print-branch-for-root "$REPO_ROOT" 2>/dev/null || true)
+  fi
+  if [ -n "$branch" ]; then
+    printf '%s\n' "$branch"
+    return 0
+  fi
+  git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
+}
+BRANCH_NAME="$(resolve_branch_name)"
+SELF="$SCRIPT_DIR/$(basename "$0")"
 SELF_MTIME=$(stat -f%m "$SELF" 2>/dev/null || stat -c%Y "$SELF" 2>/dev/null || echo 0)
 
 BOLD="\033[1m" DIM="\033[2m" GREEN="\033[32m" YELLOW="\033[33m"
@@ -23,10 +49,40 @@ file_time() {
   stat -f%m "$1" 2>/dev/null || stat -c%Y "$1" 2>/dev/null || echo 0
 }
 
+pid_cwd() {
+  local pid="$1"
+  lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
+}
+
+repo_has_process() {
+  local pattern="$1" pid cmd cwd
+  while IFS= read -r pid; do
+    [ -z "$pid" ] && continue
+    cmd=$(ps -p "$pid" -o command= 2>/dev/null || true)
+    case "$cmd" in
+      *"tail -f "*|*"rcx_log_watcher.sh"*|*"_pane_"*|*"pipeline_monitor.sh"*)
+        continue
+        ;;
+    esac
+    case "$cmd" in
+      *"$REPO_ROOT"*)
+        return 0
+        ;;
+    esac
+    cwd="$(pid_cwd "$pid")"
+    if [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ]; then
+      return 0
+    fi
+  done < <(pgrep -f "$pattern" 2>/dev/null || true)
+  return 1
+}
+
 while true; do
   {
   echo -e "${BOLD}SESSION TIMELINE${RESET}"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo -e "  ${DIM}Watching:${RESET} $BRANCH_NAME"
+  echo -e "  ${DIM}Worktree:${RESET} $REPO_ROOT"
   echo ""
 
   # Collect events with timestamps, then sort chronologically
@@ -88,6 +144,15 @@ content = open('$reviewer_file', errors='replace').read()
 matches = list(re.finditer(r'BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE', content, re.DOTALL))
 if not matches: exit()
 env = json.loads(matches[-1].group(1))
+env = None
+for m in reversed(matches):
+    candidate = json.loads(m.group(1))
+    dec = candidate.get('decision','')
+    if dec and '|' not in dec:
+        env = candidate
+        break
+if env is None:
+    exit()
 dec = env.get('decision','?')
 findings = env.get('findings',[])
 blk = sum(1 for f in findings if f.get('disposition') == 'blocking')
@@ -113,23 +178,20 @@ else:
   fi
 
   # 4. Executor start
-  EXEC_LOG="$REPO_ROOT/.scratch/wave1a_executor.log"
-  if [ -f "$EXEC_LOG" ]; then
-    ts=$(file_time "$EXEC_LOG")
-    # The file was created when the executor started — but it gets overwritten.
-    # Use the phase_b_executor process start time if available
-    exec_pid=$(pgrep -f "phase_b_executor.*wave1a" 2>/dev/null | head -1) || true
-    if [ -n "$exec_pid" ]; then
-      started=$(ps -p "$exec_pid" -o lstart= 2>/dev/null | xargs)
-      if [ -n "$started" ]; then
-        ts=$(date -j -f "%c" "$started" +%s 2>/dev/null || echo "$ts")
-      fi
-    fi
-    add_event "$ts" "${BOLD}Pipeline started${RESET} (Wave 1A)"
-  fi
+  for f in "$REPO_ROOT/.scratch/phase_a_executor_live.log" \
+           "$REPO_ROOT/.scratch/phase_b_executor_live.log" \
+           "$REPO_ROOT/.scratch/commit_executor_live.log"; do
+    [ -f "$f" ] || continue
+    ts=$(file_time "$f")
+    case "$(basename "$f")" in
+      phase_a_executor_live.log) add_event "$ts" "${YELLOW}Phase A updated${RESET}" ;;
+      phase_b_executor_live.log) add_event "$ts" "${PURPLE}Phase B updated${RESET}" ;;
+      commit_executor_live.log) add_event "$ts" "${GREEN}Commit path updated${RESET}" ;;
+    esac
+  done
 
   # 5. Commits on current branch
-  git log --format="%ct|${GREEN}Committed${RESET}: %s" --since="6 hours ago" -5 2>/dev/null | while IFS='|' read -r cts msg; do
+  git -C "$REPO_ROOT" log --format="%ct|${GREEN}Committed${RESET}: %s" --since="6 hours ago" -5 2>/dev/null | while IFS='|' read -r cts msg; do
     echo "${cts}|${msg}"
   done > /tmp/rcx_timeline_commits_$$.txt 2>/dev/null
   if [ -s /tmp/rcx_timeline_commits_$$.txt ]; then
@@ -154,14 +216,14 @@ else:
   echo ""
   now=$(date '+%H:%M')
   # Figure out what's happening right now
-  if pgrep -f "codex.*exec.*gpt" > /dev/null 2>&1; then
+  if repo_has_process "codex.*exec.*gpt"; then
     echo -e "  ${DIM}${now}${RESET}  ${YELLOW}← Codex reviewing now${RESET}"
-  elif pgrep -f "claude.*--print" > /dev/null 2>&1; then
+  elif repo_has_process "claude.*--print"; then
     echo -e "  ${DIM}${now}${RESET}  ${PURPLE}← Claude implementing now${RESET}"
-  elif pgrep -f "run_review.py" > /dev/null 2>&1; then
-    echo -e "  ${DIM}${now}${RESET}  ${CYAN}← SDK agents running now${RESET}"
-  elif pgrep -f "phase_b_executor\|commit_executor\|executor_dispatch" > /dev/null 2>&1; then
-    echo -e "  ${DIM}${now}${RESET}  ${CYAN}← executor running${RESET}"
+  elif repo_has_process "run_review.py"; then
+    echo -e "  ${DIM}${now}${RESET}  ${CYAN}← SDK review agents checking this worktree now${RESET}"
+  elif repo_has_process "phase_a_executor\|phase_b_executor\|commit_executor\|executor_dispatch"; then
+    echo -e "  ${DIM}${now}${RESET}  ${CYAN}← pipeline executor working in this worktree now${RESET}"
   else
     echo -e "  ${DIM}${now}${RESET}  ${DIM}← idle${RESET}"
   fi

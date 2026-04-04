@@ -1,7 +1,7 @@
 """Tests for recovery_gate: failure classifier and Tier 1–3 recovery."""
 from __future__ import annotations
 
-import json, os, sqlite3, subprocess
+import json, os, re, sqlite3, subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -1070,8 +1070,9 @@ class TestRecoveryStatusRendering:
             encoding="utf-8",
         )
         rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
-        assert "ACTIVE — Tier 2 process_timeout" in rendered
-        assert "Retry target: Phase A" in rendered
+        assert "ACTIVE — Tier 2 recovery (process_timeout)" in rendered
+        assert "Problem: a step timed out" in rendered
+        assert "If recovery works, go back to: Phase A" in rendered
         assert "Invocation: 2 in wave" in rendered
         assert "Reason: phase_a timed out" in rendered
 
@@ -1105,7 +1106,8 @@ class TestRecoveryStatusRendering:
             encoding="utf-8",
         )
         rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
-        assert "POSSIBLY HUNG — Tier 3 agent_review_crash" in rendered
+        assert "POSSIBLY HUNG — Tier 3 recovery (agent_review_crash)" in rendered
+        assert "asking the recovery agent what to try" in rendered
         assert "loop 2/3" in rendered
         assert "claude PID: 888888 (dead)" in rendered
 
@@ -1138,7 +1140,7 @@ class TestRecoveryStatusRendering:
             encoding="utf-8",
         )
         rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
-        assert "LAST RECOVERY — Tier 3 agent_review_crash" in rendered
+        assert "LAST RECOVERY — Tier 3 recovery (agent_review_crash)" in rendered
         assert "Outcome: success via shell" in rendered
         assert "Recovery note: narrowed the fix" in rendered
 
@@ -1442,9 +1444,16 @@ class TestObservabilityWorktreeResolution:
         bin_dir.mkdir()
         script = f"""#!/usr/bin/env bash
 set -eu
-case "$*" in
+args=("$@")
+if [ "${{args[0]:-}}" = "-C" ]; then
+  args=("${{args[@]:2}}")
+fi
+case "${{args[*]}}" in
   "rev-parse --show-toplevel")
     {"printf '%s\\n' " + repr(show_toplevel) if show_toplevel is not None else "exit 128"}
+    ;;
+  "rev-parse --abbrev-ref HEAD")
+    {"printf '%s\\n' " + repr(branch) if branch is not None else "exit 1"}
     ;;
   "symbolic-ref --quiet --short HEAD")
     {"printf '%s\\n' " + repr(branch) if branch is not None else "exit 1"}
@@ -1658,7 +1667,7 @@ esac
 
         assert result.returncode == 0
         assert "RECOVERY" in result.stdout
-        assert "Tier 3 agent_review_crash" in result.stdout
+        assert "Tier 3 recovery (agent_review_crash)" in result.stdout
 
     def test_pipeline_status_uses_sole_linked_worktree_when_only_one_exists(self, tmp_path):
         common = tmp_path / "common"
@@ -1962,3 +1971,182 @@ esac
         assert "Latest meta review" in result.stdout
         assert "COMMIT_GO" in result.stdout
         assert "Bounded review closed cleanly." in result.stdout
+
+    def test_pane_findings_uses_active_worktree_when_current_root_is_quiet(self, tmp_path):
+        quiet = tmp_path / "quiet"
+        active = tmp_path / "active"
+        quiet.mkdir()
+        active.mkdir()
+        self._minimal_bus(quiet)
+        self._minimal_bus(active)
+        self._write_commit_state(active, status="post_commit_pending")
+        self._install_observability_script(quiet, "_pane_findings.sh")
+        self._install_observability_script(quiet, "pipeline_status.sh")
+        raw_dir = active / ".agent_bus" / "raw" / "phase-a-r1-1234abcd"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "phase-a-r1-1234abcd--r1-reviewer.txt").write_text(
+            "BEGIN_AGENT_ENVELOPE\n"
+            '{\n'
+            '  "decision": "REQUEST_CHANGES",\n'
+            '  "summary": "Stub packet rejected until the real plan is written.",\n'
+            '  "findings": [\n'
+            '    {"disposition": "blocking", "severity": "high", "title": "Replace stub with real plan"}\n'
+            '  ]\n'
+            '}\n'
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+        worktree_output = (
+            f"worktree {quiet}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/quiet-wave\n\n"
+            f"worktree {active}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(quiet),
+            branch="jabramsja/quiet-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(quiet / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=quiet,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Watching: jabramsja/active-wave" in clean_stdout
+        assert "REQUEST_CHANGES" in clean_stdout
+        assert "Meaning: Needs fixes before continuing." in clean_stdout
+
+    def test_pane_processes_ignores_unrelated_global_codex_session_logs(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_processes.sh")
+        self._install_observability_script(repo_root, "pipeline_status.sh")
+        self._install_observability_script(repo_root, "pipeline_dashboard.py")
+
+        fake_home = tmp_path / "home"
+        codex_dir = fake_home / ".codex" / "sessions" / datetime.now().strftime("%Y/%m/%d")
+        codex_dir.mkdir(parents=True, exist_ok=True)
+        (codex_dir / "unrelated.jsonl").write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-04-04T06:00:00Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "content": [{"text": "unrelated global codex session"}],
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\nHEAD 1111111111111111\nbranch refs/heads/jabramsja/repo-wave\n",
+        )
+        env = os.environ | {
+            "HOME": str(fake_home),
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_processes.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Pipeline is idle. No active work." in clean_stdout
+        assert "unrelated global codex session" not in clean_stdout
+
+    def test_pane_processes_uses_local_dashboard_code_for_active_worktree_data(self, tmp_path):
+        quiet = tmp_path / "quiet"
+        active = tmp_path / "active"
+        quiet.mkdir()
+        active.mkdir()
+        self._minimal_bus(quiet)
+        self._minimal_bus(active)
+        self._write_commit_state(active, status="post_commit_pending")
+        self._install_observability_script(quiet, "_pane_processes.sh")
+        self._install_observability_script(quiet, "pipeline_status.sh")
+        self._install_observability_script(quiet, "pipeline_dashboard.py")
+
+        recovery_dir = active / ".agent_bus" / "recovery"
+        recovery_dir.mkdir(parents=True, exist_ok=True)
+        (recovery_dir / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": True,
+                    "tier": 3,
+                    "failure_class": "agent_review_crash",
+                    "wave_id": "wave-active",
+                    "wave_invocation_count": 2,
+                    "tuple_attempt_index": 1,
+                    "retry_target": "phase_b_executor",
+                    "state": "tier3_waiting_on_claude",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "invocation_id": "wave-active-phase_b_executor-agent_review_crash-01",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        worktree_output = (
+            f"worktree {quiet}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/quiet-wave\n\n"
+            f"worktree {active}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(quiet),
+            branch="jabramsja/quiet-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(quiet / "mu" / "tools" / "observability" / "_pane_processes.sh")],
+            cwd=quiet,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Watching: jabramsja/active-wave" in clean_stdout
+        assert "ACTIVE — Tier 3 recovery (agent_review_crash)" in clean_stdout
+        assert "Problem: a review subprocess crashed" in clean_stdout

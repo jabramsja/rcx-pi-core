@@ -3,9 +3,35 @@
 # Shows blocking/non-blocking findings from latest bridge rounds
 # Auto-reloads when script changes on disk.
 set +e
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+resolve_repo_root() {
+  local helper="$SCRIPT_DIR/pipeline_status.sh"
+  local root=""
+  if [ -f "$helper" ]; then
+    root=$(bash "$helper" --print-root 2>/dev/null || true)
+  fi
+  if [ -n "$root" ]; then
+    printf '%s\n' "$root"
+    return 0
+  fi
+  git rev-parse --show-toplevel 2>/dev/null || pwd
+}
+resolve_branch_name() {
+  local helper="$SCRIPT_DIR/pipeline_status.sh"
+  local branch=""
+  if [ -f "$helper" ]; then
+    branch=$(bash "$helper" --print-branch-for-root "$REPO_ROOT" 2>/dev/null || true)
+  fi
+  if [ -n "$branch" ]; then
+    printf '%s\n' "$branch"
+    return 0
+  fi
+  git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
+}
+REPO_ROOT="$(resolve_repo_root)"
 RAW_DIR="$REPO_ROOT/.agent_bus/raw"
-SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+BRANCH_NAME="$(resolve_branch_name)"
+SELF="$SCRIPT_DIR/$(basename "$0")"
 SELF_MTIME=$(stat -f%m "$SELF" 2>/dev/null || stat -c%Y "$SELF" 2>/dev/null || echo 0)
 
 BOLD="\033[1m" DIM="\033[2m" GREEN="\033[32m" YELLOW="\033[33m"
@@ -22,11 +48,25 @@ notify() {
   echo "$round" > "$NOTIFY_MARKER"
 }
 
+decision_meaning() {
+  case "$1" in
+    GO|COMMIT_GO) echo "Ready to continue." ;;
+    REQUEST_CHANGES) echo "Needs fixes before continuing." ;;
+    NEEDS_PHASE_A) echo "Needs planning changes." ;;
+    NEEDS_PHASE_B) echo "Needs code changes." ;;
+    COMMIT_GO_HOLD_PUSH) echo "Okay to commit, but push is intentionally paused." ;;
+    NO_GO|ERROR|STALE) echo "Stopped because something is broken or unsafe." ;;
+    *) echo "Waiting for the next decision." ;;
+  esac
+}
+
 while true; do
   # Build output to temp file, only redraw if content changed
   {
   echo -e "${BOLD}REVIEW FINDINGS${RESET}  $(date '+%H:%M:%S')"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo -e "  ${DIM}Watching:${RESET} $BRANCH_NAME"
+  echo -e "  ${DIM}Worktree:${RESET} $REPO_ROOT"
   echo ""
 
   # Find the 5 most recent round dirs (newest first)
@@ -180,6 +220,7 @@ for f in nb:
     echo -e ""
     echo -e "  ${CYAN}$ROUND_NAME${RESET} ${DIM}($age_str)${RESET}"
     echo -e "  Decision: ${dec_color}${BOLD}$DECISION${RESET}  ${RED}${BLK_COUNT}B${RESET} ${YELLOW}${NB_COUNT}NB${RESET}"
+    echo -e "  ${DIM}Meaning: $(decision_meaning "$DECISION")${RESET}"
 
     if [ -n "$SUMMARY" ]; then
       echo -e "  ${DIM}$SUMMARY${RESET}"

@@ -1,11 +1,40 @@
 #!/usr/bin/env bash
 # _pane_prci.sh — PR/CI status pane for pipeline_monitor
 # Resilient: never exits on transient errors (gh timeouts, network issues)
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+resolve_repo_root() {
+  local helper="$SCRIPT_DIR/pipeline_status.sh"
+  local root=""
+  if [ -f "$helper" ]; then
+    root=$(bash "$helper" --print-root 2>/dev/null || true)
+  fi
+  if [ -n "$root" ]; then
+    printf '%s\n' "$root"
+    return 0
+  fi
+  git rev-parse --show-toplevel 2>/dev/null || pwd
+}
+resolve_branch_name() {
+  local helper="$SCRIPT_DIR/pipeline_status.sh"
+  local branch=""
+  if [ -f "$helper" ]; then
+    branch=$(bash "$helper" --print-branch-for-root "$REPO_ROOT" 2>/dev/null || true)
+  fi
+  if [ -n "$branch" ]; then
+    printf '%s\n' "$branch"
+    return 0
+  fi
+  git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
+}
+REPO_ROOT="$(resolve_repo_root)"
 while true; do
   clear
   echo "PR / CI STATUS"
   echo "──────────────"
+  BRANCH="$(resolve_branch_name)"
+  echo "Watching: $BRANCH"
+  echo "Worktree: $REPO_ROOT"
+  echo ""
 
   PR=""
 
@@ -17,15 +46,9 @@ while true; do
 
   # Strategy 2: Fallback — find PR for current branch via gh pr list
   if [ -z "$PR" ]; then
-    BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || BRANCH=""
     if [ -n "$BRANCH" ] && [ "$BRANCH" != "dev" ] && [ "$BRANCH" != "main" ]; then
       PR=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null) || PR=""
     fi
-  fi
-
-  # Strategy 3: Fallback — most recent open PR in the repo
-  if [ -z "$PR" ]; then
-    PR=$(gh pr list --state open --limit 1 --json number --jq '.[0].number' 2>/dev/null) || PR=""
   fi
 
   if [ -n "$PR" ]; then
@@ -58,7 +81,7 @@ while true; do
       echo "Review threads: $THREAD_COUNT"
     fi
   else
-    echo "No active PR found"
+    echo "No active PR for this worktree"
   fi
 
   sleep 15
