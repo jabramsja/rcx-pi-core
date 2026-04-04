@@ -1,7 +1,7 @@
 # Tracker-Only Handoff Compatibility
 
 Date: 2026-04-04
-Status: Implementation ready for routed supervisor
+Status: Routed closeout replay authorized
 Task: [PIPELINE-RECOVERY/tracker-only-handoff-compat-2026-04-04]
 Wave ID: tracker-only-handoff-compat-2026-04-04
 
@@ -43,3 +43,14 @@ Bot review finding on merged PR #718:
 - `python3 -m py_compile mu/tools/executors/commit_executor.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py`
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_commit_executor_receipt.py -q --tb=short`
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py -q --tb=short`
+
+## Routed closeout note
+
+The first routed `commit` replay for this wave proved the actual bug surface:
+an `UPDATE_TRACKER_ONLY` routing record with no `tracker_note_text` now makes it
+through Step 3, Step 4, Step 5, and supervisor review cleanly. That replay then
+failed later at `pre-push-fast` for a separate governance reason: this
+maintenance slice needed an explicit `FOUNDER_OVERRIDE` marker to clear the
+rolling structural quota. The follow-on replay for this same wave is therefore
+governance-only: update the canonical tracker note with the override and rerun
+the routed commit path.

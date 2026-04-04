@@ -1,24 +1,24 @@
 {
   "wave_id": "tracker-only-handoff-compat-2026-04-04",
-  "repeat_run_speedup_ratio": 1.24917,
+  "repeat_run_speedup_ratio": 0.988002,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.372163,
+  "step_growth_slope": 0.379231,
   "repeat_run_raw_seconds": [
-    0.464895,
-    0.372163
+    0.374681,
+    0.379231
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.464895
+      "elapsed_seconds": 0.374681
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.837058
+      "elapsed_seconds": 0.753912
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-04T03:47:27Z",
+  "collection_timestamp_utc": "2026-04-04T03:53:47Z",
   "collector_version": "2.2.0"
 }
