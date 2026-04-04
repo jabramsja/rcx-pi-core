@@ -90,6 +90,26 @@ class TestClassifyFailure:
             {"status": "error", "stderr": "Stale continuation record",
              "step": "commit"}) == FailureClass.STALE_CONTINUATION
 
+    def test_pr_merge_conflict_not_misclassified_as_stale_continuation(self):
+        stdout = (
+            "package note: stale continuation wording appeared in prior evidence\n"
+            + json.dumps(
+                {
+                    "status": "error",
+                    "step": "ensure_review_clear_and_merge",
+                    "errors": [
+                        "merge_pr.sh failed: X Pull request repo#723 is not mergeable: "
+                        "the merge commit cannot be cleanly created."
+                    ],
+                    "pr_number": "723",
+                },
+                indent=2,
+            )
+        )
+        assert rg_mod.classify_failure(
+            {"status": "failed", "step": "commit", "stdout": stdout}
+        ) == FailureClass.PR_MERGE_CONFLICT
+
     def test_mixed_staging_keyword(self):
         assert rg_mod.classify_failure(
             {"status": "error", "stderr": "detected mixed staging state",
@@ -367,6 +387,55 @@ class TestAttemptRecovery:
         r = rg_mod.attempt_recovery(tmp_path, {"status": "timeout", "step": "p"}, "w1")
         assert r["recovered"] is True and r["tier"] == 2
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+
+    def test_tier2_pr_merge_conflict_recovers_via_branch_sync(self, tmp_path, monkeypatch):
+        calls: list[list[str]] = []
+
+        def fake_run(args, cwd=None, capture_output=False, text=False, timeout=None, **kwargs):
+            calls.append(list(args))
+            if args[:2] == ["git", "status"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if args[:4] == ["gh", "pr", "view", "723"]:
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    json.dumps({"baseRefName": "dev", "mergeStateStatus": "DIRTY"}),
+                    "",
+                )
+            if args[:3] == ["git", "fetch", "origin"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if args[:2] == ["git", "merge"]:
+                return subprocess.CompletedProcess(args, 0, "Merge made by the 'ort' strategy.\n", "")
+            if args[:3] == ["git", "push", "origin"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            raise AssertionError(f"unexpected subprocess.run call: {args}")
+
+        monkeypatch.setattr(rg_mod.subprocess, "run", fake_run)
+        stdout = json.dumps(
+            {
+                "status": "error",
+                "step": "ensure_review_clear_and_merge",
+                "errors": [
+                    "merge_pr.sh failed: X Pull request repo#723 is not mergeable: "
+                    "the merge commit cannot be cleanly created."
+                ],
+                "pr_number": "723",
+            }
+        )
+
+        r = rg_mod.attempt_recovery(
+            tmp_path,
+            {"status": "failed", "step": "commit", "stdout": stdout},
+            "w1",
+        )
+
+        assert r["recovered"] is True
+        assert r["tier"] == 2
+        assert r["failure_class"] == "pr_merge_conflict"
+        assert r["action"] == "merge_base_branch_and_push"
+        assert ["git", "fetch", "origin", "dev"] in calls
+        assert ["git", "merge", "--no-edit", "origin/dev"] in calls
+        assert ["git", "push", "origin", "HEAD"] in calls
 
     def test_tier1_bridge_lock_recovery(self, tmp_path):
         bus = tmp_path / ".agent_bus"; bus.mkdir()
@@ -717,13 +786,14 @@ class TestFixImplementerStale:
 
 
 class TestTier2FixesMap:
-    def test_all_four_registered(self):
-        """All 4 Tier 2 failure classes have registered fix functions."""
+    def test_all_five_registered(self):
+        """All 5 Tier 2 failure classes have registered fix functions."""
         expected = {
             rg_mod.FailureClass.PROCESS_TIMEOUT,
             rg_mod.FailureClass.TRANSIENT_KILL,
             rg_mod.FailureClass.AGGREGATION_HANG,
             rg_mod.FailureClass.IMPLEMENTER_STALE,
+            rg_mod.FailureClass.PR_MERGE_CONFLICT,
         }
         assert set(rg_mod._TIER2_FIXES.keys()) == expected  # ANTICHEAT_OK
 
