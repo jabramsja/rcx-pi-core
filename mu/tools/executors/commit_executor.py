@@ -1739,17 +1739,20 @@ def prepare_handoff_from_routing_record(
         "commit_message",
         f"chore: {summary}\n\nCo-Authored-By: Claude <noreply@anthropic.com>",
     )
+    if not isinstance(commit_message, str):
+        commit_message = str(commit_message) if commit_message is not None else f"chore: {summary}"
 
     # UPDATE_TRACKER_ONLY routing records may omit tracker_note_text. In that
     # case, synthesize the same contract-complete note shape that validate_handoff
     # now requires instead of the older one-line fallback.
     if decision == "UPDATE_TRACKER_ONLY" and not tracker_note:
+        force_add = record.get("force_add_files") or []
         tracker_note = _build_default_tracker_note_text(
             wave_id=wave_id,
             wave_class=wave_class,
             target_gate_id=target_gate_id,
             commit_message=commit_message,
-            files_to_stage=files_to_stage + record.get("force_add_files", []),
+            files_to_stage=files_to_stage + force_add,
         )
 
     handoff = {
