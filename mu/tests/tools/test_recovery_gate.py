@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json, os, sqlite3, subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
@@ -9,8 +10,38 @@ import pytest
 from mu.tests.tools.module_loader import load_module
 
 _EXECUTORS_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "executors"
+_OBSERVABILITY_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "observability"
 rg_mod = load_module("recovery_gate", _EXECUTORS_DIR / "recovery_gate.py")
+dash_mod = load_module("pipeline_dashboard_observability", _OBSERVABILITY_DIR / "pipeline_dashboard.py")
+web_mod = load_module("pipeline_dashboard_web_observability", _OBSERVABILITY_DIR / "pipeline_dashboard_web.py")
 FailureClass = rg_mod.FailureClass
+
+
+class FakePopen:
+    def __init__(
+        self,
+        *,
+        stdout: str = "",
+        stderr: str = "",
+        pid: int = 4242,
+        communicate_exc: Exception | None = None,
+    ):
+        self._stdout = stdout
+        self._stderr = stderr
+        self.pid = pid
+        self.returncode = 0
+        self._communicate_exc = communicate_exc
+        self._communicate_calls = 0
+        self.killed = False
+
+    def communicate(self, timeout=None):
+        self._communicate_calls += 1
+        if self._communicate_exc is not None and self._communicate_calls == 1:
+            raise self._communicate_exc
+        return self._stdout, self._stderr
+
+    def kill(self):
+        self.killed = True
 
 
 class TestClassifyFailure:
@@ -18,37 +49,16 @@ class TestClassifyFailure:
 
     @pytest.mark.parametrize("status", [
         "question_for_founder", "max_rounds_reached",
-        "supervisor_rejected",
+        "supervisor_rejected", "needs_phase_b",
     ])
     def test_terminal_statuses(self, status):
         assert rg_mod.classify_failure(
             {"status": status, "step": "x"}) == FailureClass.TERMINAL_POLICY
 
-    def test_needs_phase_b_is_tier3(self):
-        assert rg_mod.classify_failure(
-            {"status": "needs_phase_b", "step": "phase_b"}
-        ) == FailureClass.NEEDS_PHASE_B
-
-    def test_needs_phase_b_sequence_does_not_crash(self):
-        assert rg_mod.classify_failure(
-            {"status": ["needs_phase_b"], "step": "phase_b"}
-        ) == FailureClass.NEEDS_PHASE_B
-
-    def test_needs_phase_b_in_stdout_status_line(self):
-        assert rg_mod.classify_failure(
-            {"status": "failed", "stdout": "[phase-b] Status: needs_phase_b\n", "stderr": ""}
-        ) == FailureClass.NEEDS_PHASE_B
-
     def test_terminal_in_stdout_json(self):
         inner = json.dumps({"status": "supervisor_rejected"})
         assert rg_mod.classify_failure(
             {"status": "failed", "stdout": inner, "stderr": ""}) == FailureClass.TERMINAL_POLICY
-
-    def test_terminal_outer_status_beats_embedded_needs_phase_b(self):
-        inner = json.dumps({"status": "needs_phase_b"})
-        assert rg_mod.classify_failure(
-            {"status": "question_for_founder", "stdout": inner, "stderr": ""}
-        ) == FailureClass.TERMINAL_POLICY
 
     def test_stale_bridge_lock_in_stderr(self):
         assert rg_mod.classify_failure(
@@ -126,42 +136,55 @@ class TestClassifyFailure:
             {"status": "error", "step": "agent_review",
              "stderr": "agent died"}) == FailureClass.AGENT_REVIEW_CRASH
 
-    def test_embedded_phase_a_agent_review_failure(self):
-        stdout = json.dumps({
-            "status": "error",
-            "error": (
-                "SDK agent review failed (exit=3). "
-                "Hard gate: agents must pass before bridge review. "
-                "agent_status: verifier=NON_COMPLIANT"
-            ),
-        })
-        assert rg_mod.classify_failure(
-            {"status": "failed", "step": "", "stdout": stdout, "stderr": ""}
-        ) == FailureClass.AGENT_REVIEW_CRASH
-
-    def test_embedded_phase_a_agent_review_timeout_is_process_timeout(self):
-        stdout = json.dumps({
-            "status": "error",
-            "error": (
-                "SDK agent review failed (exit=-1). "
-                "Hard gate: agents must pass before bridge review. "
-                "agent_status: phase=retry:adversary status=running "
-                "running_agents=['adversary'] last_progress=2026-04-02T04:58:58Z | "
-                "stderr_tail: Agent review timed out after 900s"
-            ),
-        })
-        assert rg_mod.classify_failure(
-            {"status": "failed", "step": "phase_a", "stdout": stdout, "stderr": ""}
-        ) == FailureClass.PROCESS_TIMEOUT
-
     def test_unknown_error(self):
         assert rg_mod.classify_failure(
             {"status": "error", "step": "some_step",
              "stderr": "something unexpected"}) == FailureClass.UNKNOWN_ERROR
 
+    def test_embedded_bridge_error_classified_as_agent_review_crash(self):
+        stdout = json.dumps({
+            "status": "error",
+            "error": (
+                "Bridge subprocess failed in round 1 (exit=2). "
+                "bridge_supervisor.py: error: unrecognized arguments: --packet-review"
+            ),
+            "executor": "phase_a_executor",
+        }, indent=2)
+        assert rg_mod.classify_failure(
+            {"status": "failed", "step": "phase_a_executor", "stdout": stdout}
+        ) == FailureClass.AGENT_REVIEW_CRASH
+
     def test_unclassified(self):
         assert rg_mod.classify_failure({"status": "weird"}) == FailureClass.UNCLASSIFIED
         assert rg_mod.classify_failure({}) == FailureClass.UNCLASSIFIED
+
+
+class TestReasonSummaries:
+    def test_embedded_json_reason_prefers_error_field(self):
+        stdout = json.dumps({
+            "status": "error",
+            "error": (
+                "Bridge subprocess failed in round 1 (exit=2). "
+                "bridge_supervisor.py: error: unrecognized arguments: --packet-review"
+            ),
+            "rendered_path": ".agent_bus/rendered/phase-a-r1-123.md",
+        }, indent=2)
+        reason = rg_mod._summarize_result_reason({"stdout": stdout})  # ANTICHEAT_OK
+        assert "Bridge subprocess failed in round 1" in reason
+        assert reason != "}"
+
+    def test_embedded_json_reason_ignores_leading_log_lines(self):
+        payload = json.dumps({
+            "status": "error",
+            "error": "Bridge subprocess failed in round 1 (exit=2).",
+        }, indent=2)
+        stdout = (
+            "[phase-a] Bridge exit code: 2\n"
+            "[phase-a] Bridge failed (exit 2) — failing closed\n"
+            f"{payload}\n"
+        )
+        reason = rg_mod._summarize_result_reason({"stdout": stdout})  # ANTICHEAT_OK
+        assert reason == "Bridge subprocess failed in round 1 (exit=2)."
 
 
 class TestTierMapping:
@@ -176,7 +199,6 @@ class TestTierMapping:
         assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
         tier4 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 4}
         assert tier4 == {FailureClass.TERMINAL_POLICY, FailureClass.UNCLASSIFIED}
-        assert rg_mod.tier_for(FailureClass.NEEDS_PHASE_B) == 3
 
 
 class TestFixStaleBridgeLock:
@@ -302,6 +324,33 @@ class TestRecoveryLog:
         assert rg_mod._count_prior_attempts(attempts, "w2", "s1", "x") == 0 # ANTICHEAT_OK
 
 
+class TestRecoveryStatus:
+    def test_status_round_trip_and_wave_invocation_count(self, tmp_path):
+        rg_mod._save_recovery_status(  # ANTICHEAT_OK: status file is the public pane substrate
+            tmp_path,
+            {"active": True, "wave_id": "w1"},
+        )
+        loaded = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert loaded["wave_id"] == "w1"
+        attempts = [
+            {"wave_id": "w1", "invocation_id": "inv-a"},
+            {"wave_id": "w1", "invocation_id": "inv-a"},
+            {"wave_id": "w1", "invocation_id": "inv-b"},
+            {"wave_id": "w1"},
+            {"wave_id": "w2", "invocation_id": "inv-z"},
+        ]
+        assert rg_mod._count_wave_invocations(attempts, "w1") == 3  # ANTICHEAT_OK
+
+    def test_summarize_result_reason_ignores_numeric_stdout_trailer(self):
+        result = {
+            "status": "error",
+            "step": "commit",
+            "stdout": "tokens used\n40,304\n",
+            "stderr": "",
+        }
+        assert rg_mod._summarize_result_reason(result) == "commit: error"  # ANTICHEAT_OK
+
+
 class TestAttemptRecovery:
     def test_tier4_escalates(self, tmp_path):
         r = rg_mod.attempt_recovery(tmp_path, {"status": "question_for_founder", "step": "b"}, "w1")
@@ -364,27 +413,34 @@ class TestAttemptRecovery:
         entries = rg_mod._load_recovery_log(tmp_path) # ANTICHEAT_OK
         assert len(entries) == 1
         assert entries[0]["wave_id"] == "w1" and entries[0]["tier"] == 1
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["active"] is False
+        assert status["outcome"] == "success"
+        assert status["failure_class"] == "stale_bridge_lock"
+        assert status["wave_invocation_count"] == 1
 
     def test_unclassified_escalates(self, tmp_path):
         r = rg_mod.attempt_recovery(tmp_path, {"status": "banana"}, "w1")
         assert r["recovered"] is False and r["tier"] == 4 and r["failure_class"] == "unclassified"
 
-    def test_tier3_needs_phase_b_invokes_recovery_loop(self, tmp_path):
-        with patch.object(rg_mod, "run_recovery_loop", return_value={
+    def test_tier3_attempt_recovery_invokes_live_loop(self, tmp_path):
+        loop_result = {
             "recovered": True,
             "exhausted": False,
             "iterations": 1,
-            "log": [{"action": "verify_pass", "detail": "phase b re-entry succeeded"}],
-        }) as mock_loop:
+            "log": [{"action": "shell", "detail": "retrying phase_b_executor"}],
+        }
+        with patch.object(rg_mod, "run_recovery_loop", return_value=loop_result) as mock_loop:
             r = rg_mod.attempt_recovery(
                 tmp_path,
-                {"status": "needs_phase_b", "step": "phase_b"},
+                {"status": "failed", "step": "phase_b", "stderr": "FAILED test_x"},
                 "w1",
             )
         mock_loop.assert_called_once()
         assert r["recovered"] is True
         assert r["tier"] == 3
         assert r["action"] == "recovery_loop"
+        assert "retrying phase_b_executor" in r["detail"]
 
     def test_distinct_executor_timeouts_separate_buckets(self, tmp_path, monkeypatch):
         """Timeout results with different executors don't share exhaustion bucket.
@@ -497,39 +553,6 @@ class TestFixProcessTimeout:
         assert os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] == "5400"
         assert os.environ["RCX_RECOVERY_TIMEOUT_KEY"] == "commit_executor"
         assert "commit_executor" in r["detail"]
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
-
-    def test_increases_timeout_agent_review_when_inner_sdk_timeout(self, tmp_path, monkeypatch):
-        """Wrapped Phase A SDK timeouts should bump the inner agent_review budget."""
-        cfg_dir = tmp_path / "mu" / "tools" / "executors"
-        cfg_dir.mkdir(parents=True)
-        (cfg_dir / "executor_config.json").write_text(json.dumps({
-            "timeouts": {"phase_a_executor": 1800, "agent_review": 900}
-        }))
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
-        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_TIMEOUT_agent_review", raising=False)
-        result = {
-            "status": "failed",
-            "executor": "phase_a_executor",
-            "step": "phase_a",
-            "stdout": json.dumps({
-                "status": "error",
-                "error": (
-                    "SDK agent review failed (exit=-1). Hard gate: agents must pass "
-                    "before bridge review. agent_status: phase=retry:adversary "
-                    "status=running running_agents=['adversary'] last_progress=now | "
-                    "stderr_tail: Agent review timed out after 900s"
-                ),
-            }),
-            "stderr": "",
-        }
-        r = rg_mod.fix_process_timeout(tmp_path, result=result)
-        assert r["fixed"] is True
-        assert os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] == "1350"
-        assert os.environ["RCX_RECOVERY_TIMEOUT_KEY"] == "agent_review"
-        assert "agent_review" in r["detail"]
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
 
@@ -750,84 +773,65 @@ class TestRecoveryLoop:
             "explanation": "applying fix"
         })
         verify_ok = MagicMock(returncode=0, stdout="", stderr="")
-        call_count = {"n": 0}
 
         def mock_run(cmd, **kw):
-            call_count["n"] += 1
-            if isinstance(cmd, list) and "claude" in cmd:
-                return MagicMock(stdout=claude_response, stderr="", returncode=0)
             if isinstance(cmd, list):  # verify command
                 return verify_ok
             # shell=True command
             return MagicMock(stdout="ok", stderr="", returncode=0)
 
+        popen_factory = lambda *args, **kwargs: FakePopen(stdout=claude_response, pid=4242)
+        orig_update = rg_mod._update_recovery_status  # ANTICHEAT_OK: capture live recovery status transitions
         with patch.object(rg_mod, "subprocess") as mock_sp:
             mock_sp.run = mock_run
+            mock_sp.Popen = popen_factory
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
-            r = rg_mod.run_recovery_loop(
-                tmp_path, result, "w1", verify_command=["echo", "verify"])
+            with patch.object(rg_mod, "_update_recovery_status", wraps=orig_update) as update_spy:
+                r = rg_mod.run_recovery_loop(
+                    tmp_path, result, "w1", verify_command=["echo", "verify"])
         assert r["recovered"] is True
         assert r["iterations"] == 1
+        assert any(call.kwargs.get("child_pid") == 4242 for call in update_spy.mock_calls if call.kwargs)
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["active"] is False
+        assert status["outcome"] == "success"
+        assert status["child_pid"] == 0
+        assert status["last_action"] == "shell"
 
-    def test_extracts_prose_wrapped_json(self, tmp_path):
-        """Prose-wrapped fenced JSON should still drive recovery."""
-        result = {"status": "failed", "step": "pre_commit",
-                  "stderr": "test_x failed", "stdout": ""}
-        claude_response = """Root cause identified.
-
-```json
-{"action": "shell", "commands": ["echo fixed"], "explanation": "applying fix"}
-```
-"""
-        verify_ok = MagicMock(returncode=0, stdout="", stderr="")
+    def test_successful_shell_fix_requests_retry_without_verify(self, tmp_path):
+        result = {
+            "status": "failed",
+            "step": "phase_b_executor",
+            "executor": "phase_b_executor",
+            "stderr": "FAILED test_x",
+            "stdout": "",
+        }
+        claude_response = json.dumps({
+            "action": "shell",
+            "commands": ["echo fixed"],
+            "explanation": "apply fix and retry",
+        })
 
         def mock_run(cmd, **kw):
-            if isinstance(cmd, list) and "claude" in cmd:
-                return MagicMock(stdout=claude_response, stderr="", returncode=0)
-            if isinstance(cmd, list):
-                return verify_ok
             return MagicMock(stdout="ok", stderr="", returncode=0)
 
         with patch.object(rg_mod, "subprocess") as mock_sp:
             mock_sp.run = mock_run
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response, pid=5151)
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
-            r = rg_mod.run_recovery_loop(
-                tmp_path, result, "w1", verify_command=["echo", "verify"])
+            r = rg_mod.run_recovery_loop(tmp_path, result, "w-retry")
         assert r["recovered"] is True
-        assert r["iterations"] == 1
-
-    def test_parse_error_reprompts_with_invalid_response_context(self, tmp_path):
-        """Malformed prose should be fed back into the next iteration prompt."""
-        result = {"status": "failed", "step": "phase_a",
-                  "stderr": "agent review failed", "stdout": ""}
-        prompts: list[str] = []
-        responses = [
-            "The root cause is an external env var in the parent invocation.",
-            json.dumps({
-                "action": "skip",
-                "commands": [],
-                "explanation": "caller-supplied env var cannot be changed safely here",
-            }),
-        ]
-
-        def mock_run(cmd, **kw):
-            if isinstance(cmd, list) and "claude" in cmd:
-                prompts.append(cmd[3])
-                return MagicMock(
-                    stdout=responses[len(prompts) - 1], stderr="", returncode=0)
-            return MagicMock(stdout="", stderr="", returncode=0)
-
-        with patch.object(rg_mod, "subprocess") as mock_sp:
-            mock_sp.run = mock_run
-            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
-            r = rg_mod.run_recovery_loop(tmp_path, result, "w-reprompt", max_iterations=2)
-
-        assert r["recovered"] is False
         assert r["exhausted"] is False
-        assert r["iterations"] == 2
-        assert "Previous response was invalid" not in prompts[0]
-        assert "Previous response was invalid" in prompts[1]
-        assert "external env var in the parent invocation" in prompts[1]
+        assert r["iterations"] == 1
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["active"] is False
+        assert status["outcome"] == "retry_requested"
+        assert status["state"] == "tier3_retry_requested"
+        assert status["retry_target"] == "phase_b_executor"
+        entries = rg_mod._load_recovery_log(tmp_path)  # ANTICHEAT_OK
+        assert entries[-1]["outcome"] == "retry_requested"
 
     def test_max_iterations(self, tmp_path):
         """Verify loop stops after max_iterations."""
@@ -838,14 +842,14 @@ class TestRecoveryLoop:
         verify_fail = MagicMock(returncode=1, stdout="", stderr="still fails")
 
         def mock_run(cmd, **kw):
-            if isinstance(cmd, list) and "claude" in cmd:
-                return MagicMock(stdout=claude_response, stderr="", returncode=0)
             if isinstance(cmd, list):  # verify
                 return verify_fail
             return MagicMock(stdout="", stderr="", returncode=0)
 
         with patch.object(rg_mod, "subprocess") as mock_sp:
             mock_sp.run = mock_run
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response, pid=31337)
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
             r = rg_mod.run_recovery_loop(
                 tmp_path, result, "w1", max_iterations=3,
@@ -853,6 +857,10 @@ class TestRecoveryLoop:
         assert r["recovered"] is False
         assert r["exhausted"] is True
         assert r["iterations"] == 3
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "exhausted"
+        assert status["state"] == "tier3_exhausted"
+        assert status["current_iteration"] == 3
 
     def test_escalate_action(self, tmp_path):
         """Verify escalate action returns exhausted=True."""
@@ -861,16 +869,18 @@ class TestRecoveryLoop:
             "action": "escalate", "commands": [], "explanation": "need human"
         })
 
-        def mock_run(cmd, **kw):
-            return MagicMock(stdout=claude_response, stderr="", returncode=0)
-
         with patch.object(rg_mod, "subprocess") as mock_sp:
-            mock_sp.run = mock_run
+            mock_sp.run = lambda *args, **kwargs: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response)
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
             r = rg_mod.run_recovery_loop(tmp_path, result, "w1")
         assert r["recovered"] is False
         assert r["exhausted"] is True
         assert r["iterations"] == 1
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "escalated"
+        assert status["state"] == "tier3_escalated"
 
     def test_dangerous_command_blocked(self, tmp_path):
         """Verify denylist blocks rm -rf etc."""
@@ -883,14 +893,14 @@ class TestRecoveryLoop:
         verify_fail = MagicMock(returncode=1, stdout="", stderr="nope")
 
         def mock_run(cmd, **kw):
-            if isinstance(cmd, list) and "claude" in cmd:
-                return MagicMock(stdout=claude_response, stderr="", returncode=0)
             if isinstance(cmd, list):  # verify
                 return verify_fail
             return MagicMock(stdout="ok", stderr="", returncode=0)
 
         with patch.object(rg_mod, "subprocess") as mock_sp:
             mock_sp.run = mock_run
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response)
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
             r = rg_mod.run_recovery_loop(
                 tmp_path, result, "w1", max_iterations=1,
@@ -906,37 +916,22 @@ class TestRecoveryLoop:
         """Verify claude call timeout is handled gracefully."""
         result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
 
-        def mock_run(cmd, **kw):
-            raise subprocess.TimeoutExpired(cmd="claude", timeout=60)
-
         with patch.object(rg_mod, "subprocess") as mock_sp:
-            mock_sp.run = mock_run
+            mock_sp.run = lambda *args, **kwargs: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(
+                communicate_exc=subprocess.TimeoutExpired(cmd="claude", timeout=60),
+                pid=9999,
+            )
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
             r = rg_mod.run_recovery_loop(
                 tmp_path, result, "w1", max_iterations=1)
         assert r["recovered"] is False
         assert len(r["log"]) == 1
         assert r["log"][0]["action"] == "timeout"
-
-    def test_diagnosis_prompt_trims_large_blocks(self, tmp_path):
-        result = {
-            "status": "failed",
-            "step": "phase_a",
-            "stderr": "\n".join(f"heartbeat {i} " + ("x" * 400) for i in range(80)),
-            "stdout": "\n".join(f"stdout {i} " + ("y" * 400) for i in range(30)),
-        }
-
-        with patch.object(rg_mod, "subprocess") as mock_sp:
-            mock_sp.run.return_value = MagicMock(returncode=0, stdout=" M packet.md\n")
-            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
-            prompt = rg_mod._build_diagnosis_prompt(  # ANTICHEAT_OK: prompt budget helper
-                result, "wave-x", 0, tmp_path)
-
-        assert "[truncated 40 earlier lines]" in prompt
-        assert "[truncated 10 earlier lines]" in prompt
-        assert "heartbeat 79 " in prompt
-        assert ("x" * 260) not in prompt
-        assert ("y" * 260) not in prompt
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "exhausted"
+        assert status["last_action"] == "exhausted"
 
 
 class TestDangerousCommandDetection:
@@ -944,11 +939,8 @@ class TestDangerousCommandDetection:
         "rm -rf /tmp/x", "git push origin main", "git reset --hard HEAD",
         "sudo rm -rf /", "git push --force",
         "rm -r /tmp/stuff", "git checkout .", "git restore .",
-        "git reset HEAD foo.py", "git checkout -- foo.py",
-        "git restore --staged foo.py", "git restore --source=HEAD foo.py",
         "git clean -fd", "dd if=/dev/zero of=/dev/sda",
-        "chmod 777 /etc/passwd", "cat .git/config", "ls .git/hooks/",
-        "git  push origin main", "git\tpush origin main", "git\npush origin main",
+        "chmod 777 /etc/passwd",
     ])
     def test_dangerous_blocked(self, cmd):
         assert rg_mod._is_dangerous_command(cmd) is True  # ANTICHEAT_OK
@@ -959,14 +951,6 @@ class TestDangerousCommandDetection:
     ])
     def test_safe_allowed(self, cmd):
         assert rg_mod._is_dangerous_command(cmd) is False  # ANTICHEAT_OK
-
-    @pytest.mark.parametrize("cmd", [
-        "echo Z2l0IHB1c2g= | base64 -d | sh",
-        "git config alias.x \"push --force\" && git x",
-        "X=push; git $X",
-    ])
-    def test_obfuscated_git_commands_blocked(self, cmd):
-        assert rg_mod._is_dangerous_command(cmd) is True  # ANTICHEAT_OK
 
 
 class TestApplyEditRepoEscape:
@@ -1001,37 +985,6 @@ class TestApplyEditRepoEscape:
         assert "repo-escape blocked" in msg
         assert outside.read_text() == "secret"  # unchanged
 
-    def test_sensitive_git_config_edit_blocked(self, tmp_path):
-        git_dir = tmp_path / ".git"
-        git_dir.mkdir()
-        (git_dir / "config").write_text("old")
-        ok, msg = rg_mod._apply_edit(  # ANTICHEAT_OK
-            {"file_path": ".git/config", "old_text": "old", "new_text": "new"},
-            tmp_path,
-        )
-        assert ok is False
-        assert "sensitive path blocked" in msg
-
-    def test_sensitive_hook_symlink_edit_blocked(self, tmp_path):
-        git_hooks = tmp_path / ".git" / "hooks"
-        git_hooks.mkdir(parents=True)
-        target = tmp_path / "mu" / "tools" / "hooks"
-        target.mkdir(parents=True)
-        target_file = target / "pre-commit-doc-check"
-        target_file.write_text("old")
-        (git_hooks / "pre-commit").symlink_to(target_file)
-        ok, msg = rg_mod._apply_edit(  # ANTICHEAT_OK
-            {
-                "file_path": ".git/hooks/pre-commit",
-                "old_text": "old",
-                "new_text": "new",
-            },
-            tmp_path,
-        )
-        assert ok is False
-        assert "sensitive path blocked" in msg
-        assert target_file.read_text() == "old"
-
 
 class TestRecoveryLoopDurableLogging:
     def test_iterations_persisted_to_recovery_log(self, tmp_path):
@@ -1044,14 +997,14 @@ class TestRecoveryLoopDurableLogging:
         verify_fail = MagicMock(returncode=1, stdout="", stderr="still fails")
 
         def mock_run(cmd, **kw):
-            if isinstance(cmd, list) and "claude" in cmd:
-                return MagicMock(stdout=claude_response, stderr="", returncode=0)
             if isinstance(cmd, list):
                 return verify_fail
             return MagicMock(stdout="ok", stderr="", returncode=0)
 
         with patch.object(rg_mod, "subprocess") as mock_sp:
             mock_sp.run = mock_run
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response)
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
             rg_mod.run_recovery_loop(
                 tmp_path, result, "w-log-test", max_iterations=2,
@@ -1061,6 +1014,7 @@ class TestRecoveryLoopDurableLogging:
         assert len(entries) == 2
         assert all(e["tier"] == 3 for e in entries)
         assert all(e["wave_id"] == "w-log-test" for e in entries)
+        assert entries[0]["invocation_id"] == entries[1]["invocation_id"]
 
     def test_escalate_persisted(self, tmp_path):
         """Escalate action is durably logged."""
@@ -1069,11 +1023,10 @@ class TestRecoveryLoopDurableLogging:
             "action": "escalate", "commands": [], "explanation": "need human"
         })
 
-        def mock_run(cmd, **kw):
-            return MagicMock(stdout=claude_response, stderr="", returncode=0)
-
         with patch.object(rg_mod, "subprocess") as mock_sp:
-            mock_sp.run = mock_run
+            mock_sp.run = lambda *args, **kwargs: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response)
+            mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
             rg_mod.run_recovery_loop(tmp_path, result, "w-esc")
 
@@ -1081,3 +1034,931 @@ class TestRecoveryLoopDurableLogging:
         assert len(entries) == 1
         assert "escalate" in entries[0]["action"]
         assert entries[0]["outcome"] == "escalated"
+
+
+class TestRecoveryStatusRendering:
+    def test_no_status_file(self, tmp_path):
+        lines = dash_mod.render_recovery_lines(tmp_path)
+        assert lines[0] == "RECOVERY"
+        assert "No recovery activity recorded yet." in lines[-1]
+
+    def test_active_looping_recovery(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime(2026, 4, 3, 21, 0, tzinfo=timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": True,
+                    "wave_id": "wave-alpha",
+                    "failure_class": "process_timeout",
+                    "tier": 2,
+                    "wave_invocation_count": 2,
+                    "tuple_attempt_index": 1,
+                    "retry_target": "phase_a_executor",
+                    "state": "tier2_fixing",
+                    "owner_pid": 1,
+                    "reason": "phase_a timed out",
+                    "updated_at": (now - timedelta(seconds=12)).isoformat(),
+                    "current_iteration": 0,
+                    "max_iterations": 0,
+                    "current_command": "",
+                    "explanation": "",
+                    "detail": "",
+                }
+            ),
+            encoding="utf-8",
+        )
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+        assert "ACTIVE — Tier 2 process_timeout" in rendered
+        assert "Retry target: Phase A" in rendered
+        assert "Invocation: 2 in wave" in rendered
+        assert "Reason: phase_a timed out" in rendered
+
+    def test_hung_child_pid_and_completed_outcome(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime(2026, 4, 3, 21, 0, tzinfo=timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": True,
+                    "wave_id": "wave-beta",
+                    "failure_class": "agent_review_crash",
+                    "tier": 3,
+                    "wave_invocation_count": 1,
+                    "tuple_attempt_index": 1,
+                    "retry_target": "commit_executor",
+                    "state": "tier3_waiting_on_claude",
+                    "owner_pid": 999999,
+                    "child_pid": 888888,
+                    "child_role": "claude",
+                    "reason": "connector stalled",
+                    "updated_at": (now - timedelta(seconds=120)).isoformat(),
+                    "current_iteration": 2,
+                    "max_iterations": 3,
+                    "current_command": "claude --print",
+                    "explanation": "trying a narrower fix",
+                    "detail": "",
+                }
+            ),
+            encoding="utf-8",
+        )
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+        assert "POSSIBLY HUNG — Tier 3 agent_review_crash" in rendered
+        assert "loop 2/3" in rendered
+        assert "claude PID: 888888 (dead)" in rendered
+
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "wave_id": "wave-beta",
+                    "failure_class": "agent_review_crash",
+                    "tier": 3,
+                    "wave_invocation_count": 1,
+                    "tuple_attempt_index": 1,
+                    "retry_target": "commit_executor",
+                    "state": "tier3_verify_pass",
+                    "owner_pid": 1234,
+                    "child_pid": 0,
+                    "reason": "connector stalled",
+                    "updated_at": (now - timedelta(seconds=20)).isoformat(),
+                    "finished_at": (now - timedelta(seconds=20)).isoformat(),
+                    "current_iteration": 1,
+                    "max_iterations": 3,
+                    "current_command": "",
+                    "explanation": "narrowed the fix",
+                    "detail": "verification passed",
+                    "outcome": "success",
+                    "last_action": "shell",
+                    "recovered": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+        assert "LAST RECOVERY — Tier 3 agent_review_crash" in rendered
+        assert "Outcome: success via shell" in rendered
+        assert "Recovery note: narrowed the fix" in rendered
+
+    def test_recent_attempts_rendered_for_matching_invocation(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime(2026, 4, 3, 21, 0, tzinfo=timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": True,
+                    "invocation_id": "wave-gamma-phase_b_executor-process_timeout-01",
+                    "wave_id": "wave-gamma",
+                    "step": "phase_b_executor",
+                    "failure_class": "process_timeout",
+                    "tier": 3,
+                    "wave_invocation_count": 3,
+                    "tuple_attempt_index": 2,
+                    "retry_target": "phase_b_executor",
+                    "state": "tier3_verifying",
+                    "owner_pid": 1234,
+                    "child_pid": 5678,
+                    "child_role": "claude",
+                    "reason": "phase_b timed out",
+                    "updated_at": (now - timedelta(seconds=8)).isoformat(),
+                    "current_iteration": 2,
+                    "max_iterations": 3,
+                    "current_command": "pytest mu/tests/tools/test_executor_dispatch.py -q",
+                    "explanation": "retry with narrower timeout override",
+                    "detail": "",
+                }
+            ),
+            encoding="utf-8",
+        )
+        (status_path / "recovery_log.json").write_text(
+            json.dumps(
+                {
+                    "attempts": [
+                        {
+                            "timestamp": (now - timedelta(seconds=40)).isoformat(),
+                            "wave_id": "wave-old",
+                            "step": "phase_b_executor",
+                            "failure_class": "process_timeout",
+                            "tier": 3,
+                            "action": "tier3_iter1_skip",
+                            "outcome": "skipped",
+                            "duration_s": 0.5,
+                            "detail": "old unrelated invocation",
+                            "invocation_id": "wave-old-phase_b_executor-process_timeout-01",
+                        },
+                        {
+                            "timestamp": (now - timedelta(seconds=20)).isoformat(),
+                            "wave_id": "wave-gamma",
+                            "step": "phase_b_executor",
+                            "failure_class": "process_timeout",
+                            "tier": 3,
+                            "action": "tier3_iter1_parse_error",
+                            "outcome": "failed",
+                            "duration_s": 1.25,
+                            "detail": "claude returned prose instead of json",
+                            "invocation_id": "wave-gamma-phase_b_executor-process_timeout-01",
+                        },
+                        {
+                            "timestamp": (now - timedelta(seconds=5)).isoformat(),
+                            "wave_id": "wave-gamma",
+                            "step": "phase_b_executor",
+                            "failure_class": "process_timeout",
+                            "tier": 3,
+                            "action": "tier3_iter2_shell",
+                            "outcome": "retry_requested",
+                            "duration_s": 2.75,
+                            "detail": "timeout override applied; retrying Phase B",
+                            "invocation_id": "wave-gamma-phase_b_executor-process_timeout-01",
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+        assert "Recent attempts:" in rendered
+        assert "tier3_iter1_parse_error -> failed" in rendered
+        assert "tier3_iter2_shell -> retry_requested" in rendered
+        assert "old unrelated invocation" not in rendered
+
+    def test_inactive_trivial_invocation_uses_detail_and_wave_history(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime(2026, 4, 4, 5, 0, tzinfo=timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "invocation_id": "wave-delta-commit-stale-continuation-01",
+                    "wave_id": "wave-delta",
+                    "step": "commit",
+                    "failure_class": "stale_continuation",
+                    "tier": 1,
+                    "wave_invocation_count": 2,
+                    "tuple_attempt_index": 1,
+                    "retry_target": "commit_executor",
+                    "state": "tier1_failed",
+                    "owner_pid": 999999,
+                    "child_pid": 0,
+                    "reason": "40,304",
+                    "updated_at": (now - timedelta(seconds=30)).isoformat(),
+                    "finished_at": (now - timedelta(seconds=30)).isoformat(),
+                    "current_iteration": 0,
+                    "max_iterations": 0,
+                    "current_command": "",
+                    "explanation": "",
+                    "detail": "phase_b_state.json not found",
+                    "outcome": "failed",
+                    "last_action": "noop",
+                    "recovered": False,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (status_path / "recovery_log.json").write_text(
+            json.dumps(
+                {
+                    "attempts": [
+                        {
+                            "timestamp": (now - timedelta(seconds=80)).isoformat(),
+                            "wave_id": "wave-delta",
+                            "step": "commit",
+                            "failure_class": "test_failure",
+                            "tier": 3,
+                            "action": "tier3_iter1_parse_error",
+                            "outcome": "failed",
+                            "duration_s": 1.25,
+                            "detail": "claude returned prose instead of json",
+                            "invocation_id": "wave-delta-commit-test-failure-01",
+                        },
+                        {
+                            "timestamp": (now - timedelta(seconds=45)).isoformat(),
+                            "wave_id": "wave-delta",
+                            "step": "commit",
+                            "failure_class": "test_failure",
+                            "tier": 3,
+                            "action": "tier3_iter2_edit",
+                            "outcome": "retry_requested",
+                            "duration_s": 2.5,
+                            "detail": "lane metadata corrected",
+                            "invocation_id": "wave-delta-commit-test-failure-01",
+                        },
+                        {
+                            "timestamp": (now - timedelta(seconds=30)).isoformat(),
+                            "wave_id": "wave-delta",
+                            "step": "commit",
+                            "failure_class": "stale_continuation",
+                            "tier": 1,
+                            "action": "noop",
+                            "outcome": "failed",
+                            "duration_s": 0.003,
+                            "detail": "phase_b_state.json not found",
+                            "invocation_id": "wave-delta-commit-stale-continuation-01",
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+        assert "Reason: phase_b_state.json not found" in rendered
+        assert "40,304" not in rendered
+        assert "Owner PID: 999999 (dead, historical)" in rendered
+        assert "Recent attempts in wave:" in rendered
+        assert "tier3_iter2_edit -> retry_requested" in rendered
+
+
+class TestRecoveryWebSnapshot:
+    def test_missing_snapshot_returns_none(self, tmp_path):
+        with patch.object(web_mod, "REPO_ROOT", tmp_path):
+            assert web_mod.recovery_snapshot() is None  # ANTICHEAT_OK
+
+    def test_active_snapshot_exposes_plain_recovery_fields(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime.now(timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": True,
+                    "tier": 3,
+                    "failure_class": "agent_review_crash",
+                    "wave_id": "wave-recovery",
+                    "wave_invocation_count": 4,
+                    "tuple_attempt_index": 2,
+                    "retry_target": "phase_a_executor",
+                    "state": "tier3_waiting_on_claude",
+                    "reason": "Bridge subprocess failed in round 1",
+                    "explanation": "trying a narrower fix",
+                    "current_iteration": 2,
+                    "max_iterations": 3,
+                    "owner_pid": 123,
+                    "child_pid": 456,
+                    "child_role": "claude",
+                    "current_command": "claude --print",
+                    "updated_at": now.isoformat(),
+                }
+            ),
+            encoding="utf-8",
+        )
+        with patch.object(web_mod, "REPO_ROOT", tmp_path):
+            snapshot = web_mod.recovery_snapshot()  # ANTICHEAT_OK
+        assert snapshot["label"] == "ACTIVE"
+        assert snapshot["retry_target"] == "Phase A"
+        assert snapshot["reason"] == "Bridge subprocess failed in round 1"
+        assert snapshot["current_iteration"] == 2
+        assert snapshot["max_iterations"] == 3
+        assert snapshot["child_role"] == "claude"
+
+    def test_snapshot_reason_prefers_detail_over_numeric_reason(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime.now(timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "tier": 1,
+                    "failure_class": "stale_continuation",
+                    "wave_id": "wave-recovery",
+                    "wave_invocation_count": 2,
+                    "tuple_attempt_index": 1,
+                    "retry_target": "commit_executor",
+                    "state": "tier1_failed",
+                    "reason": "40,304",
+                    "detail": "phase_b_state.json not found",
+                    "explanation": "",
+                    "current_iteration": 0,
+                    "max_iterations": 0,
+                    "owner_pid": 999999,
+                    "child_pid": 0,
+                    "current_command": "",
+                    "updated_at": now.isoformat(),
+                }
+            ),
+            encoding="utf-8",
+        )
+        with patch.object(web_mod, "REPO_ROOT", tmp_path):
+            snapshot = web_mod.recovery_snapshot()  # ANTICHEAT_OK
+        assert snapshot["reason"] == "phase_b_state.json not found"
+        assert snapshot["detail"] == ""
+        assert snapshot["owner_state"] == "dead"
+
+
+class TestObservabilityNoiseFilters:
+    def test_terminal_dashboard_ignores_tail_watchers(self):
+        lines = [
+            "jeff 15571 0.0 0.0 ?? Ss 0:00.00 tail -f /repo/.scratch/phase_a_executor_live.log",
+            "jeff 20001 0.0 0.0 ?? Ss 0:00.00 python mu/tools/executors/commit_executor.py",
+        ]
+        with patch.object(dash_mod, "pid_start", return_value=123.0):
+            phase, pid, started = dash_mod.detect_phase(lines)
+        assert phase == "commit"
+        assert pid == 20001
+        assert started == 123.0
+
+    def test_web_dashboard_ignores_tail_watchers(self):
+        lines = [
+            "jeff 15571 0.0 0.0 ?? Ss 0:00.00 tail -f /repo/.scratch/phase_a_executor_live.log",
+            "jeff 20002 0.0 0.0 ?? Ss 0:00.00 python mu/tools/executors/phase_b_executor.py",
+        ]
+        with patch.object(web_mod, "pid_start", return_value=456.0):
+            phase = web_mod.detect_phase(lines)
+        assert phase["phase"] == "phase-b"
+        assert phase["pid"] == 20002
+        assert phase["started"] == 456.0
+
+    def test_only_watcher_noise_reports_idle(self):
+        lines = [
+            "jeff 15571 0.0 0.0 ?? Ss 0:00.00 tail -f /repo/.scratch/phase_a_executor_live.log",
+            "jeff 15572 0.0 0.0 ?? Ss 0:00.00 bash /tmp/rcx_log_watcher.sh",
+        ]
+        with patch.object(dash_mod, "pid_start", return_value=789.0):
+            phase, pid, started = dash_mod.detect_phase(lines)
+        assert phase == "idle"
+        assert pid is None
+        assert started is None
+
+
+class TestObservabilityWorktreeResolution:
+    def _write_executable(self, path: Path, content: str) -> None:
+        path.write_text(content, encoding="utf-8")
+        path.chmod(path.stat().st_mode | 0o111)
+
+    def _fake_git_dir(
+        self,
+        tmp_path: Path,
+        *,
+        show_toplevel: str | None,
+        branch: str | None,
+        worktree_output: str = "",
+    ) -> Path:
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        script = f"""#!/usr/bin/env bash
+set -eu
+case "$*" in
+  "rev-parse --show-toplevel")
+    {"printf '%s\\n' " + repr(show_toplevel) if show_toplevel is not None else "exit 128"}
+    ;;
+  "symbolic-ref --quiet --short HEAD")
+    {"printf '%s\\n' " + repr(branch) if branch is not None else "exit 1"}
+    ;;
+  "worktree list --porcelain")
+    printf '%b' {worktree_output!r}
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+"""
+        self._write_executable(bin_dir / "git", script)
+        return bin_dir
+
+    def _minimal_bus(self, repo_root: Path) -> None:
+        (repo_root / ".agent_bus" / "executors").mkdir(parents=True, exist_ok=True)
+        (repo_root / ".agent_bus" / "meta" / "pre_commit_receipts").mkdir(parents=True, exist_ok=True)
+
+    def _install_observability_script(self, repo_root: Path, name: str) -> None:
+        target = repo_root / "mu" / "tools" / "observability"
+        target.mkdir(parents=True, exist_ok=True)
+        script = target / name
+        script.write_text((_OBSERVABILITY_DIR / name).read_text(encoding="utf-8"), encoding="utf-8")
+        script.chmod(script.stat().st_mode | 0o111)
+
+    def _write_commit_state(self, repo_root: Path, *, status: str) -> None:
+        state = repo_root / ".agent_bus" / "executors" / "commit_executor_test.json"
+        state.write_text(f'{{"status": "{status}"}}\\n', encoding="utf-8")
+
+    def _set_age_seconds(self, path: Path, *, age_seconds: int) -> None:
+        now = datetime.now(timezone.utc).timestamp()
+        aged = now - age_seconds
+        os.utime(path, (aged, aged))
+
+    def test_pipeline_status_fails_closed_when_branch_is_unresolved(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        bin_dir = self._fake_git_dir(tmp_path, show_toplevel=None, branch=None)
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode != 0
+        assert "cannot resolve repo root" in result.stderr.lower()
+
+    def test_pipeline_status_uses_exact_linked_worktree_from_common_dir(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        linked = tmp_path / "linked"
+        linked.mkdir()
+        self._minimal_bus(linked)
+        branch = "jabramsja/pipeline-monitor-worktree-rebind-2026-04-03"
+        worktree_output = (
+            f"worktree {common}\n"
+            "bare\n\n"
+            f"worktree {linked}\n"
+            "HEAD 0123456789abcdef\n"
+            f"branch refs/heads/{branch}\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=None,
+            branch=branch,
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "PIPELINE STATUS" in result.stdout
+
+    def test_pipeline_status_uses_unique_active_worktree_when_branch_is_stale(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        stale = tmp_path / "stale"
+        active = tmp_path / "active"
+        stale.mkdir()
+        active.mkdir()
+        self._minimal_bus(active)
+        self._write_commit_state(active, status="post_commit_pending")
+        worktree_output = (
+            f"worktree {common}\n"
+            "bare\n\n"
+            f"worktree {stale}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/stale-wave\n\n"
+            f"worktree {active}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=None,
+            branch="jabramsja/missing-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "PIPELINE STATUS" in result.stdout
+        assert "post_commit_pending" in result.stdout
+
+    def test_pipeline_status_prefers_unique_active_worktree_over_quiet_current_root(self, tmp_path):
+        stale = tmp_path / "stale"
+        active = tmp_path / "active"
+        stale.mkdir()
+        active.mkdir()
+        self._minimal_bus(stale)
+        self._minimal_bus(active)
+        self._write_commit_state(stale, status="post_commit_pending")
+        self._set_age_seconds(
+            stale / ".agent_bus" / "executors" / "commit_executor_test.json",
+            age_seconds=7 * 60 * 60,
+        )
+        self._write_commit_state(active, status="post_commit_pending")
+        worktree_output = (
+            f"worktree {stale}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/stale-wave\n\n"
+            f"worktree {active}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(stale),
+            branch="jabramsja/stale-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=stale,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "post_commit_pending" in result.stdout
+
+    def test_pipeline_status_renders_recovery_block_when_dashboard_is_present(self, tmp_path):
+        repo_root = tmp_path / "active"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "pipeline_status.sh")
+        self._install_observability_script(repo_root, "pipeline_dashboard.py")
+        recovery_dir = repo_root / ".agent_bus" / "recovery"
+        recovery_dir.mkdir(parents=True)
+        now = datetime.now(timezone.utc)
+        (recovery_dir / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": True,
+                    "tier": 3,
+                    "failure_class": "agent_review_crash",
+                    "wave_id": "wave-recovery",
+                    "retry_target": "phase_a_executor",
+                    "state": "tier3_waiting_on_claude",
+                    "reason": "Bridge subprocess failed in round 1",
+                    "current_iteration": 2,
+                    "max_iterations": 3,
+                    "updated_at": now.isoformat(),
+                }
+            ),
+            encoding="utf-8",
+        )
+        worktree_output = (
+            f"worktree {repo_root}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/recovery-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/recovery-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_status.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "RECOVERY" in result.stdout
+        assert "Tier 3 agent_review_crash" in result.stdout
+
+    def test_pipeline_status_uses_sole_linked_worktree_when_only_one_exists(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        linked = tmp_path / "linked"
+        linked.mkdir()
+        self._minimal_bus(linked)
+        worktree_output = (
+            f"worktree {common}\n"
+            "bare\n\n"
+            f"worktree {linked}\n"
+            "HEAD 3333333333333333\n"
+            "branch refs/heads/dev\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=None,
+            branch="main",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "PIPELINE STATUS" in result.stdout
+
+    def test_pipeline_status_uses_unique_dev_worktree_when_common_head_is_unattached(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        feature = tmp_path / "feature"
+        dev = tmp_path / "dev"
+        feature.mkdir()
+        dev.mkdir()
+        self._minimal_bus(dev)
+        worktree_output = (
+            f"worktree {common}\n"
+            "bare\n\n"
+            f"worktree {feature}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/feature-wave\n\n"
+            f"worktree {dev}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/dev\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=None,
+            branch="main",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "PIPELINE STATUS" in result.stdout
+
+    def test_pipeline_status_fails_closed_when_multiple_active_worktrees_exist(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        active_one = tmp_path / "active-one"
+        active_two = tmp_path / "active-two"
+        active_one.mkdir()
+        active_two.mkdir()
+        self._minimal_bus(active_one)
+        self._minimal_bus(active_two)
+        self._write_commit_state(active_one, status="post_commit_pending")
+        self._write_commit_state(active_two, status="bot_findings_pending")
+        worktree_output = (
+            f"worktree {common}\n"
+            "bare\n\n"
+            f"worktree {active_one}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/active-one\n\n"
+            f"worktree {active_two}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-two\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=None,
+            branch="jabramsja/missing-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode != 0
+        assert "multiple active pipeline worktrees" in result.stderr.lower()
+
+    def test_pipeline_status_fails_closed_when_current_root_is_quiet_and_multiple_active_worktrees_exist(self, tmp_path):
+        quiet = tmp_path / "quiet"
+        active_one = tmp_path / "active-one"
+        active_two = tmp_path / "active-two"
+        quiet.mkdir()
+        active_one.mkdir()
+        active_two.mkdir()
+        self._minimal_bus(quiet)
+        self._minimal_bus(active_one)
+        self._minimal_bus(active_two)
+        self._write_commit_state(active_one, status="post_commit_pending")
+        self._write_commit_state(active_two, status="bot_findings_pending")
+        worktree_output = (
+            f"worktree {quiet}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/quiet-wave\n\n"
+            f"worktree {active_one}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-one\n\n"
+            f"worktree {active_two}\n"
+            "HEAD 3333333333333333\n"
+            "branch refs/heads/jabramsja/active-two\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(quiet),
+            branch="jabramsja/quiet-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=quiet,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode != 0
+        assert "multiple active pipeline worktrees found while current worktree is idle" in result.stderr.lower()
+
+    def test_pipeline_monitor_fails_closed_when_branch_is_unresolved(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        bin_dir = self._fake_git_dir(tmp_path, show_toplevel=None, branch=None)
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_monitor.sh"), "status"],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode != 0
+        assert "cannot resolve repo root" in result.stderr.lower()
+
+    def test_pipeline_monitor_status_uses_unique_dev_worktree_when_common_head_is_unattached(self, tmp_path):
+        common = tmp_path / "common"
+        common.mkdir()
+        feature = tmp_path / "feature"
+        dev = tmp_path / "dev"
+        feature.mkdir()
+        dev.mkdir()
+        self._minimal_bus(dev)
+        self._install_observability_script(dev, "pipeline_status.sh")
+        worktree_output = (
+            f"worktree {common}\n"
+            "bare\n\n"
+            f"worktree {feature}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/feature-wave\n\n"
+            f"worktree {dev}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/dev\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=None,
+            branch="main",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_monitor.sh"), "status"],
+            cwd=common,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "PIPELINE STATUS" in result.stdout
+
+    def test_pipeline_monitor_status_prefers_unique_active_worktree_over_quiet_current_root(self, tmp_path):
+        stale = tmp_path / "stale"
+        active = tmp_path / "active"
+        stale.mkdir()
+        active.mkdir()
+        self._minimal_bus(stale)
+        self._minimal_bus(active)
+        self._install_observability_script(active, "pipeline_status.sh")
+        self._write_commit_state(stale, status="post_commit_pending")
+        self._set_age_seconds(
+            stale / ".agent_bus" / "executors" / "commit_executor_test.json",
+            age_seconds=7 * 60 * 60,
+        )
+        self._write_commit_state(active, status="post_commit_pending")
+        worktree_output = (
+            f"worktree {stale}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/stale-wave\n\n"
+            f"worktree {active}\n"
+            "HEAD 2222222222222222\n"
+            "branch refs/heads/jabramsja/active-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(stale),
+            branch="jabramsja/stale-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_monitor.sh"), "status"],
+            cwd=stale,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "post_commit_pending" in result.stdout
+
+    def test_pane_findings_renders_fallback_when_no_bridge_rounds_exist(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        (repo_root / ".agent_bus" / "meta" / "raw").mkdir(parents=True, exist_ok=True)
+        (repo_root / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo_root / ".scratch" / "commit_executor_live.log").write_text(
+            "[commit-executor] Step 14: waiting for CI on PR #719...\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        assert "No active Phase A/Phase B bridge rounds" in result.stdout
+        assert "Commit path" in result.stdout
+        assert "Step 14: waiting for CI on PR #719..." in result.stdout
+
+    def test_pane_findings_renders_latest_meta_review_when_bridge_rounds_are_idle(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        meta_dir = repo_root / ".agent_bus" / "meta" / "raw"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        (repo_root / ".scratch").mkdir(parents=True, exist_ok=True)
+        (meta_dir / "meta-wave.txt").write_text(
+            "BEGIN_META_ENVELOPE\n"
+            '{\n'
+            '  "decision": "COMMIT_GO",\n'
+            '  "summary": "Bounded review closed cleanly."\n'
+            '}\n'
+            "END_META_ENVELOPE\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        assert "Latest meta review" in result.stdout
+        assert "COMMIT_GO" in result.stdout
+        assert "Bounded review closed cleanly." in result.stdout

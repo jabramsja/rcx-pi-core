@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import fcntl
 import json
 import os
@@ -23,24 +22,6 @@ bridge = load_module("bridge_supervisor", REPO_ROOT / "tools" / "agents" / "brid
 migrations = load_module("bridge_migrations", REPO_ROOT / "tools" / "agents" / "bridge_migrations.py")
 
 
-def _load_file_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-terminal_dashboard = _load_file_module(
-    "pipeline_dashboard_mod",
-    REPO_ROOT / "mu" / "tools" / "observability" / "pipeline_dashboard.py",
-)
-web_dashboard = _load_file_module(
-    "pipeline_dashboard_web_mod",
-    REPO_ROOT / "tools" / "observability" / "pipeline_dashboard_web.py",
-)
-
-
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True)
     return result.stdout
@@ -53,26 +34,6 @@ def _init_temp_repo(repo: Path) -> None:
     (repo / "README.md").write_text("bridge test repo\n", encoding="utf-8")
     _git(repo, "add", "README.md")
     _git(repo, "commit", "-m", "init")
-
-
-def _write_rendered_envelope(path: Path, decision: str, summary: str = "summary") -> None:
-    envelope = {
-        "decision": decision,
-        "summary": summary,
-        "findings": [
-            {
-                "disposition": "blocking",
-                "severity": "high",
-                "title": "blocking finding",
-            }
-        ],
-    }
-    path.write_text(
-        "BEGIN_AGENT_ENVELOPE\n"
-        f"{json.dumps(envelope)}\n"
-        "END_AGENT_ENVELOPE\n",
-        encoding="utf-8",
-    )
 
 
 def test_parse_envelope_from_mixed_output() -> None:
@@ -129,119 +90,6 @@ BEGIN_AGENT_ENVELOPE
 END_AGENT_ENVELOPE"""
     with pytest.raises(bridge.BridgeError, match="multiple differing envelope blocks"):
         bridge.parse_envelope(output)
-
-
-def test_timeout_override_rejects_non_finite_values(monkeypatch) -> None:
-    monkeypatch.setenv("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", "nan")
-    assert bridge._resolve_timeout_override("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", 12.0) == 12.0  # ANTICHEAT_OK: testing timeout override helper rejects NaN input
-    monkeypatch.setenv("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", "inf")
-    assert bridge._resolve_timeout_override("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", 12.0) == 12.0  # ANTICHEAT_OK: testing timeout override helper rejects Inf input
-
-
-def test_zero_output_timeout_is_clamped_below_turn_budget(monkeypatch) -> None:
-    monkeypatch.delenv("RCX_BRIDGE_ZERO_OUTPUT_TIMEOUT_S", raising=False)
-    monkeypatch.setattr(bridge, "BRIDGE_ZERO_OUTPUT_TIMEOUT_S", 450.0)
-    assert bridge._bridge_zero_output_timeout_s(300.0) == 299.0  # ANTICHEAT_OK: testing zero-output timeout clamp helper under large budget
-    assert bridge._bridge_zero_output_timeout_s(1.0) == 0.5  # ANTICHEAT_OK: testing zero-output timeout clamp helper under small budget
-    assert bridge._bridge_zero_output_timeout_s(0.05) is None  # ANTICHEAT_OK: testing zero-output timeout clamp helper disables impossible budget
-
-
-def test_terminal_dashboard_treats_pre_commit_supervisor_as_commit(monkeypatch) -> None:
-    monkeypatch.setattr(terminal_dashboard, "pid_start", lambda pid: 123.0)
-    phase, pid, started = terminal_dashboard.detect_phase(
-        [
-            "jeff 4242 0.0 0.1 python3 mu/tools/agents/meta_bridge_supervisor.py --package foo.json",
-        ]
-    )
-    assert phase == "commit"
-    assert pid == 4242
-    assert started == 123.0
-
-
-def test_terminal_dashboard_detects_post_merge_supervisor(monkeypatch) -> None:
-    monkeypatch.setattr(terminal_dashboard, "pid_start", lambda pid: 456.0)
-    phase, pid, started = terminal_dashboard.detect_phase(
-        [
-            "jeff 5151 0.0 0.1 python3 mu/tools/agents/meta_bridge_supervisor.py --mode post-merge --package foo.json",
-        ]
-    )
-    assert phase == "post-merge"
-    assert pid == 5151
-    assert started == 456.0
-
-
-def test_web_dashboard_treats_pre_commit_supervisor_as_commit(monkeypatch) -> None:
-    monkeypatch.setattr(web_dashboard, "pid_start", lambda pid: 321.0)
-    phase = web_dashboard.detect_phase(
-        [
-            "jeff 6262 0.0 0.1 python3 mu/tools/agents/meta_bridge_supervisor.py --package foo.json",
-        ]
-    )
-    assert phase == {"phase": "commit", "pid": 6262, "started": 321.0}
-
-
-def test_web_dashboard_detects_post_merge_supervisor(monkeypatch) -> None:
-    monkeypatch.setattr(web_dashboard, "pid_start", lambda pid: 654.0)
-    phase = web_dashboard.detect_phase(
-        [
-            "jeff 7373 0.0 0.1 python3 mu/tools/agents/meta_bridge_supervisor.py --mode post-merge --package foo.json",
-        ]
-    )
-    assert phase == {"phase": "post-merge", "pid": 7373, "started": 654.0}
-
-
-def test_terminal_dashboard_prefers_rendered_envelope_when_raw_has_no_envelope(
-    tmp_path: Path, monkeypatch
-) -> None:
-    repo_root = tmp_path
-    raw_dir = repo_root / ".agent_bus" / "raw" / "phase-a-r2-deadbeef"
-    raw_dir.mkdir(parents=True)
-    reviewer = raw_dir / "phase-a-r2-deadbeef--r1-reviewer.txt"
-    reviewer.write_text(
-        '{"type":"turn.completed","item":{"completed":{"agent_message":{"text":"no envelope here"}}}}',
-        encoding="utf-8",
-    )
-    rendered = repo_root / ".agent_bus" / "rendered" / "phase-a-r2-deadbeef.md"
-    rendered.parent.mkdir(parents=True)
-    _write_rendered_envelope(rendered, "GO", "rendered summary")
-    monkeypatch.setattr(terminal_dashboard, "REPO_ROOT", repo_root)
-
-    history = terminal_dashboard.bridge_round_history()
-    latest = terminal_dashboard.latest_bridge_summary()
-
-    assert len(history) == 1
-    assert history[0]["job_id"] == "phase-a-r2-deadbeef"
-    assert history[0]["decision"] == "GO"
-    assert latest == (
-        "phase-a-r2-deadbeef",
-        "GO",
-        "rendered summary",
-        [{"disposition": "blocking", "severity": "high", "title": "blocking finding"}],
-        [],
-    )
-
-
-def test_web_dashboard_prefers_rendered_envelope_when_raw_has_no_envelope(
-    tmp_path: Path, monkeypatch
-) -> None:
-    repo_root = tmp_path
-    raw_dir = repo_root / ".agent_bus" / "raw" / "phase-b-r1-feedface"
-    raw_dir.mkdir(parents=True)
-    reviewer = raw_dir / "phase-b-r1-feedface--r1-reviewer.txt"
-    reviewer.write_text(
-        '{"type":"turn.completed","item":{"completed":{"agent_message":{"text":"still no envelope"}}}}',
-        encoding="utf-8",
-    )
-    rendered = repo_root / ".agent_bus" / "rendered" / "phase-b-r1-feedface.md"
-    rendered.parent.mkdir(parents=True)
-    _write_rendered_envelope(rendered, "REQUEST_CHANGES", "rendered web summary")
-    monkeypatch.setattr(web_dashboard, "REPO_ROOT", repo_root)
-
-    history = web_dashboard.bridge_round_history()
-
-    assert len(history) == 1
-    assert history[0]["job_id"] == "phase-b-r1-feedface"
-    assert history[0]["decision"] == "REQUEST_CHANGES"
 
 
 def test_parse_envelope_ignores_prompt_template_placeholder_block() -> None:
@@ -412,123 +260,6 @@ print(json.dumps({"type": "result", "subtype": "success", "result": ""}))
     parsed = bridge.parse_envelope(output)
     assert parsed["decision"] == "REQUEST_CHANGES"
     assert parsed["summary"] == "assistant-content"
-
-
-def test_run_adapter_normalizes_codex_json_agent_message(tmp_path: Path) -> None:
-    stream_agent = tmp_path / "codex_json_agent.py"
-    stream_agent.write_text(
-        """\
-import json
-import sys
-
-sys.stdin.read()
-envelope = \"\"\"BEGIN_AGENT_ENVELOPE
-{
-  "job_id": "job-1",
-  "turn_id": "r1-reviewer",
-  "agent_role": "reviewer",
-  "decision": "GO",
-  "summary": "codex-json",
-  "touched_files_claimed": [],
-  "findings": [],
-  "validations_claimed": [],
-  "request_for_next_agent": ""
-}
-END_AGENT_ENVELOPE\"\"\"
-print(json.dumps({"type": "thread.started", "thread_id": "thread-1"}))
-print(json.dumps({"type": "turn.started"}))
-print(json.dumps({"type": "item.completed", "item": {"id": "item_0", "type": "agent_message", "text": envelope}}))
-print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}}))
-""",
-        encoding="utf-8",
-    )
-
-    prompt_path = tmp_path / "prompt.txt"
-    prompt_path.write_text("review prompt", encoding="utf-8")
-    raw_output_path = tmp_path / "raw.txt"
-    spec = adapters.AdapterSpec(
-        name="codex",
-        cmd=[sys.executable, str(stream_agent), "--json"],
-        timeout_s=30,
-        prompt_via_stdin=True,
-    )
-
-    output = adapters.run_adapter(
-        spec,
-        prompt_text="review prompt",
-        prompt_path=prompt_path,
-        repo_root=tmp_path,
-        job_id="job-1",
-        turn_id="r1-reviewer",
-        agent_role="reviewer",
-        raw_output_path=raw_output_path,
-    )
-
-    parsed = bridge.parse_envelope(output)
-    assert parsed["decision"] == "GO"
-    assert parsed["summary"] == "codex-json"
-    raw_lines = raw_output_path.read_text(encoding="utf-8").splitlines()
-    assert raw_lines[0].startswith('{"type": "thread.started"') or raw_lines[0].startswith('{"type":"thread.started"')
-
-
-def test_run_adapter_stops_after_codex_json_envelope(tmp_path: Path) -> None:
-    stream_agent = tmp_path / "codex_json_lingering_agent.py"
-    stream_agent.write_text(
-        """\
-import json
-import sys
-import time
-
-sys.stdin.read()
-envelope = \"\"\"BEGIN_AGENT_ENVELOPE
-{
-  "job_id": "job-1",
-  "turn_id": "r1-reviewer",
-  "agent_role": "reviewer",
-  "decision": "GO",
-  "summary": "codex-linger-safe",
-  "touched_files_claimed": [],
-  "findings": [],
-  "validations_claimed": [],
-  "request_for_next_agent": ""
-}
-END_AGENT_ENVELOPE\"\"\"
-print(json.dumps({"type": "thread.started", "thread_id": "thread-1"}), flush=True)
-print(json.dumps({"type": "turn.started"}), flush=True)
-print(json.dumps({"type": "item.completed", "item": {"id": "item_0", "type": "agent_message", "text": envelope}}), flush=True)
-time.sleep(10.0)
-""",
-        encoding="utf-8",
-    )
-
-    prompt_path = tmp_path / "prompt.txt"
-    prompt_path.write_text("review prompt", encoding="utf-8")
-    raw_output_path = tmp_path / "raw.txt"
-    spec = adapters.AdapterSpec(
-        name="codex",
-        cmd=[sys.executable, str(stream_agent), "--json"],
-        timeout_s=30,
-        prompt_via_stdin=True,
-    )
-
-    start = time.monotonic()
-    output = adapters.run_adapter(
-        spec,
-        prompt_text="review prompt",
-        prompt_path=prompt_path,
-        repo_root=tmp_path,
-        job_id="job-1",
-        turn_id="r1-reviewer",
-        agent_role="reviewer",
-        raw_output_path=raw_output_path,
-        stop_after_envelope=True,
-    )
-    elapsed = time.monotonic() - start
-
-    parsed = bridge.parse_envelope(output)
-    assert parsed["decision"] == "GO"
-    assert parsed["summary"] == "codex-linger-safe"
-    assert elapsed < 2.0
 
 
 def test_run_adapter_stops_after_stream_json_envelope(tmp_path: Path) -> None:
@@ -746,7 +477,9 @@ time.sleep(10.0)
     elapsed = time.monotonic() - start
 
     assert elapsed < 2.0
-    assert "warming up" in raw_output_path.read_text(encoding="utf-8")
+    raw_text = raw_output_path.read_text(encoding="utf-8")
+    assert raw_text.startswith("[stderr]\n")
+    assert "warming up" in raw_text
 
 
 def test_run_adapter_stale_timeout_kills_detached_descendants(tmp_path: Path) -> None:
@@ -1291,38 +1024,6 @@ def test_reviewer_prompt_includes_staged_diff(tmp_path: Path) -> None:
     assert "$staged_diff" not in prompt, "template variable not substituted"
     assert "README.md" in prompt, "staged diff should reference changed file"
     assert "+updated content for diff test" in prompt, "staged diff should show added line"
-
-
-def test_reviewer_prompt_keeps_bootstrap_but_forbids_startup_wrappers(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _init_temp_repo(repo_root)
-    paths = bridge.bridge_paths(repo_root)
-    bridge.init_db(paths)
-
-    job_id = bridge.submit_job(
-        paths,
-        task_text="prompt policy test",
-        scope_hint=None,
-        wave_class="MAINTENANCE",
-        allow_edits=False,
-        reader_agent="claude",
-        reviewer_agent="codex",
-        max_rounds=1,
-        acceptance_checks=[],
-        job_id="prompt-policy-job",
-    )
-
-    with bridge.open_db(paths) as conn:
-        job = bridge.read_job(conn, job_id)
-        prompt = bridge.build_reviewer_prompt(conn, paths, job, 1, [])
-
-    assert "read FOUNDER_SESSION_BOOTSTRAP.md" in prompt
-    assert "Startup validation already ran before this review." in prompt
-    assert "Do NOT invoke `founder_session_guard.sh`" in prompt
-    assert "Do NOT invoke `founder_session_attest.sh`" not in prompt  # single consolidated rule surface
-    assert "Do NOT mutate repo state to make review easier." in prompt
-    assert "Never use `git stash`" in prompt
 
 
 # --- DEFECT-4: single-supervisor file lock ---
@@ -2022,18 +1723,6 @@ def test_no_diff_flag_cli_parsing(tmp_path: Path) -> None:
         "--no-diff",
     ])
     assert args.no_diff is True
-    assert args.packet_review is False
-
-    args_packet = bridge.build_parser().parse_args([
-        "--repo-root", str(tmp_path),
-        "review",
-        "--task", "packet review",
-        "--summary", "context",
-        "--no-diff",
-        "--packet-review",
-    ])
-    assert args_packet.no_diff is True
-    assert args_packet.packet_review is True
 
     # Without --no-diff, default is False
     args2 = bridge.build_parser().parse_args([
@@ -2043,7 +1732,6 @@ def test_no_diff_flag_cli_parsing(tmp_path: Path) -> None:
         "--summary", "did stuff",
     ])
     assert args2.no_diff is False
-    assert args2.packet_review is False
 
 
 def test_no_diff_review_omits_diff_from_reviewer_prompt(tmp_path: Path) -> None:
@@ -2087,7 +1775,6 @@ print(f"BEGIN_AGENT_ENVELOPE\\n{json.dumps(envelope)}\\nEND_AGENT_ENVELOPE")
         task_text="Should we add event streaming?",
         reader_summary="Design deliberation about bridge UX improvements",
         include_diff=False,
-        design_deliberation=True,
     )
     assert result == "GO"
 
@@ -2099,46 +1786,6 @@ print(f"BEGIN_AGENT_ENVELOPE\\n{json.dumps(envelope)}\\nEND_AGENT_ENVELOPE")
         reviewer_env = bridge.latest_envelope(conn, row["job_id"], role="reviewer")
     assert reviewer_env is not None
     assert "diff_suppressed=True" in reviewer_env["summary"]
-
-
-def test_no_diff_packet_review_omits_diff_without_design_marker(tmp_path: Path) -> None:
-    """Packet/code reviews may suppress diff without switching into design deliberation."""
-    paths, _ = _setup_bridge_repo(tmp_path)
-    (tmp_path / "repo" / "new_file.py").write_text("print('hello')\n", encoding="utf-8")
-    _git(tmp_path / "repo", "add", "new_file.py")
-
-    job_id = bridge.submit_job(
-        paths,
-        task_text="Review the tracked packet only.",
-        scope_hint=None,
-        wave_class="MAINTENANCE",
-        allow_edits=False,
-        reader_agent="claude",
-        reviewer_agent="codex",
-        max_rounds=1,
-        acceptance_checks=[],
-        job_id="packet-review-no-diff",
-    )
-
-    with bridge.open_db(paths) as conn:
-        job = bridge.read_job(conn, job_id)
-        prompt = bridge.build_reviewer_prompt(
-            conn,
-            paths,
-            job,
-            1,
-            [],
-            include_diff=False,
-            design_deliberation=False,
-            packet_review=True,
-        )
-
-    assert "THIS IS A DESIGN DELIBERATION" not in prompt
-    assert "THIS IS A PACKET REVIEW, NOT A BROAD REPO RED-TEAM." in prompt
-    assert "Do NOT broaden into adjacent repo sweeps" in prompt
-    assert "If the packet is obviously a stub or placeholder, reject it from the packet text plus `TASKS.md` evidence alone." in prompt
-    assert "Search `TASKS.md` for the exact task block or tracked-packet reference" in prompt
-    assert "do NOT open governing packets, prior replay/hardening notes, or downstream implementation files" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -2727,11 +2374,7 @@ def test_bridge_turn_wall_time_cap_fails_closed(tmp_path: Path, monkeypatch: pyt
         "import sys\n"
         "import time\n"
         "sys.stdin.read()\n"
-        "deadline = time.time() + 10.0\n"
-        "while time.time() < deadline:\n"
-        "    sys.stdout.write('heartbeat\\n')\n"
-        "    sys.stdout.flush()\n"
-        "    time.sleep(0.05)\n",
+        "time.sleep(10.0)\n",  # Long sleep ensures timer always fires first
         encoding="utf-8",
     )
     config = json.loads(paths.config_path.read_text(encoding="utf-8"))
@@ -2801,13 +2444,15 @@ def test_bridge_zero_output_watchdog_fails_closed(tmp_path: Path, monkeypatch: p
     config = json.loads(paths.config_path.read_text(encoding="utf-8"))
     config["agents"]["codex"] = {
         "mode": "live",
-        "cmd": [sys.executable, str(noisy_agent)],
+        "cmd": [sys.executable, "-u", str(noisy_agent)],
         "prompt_via_stdin": True,
         "timeout_s": 30,
         "env": {},
     }
     paths.config_path.write_text(json.dumps(config), encoding="utf-8")
-    monkeypatch.setattr(bridge, "BRIDGE_ZERO_OUTPUT_TIMEOUT_S", 0.05)
+    # Keep the watchdog aggressive while giving CI enough process-start headroom
+    # for the noisy reviewer to emit at least one stderr line.
+    monkeypatch.setattr(bridge, "BRIDGE_ZERO_OUTPUT_TIMEOUT_S", 0.2)
     monkeypatch.setattr(bridge, "BRIDGE_MAX_TURN_WALL_TIME_S", 1.0)
 
     job_id = bridge.submit_job(
@@ -2837,6 +2482,7 @@ def test_bridge_zero_output_watchdog_fails_closed(tmp_path: Path, monkeypatch: p
     assert reviewer_turn is not None
     assert reviewer_turn["status"] == "FAILED"
     raw_text = Path(reviewer_turn["raw_output_path"]).read_text(encoding="utf-8")
+    assert raw_text.startswith("[stderr]\n")
     assert "noise" in raw_text
     assert "BEGIN_AGENT_ENVELOPE" not in raw_text
     assert job is not None
@@ -2855,8 +2501,6 @@ def test_bridge_turn_timeout_env_override_allows_longer_reviewer_turn(
         "import sys\n"
         "import time\n"
         "sys.stdin.read()\n"
-        "print('reviewer starting')\n"
-        "sys.stdout.flush()\n"
         "time.sleep(0.2)\n"
         "print('BEGIN_AGENT_ENVELOPE')\n"
         "print('{')\n"

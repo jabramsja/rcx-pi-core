@@ -3,6 +3,17 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+sanitize_local_git_env() {
+    local git_local_env
+    git_local_env="$(git rev-parse --local-env-vars 2>/dev/null || true)"
+    if [ -n "$git_local_env" ]; then
+        # shellcheck disable=SC2086
+        unset $git_local_env
+    fi
+}
+
+sanitize_local_git_env
+
 # Ensure deterministic dict ordering for ALL subprocesses (including pytest-xdist workers)
 export PYTHONHASHSEED=0
 

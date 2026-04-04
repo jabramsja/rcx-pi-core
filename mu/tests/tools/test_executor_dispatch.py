@@ -176,12 +176,28 @@ class TestDispatcherInputValidation:
 
 def _make_new_handoff(**overrides):
     """Create a valid new-schema handoff dict."""
+    wave_id = overrides.get("wave_id", "test-wave-id")
+    target_gate_id = overrides.get("target_gate_id", "G8")
     base = {
-        "wave_id": "test-wave-id",
+        "wave_id": wave_id,
         "wave_class": "L4_ENABLER",
-        "target_gate_id": "G8",
+        "target_gate_id": target_gate_id,
         "branch_prefix": "jabramsja",
-        "tracker_note_text": "- Tracker sync note (test, test-wave-id): test note.",
+        "tracker_note_text": (
+            f"- Tracker sync note (2026-04-03, {wave_id}): **TEST — valid handoff note.** "
+            f"Class: L4_ENABLER. target_gate_id: {target_gate_id}. "
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_executor_dispatch.py`. "
+            "evidence_delta: (1) Test handoff scopes one file. (2) Validation exercises the executor test module. "
+            "(3) Indicator artifact binds the wave. "
+            "progress_proof_before: Test handoff had no validated tracker note. "
+            "progress_proof_after: Test handoff now carries a canonical tracker note. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: reports/l4_wave_indicators/{wave_id}.json. "
+            f"indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} --output reports/l4_wave_indicators/{wave_id}.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        ),
         "fixes_implemented": ["test fix"],
         "files_to_stage": ["file1.py"],
         "force_add_files": [],
@@ -275,6 +291,45 @@ class TestCommitHandoffValidation:
     def test_valid_handoff_passes(self):
         valid, errors = commit_mod.validate_handoff(_make_new_handoff())
         assert valid, errors
+
+    def test_incomplete_l4_tracker_note_fails_early(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_handoff(
+                tracker_note_text=(
+                    "- Tracker sync note (2026-04-03, test-wave-id): **TEST — incomplete note.** "
+                    "Class: L4_ENABLER. target_gate_id: G8."
+                )
+            )
+        )
+        assert not valid
+        assert any("evidence_command" in e for e in errors)
+        assert any("progress_proof_before" in e for e in errors)
+
+    def test_build_commit_handoff_defaults_to_contract_complete_note(self, tmp_path):
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        test_file = repo / "mu" / "tests" / "tools" / "test_auto_note.py"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+        handoff, errors = commit_mod.build_commit_handoff(
+            wave_id="test-wave-id",
+            task_id="[TEST-1]",
+            files_to_stage=["mu/tests/tools/test_auto_note.py"],
+            commit_message="fix: auto note",
+            fixes_implemented=["auto tracker generation"],
+            repo_root=repo,
+        )
+        assert not errors, errors
+        note = handoff["tracker_note_text"]
+        assert "evidence_command:" in note
+        assert "progress_proof_before:" in note
+        assert "indicator_collection_command:" in note
+        assert "test_auto_note.py" in note
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
 
     def test_missing_fields_fails(self):
         valid, errors = commit_mod.validate_handoff({"files_to_stage": ["x"]})
@@ -2494,6 +2549,36 @@ class TestReceiptAndCommit:
         assert result["status"] == "error"
         assert result["step"] == "run_pre_push_script"
         assert any("tracker note contract failed" in e for e in result["errors"])
+
+    def test_step11_uses_extended_pre_push_timeout(self, tmp_path):
+        """Step 11 must give pre-push-fast enough time for the real fast audit path."""
+        repo, env, mock_result = self._setup_repo_through_supervisor(tmp_path, "COMMIT_GO")
+
+        hooks_dir = repo / "mu" / "tools" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        script = hooks_dir / "pre-push-fast"
+        script.write_text("#!/bin/bash\nexit 0\n")
+        script.chmod(0o755)
+
+        orig_run = commit_mod._run  # ANTICHEAT_OK: asserting Step 11 timeout contract
+        seen_timeout = {"value": None}
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:2] == ["bash", str(script)]:
+                seen_timeout["value"] = timeout
+                raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+            return orig_run(cmd, cwd=cwd, timeout=timeout, check=check, env=env)
+
+        with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
+            sys.modules["meta_bridge_client"].run_meta_bridge_package = MagicMock(return_value=mock_result)
+            sys.modules["meta_bridge_client"].MetaBridgeClientError = Exception
+            with patch.object(commit_mod, "_run", side_effect=fake_run):
+                result = commit_mod.run_commit_pipeline(_make_new_handoff(), repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "run_pre_push_script"
+        assert any("timed out" in e for e in result["errors"])
+        assert seen_timeout["value"] == commit_mod.PRE_PUSH_FAST_TIMEOUT_S
 
     def _setup_repo_through_supervisor(self, tmp_path, receipt_decision="COMMIT_GO"):
         """Helper: create repo, pre-insert wave_id, create receipt, return (repo, env, mock)."""
@@ -4888,6 +4973,88 @@ class TestModularSurfaceEntrypoints:
             str(dispatch_mod.SCRIPT_DIR / "commit_executor.py"),
         ]
 
+    def test_commit_surface_failure_routes_to_recovery_and_retries(self, tmp_path):
+        handoff_path = tmp_path / "handoff.json"
+        handoff_path.write_text(
+            json.dumps({"wave_id": "commit-surface-wave", "task_id": "[PIPELINE-RECOVERY]"}),
+            encoding="utf-8",
+        )
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["commit", "--handoff", str(handoff_path), "--json"]
+        )
+        commit_fail = subprocess.CompletedProcess(
+            ["commit"], 1, json.dumps({"status": "error", "step": "wait_ci"}), "CI failed"
+        )
+        commit_ok = subprocess.CompletedProcess(
+            ["commit"], 0, json.dumps({"status": "success"}), ""
+        )
+        recovery = {
+            "recovered": True,
+            "exhausted": False,
+            "failure_class": "test_failure",
+            "tier": 3,
+            "action": "recovery_loop",
+            "detail": "resume commit surface",
+        }
+
+        with patch.object(
+            dispatch_mod,
+            "_run_executor_in_group",
+            side_effect=[commit_fail, commit_ok],
+        ) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery", return_value=recovery) as mock_recovery:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={"timeouts": {"commit_executor": 300}},
+            )
+
+        assert exit_code == 0
+        assert mock_run.call_count == 2
+        mock_recovery.assert_called_once()
+        assert mock_recovery.call_args[0][2] == "commit-surface-wave"
+
+    def test_commit_surface_stderr_only_failure_routes_to_recovery(self, tmp_path):
+        handoff_path = tmp_path / "handoff.json"
+        handoff_path.write_text(
+            json.dumps({"wave_id": "commit-surface-wave", "task_id": "[PIPELINE-RECOVERY]"}),
+            encoding="utf-8",
+        )
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["commit", "--handoff", str(handoff_path), "--json"]
+        )
+        commit_fail = subprocess.CompletedProcess(
+            ["commit"], 1, "", "fatal: remote rejected push"
+        )
+        recovery = {
+            "recovered": False,
+            "exhausted": True,
+            "failure_class": "unknown_error",
+            "tier": 3,
+            "action": "recovery_loop",
+            "detail": "raw failure reached recovery",
+        }
+
+        with patch.object(
+            dispatch_mod,
+            "_run_executor_in_group",
+            return_value=commit_fail,
+        ) as mock_run, \
+             patch.object(dispatch_mod, "attempt_recovery", return_value=recovery) as mock_recovery:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={"timeouts": {"commit_executor": 300}},
+            )
+
+        assert exit_code == 1
+        assert mock_run.call_count == 1
+        mock_recovery.assert_called_once()
+        result = mock_recovery.call_args[0][1]
+        assert result["status"] == "failed"
+        assert result["stdout"] == ""
+        assert result["stderr"] == "fatal: remote rejected push"
+
     def test_phase_a_surface_chained_commit_failure_retries_commit_only(self, tmp_path):
         plan_path = tmp_path / "reports" / "control_plane" / "plan.md"
         plan_path.parent.mkdir(parents=True)
@@ -4984,6 +5151,34 @@ class TestModularSurfaceEntrypoints:
             "held",
             "COMMIT_HELD",
         )
+
+    def test_classify_commit_executor_result_detects_json_error(self):
+        commit_result = subprocess.CompletedProcess(
+            ["commit"], 0, json.dumps({"status": "error"}), ""
+        )
+        assert dispatch_mod._classify_commit_executor_result(commit_result) == (  # ANTICHEAT_OK: testing internal commit-result classifier
+            "failed",
+            "COMMIT_GO",
+        )
+
+    def test_main_routes_commit_surface_through_recovery_wrapper(self, tmp_path):
+        handoff_path = tmp_path / "handoff.json"
+        handoff_path.write_text(json.dumps({"wave_id": "commit-surface-wave"}), encoding="utf-8")
+        config = {"timeouts": {"commit_executor": 300}}
+
+        with patch.object(dispatch_mod, "resolve_repo_root_for_dispatch", return_value=tmp_path), \
+             patch.object(dispatch_mod, "load_config", return_value=config) as mock_load, \
+             patch.object(dispatch_mod, "run_recoverable_surface_command", return_value=0) as mock_run:
+            exit_code = dispatch_mod.main(
+                ["commit", "--handoff", str(handoff_path), "--json"]
+            )
+
+        assert exit_code == 0
+        mock_load.assert_called_once()
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args
+        assert call_args.kwargs["repo_root"] == tmp_path
+        assert call_args.kwargs["config"] == config
 
     def test_resolve_repo_root_for_dispatch_uses_linked_worktree_from_bare_common_dir(self):
         branch = "jabramsja/recovery-tier3-wiring-closeout-2026-04-01"
@@ -5989,6 +6184,22 @@ class TestCommitExecutorRoutingRecordAcceptance:
         assert handoff["caller"] == "update_tracker_only"
         assert "TASKS.md" in handoff["files_to_stage"]
         assert handoff["wave_id"] == "tracker-update"
+
+    def test_prepare_handoff_tracker_only_fallback_note_is_contract_complete(self, tmp_path):
+        record = {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "update the tracker",
+            "wave_name": "tracker-update",
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert not errors
+        assert handoff is not None
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+        note = handoff["tracker_note_text"]
+        assert "primary_invariant_id:" in note
+        assert "indicator_artifact_ref:" in note
+        assert "boot0_progress_state:" in note
 
     def test_prepare_handoff_from_valid_embedded_handoff(self, tmp_path):
         """Embedded handoffs are accepted only after full validation."""

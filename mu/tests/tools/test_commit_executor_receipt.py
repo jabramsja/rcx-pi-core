@@ -28,11 +28,13 @@ commit_mod = load_module(
 
 def _make_new_schema_handoff(**overrides):
     """Create a valid new-schema handoff for testing."""
+    wave_id = overrides.get("wave_id", "test-wave")
+    target_gate_id = overrides.get("target_gate_id", "G8")
     base = {
-        "wave_id": "test-wave",
+        "wave_id": wave_id,
         "task_id": "[TEST]",
         "wave_class": "L4_ENABLER",
-        "target_gate_id": "G8",
+        "target_gate_id": target_gate_id,
         "caller": "phase_b",
         "branch_prefix": "jabramsja",
         "files_to_stage": ["file.py"],
@@ -43,7 +45,21 @@ def _make_new_schema_handoff(**overrides):
         "base_branch": "dev",
         "pre_commit_receipt_path": ".agent_bus/meta/pre_commit_receipt.json",
         "fixes_implemented": ["test fix"],
-        "tracker_note_text": "- Tracker sync note (test-wave): test",
+        "tracker_note_text": (
+            f"- Tracker sync note (2026-04-03, {wave_id}): **TEST — receipt handoff note.** "
+            f"Class: L4_ENABLER. target_gate_id: {target_gate_id}. "
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py`. "
+            "evidence_delta: (1) Receipt tests scope the commit handoff. (2) Validation exercises the receipt test module. "
+            "(3) Indicator artifact binds the wave. "
+            "progress_proof_before: Receipt handoff had no validated tracker note. "
+            "progress_proof_after: Receipt handoff now carries a canonical tracker note. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: reports/l4_wave_indicators/{wave_id}.json. "
+            f"indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} --output reports/l4_wave_indicators/{wave_id}.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        ),
     }
     base.update(overrides)
     return base
@@ -304,6 +320,48 @@ class TestWaveIdBounds:
         assert handoff is not None
         assert len(handoff["wave_id"]) <= commit_mod.MAX_WAVE_ID_LEN
         assert commit_mod.WAVE_ID_RE.fullmatch(handoff["wave_id"])
+
+    def test_prepare_handoff_from_routing_record_builds_valid_tracker_only_note(self, tmp_path):
+        record = {
+            "wave_name": "tracker-only-wave",
+            "summary": "sync tracker only",
+            "decision": "UPDATE_TRACKER_ONLY",
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert errors == []
+        assert handoff is not None
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+        assert "no_op_proof:" in handoff["tracker_note_text"]
+        assert "defer_reason_code:" in handoff["tracker_note_text"]
+
+    def test_prepare_handoff_tracker_only_null_force_add_files_treated_as_empty(self, tmp_path):
+        record = {
+            "wave_name": "tracker-only-wave",
+            "summary": "sync tracker only",
+            "decision": "UPDATE_TRACKER_ONLY",
+            "force_add_files": None,
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert errors == []
+        assert handoff is not None
+        assert handoff["force_add_files"] == []
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
+    def test_prepare_handoff_tracker_only_coerces_non_string_commit_message(self, tmp_path):
+        record = {
+            "wave_name": "tracker-only-wave",
+            "summary": "sync tracker only",
+            "decision": "UPDATE_TRACKER_ONLY",
+            "commit_message": 123,
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert errors == []
+        assert handoff is not None
+        assert handoff["commit_message"] == "123"
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
 
     def test_has_path_traversal_decodes_percent_escapes(self):
         assert commit_mod._has_path_traversal("..%2F..%2Fetc%2Fpasswd") is True  # ANTICHEAT_OK: testing path traversal detection

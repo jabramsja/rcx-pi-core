@@ -300,6 +300,30 @@ class TestUntrackedArtifactChecker:
             "check_untracked_artifacts.sh not wired into pre-commit-doc-check"
         )
 
+    def test_pre_push_sanitizes_hook_git_env(self):
+        """pre-push-fast must clear hook-local GIT_* vars before deeper audits."""
+        hook = REPO_ROOT / "mu" / "tools" / "hooks" / "pre-push-fast"
+        content = hook.read_text()
+        assert "git rev-parse --local-env-vars" in content, (
+            "pre-push-fast must clear hook-local git env before spawning dev/audit"
+        )
+        assert "sanitize_local_git_env" in content, (
+            "pre-push-fast must centralize local git env sanitization"
+        )
+
+    def test_dev_and_audit_fast_sanitize_hook_git_env(self):
+        """dev.sh, audit_fast.sh, and audit_all.sh must clear hook-local GIT_* vars."""
+        dev = REPO_ROOT / "dev.sh"
+        audit_fast = REPO_ROOT / "mu" / "tools" / "audits" / "audit_fast.sh"
+        audit_all = REPO_ROOT / "mu" / "tools" / "audits" / "audit_all.sh"
+        for path in (dev, audit_fast, audit_all):
+            content = path.read_text()
+            assert "git rev-parse --local-env-vars" in content, (
+                f"{path} must clear hook-local git env before nested git/test commands"
+            )
+            assert "sanitize_local_git_env" in content, (
+                f"{path} must centralize local git env sanitization"
+            )
 
 class TestAntiSlopGuard:
     """Reject tracked backup/temp artifacts in governed subtrees."""

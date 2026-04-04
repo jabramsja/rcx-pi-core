@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real-time pipeline dashboard. Read-only — safe to run alongside active pipeline."""
 
+import argparse
 import glob as _glob
 import json
 import os
@@ -11,9 +12,13 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 REFRESH_INTERVAL = 5
+RECOVERY_LOG_REL = Path(".agent_bus") / "recovery" / "recovery_log.json"
+RECOVERY_STATUS_REL = Path(".agent_bus") / "recovery" / "recovery_status.json"
+_HUNG_THRESHOLD_SECONDS = 90
 
 # Colors
 R = "\033[0m"    # reset
@@ -48,6 +53,324 @@ def elapsed(t):
     return f"{h}h{m:02d}m" if h else f"{m}m{s:02d}s"
 
 
+def _read_recovery_status(repo_root: Path) -> dict[str, Any]:
+    path = repo_root / RECOVERY_STATUS_REL
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _read_recovery_attempts(repo_root: Path) -> list[dict[str, Any]]:
+    path = repo_root / RECOVERY_LOG_REL
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    attempts = data.get("attempts", [])
+    return attempts if isinstance(attempts, list) else []
+
+
+def _parse_iso(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _age_seconds(value: str, *, now: datetime) -> int | None:
+    parsed = _parse_iso(value)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return max(0, int((now - parsed).total_seconds()))
+
+
+def _elapsed_seconds(seconds: int | None) -> str:
+    if seconds is None:
+        return "unknown"
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        minutes, rem = divmod(seconds, 60)
+        return f"{minutes}m {rem:02d}s"
+    hours, rem = divmod(seconds, 3600)
+    minutes = rem // 60
+    return f"{hours}h {minutes:02d}m"
+
+
+def _excerpt(value: Any, limit: int = 110) -> str:
+    if value is None:
+        return ""
+    text = str(value).replace("\r", "\n").strip()
+    if not text:
+        return ""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    excerpt = lines[-1] if lines else text
+    if len(excerpt) <= limit:
+        return excerpt
+    return excerpt[: limit - 3].rstrip() + "..."
+
+
+def _is_unhelpful_recovery_text(text: str) -> bool:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return True
+    if re.fullmatch(r"[\d,\s]+", cleaned):
+        return True
+    if cleaned.lower().startswith("tokens used"):
+        return True
+    return False
+
+
+def _is_generic_recovery_reason(text: str) -> bool:
+    return bool(re.fullmatch(
+        r"[a-z0-9_-]+:\s+(failed|error|partial|success|held|unknown)",
+        (text or "").strip().lower(),
+    ))
+
+
+def _pid_state(pid_value: Any) -> tuple[int, str]:
+    try:
+        pid = int(pid_value)
+    except (TypeError, ValueError):
+        return 0, ""
+    if pid <= 0:
+        return 0, ""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return pid, "dead"
+    return pid, "alive"
+
+
+def _human_target(target: str) -> str:
+    cleaned = (target or "").strip()
+    mapping = {
+        "phase_a_executor": "Phase A",
+        "phase_a": "Phase A",
+        "phase_b_executor": "Phase B",
+        "phase_b": "Phase B",
+        "commit_executor": "Commit",
+        "commit": "Commit",
+        "executor_dispatch": "Dispatch",
+    }
+    return mapping.get(cleaned, cleaned.replace("_", " "))
+
+
+def _rendered_recovery_reason(status: dict[str, Any]) -> tuple[str, str]:
+    reason = _excerpt(status.get("reason", ""))
+    detail = _excerpt(status.get("detail", ""))
+    explanation = _excerpt(status.get("explanation", ""))
+    if reason and not _is_unhelpful_recovery_text(reason) and not _is_generic_recovery_reason(reason):
+        return reason, "reason"
+    if detail and not _is_unhelpful_recovery_text(detail):
+        return detail, "detail"
+    if reason and not _is_unhelpful_recovery_text(reason):
+        return reason, "reason"
+    if explanation and not _is_unhelpful_recovery_text(explanation):
+        return explanation, "explanation"
+    return "", ""
+
+
+def _format_recovery_pid_line(status: dict[str, Any], *, active: bool) -> str:
+    owner_pid, owner_state = _pid_state(status.get("owner_pid"))
+    child_pid, child_state = _pid_state(status.get("child_pid"))
+    child_role = _excerpt(status.get("child_role", ""), 24)
+    if not owner_pid and not child_pid:
+        return ""
+
+    parts: list[str] = []
+    if owner_pid:
+        owner_label = f"Owner PID: {owner_pid}"
+        if owner_state:
+            if not active and owner_state == "dead":
+                owner_label += " (dead, historical)"
+            else:
+                owner_label += f" ({owner_state})"
+        parts.append(owner_label)
+    if child_pid:
+        child_label = f"{child_role or 'child'} PID: {child_pid}"
+        if child_state:
+            if not active and child_state == "dead":
+                child_label += " (dead, historical)"
+            else:
+                child_label += f" ({child_state})"
+        parts.append(child_label)
+    return "  " + " · ".join(parts)
+
+
+def _attempt_matches_wave_step(attempt: dict[str, Any], wave_id: str, step: str) -> bool:
+    if wave_id and str(attempt.get("wave_id", "")).strip() != wave_id:
+        return False
+    if step and str(attempt.get("step", "")).strip() != step:
+        return False
+    return True
+
+
+def _is_trivial_recovery_attempt(attempt: dict[str, Any]) -> bool:
+    action = str(attempt.get("action", "")).strip().lower()
+    outcome = str(attempt.get("outcome", "")).strip().lower()
+    return action in {"noop", "no_fix_registered"} and outcome in {"failed", "skipped"}
+
+
+def _recent_recovery_attempt_lines(
+    repo_root: Path, status: dict[str, Any], *, limit: int = 3,
+) -> list[str]:
+    attempts = _read_recovery_attempts(repo_root)
+    if not attempts:
+        return []
+
+    invocation_id = str(status.get("invocation_id", "")).strip()
+    wave_id = str(status.get("wave_id", "")).strip()
+    step = str(status.get("step", "")).strip()
+    failure_class = str(status.get("failure_class", "")).strip()
+
+    matches: list[dict[str, Any]] = []
+    for attempt in reversed(attempts):
+        if invocation_id:
+            if str(attempt.get("invocation_id", "")).strip() != invocation_id:
+                continue
+        else:
+            if wave_id and str(attempt.get("wave_id", "")).strip() != wave_id:
+                continue
+            if step and str(attempt.get("step", "")).strip() != step:
+                continue
+            if failure_class and str(attempt.get("failure_class", "")).strip() != failure_class:
+                continue
+        matches.append(attempt)
+        if len(matches) >= limit:
+            break
+
+    used_wave_fallback = False
+    if (
+        invocation_id
+        and not bool(status.get("active"))
+        and (not matches or all(_is_trivial_recovery_attempt(attempt) for attempt in matches))
+    ):
+        matches = []
+        for attempt in reversed(attempts):
+            if not _attempt_matches_wave_step(attempt, wave_id, step):
+                continue
+            matches.append(attempt)
+            if len(matches) >= limit:
+                break
+        used_wave_fallback = bool(matches)
+
+    if not matches:
+        return []
+
+    lines = ["  Recent attempts in wave:" if used_wave_fallback else "  Recent attempts:"]
+    for attempt in reversed(matches):
+        action = _excerpt(attempt.get("action", ""), 40) or "unknown"
+        outcome = _excerpt(attempt.get("outcome", ""), 32) or "unknown"
+        detail = _excerpt(attempt.get("detail", ""), 72)
+        duration = attempt.get("duration_s")
+        summary = f"  - {action} -> {outcome}"
+        if isinstance(duration, (int, float)):
+            summary += f" ({duration:.3f}s)"
+        if detail:
+            summary += f": {detail}"
+        lines.append(summary)
+    return lines
+
+
+def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> list[str]:
+    now = now or datetime.now(timezone.utc)
+    status = _read_recovery_status(repo_root)
+    lines = [
+        "RECOVERY",
+        "─────────────────────────────────────",
+    ]
+    if not status:
+        lines.append("  No recovery activity recorded yet.")
+        return lines
+
+    active = bool(status.get("active"))
+    age = _age_seconds(status.get("updated_at", ""), now=now)
+    label = "ACTIVE"
+    if active and age is not None and age >= _HUNG_THRESHOLD_SECONDS:
+        label = "POSSIBLY HUNG"
+    elif not active:
+        label = "LAST RECOVERY"
+
+    tier = status.get("tier", "?")
+    failure_class = status.get("failure_class", "?")
+    lines.append(f"  {label} — Tier {tier} {failure_class}")
+
+    wave_id = _excerpt(status.get("wave_id", ""), 80)
+    if wave_id:
+        lines.append(f"  Wave: {wave_id}")
+
+    invocations = status.get("wave_invocation_count")
+    tuple_attempt = status.get("tuple_attempt_index")
+    if invocations or tuple_attempt:
+        lines.append(
+            f"  Invocation: {invocations or '?'} in wave · tuple attempt {tuple_attempt or '?'}"
+        )
+
+    retry_target = _human_target(str(status.get("retry_target", "")))
+    if retry_target:
+        prefix = "Retry target" if active or status.get("recovered") else "Last target"
+        lines.append(f"  {prefix}: {retry_target}")
+
+    state = _excerpt(status.get("state", ""), 80)
+    current_iteration = status.get("current_iteration") or 0
+    max_iterations = status.get("max_iterations") or 0
+    if state:
+        if max_iterations:
+            lines.append(f"  State: {state} · loop {current_iteration}/{max_iterations}")
+        else:
+            lines.append(f"  State: {state}")
+
+    pid_line = _format_recovery_pid_line(status, active=active)
+    if pid_line:
+        lines.append(pid_line)
+
+    reason, reason_source = _rendered_recovery_reason(status)
+    if reason:
+        lines.append(f"  Reason: {reason}")
+
+    explanation = _excerpt(status.get("explanation", ""))
+    if explanation and reason_source != "explanation":
+        lines.append(f"  Recovery note: {explanation}")
+
+    current_command = _excerpt(status.get("current_command", ""))
+    if current_command:
+        lines.append(f"  Command: {current_command}")
+
+    lines.extend(_recent_recovery_attempt_lines(repo_root, status))
+
+    last_action = _excerpt(status.get("last_action", ""), 60)
+    outcome = _excerpt(status.get("outcome", ""), 60)
+    detail = _excerpt(status.get("detail", ""))
+    if active:
+        lines.append(f"  Updated: {_elapsed_seconds(age)} ago")
+    else:
+        finished_age = _age_seconds(
+            status.get("finished_at", "") or status.get("updated_at", ""),
+            now=now,
+        )
+        summary = outcome or "completed"
+        if last_action:
+            summary += f" via {last_action}"
+        lines.append(f"  Outcome: {summary} · {_elapsed_seconds(finished_age)} ago")
+    if detail and detail != reason and detail != explanation and reason_source != "detail":
+        lines.append(f"  Detail: {detail}")
+
+    return lines
+
+
 def ps_lines():
     try:
         return subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=5).stdout.splitlines()
@@ -65,104 +388,25 @@ def pid_start(pid):
     return None
 
 
-def _parse_agent_envelope(text):
-    matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", text, re.DOTALL))
-    if not matches:
-        return None
-    for match in reversed(matches):
-        try:
-            env = json.loads(match.group(1))
-        except json.JSONDecodeError:
-            continue
-        decision = env.get("decision", "")
-        if decision and "|" not in decision:
-            return env
-    return None
-
-
-def _parse_rendered_reviewer_section(text):
-    section_re = re.compile(r"(?ms)^### .*? — reviewer\n(.*?)(?=^### |\Z)")
-    decision_re = re.compile(
-        r"(?m)^\s*-\s*Decision:\s*"
-        r"(GO|REQUEST_CHANGES|NO_GO|QUESTION|STALE|ERROR|SYNTHETIC)\b"
-    )
-    summary_re = re.compile(r"(?m)^\s*-\s*Summary:\s*(.*)")
-    finding_re = re.compile(
-        r"(?m)^\s*\d+\.\s+\*\*(DEFECT|POLICY_BOUND|DOC_ACCURACY)\*\* "
-        r"\(([^)]+)\):\s*(.*)$"
-    )
-    sections = list(section_re.finditer(text))
-    for section in reversed(sections):
-        block = section.group(1)
-        decision_match = decision_re.search(block)
-        if not decision_match:
-            continue
-        decision = decision_match.group(1)
-        if decision == "SYNTHETIC":
-            continue
-        summary_match = summary_re.search(block)
-        disposition = "non_blocking" if decision == "GO" else "blocking"
-        findings = [
-            {
-                "class": cls,
-                "severity": severity.strip().lower(),
-                "title": title.strip(),
-                "disposition": disposition,
-            }
-            for cls, severity, title in finding_re.findall(block)
-        ]
-        return {
-            "decision": decision,
-            "summary": (summary_match.group(1).strip() if summary_match else ""),
-            "findings": findings,
-        }
-    return None
-
-
-def _parse_review_payload(text):
-    return _parse_agent_envelope(text) or _parse_rendered_reviewer_section(text)
-
-
-def _is_bridge_round_dir(name):
+def _is_observability_noise(line: str) -> bool:
+    lowered = line.lower()
     return (
-        name.startswith("phase-a-r")
-        or name.startswith("phase-b-r")
-        or name.startswith("phase-a-reentry-r")
-        or name.startswith("phase-b-reentry-r")
+        "tail -f " in lowered
+        or "rcx_log_watcher.sh" in lowered
+        or "_pane_" in lowered
+        or "pipeline_monitor.sh" in lowered
     )
-
-
-def _bridge_review_artifact(job_id, reviewer_file):
-    rendered = REPO_ROOT / ".agent_bus" / "rendered" / f"{job_id}.md"
-    candidates = [rendered]
-    if reviewer_file is not None:
-        candidates.append(reviewer_file)
-    for path in candidates:
-        if path is None or not path.exists():
-            continue
-        try:
-            env = _parse_review_payload(path.read_text())
-        except Exception:
-            continue
-        if env is not None:
-            return env, path.stat().st_mtime
-    return None, None
 
 
 def detect_phase(lines):
     for name, pattern in [("phase-a", "phase_a_executor"), ("phase-b", "phase_b_executor"),
-                          ("commit", "commit_executor")]:
+                          ("commit", "commit_executor"), ("post-merge", "meta_bridge_supervisor")]:
         for l in lines:
-            if pattern in l and "grep" not in l and "test_" not in l:
+            if pattern in l and "grep" not in l and "test_" not in l and not _is_observability_noise(l):
                 pid = int(l.split()[1])
                 return name, pid, pid_start(pid)
     for l in lines:
-        if "meta_bridge_supervisor" in l and "grep" not in l and "test_" not in l:
-            pid = int(l.split()[1])
-            phase = "post-merge" if "--mode post-merge" in l or " post-merge " in l else "commit"
-            return phase, pid, pid_start(pid)
-    for l in lines:
-        if "executor_dispatch" in l and "grep" not in l:
+        if "executor_dispatch" in l and "grep" not in l and not _is_observability_noise(l):
             return "dispatch", int(l.split()[1]), pid_start(int(l.split()[1]))
     return "idle", None, None
 
@@ -170,7 +414,8 @@ def detect_phase(lines):
 def detect_subs(lines):
     subs = []
     for l in lines:
-        if "grep" in l: continue
+        if "grep" in l or _is_observability_noise(l):
+            continue
         if "codex exec" in l:
             pid = int(l.split()[1])
             subs.append(("codex-review", pid, pid_start(pid)))
@@ -205,28 +450,33 @@ def bridge_round_history():
         return []
     rounds = []
     for d in sorted(raw_dir.iterdir()):
-        if not d.is_dir() or not _is_bridge_round_dir(d.name):
+        if not d.is_dir() or not d.name.startswith("phase-b-r"):
             continue
-        reviewer_files = sorted(
-            (f for f in d.iterdir() if "reviewer" in f.name),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
-        reviewer_file = reviewer_files[0] if reviewer_files else None
-        env, mtime = _bridge_review_artifact(d.name, reviewer_file)
-        if env is None or mtime is None:
-            continue
-        findings = env.get("findings", [])
-        blk = [x for x in findings if x.get("disposition") == "blocking"]
-        nblk = [x for x in findings if x.get("disposition") != "blocking"]
-        rounds.append({
-            "job_id": d.name,
-            "decision": env.get("decision", ""),
-            "blocking": blk,
-            "non_blocking": nblk,
-            "timestamp": mtime,
-        })
-    rounds.sort(key=lambda r: r["timestamp"])
+        for f in d.iterdir():
+            if "reviewer" not in f.name:
+                continue
+            try:
+                content = f.read_text()
+                matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", content, re.DOTALL))
+                if not matches:
+                    continue
+                env = json.loads(matches[-1].group(1))
+                dec = env.get("decision", "")
+                if "|" in dec:
+                    continue
+                findings = env.get("findings", [])
+                blk = [x for x in findings if x.get("disposition") == "blocking"]
+                nblk = [x for x in findings if x.get("disposition") != "blocking"]
+                mtime = f.stat().st_mtime
+                rounds.append({
+                    "job_id": d.name,
+                    "decision": dec,
+                    "blocking": blk,
+                    "non_blocking": nblk,
+                    "timestamp": mtime,
+                })
+            except Exception:
+                pass
     return rounds
 
 
@@ -236,30 +486,32 @@ def latest_bridge_summary():
     if not raw_dir.exists():
         return None
     latest = None
-    latest_mtime = 0.0
+    latest_mtime = 0
     for d in raw_dir.iterdir():
-        if not d.is_dir() or not _is_bridge_round_dir(d.name):
+        if not d.is_dir():
             continue
-        reviewer_files = sorted(
-            (f for f in d.iterdir() if "reviewer" in f.name),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
-        reviewer_file = reviewer_files[0] if reviewer_files else None
-        env, mtime = _bridge_review_artifact(d.name, reviewer_file)
-        if env is None or mtime is None or mtime <= latest_mtime:
-            continue
-        latest_mtime = mtime
-        latest = (d.name, env)
+        for f in d.iterdir():
+            if "reviewer" in f.name and f.stat().st_mtime > latest_mtime:
+                latest_mtime = f.stat().st_mtime
+                latest = (d.name, f)
     if not latest:
         return None
-    env = latest[1]
-    dec = env.get("decision", "")
-    summary = env.get("summary", "")
-    findings = env.get("findings", [])
-    blk = [x for x in findings if x.get("disposition") == "blocking"]
-    nblk = [x for x in findings if x.get("disposition") != "blocking"]
-    return latest[0], dec, summary, blk, nblk
+    try:
+        content = latest[1].read_text()
+        matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", content, re.DOTALL))
+        if not matches:
+            return None
+        env = json.loads(matches[-1].group(1))
+        dec = env.get("decision", "")
+        if "|" in dec:
+            return None
+        summary = env.get("summary", "")
+        findings = env.get("findings", [])
+        blk = [x for x in findings if x.get("disposition") == "blocking"]
+        nblk = [x for x in findings if x.get("disposition") != "blocking"]
+        return latest[0], dec, summary, blk, nblk
+    except Exception:
+        return None
 
 
 def agent_status():
@@ -330,6 +582,13 @@ def render():
         out.append(box_line(f"  {GRY}(no active subprocess){R}"))
 
     out.append(box_mid())
+
+    recovery_lines = render_recovery_lines(REPO_ROOT)
+    if len(recovery_lines) > 2:
+        out.append(section("RECOVERY"))
+        for line in recovery_lines[2:]:
+            out.append(box_line(line))
+        out.append(box_mid())
 
     # Routing
     routing = read_json(REPO_ROOT / ".agent_bus" / "meta" / "post_merge_routing.json")
@@ -460,8 +719,21 @@ def render():
     return "\n".join(out)
 
 
-def main():
-    interval = int(sys.argv[1]) if len(sys.argv) > 1 else REFRESH_INTERVAL
+def main(argv: list[str] | None = None):
+    global REPO_ROOT
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("interval", nargs="?", type=int, default=REFRESH_INTERVAL)
+    parser.add_argument("--repo-root", default=str(REPO_ROOT), help="Repo root to inspect")
+    parser.add_argument("--render-recovery", action="store_true", help="Print recovery lines once and exit")
+    args = parser.parse_args(argv)
+    REPO_ROOT = Path(args.repo_root).resolve()
+
+    if args.render_recovery:
+        for line in render_recovery_lines(REPO_ROOT):
+            print(line)
+        return
+
+    interval = args.interval
     try:
         while True:
             os.system("clear")

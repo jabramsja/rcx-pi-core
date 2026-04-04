@@ -2,93 +2,143 @@
 
 All notable changes to RCX are documented in this file.
 
-## 2026-04-02
+## 2026-04-04
 
-### Deferred Clean Replay Hardening
+### Findings Pane Fallback
 
-- `phase_a_executor.py` now gives stub rewrites an explicit packet-scoped mode:
-  while the current packet is still a placeholder, the implementer must use the
-  cited `TASKS.md` and governing-plan evidence to rewrite the packet first
-  instead of spelunking downstream implementation files
-- `bridge_supervisor.py` and the Phase A bridge task now keep obvious packet
-  reviews narrowly scoped to the exact authorization block plus packet evidence,
-  instead of broadening into governing packets, prior replay notes, or
-  downstream implementation files before issuing `REQUEST_CHANGES`
-- `executor_dispatch.py` now reaps the child executor process tree on direct
-  `SIGINT` / `SIGTERM` or other abrupt interruption, preventing orphaned
-  Phase A / bridge processes from leaving stale bridge locks across replays
-- `commit_executor.py` now runs targeted pytest gates with
-  `--import-mode=importlib`, so mirrored legacy and modern test files with the
-  same basename no longer fail during collection inside the commit gate
-- `commit_executor.py` now scales the targeted pytest timeout with the number
-  of affected files, so the mirrored control-surface gate no longer times out
-  at the old fixed 120 second ceiling
-- repo-root `conftest.py` now provides a fallback `mock_routing_record`
-  fixture so the mirrored dispatcher suites keep the same Phase B routing stub
-  when that targeted gate runs both trees together
-- `mu/tests/tools/test_commit_executor_receipt.py`,
-  `mu/tests/tools/test_executor_dispatch.py`, and
-  `mu/tests/tools/test_agent_bridge_supervisor.py` now mark the intentional
-  private-helper proof lines with `# ANTICHEAT_OK`, so the post-commit
-  `pre-push-fast` hook treats those tests as explicit proof surfaces instead of
-  policy violations
-- the bridge wall-time override regression test now emits an immediate stdout
-  heartbeat before its intentional sleep, so it still proves
-  `RCX_BRIDGE_MAX_TURN_WALL_TIME_S` widening without accidentally depending on
-  the separate zero-output watchdog under xdist startup jitter
-- `mu/tests/tools/test_run_review.py` now injects a sentinel
-  `ClaudeAgentOptions` class before asserting `build_query_options()`
-  permission-mode wiring, matching the already-hardened legacy
-  `tests/tools/test_run_review.py` mirror so the proof no longer depends on
-  `claude_agent_sdk` being installed in the test environment
+- `_pane_findings.sh` now renders a plain-English fallback state when there is
+  no active Phase A / Phase B bridge round, instead of looping back to a blank
+  shell prompt
+- that fallback now surfaces the latest meta-review decision and the latest
+  commit-path state, so the pane stays useful during supervisor/commit-only
+  waves
+- `RCX_PANE_ONESHOT=1` now renders the pane once and exits, which gives the
+  observability suite a stable non-interactive proof surface
+- `mu/tests/tools/test_recovery_gate.py` now locks both the no-bridge fallback
+  and the meta-review rendering path directly
+
+### Tracker-Only Handoff Compatibility
+
+- `prepare_handoff_from_routing_record()` now builds a contract-complete
+  tracker note for routed `UPDATE_TRACKER_ONLY` handoffs when upstream omitted
+  `tracker_note_text`, instead of falling back to the older one-line note that
+  `validate_handoff()` now rejects
 - `mu/tests/tools/test_executor_dispatch.py` and
-  `mu/tests/tools/test_agent_bridge_supervisor.py` now lock the stub-scoping,
-  bounded packet-review, and interrupt-cleanup regressions surfaced by the live
-  clean E5/E6 replay, while `mu/tests/tools/test_commit_executor_receipt.py`
-  locks the duplicate-basename targeted-pytest regression
+  `mu/tests/tools/test_commit_executor_receipt.py` now lock that tracker-only
+  fallback path directly by proving the synthesized handoff validates cleanly
+  without a pre-populated tracker note
 
-### Deferred Replay Hardening
+## 2026-04-03
 
-- `run_review.py`, `shared_agent_utils.py`, `_contract_redteam.md`, and `validate_agent_compliance.py` now force in-band self-contained review output, inject the active repo root into review prompts, reject off-checkout redirect patterns, and require the `CHECKED` / `NOT_CHECKED` / `VERDICT` scaffold before a hard-gate agent result is accepted
-- `phase_a_executor.py` now treats `Grounding / Authorization` as satisfying the required grounding section, and `executor_dispatch.py` now extracts `plan_path` from mixed stdout + JSON Phase A output instead of only clean JSON lines
-- `phase_b_executor.py` now parses raw JSONL agent-message findings before falling back to rendered bridge text, bounds local pytest gate timeouts, and limits bridge-fix pytest runs to tests changed in the current fix round; `phase_b_implementer.py` now applies an explicit zero-output timeout to silent helper hangs
-- `mu/tests/tools/test_executor_dispatch.py`, `mu/tests/tools/test_phase_b_executor.py`, `mu/tests/tools/test_run_review.py`, `mu/tests/tools/test_validate_agent_compliance.py`, and `mu/tests/tools/test_agent_prompt_contract_injection.py` now lock the replay-hardening regressions surfaced by the live deferred E5/E6 rerun
+### Meta-Bridge Task-ID Path Safety
 
-### Deferred Consolidation Phase B Fail-Closed Hardening
+- `meta_bridge_supervisor.py` now sanitizes slash-bearing `task_id` values
+  before embedding them in pre-commit and post-merge reviewer `job_id` /
+  `turn_id` filenames, so exact tracker task IDs like
+  `[PIPELINE-RECOVERY/pipeline-monitor-worktree-rebind-2026-04-03]` no longer
+  crash prompt/raw-output path creation
+- `mu/tests/tools/test_meta_bridge_supervisor.py` now locks slash-bearing task
+  IDs for the filename token helper and for both the pre-commit and post-merge
+  reviewer launch paths, so the supervisor cannot regress back to raw
+  slash-bearing filenames silently
 
-- `phase_b_executor.py` now applies the critical/high severity floor before governance/doc-path downgrades, so `POLICY_BOUND` / `DOC_ACCURACY` findings on reports or tracker files can no longer smuggle high-severity bridge feedback into the non-blocking bucket
-- `phase_b_executor.py` `_stage_files()` now fails closed when `git add` rejects a path instead of retrying with `git add -f`, so Phase B cannot force-stage ignored files
-- `mu/tests/tools/test_phase_b_executor.py` now locks the severity-floor ordering, the ignored-file staging rejection, normal staging success, and the previously added job-scoped raw-reviewer fallback
+### Hook Audit Env Sanitization
 
-### Deferred Consolidation Control-Surface Fail-Closed Hardening
+- `mu/tools/hooks/pre-push-fast`, `dev.sh`, `mu/tools/audits/audit_fast.sh`,
+  and `mu/tools/audits/audit_all.sh` now clear Git hook-local `GIT_*`
+  variables before
+  spawning deeper audits, so nested git-aware tests rediscover the worktree
+  normally instead of inheriting hook-only state
+- `mu/tests/structural/test_subtree_root_guard.py` now locks that hook-env
+  sanitization contract without duplicating the new structural checks
+- a simulated hook-env proof shows representative untracked-artifact,
+  meta-bridge, and ensure_feature_branch tests return to green once the
+  inherited hook-local vars are cleared
 
-- `phase_b_executor.py` now reloads reviewer raw transcripts referenced by rendered bridge markdown before classifying findings, so explicit reviewer fields like `class` and `disposition` survive Phase B blocking/non-blocking decisions instead of being lost in rendered-summary fallback
-- Phase B rendered-markdown fallback now preserves finding class and defaults missing disposition metadata to `blocking`, so unreadable/missing raw transcripts fail closed instead of silently downgrading medium-severity bridge defects
-- `executor_dispatch.py` now routes successful direct `phase-a` and `phase-b` control-surface invocations through the same chained A→B→commit path as the main dispatcher, and recoverable chained commit failures retry the commit leg instead of re-running the full surface
-- `mu/tests/tools/test_phase_b_executor.py` and `mu/tests/tools/test_executor_dispatch.py` now lock the raw-transcript preference, fail-closed markdown fallback, direct-surface chaining, and chained-commit retry behavior that surfaced during the live `[DEFERRED-CONSOLIDATION]` E5/E6 rerun
+### Pipeline Monitor Linked-Worktree Rebind
 
-### Deferred Consolidation Observability Hardening
+- `pipeline_monitor.sh` now resolves a real linked worktree when launched from
+  the bare/common repo path, and the tmux pane commands explicitly `cd` into
+  that resolved worktree before starting the watcher, findings, timeline, and
+  process panes
+- `pipeline_status.sh` now uses the same linked-worktree resolver, so the
+  one-shot pipeline summary works from the bare/common repo path instead of
+  failing on an empty `git rev-parse --show-toplevel`
+- both entrypoints now ignore stale non-final executor state after a bounded
+  age window, so ancient root-worktree `post_commit_pending` artifacts stop
+  masking the real live pipeline in another linked worktree
+- both observability entrypoints now implement the same resolver rules:
+  prefer the exact current-branch worktree, then a uniquely active pipeline
+  worktree, then a sole linked worktree, then the unique linked `dev`
+  worktree, and only then fail closed
+- `pipeline_dashboard.py --render-recovery` now shows recent matching recovery
+  attempts from `.agent_bus/recovery/recovery_log.json`, giving the tmux
+  recovery block loop/outcome detail instead of only a static status snapshot
+- `mu/tests/tools/test_recovery_gate.py` now locks the exact linked-worktree
+  success path, the stale-branch active-worktree fallback, the sole-linked
+  fallback, the unique-`dev` fallback, the quiet-current-root stale-state
+  override, and recent-attempt recovery rendering without increasing test-file
+  count
+- this closes the concrete stale-pane failure mode where tmux started from the
+  bare/common path launched `/mu/tools/observability/...` commands or kept
+  showing ancient root-worktree state instead of the live recovery-aware pane
 
-- `bridge_supervisor.py` now uses a 450s reviewer zero-output watchdog baseline, clamps that watchdog inside the active turn budget, and rejects non-finite timeout overrides instead of accepting `NaN` / `Inf`
-- `pipeline_dashboard.py` and `pipeline_dashboard_web.py` now distinguish pre-commit versus post-merge `meta_bridge_supervisor.py` runs by real process args instead of treating every supervisor process as post-merge routing
-- terminal/web dashboards and the tmux findings pane now fall back to rendered reviewer markdown when Codex raw transcripts do not contain a direct envelope block, so completed historical review rounds no longer render as false `In progress...`
-- `mu/tests/tools/test_validate_agent_compliance.py` now removes the vacuous `if stdout:` guards from the hook fail-closed checks, and `phase_b_executor.py` now carries an accurate comment about the `git add -f` fallback path
+### Routed Commit Recovery And Bridge Watchdog Hardening
 
-## 2026-04-01
+- `executor_dispatch.py` now routes the modular `commit` surface through the
+  same recovery wrapper used by `phase-a` / `phase-b`, derives commit-wave
+  identity from the handoff or routing record, and treats structured commit
+  `status:error` output as a real failed commit surface instead of a silent
+  success
+- `bridge_adapters.py` now starts the zero-output watchdog after prompt
+  delivery and writes stderr to the raw transcript incrementally with the
+  normal `[stderr]` sentinel, so noisy reviewers no longer fail closed with an
+  empty raw transcript just because CI process startup consumed the original
+  timer budget
+- `mu/tests/tools/test_agent_bridge_supervisor.py` now gives the zero-output
+  bridge watchdog proof a realistic CI margin and locks the stderr-only raw
+  transcript prefix directly
+- `mu/tests/tools/test_executor_dispatch.py` now locks commit-surface recovery,
+  commit-surface recovery-wrapper routing from `main()`, and structured
+  commit-status error classification directly
 
-### Tier 3 Recovery Response Hardening
+### Recovery Observability And Watcher-Noise Hardening
 
-- `recovery_gate.py` now salvages prose-wrapped fenced JSON from the Tier 3
-  `claude --print` recovery loop instead of requiring the entire response body
-  to be raw JSON
-- `recovery_gate.py` now feeds a malformed recovery response back into the next
-  iteration prompt and explicitly tells the recovery agent to return `skip` or
-  `escalate` when the root cause is caller-supplied env/CLI state outside repo
-  control
-- `mu/tests/tools/test_recovery_gate.py` now locks both regressions directly:
-  prose-wrapped JSON still drives recovery, and malformed prose is reflected
-  into the next iteration prompt so the model can re-emit structured JSON
-  instead of wasting the remaining loop on repeat parse errors
+- `recovery_gate.py` now writes a structured
+  `.agent_bus/recovery/recovery_status.json` file with the current recovery
+  tier, failure class, retry target, wave invocation count, tuple attempt
+  index, owner PID, live child PID/role, current state, and terminal outcome
+- `recovery_gate.py` on current `dev` now also restores live Tier 3 wiring in
+  `attempt_recovery()`, so routed dispatcher failures actually enter the
+  recovery loop instead of returning `not_implemented`
+- `pipeline_dashboard.py` now renders that status into plain-English recovery
+  lines for tmux and other text dashboards, and `_pane_processes.sh` now shows
+  the recovery section directly by calling the existing dashboard surface
+- `_pane_processes.sh`, `pipeline_dashboard.py`,
+  `pipeline_dashboard_web.py`, and `pipeline_status.sh` now ignore `tail -f`
+  log watchers and other observability helper processes when detecting the
+  active pipeline phase, so stale panes no longer report fake live executors
+- `pipeline_dashboard_web.py` and `pipeline_status.sh` now surface the same
+  live recovery facts directly, including tier, target, loop counter, live
+  PIDs, plain-English reason, and terminal outcome
+- recovery reason extraction now pulls the embedded executor error from routed
+  Phase A JSON output, so the pane shows the actual bridge failure string
+  instead of a useless trailing `}` line
+- `commit_executor.py` now generates contract-complete tracker notes for ad hoc
+  routed commit handoffs by default and rejects incomplete tracker notes during
+  input validation, so the commit surface fails early instead of getting all
+  the way to pre-push before the L4 tracker-note contract trips
+- `commit_executor.py` now gives `pre-push-fast` a longer Step 11 timeout, so
+  the real fast-audit path can finish instead of being misreported as a failed
+  push gate when the audit is still making forward progress
+- `mu/tests/tools/test_executor_dispatch.py` and
+  `mu/tests/tools/test_commit_executor_receipt.py` now lock both the stronger
+  handoff-note validation and the default note-generation path directly
+- `mu/tests/tools/test_executor_dispatch.py` now also locks the extended
+  `pre-push-fast` timeout contract directly
+- `mu/tests/tools/test_recovery_gate.py` now locks both the recovery-status
+  rendering contract and the watcher-noise regression directly, without adding
+  new test files
 
 ## 2026-03-27
 

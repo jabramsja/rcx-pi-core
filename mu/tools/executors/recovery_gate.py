@@ -12,6 +12,7 @@ import re
 import sqlite3
 import subprocess
 import time
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -49,7 +50,6 @@ class FailureClass(Enum):
     AGGREGATION_HANG = "aggregation_hang"
     IMPLEMENTER_STALE = "implementer_stale"
     # Tier 3 -- LLM diagnosis (small focused prompt)
-    NEEDS_PHASE_B = "needs_phase_b"
     GIT_STAGING_CONFLICT = "git_staging_conflict"
     TEST_FAILURE = "test_failure"
     AGENT_REVIEW_CRASH = "agent_review_crash"
@@ -64,20 +64,16 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.MIXED_STAGING: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
     FailureClass.AGGREGATION_HANG: 2, FailureClass.IMPLEMENTER_STALE: 2,
-    FailureClass.NEEDS_PHASE_B: 3, FailureClass.GIT_STAGING_CONFLICT: 3,
-    FailureClass.TEST_FAILURE: 3, FailureClass.AGENT_REVIEW_CRASH: 3,
-    FailureClass.UNKNOWN_ERROR: 3,
+    FailureClass.GIT_STAGING_CONFLICT: 3, FailureClass.TEST_FAILURE: 3,
+    FailureClass.AGENT_REVIEW_CRASH: 3, FailureClass.UNKNOWN_ERROR: 3,
     FailureClass.TERMINAL_POLICY: 4, FailureClass.UNCLASSIFIED: 4,
 }
 
 _TERMINAL_STATUSES = frozenset({
     "question_for_founder", "max_rounds_reached",
-    "supervisor_rejected",
+    "supervisor_rejected", "needs_phase_b",
 })
 _TRANSIENT_KILL_CODES = frozenset({-9, -15, 137})
-_STATUS_LINE_RE = re.compile(
-    r"^\s*\[[^\]]+\]\s+Status:\s*([A-Za-z0-9_ -]+)\s*$"
-)
 
 
 def tier_for(fc: FailureClass) -> int:
@@ -91,53 +87,52 @@ def tier_for(fc: FailureClass) -> int:
 
 def classify_failure(result: dict[str, Any]) -> FailureClass:
     """Classify an executor failure result into a FailureClass."""
-    outer_statuses = _normalize_status_values(result.get("status", ""))
-    outer_status = outer_statuses[0] if outer_statuses else ""
-    status = outer_status
+    status = result.get("status", "")
     stderr = result.get("stderr", "")
     exit_code = result.get("exit_code")
     step = result.get("step", "")
     stdout = result.get("stdout", "")
-    if not isinstance(stderr, str):
-        stderr = ""
-    if not isinstance(step, str):
-        step = ""
-    if not isinstance(stdout, str):
-        stdout = ""
-    embedded = _extract_embedded_result(stdout)
-    embedded_statuses = _extract_embedded_statuses(stdout)
-    embedded_status = embedded.get("status")
-    if isinstance(embedded_status, str) and embedded_status.strip():
-        status = embedded_status.strip()
-    embedded_step = embedded.get("step")
-    if (not isinstance(step, str) or not step.strip()) and isinstance(embedded_step, str):
-        step = embedded_step.strip()
-    combined_text = _collect_error_text(result, embedded)
+    embedded_stdout = _parse_json_object(stdout)
+    embedded_stderr = _parse_json_object(stderr)
+    embedded_status = (
+        embedded_stdout.get("status")
+        or embedded_stderr.get("status")
+        or ""
+    )
+    embedded_step = (
+        embedded_stdout.get("step")
+        or embedded_stdout.get("executor")
+        or embedded_stderr.get("step")
+        or embedded_stderr.get("executor")
+        or ""
+    )
+    embedded_reason = " ".join(
+        part
+        for part in (
+            _summarize_json_value(embedded_stdout),
+            _summarize_json_value(embedded_stderr),
+        )
+        if part
+    )
+    combined_text = " ".join(
+        part for part in (stderr, stdout, embedded_reason) if isinstance(part, str) and part
+    )
     combined_lower = combined_text.lower()
+    step_lower = " ".join(part for part in (step, embedded_step) if part).lower()
+    status_failed = status in ("error", "failed") or embedded_status in ("error", "failed")
 
     # Tier 4: terminal policy outcomes (check first, never recover)
-    if outer_status in _TERMINAL_STATUSES:
-        return FailureClass.TERMINAL_POLICY
-    if set(outer_statuses) & _TERMINAL_STATUSES:
-        return FailureClass.TERMINAL_POLICY
     if status in _TERMINAL_STATUSES:
         return FailureClass.TERMINAL_POLICY
-    if embedded_statuses & _TERMINAL_STATUSES:
+    if embedded_status in _TERMINAL_STATUSES:
         return FailureClass.TERMINAL_POLICY
 
-    if status == FailureClass.NEEDS_PHASE_B.value:
-        return FailureClass.NEEDS_PHASE_B
-    if FailureClass.NEEDS_PHASE_B.value in outer_statuses:
-        return FailureClass.NEEDS_PHASE_B
-    if FailureClass.NEEDS_PHASE_B.value in embedded_statuses:
-        return FailureClass.NEEDS_PHASE_B
-
     # Tier 1: deterministic lock/state issues
-    if "bridge.lock" in combined_lower:
+    if "bridge.lock" in combined_text:
         return FailureClass.STALE_BRIDGE_LOCK
-    if "index.lock" in combined_lower:
+    if "index.lock" in combined_text:
         return FailureClass.STALE_GIT_INDEX_LOCK
-    if "phase_b_state.json" in combined_lower or "stale_state" in status:
+    if "phase_b_state.json" in combined_text or "stale_state" in status:
         return FailureClass.STALE_EXECUTOR_STATE
     if "continuation" in combined_lower and "stale" in combined_lower:
         return FailureClass.STALE_CONTINUATION
@@ -146,8 +141,6 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
 
     # Tier 2: transient / timeout issues
     if status == "timeout":
-        return FailureClass.PROCESS_TIMEOUT
-    if "timed out" in combined_lower and "agent review" in combined_lower:
         return FailureClass.PROCESS_TIMEOUT
     if exit_code is not None and exit_code in _TRANSIENT_KILL_CODES:
         return FailureClass.TRANSIENT_KILL
@@ -161,99 +154,22 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.GIT_STAGING_CONFLICT
     if "test" in combined_lower and ("fail" in combined_lower or "error" in combined_lower):
         return FailureClass.TEST_FAILURE
-    if "agent" in step.lower() and status in ("error", "failed"):
+    review_crash_hints = (
+        "bridge subprocess failed",
+        "produced no stdout",
+        "adapter 'codex'",
+        'adapter "codex"',
+        "--packet-review",
+        "reviewer",
+    )
+    if status_failed and any(hint in combined_lower for hint in review_crash_hints):
         return FailureClass.AGENT_REVIEW_CRASH
-    if "agent review" in combined_lower and status in ("error", "failed"):
+    if status_failed and ("agent" in step_lower or "bridge" in step_lower):
         return FailureClass.AGENT_REVIEW_CRASH
-    if status in ("error", "failed"):
+    if status_failed:
         return FailureClass.UNKNOWN_ERROR
 
     return FailureClass.UNCLASSIFIED
-
-
-def _extract_embedded_result(stdout: str) -> dict[str, Any]:
-    """Extract an executor result object from stdout when available."""
-    if not stdout:
-        return {}
-
-    try:
-        data = json.loads(stdout)
-        if isinstance(data, dict):
-            return data
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    for line in stdout.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("{"):
-            continue
-        try:
-            data = json.loads(stripped)
-            if isinstance(data, dict):
-                return data
-        except (json.JSONDecodeError, ValueError):
-            continue
-    return {}
-
-
-def _normalize_status_values(value: Any) -> list[str]:
-    """Return string status values without throwing on malformed executor data."""
-    if isinstance(value, str):
-        normalized = value.strip()
-        return [normalized] if normalized else []
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return [
-            item.strip()
-            for item in value
-            if isinstance(item, str) and item.strip()
-        ]
-    return []
-
-
-def _extract_embedded_statuses(stdout: str) -> set[str]:
-    """Extract executor-reported statuses from stdout JSON or status lines."""
-    statuses: set[str] = set()
-    if not stdout:
-        return statuses
-
-    try:
-        data = json.loads(stdout)
-        if isinstance(data, dict) and isinstance(data.get("status"), str):
-            statuses.add(data["status"])
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    for line in stdout.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("{"):
-            try:
-                data = json.loads(stripped)
-                if isinstance(data, dict) and isinstance(data.get("status"), str):
-                    statuses.add(data["status"])
-            except (json.JSONDecodeError, ValueError):
-                pass
-        match = _STATUS_LINE_RE.match(stripped)
-        if match:
-            statuses.add(match.group(1).strip())
-    return statuses
-
-
-def _collect_error_text(result: dict[str, Any], embedded: dict[str, Any]) -> str:
-    """Collect outer and embedded error text for failure classification."""
-    parts: list[str] = []
-    for key in ("message", "stderr", "stdout"):
-        value = result.get(key, "")
-        if isinstance(value, str) and value:
-            parts.append(value)
-    embedded_error = embedded.get("error")
-    if isinstance(embedded_error, str) and embedded_error:
-        parts.append(embedded_error)
-    embedded_errors = embedded.get("errors")
-    if isinstance(embedded_errors, list):
-        parts.extend(item for item in embedded_errors if isinstance(item, str) and item)
-    return "\n".join(parts)
 
 
 def _looks_like_mixed_staging(stderr: str, stdout: str, step: str) -> bool:
@@ -402,34 +318,6 @@ def _load_config_timeouts(repo_root: Path) -> dict[str, Any]:
         return {}
 
 
-def _timeout_key_for_result(result: dict[str, Any], timeouts: dict[str, Any]) -> str:
-    """Select the timeout knob that corresponds to the observed failure."""
-    stdout = result.get("stdout", "")
-    embedded = _extract_embedded_result(stdout if isinstance(stdout, str) else "")
-    outer_statuses = _normalize_status_values(result.get("status", ""))
-    status = outer_statuses[0] if outer_statuses else ""
-    embedded_status = embedded.get("status")
-    if isinstance(embedded_status, str) and embedded_status.strip():
-        status = embedded_status.strip()
-    step = result.get("step", "")
-    embedded_step = embedded.get("step")
-    if (not isinstance(step, str) or not step.strip()) and isinstance(embedded_step, str):
-        step = embedded_step.strip()
-    combined_lower = _collect_error_text(result, embedded).lower()
-
-    if "agent review" in combined_lower and "agent_review" in timeouts:
-        return "agent_review"
-
-    executor = result.get("executor", "")
-    if isinstance(executor, str) and executor in timeouts:
-        return executor
-    if isinstance(step, str) and step in timeouts:
-        return step
-    if status == "timeout" and "phase_b_executor" in timeouts:
-        return "phase_b_executor"
-    return next(iter(timeouts), "phase_b_executor")
-
-
 def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     """Increase timeout by 50% (capped at 2x original) via env var override.
 
@@ -446,7 +334,8 @@ def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     timeouts = _load_config_timeouts(repo_root)
     # Determine which executor timed out from the result
     result = kw.get("result", {})
-    timeout_key = _timeout_key_for_result(result, timeouts)
+    executor = result.get("executor", "phase_b_executor")
+    timeout_key = executor if executor in timeouts else "phase_b_executor"
     current = timeouts.get(timeout_key, 3600)
     # Track original baseline across sequential recoveries.  On the first
     # call the env var is absent so we seed it from the (still-original)
@@ -566,28 +455,11 @@ _DANGEROUS_COMMANDS = frozenset({
     "git clean -f", "dd if=", "mkfs.", "chmod 777",
     "> /dev/sd", ":(){ :|:& };:",
 })
-_DANGEROUS_COMMAND_PATTERNS = (
-    re.compile(r"\bgit\s+push\b"),
-    re.compile(r"\bgit\s+reset\b"),
-    re.compile(r"\bgit\s+checkout\b(?:[^\n]*\s)?--(?:\s|$)"),
-    re.compile(
-        r"\bgit\s+restore\b"
-        r"(?=[^\n]*\s--source(?:=|\s)|[^\n]*\s--staged(?:=|\s|$))"
-    ),
-    re.compile(r"\|\s*(?:sh|bash)\b"),
-    re.compile(r"\bbase64\b"),
-    re.compile(r"\beval\b"),
-    re.compile(r"\bgit\s+config\b[^\n]*\balias\."),
-    re.compile(r"\bgit\s+\$"),
-)
-_SENSITIVE_RELATIVE_PATHS = (
-    ".git/config",
-    ".git/hooks",
-)
 
 MAX_RECOVERY_ITERATIONS = 3
 _CLAUDE_TIMEOUT = 60
 _SHELL_TIMEOUT = 30
+_TRIVIAL_EXCERPTS = frozenset({"{", "}", "[", "]", ",", '"', '",', "{}", "[]"})
 
 
 def _is_dangerous_command(cmd: str) -> bool:
@@ -596,61 +468,12 @@ def _is_dangerous_command(cmd: str) -> bool:
     for denied in _DANGEROUS_COMMANDS:
         if denied in cmd_lower:
             return True
-    if _touches_sensitive_path_text(cmd_lower):
-        return True
-    for pattern in _DANGEROUS_COMMAND_PATTERNS:
-        if pattern.search(cmd_lower):
-            return True
     return False
-
-
-def _touches_sensitive_path_text(text: str) -> bool:
-    """Fail closed on commands that touch repo-internal sensitive paths."""
-    lowered = text.strip().lower()
-    return (
-        ".git/config" in lowered
-        or ".git/hooks/" in lowered
-        or lowered.endswith(".git/hooks")
-    )
-
-
-def _is_sensitive_repo_path(relative_path: str) -> bool:
-    normalized = relative_path.replace("\\", "/").strip().lower()
-    parts: list[str] = []
-    for part in normalized.split("/"):
-        if not part or part == ".":
-            continue
-        if part == "..":
-            if parts:
-                parts.pop()
-            continue
-        parts.append(part)
-    normalized = "/".join(parts)
-    return any(
-        normalized == denied or normalized.startswith(f"{denied}/")
-        for denied in _SENSITIVE_RELATIVE_PATHS
-    )
-
-
-def _trim_prompt_block(text: str, *, max_lines: int, max_chars_per_line: int = 240) -> str:
-    """Trim prompt context by line count and per-line width."""
-    lines = text.strip().splitlines()
-    if not lines:
-        return ""
-    if len(lines) > max_lines:
-        lines = [f"[truncated {len(lines) - max_lines} earlier lines]"] + lines[-max_lines:]
-    trimmed_lines: list[str] = []
-    for line in lines:
-        if len(line) > max_chars_per_line:
-            trimmed_lines.append(f"{line[:max_chars_per_line]}...[truncated]")
-        else:
-            trimmed_lines.append(line)
-    return "\n".join(trimmed_lines)
 
 
 def _build_diagnosis_prompt(
     result: dict[str, Any], wave_id: str, iteration: int,
-    repo_root: Path, prior_invalid_response: str = "",
+    repo_root: Path,
 ) -> str:
     """Build a ~2K token diagnosis prompt for claude --print."""
     fc = result.get("failure_class", result.get("recovery", {}).get("failure_class", "unknown"))
@@ -658,8 +481,9 @@ def _build_diagnosis_prompt(
     step = result.get("step", "unknown")
     stderr = result.get("stderr", "")
     stdout = result.get("stdout", "")
-    stderr_block = _trim_prompt_block(stderr if isinstance(stderr, str) else "", max_lines=40)
-    stdout_block = _trim_prompt_block(stdout if isinstance(stdout, str) else "", max_lines=20)
+    # Truncate to keep within token budget
+    stderr_lines = stderr.strip().splitlines()[-100:]
+    stdout_lines = stdout.strip().splitlines()[-50:]
     # Get git status
     try:
         git_proc = subprocess.run(
@@ -668,18 +492,6 @@ def _build_diagnosis_prompt(
         git_status = git_proc.stdout[:500] if git_proc.returncode == 0 else "(unavailable)"
     except (subprocess.TimeoutExpired, OSError):
         git_status = "(unavailable)"
-
-    invalid_response_block = ""
-    if prior_invalid_response.strip():
-        invalid_response_block = f"""
-
-Previous response was invalid because it was not parseable JSON. Reissue the
-diagnosis as a SINGLE JSON object matching the schema below and do not add any
-prose outside the JSON.
-
-Previous invalid response (truncated):
-{prior_invalid_response[:600]}
-"""
 
     return f"""You are a pipeline recovery agent. A pipeline step has failed and you must diagnose and fix it.
 
@@ -690,14 +502,13 @@ Iteration: {iteration + 1}/{MAX_RECOVERY_ITERATIONS}
 Wave: {wave_id}
 
 STDERR (last 100 lines):
-{stderr_block}
+{chr(10).join(stderr_lines)}
 
 STDOUT (last 50 lines):
-{stdout_block}
+{chr(10).join(stdout_lines)}
 
 Git status:
 {git_status}
-{invalid_response_block}
 
 Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
 {{"action": "shell"|"edit"|"skip"|"escalate", "commands": ["cmd1", "cmd2"], "explanation": "why"}}
@@ -707,72 +518,7 @@ Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
 - "skip": cannot fix, return failure
 - "escalate": need human intervention
 
-If the cause is a caller-supplied env var, CLI flag, or parent-process state
-that this recovery loop cannot safely change, use "skip" with explanation.
-If human intervention is required, use "escalate" with explanation.
-
 Safety: no rm -rf, no git push, no git reset --hard. Max 30s per command."""
-
-
-def _extract_first_json_object(text: str) -> str | None:
-    """Return the first balanced JSON object embedded in text."""
-    start = text.find("{")
-    while start != -1:
-        depth = 0
-        in_string = False
-        escaped = False
-        for idx in range(start, len(text)):
-            ch = text[idx]
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif ch == "\\":
-                    escaped = True
-                elif ch == '"':
-                    in_string = False
-                continue
-            if ch == '"':
-                in_string = True
-                continue
-            if ch == "{":
-                depth += 1
-                continue
-            if ch == "}":
-                depth -= 1
-                if depth == 0:
-                    return text[start:idx + 1]
-                if depth < 0:
-                    break
-        start = text.find("{", start + 1)
-    return None
-
-
-def _parse_recovery_response(raw_response: str) -> dict[str, Any]:
-    """Parse a recovery-agent response, tolerating prose-wrapped JSON."""
-    cleaned = raw_response.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.splitlines()
-        lines = [line for line in lines if not line.startswith("```")]
-        cleaned = "\n".join(lines).strip()
-    if not cleaned:
-        raise ValueError("empty response")
-
-    candidates: list[str] = [cleaned]
-    embedded = _extract_first_json_object(cleaned)
-    if embedded and embedded != cleaned:
-        candidates.append(embedded)
-
-    last_error = "response was not valid JSON"
-    for candidate in candidates:
-        try:
-            response = json.loads(candidate)
-        except (json.JSONDecodeError, ValueError) as exc:
-            last_error = str(exc)
-            continue
-        if isinstance(response, dict):
-            return response
-        last_error = "response must decode to a JSON object"
-    raise ValueError(last_error)
 
 
 def _apply_edit(edit: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
@@ -781,20 +527,10 @@ def _apply_edit(edit: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
     Safety: file_path must resolve to within repo_root (no symlink escape).
     """
     raw_path = edit.get("file_path", "")
-    if not isinstance(raw_path, str):
-        return False, "file_path must be a string"
-    raw_path = raw_path.strip()
-    if not raw_path:
-        return False, "file_path is required"
-    if _is_sensitive_repo_path(raw_path):
-        return False, f"sensitive path blocked: {raw_path}"
     file_path = (repo_root / raw_path).resolve()
     repo_resolved = repo_root.resolve()
     if not str(file_path).startswith(str(repo_resolved) + os.sep) and file_path != repo_resolved:
         return False, f"repo-escape blocked: {raw_path} resolves outside repo root"
-    repo_relative = file_path.relative_to(repo_resolved).as_posix()
-    if _is_sensitive_repo_path(repo_relative):
-        return False, f"sensitive path blocked: {raw_path}"
     old_text = edit.get("old_text", "")
     new_text = edit.get("new_text", "")
     if not file_path.exists():
@@ -813,7 +549,7 @@ def _apply_edit(edit: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
 def _log_tier3_attempt(
     repo_root: Path, wave_id: str, step: str, failure_class: str,
     iteration: int, action: str, outcome: str, duration_s: float,
-    detail: str = "",
+    detail: str = "", invocation_id: str = "",
 ) -> None:
     """Persist a single Tier 3 recovery iteration to recovery_log.json."""
     attempts = _load_recovery_log(repo_root)
@@ -822,6 +558,7 @@ def _log_tier3_attempt(
         wave_id=wave_id, step=step, failure_class=failure_class, tier=3,
         action=f"tier3_iter{iteration}_{action}", outcome=outcome,
         duration_s=duration_s, tokens_used=0, detail=detail,
+        invocation_id=invocation_id,
     )
     attempts.append(asdict(attempt))
     _save_recovery_log(repo_root, attempts)
@@ -831,6 +568,7 @@ def run_recovery_loop(
     repo_root: Path, result: dict[str, Any], wave_id: str,
     max_iterations: int = MAX_RECOVERY_ITERATIONS,
     verify_command: list[str] | None = None,
+    invocation_id: str = "",
 ) -> dict[str, Any]:
     """Tier 3 LLM recovery loop: diagnose → fix → verify.
 
@@ -840,29 +578,80 @@ def run_recovery_loop(
     loop_log: list[dict[str, Any]] = []
     fc = result.get("failure_class", result.get("recovery", {}).get("failure_class", "unknown"))
     step = result.get("step") or result.get("executor", "unknown")
-    prior_invalid_response = ""
+    failure_class = (
+        FailureClass(fc)
+        if fc in FailureClass._value2member_map_
+        else FailureClass.UNKNOWN_ERROR
+    )
+    if not invocation_id:
+        invocation_id = _new_invocation_id(wave_id, step, str(fc))
+    current_status = _load_recovery_status(repo_root)
+    if current_status.get("invocation_id") != invocation_id or not current_status.get("active"):
+        attempts = _load_recovery_log(repo_root)
+        _begin_recovery_status(
+            repo_root,
+            attempts=attempts,
+            result=result,
+            wave_id=wave_id,
+            step=step,
+            failure_class=failure_class,
+            tier=3,
+            prior_attempts=0,
+            invocation_id=invocation_id,
+        )
+        _update_recovery_status(repo_root, max_iterations=max_iterations)
 
     for i in range(max_iterations):
         iteration_t0 = time.monotonic()
-        prompt = _build_diagnosis_prompt(
-            result, wave_id, i, repo_root, prior_invalid_response=prior_invalid_response)
-        action_succeeded = False
+        prompt = _build_diagnosis_prompt(result, wave_id, i, repo_root)
+        _update_recovery_status(
+            repo_root,
+            state="tier3_waiting_on_claude",
+            current_iteration=i + 1,
+            last_action="diagnose",
+            child_pid=0,
+            child_role="",
+            current_command="claude --print",
+            detail=_excerpt(_summarize_result_reason(result)),
+        )
 
         # Call claude --print for diagnosis
+        claude_proc = None
         try:
-            claude_proc = subprocess.run(
+            claude_proc = subprocess.Popen(
                 ["claude", "--print", "-p", prompt],
-                capture_output=True, text=True, timeout=_CLAUDE_TIMEOUT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
                 cwd=repo_root)
-            raw_response = claude_proc.stdout.strip()
+            _update_recovery_status(
+                repo_root,
+                child_pid=claude_proc.pid,
+                child_role="claude",
+            )
+            stdout, _stderr = claude_proc.communicate(timeout=_CLAUDE_TIMEOUT)
+            raw_response = stdout.strip()
         except subprocess.TimeoutExpired:
+            if claude_proc is not None:
+                claude_proc.kill()
+                claude_proc.communicate()
             dur = round(time.monotonic() - iteration_t0, 3)
             loop_log.append({
                 "iteration": i + 1, "action": "timeout",
                 "detail": "claude --print timed out",
                 "duration_s": dur})
             _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
-                               "timeout", "failed", dur, "claude --print timed out")
+                               "timeout", "failed", dur, "claude --print timed out",
+                               invocation_id=invocation_id)
+            _update_recovery_status(
+                repo_root,
+                state="tier3_timeout",
+                child_pid=0,
+                child_role="",
+                current_command="",
+                last_action="timeout",
+                detail="claude --print timed out",
+            )
             continue
         except OSError as exc:
             dur = round(time.monotonic() - iteration_t0, 3)
@@ -871,28 +660,61 @@ def run_recovery_loop(
                 "detail": f"claude invocation failed: {exc}",
                 "duration_s": dur})
             _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
-                               "error", "failed", dur, f"claude invocation failed: {exc}")
+                               "error", "failed", dur, f"claude invocation failed: {exc}",
+                               invocation_id=invocation_id)
+            _update_recovery_status(
+                repo_root,
+                state="tier3_error",
+                child_pid=0,
+                child_role="",
+                current_command="",
+                last_action="error",
+                detail=_excerpt(f"claude invocation failed: {exc}"),
+            )
             continue
 
         # Parse JSON response
         try:
-            response = _parse_recovery_response(raw_response)
-            prior_invalid_response = ""
-        except ValueError as exc:
-            prior_invalid_response = raw_response[:1000]
+            # Strip markdown fences if present
+            cleaned = raw_response
+            if cleaned.startswith("```"):
+                lines = cleaned.splitlines()
+                lines = [l for l in lines if not l.startswith("```")]
+                cleaned = "\n".join(lines)
+            response = json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError):
             dur = round(time.monotonic() - iteration_t0, 3)
             loop_log.append({
                 "iteration": i + 1, "action": "parse_error",
-                "detail": f"could not parse response ({exc}): {raw_response[:200]}",
+                "detail": f"could not parse response: {raw_response[:200]}",
                 "duration_s": dur})
             _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
                                "parse_error", "failed", dur,
-                               f"could not parse response ({exc}): {raw_response[:200]}")
+                               f"could not parse response: {raw_response[:200]}",
+                               invocation_id=invocation_id)
+            _update_recovery_status(
+                repo_root,
+                state="tier3_parse_error",
+                child_pid=0,
+                child_role="",
+                current_command="",
+                last_action="parse_error",
+                detail=_excerpt(raw_response[:200]),
+            )
             continue
 
         action = response.get("action", "skip")
         commands = response.get("commands", [])
         explanation = response.get("explanation", "")
+        _update_recovery_status(
+            repo_root,
+            child_pid=0,
+            child_role="",
+            current_command="",
+            last_action=action,
+            explanation=_excerpt(explanation),
+            detail=_excerpt(explanation),
+        )
 
         if action == "escalate":
             dur = round(time.monotonic() - iteration_t0, 3)
@@ -900,7 +722,17 @@ def run_recovery_loop(
                 "iteration": i + 1, "action": "escalate",
                 "detail": explanation, "duration_s": dur})
             _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
-                               "escalate", "escalated", dur, explanation)
+                               "escalate", "escalated", dur, explanation,
+                               invocation_id=invocation_id)
+            _finish_recovery_status(
+                repo_root,
+                recovered=False,
+                exhausted=True,
+                outcome="escalated",
+                action="escalate",
+                detail=explanation,
+                state="tier3_escalated",
+            )
             return {"recovered": False, "exhausted": True,
                     "iterations": i + 1, "log": loop_log}
 
@@ -910,84 +742,92 @@ def run_recovery_loop(
                 "iteration": i + 1, "action": "skip",
                 "detail": explanation, "duration_s": dur})
             _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
-                               "skip", "skipped", dur, explanation)
+                               "skip", "skipped", dur, explanation,
+                               invocation_id=invocation_id)
+            _finish_recovery_status(
+                repo_root,
+                recovered=False,
+                exhausted=False,
+                outcome="skipped",
+                action="skip",
+                detail=explanation,
+                state="tier3_skipped",
+            )
             return {"recovered": False, "exhausted": False,
                     "iterations": i + 1, "log": loop_log}
 
         if action == "shell":
             cmd_results = []
             blocked = False
-            executed_any = False
-            shell_success = True
+            executed = 0
+            all_ok = True
+            _update_recovery_status(
+                repo_root,
+                state="tier3_running_shell",
+                current_command=_excerpt(commands[0] if commands else ""),
+            )
             for cmd in commands:
                 if not isinstance(cmd, str):
-                    shell_success = False
                     continue
-                executed_any = True
                 if _is_dangerous_command(cmd):
                     cmd_results.append(f"BLOCKED: {cmd}")
                     blocked = True
-                    shell_success = False
+                    all_ok = False
                     continue
                 try:
                     cmd_proc = subprocess.run(
                         cmd, shell=True, capture_output=True, text=True,
                         timeout=_SHELL_TIMEOUT, cwd=repo_root)
+                    executed += 1
+                    if cmd_proc.returncode != 0:
+                        all_ok = False
                     cmd_results.append(
                         f"exit={cmd_proc.returncode}: {cmd_proc.stdout[:200]}")
-                    if cmd_proc.returncode != 0:
-                        shell_success = False
                 except subprocess.TimeoutExpired:
+                    all_ok = False
                     cmd_results.append(f"TIMEOUT: {cmd}")
-                    shell_success = False
                 except OSError as exc:
+                    all_ok = False
                     cmd_results.append(f"ERROR: {exc}")
-                    shell_success = False
             loop_log.append({
                 "iteration": i + 1, "action": "shell",
                 "commands": commands, "results": cmd_results,
                 "blocked": blocked, "detail": explanation,
                 "duration_s": round(time.monotonic() - iteration_t0, 3)})
-            action_succeeded = executed_any and shell_success
+            action_applied = executed > 0 and all_ok and not blocked
 
         elif action == "edit":
             edit_results = []
-            edit_count = 0
-            edit_success = True
+            edit_successes = 0
+            edit_failures = 0
+            _update_recovery_status(
+                repo_root,
+                state="tier3_applying_edit",
+            )
             for edit in commands:
                 if isinstance(edit, dict):
-                    edit_count += 1
                     ok, msg = _apply_edit(edit, repo_root)
                     edit_results.append(msg)
-                    if not ok:
-                        edit_success = False
+                    if ok:
+                        edit_successes += 1
+                    else:
+                        edit_failures += 1
             loop_log.append({
                 "iteration": i + 1, "action": "edit",
                 "results": edit_results, "detail": explanation,
                 "duration_s": round(time.monotonic() - iteration_t0, 3)})
-            action_succeeded = edit_count > 0 and edit_success
-
-        if not verify_command:
-            dur = round(time.monotonic() - iteration_t0, 3)
-            if action_succeeded:
-                _log_tier3_attempt(
-                    repo_root, wave_id, step, fc, i + 1,
-                    action, "success", dur,
-                    "no explicit verify command; action completed cleanly")
-                loop_log.append({
-                    "iteration": i + 1, "action": "verify_pass",
-                    "detail": "no explicit verify command; action completed cleanly",
-                })
-                return {"recovered": True, "exhausted": False,
-                        "iterations": i + 1, "log": loop_log}
-            _log_tier3_attempt(
-                repo_root, wave_id, step, fc, i + 1,
-                action, "failed", dur, explanation or "action did not complete cleanly")
-            continue
+            action_applied = edit_successes > 0 and edit_failures == 0
+        else:
+            action_applied = False
 
         # Verify: re-run the failed gate/check if a verify command is provided
         if verify_command:
             try:
+                _update_recovery_status(
+                    repo_root,
+                    state="tier3_verifying",
+                    current_command=_excerpt(" ".join(verify_command)),
+                )
                 verify_proc = subprocess.run(
                     verify_command, capture_output=True, text=True,
                     timeout=_SHELL_TIMEOUT, cwd=repo_root)
@@ -997,20 +837,69 @@ def run_recovery_loop(
                         "iteration": i + 1, "action": "verify_pass",
                         "detail": "verification passed"})
                     _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
-                                       action, "success", dur, "verification passed")
+                                       action, "success", dur, "verification passed",
+                                       invocation_id=invocation_id)
+                    _finish_recovery_status(
+                        repo_root,
+                        recovered=True,
+                        exhausted=False,
+                        outcome="success",
+                        action=action,
+                        detail="verification passed",
+                        state="tier3_verify_pass",
+                    )
                     return {"recovered": True, "exhausted": False,
                             "iterations": i + 1, "log": loop_log}
                 # Update result with new error for next iteration
                 result = dict(result)
                 result["stderr"] = verify_proc.stderr
                 result["stdout"] = verify_proc.stdout
+                _update_recovery_status(
+                    repo_root,
+                    state="tier3_verify_failed",
+                    detail=_excerpt(_summarize_result_reason(result)),
+                )
             except (subprocess.TimeoutExpired, OSError):
                 pass
+        elif action in {"shell", "edit"} and action_applied:
+            dur = round(time.monotonic() - iteration_t0, 3)
+            retry_target = _retry_target(result, step)
+            detail = explanation or f"{action} applied; retrying {retry_target}"
+            _log_tier3_attempt(
+                repo_root, wave_id, step, fc, i + 1,
+                action, "retry_requested", dur, detail,
+                invocation_id=invocation_id,
+            )
+            _finish_recovery_status(
+                repo_root,
+                recovered=True,
+                exhausted=False,
+                outcome="retry_requested",
+                action=action,
+                detail=detail,
+                state="tier3_retry_requested",
+            )
+            return {
+                "recovered": True,
+                "exhausted": False,
+                "iterations": i + 1,
+                "log": loop_log,
+            }
         # Log iteration outcome (verify failed or no verify command)
         dur = round(time.monotonic() - iteration_t0, 3)
         _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
-                           action, "failed", dur, explanation)
+                           action, "failed", dur, explanation,
+                           invocation_id=invocation_id)
 
+    _finish_recovery_status(
+        repo_root,
+        recovered=False,
+        exhausted=True,
+        outcome="exhausted",
+        action="exhausted",
+        detail=f"max {max_iterations} Tier 3 iterations exhausted",
+        state="tier3_exhausted",
+    )
     return {"recovered": False, "exhausted": True,
             "iterations": max_iterations, "log": loop_log}
 
@@ -1021,6 +910,7 @@ def run_recovery_loop(
 
 RECOVERY_LOG_DIR = Path(".agent_bus") / "recovery"
 RECOVERY_LOG_FILE = RECOVERY_LOG_DIR / "recovery_log.json"
+RECOVERY_STATUS_FILE = RECOVERY_LOG_DIR / "recovery_status.json"
 MAX_LOG_ENTRIES = 500
 
 
@@ -1037,6 +927,223 @@ class RecoveryAttempt:
     duration_s: float
     tokens_used: int = 0
     detail: str = ""
+    invocation_id: str = ""
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _excerpt(value: Any, limit: int = 160) -> str:
+    if value is None:
+        return ""
+    text = str(value).replace("\r", "\n").strip()
+    if not text:
+        return ""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    excerpt = ""
+    for candidate in reversed(lines):
+        if candidate not in _TRIVIAL_EXCERPTS:
+            excerpt = candidate
+            break
+    if not excerpt:
+        excerpt = lines[-1] if lines else text
+    if len(excerpt) <= limit:
+        return excerpt
+    return excerpt[: limit - 3].rstrip() + "..."
+
+
+def _parse_json_object(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str):
+        return {}
+    text = value.strip()
+    if not text:
+        return {}
+    candidates: list[str] = []
+    if text.startswith("{"):
+        candidates.append(text)
+    json_start = text.find("{")
+    json_end = text.rfind("}")
+    if json_start != -1 and json_end > json_start:
+        candidates.append(text[json_start:json_end + 1])
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _summarize_json_value(value: Any) -> str:
+    if isinstance(value, dict):
+        for key in ("error", "message", "detail", "reason", "stderr", "stdout"):
+            excerpt = _summarize_json_value(value.get(key))
+            if excerpt:
+                return excerpt
+        for nested in value.values():
+            excerpt = _summarize_json_value(nested)
+            if excerpt:
+                return excerpt
+        return ""
+    if isinstance(value, list):
+        for item in value:
+            excerpt = _summarize_json_value(item)
+            if excerpt:
+                return excerpt
+        return ""
+    excerpt = _excerpt(value)
+    return excerpt if excerpt not in _TRIVIAL_EXCERPTS else ""
+
+
+def _summarize_result_reason(result: dict[str, Any]) -> str:
+    def _usable_excerpt(value: Any) -> str:
+        excerpt = _excerpt(value)
+        if not excerpt:
+            return ""
+        if re.fullmatch(r"[\d,\s]+", excerpt):
+            return ""
+        return excerpt
+
+    for key in ("error", "stderr", "detail", "message"):
+        excerpt = _usable_excerpt(result.get(key, ""))
+        if excerpt:
+            return excerpt
+    for key in ("stdout", "stderr"):
+        excerpt = _summarize_json_value(_parse_json_object(result.get(key, "")))
+        if excerpt:
+            return excerpt
+    excerpt = _usable_excerpt(result.get("stdout", ""))
+    if excerpt:
+        return excerpt
+    status = _excerpt(result.get("status", ""))
+    step = _excerpt(result.get("step") or result.get("executor", ""))
+    if status and step:
+        return f"{step}: {status}"
+    return status or step or "recovery invoked"
+
+
+def _load_recovery_status(repo_root: Path) -> dict[str, Any]:
+    status_path = repo_root / RECOVERY_STATUS_FILE
+    if not status_path.exists():
+        return {}
+    try:
+        data = json.loads(status_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_recovery_status(repo_root: Path, status: dict[str, Any]) -> None:
+    status_path = repo_root / RECOVERY_STATUS_FILE
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    status_path.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
+
+
+def _count_wave_invocations(attempts: list[dict[str, Any]], wave_id: str) -> int:
+    invocation_ids: set[str] = set()
+    fallback = 0
+    for entry in attempts:
+        if entry.get("wave_id") != wave_id:
+            continue
+        invocation_id = entry.get("invocation_id", "")
+        if invocation_id:
+            invocation_ids.add(invocation_id)
+        else:
+            fallback += 1
+    return len(invocation_ids) + fallback
+
+
+def _new_invocation_id(wave_id: str, step: str, failure_class: str) -> str:
+    base = normalize_wave_id(wave_id or "wave")[:40]
+    step_part = normalize_wave_id(step or "step")[:20]
+    class_part = normalize_wave_id(failure_class or "failure")[:24]
+    return f"{base}-{step_part}-{class_part}-{uuid.uuid4().hex[:8]}"
+
+
+def _retry_target(result: dict[str, Any], step: str) -> str:
+    target = result.get("executor") or step or result.get("step", "")
+    return str(target).strip()
+
+
+def _begin_recovery_status(
+    repo_root: Path,
+    *,
+    attempts: list[dict[str, Any]],
+    result: dict[str, Any],
+    wave_id: str,
+    step: str,
+    failure_class: FailureClass,
+    tier: int,
+    prior_attempts: int,
+    invocation_id: str,
+) -> dict[str, Any]:
+    now = _now_iso()
+    status = {
+        "active": True,
+        "invocation_id": invocation_id,
+        "wave_id": wave_id,
+        "step": step,
+        "failure_class": failure_class.value,
+        "tier": tier,
+        "tuple_attempt_index": prior_attempts + 1,
+        "wave_invocation_count": _count_wave_invocations(attempts, wave_id) + 1,
+        "started_at": now,
+        "updated_at": now,
+        "finished_at": "",
+        "owner_pid": os.getpid(),
+        "child_pid": 0,
+        "child_role": "",
+        "state": f"tier{tier}_starting",
+        "reason": _summarize_result_reason(result),
+        "retry_target": _retry_target(result, step),
+        "current_iteration": 0,
+        "max_iterations": MAX_RECOVERY_ITERATIONS if tier == 3 else 0,
+        "last_action": "",
+        "current_command": "",
+        "explanation": "",
+        "detail": "",
+        "recovered": False,
+        "exhausted": False,
+        "outcome": "",
+    }
+    _save_recovery_status(repo_root, status)
+    return status
+
+
+def _update_recovery_status(repo_root: Path, **updates: Any) -> dict[str, Any]:
+    status = _load_recovery_status(repo_root)
+    status.update(updates)
+    status["updated_at"] = _now_iso()
+    _save_recovery_status(repo_root, status)
+    return status
+
+
+def _finish_recovery_status(
+    repo_root: Path,
+    *,
+    recovered: bool,
+    exhausted: bool,
+    outcome: str,
+    action: str,
+    detail: str,
+    state: str,
+) -> dict[str, Any]:
+    return _update_recovery_status(
+        repo_root,
+        active=False,
+        recovered=recovered,
+        exhausted=exhausted,
+        outcome=outcome,
+        state=state,
+        last_action=action,
+        detail=_excerpt(detail),
+        child_pid=0,
+        child_role="",
+        current_command="",
+        finished_at=_now_iso(),
+    )
 
 
 def _load_recovery_log(repo_root: Path) -> list[dict[str, Any]]:
@@ -1065,10 +1172,22 @@ def _count_prior_attempts(
     attempts: list[dict[str, Any]], wave_id: str, step: str, failure_class: str,
 ) -> int:
     """Count prior recovery attempts for the same (wave_id, step, class) tuple."""
-    return sum(1 for e in attempts
-               if e.get("wave_id") == wave_id
-               and e.get("step") == step
-               and e.get("failure_class") == failure_class)
+    count = 0
+    seen_invocations: set[str] = set()
+    for entry in attempts:
+        if entry.get("wave_id") != wave_id:
+            continue
+        if entry.get("step") != step:
+            continue
+        if entry.get("failure_class") != failure_class:
+            continue
+        invocation_id = entry.get("invocation_id", "")
+        if invocation_id:
+            if invocation_id in seen_invocations:
+                continue
+            seen_invocations.add(invocation_id)
+        count += 1
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -1102,29 +1221,61 @@ def attempt_recovery(
 
     attempts = _load_recovery_log(repo_root)
     prior = _count_prior_attempts(attempts, wave_id, step, fc.value)
+    invocation_id = _new_invocation_id(wave_id, step, fc.value)
+    _begin_recovery_status(
+        repo_root,
+        attempts=attempts,
+        result=result,
+        wave_id=wave_id,
+        step=step,
+        failure_class=fc,
+        tier=tier,
+        prior_attempts=prior,
+        invocation_id=invocation_id,
+    )
 
     if prior >= MAX_ATTEMPTS_PER_TUPLE:
-        return _make_result(False, "exhausted", tier, fc,
-                            f"max {MAX_ATTEMPTS_PER_TUPLE} attempts reached for "
-                            f"({wave_id}, {step}, {fc.value})", True)
+        detail = (
+            f"max {MAX_ATTEMPTS_PER_TUPLE} attempts reached for "
+            f"({wave_id}, {step}, {fc.value})"
+        )
+        _finish_recovery_status(
+            repo_root,
+            recovered=False,
+            exhausted=True,
+            outcome="exhausted",
+            action="exhausted",
+            detail=detail,
+            state=f"tier{tier}_exhausted",
+        )
+        return _make_result(False, "exhausted", tier, fc, detail, True)
     if tier == 4:
-        return _make_result(False, "escalate", 4, fc,
-                            f"tier 4 failure ({fc.value}) requires escalation", False)
+        detail = f"tier 4 failure ({fc.value}) requires escalation"
+        _finish_recovery_status(
+            repo_root,
+            recovered=False,
+            exhausted=False,
+            outcome="escalated",
+            action="escalate",
+            detail=detail,
+            state="tier4_escalated",
+        )
+        return _make_result(False, "escalate", 4, fc, detail, False)
     if tier == 3:
         loop_result = run_recovery_loop(
             repo_root,
             {
                 **result,
                 "failure_class": fc.value,
-                "tier": tier,
             },
             wave_id,
+            invocation_id=invocation_id,
         )
-        detail = f"tier 3 recovery loop ran {loop_result.get('iterations', 0)} iteration(s)"
+        detail = ""
         if loop_result.get("log"):
-            last_entry = loop_result["log"][-1]
-            if last_entry.get("detail"):
-                detail = f"{detail}; {last_entry['detail']}"
+            detail = str(loop_result["log"][-1].get("detail", "")).strip()
+        if not detail:
+            detail = _load_recovery_status(repo_root).get("detail", "")
         return _make_result(
             loop_result.get("recovered", False),
             "recovery_loop",
@@ -1136,6 +1287,7 @@ def attempt_recovery(
 
     # Tier 2: check _TIER2_FIXES before falling through
     if tier == 2:
+        _update_recovery_status(repo_root, state="tier2_fixing")
         fix_fn = _TIER2_FIXES.get(fc)
         if fix_fn is not None:
             fix_result = fix_fn(repo_root, wave_id=wave_id, result=result)
@@ -1146,20 +1298,49 @@ def attempt_recovery(
                 action=fix_result.get("action", "unknown"),
                 outcome="success" if fix_result.get("fixed") else "failed",
                 duration_s=round(duration, 3), tokens_used=0,
-                detail=fix_result.get("detail", ""))
+                detail=fix_result.get("detail", ""),
+                invocation_id=invocation_id)
             attempts.append(asdict(attempt_rec))
             _save_recovery_log(repo_root, attempts)
+            _finish_recovery_status(
+                repo_root,
+                recovered=fix_result.get("fixed", False),
+                exhausted=False,
+                outcome="success" if fix_result.get("fixed") else "failed",
+                action=fix_result.get("action", "unknown"),
+                detail=fix_result.get("detail", ""),
+                state="tier2_fixed" if fix_result.get("fixed") else "tier2_failed",
+            )
             return _make_result(fix_result.get("fixed", False),
                                 fix_result.get("action", "unknown"), tier, fc,
                                 fix_result.get("detail", ""), False)
-        return _make_result(False, "no_fix_registered", tier, fc,
-                            f"no tier 2 fix registered for {fc.value}", False)
+        detail = f"no tier 2 fix registered for {fc.value}"
+        _finish_recovery_status(
+            repo_root,
+            recovered=False,
+            exhausted=False,
+            outcome="failed",
+            action="no_fix_registered",
+            detail=detail,
+            state="tier2_unhandled",
+        )
+        return _make_result(False, "no_fix_registered", tier, fc, detail, False)
 
     fix_fn = _TIER1_FIXES.get(fc)
     if fix_fn is None:
-        return _make_result(False, "no_fix_registered", tier, fc,
-                            f"no tier 1 fix registered for {fc.value}", False)
+        detail = f"no tier 1 fix registered for {fc.value}"
+        _finish_recovery_status(
+            repo_root,
+            recovered=False,
+            exhausted=False,
+            outcome="failed",
+            action="no_fix_registered",
+            detail=detail,
+            state="tier1_unhandled",
+        )
+        return _make_result(False, "no_fix_registered", tier, fc, detail, False)
 
+    _update_recovery_status(repo_root, state="tier1_fixing")
     fix_result = fix_fn(repo_root, wave_id=wave_id, result=result)
     duration = time.monotonic() - t0
 
@@ -1169,9 +1350,19 @@ def attempt_recovery(
         action=fix_result.get("action", "unknown"),
         outcome="success" if fix_result.get("fixed") else "failed",
         duration_s=round(duration, 3), tokens_used=0,
-        detail=fix_result.get("detail", ""))
+        detail=fix_result.get("detail", ""),
+        invocation_id=invocation_id)
     attempts.append(asdict(attempt))
     _save_recovery_log(repo_root, attempts)
+    _finish_recovery_status(
+        repo_root,
+        recovered=fix_result.get("fixed", False),
+        exhausted=False,
+        outcome="success" if fix_result.get("fixed") else "failed",
+        action=fix_result.get("action", "unknown"),
+        detail=fix_result.get("detail", ""),
+        state="tier1_fixed" if fix_result.get("fixed") else "tier1_failed",
+    )
 
     return _make_result(fix_result.get("fixed", False),
                         fix_result.get("action", "unknown"), tier, fc,

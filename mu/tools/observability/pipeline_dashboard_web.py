@@ -39,107 +39,26 @@ def pid_start(pid):
         return None
 
 
-def _parse_agent_envelope(text):
-    matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", text, re.DOTALL))
-    if not matches:
-        return None
-    for match in reversed(matches):
-        try:
-            env = json.loads(match.group(1))
-        except json.JSONDecodeError:
-            continue
-        decision = env.get("decision", "")
-        if decision and "|" not in decision:
-            return env
-    return None
-
-
-def _parse_rendered_reviewer_section(text):
-    section_re = re.compile(r"(?ms)^### .*? — reviewer\n(.*?)(?=^### |\Z)")
-    decision_re = re.compile(
-        r"(?m)^\s*-\s*Decision:\s*"
-        r"(GO|REQUEST_CHANGES|NO_GO|QUESTION|STALE|ERROR|SYNTHETIC)\b"
-    )
-    summary_re = re.compile(r"(?m)^\s*-\s*Summary:\s*(.*)")
-    finding_re = re.compile(
-        r"(?m)^\s*\d+\.\s+\*\*(DEFECT|POLICY_BOUND|DOC_ACCURACY)\*\* "
-        r"\(([^)]+)\):\s*(.*)$"
-    )
-    sections = list(section_re.finditer(text))
-    for section in reversed(sections):
-        block = section.group(1)
-        decision_match = decision_re.search(block)
-        if not decision_match:
-            continue
-        decision = decision_match.group(1)
-        if decision == "SYNTHETIC":
-            continue
-        summary_match = summary_re.search(block)
-        disposition = "non_blocking" if decision == "GO" else "blocking"
-        findings = [
-            {
-                "class": cls,
-                "severity": severity.strip().lower(),
-                "title": title.strip(),
-                "disposition": disposition,
-            }
-            for cls, severity, title in finding_re.findall(block)
-        ]
-        return {
-            "decision": decision,
-            "summary": (summary_match.group(1).strip() if summary_match else ""),
-            "findings": findings,
-        }
-    return None
-
-
-def _parse_review_payload(text):
-    return _parse_agent_envelope(text) or _parse_rendered_reviewer_section(text)
-
-
-def _is_bridge_round_dir(name):
+def _is_observability_noise(line):
+    lowered = line.lower()
     return (
-        name.startswith("phase-a-r")
-        or name.startswith("phase-b-r")
-        or name.startswith("phase-a-reentry-r")
-        or name.startswith("phase-b-reentry-r")
+        "tail -f " in lowered
+        or "rcx_log_watcher.sh" in lowered
+        or "_pane_" in lowered
+        or "pipeline_monitor.sh" in lowered
     )
-
-
-def _bridge_review_artifact(job_id, reviewer_file):
-    rendered = REPO_ROOT / ".agent_bus" / "rendered" / f"{job_id}.md"
-    candidates = [rendered]
-    if reviewer_file is not None:
-        candidates.append(reviewer_file)
-    for path in candidates:
-        if path is None or not path.exists():
-            continue
-        try:
-            env = _parse_review_payload(path.read_text())
-        except Exception:
-            continue
-        if env is not None:
-            return env, path.stat().st_mtime
-    return None, None
 
 
 def detect_phase(lines):
     for name, pattern in [("phase-a", "phase_a_executor"), ("phase-b", "phase_b_executor"),
-                          ("commit", "commit_executor"),
+                          ("commit", "commit_executor"), ("post-merge", "meta_bridge_supervisor"),
                           ("bridge", "bridge_supervisor")]:
         for l in lines:
-            if pattern in l and "grep" not in l and "test_" not in l:
-                if pattern == "bridge_supervisor" and "meta_bridge_supervisor" in l:
-                    continue
+            if pattern in l and "grep" not in l and "test_" not in l and not _is_observability_noise(l):
                 pid = int(l.split()[1])
                 return {"phase": name, "pid": pid, "started": pid_start(pid)}
     for l in lines:
-        if "meta_bridge_supervisor" in l and "grep" not in l and "test_" not in l:
-            pid = int(l.split()[1])
-            phase = "post-merge" if "--mode post-merge" in l or " post-merge " in l else "commit"
-            return {"phase": phase, "pid": pid, "started": pid_start(pid)}
-    for l in lines:
-        if "executor_dispatch" in l and "grep" not in l:
+        if "executor_dispatch" in l and "grep" not in l and not _is_observability_noise(l):
             return {"phase": "dispatch", "pid": int(l.split()[1]), "started": pid_start(int(l.split()[1]))}
     return {"phase": "idle", "pid": None, "started": None}
 
@@ -147,7 +66,7 @@ def detect_phase(lines):
 def detect_subs(lines):
     subs = []
     for l in lines:
-        if "grep" in l:
+        if "grep" in l or _is_observability_noise(l):
             continue
         # Codex CLI reviewer: must have "codex exec" + "gpt" (not Codex.app desktop helpers)
         if "codex" in l.lower() and "exec" in l and "gpt" in l and "Codex.app" not in l and "Codex Helper" not in l:
@@ -177,29 +96,44 @@ def bridge_round_history():
         return []
     rounds = []
     for d in sorted(raw_dir.iterdir()):
-        if not d.is_dir() or not _is_bridge_round_dir(d.name):
+        if not d.is_dir() or not (d.name.startswith("phase-b-r") or d.name.startswith("phase-a-r")):
             continue
-        reviewer_files = sorted(
-            (f for f in d.iterdir() if "reviewer" in f.name),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
-        reviewer_file = reviewer_files[0] if reviewer_files else None
-        env, mtime = _bridge_review_artifact(d.name, reviewer_file)
-        if env is None or mtime is None:
-            continue
-        findings = env.get("findings", [])
-        blk = [x for x in findings if x.get("disposition") == "blocking"]
-        nblk = [x for x in findings if x.get("disposition") != "blocking"]
-        rounds.append({
-            "job_id": d.name,
-            "decision": env.get("decision", ""),
-            "summary": env.get("summary", ""),
-            "blocking": blk,
-            "non_blocking": nblk,
-            "timestamp": mtime,
-            "time_str": datetime.fromtimestamp(mtime).strftime("%H:%M:%S"),
-        })
+        for f in d.iterdir():
+            if "reviewer" not in f.name:
+                continue
+            try:
+                content = f.read_text()
+                matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", content, re.DOTALL))
+                if not matches:
+                    continue
+                env = None
+                for m in reversed(matches):
+                    try:
+                        candidate = json.loads(m.group(1))
+                        if "|" not in candidate.get("decision", ""):
+                            env = candidate
+                            break
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+                if env is None:
+                    continue
+                dec = env.get("decision", "")
+                if not dec:
+                    continue
+                findings = env.get("findings", [])
+                blk = [x for x in findings if x.get("disposition") == "blocking"]
+                nblk = [x for x in findings if x.get("disposition") != "blocking"]
+                rounds.append({
+                    "job_id": d.name,
+                    "decision": dec,
+                    "summary": env.get("summary", ""),
+                    "blocking": blk,
+                    "non_blocking": nblk,
+                    "timestamp": f.stat().st_mtime,
+                    "time_str": datetime.fromtimestamp(f.stat().st_mtime).strftime("%H:%M:%S"),
+                })
+            except Exception:
+                pass
     rounds.sort(key=lambda r: r["timestamp"])
     return rounds
 
@@ -756,6 +690,141 @@ def lock_status():
     return None
 
 
+def _parse_iso8601(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _age_seconds(value):
+    parsed = _parse_iso8601(value)
+    if parsed is None:
+        return None
+    return max(0, int(time.time() - parsed.timestamp()))
+
+
+def _human_recovery_target(target):
+    mapping = {
+        "phase_a_executor": "Phase A",
+        "phase_a": "Phase A",
+        "phase_b_executor": "Phase B",
+        "phase_b": "Phase B",
+        "commit_executor": "Commit",
+        "commit": "Commit",
+        "executor_dispatch": "Dispatch",
+    }
+    cleaned = (target or "").strip()
+    return mapping.get(cleaned, cleaned.replace("_", " "))
+
+
+def _excerpt(text, limit=110):
+    if text is None:
+        return ""
+    cleaned = str(text).replace("\r", "\n").strip()
+    if not cleaned:
+        return ""
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    excerpt = lines[-1] if lines else cleaned
+    if len(excerpt) <= limit:
+        return excerpt
+    return excerpt[: limit - 3].rstrip() + "..."
+
+
+def _is_unhelpful_recovery_text(text):
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return True
+    if re.fullmatch(r"[\d,\s]+", cleaned):
+        return True
+    if cleaned.lower().startswith("tokens used"):
+        return True
+    return False
+
+
+def _is_generic_recovery_reason(text):
+    return bool(re.fullmatch(
+        r"[a-z0-9_-]+:\s+(failed|error|partial|success|held|unknown)",
+        (text or "").strip().lower(),
+    ))
+
+
+def _pid_state(pid_value):
+    try:
+        pid = int(pid_value)
+    except (TypeError, ValueError):
+        return 0, ""
+    if pid <= 0:
+        return 0, ""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return pid, "dead"
+    return pid, "alive"
+
+
+def _rendered_recovery_reason(status):
+    reason = _excerpt(status.get("reason", ""))
+    detail = _excerpt(status.get("detail", ""))
+    explanation = _excerpt(status.get("explanation", ""))
+    if reason and not _is_unhelpful_recovery_text(reason) and not _is_generic_recovery_reason(reason):
+        return reason, "reason"
+    if detail and not _is_unhelpful_recovery_text(detail):
+        return detail, "detail"
+    if reason and not _is_unhelpful_recovery_text(reason):
+        return reason, "reason"
+    if explanation and not _is_unhelpful_recovery_text(explanation):
+        return explanation, "explanation"
+    return "", ""
+
+
+def recovery_snapshot():
+    status = read_json_safe(REPO_ROOT / ".agent_bus" / "recovery" / "recovery_status.json")
+    if not isinstance(status, dict) or not status:
+        return None
+    active = bool(status.get("active"))
+    age = _age_seconds(status.get("updated_at", ""))
+    label = "ACTIVE"
+    if active and age is not None and age >= 90:
+        label = "POSSIBLY HUNG"
+    elif not active:
+        label = "LAST RECOVERY"
+    owner_pid, owner_state = _pid_state(status.get("owner_pid", 0))
+    child_pid, child_state = _pid_state(status.get("child_pid", 0))
+    reason_display, reason_source = _rendered_recovery_reason(status)
+    detail_display = _excerpt(status.get("detail", ""))
+    explanation = _excerpt(status.get("explanation", ""))
+    if reason_source == "detail" or detail_display == reason_display or detail_display == explanation:
+        detail_display = ""
+    return {
+        "label": label,
+        "active": active,
+        "tier": status.get("tier"),
+        "failure_class": status.get("failure_class", ""),
+        "wave_id": status.get("wave_id", ""),
+        "wave_invocation_count": status.get("wave_invocation_count", 0),
+        "tuple_attempt_index": status.get("tuple_attempt_index", 0),
+        "retry_target": _human_recovery_target(status.get("retry_target", "")),
+        "state": status.get("state", ""),
+        "reason": reason_display,
+        "explanation": explanation,
+        "detail": detail_display,
+        "outcome": status.get("outcome", ""),
+        "last_action": status.get("last_action", ""),
+        "current_iteration": status.get("current_iteration", 0),
+        "max_iterations": status.get("max_iterations", 0),
+        "owner_pid": owner_pid,
+        "owner_state": owner_state,
+        "child_pid": child_pid,
+        "child_state": child_state,
+        "child_role": _excerpt(status.get("child_role", ""), 24),
+        "current_command": status.get("current_command", ""),
+        "updated_age_seconds": age,
+    }
+
+
 def get_state():
     psl = ps_lines()
     phase = detect_phase(psl)
@@ -767,11 +836,31 @@ def get_state():
     log = active_log_tail()
     wave = wave_context()
     lock = lock_status()
+    recovery = recovery_snapshot()
     branch = git_branch()
     commits = git_log_short()
 
     history = bridge_round_history()
     narrative = build_narrative(phase, subs, wave, lock, history)
+    if recovery and recovery.get("active"):
+        loop = ""
+        if recovery.get("max_iterations"):
+            loop = (
+                f" Loop {recovery.get('current_iteration', 0)}"
+                f"/{recovery.get('max_iterations', 0)}."
+            )
+        narrative.append({
+            "text": (
+                f"Recovery agent active: Tier {recovery.get('tier')} "
+                f"{recovery.get('failure_class')} for {recovery.get('retry_target')}.{loop}"
+            ),
+            "style": "detail",
+        })
+        if recovery.get("reason"):
+            narrative.append({
+                "text": f"Recovery reason: {recovery.get('reason')}",
+                "style": "dim",
+            })
     impl_files = implementer_changes()
     activity = model_activity()
     timeline = session_timeline()
@@ -790,6 +879,7 @@ def get_state():
         "log_tail": log,
         "wave": wave,
         "lock": lock,
+        "recovery": recovery,
         "narrative": narrative,
         "impl_files": impl_files,
         "model_activity": activity,
@@ -1070,6 +1160,7 @@ function renderSidebar(data) {
   const p = data.phase || {};
   const subs = data.subprocesses || [];
   const wave = data.wave;
+  const recovery = data.recovery;
   const agents = data.agents;
   const jobs = data.db_jobs || [];
   const gs = data.git_status || [];
@@ -1172,6 +1263,49 @@ function renderSidebar(data) {
       html += `<div class="progress-bar"><div class="progress-fill active" style="width:${pct}%;background:var(--purple)"></div></div>`;
     }
     if (wave.target_branch) html += `<div class="kv"><span class="k">Branch</span><span class="v" style="color:var(--accent)">${esc(wave.target_branch)}</span></div>`;
+    html += '</div></div>';
+  }
+
+  if (recovery) {
+    const summary = `${recovery.label} — Tier ${recovery.tier} ${recovery.failure_class || ''}`.trim();
+    html += '<div class="section"><div class="section-header">Recovery</div><div class="section-body">';
+    html += `<div style="font-size:11px;font-weight:700;color:${recovery.active ? 'var(--yellow)' : 'var(--cyan)'};margin-bottom:6px">${esc(summary)}</div>`;
+    if (recovery.retry_target) html += `<div class="kv"><span class="k">Target</span><span class="v">${esc(recovery.retry_target)}</span></div>`;
+    if (recovery.wave_invocation_count || recovery.tuple_attempt_index) {
+      html += `<div class="kv"><span class="k">Count</span><span class="v">${recovery.wave_invocation_count||'?'} in wave · try ${recovery.tuple_attempt_index||'?'}</span></div>`;
+    }
+    if (recovery.state) {
+      const loop = recovery.max_iterations ? ` · ${recovery.current_iteration||0}/${recovery.max_iterations}` : '';
+      html += `<div class="kv"><span class="k">State</span><span class="v">${esc(recovery.state + loop)}</span></div>`;
+    }
+    if (recovery.owner_pid) {
+      let pidText = `owner ${recovery.owner_pid}`;
+      if (recovery.owner_state) {
+        pidText += (!recovery.active && recovery.owner_state === 'dead')
+          ? ' (dead, historical)'
+          : ` (${recovery.owner_state})`;
+      }
+      if (recovery.child_pid) {
+        pidText += ` · ${(recovery.child_role||'child')} ${recovery.child_pid}`;
+        if (recovery.child_state) {
+          pidText += (!recovery.active && recovery.child_state === 'dead')
+            ? ' (dead, historical)'
+            : ` (${recovery.child_state})`;
+        }
+      }
+      html += `<div class="kv"><span class="k">PIDs</span><span class="v">${esc(pidText)}</span></div>`;
+    }
+    if (recovery.reason) html += `<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">Reason: ${esc(recovery.reason)}</div>`;
+    if (recovery.explanation) html += `<div style="margin-top:4px;font-size:11px;color:var(--text-dim)">Note: ${esc(recovery.explanation)}</div>`;
+    if (recovery.current_command) html += `<div style="margin-top:4px;font-size:10px;color:var(--text-muted)">Cmd: ${esc(recovery.current_command)}</div>`;
+    if (!recovery.active && recovery.outcome) {
+      let outcome = recovery.outcome;
+      if (recovery.last_action) outcome += ` via ${recovery.last_action}`;
+      html += `<div style="margin-top:6px;font-size:11px;color:var(--cyan)">Outcome: ${esc(outcome)}</div>`;
+    }
+    if (recovery.detail && recovery.detail !== recovery.reason && recovery.detail !== recovery.explanation) {
+      html += `<div style="margin-top:4px;font-size:10px;color:var(--text-muted)">Detail: ${esc(recovery.detail)}</div>`;
+    }
     html += '</div></div>';
   }
 

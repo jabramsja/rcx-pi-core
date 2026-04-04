@@ -75,6 +75,16 @@ try:
 except ImportError as _exc:
     _bridge_import_error = _exc
 
+_tracker_sync_note = None
+_tracker_sync_import_error = None
+try:
+    _executors_dir = str(SCRIPT_DIR)
+    if _executors_dir not in sys.path:
+        sys.path.insert(0, _executors_dir)
+    import tracker_sync_note as _tracker_sync_note
+except ImportError as _exc:
+    _tracker_sync_import_error = _exc
+
 BRANCH_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 FORCE_ADD_DENYLIST = tuple(d.lower() for d in (".git/", ".env", ".agent_bus/"))
@@ -146,6 +156,7 @@ BOT_REVIEW_POLL_SECONDS = 5
 BOT_REVIEW_ACK_REACTION = "eyes"
 CI_CHECK_REGISTRATION_WAIT_SECONDS = 120
 CI_CHECK_REGISTRATION_POLL_SECONDS = 5
+PRE_PUSH_FAST_TIMEOUT_S = 900
 BOT_NO_ISSUES_COMMENT_RE = re.compile(
     r"Codex Review:\s*.*did(?:n't| not) find any major issues",
     re.IGNORECASE | re.DOTALL,
@@ -322,6 +333,174 @@ def _resolve_post_merge_verify_root(repo_root: Path, base_branch: str, *, log: A
 def _handoff_sha(handoff: dict[str, Any]) -> str:
     canonical = json.dumps(handoff, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _collect_wave_test_files(paths: list[str]) -> list[str]:
+    """Return deduplicated pytest-style module paths from staged wave files."""
+    test_files: list[str] = []
+    seen: set[str] = set()
+    for raw_path in paths:
+        if not isinstance(raw_path, str):
+            continue
+        normalized = raw_path.replace("\\", "/")
+        if not normalized.endswith(".py"):
+            continue
+        if not (normalized.startswith("mu/tests/") or normalized.startswith("tests/")):
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        test_files.append(normalized)
+    return test_files
+
+
+def _build_default_tracker_note_text(
+    *,
+    wave_id: str,
+    wave_class: str,
+    target_gate_id: str,
+    commit_message: str,
+    files_to_stage: list[str],
+) -> str:
+    """Render a contract-complete tracker note for ad hoc commit handoffs."""
+    summary = (commit_message or "").splitlines()[0].strip() or f"update {wave_id}"
+    indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+    indicator_cmd = (
+        f"python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} "
+        f"--output {indicator_path}"
+    )
+    wave_files = [path for path in files_to_stage if isinstance(path, str)]
+    test_files = _collect_wave_test_files(wave_files)
+
+    if wave_class == "MAINTENANCE":
+        if _tracker_sync_note is not None:
+            fields = _tracker_sync_note.TrackerSyncNoteFields(
+                wave_id=wave_id,
+                title=summary,
+                wave_class=wave_class,
+                target_gate_id=target_gate_id,
+                no_op_proof=(
+                    "control-surface/docs/test-only wave-owned scope; no runtime/substrate files "
+                    "declared in this handoff"
+                ),
+                defer_reason_code="PIPELINE_HARDENING",
+                primary_blocker_class="INTEGRATION",
+                primary_invariant_id="INV_STRUCTURAL_FORWARD_MOTION",
+                indicator_artifact_ref=indicator_path,
+                indicator_collection_command=indicator_cmd,
+            )
+            return _tracker_sync_note.render_tracker_sync_note(fields)
+        return (
+            f"- Tracker sync note ({datetime.now(timezone.utc).strftime('%Y-%m-%d')}, {wave_id}): "
+            f"**{summary}.**. Class: {wave_class}. target_gate_id: {target_gate_id}. "
+            "no_op_proof: control-surface/docs/test-only wave-owned scope; no runtime/substrate files "
+            "declared in this handoff. defer_reason_code: PIPELINE_HARDENING. "
+            "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: {indicator_path}. indicator_collection_command: {indicator_cmd}. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        )
+
+    if test_files:
+        evidence_command = (
+            "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short " + " ".join(test_files)
+        )
+        evidence_delta = (
+            f"(1) Routed commit handoff scopes {len(wave_files)} wave-owned file(s). "
+            f"(2) Evidence gate exercises {len(test_files)} wave-owned test module(s). "
+            f"(3) Indicator artifact binds the wave to {indicator_path}."
+        )
+    else:
+        evidence_command = indicator_cmd
+        evidence_delta = (
+            f"(1) Routed commit handoff scopes {len(wave_files)} wave-owned file(s). "
+            "(2) No wave-owned pytest module was staged in this ad hoc handoff, so indicator collection is "
+            "the mechanical evidence surface. "
+            f"(3) Indicator artifact binds the wave to {indicator_path}."
+        )
+    progress_before = (
+        "The routed commit handoff had not yet been bound to a contract-complete tracker note, so "
+        "downstream L4 governance could fail during pre-push."
+    )
+    progress_after = (
+        f"The routed commit handoff for {wave_id} is now bound to {len(wave_files)} wave-owned file(s), "
+        f"{len(test_files)} wave-owned test module(s), and a canonical indicator artifact."
+    )
+
+    if _tracker_sync_note is not None:
+        fields = _tracker_sync_note.TrackerSyncNoteFields(
+            wave_id=wave_id,
+            title=summary,
+            wave_class="L4_ENABLER" if wave_class == "MAINTENANCE" else wave_class,
+            target_gate_id=target_gate_id,
+            evidence_command=evidence_command,
+            evidence_delta=evidence_delta,
+            progress_proof_before=progress_before,
+            progress_proof_after=progress_after,
+            primary_blocker_class="INTEGRATION",
+            primary_invariant_id="INV_STRUCTURAL_FORWARD_MOTION",
+            indicator_artifact_ref=indicator_path,
+            indicator_collection_command=indicator_cmd,
+        )
+        return _tracker_sync_note.render_tracker_sync_note(fields)
+
+    return (
+        f"- Tracker sync note ({datetime.now(timezone.utc).strftime('%Y-%m-%d')}, {wave_id}): "
+        f"**{summary}.**. Class: {wave_class}. target_gate_id: {target_gate_id}. "
+        f"evidence_command: `{evidence_command}`. evidence_delta: {evidence_delta}. "
+        f"progress_proof_before: {progress_before}. progress_proof_after: {progress_after}. "
+        "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+        f"indicator_artifact_ref: {indicator_path}. indicator_collection_command: {indicator_cmd}. "
+        "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+        "boot0_track_id: V1. boot0_progress_state: HOLD."
+    )
+
+
+def _validate_tracker_note_text(
+    *,
+    tracker_note_text: str,
+    wave_id: str,
+    wave_class: str,
+    target_gate_id: str,
+) -> list[str]:
+    """Reject incomplete tracker notes before the executor makes a local commit."""
+    errors: list[str] = []
+    note = tracker_note_text.strip()
+    header_re = re.compile(
+        rf"^- Tracker sync note \([^,]+,\s*{re.escape(wave_id)}\):"
+    )
+    if not header_re.search(note):
+        errors.append(f"tracker_note_text must start with a canonical tracker note header for wave_id '{wave_id}'")
+
+    required_literals = [
+        "Class:",
+        f"target_gate_id: {target_gate_id}",
+        "primary_blocker_class:",
+        "primary_invariant_id:",
+        "indicator_artifact_ref:",
+        "indicator_collection_command:",
+        "bootstrap_endgame_policy:",
+        "boot0_track_id:",
+        "boot0_progress_state:",
+    ]
+    if wave_class in ("L4_ENABLER", "L4_STRUCTURAL"):
+        required_literals.extend([
+            "evidence_command:",
+            "evidence_delta:",
+            "progress_proof_before:",
+            "progress_proof_after:",
+        ])
+    elif wave_class == "MAINTENANCE":
+        required_literals.extend([
+            "no_op_proof:",
+            "defer_reason_code:",
+        ])
+
+    for literal in required_literals:
+        if literal not in note:
+            errors.append(f"tracker_note_text missing required field marker: {literal}")
+
+    return errors
 
 
 def _continuation_record_path(repo_root: Path, wave_id: str) -> Path:
@@ -1610,12 +1789,6 @@ def prepare_handoff_from_routing_record(
             if cf:
                 files_to_stage.extend(cf)
 
-    # For UPDATE_TRACKER_ONLY, at minimum we need the tracker note
-    if decision == "UPDATE_TRACKER_ONLY" and not tracker_note:
-        # Try to derive from summary
-        wave_id_safe = wave_name.replace(" ", "-").lower()
-        tracker_note = f"- Tracker sync note ({wave_id_safe}): {summary}"
-
     if not files_to_stage:
         # Default to TASKS.md for tracker-only updates
         if decision == "UPDATE_TRACKER_ONLY":
@@ -1628,19 +1801,44 @@ def prepare_handoff_from_routing_record(
 
     # Normalize wave_id for branch naming
     wave_id = normalize_wave_id(wave_name)
+    wave_class = record.get("wave_class", "MAINTENANCE")
+    target_gate_id = record.get("target_gate_id", "NONE")
+    default_commit_message = (
+        f"chore: {summary}\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+    )
+    commit_message = record.get("commit_message", default_commit_message)
+    if commit_message is None:
+        commit_message = default_commit_message
+    elif not isinstance(commit_message, str):
+        commit_message = str(commit_message)
+    raw_force_add_files = record.get("force_add_files")
+    force_add_files = [] if raw_force_add_files is None else raw_force_add_files
+
+    # UPDATE_TRACKER_ONLY routing records may omit tracker_note_text. In that
+    # case, synthesize the same contract-complete note shape that validate_handoff
+    # now requires instead of the older one-line fallback.
+    if decision == "UPDATE_TRACKER_ONLY" and not tracker_note:
+        force_add = force_add_files if isinstance(force_add_files, list) else []
+        tracker_note = _build_default_tracker_note_text(
+            wave_id=wave_id,
+            wave_class=wave_class,
+            target_gate_id=target_gate_id,
+            commit_message=commit_message,
+            files_to_stage=files_to_stage + force_add,
+        )
 
     handoff = {
         "wave_id": wave_id,
         "task_id": record.get("task_id", f"[{wave_name}]"),
-        "wave_class": record.get("wave_class", "MAINTENANCE"),
-        "target_gate_id": record.get("target_gate_id", "NONE"),
+        "wave_class": wave_class,
+        "target_gate_id": target_gate_id,
         "caller": "update_tracker_only" if decision == "UPDATE_TRACKER_ONLY" else "phase_b",
         "branch_prefix": "jabramsja",
         "tracker_note_text": tracker_note,
         "fixes_implemented": record.get("fixes_implemented", [summary]),
         "files_to_stage": files_to_stage,
-        "force_add_files": record.get("force_add_files", []),
-        "commit_message": record.get("commit_message", f"chore: {summary}\n\nCo-Authored-By: Claude <noreply@anthropic.com>"),
+        "force_add_files": force_add_files,
+        "commit_message": commit_message,
         "pr_title": record.get("pr_title", f"chore: {summary}"[:70]),
         "pr_body": record.get("pr_body", f"## Summary\n\n- {summary}"),
         "base_branch": "dev",
@@ -1726,14 +1924,12 @@ def build_commit_handoff(
         "target_gate_id": target_gate_id,
         "caller": caller,
         "branch_prefix": branch_prefix,
-        "tracker_note_text": tracker_note_text or (
-            f"- Tracker sync note ({datetime.now(timezone.utc).strftime('%Y-%m-%d')}, {wave_id}): "
-            f"**{commit_message}**. Class: {wave_class}. "
-            f"target_gate_id: {target_gate_id}. "
-            f"primary_blocker_class: INTEGRATION. "
-            f"primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
-            f"bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
-            f"boot0_track_id: V1. boot0_progress_state: HOLD."
+        "tracker_note_text": tracker_note_text or _build_default_tracker_note_text(
+            wave_id=wave_id,
+            wave_class=wave_class,
+            target_gate_id=target_gate_id,
+            commit_message=commit_message,
+            files_to_stage=effective_files + effective_force,
         ),
         "fixes_implemented": fixes_implemented,
         "files_to_stage": effective_files,
@@ -1886,6 +2082,15 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
     tnt = handoff.get("tracker_note_text", "")
     if not isinstance(tnt, str) or not tnt.strip():
         errors.append("tracker_note_text must be a non-empty string")
+    else:
+        errors.extend(
+            _validate_tracker_note_text(
+                tracker_note_text=tnt,
+                wave_id=str(handoff.get("wave_id", "")),
+                wave_class=str(handoff.get("wave_class", "")),
+                target_gate_id=str(handoff.get("target_gate_id", "")),
+            )
+        )
 
     # fixes_implemented must be non-empty list of strings
     fi = handoff.get("fixes_implemented")
@@ -1930,7 +2135,7 @@ def _run_post_commit_pipeline(
         pre_push_script = repo_root / "mu" / "tools" / "hooks" / "pre-push-fast"
         if pre_push_script.exists():
             try:
-                _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=300)
+                _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=PRE_PUSH_FAST_TIMEOUT_S)
             except subprocess.CalledProcessError as exc:
                 detail = (exc.stderr or exc.stdout or "").strip()
                 if not detail:
