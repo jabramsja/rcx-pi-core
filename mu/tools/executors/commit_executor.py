@@ -1721,12 +1721,6 @@ def prepare_handoff_from_routing_record(
             if cf:
                 files_to_stage.extend(cf)
 
-    # For UPDATE_TRACKER_ONLY, at minimum we need the tracker note
-    if decision == "UPDATE_TRACKER_ONLY" and not tracker_note:
-        # Try to derive from summary
-        wave_id_safe = wave_name.replace(" ", "-").lower()
-        tracker_note = f"- Tracker sync note ({wave_id_safe}): {summary}"
-
     if not files_to_stage:
         # Default to TASKS.md for tracker-only updates
         if decision == "UPDATE_TRACKER_ONLY":
@@ -1739,19 +1733,44 @@ def prepare_handoff_from_routing_record(
 
     # Normalize wave_id for branch naming
     wave_id = normalize_wave_id(wave_name)
+    wave_class = record.get("wave_class", "MAINTENANCE")
+    target_gate_id = record.get("target_gate_id", "NONE")
+    default_commit_message = (
+        f"chore: {summary}\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+    )
+    commit_message = record.get("commit_message", default_commit_message)
+    if commit_message is None:
+        commit_message = default_commit_message
+    elif not isinstance(commit_message, str):
+        commit_message = str(commit_message)
+    raw_force_add_files = record.get("force_add_files")
+    force_add_files = [] if raw_force_add_files is None else raw_force_add_files
+
+    # UPDATE_TRACKER_ONLY routing records may omit tracker_note_text. In that
+    # case, synthesize the same contract-complete note shape that validate_handoff
+    # now requires instead of the older one-line fallback.
+    if decision == "UPDATE_TRACKER_ONLY" and not tracker_note:
+        force_add = force_add_files if isinstance(force_add_files, list) else []
+        tracker_note = _build_default_tracker_note_text(
+            wave_id=wave_id,
+            wave_class=wave_class,
+            target_gate_id=target_gate_id,
+            commit_message=commit_message,
+            files_to_stage=files_to_stage + force_add,
+        )
 
     handoff = {
         "wave_id": wave_id,
         "task_id": record.get("task_id", f"[{wave_name}]"),
-        "wave_class": record.get("wave_class", "MAINTENANCE"),
-        "target_gate_id": record.get("target_gate_id", "NONE"),
+        "wave_class": wave_class,
+        "target_gate_id": target_gate_id,
         "caller": "update_tracker_only" if decision == "UPDATE_TRACKER_ONLY" else "phase_b",
         "branch_prefix": "jabramsja",
         "tracker_note_text": tracker_note,
         "fixes_implemented": record.get("fixes_implemented", [summary]),
         "files_to_stage": files_to_stage,
-        "force_add_files": record.get("force_add_files", []),
-        "commit_message": record.get("commit_message", f"chore: {summary}\n\nCo-Authored-By: Claude <noreply@anthropic.com>"),
+        "force_add_files": force_add_files,
+        "commit_message": commit_message,
         "pr_title": record.get("pr_title", f"chore: {summary}"[:70]),
         "pr_body": record.get("pr_body", f"## Summary\n\n- {summary}"),
         "base_branch": "dev",

@@ -6002,6 +6002,22 @@ class TestCommitExecutorRoutingRecordAcceptance:
         assert "TASKS.md" in handoff["files_to_stage"]
         assert handoff["wave_id"] == "tracker-update"
 
+    def test_prepare_handoff_tracker_only_fallback_note_is_contract_complete(self, tmp_path):
+        record = {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "update the tracker",
+            "wave_name": "tracker-update",
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert not errors
+        assert handoff is not None
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+        note = handoff["tracker_note_text"]
+        assert "primary_invariant_id:" in note
+        assert "indicator_artifact_ref:" in note
+        assert "boot0_progress_state:" in note
+
     def test_prepare_handoff_from_valid_embedded_handoff(self, tmp_path):
         """Embedded handoffs are accepted only after full validation."""
         embedded = _make_new_handoff(wave_id="embedded-test")
