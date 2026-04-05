@@ -4,6 +4,21 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-04-04
 
+### Post-Commit Round-Trip Follow-On
+
+- `phase_a_executor.py` now gives stub-only Phase A packet rewrites a much
+  shorter implementer timeout budget than full implementation work, so a simple
+  blank-packet rewrite cannot sit on the full generic 15-minute implementer
+  budget before failing stale
+- `mu/tests/tools/test_executor_dispatch.py` now locks that stub-rewrite budget
+  directly in the existing packet-scope regression, so the shorter timeout
+  cannot silently revert
+- `reports/control_plane/post_commit_roundtrip_2026-04-04.md` now records that
+  the old direct `phase-a --plan-name recovery_live_probe_2026-04-03` shortcut
+  is no longer a valid end-to-end proof path under the current bridge review
+  contract, and that the next proof must use the real routed post-merge /
+  commit path instead
+
 ### Executor Fallback Config Truth Sync
 
 - `executor_common.py` fallback executor config now matches the checked-in
