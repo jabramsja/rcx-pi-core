@@ -97,6 +97,8 @@ PHASE_A_ALLOWED_REVIEW_EXIT_CODES = {0, 1, 2}
 PHASE_A_BRIDGE_POLL_SLEEP = 2.0
 PHASE_A_BRIDGE_STALE_TIMEOUT = 120.0
 PHASE_A_BRIDGE_AGGREGATION_HANG_TIMEOUT = 60.0
+PHASE_A_STUB_REWRITE_IMPLEMENTER_TIMEOUT = 180
+PHASE_A_FULL_IMPLEMENTER_TIMEOUT = 900
 
 
 def _trim_stderr(stderr: str, limit: int = 500, *, tail: bool = False) -> str:
@@ -1243,11 +1245,16 @@ def run_phase_a(
                             f"Update ONLY `{rel_plan_path}`. Do NOT create new files. "
                             "Replace the stub with the real plan directly in that file."
                         )
+                        implementer_timeout = (
+                            PHASE_A_STUB_REWRITE_IMPLEMENTER_TIMEOUT
+                            if stub_rewrite
+                            else PHASE_A_FULL_IMPLEMENTER_TIMEOUT
+                        )
                         log("Invoking implementer to fix blocking findings...")
                         impl_result = _invoke_implementer(
                             repo_root, impl_prompt,
                             backend="claude",
-                            timeout=900,
+                            timeout=implementer_timeout,
                             verbose=verbose,
                         )
                         if impl_result["status"] != "success":

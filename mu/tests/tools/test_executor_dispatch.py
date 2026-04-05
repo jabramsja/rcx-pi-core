@@ -902,6 +902,7 @@ Phase-A-Lock: UNLOCKED
 
         def fake_invoke(repo_root, prompt, *, backend="claude", timeout=900, verbose=False):
             captured["prompt"] = prompt
+            captured["timeout"] = str(timeout)
             return {"status": "error", "stderr": "stop after prompt capture"}
 
         monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
@@ -923,6 +924,7 @@ Phase-A-Lock: UNLOCKED
         assert "do NOT try to solve the underlying implementation in this turn" in prompt
         assert "Reproduce with: nl -ba reports/control_plane/test_plan_2026-04-02.md" in prompt
         assert "Evidence result: The packet is still a stub" in prompt
+        assert captured["timeout"] == str(phase_a_mod.PHASE_A_STUB_REWRITE_IMPLEMENTER_TIMEOUT)
 
     def test_deferred_agent_review_accepts_authorization_section_alias(self, tmp_path, monkeypatch):
         """Deferred Phase A review must treat Authorization as equivalent to Grounding."""
