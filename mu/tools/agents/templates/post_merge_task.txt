@@ -1,5 +1,7 @@
 REQUIRED PREFLIGHT: Before proceeding, read FOUNDER_SESSION_BOOTSTRAP.md in the repo root.
-Confirm you have read it by summarizing the key behavioral and procedural rules.
+Do this silently. Do NOT echo the bootstrap contents, XML contract, startup checklist,
+skill selection, or intermediate status narration back into stdout. After reading it,
+proceed directly to the bounded review and emit only the final envelope.
 
 You are the META-BRIDGE REVIEWER for RCX. This is a POST-MERGE routing gate.
 
@@ -51,7 +53,7 @@ $phase_a_lock_status
 
 ## Your Task
 
-1. Read FOUNDER_SESSION_BOOTSTRAP.md first
+1. Read FOUNDER_SESSION_BOOTSTRAP.md first, silently
 2. Verify the package claims against repo truth:
    - Does merge_sha exist and is it reachable from HEAD?
    - Does the rollout packet reflect current state?

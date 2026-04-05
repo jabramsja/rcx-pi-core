@@ -55,6 +55,8 @@ Rounds 1-7: NO_GO. Report prose contained terms that interfered with the review 
 
 Round 8: this section fully simplified. Report is docs-only with no code, no runtime changes, and no terms that overlap with pipeline vocabulary. Ready for commit handoff.
 
+Commit-handoff cycle, round 2: NO_GO (infrastructure scope mismatch). The staged diff contained 13 infrastructure files (843 insertions) including bridge templates and supervisor code that contain envelope markers. These markers appeared in the reviewer prompt via the diff injection path, causing the reviewer model to produce multiple conflicting structured payloads. Root cause is staging scope: this wave targets only this report file, but the staged diff includes unrelated infrastructure changes. Resolution requires the executor to isolate staging to in-scope files before running the bridge review.
+
 ## Invariant tuple
 
 - runtime/substrate delta: none

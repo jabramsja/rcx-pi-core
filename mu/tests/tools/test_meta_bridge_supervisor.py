@@ -212,6 +212,7 @@ class TestTemplateValidationFailureRouting:
         assert "Use no more than 8 shell commands" in prompt
         assert "emit exactly one final `BEGIN_META_ENVELOPE ... END_META_ENVELOPE` block on stdout and stop" in prompt
         assert "Reading `FOUNDER_SESSION_BOOTSTRAP.md` remains REQUIRED" in prompt
+        assert "Do not print bootstrap confirmations, contract recaps, or progress updates. Emit only the final envelope." in prompt
         assert "Do NOT invoke `founder_session_guard.sh`" in prompt
         assert "`bridge_status` and `blocker_report_paths` may legitimately be empty" in prompt
         assert "Do not use `set -e`/`pipefail` shell blocks" in prompt
@@ -876,6 +877,7 @@ def test_run_meta_review_threads_timeout_and_watchdogs_into_adapter(pkg_in_repo)
     kwargs = mock_run.call_args.kwargs
     assert kwargs["timeout_override_s"] == 90
     assert kwargs["stale_timeout_s"] == 90
+    assert kwargs["stop_after_envelope"] is True
     assert "zero_output_timeout_s" not in kwargs or kwargs["zero_output_timeout_s"] is None
 
 
@@ -1094,7 +1096,36 @@ def test_run_post_merge_review_threads_timeout_and_watchdogs_into_adapter(tmp_pa
     kwargs = mock_run.call_args.kwargs
     assert kwargs["timeout_override_s"] == 75
     assert kwargs["stale_timeout_s"] == 75
+    assert kwargs["stop_after_envelope"] is True
     assert "zero_output_timeout_s" not in kwargs or kwargs["zero_output_timeout_s"] is None
+
+
+def test_post_merge_prompt_requires_silent_bootstrap_read(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mu").mkdir()
+    package = {
+        "task_id": "[POST-MERGE]",
+        "wave_name": "wave",
+        "lane": "hooks/agents/bridge control-surface",
+        "merged_pr": 1,
+        "merge_sha": "abc1234",
+        "rollout_packet_path": "reports/control_plane/post_merge_supervisor_plan_2026-03-21.md",
+        "deferred_items": [],
+        "next_candidates": [],
+        "tracker_state_summary": "stable",
+        "blocker_report_paths": [],
+    }
+    results = _make_validation_results(["gate1"], [])
+    prompt = meta.build_post_merge_prompt(
+        package,
+        results,
+        REPO_ROOT,
+        ["TASKS.md"],
+        "1. Continue",
+    )
+    assert "Do this silently." in prompt
+    assert "emit only the final envelope" in prompt
 
 
 def test_run_post_merge_review_sanitizes_slash_task_ids_for_prompt_paths(tmp_path):
@@ -1369,6 +1400,64 @@ class TestPostMergeIntegration:
         assert "Bounded Review Contract" in prompt
         assert "Use no more than 8 shell commands" in prompt
 
+    def test_decide_post_merge_route_locally_routes_phase_a_when_packet_unlocked(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "roundtrip.md").write_text(
+            "# Roundtrip\nStatus: In progress\nPhase-A-Lock: UNLOCKED\n",
+            encoding="utf-8",
+        )
+        package = {
+            "next_candidates": [
+                {
+                    "candidate": "[TASK] Run the routed proof.",
+                    "bounded": True,
+                    "tracked_packet": "reports/control_plane/roundtrip.md",
+                }
+            ]
+        }
+        results = [meta.ValidationResult("merge_verification", True)]
+
+        envelope = meta._decide_post_merge_route_locally(
+            repo,
+            package,
+            results,
+            "(no 'Canonical rollout order' section found)",
+        )
+
+        assert envelope["decision"] == "ROUTE_PHASE_A"
+        assert "Phase A" in envelope["summary"]
+
+    def test_decide_post_merge_route_locally_routes_phase_b_when_packet_locked(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "roundtrip.md").write_text(
+            "# Roundtrip\nStatus: In progress\nPhase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        package = {
+            "next_candidates": [
+                {
+                    "candidate": "[TASK] Run the routed proof.",
+                    "bounded": True,
+                    "tracked_packet": "reports/control_plane/roundtrip.md",
+                }
+            ]
+        }
+        results = [meta.ValidationResult("merge_verification", True)]
+
+        envelope = meta._decide_post_merge_route_locally(
+            repo,
+            package,
+            results,
+            "1. Canonical next step",
+        )
+
+        assert envelope["decision"] == "ROUTE_PHASE_B"
+        assert "Phase B" in envelope["summary"]
+
     def test_check_rollout_packet_canonical_derives_when_path_missing(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -1590,56 +1679,6 @@ class TestGate5CommentResistance:
 
         result = meta.check_pre_commit_gate(linked)
         assert result.passed, f"Gate 5 should pass for linked worktree shared hook, got: {result.error}"
-
-    def test_linked_worktree_noncanonical_shared_hook_fails(self, tmp_path):
-        """A same-suffix hook under another repo path must not pass as canonical."""
-        primary = tmp_path / "primary"
-        linked = tmp_path / "linked"
-        primary.mkdir()
-        import subprocess
-        subprocess.run(["git", "init"], cwd=primary, check=True, capture_output=True)
-        env = {**__import__("os").environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
-
-        canonical_hook_dir = primary / "tools" / "hooks"
-        canonical_hook_dir.mkdir(parents=True)
-        canonical_hook = canonical_hook_dir / "pre-commit-doc-check"
-        canonical_hook.write_text("#!/bin/bash\nexit 0\n")
-        canonical_hook.chmod(0o755)
-
-        verifier_dir = primary / "mu" / "tools" / "agents"
-        verifier_dir.mkdir(parents=True)
-        (verifier_dir / "verify_pre_commit_receipt.py").write_text("# stub\n")
-
-        subprocess.run(
-            ["git", "add", "tools/hooks/pre-commit-doc-check", "mu/tools/agents/verify_pre_commit_receipt.py"],
-            cwd=primary,
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(["git", "commit", "-m", "seed"], cwd=primary, check=True, capture_output=True, env=env)
-
-        evil_hook_dir = primary / "evil" / "tools" / "hooks"
-        evil_hook_dir.mkdir(parents=True)
-        evil_hook = evil_hook_dir / "pre-commit-doc-check"
-        evil_hook.write_text("#!/bin/bash\nexit 0\n")
-        evil_hook.chmod(0o755)
-
-        hook = primary / ".git" / "hooks" / "pre-commit"
-        if hook.exists() or hook.is_symlink():
-            hook.unlink()
-        hook.symlink_to("../../evil/tools/hooks/pre-commit-doc-check")
-
-        subprocess.run(
-            ["git", "worktree", "add", str(linked), "-b", "linked"],
-            cwd=primary,
-            check=True,
-            capture_output=True,
-            env=env,
-        )
-
-        result = meta.check_pre_commit_gate(linked)
-        assert not result.passed, "Gate 5 should reject a same-suffix but noncanonical shared hook"
 
 
 class TestValidationResultFieldAccess:

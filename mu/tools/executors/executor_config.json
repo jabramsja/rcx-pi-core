@@ -24,7 +24,7 @@
   "timeouts": {
     "dialectic_executor": 600,
     "phase_a_executor": 3600,
-    "phase_b_executor": 3600,
+    "phase_b_executor": 18000,
     "phase_b_implementer_stale": 300,
     "commit_executor": 3600,
     "agent_review": 900

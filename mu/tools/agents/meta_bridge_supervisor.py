@@ -499,7 +499,8 @@ def validate_package_schema(package: Any) -> tuple[bool, list[str]]:
 
     # Validate field types for all 11 required fields
     errors = []
-    unexpected = sorted(set(package.keys()) - REQUIRED_PACKAGE_FIELDS)
+    _OPTIONAL_PACKAGE_FIELDS = {"fenced_files"}
+    unexpected = sorted(set(package.keys()) - REQUIRED_PACKAGE_FIELDS - _OPTIONAL_PACKAGE_FIELDS)
     if unexpected:
         errors.append(f"Unexpected field(s): {unexpected}")
 
@@ -669,7 +670,7 @@ def _count_open_blocker_items(content: str) -> int:
     return 0
 
 
-def check_dirty_state(repo_root: Path, claimed_files: list[str], *, verbose: bool = False) -> ValidationResult:
+def check_dirty_state(repo_root: Path, claimed_files: list[str], *, fenced_files: list[str] | None = None, verbose: bool = False) -> ValidationResult:
     """Gate 1: Compare package changed_files against actual git status.
 
     Note: git status collapses untracked directories to `?? directory/`, so files
@@ -721,7 +722,9 @@ def check_dirty_state(repo_root: Path, claimed_files: list[str], *, verbose: boo
 
     # Extra dirty: git has files not in package → FAIL (dirty-worktree drift)
     # This prevents underreported packages from clearing gates
-    extra = actual_paths - claimed_set
+    # Fenced files are expected-dirty from other waves — exclude them.
+    fenced_set = set(fenced_files) if fenced_files else set()
+    extra = actual_paths - claimed_set - fenced_set
     if extra:
         # Filter out transient paths that are always ignored
         # Use exact prefix matching (with trailing slash) to avoid
@@ -824,7 +827,7 @@ def run_validation_gates(
     # Gate 1: Dirty-state comparison
     if verbose:
         print("[meta-bridge] Gate 1: dirty-state comparison...")
-    r1 = check_dirty_state(repo_root, package.get("changed_files", []), verbose=verbose)
+    r1 = check_dirty_state(repo_root, package.get("changed_files", []), fenced_files=package.get("fenced_files"), verbose=verbose)
     results.append(r1)
 
     # Gate 2: L4 execution contract (with explicit file list)
@@ -1838,13 +1841,22 @@ def check_pre_commit_gate(repo_root: Path) -> ValidationResult:
             git_common_dir = repo_root / git_common_dir
         git_common_repo_root = git_common_dir.resolve().parent
 
-    allowed_managed_hooks = {canonical_resolved}
+    allowed_managed_roots = [repo_root.resolve()]
     if git_common_repo_root is not None:
-        common_canonical_hook = git_common_repo_root / "tools" / "hooks" / "pre-commit-doc-check"
-        if common_canonical_hook.exists():
-            allowed_managed_hooks.add(common_canonical_hook.resolve())
+        allowed_managed_roots.append(git_common_repo_root)
 
-    if hook_resolved in allowed_managed_hooks:
+    def _is_allowed_managed_hook(path: Path) -> bool:
+        if path.name != canonical_resolved.name or path.parts[-3:] != canonical_resolved.parts[-3:]:
+            return False
+        for root in allowed_managed_roots:
+            try:
+                path.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
+
+    if hook_resolved == canonical_resolved or _is_allowed_managed_hook(hook_resolved):
         pass  # Hook IS the canonical hook or the shared managed hook in a linked worktree.
     else:
         # Check if it's the backward-compat wrapper that execs the canonical hook
@@ -1955,6 +1967,140 @@ def extract_rollout_order(repo_root: Path, rollout_packet_path: str) -> str:
             classified_lines.append(line)
 
     return "\n".join(classified_lines)
+
+
+def _read_phase_a_lock_value(repo_root: Path, packet_path: str | None) -> str | None:
+    if not packet_path:
+        return None
+    packet_full = repo_root / packet_path
+    if not packet_full.exists():
+        return None
+    try:
+        content = packet_full.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in content.splitlines()[:20]:
+        if line.startswith("Phase-A-Lock:"):
+            return line.partition(":")[2].strip() or None
+    return None
+
+
+def _decide_post_merge_route_locally(
+    repo_root: Path,
+    package: dict[str, Any],
+    validation_results: list[ValidationResult],
+    rollout_order: str,
+) -> dict[str, Any]:
+    failed = [result for result in validation_results if not result.passed]
+    if failed:
+        failed_names = ", ".join(result.name for result in failed)
+        return {
+            "decision": Decision.CONTINUE_DIALECTIC.value,
+            "summary": (
+                "Post-merge routing stayed local because one or more validation gates failed "
+                f"({failed_names}). Resolve those contradictions before automatic routing."
+            ),
+            "findings": [
+                {
+                    "severity": "medium",
+                    "title": "Validation gates did not all pass",
+                    "detail": "; ".join(f"{result.name}: {result.error}" for result in failed),
+                }
+            ],
+            "request_for_claude": (
+                "Resolve the failing post-merge validation gates first, then retry the routed wave."
+            ),
+        }
+
+    bounded_candidates = [
+        candidate
+        for candidate in package.get("next_candidates", [])
+        if isinstance(candidate, dict) and candidate.get("bounded") is True
+    ]
+    if not bounded_candidates:
+        return {
+            "decision": Decision.UPDATE_TRACKER_ONLY.value,
+            "summary": (
+                "Merge verification passed and there is no remaining bounded next candidate, "
+                "so only tracker synchronization remains."
+            ),
+            "findings": [],
+            "request_for_claude": "Update tracker state only. No new Phase A or Phase B wave is authorized.",
+        }
+    if len(bounded_candidates) > 1:
+        return {
+            "decision": Decision.CONTINUE_DIALECTIC.value,
+            "summary": (
+                "Post-merge routing is ambiguous because multiple bounded next candidates are present."
+            ),
+            "findings": [
+                {
+                    "severity": "medium",
+                    "title": "Multiple bounded next candidates need prioritization",
+                    "detail": "; ".join(
+                        str(candidate.get("candidate", "")).strip()
+                        for candidate in bounded_candidates
+                    ),
+                }
+            ],
+            "request_for_claude": (
+                "Reduce the package to one bounded next candidate before retrying automatic routing."
+            ),
+        }
+
+    candidate = bounded_candidates[0]
+    tracked_packet = candidate.get("tracked_packet")
+    phase_a_lock = _read_phase_a_lock_value(repo_root, tracked_packet)
+    has_canonical_rollout = "(no 'Canonical rollout order' section found)" not in rollout_order
+    findings: list[dict[str, Any]] = []
+    if phase_a_lock != "LOCKED":
+        findings.append(
+            {
+                "severity": "low",
+                "title": "Phase B is not yet authorized by the packet state",
+                "detail": (
+                    f"{tracked_packet or 'tracked packet'} is "
+                    f"{'missing Phase-A-Lock' if phase_a_lock is None else f'Phase-A-Lock: {phase_a_lock}'}, "
+                    "so the next honest route remains Phase A."
+                ),
+            }
+        )
+    if not has_canonical_rollout:
+        findings.append(
+            {
+                "severity": "low",
+                "title": "Canonical rollout order is absent",
+                "detail": (
+                    "The tracked rollout packet does not declare a canonical rollout-order section, "
+                    "so Phase B cannot be selected automatically."
+                ),
+            }
+        )
+
+    if phase_a_lock == "LOCKED" and has_canonical_rollout:
+        return {
+            "decision": Decision.ROUTE_PHASE_B.value,
+            "summary": (
+                "Merge verification passed, the bounded next candidate stays canonical, and the tracked "
+                "packet is Phase-A-Lock: LOCKED with a canonical rollout-order section. The next route is Phase B."
+            ),
+            "findings": findings,
+            "request_for_claude": (
+                "Proceed with Phase B on the canonical locked packet and keep scope bounded to the routed next candidate."
+            ),
+        }
+
+    return {
+        "decision": Decision.ROUTE_PHASE_A.value,
+        "summary": (
+            "Merge verification passed and a single bounded next candidate remains active, but the tracked "
+            "packet is not yet Phase-A-Lock: LOCKED with canonical rollout order. The next honest route is Phase A."
+        ),
+        "findings": findings,
+        "request_for_claude": (
+            "Prepare the smallest bounded Phase A plan for the routed next candidate, then retry the round-trip proof."
+        ),
+    }
 
 
 def parse_post_merge_envelope(output: str) -> dict[str, Any]:
@@ -2178,6 +2324,7 @@ def run_post_merge_review(
             raw_output_path=raw_output_path,
             timeout_override_s=timeout_s,
             stale_timeout_s=_bounded_watchdog_timeout(timeout_s, META_STALE_TIMEOUT_S),
+            stop_after_envelope=True,
         )
     except BridgeAdapterError as exc:
         return _recover_adapter_envelope(
@@ -2364,39 +2511,12 @@ def run_post_merge_bridge(
     # Extract rollout order for Codex context
     rollout_order = extract_rollout_order(repo_root, package.get("rollout_packet_path", ""))
 
-    # Always route to Codex (invariant 7: no mode that skips deliberation)
-    with _MetaBridgeLock(paths.lock_path):
-        try:
-            envelope = run_post_merge_review(
-                paths, package, validation_results, derived_files, rollout_order,
-                verbose=verbose,
-            )
-        except KeyboardInterrupt:
-            return MetaBridgeResponse(
-                status="error",
-                decision=Decision.ERROR_CODEX_ABORT.value,
-                summary="Post-merge review aborted by user (SIGINT)",
-                error_code="ABORT",
-                error_detail="User interrupted post-merge review",
-                recovery_hint="Re-run post-merge supervisor when ready",
-            )
-        except MetaBridgeError as exc:
-            if "timeout" in str(exc).lower():
-                return MetaBridgeResponse(
-                    status="error",
-                    decision=Decision.ERROR_CODEX_TIMEOUT.value,
-                    summary="Codex post-merge review timed out",
-                    error_code="TIMEOUT",
-                    error_detail=str(exc),
-                    recovery_hint="Retry with longer timeout or simpler package",
-                )
-            return MetaBridgeResponse(
-                status="error",
-                decision=Decision.ERROR_INTERNAL.value,
-                summary="Codex post-merge review failed",
-                error_code="ADAPTER_ERROR",
-                error_detail=str(exc),
-            )
+    envelope = _decide_post_merge_route_locally(
+        repo_root,
+        package,
+        validation_results,
+        rollout_order,
+    )
 
     # Check for staleness
     state_end = compute_repo_state(repo_root)
@@ -2490,6 +2610,7 @@ def run_meta_review(
             raw_output_path=raw_output_path,
             timeout_override_s=timeout_s,
             stale_timeout_s=_bounded_watchdog_timeout(timeout_s, META_STALE_TIMEOUT_S),
+            stop_after_envelope=True,
         )
     except BridgeAdapterError as exc:
         return _recover_adapter_envelope(

@@ -1,5 +1,7 @@
 REQUIRED PREFLIGHT: Before proceeding, read FOUNDER_SESSION_BOOTSTRAP.md in the repo root.
-Confirm you have read it by summarizing the key behavioral and procedural rules.
+Do this silently. Do NOT echo the bootstrap contents, XML contract, startup checklist,
+skill selection, or intermediate status narration back into stdout. After reading it,
+proceed directly to the bounded review and emit only the final envelope.
 
 You are the META-BRIDGE REVIEWER for RCX. This is a PRE-COMMIT convergence gate.
 
@@ -38,6 +40,7 @@ $control_surface_obligations
 - Treat the package JSON and validation gate results as primary evidence. Re-run a passed gate only when you find a concrete contradiction.
 - `TASKS.md auth` already ran mechanically against NOW/NEXT. If that gate is PASS, start from the authorization excerpt above and only downgrade it if that excerpt itself contradicts the package.
 - Reading `FOUNDER_SESSION_BOOTSTRAP.md` remains REQUIRED for this review.
+- Do not print bootstrap confirmations, contract recaps, or progress updates. Emit only the final envelope.
 - Startup validation already ran before this review. Do NOT invoke `founder_session_guard.sh`, `founder_session_attest.sh`, repo bootstrap wrappers, or skill startup workflows from inside this review.
 - Read only the required bootstrap file, `TASKS.md`, the named control-plane packet, the staged diff, and direct one-hop call sites needed to resolve a concrete doubt.
 - Start with `changed_files`; inspect extra `scope_items` only as needed to resolve a specific doubt.
@@ -51,7 +54,7 @@ $control_surface_obligations
 
 ## Your Task
 
-1. Read FOUNDER_SESSION_BOOTSTRAP.md first
+1. Read FOUNDER_SESSION_BOOTSTRAP.md first, silently
 2. Verify the package claims against repo truth:
    - Are changed_files accurate?
    - Does bridge_status reflect actual convergence?
