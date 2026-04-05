@@ -25,7 +25,7 @@ surfaces. If a linked worktree or partial local config falls back to stale
 baked-in defaults, the live pipeline can silently run with older budgets and
 backend choices than the repo-tracked operational config claims.
 
-## Changed surfaces
+## Changed surfaces (cumulative wave history)
 
 - `mu/tools/executors/executor_common.py`
 - `mu/tools/executors/phase_a_executor.py`
