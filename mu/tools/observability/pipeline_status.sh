@@ -445,6 +445,7 @@ echo "────────────────────────�
 EXEC_IS_CURRENT=0
 EXEC_FILES=""
 EXEC_BRANCHLESS_FALLBACK=""
+EXEC_DETACHED_FALLBACK=""
 while IFS= read -r candidate; do
   [ -n "$candidate" ] || continue
   target_branch=$(jq -r '.target_branch // ""' "$candidate" 2>/dev/null || true)
@@ -458,8 +459,14 @@ while IFS= read -r candidate; do
     EXEC_FILES="$candidate"
     break
   fi
+  # Track most recent record with a real target_branch for detached HEAD fallback
+  if [ -z "$EXEC_DETACHED_FALLBACK" ]; then
+    EXEC_DETACHED_FALLBACK="$candidate"
+  fi
 done < <(ls -t "$BUS/executors"/commit_executor_*.json 2>/dev/null || true)
-if [ -z "$EXEC_FILES" ] && [ -n "$EXEC_BRANCHLESS_FALLBACK" ]; then
+if [ -z "$EXEC_FILES" ] && [ "$CURRENT_BRANCH" = "HEAD" ] && [ -n "$EXEC_DETACHED_FALLBACK" ]; then
+  EXEC_FILES="$EXEC_DETACHED_FALLBACK"
+elif [ -z "$EXEC_FILES" ] && [ -n "$EXEC_BRANCHLESS_FALLBACK" ]; then
   EXEC_FILES="$EXEC_BRANCHLESS_FALLBACK"
 fi
 
