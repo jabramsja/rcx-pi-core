@@ -1838,22 +1838,13 @@ def check_pre_commit_gate(repo_root: Path) -> ValidationResult:
             git_common_dir = repo_root / git_common_dir
         git_common_repo_root = git_common_dir.resolve().parent
 
-    allowed_managed_roots = [repo_root.resolve()]
+    allowed_managed_hooks = {canonical_resolved}
     if git_common_repo_root is not None:
-        allowed_managed_roots.append(git_common_repo_root)
+        common_canonical_hook = git_common_repo_root / "tools" / "hooks" / "pre-commit-doc-check"
+        if common_canonical_hook.exists():
+            allowed_managed_hooks.add(common_canonical_hook.resolve())
 
-    def _is_allowed_managed_hook(path: Path) -> bool:
-        if path.name != canonical_resolved.name or path.parts[-3:] != canonical_resolved.parts[-3:]:
-            return False
-        for root in allowed_managed_roots:
-            try:
-                path.relative_to(root)
-                return True
-            except ValueError:
-                continue
-        return False
-
-    if hook_resolved == canonical_resolved or _is_allowed_managed_hook(hook_resolved):
+    if hook_resolved in allowed_managed_hooks:
         pass  # Hook IS the canonical hook or the shared managed hook in a linked worktree.
     else:
         # Check if it's the backward-compat wrapper that execs the canonical hook
