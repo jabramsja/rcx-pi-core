@@ -241,6 +241,24 @@ class TestTemplateValidationFailureRouting:
         assert "Keep the authorization excerpt visible to the reviewer." in prompt
         assert "If that gate is PASS, start from the authorization excerpt above" in prompt
 
+    def test_tasks_authorization_context_ignores_prose_mentions_before_task_bullet(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text(
+            "## NOW\n\n"
+            "- **[OTHER]** **NEXT** (2026-04-04, founder-authorized).\n"
+            "  Follow-on structural queue unparked as [TASK-1].\n\n"
+            "## NEXT\n\n"
+            "- **[TASK-1]** **NEXT** (2026-04-04, founder-authorized).\n"
+            "  Keep the authorization excerpt visible to the reviewer.\n",
+            encoding="utf-8",
+        )
+
+        excerpt = meta._extract_task_authorization_context(repo, "[TASK-1]")
+
+        assert excerpt.startswith("- **[TASK-1]** **NEXT**")
+        assert "Follow-on structural queue unparked" not in excerpt
+
 
 class TestDryRunBehavior:
     """Dry-run must be validation-only and say so explicitly."""

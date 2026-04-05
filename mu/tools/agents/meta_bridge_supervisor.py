@@ -316,10 +316,15 @@ def _extract_task_authorization_context(repo_root: Path, task_id: str) -> str:
         return "(task_id missing)"
 
     escaped_id = re.escape(task_id)
-    pattern = re.compile(rf"(?:\*\*)?{escaped_id}(?:\*\*)?")
+    # Match only task bullet headers (lines starting with "- " or "- ~~"),
+    # not prose references that happen to mention the task_id.
+    bullet_prefix = re.compile(r"^- (?:~~)?\s*(?:\*\*)?")
+    id_pattern = re.compile(rf"(?:\*\*)?{escaped_id}(?:\*\*)?")
     lines = active_section.splitlines()
     for idx, line in enumerate(lines):
-        if not pattern.search(line):
+        if not bullet_prefix.match(line):
+            continue
+        if not id_pattern.search(line):
             continue
         excerpt = [line]
         for follow in lines[idx + 1:]:
