@@ -1547,6 +1547,100 @@ class TestGate5CommentResistance:
         result = meta.check_pre_commit_gate(repo)
         assert result.passed, f"Gate 5 should pass on real exec, got: {result.error}"
 
+    def test_linked_worktree_shared_managed_hook_passes(self, tmp_path):
+        """Linked worktrees should accept the shared managed hook in the common git dir."""
+        primary = tmp_path / "primary"
+        linked = tmp_path / "linked"
+        primary.mkdir()
+        import subprocess
+        subprocess.run(["git", "init"], cwd=primary, check=True, capture_output=True)
+        env = {**__import__("os").environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+
+        canonical_hook_dir = primary / "tools" / "hooks"
+        canonical_hook_dir.mkdir(parents=True)
+        canonical_hook = canonical_hook_dir / "pre-commit-doc-check"
+        canonical_hook.write_text("#!/bin/bash\nexit 0\n")
+        canonical_hook.chmod(0o755)
+
+        verifier_dir = primary / "mu" / "tools" / "agents"
+        verifier_dir.mkdir(parents=True)
+        (verifier_dir / "verify_pre_commit_receipt.py").write_text("# stub\n")
+
+        subprocess.run(
+            ["git", "add", "tools/hooks/pre-commit-doc-check", "mu/tools/agents/verify_pre_commit_receipt.py"],
+            cwd=primary,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "commit", "-m", "seed"], cwd=primary, check=True, capture_output=True, env=env)
+
+        hook = primary / ".git" / "hooks" / "pre-commit"
+        if hook.exists() or hook.is_symlink():
+            hook.unlink()
+        hook.symlink_to("../../tools/hooks/pre-commit-doc-check")
+
+        subprocess.run(
+            ["git", "worktree", "add", str(linked), "-b", "linked"],
+            cwd=primary,
+            check=True,
+            capture_output=True,
+            env=env,
+        )
+
+        result = meta.check_pre_commit_gate(linked)
+        assert result.passed, f"Gate 5 should pass for linked worktree shared hook, got: {result.error}"
+
+    def test_linked_worktree_noncanonical_shared_hook_fails(self, tmp_path):
+        """A same-suffix hook under another repo path must not pass as canonical."""
+        primary = tmp_path / "primary"
+        linked = tmp_path / "linked"
+        primary.mkdir()
+        import subprocess
+        subprocess.run(["git", "init"], cwd=primary, check=True, capture_output=True)
+        env = {**__import__("os").environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+
+        canonical_hook_dir = primary / "tools" / "hooks"
+        canonical_hook_dir.mkdir(parents=True)
+        canonical_hook = canonical_hook_dir / "pre-commit-doc-check"
+        canonical_hook.write_text("#!/bin/bash\nexit 0\n")
+        canonical_hook.chmod(0o755)
+
+        verifier_dir = primary / "mu" / "tools" / "agents"
+        verifier_dir.mkdir(parents=True)
+        (verifier_dir / "verify_pre_commit_receipt.py").write_text("# stub\n")
+
+        subprocess.run(
+            ["git", "add", "tools/hooks/pre-commit-doc-check", "mu/tools/agents/verify_pre_commit_receipt.py"],
+            cwd=primary,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "commit", "-m", "seed"], cwd=primary, check=True, capture_output=True, env=env)
+
+        evil_hook_dir = primary / "evil" / "tools" / "hooks"
+        evil_hook_dir.mkdir(parents=True)
+        evil_hook = evil_hook_dir / "pre-commit-doc-check"
+        evil_hook.write_text("#!/bin/bash\nexit 0\n")
+        evil_hook.chmod(0o755)
+
+        hook = primary / ".git" / "hooks" / "pre-commit"
+        if hook.exists() or hook.is_symlink():
+            hook.unlink()
+        hook.symlink_to("../../evil/tools/hooks/pre-commit-doc-check")
+
+        subprocess.run(
+            ["git", "worktree", "add", str(linked), "-b", "linked"],
+            cwd=primary,
+            check=True,
+            capture_output=True,
+            env=env,
+        )
+
+        result = meta.check_pre_commit_gate(linked)
+        assert not result.passed, "Gate 5 should reject a same-suffix but noncanonical shared hook"
+
 
 class TestValidationResultFieldAccess:
     """ValidationResult must only use fields that exist on the dataclass.
