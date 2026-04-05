@@ -464,8 +464,20 @@ while IFS= read -r candidate; do
     EXEC_DETACHED_FALLBACK="$candidate"
   fi
 done < <(ls -t "$BUS/executors"/commit_executor_*.json 2>/dev/null || true)
-if [ -z "$EXEC_FILES" ] && [ "$CURRENT_BRANCH" = "HEAD" ] && [ -n "$EXEC_DETACHED_FALLBACK" ]; then
-  EXEC_FILES="$EXEC_DETACHED_FALLBACK"
+if [ -z "$EXEC_FILES" ] && [ "$CURRENT_BRANCH" = "HEAD" ]; then
+  # Detached HEAD: pick the fresher of the two fallback records so a stale
+  # branch-tagged file never shadows a more recent branchless state.
+  if [ -n "$EXEC_DETACHED_FALLBACK" ] && [ -n "$EXEC_BRANCHLESS_FALLBACK" ]; then
+    if [ "$EXEC_BRANCHLESS_FALLBACK" -nt "$EXEC_DETACHED_FALLBACK" ]; then
+      EXEC_FILES="$EXEC_BRANCHLESS_FALLBACK"
+    else
+      EXEC_FILES="$EXEC_DETACHED_FALLBACK"
+    fi
+  elif [ -n "$EXEC_DETACHED_FALLBACK" ]; then
+    EXEC_FILES="$EXEC_DETACHED_FALLBACK"
+  elif [ -n "$EXEC_BRANCHLESS_FALLBACK" ]; then
+    EXEC_FILES="$EXEC_BRANCHLESS_FALLBACK"
+  fi
 elif [ -z "$EXEC_FILES" ] && [ -n "$EXEC_BRANCHLESS_FALLBACK" ]; then
   EXEC_FILES="$EXEC_BRANCHLESS_FALLBACK"
 fi
