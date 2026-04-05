@@ -1741,9 +1741,25 @@ esac
         self._write_executable(bin_dir / "tmux", script)
         return bin_dir
 
-    def _write_commit_state(self, repo_root: Path, *, status: str) -> None:
+    def _write_commit_state(
+        self,
+        repo_root: Path,
+        *,
+        status: str,
+        target_branch: str | None = None,
+        steps_completed: list[str] | None = None,
+        pr_number: int | None = None,
+    ) -> None:
         state = repo_root / ".agent_bus" / "executors" / "commit_executor_test.json"
-        state.write_text(f'{{"status": "{status}"}}\\n', encoding="utf-8")
+        payload = {
+            "status": status,
+            "steps_completed": steps_completed or [],
+        }
+        if target_branch is not None:
+            payload["target_branch"] = target_branch
+        if pr_number is not None:
+            payload["pr_number"] = pr_number
+        state.write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
     def _set_age_seconds(self, path: Path, *, age_seconds: int) -> None:
         now = datetime.now(timezone.utc).timestamp()
@@ -1878,6 +1894,84 @@ esac
 
         assert result.returncode == 0
         assert "post_commit_pending" in result.stdout
+
+    def test_pipeline_status_demotes_stale_executor_state_and_hides_stale_pr_block(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._write_commit_state(
+            repo_root,
+            status="post_commit_pending",
+            target_branch="jabramsja/stale-wave",
+            steps_completed=["wait_ci"],
+            pr_number=706,
+        )
+        self._set_age_seconds(
+            repo_root / ".agent_bus" / "executors" / "commit_executor_test.json",
+            age_seconds=7 * 60 * 60,
+        )
+        worktree_output = (
+            f"worktree {repo_root}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/stale-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/stale-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "Executor: idle" in result.stdout
+        assert "Last saved executor state: post_commit_pending for stale-wave" in result.stdout
+        assert "\nPR #706:" not in result.stdout
+
+    def test_pipeline_status_ignores_commit_state_from_a_different_branch(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._write_commit_state(
+            repo_root,
+            status="post_commit_pending",
+            target_branch="jabramsja/some-other-wave",
+            steps_completed=["wait_ci"],
+            pr_number=706,
+        )
+        worktree_output = (
+            f"worktree {repo_root}\n"
+            "HEAD 1111111111111111\n"
+            "branch refs/heads/jabramsja/current-wave\n"
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/current-wave",
+            worktree_output=worktree_output,
+        )
+        env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(_OBSERVABILITY_DIR / "pipeline_status.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert "Executor: idle (no active commit state)" in result.stdout
+        assert "some-other-wave" not in result.stdout
+        assert "\nPR #706:" not in result.stdout
 
     def test_pipeline_status_renders_recovery_block_when_dashboard_is_present(self, tmp_path):
         repo_root = tmp_path / "active"
@@ -2741,6 +2835,49 @@ esac
         assert "Watching: jabramsja/quiet-wave" in clean_stdout
         assert "ACTIVE — Tier 3 recovery (agent_review_crash)" not in clean_stdout
         assert "No recovery activity recorded yet." in clean_stdout
+
+    def test_pane_processes_demotes_stale_phase_b_checkpoint_to_historical_status(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_processes.sh")
+        self._install_observability_script(repo_root, "pipeline_status.sh")
+        self._install_observability_script(repo_root, "pipeline_dashboard.py")
+
+        phase_b_state = repo_root / ".agent_bus" / "executors" / "phase_b_state.json"
+        phase_b_state.write_text(
+            json.dumps({"completed_step": "needs_phase_b_reentry"}),
+            encoding="utf-8",
+        )
+        self._set_age_seconds(phase_b_state, age_seconds=7 * 60 * 60)
+
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\nHEAD 1111111111111111\nbranch refs/heads/jabramsja/repo-wave\n",
+        )
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_processes.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "No pipeline step is running. Waiting for the next wave." in clean_stdout
+        assert "Last saved Phase B checkpoint: waiting to restart Phase B" in clean_stdout
+        assert "Current step:" not in clean_stdout
+        assert "needs phase b reentry" not in clean_stdout
 
     def test_pane_processes_trims_long_output_to_keep_header_visible(self, tmp_path):
         repo_root = tmp_path / "repo"
