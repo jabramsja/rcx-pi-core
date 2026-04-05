@@ -307,6 +307,37 @@ def _extract_now_next_text(repo_root: Path) -> tuple[str, str]:
     return active, ""
 
 
+def _extract_task_authorization_context(repo_root: Path, task_id: str) -> str:
+    """Return the matching NOW/NEXT excerpt for task_id when available."""
+    active_section, error = _extract_now_next_text(repo_root)
+    if error:
+        return f"(authorization context unavailable: {error})"
+    if not task_id:
+        return "(task_id missing)"
+
+    escaped_id = re.escape(task_id)
+    # Match only task bullet headers (lines starting with "- " or "- ~~"),
+    # not prose references that happen to mention the task_id.
+    bullet_prefix = re.compile(r"^- (?:~~)?\s*(?:\*\*)?")
+    id_pattern = re.compile(rf"(?:\*\*)?{escaped_id}(?:\*\*)?")
+    lines = active_section.splitlines()
+    for idx, line in enumerate(lines):
+        if not bullet_prefix.match(line):
+            continue
+        if not id_pattern.search(line):
+            continue
+        excerpt = [line]
+        for follow in lines[idx + 1:]:
+            if follow.startswith("- "):
+                break
+            excerpt.append(follow)
+        rendered = "\n".join(excerpt).strip()
+        if rendered:
+            return rendered
+        break
+    return f"(no matching NOW/NEXT excerpt found for {task_id})"
+
+
 def meta_bridge_paths(repo_root: Path) -> MetaBridgePaths:
     bus_dir = repo_root / META_BUS_DIR_NAME
     return MetaBridgePaths(
@@ -1094,6 +1125,9 @@ def build_meta_reviewer_prompt(
         (f" ({r.error[:100]})" if r.error else "")
         for r in validation_results
     )
+    tasks_authorization_context = _extract_task_authorization_context(
+        repo_root, package.get("task_id", "")
+    )
 
     any_failed = any(not r.passed for r in validation_results)
     if any_failed:
@@ -1162,6 +1196,7 @@ def build_meta_reviewer_prompt(
     payload = {
         "package_json": json.dumps(package, indent=2),
         "validation_summary": validation_summary,
+        "tasks_authorization_context": tasks_authorization_context,
         "validation_failure_routing": validation_failure_routing,
         "control_surface_obligations": control_surface_obligations,
         "repo_root": str(repo_root),

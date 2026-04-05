@@ -216,6 +216,59 @@ class TestTemplateValidationFailureRouting:
         assert "`bridge_status` and `blocker_report_paths` may legitimately be empty" in prompt
         assert "Do not use `set -e`/`pipefail` shell blocks" in prompt
 
+    def test_prompt_includes_tasks_authorization_context(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text(
+            "## NOW\n\n## NEXT\n\n"
+            "- **[TASK-1]** **NEXT** (2026-04-04, founder-authorized).\n"
+            "  Keep the authorization excerpt visible to the reviewer.\n"
+            "  **Lane:** control-surface.\n",
+            encoding="utf-8",
+        )
+        package = {
+            "task_id": "[TASK-1]",
+            "wave_name": "test-wave",
+            "lane": "test-lane",
+        }
+        results = _make_validation_results(
+            passed_names=["TASKS.md auth"],
+            failed_names_errors=[],
+        )
+        prompt = meta.build_meta_reviewer_prompt(package, results, repo)
+        assert "TASKS Authorization Context" in prompt
+        assert "- **[TASK-1]** **NEXT**" in prompt
+        assert "Keep the authorization excerpt visible to the reviewer." in prompt
+        assert "If that gate is PASS, start from the authorization excerpt above" in prompt
+
+    def test_tasks_authorization_context_ignores_prose_mentions_before_task_bullet(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text(
+            "## NOW\n\n"
+            "- **[OTHER]** **NEXT** (2026-04-04, founder-authorized).\n"
+            "  Follow-on structural queue unparked as [TASK-1].\n\n"
+            "## NEXT\n\n"
+            "- **[TASK-1]** **NEXT** (2026-04-04, founder-authorized).\n"
+            "  Keep the authorization excerpt visible to the reviewer.\n",
+            encoding="utf-8",
+        )
+        package = {
+            "task_id": "[TASK-1]",
+            "wave_name": "test-wave",
+            "lane": "test-lane",
+        }
+        results = _make_validation_results(
+            passed_names=["TASKS.md auth"],
+            failed_names_errors=[],
+        )
+
+        prompt = meta.build_meta_reviewer_prompt(package, results, repo)
+
+        assert "- **[TASK-1]** **NEXT**" in prompt
+        assert "Keep the authorization excerpt visible to the reviewer." in prompt
+        assert "Follow-on structural queue unparked as [TASK-1]." not in prompt
+
 
 class TestDryRunBehavior:
     """Dry-run must be validation-only and say so explicitly."""

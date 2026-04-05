@@ -202,13 +202,23 @@ def _is_test_file(path: str) -> bool:
     )
 
 
+def _canonical_repo_test_path(repo_root: Path, path: str) -> str:
+    """Canonicalize repo-relative test paths so symlink mirrors dedupe cleanly."""
+    normalized = path.replace("\\", "/")
+    try:
+        resolved = (repo_root / normalized).resolve(strict=False)
+        return resolved.relative_to(repo_root.resolve()).as_posix()
+    except (OSError, ValueError):
+        return normalized
+
+
 def _collect_commit_test_files(repo_root: Path, staged_files: list[str]) -> list[str]:
     """Collect staged test files and mirrored test files for staged Python code."""
     candidates: set[str] = set()
     for path in staged_files:
         normalized = path.replace("\\", "/")
         if _is_test_file(normalized) and normalized.endswith(".py"):
-            candidates.add(normalized)
+            candidates.add(_canonical_repo_test_path(repo_root, normalized))
             continue
         if not normalized.endswith(".py"):
             continue
@@ -219,7 +229,12 @@ def _collect_commit_test_files(repo_root: Path, staged_files: list[str]) -> list
                 continue
             for match in root_path.rglob(f"test_{stem}*.py"):
                 if match.is_file():
-                    candidates.add(match.relative_to(repo_root).as_posix())
+                    candidates.add(
+                        _canonical_repo_test_path(
+                            repo_root,
+                            match.relative_to(repo_root).as_posix(),
+                        )
+                    )
     return sorted(candidates)
 
 

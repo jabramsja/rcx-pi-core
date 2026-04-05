@@ -584,6 +584,38 @@ class TestCommitExecutorPytestGate:
             "tests/test_direct_stage.py",
         ]
 
+    def test_collect_commit_test_files_dedupes_symlinked_test_mirrors(self, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / "mu" / "tools").mkdir(parents=True)
+        (repo / "mu" / "tests" / "tools").mkdir(parents=True)
+        (repo / "tests").symlink_to("mu/tests", target_is_directory=True)
+        (repo / "mu" / "tools" / "example.py").write_text("# code\n")
+        (repo / "mu" / "tests" / "tools" / "test_example_executor.py").write_text(
+            "def test_example(): pass\n"
+        )
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: testing targeted pytest collection
+            repo,
+            ["mu/tools/example.py"],
+        )
+
+        assert result == ["mu/tests/tools/test_example_executor.py"]
+
+    def test_collect_commit_test_files_canonicalizes_staged_symlink_test_path(self, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / "mu" / "tests" / "tools").mkdir(parents=True)
+        (repo / "tests").symlink_to("mu/tests", target_is_directory=True)
+        (repo / "mu" / "tests" / "tools" / "test_example_executor.py").write_text(
+            "def test_example(): pass\n"
+        )
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: testing staged symlink-path canonicalization
+            repo,
+            ["tests/tools/test_example_executor.py"],
+        )
+
+        assert result == ["mu/tests/tools/test_example_executor.py"]
+
     def test_run_commit_pipeline_blocks_on_targeted_pytest_failure(self, tmp_path):
         from collections import namedtuple
         import types
