@@ -1,24 +1,24 @@
 {
   "wave_id": "meta-bridge-auth-context-2026-04-04",
-  "repeat_run_speedup_ratio": 1.031192,
+  "repeat_run_speedup_ratio": 1.00052,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.367687,
+  "step_growth_slope": 0.400134,
   "repeat_run_raw_seconds": [
-    0.379156,
-    0.367687
+    0.400342,
+    0.400134
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.379156
+      "elapsed_seconds": 0.400342
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.746843
+      "elapsed_seconds": 0.800476
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-05T00:06:38Z",
+  "collection_timestamp_utc": "2026-04-05T00:10:18Z",
   "collector_version": "2.2.0"
 }

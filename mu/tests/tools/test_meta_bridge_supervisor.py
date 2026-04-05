@@ -253,11 +253,21 @@ class TestTemplateValidationFailureRouting:
             "  Keep the authorization excerpt visible to the reviewer.\n",
             encoding="utf-8",
         )
+        package = {
+            "task_id": "[TASK-1]",
+            "wave_name": "test-wave",
+            "lane": "test-lane",
+        }
+        results = _make_validation_results(
+            passed_names=["TASKS.md auth"],
+            failed_names_errors=[],
+        )
 
-        excerpt = meta._extract_task_authorization_context(repo, "[TASK-1]")
+        prompt = meta.build_meta_reviewer_prompt(package, results, repo)
 
-        assert excerpt.startswith("- **[TASK-1]** **NEXT**")
-        assert "Follow-on structural queue unparked" not in excerpt
+        assert "- **[TASK-1]** **NEXT**" in prompt
+        assert "Keep the authorization excerpt visible to the reviewer." in prompt
+        assert "Follow-on structural queue unparked as [TASK-1]." not in prompt
 
 
 class TestDryRunBehavior:
