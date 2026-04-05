@@ -1828,9 +1828,33 @@ def check_pre_commit_gate(repo_root: Path) -> ValidationResult:
     canonical_hook = repo_root / "tools" / "hooks" / "pre-commit-doc-check"
     hook_resolved = hook_path.resolve()
     canonical_resolved = canonical_hook.resolve()
+    try:
+        git_common_dir_str = str(git_output(repo_root, ["rev-parse", "--git-common-dir"])).strip()
+    except MetaBridgeError:
+        git_common_repo_root = None
+    else:
+        git_common_dir = Path(git_common_dir_str)
+        if not git_common_dir.is_absolute():
+            git_common_dir = repo_root / git_common_dir
+        git_common_repo_root = git_common_dir.resolve().parent
 
-    if hook_resolved == canonical_resolved:
-        pass  # Hook IS the canonical hook (symlink or direct)
+    allowed_managed_roots = [repo_root.resolve()]
+    if git_common_repo_root is not None:
+        allowed_managed_roots.append(git_common_repo_root)
+
+    def _is_allowed_managed_hook(path: Path) -> bool:
+        if path.name != canonical_resolved.name or path.parts[-3:] != canonical_resolved.parts[-3:]:
+            return False
+        for root in allowed_managed_roots:
+            try:
+                path.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
+
+    if hook_resolved == canonical_resolved or _is_allowed_managed_hook(hook_resolved):
+        pass  # Hook IS the canonical hook or the shared managed hook in a linked worktree.
     else:
         # Check if it's the backward-compat wrapper that execs the canonical hook
         try:

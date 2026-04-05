@@ -4,6 +4,16 @@ All notable changes to RCX are documented in this file.
 
 ## 2026-04-04
 
+### Linked Worktree Pre-Commit Gate Truth
+
+- `meta_bridge_supervisor.py` Gate 5 now accepts the shared managed
+  `tools/hooks/pre-commit-doc-check` hook when a linked worktree resolves it
+  through the common git directory of the primary checkout, instead of falsely
+  treating that valid shared-hook install as missing delegation
+- `mu/tests/tools/test_meta_bridge_supervisor.py` now locks that behavior with
+  a real `git worktree add` regression so routed post-merge review cannot block
+  the end-to-end proof on the same false worktree mismatch again
+
 ### Post-Commit Round-Trip Follow-On
 
 - `phase_a_executor.py` now gives stub-only Phase A packet rewrites a much

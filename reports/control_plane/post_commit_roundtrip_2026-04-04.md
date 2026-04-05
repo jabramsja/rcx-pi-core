@@ -17,6 +17,9 @@ Wave ID: post-commit-roundtrip-2026-04-04
 5. retire the old direct `recovery_live_probe_2026-04-03` shortcut as the
    next-proof path, because current bridge review now rejects that ad hoc packet
    as an unauthorized tracked-plan surface
+6. clear the linked-worktree pre-commit Gate 5 false failure that blocks the
+   routed proof even when the shared managed hook is installed correctly through
+   the common git directory
 
 ## Why this wave exists
 
@@ -29,7 +32,9 @@ backend choices than the repo-tracked operational config claims.
 
 - `mu/tools/executors/executor_common.py`
 - `mu/tools/executors/phase_a_executor.py`
+- `mu/tools/agents/meta_bridge_supervisor.py`
 - `mu/tests/tools/test_executor_dispatch.py`
+- `mu/tests/tools/test_meta_bridge_supervisor.py`
 - `reports/control_plane/post_commit_roundtrip_2026-04-04.md`
 - `CHANGELOG.md`
 - `TASKS.md`
@@ -38,6 +43,7 @@ backend choices than the repo-tracked operational config claims.
 
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py -k 'phase_a_implementer_prompt_stays_packet_scoped or deferred_agent_review_accepts_authorization_section_alias' -q --tb=short`
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py -q`
+- `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_meta_bridge_supervisor.py -k 'test_real_exec_passes or test_linked_worktree_shared_managed_hook_passes' -q --tb=short`
 - `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_recovery_gate.py -q`
 
 ## Current proof status
@@ -51,6 +57,13 @@ backend choices than the repo-tracked operational config claims.
 - The next end-to-end proof should therefore use the real routed
   post-merge/commit path, not the obsolete direct `phase-a --plan-name ...`
   shortcut.
+- The first real routed post-merge review on merged `dev` then exposed a second
+  control-plane blocker: Gate 5 falsely failed in a linked worktree because the
+  shared pre-commit hook resolved to the canonical managed hook inside the main
+  checkout's common git directory instead of the linked checkout path.
+- That Gate 5 blocker is a worktree-truth bug in `check_pre_commit_gate()`, not
+  a real missing-hook condition; the next proof attempt should therefore rerun
+  the same routed post-merge package after this linked-worktree fix lands.
 
 ## Invariant tuple
 
