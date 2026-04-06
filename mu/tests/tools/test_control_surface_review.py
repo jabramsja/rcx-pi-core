@@ -105,6 +105,17 @@ class TestControlSurfaceDetection:
         assert self._tc(["mu/tools/agents/templates/meta_bridge_task.txt"])
 
 
+class TestBridgeReviewerPromptContract:
+    """Bridge reviewer prompt must not invite bootstrap recap before the envelope."""
+
+    def test_bridge_reviewer_prompt_requires_silent_bootstrap_read(self):
+        prompt = (REPO_ROOT / "tools" / "agents" / "templates" / "bridge_reviewer_prompt.txt").read_text()
+        assert "read FOUNDER_SESSION_BOOTSTRAP.md in the repo root silently" in prompt
+        assert "Do not summarize it." in prompt
+        assert "briefly summarizing the key behavioral and procedural rules" not in prompt
+        assert "brief bootstrap summary" not in prompt
+
+
 class TestInvariantChecksOnRealRepo:
     """Run invariant checks against the actual repo to verify current truth."""
 

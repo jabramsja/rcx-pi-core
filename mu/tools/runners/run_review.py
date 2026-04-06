@@ -702,9 +702,11 @@ IMPORTANT: Your previous output failed compliance validation. Here's what went w
 {safe_feedback}
 
 Please address these issues in your response. Ensure you:
-1. Include proper FINDING blocks with FILE, LINES, CODE, and VERIFIED fields
-2. Include a clear Verdict line
-3. Do NOT fabricate code - only cite code you actually read with the Read tool
+1. Include a `### CHECKED` section with concrete bullets of what you verified
+2. Include a `### NOT_CHECKED` section with concrete bullets of what you did not verify
+3. Include proper FINDING blocks with FILE, LINES, CODE, and VERIFIED fields
+4. Include a clear Verdict line: `VERDICT: <TOKEN>`
+5. Do NOT fabricate code - only cite code you actually read with the Read tool
 ---
 """
 
@@ -1381,11 +1383,13 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
 
     def get_exit_code(self) -> int:
         """Get appropriate exit code based on results."""
-        # Check compliance failures on hard-gate agents first. These remain
-        # fail-closed because bridge should never receive malformed blocker
-        # evidence from verifier/adversary/structural-proof.
+        # Check compliance failures on hard-gate agents. Compliance failures
+        # on agents that don't actually block merge (e.g. adversary with
+        # non-compliant format but no machine-verifiable evidence) are soft
+        # warnings, not hard gates.
         hard_gate_compliance_failures = [
-            r for r in self.results if r.is_hard_gate and not r.is_compliant
+            r for r in self.results
+            if r.is_hard_gate and not r.is_compliant and r.blocks_merge
         ]
         if hard_gate_compliance_failures:
             return 3

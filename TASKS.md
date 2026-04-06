@@ -524,7 +524,8 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   **Tracked packet:** `reports/control_plane/findings_pane_fallback_2026-04-04.md`
   **Lane:** control-surface (pipeline hardening).
 
-- **[PIPELINE-RECOVERY/status-surface-truth-2026-04-04]** **CLOSED** (2026-04-05, PR #731) (2026-04-04, founder-authorized).
+- **[PIPELINE-RECOVERY/status-surface-truth-2026-04-04]** **CLOSED** (2026-04-05, PR #731)
+  Pipeline infrastructure follow-up landed (2026-04-06): soft gate for adversary compliance, retry feedback, test fixes. (2026-04-04, founder-authorized).
   Keep pipeline status surfaces honest: fix stale process detection and
   recovery-gate test accuracy.
   **Lane:** control-surface (pipeline hardening).
@@ -559,7 +560,7 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   reviews can proceed.
   **Tracked packet:** `reports/control_plane/phase_a_bridge_prereq_2026-04-04.md`
   **Lane:** control-surface (pipeline hardening).
-- **[PIPELINE-RECOVERY/post-commit-roundtrip-2026-04-04]** **NEXT** (2026-04-04, founder-authorized).
+- **[PIPELINE-RECOVERY/post-commit-roundtrip-2026-04-04]** **CLOSED** (2026-04-06, PR #734) (2026-04-04, founder-authorized).
   Keep routed commit/post-commit waves aligned with the checked-in live
   executor config so missing or partial local config cannot silently shrink the
   real Phase A, Phase B, or commit timeout budget before the end-to-end
