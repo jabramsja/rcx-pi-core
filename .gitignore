@@ -108,6 +108,7 @@ RCX_MINIMAL_SPINE_MANIFEST.json
 !.claude/agents/
 !.claude/commands/
 !.claude/skills/
+!.claude/rules/
 .agent_memory/
 .agent_bus/
 experiments/

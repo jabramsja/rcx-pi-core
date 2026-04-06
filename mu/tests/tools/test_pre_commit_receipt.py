@@ -250,7 +250,13 @@ class TestClaudeMdPreCommitCommand:
     """CLAUDE.md must contain the canonical pre-commit supervisor command."""
 
     def test_claude_md_has_pre_commit_step(self):
-        claude_md = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-        # CLAUDE.md should reference the structured client or the commit executor
-        assert "meta_bridge_client" in claude_md or "commit_executor" in claude_md
-        assert "commit protocol" in claude_md.lower() or "pre-commit" in claude_md.lower()
+        # Check the full instruction surface (CLAUDE.md + .claude/rules/)
+        parts = [(REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")]
+        rules_dir = REPO_ROOT / ".claude" / "rules"
+        if rules_dir.is_dir():
+            for f in sorted(rules_dir.glob("*.md")):
+                parts.append(f.read_text(encoding="utf-8"))
+        text = "\n".join(parts)
+        # Instruction surface should reference the structured client or the commit executor
+        assert "meta_bridge_client" in text or "commit_executor" in text
+        assert "commit protocol" in text.lower() or "pre-commit" in text.lower()
