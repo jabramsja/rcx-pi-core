@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # _pane_timeline.sh — Session timeline pane for tmux
 # Shows chronological history of what happened this pipeline run.
-# Auto-reloads when script changes on disk.
 set +e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 resolve_repo_root() {
-  local helper="$SCRIPT_DIR/pipeline_status.sh"
+  local helper="$SCRIPT_DIR/_resolve_live_root.sh"
   local root=""
   if [ -f "$helper" ]; then
-    root=$(bash "$helper" --print-root 2>/dev/null || true)
+    root=$(bash "$helper" 2>/dev/null || true)
   fi
   if [ -n "$root" ]; then
     printf '%s\n' "$root"
@@ -18,15 +17,6 @@ resolve_repo_root() {
 }
 resolve_branch_name_for_root() {
   local root="${1:-$REPO_ROOT}"
-  local helper="$SCRIPT_DIR/pipeline_status.sh"
-  local branch=""
-  if [ -f "$helper" ]; then
-    branch=$(bash "$helper" --print-branch-for-root "$root" 2>/dev/null || true)
-  fi
-  if [ -n "$branch" ]; then
-    printf '%s\n' "$branch"
-    return 0
-  fi
   git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
 }
 refresh_context() {
@@ -42,9 +32,6 @@ refresh_context() {
 }
 REPO_ROOT=""
 BRANCH_NAME=""
-SELF="$SCRIPT_DIR/$(basename "$0")"
-SELF_MTIME=$(stat -f%m "$SELF" 2>/dev/null || stat -c%Y "$SELF" 2>/dev/null || echo 0)
-
 BOLD="\033[1m" DIM="\033[2m" GREEN="\033[32m" YELLOW="\033[33m"
 RED="\033[31m" CYAN="\033[36m" PURPLE="\033[35m" RESET="\033[0m"
 LAST_HASH=""
@@ -73,6 +60,9 @@ repo_has_process() {
     cmd=$(ps -p "$pid" -o command= 2>/dev/null || true)
     case "$cmd" in
       *"tail -f "*|*"rcx_log_watcher.sh"*|*"_pane_"*|*"pipeline_monitor.sh"*)
+        continue
+        ;;
+      "bash -c "*|*/bash\ -c\ *|"tee "*)
         continue
         ;;
     esac
@@ -256,15 +246,21 @@ else:
     printf '\033[H\033[2J\033[3J'
     cat "$TMPOUT"
     LAST_HASH="$NEW_HASH"
+  else
+    # Data unchanged — just update timestamp so user knows it's alive
+    tput cup 0 0 2>/dev/null
+    echo -e "${BOLD}Pane 4: session timeline${RESET}  $(date '+%H:%M:%S')"
   fi
 
-  # Auto-reload
-  NEW_MTIME=$(stat -f%m "$SELF" 2>/dev/null || stat -c%Y "$SELF" 2>/dev/null || echo 0)
-  if [ "$NEW_MTIME" != "$SELF_MTIME" ]; then
+  # Auto-reload: re-exec if script changed on disk
+  _SELF="${BASH_SOURCE[0]}"
+  _NEW_MTIME=$(stat -f%m "$_SELF" 2>/dev/null || stat -c%Y "$_SELF" 2>/dev/null || echo 0)
+  if [ "${_SELF_MTIME:-0}" != "0" ] && [ "$_NEW_MTIME" != "$_SELF_MTIME" ]; then
     rm -f "$TMPOUT"
     sleep 1
-    exec bash "$SELF"
+    exec bash "$_SELF"
   fi
+  _SELF_MTIME="$_NEW_MTIME"
 
   sleep 5
 done

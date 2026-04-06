@@ -68,12 +68,22 @@ write_log_watcher() {
 # Resilient: never exits on transient errors
 set +e  # Do not exit on error
 LIVE_LOG="/tmp/rcx_pipeline_live.txt"
-IDLE_WINDOW_SECONDS=300
+# Keep the freshest real phase log visible for longer after a run ends so the
+# monitor still shows the last live failure/success instead of blanking almost
+# immediately.
+IDLE_WINDOW_SECONDS=3600
 current_log=""
 tail_pid=""
 
 resolve_repo_root() {
   local root=""
+  if [ -n "${RCX_OBS_ROOT_HELPER:-}" ] && [ -f "${RCX_OBS_ROOT_HELPER:-}" ]; then
+    root=$(bash "$RCX_OBS_ROOT_HELPER" 2>/dev/null || true)
+  fi
+  if [ -n "$root" ]; then
+    printf '%s\n' "$root"
+    return 0
+  fi
   if [ -n "${RCX_OBS_REPO_ROOT:-}" ] && [ -d "${RCX_OBS_REPO_ROOT:-}" ]; then
     (
       cd "${RCX_OBS_REPO_ROOT}" 2>/dev/null && pwd -P
@@ -220,22 +230,24 @@ cmd_start() {
   chmod +x "$watcher"
 
   local OBS_DIR="$REPO_ROOT/mu/tools/observability"
-  local PINNED_ROOT="$REPO_ROOT"
-  local repo_q="" obs_q="" root_q="" watcher_q="" status_q=""
+  local repo_q="" obs_q="" watcher_q="" status_q="" root_helper_q=""
   printf -v repo_q '%q' "$REPO_ROOT"
   printf -v obs_q '%q' "$OBS_DIR"
-  printf -v root_q '%q' "$PINNED_ROOT"
   printf -v watcher_q '%q' "$watcher"
   printf -v status_q '%q' "$OBS_DIR/pipeline_status.sh"
+  printf -v root_helper_q '%q' "$OBS_DIR/_resolve_live_root.sh"
 
   local pane1_cmd=""
   local pane2_cmd=""
   local pane3_cmd=""
   local pane4_cmd=""
-  pane1_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q RCX_OBS_STATUS_SCRIPT=$status_q bash $watcher_q"
-  pane2_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q bash $obs_q/_pane_findings.sh"
-  pane3_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q bash $obs_q/_pane_processes.sh"
-  pane4_cmd="cd $repo_q && RCX_OBS_REPO_ROOT=$root_q bash $obs_q/_pane_timeline.sh"
+  # Do not pin panes to the launcher worktree. Let each pane re-resolve the
+  # freshest active pipeline worktree on every refresh so tmux stays honest
+  # when the real run lives in a different linked worktree.
+  pane1_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $watcher_q"
+  pane2_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_findings.sh"
+  pane3_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_processes.sh"
+  pane4_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_timeline.sh"
 
   # Create session
   tmux new-session -d -x "$SESSION_WIDTH" -y "$SESSION_HEIGHT" -s "$SESSION" "$pane1_cmd"
@@ -305,7 +317,7 @@ cmd_attach() {
 }
 
 cmd_status() {
-  exec "$STATUS_SCRIPT"
+  exec env -u RCX_OBS_REPO_ROOT "$STATUS_SCRIPT"
 }
 
 # ── exec: Run a command with live tee to tmux ──

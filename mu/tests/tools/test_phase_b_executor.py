@@ -2826,7 +2826,7 @@ class TestSdkReviewScopeSelection:
             "| `reports/control_plane/plan.md` | current wave |\n"
             "| `mu/tools/runners/run_review.py` | adjacent pipeline-recovery (fenced out) |\n"
         )
-        assert pb_mod._parse_fenced_out_files(plan) == [
+        assert pb_mod._parse_fenced_out_files(plan) == [  # ANTICHEAT_OK: testing internal executor functions
             "mu/tools/executors/foo.py",
             "mu/tools/runners/run_review.py",
         ]

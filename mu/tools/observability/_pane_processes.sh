@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # _pane_processes.sh — Human-readable pipeline status pane for tmux
-# Shows what's happening in plain language, not just PIDs
-# Auto-reloads when the script file changes on disk.
+# Shows what's happening in plain language, not just PIDs.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 resolve_repo_root() {
-  local helper="$SCRIPT_DIR/pipeline_status.sh"
+  local helper="$SCRIPT_DIR/_resolve_live_root.sh"
   local root=""
   if [ -f "$helper" ]; then
-    root=$(bash "$helper" --print-root 2>/dev/null || true)
+    root=$(bash "$helper" 2>/dev/null || true)
   fi
   if [ -n "$root" ]; then
     printf '%s\n' "$root"
@@ -17,15 +16,6 @@ resolve_repo_root() {
 }
 resolve_branch_name_for_root() {
   local root="${1:-$REPO_ROOT}"
-  local helper="$SCRIPT_DIR/pipeline_status.sh"
-  local branch=""
-  if [ -f "$helper" ]; then
-    branch=$(bash "$helper" --print-branch-for-root "$root" 2>/dev/null || true)
-  fi
-  if [ -n "$branch" ]; then
-    printf '%s\n' "$branch"
-    return 0
-  fi
   git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
 }
 refresh_context() {
@@ -43,9 +33,6 @@ refresh_context() {
 REPO_ROOT=""
 BUS=""
 BRANCH_NAME=""
-SELF="$SCRIPT_DIR/$(basename "$0")"
-SELF_MTIME=$(stat -f%m "$SELF" 2>/dev/null || stat -c%Y "$SELF" 2>/dev/null || echo 0)
-
 BOLD="\033[1m" DIM="\033[2m" GREEN="\033[32m" YELLOW="\033[33m"
 RED="\033[31m" CYAN="\033[36m" PURPLE="\033[35m" RESET="\033[0m"
 LAST_HASH=""
@@ -157,6 +144,12 @@ find_live_pid() {
       *"tail -f "*|*"rcx_log_watcher.sh"*|*"_pane_"*|*"pipeline_monitor.sh"*)
         continue
         ;;
+      # Skip shell wrappers and tee — they contain executor keywords in
+      # embedded strings (e.g. tee .scratch/phase_a_executor_live.log) which
+      # cause false-positive phase detection.
+      "bash -c "*|*/bash\ -c\ *|"tee "*)
+        continue
+        ;;
     esac
     pid_matches_repo_root "$pid" || continue
     if echo "$cmd" | grep -q "$kw"; then
@@ -236,6 +229,10 @@ while true; do
   if [ "$FAST_ONESHOT" != "1" ]; then
     while IFS= read -r pid; do
       [ -z "$pid" ] && continue
+      cmd=$(ps -p "$pid" -o command= 2>/dev/null) || continue
+      case "$cmd" in
+        "bash -c "*|*/bash\ -c\ *|"tee "*) continue ;;
+      esac
       pid_matches_repo_root "$pid" || continue
       codex_pids="${codex_pids}${pid} "
       codex_count=$((codex_count + 1))
@@ -267,6 +264,10 @@ while true; do
       [ -z "$pid" ] && continue
       pid_matches_repo_root "$pid" || continue
       cmd=$(ps -p "$pid" -o command= 2>/dev/null) || continue
+      # Skip shell wrappers — they contain --print in embedded eval strings
+      case "$cmd" in
+        "bash -c "*|*/bash\ -c\ *|"tee "*) continue ;;
+      esac
       # Only count implementer processes (have --print), skip interactive sessions
       if echo "$cmd" | grep -q "\-\-print"; then
         claude_pids="${claude_pids}${pid} "
@@ -371,7 +372,7 @@ while true; do
       phase_b_is_live=1
     fi
 
-    if [ "$mr" -gt 0 ]; then
+    if [ "$mr" -gt 0 ] && { [ "$phase_b_is_live" -eq 1 ] || [ "$pb_age" -le 600 ]; }; then
       echo -e "  Review pass: ${BOLD}$br / $mr${RESET}"
     fi
     human_step=$(human_phase_b_step "$step")
@@ -379,10 +380,12 @@ while true; do
     if [ "$phase_b_is_live" -eq 0 ]; then
       step_label="Last saved Phase B checkpoint"
     fi
-    if [ "$pb_age" -gt 600 ]; then
-      echo -e "  $step_label: $human_step ${DIM}(saved state is $(( pb_age / 60 ))m old)${RESET}"
-    else
+    if [ "$phase_b_is_live" -eq 1 ]; then
       echo -e "  $step_label: $human_step"
+    elif [ "$pb_age" -le 600 ]; then
+      echo -e "  $step_label: $human_step"
+    else
+      echo -e "  $step_label: $human_step ${DIM}($(( pb_age / 3600 ))h ago — stale)${RESET}"
     fi
   fi
 
@@ -392,9 +395,7 @@ while true; do
     dec=$(jq -r '.decision // "?"' "$LATEST_RECEIPT" 2>/dev/null) || dec="?"
     human_dec=$(human_gate_decision "$dec")
     receipt_age=$(( $(date +%s) - $(stat -f%m "$LATEST_RECEIPT" 2>/dev/null || stat -c%Y "$LATEST_RECEIPT" 2>/dev/null || echo 0) ))
-    if [ "$receipt_age" -gt 600 ]; then
-      echo -e "  Last gate decision: $human_dec ${DIM}($(( receipt_age / 60 ))m ago — stale)${RESET}"
-    else
+    if [ "$receipt_age" -le 600 ]; then
       echo -e "  Last gate decision: $human_dec ($(( receipt_age / 60 ))m ago)"
     fi
   fi
@@ -414,6 +415,34 @@ while true; do
     python3 "$DASHBOARD_PY" --render-recovery --repo-root "$REPO_ROOT" > "$RECOVERY_TMP" 2>/dev/null || true
     recovery_line_count=$(wc -l < "$RECOVERY_TMP" 2>/dev/null | xargs)
     if [[ "$recovery_line_count" =~ ^[0-9]+$ ]] && [ "$recovery_line_count" -gt 0 ]; then
+      # Add staleness indicator to recovery header — check the status file age
+      recovery_status_file="$REPO_ROOT/.agent_bus/recovery/recovery_status.json"
+      recovery_age_label=""
+      if [ -f "$recovery_status_file" ]; then
+        recovery_age=$(( $(date +%s) - $(stat -f%m "$recovery_status_file" 2>/dev/null || stat -c%Y "$recovery_status_file" 2>/dev/null || echo 0) ))
+        if [ "$recovery_age" -lt 120 ]; then
+          recovery_age_label="${recovery_age}s ago"
+        elif [ "$recovery_age" -lt 7200 ]; then
+          recovery_age_label="$(( recovery_age / 60 ))m ago"
+        else
+          recovery_age_label="$(( recovery_age / 3600 ))h ago — stale"
+        fi
+      fi
+      # Print recovery with age-annotated header (replace first line if it matches)
+      {
+        first_line=true
+        while IFS= read -r line; do
+          if [ "$first_line" = true ]; then
+            first_line=false
+            if [ -n "$recovery_age_label" ] && echo "$line" | grep -q "^RECOVERY"; then
+              echo -e "${BOLD}RECOVERY${RESET}  ${DIM}($recovery_age_label)${RESET}"
+              continue
+            fi
+          fi
+          echo "$line"
+        done < "$RECOVERY_TMP"
+      } > "${RECOVERY_TMP}.annotated"
+      mv "${RECOVERY_TMP}.annotated" "$RECOVERY_TMP"
       max_recovery_lines=8
       if [ "$phase" != "idle" ] || [ "$worker_lines" -gt 0 ]; then
         max_recovery_lines=11
@@ -446,7 +475,8 @@ while true; do
     fi
   done
 
-  if [ "$FAST_ONESHOT" != "1" ] && [ -n "$activity_source" ]; then
+  # Skip activity tail when SDK agents are running — the implementer output is stale context
+  if [ "$FAST_ONESHOT" != "1" ] && [ -n "$activity_source" ] && [ -z "$agent_pid" ] && { [ "$phase" != "idle" ] || [ "$worker_lines" -gt 0 ]; }; then
     # Determine label
     case "$activity_source" in
       *implementer*) activity_label="${PURPLE}IMPLEMENTING${RESET}" ;;
@@ -525,6 +555,10 @@ for line in sys.stdin:
     printf '\033[H\033[2J\033[3J'
     cat "$TMPOUT"
     LAST_HASH="$NEW_HASH"
+  else
+    # Data unchanged — just update timestamp so user knows it's alive
+    tput cup 0 0 2>/dev/null
+    echo -e "${BOLD}Pane 3: plain-English status${RESET}  $(date '+%H:%M:%S')"
   fi
 
   if [ "$ONESHOT" = "1" ]; then
@@ -532,13 +566,15 @@ for line in sys.stdin:
     exit 0
   fi
 
-  # Auto-reload: if script changed on disk, re-exec
-  NEW_MTIME=$(stat -f%m "$SELF" 2>/dev/null || stat -c%Y "$SELF" 2>/dev/null || echo 0)
-  if [ "$NEW_MTIME" != "$SELF_MTIME" ]; then
+  # Auto-reload: re-exec if script changed on disk
+  _SELF="${BASH_SOURCE[0]}"
+  _NEW_MTIME=$(stat -f%m "$_SELF" 2>/dev/null || stat -c%Y "$_SELF" 2>/dev/null || echo 0)
+  if [ "${_SELF_MTIME:-0}" != "0" ] && [ "$_NEW_MTIME" != "$_SELF_MTIME" ]; then
     rm -f "$TMPOUT"
     sleep 1
-    exec bash "$SELF"
+    exec bash "$_SELF"
   fi
+  _SELF_MTIME="$_NEW_MTIME"
 
   sleep 5
 done

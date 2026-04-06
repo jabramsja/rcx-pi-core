@@ -1419,7 +1419,7 @@ class TestPostMergeIntegration:
         }
         results = [meta.ValidationResult("merge_verification", True)]
 
-        envelope = meta._decide_post_merge_route_locally(
+        envelope = meta._decide_post_merge_route_locally(  # ANTICHEAT_OK: testing internal supervisor functions
             repo,
             package,
             results,
@@ -1448,7 +1448,7 @@ class TestPostMergeIntegration:
         }
         results = [meta.ValidationResult("merge_verification", True)]
 
-        envelope = meta._decide_post_merge_route_locally(
+        envelope = meta._decide_post_merge_route_locally(  # ANTICHEAT_OK: testing internal supervisor functions
             repo,
             package,
             results,

@@ -495,65 +495,65 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   **Tracked packet:** `reports/control_plane/meta_bridge_taskid_path_safety_2026-04-03.md`
   **Lane:** control-surface (supervisor hardening).
 
-- **[PIPELINE-RECOVERY/recovery-observability-2026-04-03]** **NEXT** (2026-04-03, founder-authorized).
+- **[PIPELINE-RECOVERY/recovery-observability-2026-04-03]** **CLOSED** (2026-04-05, PRs #718, #721) (2026-04-03, founder-authorized).
   Live recovery status + watcher-noise filtering for tmux and dashboards.
   **Tracked packet:** `reports/control_plane/recovery_observability_2026-04-03.md`
   **Lane:** control-surface (pipeline hardening).
 
-- **[PIPELINE-RECOVERY/pipeline-monitor-worktree-rebind-2026-04-03]** **NEXT** (2026-04-03, founder-authorized).
+- **[PIPELINE-RECOVERY/pipeline-monitor-worktree-rebind-2026-04-03]** **CLOSED** (2026-04-05, PR #715) (2026-04-03, founder-authorized).
   Rebind terminal observability to the live linked worktree and surface recent recovery attempts in the tmux/status recovery block.
   **Tracked packet:** `reports/control_plane/pipeline_monitor_worktree_rebind_2026-04-03.md`
   **Lane:** control-surface (pipeline hardening).
 
-- **[PIPELINE-RECOVERY/hook-audit-env-sanitization-2026-04-03]** **NEXT** (2026-04-03, founder-authorized).
+- **[PIPELINE-RECOVERY/hook-audit-env-sanitization-2026-04-03]** **CLOSED** (2026-04-05, PR #717) (2026-04-03, founder-authorized).
   Clear inherited git-local env in hook-driven audit entrypoints before deeper pipeline tests run, and lock that control-surface contract with structural regressions.
   **Tracked packet:** `reports/control_plane/hook_audit_env_sanitization_2026-04-03.md`
   **Lane:** control-surface (pipeline hardening).
 
-- **[PIPELINE-RECOVERY/tracker-only-handoff-compat-2026-04-04]** **NEXT** (2026-04-04, founder-authorized).
+- **[PIPELINE-RECOVERY/tracker-only-handoff-compat-2026-04-04]** **CLOSED** (2026-04-05, PR #719) (2026-04-04, founder-authorized).
   Preserve routed `UPDATE_TRACKER_ONLY` compatibility when `tracker_note_text`
   is absent by synthesizing the same contract-complete tracker note shape that
   `validate_handoff()` now requires.
   **Tracked packet:** `reports/control_plane/tracker_only_handoff_compat_2026-04-04.md`
   **Lane:** control-surface (pipeline hardening).
 
-- **[PIPELINE-RECOVERY/findings-pane-fallback-2026-04-04]** **NEXT** (2026-04-04, founder-authorized).
+- **[PIPELINE-RECOVERY/findings-pane-fallback-2026-04-04]** **CLOSED** (2026-04-05, PR #720) (2026-04-04, founder-authorized).
   Keep the tmux findings pane useful when there is no active Phase A/Phase B
   bridge round by rendering an explicit fallback state plus the latest
   meta-review or commit-path status instead of leaving a blank shell.
   **Tracked packet:** `reports/control_plane/findings_pane_fallback_2026-04-04.md`
   **Lane:** control-surface (pipeline hardening).
 
-- **[PIPELINE-RECOVERY/status-surface-truth-2026-04-04]** **NEXT** (2026-04-04, founder-authorized).
+- **[PIPELINE-RECOVERY/status-surface-truth-2026-04-04]** **CLOSED** (2026-04-05, PR #731) (2026-04-04, founder-authorized).
   Keep pipeline status surfaces honest: fix stale process detection and
   recovery-gate test accuracy.
   **Lane:** control-surface (pipeline hardening).
 
-- **[PIPELINE-RECOVERY/recovery-observability-followon-2026-04-04]** **NEXT** (2026-04-04, founder-authorized).
+- **[PIPELINE-RECOVERY/recovery-observability-followon-2026-04-04]** **CLOSED** (2026-04-05, PRs #723, #725, #727) (2026-04-04, founder-authorized).
   Keep tmux panes tied to the worktree that actually owns the live pipeline
   data, remove unrelated global activity noise, and keep recovery wording in
   plain English.
   **Tracked packet:** `reports/control_plane/recovery_observability_followon_2026-04-04.md`
   **Lane:** control-surface (pipeline hardening).
-- **[PIPELINE-RECOVERY/recovery-pane-truth-2026-04-04]** **NEXT** (2026-04-04, founder-authorized).
+- **[PIPELINE-RECOVERY/recovery-pane-truth-2026-04-04]** **CLOSED** (2026-04-05, PR #726) (2026-04-04, founder-authorized).
   When a routed retry later succeeds, clear the stale historical recovery
   record so tmux/dashboard surfaces stop presenting an exhausted Tier 3 record
   as current truth, and keep that historical state readable in plain English.
   **Tracked packet:** `reports/control_plane/recovery_pane_truth_2026-04-04.md`
   **Lane:** control-surface (pipeline hardening).
-- **[PIPELINE-RECOVERY/merge-recovery-followon-2026-04-04]** **NEXT** (2026-04-04, founder-authorized).
+- **[PIPELINE-RECOVERY/merge-recovery-followon-2026-04-04]** **CLOSED** (2026-04-05, PR #724) (2026-04-04, founder-authorized).
   Stop dirty PR merge failures from being mislabeled as stale continuation
   problems, auto-sync the feature branch with its PR base branch when that can
   be done safely, and keep post-commit continuation resumable after that sync.
   **Tracked packet:** `reports/control_plane/merge_recovery_followon_2026-04-04.md`
   **Lane:** control-surface (pipeline hardening).
-- **[PIPELINE-RECOVERY/pane-fit-merge-sweep-clarity-2026-04-04]** **NEXT** (2026-04-04, founder-authorized).
+- **[PIPELINE-RECOVERY/pane-fit-merge-sweep-clarity-2026-04-04]** **CLOSED** (2026-04-05, PR #728) (2026-04-04, founder-authorized).
   Keep the tmux dashboard readable in the order the founder actually sees on
   screen, keep pane labels and explanations in plain English, and explain
   historical top-level Codex comments during merge sweep output.
   **Tracked packet:** `reports/control_plane/pane_fit_merge_sweep_clarity_2026-04-04.md`
   **Lane:** control-surface (pipeline hardening).
-- **[PIPELINE-RECOVERY/phase-a-bridge-prereq-2026-04-04]** **NEXT** (2026-04-04, founder-authorized).
+- **[PIPELINE-RECOVERY/phase-a-bridge-prereq-2026-04-04]** **CLOSED** (2026-04-05, PR #730 (meta-bridge-auth-context)) (2026-04-04, founder-authorized).
   Remove the deleted `--packet-review` flag from Phase A bridge invocation and
   harden the findings parser to skip prompt-template envelopes so routed bridge
   reviews can proceed.
@@ -566,6 +566,7 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   round-trip proof runs.
   **Tracked packet:** `reports/control_plane/post_commit_roundtrip_2026-04-04.md`
   **Lane:** control-surface (pipeline hardening).
+  Pipeline infrastructure fixes landed (2026-04-05): timeout-budget alignment, bridge envelope handling, reviewer scope, pane observability.
 - **[RECOVERY-TIER3-WIRING]** **NEXT** (2026-03-31, founder-authorized).
   Wire Tier 3 recovery loop live + fix pipeline gaps exposed by Tier 2+3 wave.
   **Work items:**
