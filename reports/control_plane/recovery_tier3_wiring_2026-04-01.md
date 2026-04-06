@@ -1,83 +1,51 @@
 # Recovery Tier 3 Wiring
 
 Date: 2026-04-01
-Status: Closed on `dev` — all 9 work items landed
+Status: In progress — 7/9 items landed, 3 remaining (items 2, 4 partial, 5)
 Phase-A-Lock: UNLOCKED
 Task: [RECOVERY-TIER3-WIRING]
 Purpose: Wire Tier 3 recovery live into dispatcher execution and close the immediate pipeline hardening residue from PR #706.
 
 ## Scope
 
-All 9 TASKS.md work items for `[RECOVERY-TIER3-WIRING]` have been verified as landed in current code. This packet now records the closed state and the final implementation boundary for item (7).
+- `mu/tools/executors/recovery_gate.py` — items (2), (4), (5)
+- `mu/tests/tools/test_recovery_gate.py` — regression tests for remaining items
 
-**Files verified:**
+## Landed Work Items (verified 2026-04-06 against current code)
 
-| File | Status |
-|------|--------|
-| `mu/tools/executors/recovery_gate.py` | Items (1), (2), (4), (5), (8) landed |
-| `mu/tools/executors/executor_dispatch.py` | Items (3), (6), (7) landed |
-| `mu/tools/executors/commit_executor.py` | Item (9) landed |
+1. **(1) Wire `run_recovery_loop()` into `attempt_recovery()`** — LANDED (recovery_gate.py:1512)
+2. **(3) Fix Tier 2 sequential timeout cap** — LANDED (executor_dispatch.py:421)
+3. **(6) Surface command routing through dispatcher recovery** — LANDED (executor_dispatch.py:406)
+4. **(7) Process-tree cleanup before timeout retry** — LANDED (executor_dispatch.py via _run_executor_in_group)
+5. **(8) Timeout bump cap re-base on original baseline** — LANDED (executor_dispatch.py:421-522)
+6. **(9) Commit executor pytest gate** — LANDED (commit_executor.py:261)
 
-**Directories verified:** `mu/tools/executors/`, `mu/tests/tools/`
+## Remaining Work Items
 
-## Already-Landed Work Items
+1. **(2) Reclassify `needs_phase_b` from Tier 4 terminal to Tier 3 recoverable** — `needs_phase_b` is still in `_TERMINAL_STATUSES` at recovery_gate.py:77. Move it to a Tier 3 classification so the recovery loop can retry Phase B instead of escalating to founder.
 
-The following TASKS.md work items are landed in current code and are not pending:
+2. **(4) Expand Tier 3 denylist to pattern-based** — PARTIAL. `_DANGEROUS_COMMANDS` at recovery_gate.py:592 has exact string matches (`git reset --hard`, `git checkout .`, `git restore .`). Missing: broader subcommand patterns for `git reset`, `git checkout`, `git restore` that would catch variations like `git reset --mixed`, `git checkout -- file`, `git restore --staged`.
 
-1. **(1) Wire `run_recovery_loop()` into `attempt_recovery()`** — Landed in `recovery_gate.py`; Tier 3 now calls the live recovery loop.
-2. **(2) Reclassify `needs_phase_b` as Tier 3 recoverable** — Landed in `recovery_gate.py`; `needs_phase_b` no longer escalates as a terminal Tier 4 outcome.
-3. **(3) Fix Tier 2 sequential timeout cap** — Landed across recovery override handling; timeout bumps re-base on the original baseline instead of compounding.
-4. **(4) Expand Tier 3 denylist to pattern-based** — Landed in `recovery_gate.py`; destructive git forms and shell-obfuscation patterns are denied.
-5. **(5) Block edits to repo-internal sensitive paths** — Landed in `recovery_gate.py`; `.git/config` and `.git/hooks/` mutations are blocked.
-6. **(6) Surface command routing through dispatcher recovery** — Landed in `executor_dispatch.py`; `phase-a` and `phase-b` route through recovery-aware execution.
-7. **(7) Process-tree cleanup before timeout retry** — Landed in `executor_dispatch.py`; see **Layer Correction** below.
-8. **(8) Timeout bump cap re-base on original baseline** — Landed with item (3); both fixes share the same preserved-baseline logic.
-9. **(9) Commit executor pytest gate** — Landed in `commit_executor.py`; commit execution runs targeted pytest on affected test files before commit.
-
-**Adjacent residue also landed:**
-- Tier 3 durable recovery logging persists every iteration to `recovery_log.json`.
-
-## Layer Correction
-
-Item (7) was initially described as a `recovery_gate.py` change, but code truth shows that timeout cleanup belongs at the timed subprocess boundary, not inside the retry-policy fix functions.
-
-The actual implementation lives in `executor_dispatch.py` via `_run_executor_in_group()`, which:
-
-1. starts executor subprocesses in their own process group,
-2. kills the process group on timeout,
-3. walks remaining descendants with process-tree cleanup,
-4. kills the direct child as a final fallback, and
-5. reaps the process before retry propagation.
-
-`fix_process_timeout()` and `fix_implementer_stale()` in `recovery_gate.py` correctly stay at the policy layer: they adjust timeout parameters for the next attempt and do not own a live process handle.
-
-## Pending Work Items
-
-None. `[RECOVERY-TIER3-WIRING]` is closed.
+3. **(5) Block edits to repo-internal sensitive paths** — NOT LANDED. No mechanism in recovery_gate.py blocks Tier 3 shell/edit actions from targeting `.git/config`, `.git/hooks/`, or other repo-internal paths. `_is_repo_escape` only checks if paths resolve outside the repo root, not if they target sensitive paths within it.
 
 ## Constraints
 
-1. No new bootstrap/runtime host semantics were introduced; this wave stayed in the Python control surface.
-2. No learning-store behavior was added here; that remains future `[PIPELINE-RECOVERY]` scope.
+- No new bootstrap/runtime host semantics.
+- No learning-store behavior (remains future [PIPELINE-RECOVERY] scope).
 
 ## Stop Conditions
 
-No implementation remains in this packet. Re-open only if verification exposes a regression in the landed recovery surfaces.
+- Stop if remaining items require design decisions beyond the scope of this task.
 
 ## Acceptance Criteria
 
-Closeout verification for this packet:
-
-1. Tier 3 recovery is live in dispatcher execution.
-2. `phase-a` and `phase-b` surfaces route through recovery-aware execution.
-3. Timeout cleanup occurs at the dispatcher subprocess boundary before retry.
-4. Targeted pytest gating runs before commit execution.
-5. Recovery/dispatcher tests and docs consistency continue to pass.
+- `needs_phase_b` is Tier 3 recoverable, not Tier 4 terminal.
+- Denylist catches `git reset`, `git checkout`, `git restore` subcommand variations.
+- Sensitive repo-internal paths (`.git/config`, `.git/hooks/`) are blocked from Tier 3 actions.
 
 ## Grounding
 
-- **Authorization source:** `[RECOVERY-TIER3-WIRING]` in `TASKS.md` (founder-authorized 2026-03-31; closed 2026-04-01).
-- **Parent task:** `[PIPELINE-RECOVERY]` remains in progress for the learning-store follow-on only.
-- **Depends on:** PR #706 (`Tier 2 auto-retry + Tier 3 recovery loop function`) landed before this closeout.
-- **Tracker sync note:** `TASKS.md` tracker sync note dated 2026-04-01 (`recovery-tier3-wiring-closeout-2026-04-01`).
+- **Authorization source:** `[RECOVERY-TIER3-WIRING]` in `TASKS.md` (founder-authorized 2026-03-31).
+- **Parent task:** `[PIPELINE-RECOVERY]` IN PROGRESS.
+- **Depends on:** PR #706 (Tier 2+3 code) landed.
 - **Design reference:** `mu/docs/agents/PipelineRecovery.v0.md`.
