@@ -154,6 +154,24 @@ VERIFIED: Yes
         assert any("missing NOT_CHECKED section" in v for v in result["violations"])
         assert any("missing explicit VERDICT line" in v for v in result["violations"])
 
+    def test_strict_mode_accepts_backticked_verdict_line(self):
+        """Strict mode should accept verdict lines wrapped in backticks."""
+        output = """
+### CHECKED
+- Verified the packet makes no structural claims.
+
+### NOT_CHECKED
+- Did not rerun the full pipeline.
+
+### Verdict
+`VERDICT: NO_STRUCTURAL_CLAIMS`
+"""
+
+        result = check_compliance(output, strict=True)
+
+        assert result["compliant"] is True
+        assert not any("missing explicit VERDICT line" in v for v in result["violations"])
+
     def test_strict_mode_rejects_external_review_redirect(self, tmp_path, monkeypatch):
         """Strict mode should reject outputs that redirect review to external files."""
         monkeypatch.chdir(tmp_path)
