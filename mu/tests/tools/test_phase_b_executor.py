@@ -1618,11 +1618,24 @@ class TestGovernanceDowngrade:
         assert "reports/deferred/README.md" in reason
 
     @pytest.mark.parametrize("severity", ["high", "critical"])
-    def test_governance_path_cannot_downgrade_severity_floor(self, severity):
-        """High/critical governance findings stay blocking despite report paths."""
+    def test_governance_path_downgrades_even_high_severity(self, severity):
+        """DOC_ACCURACY/POLICY_BOUND on governance paths are editorial — downgraded regardless of severity."""
         findings = [{
             "title": "Critical governance downgrade",
             "class": "POLICY_BOUND",
+            "severity": severity,
+            "file": "reports/control_plane/example.md",
+        }]
+        blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
+        assert len(blocking) == 0
+        assert len(non_blocking) == 1
+
+    @pytest.mark.parametrize("severity", ["high", "critical"])
+    def test_defect_on_governance_path_stays_blocking(self, severity):
+        """DEFECT findings on governance paths still block — only DOC_ACCURACY/POLICY_BOUND downgrade."""
+        findings = [{
+            "title": "Runtime defect in report",
+            "class": "DEFECT",
             "severity": severity,
             "file": "reports/control_plane/example.md",
         }]
@@ -2698,6 +2711,7 @@ class TestParseFindings:
         assert len(findings) == 1
         assert findings[0]["severity"] == "critical"
         assert findings[0]["disposition"] == "blocking"
+        assert "malformed" in findings[0]["title"].lower()
 
     def test_parse_envelope_with_code_fences(self):
         envelope = json.dumps({"findings": [{"title": "A", "disposition": "blocking"}]})
@@ -2705,8 +2719,8 @@ class TestParseFindings:
         findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
         assert len(findings) == 1
 
-    def test_parse_conflicting_valid_envelopes_fails_closed(self):
-        """Multiple distinct NON-EMPTY envelopes must fail closed instead of picking one."""
+    def test_parse_multiple_envelopes_uses_last(self):
+        """Multiple distinct NON-EMPTY envelopes: use the last valid one (same as bridge_supervisor)."""
         first = json.dumps({"findings": [{"title": "Finding A", "severity": "low"}]})
         second = json.dumps({"findings": [{"title": "Finding B", "severity": "high"}]})
         render = (
@@ -2720,9 +2734,8 @@ class TestParseFindings:
         )
         findings = pb_mod._parse_findings_from_render(render)  # ANTICHEAT_OK: testing internal executor functions
         assert len(findings) == 1
-        assert findings[0]["severity"] == "critical"
-        assert findings[0]["disposition"] == "blocking"
-        assert "Multiple conflicting AGENT_ENVELOPE" in findings[0]["title"]
+        assert findings[0]["title"] == "Finding B"
+        assert findings[0]["severity"] == "high"
 
     def test_empty_envelope_plus_real_not_conflicting(self):
         """Empty-findings envelope + real envelope → returns real findings, not conflict."""
@@ -2804,6 +2817,20 @@ class TestSdkReviewScopeSelection:
         selected = pb_mod._select_sdk_review_files(files)  # ANTICHEAT_OK: testing internal executor functions
         assert selected == []
 
+    def test_parse_fenced_out_files_from_checkout_state_fence(self):
+        plan = (
+            "### Checkout-state fence\n\n"
+            "| File | Status |\n"
+            "|------|--------|\n"
+            "| `mu/tools/executors/foo.py` | adjacent pipeline-recovery (fenced out) |\n"
+            "| `reports/control_plane/plan.md` | current wave |\n"
+            "| `mu/tools/runners/run_review.py` | adjacent pipeline-recovery (fenced out) |\n"
+        )
+        assert pb_mod._parse_fenced_out_files(plan) == [  # ANTICHEAT_OK: testing internal executor functions
+            "mu/tools/executors/foo.py",
+            "mu/tools/runners/run_review.py",
+        ]
+
     def test_report_only_changed_files_skip_sdk_gate(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -2832,6 +2859,52 @@ class TestSdkReviewScopeSelection:
         assert result["agent_review_ran"] is False
         assert result["agent_review_skipped_reason"] == "no_implementation_files"
         assert result["agent_review_scope"] == []
+
+    def test_checkout_state_fence_excludes_dirty_baseline_from_wave_scope(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        plan_path = repo / "reports" / "control_plane" / "plan.md"
+        plan_path.write_text(
+            "# Plan\n\n"
+            "Phase-A-Lock: LOCKED\n\n"
+            "## Scope\n\n"
+            "- `reports/control_plane/plan.md`\n"
+            "- `mu/tools/executors/foo.py`\n\n"
+            "### Checkout-state fence\n\n"
+            "| File | Status |\n"
+            "|------|--------|\n"
+            "| `mu/tools/executors/foo.py` | adjacent pipeline-recovery (fenced out) |\n"
+        )
+
+        mock_impl = _make_mock_impl()
+        stage_files = MagicMock(return_value=True)
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=[
+                 "mu/tools/executors/foo.py",
+                 "reports/control_plane/plan.md",
+             ]), \
+             patch.object(pb_mod, "run_sdk_agents", side_effect=AssertionError("SDK gate should be skipped")), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1",
+             }), \
+             patch.object(pb_mod, "_stage_files", stage_files), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert result["agent_review_ran"] is False
+        assert result["agent_review_skipped_reason"] == "no_implementation_files"
+        assert result["agent_review_scope"] == []
+        assert stage_files.call_args_list
+        for call in stage_files.call_args_list:
+            assert call.args[1] == ["reports/control_plane/plan.md"]
 
     def test_parse_markdown_findings(self):
         render = (
@@ -4463,6 +4536,47 @@ class TestSdkReviewDepthContract:
         env = captured["env"]
         assert env["RCX_REVIEW_STATUS_PATH"].endswith(".status.json")
         assert env["RCX_REVIEW_AGENT_TIMEOUT"] == "600"
+
+    def test_phase_a_sdk_review_uses_terminal_status_when_runner_lingers(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".scratch").mkdir()
+
+        class FakeProc:
+            pid = 1234
+
+            def poll(self):
+                return None
+
+        def fake_popen(cmd, cwd, stdout, stderr, text, env):
+            Path(env["RCX_REVIEW_STATUS_PATH"]).write_text(
+                json.dumps(
+                    {
+                        "status": "hard_gate_failed",
+                        "running_agents": [],
+                        "completed_agents": {
+                            "verifier": {"verdict": "REQUEST_CHANGES", "passed": False}
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            Path(cmd[8]).write_text("report", encoding="utf-8")
+            stdout.write("review stdout")
+            stdout.flush()
+            stderr.write("review stderr")
+            stderr.flush()
+            return FakeProc()
+
+        with patch.object(pa_mod.uuid, "uuid4", return_value=SimpleNamespace(hex="deadbeefcafebabe")), \
+             patch.object(pa_mod.subprocess, "Popen", side_effect=fake_popen), \
+             patch.object(pa_mod, "process_descendants", return_value=[]):
+            result = pa_mod.run_sdk_agents(repo, ["mu/tools/executors/phase_a_executor.py"])
+
+        assert result["exit_code"] == 1
+        assert result["stdout"] == "review stdout"
+        assert result["stderr"] == "review stderr"
+        assert result["status_path"].endswith("phase_a_agent_review_deadbeef.status.json")
 
     def test_phase_a_review_depth_config_accepts_full_override(self):
         assert pa_mod.resolve_review_depth({"review_depths": {"phase_a": "full"}}, "phase_a") == "full"  # ANTICHEAT_OK: testing config resolver

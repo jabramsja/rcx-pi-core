@@ -32,6 +32,7 @@ import json
 import os
 import re
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -131,24 +132,9 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
     disposition = finding.get("disposition")
     finding_class = str(finding.get("class") or "").upper()
 
-    # Critical/high findings stay blocking even if an explicit disposition tries
-    # to soften them. This is the fail-closed floor for bridge feedback.
-    # IMPORTANT: this check runs BEFORE governance downgrades and the generic
-    # disposition check so critical/high findings cannot be softened merely by
-    # pointing at a report/TASKS path or by carrying a disposition.
-    if severity == "critical":
-        if disposition == "non_blocking":
-            return "blocking", "critical severity overrides explicit non_blocking disposition"
-        return "blocking", "critical severity (always blocking)"
-
-    if severity == "high":
-        if disposition == "non_blocking":
-            return "blocking", "high severity overrides explicit non_blocking disposition"
-        return "blocking", "high severity (always blocking)"
-
-    # Governance/doc-only findings are non-blocking only below the severity
-    # floor. Must satisfy BOTH conditions: governance class AND governance file
-    # path. A POLICY_BOUND finding on actual code stays blocking.
+    # Governance/doc-only findings: DOC_ACCURACY or POLICY_BOUND on governance
+    # paths are editorial, not runtime risks. Downgrade to non-blocking regardless
+    # of severity. Critical DEFECT findings on code still block.
     _GOV_CLASSES = {"POLICY_BOUND", "DOC_ACCURACY"}
     _GOV_PATH_PREFIXES = ("reports/", "TASKS.md", ".claude/", "CHANGELOG.md", "STATUS.md")
     finding_file = str(finding.get("file") or "")
@@ -159,6 +145,18 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
             f"{severity} {finding_class} on governance/doc path — "
             f"downgraded to non-blocking (file: {finding_file})"
         )
+
+    # Critical/high findings on non-governance paths stay blocking even if an
+    # explicit disposition tries to soften them. Fail-closed severity floor.
+    if severity == "critical":
+        if disposition == "non_blocking":
+            return "blocking", "critical severity overrides explicit non_blocking disposition"
+        return "blocking", "critical severity (always blocking)"
+
+    if severity == "high":
+        if disposition == "non_blocking":
+            return "blocking", "high severity overrides explicit non_blocking disposition"
+        return "blocking", "high severity (always blocking)"
 
     if disposition is not None:
         if disposition in ALLOWED_FINDING_DISPOSITIONS:
@@ -591,32 +589,29 @@ def _parse_findings_from_text(text: str) -> list[dict[str, Any]]:
             "disposition": "blocking",
             "detail": "Bridge render contained nested AGENT_ENVELOPE markers.",
         }]
-    valid_envelopes: list[dict[str, Any]] = []
+    # Use the LAST valid envelope with non-empty findings — same strategy as
+    # bridge_supervisor.parse_envelope().  Codex emits draft envelopes during
+    # reasoning; only the final one is authoritative.
+    any_valid = False
     for payload in reversed(envelope_payloads):
         try:
             envelope = json.loads(_normalize_agent_envelope_payload(payload))
         except (json.JSONDecodeError, TypeError):
             continue
+        any_valid = True
         findings = envelope.get("findings")
-        # Only consider envelopes with non-empty findings lists.
-        # Empty-findings envelopes ({"findings": []}) are discarded so a
-        # prepended decoy cannot trigger a false "conflicting payloads" error.
         if isinstance(findings, list) and findings:
-            valid_envelopes.append(envelope)
-    if valid_envelopes:
-        canonical_payloads = {
-            json.dumps(env.get("findings", []), sort_keys=True, separators=(",", ":"))
-            for env in valid_envelopes
-        }
-        if len(canonical_payloads) > 1:
-            return [{
-                "title": "Multiple conflicting AGENT_ENVELOPE payloads in bridge render",
-                "severity": "critical",
-                "type": "DEFECT",
-                "disposition": "blocking",
-                "detail": "Bridge render contained more than one distinct structured findings payload.",
-            }]
-        return valid_envelopes[0]["findings"]
+            return findings
+    # Envelope markers were present but no valid JSON could be parsed —
+    # fail closed so malformed reviewer output doesn't silently pass.
+    if saw_envelope_markers and not any_valid and envelope_payloads:
+        return [{
+            "title": "All AGENT_ENVELOPE payloads in bridge render are malformed JSON",
+            "severity": "critical",
+            "type": "DEFECT",
+            "disposition": "blocking",
+            "detail": "Bridge render contained envelope markers but no parseable JSON payload.",
+        }]
 
     # Strategy 2: numbered markdown findings
     # Pattern: "  N. **TYPE** (severity): title"  with optional indented detail lines
@@ -1432,6 +1427,22 @@ def _select_sdk_review_files(files: list[str]) -> list[str]:
     return implementation
 
 
+def _total_bridge_rounds(repo_root: Path) -> int:
+    """Count total completed Phase B bridge rounds from bridge.db."""
+    db_path = repo_root / ".agent_bus" / "bridge.db"
+    if not db_path.exists():
+        return 0
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=5)
+        row = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE job_id LIKE 'phase-b-%' AND status = 'DONE'"
+        ).fetchone()
+        conn.close()
+        return row[0] if row else 0
+    except Exception:
+        return 0
+
+
 def _collect_changed_files(
     repo_root: Path,
     allowed_files: set[str] | None = None,
@@ -1530,6 +1541,23 @@ def _parse_plan_declared_files(plan_content: str) -> list[str]:
                 _add(bullet_body.split()[0])
         for token in _INLINE_PATH_RE.findall(line):
             _add(token)
+
+    return parsed
+
+
+def _parse_fenced_out_files(plan_content: str) -> list[str]:
+    """Extract repo-relative files explicitly marked as fenced out in the packet."""
+    seen: set[str] = set()
+    parsed: list[str] = []
+
+    for line in plan_content.splitlines():
+        if "fenced out" not in line.lower():
+            continue
+        for token in re.findall(r"`([^`\n]+)`", line):
+            normalized = _normalize_declared_path_token(token)
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                parsed.append(normalized)
 
     return parsed
 
@@ -2106,12 +2134,21 @@ def run_phase_b(
     target_gate_id = routing_record.get("target_gate_id", "G8")
 
     # Parse plan-declared files from markdown/body content.
+    fenced_out_files = set(_parse_fenced_out_files(plan.get("content", "")))
     plan_declared_files: list[str] | None = None
-    _parsed = _parse_plan_declared_files(plan.get("content", ""))
+    _parsed = [
+        path for path in _parse_plan_declared_files(plan.get("content", ""))
+        if path not in fenced_out_files
+    ]
     # Only activate strict tracking when the plan actually declares files.
     # An empty parse means "plan has no file list" → use prefix fallback.
     if _parsed:
         plan_declared_files = _parsed
+    if fenced_out_files:
+        log(
+            f"Checkout-state fence excludes {len(fenced_out_files)} file(s) "
+            "from this wave-owned scope"
+        )
 
     # Track implementer-changed files: snapshot before, diff after
     implementer_changed: set[str] = set()
@@ -2128,11 +2165,11 @@ def run_phase_b(
     # Restore wave-owned file tracking from persisted state (R7-1: crash-resume)
     if saved_state and resume_after:
         if saved_state.get("implementer_changed"):
-            implementer_changed = set(saved_state["implementer_changed"])
+            implementer_changed = set(saved_state["implementer_changed"]) - fenced_out_files
         if saved_state.get("executor_created"):
-            executor_created = set(saved_state["executor_created"])
+            executor_created = set(saved_state["executor_created"]) - fenced_out_files
         if saved_state.get("baseline_wave_files"):
-            baseline_wave_files = set(saved_state["baseline_wave_files"])
+            baseline_wave_files = set(saved_state["baseline_wave_files"]) - fenced_out_files
         if saved_state.get("all_non_blocking"):
             all_non_blocking = list(saved_state["all_non_blocking"])
         if saved_state.get("finding_history"):
@@ -2140,7 +2177,7 @@ def run_phase_b(
     # Merge persisted dirty-wave scope with the current repo dirty baseline so
     # late follow-up fixes made after a saved checkpoint are not silently dropped
     # from supervisor packaging on resume.
-    baseline_wave_files |= set(_collect_baseline_wave_files(repo_root, plan_path))
+    baseline_wave_files |= (set(_collect_baseline_wave_files(repo_root, plan_path)) - fenced_out_files)
 
     # Determine which steps to skip based on resume state
     _RESUME_ORDER = ["implementer", "agent_review", "bridge_converged", "needs_phase_b_reentry"]
@@ -2239,7 +2276,7 @@ def run_phase_b(
 
         # Collect changed files after implementer ran — track what implementer actually changed
         post_impl_files = set(_collect_changed_files(repo_root))
-        implementer_changed = post_impl_files - pre_impl_files
+        implementer_changed = (post_impl_files - pre_impl_files) - fenced_out_files
         changed_files = _collect_wave_owned_files(
             repo_root,
             plan_path,
@@ -2793,15 +2830,19 @@ def run_phase_b(
                 if p.is_file() and p.suffix == ".md" and p.name != "README.md"
             )
         deferred_items = _collect_supervisor_deferred_items(changed_files, deferred_packet_path)
+        all_dirty_reentry = _collect_changed_files(repo_root)
+        fenced_reentry = [f for f in all_dirty_reentry if f not in set(changed_files)]
+
         supervisor_package = {
             "task_id": routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
             "wave_name": wave_id,
             "lane": "hooks/agents/bridge control-surface",
             "changed_files": changed_files,
+            "fenced_files": fenced_reentry,
             "scope_items": [plan_path],
             "fixes_implemented": ["Phase B implementation per locked plan (resumed from NEEDS_PHASE_B)"],
             "deferred_items": deferred_items,
-            "bridge_status": {"rounds": result.get("bridge_rounds", 0), "reentry": True},
+            "bridge_status": {"rounds": result.get("bridge_rounds", 0), "total_rounds": _total_bridge_rounds(repo_root), "reentry": True},
             "evidence_handles": {},
             "blocker_report_paths": blocker_paths,
             "current_judgment": "COMMIT_GO",
@@ -2867,15 +2908,20 @@ def run_phase_b(
             log(f"Acknowledging {len(blocker_paths)} active blocking packet(s)")
         deferred_items = _collect_supervisor_deferred_items(changed_files, deferred_packet_path)
 
+        # Fenced files: dirty in git but not wave-owned (from other waves)
+        all_dirty = _collect_changed_files(repo_root)
+        fenced = [f for f in all_dirty if f not in set(changed_files)]
+
         supervisor_package = {
             "task_id": routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
             "wave_name": wave_id,
             "lane": "hooks/agents/bridge control-surface",
             "changed_files": changed_files,
+            "fenced_files": fenced,
             "scope_items": [plan_path],
             "fixes_implemented": ["Phase B implementation per locked plan"],
             "deferred_items": deferred_items,
-            "bridge_status": {"rounds": result.get("bridge_rounds", 0)},
+            "bridge_status": {"rounds": result.get("bridge_rounds", 0), "total_rounds": _total_bridge_rounds(repo_root)},
             "evidence_handles": {},
             "blocker_report_paths": blocker_paths,
             "current_judgment": "COMMIT_GO",
@@ -3217,7 +3263,9 @@ def run_phase_b(
 
         # Refresh ALL supervisor package truth for re-entry
         supervisor_package["changed_files"] = changed_files
-        supervisor_package["bridge_status"] = {"rounds": result.get("bridge_rounds", 0), "reentry": True}
+        all_dirty_reentry2 = _collect_changed_files(repo_root)
+        supervisor_package["fenced_files"] = [f for f in all_dirty_reentry2 if f not in set(changed_files)]
+        supervisor_package["bridge_status"] = {"rounds": result.get("bridge_rounds", 0), "total_rounds": _total_bridge_rounds(repo_root), "reentry": True}
         # Refresh blocker acknowledgment (may have changed during re-entry)
         blocking_dir = repo_root / "reports" / "deferred" / "blocking"
         if blocking_dir.is_dir():

@@ -226,8 +226,9 @@ Staged diff (up to 10000 chars):
 {diff_text}
 
 Required review scope:
-- red-team all touched files
-- red-team adjacent high-risk files implicated by those touches
+- red-team ONLY the files listed in CHANGED_FILES_ACTUAL above
+- if UNSTAGED_FILES says "out of scope", do NOT read, review, or issue findings about unstaged files — they belong to other waves
+- red-team adjacent high-risk files implicated by the in-scope touches
 - classify findings as DEFECT, POLICY_BOUND, or DOC_ACCURACY
 
 Exhaustive enumeration requirement:
@@ -497,6 +498,27 @@ def changed_files(repo_root: Path, *, staged: bool) -> list[str]:
         for path in _iter_untracked_files(repo_root):
             files.append(path.relative_to(repo_root).as_posix())
     return files
+
+
+def _scoped_review_targets_from_task_text(repo_root: Path, task_text: str) -> list[str]:
+    """Prefer explicit repo-local paths from the review task over all dirty files."""
+    repo_root_resolved = repo_root.resolve()
+    targets: list[str] = []
+    seen: set[str] = set()
+    for token in re.findall(r"`([^`\n]+)`", task_text):
+        candidate = Path(token)
+        try:
+            resolved = candidate.resolve() if candidate.is_absolute() else (repo_root / candidate).resolve()
+            if not resolved.is_file() or not resolved.is_relative_to(repo_root_resolved):
+                continue
+            rel_path = resolved.relative_to(repo_root_resolved).as_posix()
+        except (OSError, ValueError):
+            continue
+        if rel_path in seen:
+            continue
+        seen.add(rel_path)
+        targets.append(rel_path)
+    return targets
 
 
 REVIEWER_DIFF_MAX_CHARS = 10000
@@ -784,14 +806,20 @@ def parse_envelope(output: str) -> dict[str, Any]:
         "touched_files_claimed", "findings", "validations_claimed",
         "request_for_next_agent",
     }
+    parse_errors: list[str] = []
     for index, match in enumerate(matches, start=1):
         try:
             envelope = json.loads(match.group(1))
         except json.JSONDecodeError as exc:
-            raise BridgeError(f"Agent envelope #{index} is not valid JSON: {exc}") from exc
+            # Codex emits the prompt template (with truncated strings) and
+            # draft envelopes during reasoning.  Skip malformed entries and
+            # only fail if NO valid envelope is found after the loop.
+            parse_errors.append(f"Agent envelope #{index} is not valid JSON: {exc}")
+            continue
         missing = required.difference(envelope)
         if missing:
-            raise BridgeError(f"Agent envelope missing keys: {sorted(missing)}")
+            # Draft envelopes may omit required keys — skip, don't abort.
+            continue
         decision = envelope["decision"]
         if decision not in AUTHORIZED_DECISIONS:
             # The live adapter transcript can contain the prompt template before
@@ -806,6 +834,11 @@ def parse_envelope(output: str) -> dict[str, Any]:
         canonical_payloads.add(json.dumps(envelope, sort_keys=True, separators=(",", ":")))
 
     if not envelopes:
+        if parse_errors:
+            raise BridgeError(
+                f"Agent output contained {len(matches)} envelope block(s) but none were valid. "
+                f"Parse errors: {'; '.join(parse_errors[:3])}"
+            )
         raise BridgeError("Agent output contained only non-authoritative template envelope blocks")
 
     if len(canonical_payloads) > 1:
@@ -860,9 +893,18 @@ def build_reviewer_prompt(
     reader_summary = reader_envelope.get("summary", "(none)")
     if include_diff:
         diff_text = staged_diff_content(paths.repo_root)
-        changed_actual = _format_list(changed_files(paths.repo_root, staged=False) + changed_files(paths.repo_root, staged=True))
-        staged = _format_list(changed_files(paths.repo_root, staged=True))
-        unstaged = _format_list(changed_files(paths.repo_root, staged=False))
+        staged_list = changed_files(paths.repo_root, staged=True)
+        unstaged_list = changed_files(paths.repo_root, staged=False)
+        # When files are staged, scope the review to staged files only.
+        # Unstaged files in a dirty worktree may be fenced-out (belonging
+        # to other waves) and must not pollute the reviewer's scope.
+        if staged_list:
+            changed_actual = _format_list(staged_list)
+            unstaged = "(out of scope — only staged files are under review)"
+        else:
+            changed_actual = _format_list(unstaged_list)
+            unstaged = _format_list(unstaged_list)
+        staged = _format_list(staged_list)
         review_mode_instructions = _build_code_review_instructions(
             changed_actual, staged, unstaged, validation_text, reader_summary, diff_text,
         )
@@ -1656,6 +1698,13 @@ def review_job(
             actual_staged = changed_files(paths.repo_root, staged=True)
             actual_unstaged = changed_files(paths.repo_root, staged=False)
             all_changed = sorted(set(actual_staged + actual_unstaged))
+            scoped_targets = _scoped_review_targets_from_task_text(paths.repo_root, task_text)
+            claimed_files = scoped_targets if scoped_targets else all_changed
+            next_request = (
+                "Review the plan against the task requirements."
+                if "Review the plan at `" in task_text
+                else "Review the implementation against the task requirements."
+            )
 
             envelope = {
                 "job_id": final_job_id,
@@ -1664,10 +1713,10 @@ def review_job(
                 "decision": "SYNTHETIC",
                 "synthetic": True,
                 "summary": reader_summary,
-                "touched_files_claimed": all_changed,
+                "touched_files_claimed": claimed_files,
                 "findings": [],
                 "validations_claimed": [],
-                "request_for_next_agent": "Review the implementation against the task requirements.",
+                "request_for_next_agent": next_request,
             }
 
             # Record synthetic reader turn

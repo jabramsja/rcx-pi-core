@@ -51,6 +51,33 @@ _AGENT_ENVELOPE_RE = re.compile(
 _AUTHORIZED_AGENT_DECISIONS = frozenset(
     {"GO", "NO_GO", "REQUEST_CHANGES", "QUESTION", "STALE", "ERROR", "SYNTHETIC"}
 )
+_META_ENVELOPE_RE = re.compile(
+    r"BEGIN_META_ENVELOPE\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?END_META_ENVELOPE",
+    re.DOTALL,
+)
+_AUTHORIZED_META_DECISIONS = frozenset(
+    {
+        "COMMIT_GO",
+        "COMMIT_GO_HOLD_PUSH",
+        "NO_ACTION",
+        "NEEDS_PHASE_A",
+        "NEEDS_PHASE_B",
+        "STOP_FOR_FOUNDER",
+        "STOP_FOR_TRIAGE_DISCUSSION",
+        "CONTINUE_DIALECTIC",
+        "ROUTE_PHASE_A",
+        "ROUTE_PHASE_B",
+        "UPDATE_TRACKER_ONLY",
+        "ERROR_VALIDATION_FAILED",
+        "ERROR_PACKAGE_INVALID",
+        "ERROR_CODEX_TIMEOUT",
+        "ERROR_CODEX_ABORT",
+        "ERROR_REPO_CHANGED",
+        "ERROR_MERGE_NOT_FOUND",
+        "ERROR_INTERNAL",
+        "RETRY_SUGGESTED",
+    }
+)
 
 
 def _extract_text_from_stream_content(block: Any) -> str:
@@ -264,16 +291,29 @@ def _pid_is_live_non_zombie(pid: int) -> bool:
     return not stat.lstrip().startswith("Z")
 
 
-def _contains_complete_agent_envelope(text: str) -> bool:
-    for match in _AGENT_ENVELOPE_RE.finditer(text):
-        try:
-            envelope = json.loads(match.group(1))
-        except json.JSONDecodeError:
-            continue
-        decision = envelope.get("decision")
-        if isinstance(decision, str) and decision in _AUTHORIZED_AGENT_DECISIONS:
-            return True
+def _contains_complete_adapter_envelope(text: str) -> bool:
+    for pattern, authorized_decisions in (
+        (_AGENT_ENVELOPE_RE, _AUTHORIZED_AGENT_DECISIONS),
+        (_META_ENVELOPE_RE, _AUTHORIZED_META_DECISIONS),
+    ):
+        for match in pattern.finditer(text):
+            try:
+                envelope = json.loads(match.group(1))
+            except json.JSONDecodeError:
+                continue
+            decision = envelope.get("decision")
+            if isinstance(decision, str) and decision in authorized_decisions:
+                return True
     return False
+
+
+def _raw_transcript_contains_complete_adapter_envelope(raw_output_path: Path | None) -> bool:
+    if raw_output_path is None:
+        return False
+    try:
+        return _contains_complete_adapter_envelope(raw_output_path.read_text(encoding="utf-8"))
+    except OSError:
+        return False
 
 
 def _authoritative_output_so_far(spec: AdapterSpec, cmd: list[str], stdout_text: str) -> str:
@@ -558,8 +598,11 @@ def _run_adapter_buffered(
             if (
                 stop_after_envelope
                 and not envelope_terminated.is_set()
-                and _contains_complete_agent_envelope(
-                    _authoritative_output_so_far(spec, cmd, "".join(stdout_lines))
+                and (
+                    _contains_complete_adapter_envelope(
+                        _authoritative_output_so_far(spec, cmd, "".join(stdout_lines))
+                    )
+                    or _raw_transcript_contains_complete_adapter_envelope(raw_output_path)
                 )
             ):
                 envelope_terminated.set()
@@ -605,7 +648,12 @@ def _run_adapter_buffered(
     output = _normalize_stdout_for_adapter(spec, cmd, "".join(stdout_lines))
     stderr_text = stderr_buf.getvalue()
     if stderr_text:
-        output = f"{output}\n[stderr]\n{stderr_text}".strip()
+        if not output.strip() and _contains_complete_adapter_envelope(stderr_text):
+            # CLI wrote all output including envelope to stderr (e.g. codex exec).
+            # Promote stderr as authoritative output so parse_envelope accepts it.
+            output = stderr_text
+        else:
+            output = f"{output}\n[stderr]\n{stderr_text}".strip()
         if raw_fh is not None and not stderr_written_raw():
             write_stderr_raw(stderr_text)
     if zero_output_timed_out.is_set():
@@ -692,8 +740,11 @@ def _run_adapter_streaming(
             or envelope_terminated.is_set()
         ):
             return
-        if _contains_complete_agent_envelope(
-            _authoritative_output_so_far(spec, cmd, sink.getvalue())
+        if (
+            _contains_complete_adapter_envelope(
+                _authoritative_output_so_far(spec, cmd, sink.getvalue())
+            )
+            or _raw_transcript_contains_complete_adapter_envelope(raw_output_path)
         ):
             envelope_terminated.set()
             # Give the adapter a brief grace period to flush any immediate trailing bytes
@@ -749,7 +800,26 @@ def _run_adapter_streaming(
             )
             zero_output_watchdog.daemon = True
             zero_output_watchdog.start()
-        proc.wait(timeout=spec.timeout_s)
+        deadline = time.monotonic() + spec.timeout_s
+        wait_slice = 0.2 if stop_after_envelope else spec.timeout_s
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(cmd, spec.timeout_s)
+            try:
+                proc.wait(timeout=min(wait_slice, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                if stop_after_envelope and (
+                    envelope_terminated.is_set()
+                    or _contains_complete_adapter_envelope(
+                        _authoritative_output_so_far(spec, cmd, stdout_buf.getvalue())
+                    )
+                    or _raw_transcript_contains_complete_adapter_envelope(raw_output_path)
+                ):
+                    envelope_terminated.set()
+                    _kill_process_group(proc, wait_for_exit=True)
+                    continue
         if zero_output_watchdog is not None:
             zero_output_watchdog.cancel()
         stale_watchdog_stop.set()
@@ -778,7 +848,12 @@ def _run_adapter_streaming(
     output = _normalize_stdout_for_adapter(spec, cmd, stdout_buf.getvalue())
     stderr_text = stderr_buf.getvalue()
     if stderr_text:
-        output = f"{output}\n[stderr]\n{stderr_text}".strip()
+        if not output.strip() and _contains_complete_adapter_envelope(stderr_text):
+            # CLI wrote all output including envelope to stderr (e.g. codex exec).
+            # Promote stderr as authoritative output so parse_envelope accepts it.
+            output = stderr_text
+        else:
+            output = f"{output}\n[stderr]\n{stderr_text}".strip()
         if raw_fh is not None and not stderr_written_raw():
             write_stderr_raw(stderr_text)
     if zero_output_timed_out.is_set():

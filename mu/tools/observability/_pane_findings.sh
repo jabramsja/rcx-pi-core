@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # _pane_findings.sh — Bridge review findings pane for tmux
-# Shows blocking/non-blocking findings from latest bridge rounds
-# Auto-reloads when script changes on disk.
+# Shows blocking/non-blocking findings from latest bridge rounds.
 set +e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 resolve_repo_root() {
-  local helper="$SCRIPT_DIR/pipeline_status.sh"
+  local helper="$SCRIPT_DIR/_resolve_live_root.sh"
   local root=""
   if [ -f "$helper" ]; then
-    root=$(bash "$helper" --print-root 2>/dev/null || true)
+    root=$(bash "$helper" 2>/dev/null || true)
   fi
   if [ -n "$root" ]; then
     printf '%s\n' "$root"
@@ -18,15 +17,6 @@ resolve_repo_root() {
 }
 resolve_branch_name_for_root() {
   local root="${1:-$REPO_ROOT}"
-  local helper="$SCRIPT_DIR/pipeline_status.sh"
-  local branch=""
-  if [ -f "$helper" ]; then
-    branch=$(bash "$helper" --print-branch-for-root "$root" 2>/dev/null || true)
-  fi
-  if [ -n "$branch" ]; then
-    printf '%s\n' "$branch"
-    return 0
-  fi
   git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
 }
 refresh_context() {
@@ -44,9 +34,6 @@ refresh_context() {
 REPO_ROOT=""
 RAW_DIR=""
 BRANCH_NAME=""
-SELF="$SCRIPT_DIR/$(basename "$0")"
-SELF_MTIME=$(stat -f%m "$SELF" 2>/dev/null || stat -c%Y "$SELF" 2>/dev/null || echo 0)
-
 BOLD="\033[1m" DIM="\033[2m" GREEN="\033[32m" YELLOW="\033[33m"
 RED="\033[31m" CYAN="\033[36m" PURPLE="\033[35m" RESET="\033[0m"
 LAST_HASH=""
@@ -200,7 +187,20 @@ for m in reversed(matches):
             break
     except (json.JSONDecodeError, KeyError):
         continue
+if env is None and '$REVIEW_SOURCE' != '$REVIEWER_FILE':
+    # No JSON envelope in rendered file — try raw reviewer file before markdown fallback
+    raw_content = open('$REVIEWER_FILE', errors='replace').read()
+    for m in reversed(list(re.finditer(r'BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE', raw_content, re.DOTALL))):
+        try:
+            candidate = json.loads(m.group(1))
+            dec = candidate.get('decision', '')
+            if '|' not in dec and dec:
+                env = candidate
+                break
+        except (json.JSONDecodeError, KeyError):
+            continue
 if env is None:
+    # Last resort: parse rendered markdown (loses disposition precision)
     sections = list(re.finditer(r'(?ms)^### .*? — reviewer\n(.*?)(?=^### |\Z)', content))
     decision_re = re.compile(r'(?m)^\s*-\s*Decision:\s*(GO|REQUEST_CHANGES|NO_GO|QUESTION|STALE|ERROR|SYNTHETIC)\b')
     summary_re = re.compile(r'(?m)^\s*-\s*Summary:\s*(.*)')
@@ -214,7 +214,13 @@ if env is None:
         if dec == 'SYNTHETIC':
             continue
         summary_match = summary_re.search(block)
-        disposition = 'non_blocking' if dec == 'GO' else 'blocking'
+        def _md_disposition(cls, sev, dec):
+            s = sev.strip().lower()
+            if s in ('critical', 'high'):
+                return 'blocking'
+            if cls in ('DOC_ACCURACY', 'POLICY_BOUND') and s in ('medium', 'low'):
+                return 'non_blocking'
+            return 'non_blocking' if dec == 'GO' else 'blocking'
         env = {
             'decision': dec,
             'summary': summary_match.group(1).strip() if summary_match else '',
@@ -223,7 +229,7 @@ if env is None:
                     'class': cls,
                     'severity': sev.strip().lower(),
                     'title': title.strip(),
-                    'disposition': disposition,
+                    'disposition': _md_disposition(cls, sev, dec),
                 }
                 for cls, sev, title in finding_re.findall(block)
             ],
@@ -249,6 +255,80 @@ for f in nb:
     title = (f.get('title') or f.get('description') or '?')[:100]
     print(f'NB|{sev}|{title}')
 " 2>/dev/null)
+
+    if [ -z "$ENVELOPE" ] && [ "$REVIEW_SOURCE" != "$REVIEWER_FILE" ]; then
+      # Rendered file had no envelope — retry with the raw reviewer file
+      REVIEW_SOURCE="$REVIEWER_FILE"
+      ENVELOPE=$(python3 -c "
+import json, re, sys
+content = open('$REVIEW_SOURCE', errors='replace').read()
+matches = list(re.finditer(r'BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE', content, re.DOTALL))
+env = None
+for m in reversed(matches):
+    try:
+        candidate = json.loads(m.group(1))
+        dec = candidate.get('decision', '')
+        if '|' not in dec and dec:
+            env = candidate
+            break
+    except (json.JSONDecodeError, KeyError):
+        continue
+if env is None:
+    sections = list(re.finditer(r'(?ms)^### .*? — reviewer\n(.*?)(?=^### |\Z)', content))
+    decision_re = re.compile(r'(?m)^\s*-\s*Decision:\s*(GO|REQUEST_CHANGES|NO_GO|QUESTION|STALE|ERROR|SYNTHETIC)\b')
+    summary_re = re.compile(r'(?m)^\s*-\s*Summary:\s*(.*)')
+    finding_re = re.compile(r'(?m)^\s*\d+\.\s+\*\*(DEFECT|POLICY_BOUND|DOC_ACCURACY)\*\* \(([^)]+)\):\s*(.*)$')
+    for section in reversed(sections):
+        block = section.group(1)
+        decision_match = decision_re.search(block)
+        if not decision_match:
+            continue
+        dec = decision_match.group(1)
+        if dec == 'SYNTHETIC':
+            continue
+        summary_match = summary_re.search(block)
+        def _md_disposition(cls, sev, dec):
+            s = sev.strip().lower()
+            if s in ('critical', 'high'):
+                return 'blocking'
+            if cls in ('DOC_ACCURACY', 'POLICY_BOUND') and s in ('medium', 'low'):
+                return 'non_blocking'
+            return 'non_blocking' if dec == 'GO' else 'blocking'
+        env = {
+            'decision': dec,
+            'summary': summary_match.group(1).strip() if summary_match else '',
+            'findings': [
+                {
+                    'class': cls,
+                    'severity': sev.strip().lower(),
+                    'title': title.strip(),
+                    'disposition': _md_disposition(cls, sev, dec),
+                }
+                for cls, sev, title in finding_re.findall(block)
+            ],
+        }
+        break
+if env is None:
+    sys.exit(0)
+dec = env.get('decision', '?')
+summary = env.get('summary', '')[:120]
+findings = env.get('findings', [])
+blk = [f for f in findings if f.get('disposition') == 'blocking']
+nb = [f for f in findings if f.get('disposition') != 'blocking']
+print(f'DECISION={dec}')
+print(f'SUMMARY={summary}')
+print(f'BLOCKING={len(blk)}')
+print(f'NONBLOCKING={len(nb)}')
+for f in blk:
+    sev = f.get('severity', '?')
+    title = (f.get('title') or f.get('description') or '?')[:100]
+    print(f'BLK|{sev}|{title}')
+for f in nb:
+    sev = f.get('severity', '?')
+    title = (f.get('title') or f.get('description') or '?')[:100]
+    print(f'NB|{sev}|{title}')
+" 2>/dev/null)
+    fi
 
     if [ -z "$ENVELOPE" ]; then
       # No envelope yet — review still in progress. Show this and stop.
@@ -472,18 +552,20 @@ if not completed and not running:
     echo -e "${BOLD}Pane 2: review findings${RESET}  $(date '+%H:%M:%S')"
   fi
 
-  # Auto-reload
-  NEW_MTIME=$(stat -f%m "$SELF" 2>/dev/null || stat -c%Y "$SELF" 2>/dev/null || echo 0)
-  if [ "$NEW_MTIME" != "$SELF_MTIME" ]; then
-    rm -f "$TMPOUT"
-    sleep 1
-    exec bash "$SELF"
-  fi
-
   if [ "$ONESHOT" = "1" ]; then
     rm -f "$TMPOUT"
     exit 0
   fi
+
+  # Auto-reload: re-exec if script changed on disk
+  _SELF="${BASH_SOURCE[0]}"
+  _NEW_MTIME=$(stat -f%m "$_SELF" 2>/dev/null || stat -c%Y "$_SELF" 2>/dev/null || echo 0)
+  if [ "${_SELF_MTIME:-0}" != "0" ] && [ "$_NEW_MTIME" != "$_SELF_MTIME" ]; then
+    rm -f "$TMPOUT"
+    sleep 1
+    exec bash "$_SELF"
+  fi
+  _SELF_MTIME="$_NEW_MTIME"
 
   sleep 5
 done

@@ -49,9 +49,11 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "timeouts": {
         "dialectic_executor": 600,
         "phase_a_executor": 3600,
-        "phase_b_executor": 3600,
+        "phase_b_executor": 18000,
         "phase_b_implementer_stale": 300,
         "commit_executor": 3600,
+        "pre_push_fast": 900,
+        "bot_remediation": 600,
         "agent_review": 900,
     },
     "bridge_loop_limits": {

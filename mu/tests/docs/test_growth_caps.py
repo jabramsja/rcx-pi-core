@@ -19,8 +19,8 @@ BASELINE_TOOL_SCRIPTS = 68  # .py + .sh in mu/tools/ (67 + sync_native_agents.sh
 BASELINE_CORE_DOCS = 48  # .md in mu/docs/ (all subdirs) — bumped for P6 TypedNumericEnvelopes.v0.md
 
 # Per-wave caps from DocGovernance.v0.md
-CAP_TEST_FILES = 107  # prior cap + 1 for test_recovery_gate.py (pipeline recovery Phase 1)
-CAP_TOOL_SCRIPTS = 37  # prior cap + 1 for recovery_gate.py (pipeline recovery Phase 1)
+CAP_TEST_FILES = 108  # +1 for test_executor_config_alignment.py (timeout-budget enforcement)
+CAP_TOOL_SCRIPTS = 38  # +1 for _resolve_live_root.sh (tmux worktree resolution)
 CAP_CORE_DOCS = 11  # prior cap + 1 for PipelineRecovery.v0.md (recovery system design)
 
 

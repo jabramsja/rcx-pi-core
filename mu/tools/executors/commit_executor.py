@@ -46,8 +46,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 try:
     from executor_common import (
+        DEFAULT_EXECUTOR_CONFIG,
         MAX_WAVE_ID_LEN,
         WAVE_ID_RE,
+        load_executor_config,
         normalize_wave_id,
         ensure_not_agent_review_mode,
         ExecutorCommonError,
@@ -59,8 +61,10 @@ except ImportError:
     _mod = _ilu.module_from_spec(_spec)
     assert _spec.loader is not None
     _spec.loader.exec_module(_mod)
+    DEFAULT_EXECUTOR_CONFIG = _mod.DEFAULT_EXECUTOR_CONFIG
     MAX_WAVE_ID_LEN = _mod.MAX_WAVE_ID_LEN
     WAVE_ID_RE = _mod.WAVE_ID_RE
+    load_executor_config = _mod.load_executor_config
     normalize_wave_id = _mod.normalize_wave_id
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
@@ -156,7 +160,12 @@ BOT_REVIEW_POLL_SECONDS = 5
 BOT_REVIEW_ACK_REACTION = "eyes"
 CI_CHECK_REGISTRATION_WAIT_SECONDS = 120
 CI_CHECK_REGISTRATION_POLL_SECONDS = 5
-PRE_PUSH_FAST_TIMEOUT_S = 900
+_COMMIT_EXECUTOR_CONFIG = load_executor_config(SCRIPT_DIR.parent.parent.parent)
+_COMMIT_EXECUTOR_TIMEOUTS = _COMMIT_EXECUTOR_CONFIG.get("timeouts", {})
+COMMIT_EXECUTOR_OUTER_BUDGET_S = _COMMIT_EXECUTOR_TIMEOUTS.get(
+    "commit_executor", DEFAULT_EXECUTOR_CONFIG["timeouts"]["commit_executor"]
+)
+PRE_PUSH_FAST_TIMEOUT_S = _COMMIT_EXECUTOR_TIMEOUTS.get("pre_push_fast", 900)
 BOT_NO_ISSUES_COMMENT_RE = re.compile(
     r"Codex Review:\s*.*did(?:n't| not) find any major issues",
     re.IGNORECASE | re.DOTALL,
@@ -171,8 +180,19 @@ TRANSIENT_STATUS_PREFIXES = (".agent_bus/", ".scratch/")
 
 BOT_REMEDIATION_MAX_ROUNDS = 2
 BOT_REMEDIATION_ADAPTER = "claude"
-BOT_REMEDIATION_TIMEOUT_S = 600
+BOT_REMEDIATION_TIMEOUT_S = _COMMIT_EXECUTOR_TIMEOUTS.get("bot_remediation", 600)
 BOT_REMEDIATION_STALE_TIMEOUT_S = 300.0
+
+# Validate sub-timeouts fit within outer budget at import time
+for _sub_name, _sub_val in [
+    ("pre_push_fast", PRE_PUSH_FAST_TIMEOUT_S),
+    ("bot_remediation", BOT_REMEDIATION_TIMEOUT_S),
+]:
+    if _sub_val > COMMIT_EXECUTOR_OUTER_BUDGET_S:
+        raise ExecutorCommonError(
+            f"commit_executor sub-timeout {_sub_name}={_sub_val}s exceeds "
+            f"outer budget commit_executor={COMMIT_EXECUTOR_OUTER_BUDGET_S}s"
+        )
 
 
 def _run(

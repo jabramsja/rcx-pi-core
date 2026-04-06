@@ -72,7 +72,7 @@ _NOT_CHECKED_SECTION_RE = re.compile(
     re.IGNORECASE,
 )
 _VERDICT_LINE_RE = re.compile(
-    r'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:\*\*)?(?:###?\s*)?VERDICT\s*:\s*\w+',
+    r'(?:^|\n)\s*(?:[-*]\s+|\d+\.\s+)?(?:\*\*)?(?:###?\s*)?`?VERDICT\s*:\s*[\w-]+`?',
     re.IGNORECASE,
 )
 _EXTERNAL_REDIRECT_PATTERNS = (

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -394,6 +395,176 @@ time.sleep(10.0)
     assert elapsed < 2.0
 
 
+def test_run_adapter_stop_after_envelope_uses_raw_transcript_fallback(tmp_path: Path) -> None:
+    lingering_agent = tmp_path / "lingering_codex_agent.py"
+    lingering_agent.write_text(
+        """\
+import sys
+import time
+
+sys.stdin.read()
+print("bridge analysis", flush=True)
+print("BEGIN_AGENT_ENVELOPE", flush=True)
+print("{", flush=True)
+print('  "job_id": "job-1",', flush=True)
+print('  "turn_id": "r1-reviewer",', flush=True)
+print('  "agent_role": "reviewer",', flush=True)
+print('  "decision": "GO",', flush=True)
+print('  "summary": "raw transcript fallback",', flush=True)
+print('  "touched_files_claimed": [],', flush=True)
+print('  "findings": [],', flush=True)
+print('  "validations_claimed": [],', flush=True)
+print('  "request_for_next_agent": ""', flush=True)
+print("}", flush=True)
+print("END_AGENT_ENVELOPE", flush=True)
+time.sleep(10.0)
+""",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=[sys.executable, str(lingering_agent)],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    with patch.object(adapters, "_authoritative_output_so_far", return_value="bridge analysis"):
+        output = adapters.run_adapter(
+            spec,
+            prompt_text="review prompt",
+            prompt_path=prompt_path,
+            repo_root=tmp_path,
+            job_id="job-1",
+            turn_id="r1-reviewer",
+            agent_role="reviewer",
+            raw_output_path=raw_output_path,
+            stop_after_envelope=True,
+        )
+    elapsed = time.monotonic() - start
+
+    parsed = bridge.parse_envelope(output)
+    assert parsed["decision"] == "GO"
+    assert parsed["summary"] == "raw transcript fallback"
+    assert elapsed < 2.0
+
+
+def test_run_adapter_stop_after_meta_envelope_uses_raw_transcript_fallback(tmp_path: Path) -> None:
+    lingering_agent = tmp_path / "lingering_codex_meta_agent.py"
+    lingering_agent.write_text(
+        """\
+import sys
+import time
+
+sys.stdin.read()
+print("meta analysis", flush=True)
+print("BEGIN_META_ENVELOPE", flush=True)
+print("{", flush=True)
+print('  "decision": "ROUTE_PHASE_A",', flush=True)
+print('  "summary": "meta raw transcript fallback",', flush=True)
+print('  "findings": [],', flush=True)
+print('  "request_for_claude": "Continue"', flush=True)
+print("}", flush=True)
+print("END_META_ENVELOPE", flush=True)
+time.sleep(10.0)
+""",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=[sys.executable, str(lingering_agent)],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    with patch.object(adapters, "_authoritative_output_so_far", return_value="meta analysis"):
+        output = adapters.run_adapter(
+            spec,
+            prompt_text="review prompt",
+            prompt_path=prompt_path,
+            repo_root=tmp_path,
+            job_id="job-1",
+            turn_id="r1-meta",
+            agent_role="meta-reviewer",
+            raw_output_path=raw_output_path,
+            stop_after_envelope=True,
+        )
+    elapsed = time.monotonic() - start
+
+    assert 'BEGIN_META_ENVELOPE' in output
+    assert '"decision": "ROUTE_PHASE_A"' in output
+    assert '"summary": "meta raw transcript fallback"' in output
+    assert elapsed < 2.0
+
+
+def test_run_adapter_streaming_stop_after_envelope_uses_raw_transcript_fallback(tmp_path: Path) -> None:
+    lingering_agent = tmp_path / "lingering_streaming_codex_agent.py"
+    lingering_agent.write_text(
+        """\
+import sys
+import time
+
+sys.stdin.read()
+print("bridge analysis", flush=True)
+print("BEGIN_AGENT_ENVELOPE", flush=True)
+print("{", flush=True)
+print('  "job_id": "job-1",', flush=True)
+print('  "turn_id": "r1-reviewer",', flush=True)
+print('  "agent_role": "reviewer",', flush=True)
+print('  "decision": "GO",', flush=True)
+print('  "summary": "streaming raw transcript fallback",', flush=True)
+print('  "touched_files_claimed": [],', flush=True)
+print('  "findings": [],', flush=True)
+print('  "validations_claimed": [],', flush=True)
+print('  "request_for_next_agent": ""', flush=True)
+print("}", flush=True)
+print("END_AGENT_ENVELOPE", flush=True)
+time.sleep(10.0)
+""",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=[sys.executable, str(lingering_agent)],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    with patch.object(adapters, "_authoritative_output_so_far", return_value="bridge analysis"):
+        output = adapters.run_adapter(
+            spec,
+            prompt_text="review prompt",
+            prompt_path=prompt_path,
+            repo_root=tmp_path,
+            job_id="job-1",
+            turn_id="r1-reviewer",
+            agent_role="reviewer",
+            raw_output_path=raw_output_path,
+            stop_after_envelope=True,
+            stream=True,
+        )
+    elapsed = time.monotonic() - start
+
+    parsed = bridge.parse_envelope(output)
+    assert parsed["decision"] == "GO"
+    assert parsed["summary"] == "streaming raw transcript fallback"
+    assert elapsed < 2.0
+
+
 def test_run_adapter_stale_timeout_fails_closed(tmp_path: Path) -> None:
     stale_agent = tmp_path / "stale_agent.py"
     stale_agent.write_text(
@@ -726,13 +897,13 @@ def test_parse_envelope_missing_block_raises() -> None:
 
 def test_parse_envelope_invalid_json_raises() -> None:
     output = "BEGIN_AGENT_ENVELOPE\n{not valid json}\nEND_AGENT_ENVELOPE"
-    with pytest.raises(bridge.BridgeError, match="not valid JSON"):
+    with pytest.raises(bridge.BridgeError, match="none were valid"):
         bridge.parse_envelope(output)
 
 
 def test_parse_envelope_missing_keys_raises() -> None:
     output = 'BEGIN_AGENT_ENVELOPE\n{"job_id": "x", "turn_id": "t"}\nEND_AGENT_ENVELOPE'
-    with pytest.raises(bridge.BridgeError, match="missing keys"):
+    with pytest.raises(bridge.BridgeError, match="non-authoritative template"):
         bridge.parse_envelope(output)
 
 

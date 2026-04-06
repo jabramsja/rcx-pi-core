@@ -97,8 +97,6 @@ PHASE_A_ALLOWED_REVIEW_EXIT_CODES = {0, 1, 2}
 PHASE_A_BRIDGE_POLL_SLEEP = 2.0
 PHASE_A_BRIDGE_STALE_TIMEOUT = 120.0
 PHASE_A_BRIDGE_AGGREGATION_HANG_TIMEOUT = 60.0
-PHASE_A_STUB_REWRITE_IMPLEMENTER_TIMEOUT = 180
-PHASE_A_FULL_IMPLEMENTER_TIMEOUT = 900
 
 
 def _trim_stderr(stderr: str, limit: int = 500, *, tail: bool = False) -> str:
@@ -428,6 +426,7 @@ def run_sdk_agents(
             status_snapshot = _read_status_snapshot(status_path)
             status_fingerprint = _status_fingerprint(status_snapshot)
             status_changed = status_fingerprint != last_status_fingerprint
+            terminal_status = status_snapshot.get("status")
 
             output_growth = (
                 stdout_size != last_stdout_size
@@ -456,6 +455,19 @@ def run_sdk_agents(
                     flush=True,
                 )
                 last_heartbeat_at = now
+
+            if exit_code is None and not child_pids and terminal_status in {"completed", "hard_gate_failed"}:
+                stdout_text, stderr_text = _read_logs()
+                return {
+                    "exit_code": 0 if terminal_status == "completed" else 1,
+                    "stdout": stdout_text,
+                    "stderr": stderr_text,
+                    "stdout_path": str(stdout_path.relative_to(repo_root)),
+                    "stderr_path": str(stderr_path.relative_to(repo_root)),
+                    "status_path": str(status_path.relative_to(repo_root)),
+                    "report_path": str(report_path.relative_to(repo_root)),
+                    "last_progress_timestamp": last_progress_ts,
+                }
 
             if exit_code is not None:
                 break
@@ -597,6 +609,18 @@ def run_bridge_design_review(
         "  network resources for this review.\n\n"
     )
     if agent_review_context:
+        task_content += (
+            "## Decision Discipline After SDK Review\n\n"
+            "- Treat completed SDK review artifacts as already-run review input.\n"
+            "- Do NOT rerun the same checks unless you have concrete repo-local evidence "
+            "that the SDK report is wrong or incomplete.\n"
+            "- If the packet is a docs/test-only maintenance or truth-sync packet with "
+            "no runtime/substrate delta, keep the review tightly bounded to packet truth, "
+            "the cited TASKS.md lines, and the cited local artifacts.\n"
+            "- Once you have enough evidence for GO, REQUEST_CHANGES, or QUESTION, emit "
+            "the JSON envelope immediately. Do not keep gathering extra evidence after "
+            "you have reached a supportable decision.\n\n"
+        )
         task_content += agent_review_context + "\n\n"
     task_content += "Questions? Concerns? Thoughts? -- Think hard\n"
     task_path.write_text(task_content, encoding="utf-8")
@@ -1077,16 +1101,24 @@ def run_phase_a(
             result["agent_review_warning_only"] = True
 
         if result.get("agent_review_report_path"):
-            return True, (
-                "## SDK Agent Review Artifacts\n\n"
-                f"- exit_code: {result.get('agent_exit_code')}\n"
-                f"- report: {result.get('agent_review_report_path')}\n"
-                f"- status: {result.get('agent_review_status_path')}\n"
-                f"- stdout: {result.get('agent_review_stdout_path')}\n\n"
+            status_summary = ""
+            if result.get("agent_review_status_path"):
+                status_summary = _read_agent_status_diagnostic(
+                    repo_root / result["agent_review_status_path"]
+                )
+            agent_review_context = "## SDK Agent Review Artifacts\n\n"
+            agent_review_context += f"- exit_code: {result.get('agent_exit_code')}\n"
+            if status_summary:
+                agent_review_context += f"- status_summary: {status_summary}\n"
+            agent_review_context += f"- report: {result.get('agent_review_report_path')}\n"
+            agent_review_context += f"- status: {result.get('agent_review_status_path')}\n"
+            agent_review_context += f"- stdout: {result.get('agent_review_stdout_path')}\n\n"
+            agent_review_context += (
                 "Bridge must treat SDK findings as review inputs for contextual "
                 "blocking/non-blocking classification. Semantic SDK negatives are "
                 "not automatic current-step blockers by themselves."
             )
+            return True, agent_review_context
         return True, ""
 
     def _run_bridge_convergence(*, start_round: int, agent_review_context: str) -> bool:
@@ -1245,16 +1277,11 @@ def run_phase_a(
                             f"Update ONLY `{rel_plan_path}`. Do NOT create new files. "
                             "Replace the stub with the real plan directly in that file."
                         )
-                        implementer_timeout = (
-                            PHASE_A_STUB_REWRITE_IMPLEMENTER_TIMEOUT
-                            if stub_rewrite
-                            else PHASE_A_FULL_IMPLEMENTER_TIMEOUT
-                        )
                         log("Invoking implementer to fix blocking findings...")
                         impl_result = _invoke_implementer(
                             repo_root, impl_prompt,
                             backend="claude",
-                            timeout=implementer_timeout,
+                            timeout=900,
                             verbose=verbose,
                         )
                         if impl_result["status"] != "success":

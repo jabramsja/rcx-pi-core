@@ -29,6 +29,7 @@ POST_MERGE_PACKAGE_NAME = "post_merge_package.json"
 # Import canonical load_routing_record from shared module
 try:
     from executor_common import (
+        DEFAULT_EXECUTOR_CONFIG,
         load_executor_config as _common_load_executor_config,
         load_routing_record as _common_load_routing_record,
         merge_executor_config_overrides,
@@ -43,6 +44,7 @@ except ImportError:
     _spec = _ilu.spec_from_file_location("executor_common", str(_common_path))
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
+    DEFAULT_EXECUTOR_CONFIG = _mod.DEFAULT_EXECUTOR_CONFIG
     _common_load_executor_config = _mod.load_executor_config
     _common_load_routing_record = _mod.load_routing_record
     merge_executor_config_overrides = _mod.merge_executor_config_overrides
@@ -439,7 +441,8 @@ def run_recoverable_surface_command(
                     return 0
                 result = retried
             else:
-                timeout = config.get("timeouts", {}).get(executor_name, 600)
+                _default_timeout = DEFAULT_EXECUTOR_CONFIG["timeouts"].get(executor_name, 600)
+                timeout = config.get("timeouts", {}).get(executor_name, _default_timeout)
                 try:
                     completed = _run_executor_in_group(cmd, cwd=repo_root, timeout=timeout)
                     _emit_completed_process_output(completed)
@@ -800,7 +803,7 @@ def _continue_successful_executor_chain(
         if verbose:
             print(f"[dispatch] Phase A converged → chaining to Phase B with plan: {plan_path}")
 
-        phase_b_timeout = config.get("timeouts", {}).get("phase_b_executor", 3600)
+        phase_b_timeout = config.get("timeouts", {}).get("phase_b_executor", DEFAULT_EXECUTOR_CONFIG["timeouts"]["phase_b_executor"])
         phase_b_routing = {
             "decision": "ROUTE_PHASE_B",
             "wave_name": (record or {}).get("wave_name", ""),
@@ -868,7 +871,7 @@ def _continue_successful_executor_chain(
         if verbose:
             print("[dispatch] Phase B converged → chaining to commit executor")
 
-        commit_timeout = config.get("timeouts", {}).get("commit_executor", 300)
+        commit_timeout = config.get("timeouts", {}).get("commit_executor", DEFAULT_EXECUTOR_CONFIG["timeouts"]["commit_executor"])
         commit_args = [
             sys.executable,
             str(SCRIPT_DIR / "commit_executor.py"),
@@ -1018,7 +1021,7 @@ def _retry_commit_only(
     if verbose:
         print("[dispatch] Retrying commit executor only (Phase A/B already succeeded)")
 
-    commit_timeout = config.get("timeouts", {}).get("commit_executor", 300)
+    commit_timeout = config.get("timeouts", {}).get("commit_executor", DEFAULT_EXECUTOR_CONFIG["timeouts"]["commit_executor"])
     commit_args = [
         sys.executable,
         str(SCRIPT_DIR / "commit_executor.py"),
@@ -1387,7 +1390,7 @@ def dispatch(
 
     # Invoke executor with appropriate interface
     try:
-        timeout = cfg.get("timeouts", {}).get(executor_name, 300)
+        timeout = cfg.get("timeouts", {}).get(executor_name, DEFAULT_EXECUTOR_CONFIG["timeouts"].get(executor_name, 300))
 
         # Build executor-specific CLI args
         executor_args = [sys.executable, str(executor_path)]

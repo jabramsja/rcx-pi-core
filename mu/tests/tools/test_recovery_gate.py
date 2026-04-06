@@ -1652,15 +1652,35 @@ class TestObservabilityWorktreeResolution:
         script = f"""#!/usr/bin/env bash
 set -eu
 args=("$@")
+git_c_dir=""
 if [ "${{args[0]:-}}" = "-C" ]; then
+  git_c_dir="${{args[1]:-}}"
   args=("${{args[@]:2}}")
 fi
 case "${{args[*]}}" in
   "rev-parse --show-toplevel")
-    {"printf '%s\\n' " + repr(show_toplevel) if show_toplevel is not None else "exit 128"}
+    if [ -n "$git_c_dir" ]; then
+      printf '%s\\n' "$git_c_dir"
+    else
+      {"printf '%s\\n' " + repr(show_toplevel) if show_toplevel is not None else "exit 128"}
+    fi
     ;;
   "rev-parse --abbrev-ref HEAD")
-    {"printf '%s\\n' " + repr(branch) if branch is not None else "exit 1"}
+    if [ -n "$git_c_dir" ]; then
+      # Look up branch from worktree output by matching path
+      worktree_data=$(printf '%b' {worktree_output!r})
+      branch_for_dir=$(echo "$worktree_data" | awk -v dir="$git_c_dir" '
+        /^worktree / {{ wt = substr($0, 10) }}
+        /^branch / && wt == dir {{ sub(/^branch refs\\/heads\\//, "", $0); print; exit }}
+      ')
+      if [ -n "$branch_for_dir" ]; then
+        printf '%s\\n' "$branch_for_dir"
+      else
+        {"printf '%s\\n' " + repr(branch) if branch is not None else "exit 1"}
+      fi
+    else
+      {"printf '%s\\n' " + repr(branch) if branch is not None else "exit 1"}
+    fi
     ;;
   "symbolic-ref --quiet --short HEAD")
     {"printf '%s\\n' " + repr(branch) if branch is not None else "exit 1"}
@@ -2398,6 +2418,33 @@ esac
         assert "display-message -p -t @1 #{pane_id}" in log_lines
         assert not any("display-message -p -t rcx-pipeline:1.1 #{pane_id}" in line for line in log_lines)
 
+    def test_pipeline_monitor_start_does_not_pin_panes_to_launcher_worktree(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        git_bin = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/test-wave",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        env = os.environ | {"PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        log_text = tmux_log.read_text(encoding="utf-8")
+        assert "unset RCX_OBS_REPO_ROOT" in log_text
+        assert "RCX_OBS_STATUS_SCRIPT=" in log_text
+        assert "RCX_OBS_REPO_ROOT=" not in log_text
+
     def test_pane_findings_renders_fallback_when_no_bridge_rounds_exist(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -2538,6 +2585,7 @@ esac
         self._minimal_bus(active)
         self._write_commit_state(active, status="post_commit_pending")
         self._install_observability_script(quiet, "_pane_findings.sh")
+        self._install_observability_script(quiet, "_resolve_live_root.sh")
         self._install_observability_script(quiet, "pipeline_status.sh")
         raw_dir = active / ".agent_bus" / "raw" / "phase-a-r1-1234abcd"
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -2710,6 +2758,7 @@ esac
         self._minimal_bus(active)
         self._write_commit_state(active, status="post_commit_pending")
         self._install_observability_script(quiet, "_pane_processes.sh")
+        self._install_observability_script(quiet, "_resolve_live_root.sh")
         self._install_observability_script(quiet, "pipeline_status.sh")
         self._install_observability_script(quiet, "pipeline_dashboard.py")
 
@@ -2841,6 +2890,7 @@ esac
         repo_root.mkdir()
         self._minimal_bus(repo_root)
         self._install_observability_script(repo_root, "_pane_processes.sh")
+        self._install_observability_script(repo_root, "_resolve_live_root.sh")
         self._install_observability_script(repo_root, "pipeline_status.sh")
         self._install_observability_script(repo_root, "pipeline_dashboard.py")
 
