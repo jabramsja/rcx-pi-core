@@ -490,6 +490,21 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
 - ~~**[PIPELINE-TEST-RUN]**~~ **CLOSED** (2026-03-28, moved to Ra). Full 15-step commit pipeline proven end-to-end (PR #673 + 8 follow-on PRs).
 - ~~**[COMMIT-EXECUTOR-E2E]**~~ **CLOSED** (2026-03-28, moved to Ra). 15-step commit executor proven mechanically via pipeline-test-run evidence.
 
+- **[RECOVERY-TIER3-WIRING]** **NEXT** (2026-03-31, founder-authorized).
+  Wire Tier 3 recovery loop live + fix remaining pipeline gaps.
+  **Work items (7/9 landed, 3 remaining):**
+  ~~(1) Wire `run_recovery_loop()` into `attempt_recovery()`~~ **LANDED** (recovery_gate.py:1512)
+  (2) Reclassify `needs_phase_b` from Tier 4 terminal to Tier 3 recoverable — **OPEN** (still in `_TERMINAL_STATUSES`)
+  ~~(3) Fix Tier 2 sequential timeout cap~~ **LANDED** (executor_dispatch.py:421)
+  (4) Expand Tier 3 denylist — **PARTIAL** (has exact matches, needs `git reset`/`checkout`/`restore` subcommand patterns)
+  (5) Block edits to `.git/config`, `.git/hooks/` — **OPEN** (no sensitive-path blocking in denylist)
+  ~~(6) Surface command path routes through dispatcher recovery~~ **LANDED** (executor_dispatch.py:406)
+  ~~(7) Process-tree cleanup before retry~~ **LANDED** (terminate_process_tree wired)
+  ~~(8) Timeout bump re-base on original baseline~~ **LANDED** (executor_dispatch.py:421-522)
+  ~~(9) Commit executor pytest gate~~ **LANDED** (commit_executor.py:261)
+  **Lane:** control-surface (pipeline hardening).
+  **Tracked packet:** `reports/control_plane/recovery_tier3_wiring_2026-04-01.md`
+  **Depends on:** ~~Tier 2+3 code~~ **Landed** (PR #706).
 - **[META-BRIDGE-BOUNDED-REVIEW-FIX]** **NEXT** (2026-04-01, founder-authorized).
   Keep `FOUNDER_SESSION_BOOTSTRAP.md` reading required for Codex reviewers, but stop the pre-commit meta-review from rerunning founder guard/attest startup flows or self-aborting on clean zero-match probe commands before emitting an envelope.
   **Tracked packet:** `reports/control_plane/meta_bridge_taskid_path_safety_2026-04-03.md`
@@ -568,23 +583,6 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   **Tracked packet:** `reports/control_plane/post_commit_roundtrip_2026-04-04.md`
   **Lane:** control-surface (pipeline hardening).
   Pipeline infrastructure fixes landed (2026-04-05): timeout-budget alignment, bridge envelope handling, reviewer scope, pane observability.
-- **[RECOVERY-TIER3-WIRING]** **NEXT** (2026-03-31, founder-authorized).
-  Wire Tier 3 recovery loop live + fix pipeline gaps exposed by Tier 2+3 wave.
-  **Work items:**
-  (1) Wire `run_recovery_loop()` into `attempt_recovery()` for Tier 3 failures (one line change)
-  (2) Reclassify `needs_phase_b` from Tier 4 terminal to Tier 3 recoverable in recovery_gate.py
-  (3) Fix Tier 2 sequential timeout cap (re-base on original config, not overridden value)
-  (4) Expand Tier 3 denylist to pattern-based (git reset/checkout/restore subcommand forms)
-  (5) Block edits to repo-internal sensitive paths (`.git/config`, `.git/hooks/`)
-  (6) Surface command path (`phase-b`, `phase-a`) should route through dispatcher recovery
-  (7) **P1 bot PR#706:** Timeout retry must perform process-tree cleanup before retrying (grandchildren survive subprocess.run timeout kill)
-  (8) **P2 bot PR#706:** Timeout bump cap must re-base on original pre-recovery baseline, not already-overridden config value
-  (9) Commit executor should run pytest on affected test files before committing (gap: Phase B has pytest gate but manual commit_executor invocations bypass it)
-  **Lane:** control-surface (pipeline hardening).
-  **Tracked packet:** `reports/control_plane/recovery_tier3_wiring_2026-04-01.md`
-  **Depends on:** ~~Tier 2+3 code~~ **Landed** (PR #706).
-  **Lane:** control-surface (pipeline hardening).
-  **Depends on:** ~~Tier 2+3 code~~ **Landed** (PR #706).
 
 - **[PIPELINE-RECOVERY]** **IN PROGRESS** (2026-03-31, founder-authorized).
   Pipeline failure recovery system — tiered auto-fix/retry/diagnose/escalate.
