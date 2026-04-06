@@ -154,13 +154,31 @@ def _normalize_stdout_for_adapter(
         return normalized if normalized is not None else stdout_text
 
     # Codex JSONL: extract agent_message text fields.
+    # Only applies to the codex adapter — other adapters pass through.
+    if spec.name != "codex":
+        return stdout_text
+
     # Codex exec outputs JSONL where the envelope lives inside
     # {"type":"item.completed","item":{"type":"agent_message","text":"..."}}
     # The text field has escaped newlines that parse_envelope can't match.
-    # Check if envelope markers are at the top level (not inside JSON strings).
-    # A top-level marker has a newline after it, not an escaped \n.
-    if _AGENT_ENVELOPE_BEGIN + "\n" in stdout_text:
-        return stdout_text
+    #
+    # Check if envelope markers are at the top level by testing whether the
+    # line that contains the marker is NOT valid JSON (i.e., it's plain text
+    # from a non-JSONL output). A simple `in` check with "\n" is unreliable
+    # because the marker can appear at a JSONL line boundary and false-match.
+    if _AGENT_ENVELOPE_BEGIN in stdout_text:
+        marker_in_plain_text = False
+        for raw_line in stdout_text.splitlines():
+            if _AGENT_ENVELOPE_BEGIN in raw_line:
+                try:
+                    json.loads(raw_line.strip())
+                except (json.JSONDecodeError, ValueError):
+                    # Not JSON — marker is at top level (plain text)
+                    marker_in_plain_text = True
+                    break
+        if marker_in_plain_text:
+            return stdout_text
+
     # Try extracting from JSONL agent_message entries
     agent_texts: list[str] = []
     for line in stdout_text.splitlines():

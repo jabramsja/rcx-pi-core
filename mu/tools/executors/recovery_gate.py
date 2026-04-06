@@ -583,6 +583,7 @@ def fix_pr_merge_conflict(repo_root: Path, **kw: Any) -> dict[str, Any]:
 
 
 _TIER2_FIXES: dict[FailureClass, Any] = {
+    FailureClass.STALE_GIT_INDEX_LOCK: lambda root, **kw: fix_stale_git_index_lock(root),
     FailureClass.PROCESS_TIMEOUT: fix_process_timeout,
     FailureClass.TRANSIENT_KILL: fix_transient_kill,
     FailureClass.AGGREGATION_HANG: fix_aggregation_hang,
