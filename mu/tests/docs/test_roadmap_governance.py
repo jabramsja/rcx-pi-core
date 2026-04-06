@@ -388,10 +388,15 @@ class TestNorthStarSemanticsLock:
         )
 
     def test_claude_md_references_semantics_lock(self):
-        """CLAUDE.md must reference NorthStarSemantics.v0.md."""
-        claude = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-        assert "NorthStarSemantics.v0.md" in claude, (
-            "CLAUDE.md must reference NorthStarSemantics.v0.md"
+        """Instruction surface must reference NorthStarSemantics.v0.md."""
+        parts = [(REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")]
+        rules_dir = REPO_ROOT / ".claude" / "rules"
+        if rules_dir.is_dir():
+            for f in sorted(rules_dir.glob("*.md")):
+                parts.append(f.read_text(encoding="utf-8"))
+        text = "\n".join(parts)
+        assert "NorthStarSemantics.v0.md" in text, (
+            "Instruction surface must reference NorthStarSemantics.v0.md"
         )
 
     def test_bootstrap_bridge_has_normative_pointer(self):

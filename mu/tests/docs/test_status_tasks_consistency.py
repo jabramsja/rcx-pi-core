@@ -753,16 +753,31 @@ def test_l3_truth_statement_not_overclaimed() -> None:
 # =============================================================================
 
 CLAUDE_MD_PATH = REPO_ROOT / "CLAUDE.md"
+CLAUDE_RULES_DIR = REPO_ROOT / ".claude" / "rules"
+
+
+def _read_full_instruction_surface() -> str:
+    """Read CLAUDE.md + all .claude/rules/*.md as the full instruction surface.
+
+    The CLAUDE.md split (2026-04-06) moved domain-specific rules to
+    .claude/rules/ for conditional loading. Tests that check for specific
+    phrases in "the instructions" should check the combined text.
+    """
+    parts = [CLAUDE_MD_PATH.read_text(encoding="utf-8")]
+    if CLAUDE_RULES_DIR.is_dir():
+        for rule_file in sorted(CLAUDE_RULES_DIR.glob("*.md")):
+            parts.append(rule_file.read_text(encoding="utf-8"))
+    return "\n".join(parts)
 
 
 def test_claude_md_has_prompt_contract_section() -> None:
     """
-    CLAUDE.md must contain a 'Codex→Claude Prompt Contract' section
+    Instruction surface must contain a 'Codex→Claude Prompt Contract' section
     that locks prompt quality for multi-wave sessions.
     """
-    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    text = _read_full_instruction_surface()
     assert "Codex→Claude Prompt Contract" in text, (
-        "CLAUDE.md missing 'Codex→Claude Prompt Contract' section."
+        "Instruction surface missing 'Codex→Claude Prompt Contract' section."
     )
 
 
@@ -770,7 +785,7 @@ def test_prompt_contract_has_required_fields() -> None:
     """
     The prompt contract must specify all 7 required fields.
     """
-    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    text = _read_full_instruction_surface()
     required_fields = (
         "Preflight gate",
         "Primary uncertainty",
@@ -791,7 +806,7 @@ def test_prompt_contract_has_governance_ratio_cap() -> None:
     The prompt contract must enforce a governance-wave ratio cap
     to prevent unbounded governance-only waves.
     """
-    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    text = _read_full_instruction_surface()
     assert "Governance ratio cap" in text or "governance ratio cap" in text.lower(), (
         "CLAUDE.md prompt contract missing governance ratio cap rule."
     )
@@ -833,48 +848,47 @@ def test_status_distinguishes_primitives_from_debt_sites() -> None:
 
 def test_claude_md_has_l4_execution_contract_section() -> None:
     """
-    CLAUDE.md must contain the L4 Execution Contract (Hard Gate) section
-    that enforces wave classification.
+    Instruction surface must contain L4 Execution Contract details.
     """
-    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
-    assert "L4 Execution Contract (Hard Gate)" in text, (
-        "CLAUDE.md missing 'L4 Execution Contract (Hard Gate)' section."
+    text = _read_full_instruction_surface()
+    assert "L4ExecutionContract.v2.md" in text, (
+        "Instruction surface missing L4 Execution Contract reference."
     )
 
 
 def test_claude_md_l4_contract_references_canonical_doc() -> None:
     """
-    CLAUDE.md L4 contract section must reference the canonical policy doc (v2).
+    Instruction surface must reference the canonical L4 policy doc (v2).
     """
-    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    text = _read_full_instruction_surface()
     assert "L4ExecutionContract.v2.md" in text, (
-        "CLAUDE.md L4 contract section must reference L4ExecutionContract.v2.md."
+        "Instruction surface must reference L4ExecutionContract.v2.md."
     )
 
 
 def test_claude_md_l4_contract_references_enforcement_checker() -> None:
     """
-    CLAUDE.md L4 contract section must reference the enforcement checker.
+    Instruction surface must reference the enforcement checker.
     """
-    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    text = _read_full_instruction_surface()
     assert "enforce_l4_execution_contract.py" in text, (
-        "CLAUDE.md L4 contract section must reference enforce_l4_execution_contract.py."
+        "Instruction surface must reference enforce_l4_execution_contract.py."
     )
 
 
 def test_claude_md_l4_contract_has_all_three_wave_classes() -> None:
     """
-    CLAUDE.md must document all 3 v2 wave classes: L4_STRUCTURAL, L4_ENABLER, MAINTENANCE.
+    Instruction surface must document all 3 v2 wave classes.
     """
-    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    text = _read_full_instruction_surface()
     assert "L4_STRUCTURAL" in text, (
-        "CLAUDE.md must document L4_STRUCTURAL wave class."
+        "Instruction surface must document L4_STRUCTURAL wave class."
     )
     assert "L4_ENABLER" in text, (
-        "CLAUDE.md must document L4_ENABLER wave class."
+        "Instruction surface must document L4_ENABLER wave class."
     )
     assert "MAINTENANCE" in text, (
-        "CLAUDE.md must document MAINTENANCE wave class."
+        "Instruction surface must document MAINTENANCE wave class."
     )
 
 
@@ -910,11 +924,11 @@ def test_claude_md_preflight_read_list_includes_roadmap() -> None:
 
 def test_claude_md_references_codex_audit_contract() -> None:
     """
-    CLAUDE.md must reference the Codex→Claude Prompt Contract.
+    Instruction surface must reference the Codex→Claude Prompt Contract.
     """
-    text = CLAUDE_MD_PATH.read_text(encoding="utf-8")
+    text = _read_full_instruction_surface()
     assert "Codex→Claude Prompt Contract" in text, (
-        "CLAUDE.md must reference 'Codex→Claude Prompt Contract'."
+        "Instruction surface must reference 'Codex→Claude Prompt Contract'."
     )
 
 

@@ -50,6 +50,7 @@
     "^AGENT_BRIDGE\\.md$",
     "^mu/mu_programs/",
     "^\\.agent_bus/",
-    "^\\.scratch/"
+    "^\\.scratch/",
+    "^\\.claude/rules/"
   ]
 }
