@@ -456,13 +456,13 @@ class TestAttemptRecovery:
             tmp_path, {"status": "error", "stderr": "bridge.lock held", "step": "bridge_loop"}, "w1")
         assert r["recovered"] is True and r["tier"] == 1
 
-    def test_tier2_index_lock_no_fix_registered(self, tmp_path):
-        """index.lock is Tier 2 but has no registered fix — returns no_fix_registered."""
+    def test_tier2_index_lock_has_placeholder_fix(self, tmp_path):
+        """index.lock is Tier 2 with a registered placeholder fix — returns demoted_to_tier2."""
         git_dir = tmp_path / ".git"; git_dir.mkdir()
         (git_dir / "index.lock").write_text("lock")
         r = rg_mod.attempt_recovery(
             tmp_path, {"status": "error", "stderr": "index.lock held", "step": "s"}, "w1")
-        assert r["recovered"] is False and r["tier"] == 2 and r["action"] == "no_fix_registered"
+        assert r["recovered"] is False and r["tier"] == 2 and r["action"] == "demoted_to_tier2"
 
     def test_exhausted_after_max_attempts(self, tmp_path):
         rg_mod._save_recovery_log(tmp_path, [ # ANTICHEAT_OK
@@ -798,9 +798,10 @@ class TestFixImplementerStale:
 
 
 class TestTier2FixesMap:
-    def test_all_five_registered(self):
-        """All 5 Tier 2 failure classes have registered fix functions."""
+    def test_all_six_registered(self):
+        """All 6 Tier 2 failure classes have registered fix functions."""
         expected = {
+            rg_mod.FailureClass.STALE_GIT_INDEX_LOCK,
             rg_mod.FailureClass.PROCESS_TIMEOUT,
             rg_mod.FailureClass.TRANSIENT_KILL,
             rg_mod.FailureClass.AGGREGATION_HANG,

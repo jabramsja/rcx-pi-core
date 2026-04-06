@@ -1045,8 +1045,9 @@ class TestBridgeLoopReinvokesImplementer:
 
         assert result["status"] == "commit_ready"
         assert mock_stage.call_count == 3
-        assert mock_stage.call_args_list[0].args[1] == ["TASKS.md", "f.py"]
-        assert mock_stage.call_args_list[1].args[1] == ["TASKS.md", "f.py"]
+        # Step 5b adds plan_path to changed_files before staging
+        assert mock_stage.call_args_list[0].args[1] == ["TASKS.md", "f.py", "reports/control_plane/plan.md"]
+        assert mock_stage.call_args_list[1].args[1] == ["TASKS.md", "f.py", "reports/control_plane/plan.md"]
 
     def test_bridge_round_staging_failure_stops_pipeline(self, tmp_path):
         """If restaging fails before bridge review, fail closed instead of reviewing stale index state."""

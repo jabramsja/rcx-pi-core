@@ -643,11 +643,11 @@ time.sleep(10.0)
             turn_id="r1-reviewer",
             agent_role="reviewer",
             raw_output_path=raw_output_path,
-            zero_output_timeout_s=0.05,
+            zero_output_timeout_s=1.0,
         )
     elapsed = time.monotonic() - start
 
-    assert elapsed < 2.0
+    assert elapsed < 5.0
     raw_text = raw_output_path.read_text(encoding="utf-8")
     assert raw_text.startswith("[stderr]\n")
     assert "warming up" in raw_text

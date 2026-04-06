@@ -2802,6 +2802,29 @@ def run_commit_pipeline(
                 "errors": [f"Indicator collector script not found: {indicator_script}"],
                 "steps_completed": result["steps_completed"]}
 
+    # ── Step 5b: reconcile indicator_artifact_ref in TASKS.md ─────────
+    # The tracker note (Step 3) may reference a speculative indicator path.
+    # After Step 5 stages the real indicator, verify and patch the reference
+    # so the supervisor sees a consistent staged state (Bug 2/9 fix, 2026-04-06).
+    tasks_path = repo_root / "TASKS.md"
+    if tasks_path.exists() and indicator_path:
+        tasks_text = tasks_path.read_text(encoding="utf-8")
+        expected_ref = f"indicator_artifact_ref: {indicator_path}"
+        if wave_id in tasks_text and expected_ref not in tasks_text:
+            # Find and patch the indicator_artifact_ref for this wave's tracker note
+            import re as _re
+            # Match indicator_artifact_ref lines near this wave_id's tracker note
+            pattern = _re.compile(
+                rf"(- Tracker sync note \([^)]*{_re.escape(wave_id)}[^)]*\).*?"
+                rf"indicator_artifact_ref: )\S+",
+                _re.DOTALL,
+            )
+            patched = pattern.sub(rf"\g<1>{indicator_path}", tasks_text)
+            if patched != tasks_text:
+                tasks_path.write_text(patched, encoding="utf-8")
+                _run(["git", "add", "--", "TASKS.md"], cwd=repo_root)
+                log("Step 5b: reconciled indicator_artifact_ref in TASKS.md")
+
     # ── Step 6: build_and_run_supervisor ──────────────────────────────
     try:
         changed_files = _run(
