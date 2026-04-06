@@ -49,7 +49,7 @@ class TestClassifyFailure:
 
     @pytest.mark.parametrize("status", [
         "question_for_founder", "max_rounds_reached",
-        "supervisor_rejected", "needs_phase_b",
+        "supervisor_rejected",
     ])
     def test_terminal_statuses(self, status):
         assert rg_mod.classify_failure(
@@ -3027,3 +3027,140 @@ esac
         assert "Watching: jabramsja/repo-wave" in clean_stdout
         assert "More detail is hidden to keep this pane readable." in clean_stdout
         assert len(clean_stdout.splitlines()) <= 18
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for recovery-tier3-wiring remaining items (2), (4), (5)
+# ---------------------------------------------------------------------------
+
+
+class TestNeedsPhaseB_Tier3:
+    """Item (2): needs_phase_b is Tier 3 recoverable, not Tier 4 terminal."""
+
+    def test_needs_phase_b_classified_as_tier3(self):
+        fc = rg_mod.classify_failure({"status": "needs_phase_b", "step": "phase_b"})
+        assert fc == FailureClass.NEEDS_PHASE_B
+        assert rg_mod.tier_for(fc) == 3
+
+    def test_needs_phase_b_embedded_in_stdout(self):
+        inner = json.dumps({"status": "needs_phase_b"})
+        fc = rg_mod.classify_failure(
+            {"status": "failed", "stdout": inner, "stderr": ""})
+        assert fc == FailureClass.NEEDS_PHASE_B
+
+    def test_needs_phase_b_not_terminal(self):
+        """needs_phase_b must NOT be classified as TERMINAL_POLICY."""
+        fc = rg_mod.classify_failure({"status": "needs_phase_b", "step": "x"})
+        assert fc != FailureClass.TERMINAL_POLICY
+
+
+class TestDangerousGitPatterns:
+    """Item (4): pattern-based denylist catches git subcommand variations."""
+
+    @pytest.mark.parametrize("cmd", [
+        "git reset --mixed",
+        "git reset --soft HEAD~1",
+        "git reset HEAD file.py",
+        "git checkout -- file.py",
+        "git checkout -b new-branch",
+        "git checkout HEAD~1",
+        "git restore --staged file.py",
+        "git restore --source=HEAD file.py",
+        "git restore --worktree .",
+    ])
+    def test_git_subcommand_variations_blocked(self, cmd):
+        assert rg_mod._is_dangerous_command(cmd) is True  # ANTICHEAT_OK
+
+    @pytest.mark.parametrize("cmd", [
+        "git status", "git diff", "git log --oneline",
+        "git add file.py", "git stash", "git branch -a",
+    ])
+    def test_safe_git_commands_allowed(self, cmd):
+        assert rg_mod._is_dangerous_command(cmd) is False  # ANTICHEAT_OK
+
+
+class TestSensitiveRepoPathBlocking:
+    """Item (5): .git/ internals blocked from Tier 3 edit and shell actions."""
+
+    def test_edit_git_config_blocked(self, tmp_path):
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        config = git_dir / "config"
+        config.write_text("[core]\n\tbare = false\n")
+        ok, msg = rg_mod._apply_edit(  # ANTICHEAT_OK
+            {"file_path": ".git/config", "old_text": "bare = false", "new_text": "bare = true"},
+            tmp_path)
+        assert ok is False
+        assert "sensitive-path blocked" in msg
+        assert "bare = false" in config.read_text()  # unchanged
+
+    def test_edit_git_hooks_blocked(self, tmp_path):
+        git_dir = tmp_path / ".git" / "hooks"
+        git_dir.mkdir(parents=True)
+        hook = git_dir / "pre-commit"
+        hook.write_text("#!/bin/sh\nexit 0\n")
+        ok, msg = rg_mod._apply_edit(  # ANTICHEAT_OK
+            {"file_path": ".git/hooks/pre-commit",
+             "old_text": "exit 0", "new_text": "exit 1"},
+            tmp_path)
+        assert ok is False
+        assert "sensitive-path blocked" in msg
+        assert "exit 0" in hook.read_text()  # unchanged
+
+    def test_edit_outside_git_dir_allowed(self, tmp_path):
+        """Files NOT in .git/ still editable."""
+        target = tmp_path / "src" / "main.py"
+        target.parent.mkdir()
+        target.write_text("old code")
+        ok, msg = rg_mod._apply_edit(  # ANTICHEAT_OK
+            {"file_path": "src/main.py", "old_text": "old", "new_text": "new"},
+            tmp_path)
+        assert ok is True
+        assert "new code" in target.read_text()
+
+    def test_targets_git_internals_helper(self):
+        assert rg_mod._targets_git_internals("cat .git/config") is True  # ANTICHEAT_OK
+        assert rg_mod._targets_git_internals("rm .git/hooks/pre-push") is True  # ANTICHEAT_OK
+        assert rg_mod._targets_git_internals("echo hello") is False  # ANTICHEAT_OK
+        assert rg_mod._targets_git_internals("cat .gitignore") is False  # ANTICHEAT_OK
+
+    def test_shell_targeting_git_internals_blocked_in_loop(self, tmp_path):
+        """Shell commands referencing .git/ are blocked in recovery loop."""
+        result = {"status": "failed", "step": "pre_commit",
+                  "stderr": "hook failed", "stdout": ""}
+        claude_response = json.dumps({
+            "action": "shell",
+            "commands": ["cat .git/config", "echo ok"],
+            "explanation": "checking config"
+        })
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.Popen = lambda *a, **kw: FakePopen(stdout=claude_response)
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            # Second Popen returns escalate to end loop
+            escalate_response = json.dumps({
+                "action": "escalate", "commands": [], "explanation": "giving up"
+            })
+            call_count = [0]
+            def popen_side_effect(*a, **kw):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    return FakePopen(stdout=claude_response)
+                return FakePopen(stdout=escalate_response)
+            mock_sp.Popen = popen_side_effect
+
+            def mock_run(cmd, **kw):
+                if isinstance(cmd, list) and cmd[:2] == ["git", "status"]:
+                    return MagicMock(returncode=0, stdout="", stderr="")
+                return MagicMock(stdout="ok", stderr="", returncode=0)
+            mock_sp.run = mock_run
+
+            loop_result = rg_mod.run_recovery_loop(
+                tmp_path, result, "w-sensitive-test", max_iterations=2)
+
+        # First iteration should have blocked the .git/config command
+        first_iter = loop_result["log"][0]
+        assert first_iter["action"] == "shell"
+        assert first_iter["blocked"] is True
+        assert any("BLOCKED (sensitive path)" in r for r in first_iter["results"])

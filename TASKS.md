@@ -503,6 +503,7 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   ~~(8) Timeout bump re-base on original baseline~~ **LANDED** (executor_dispatch.py:421-522)
   ~~(9) Commit executor pytest gate~~ **LANDED** (commit_executor.py:261)
   **Lane:** control-surface (pipeline hardening).
+  Pipeline infrastructure hardening landed (2026-04-06): Codex JSONL extraction, dispatcher worktree enforcement, tmux pane fixes, governance downgrade for DOC_ACCURACY.
   **Tracked packet:** `reports/control_plane/recovery_tier3_wiring_2026-04-01.md`
   **Depends on:** ~~Tier 2+3 code~~ **Landed** (PR #706).
 - **[META-BRIDGE-BOUNDED-REVIEW-FIX]** **NEXT** (2026-04-01, founder-authorized).

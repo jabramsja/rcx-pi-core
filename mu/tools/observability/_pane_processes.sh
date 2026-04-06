@@ -310,7 +310,25 @@ while true; do
     fi
     worker_lines=$((worker_lines + 1))
     echo -e ""
-    echo -e "  ${CYAN}AUDITING${RESET}  9 Native SDK Agents"
+    # Read actual agent count from status file if available
+    agent_label="SDK Agents"
+    agent_status_file=$(ls -t "$REPO_ROOT/.scratch/phase_"*"_agent_review_"*.status.json 2>/dev/null | head -1) || true
+    if [ -n "$agent_status_file" ] && [ -f "$agent_status_file" ]; then
+      agent_info=$(python3 -c "
+import json
+d = json.load(open('$agent_status_file'))
+running = d.get('running_agents', [])
+completed = list(d.get('completed_agents', {}).keys())
+total = len(set(running + completed))
+if running:
+    names = ', '.join(running[:3])
+    print(f'{total} agents ({names} running)')
+else:
+    print(f'{total} agents')
+" 2>/dev/null) || true
+      [ -n "$agent_info" ] && agent_label="$agent_info"
+    fi
+    echo -e "  ${CYAN}AUDITING${RESET}  $agent_label"
     echo -e "  ${DIM}PID: $agent_pid${RESET}"
     echo -e "  ${DIM}Fuzzer, verifier, adversary, translator, etc.${RESET}"
     echo -e "  ${DIM}Running parallel security and correctness checks.${RESET}"

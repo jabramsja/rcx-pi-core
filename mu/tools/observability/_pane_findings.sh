@@ -520,7 +520,21 @@ if lines:
     agent_age=$(( $(date +%s) - $(stat -f%m "$AGENT_STATUS" 2>/dev/null || stat -c%Y "$AGENT_STATUS" 2>/dev/null || echo 0) ))
     if [ "$agent_age" -lt 1800 ]; then
       echo "" >> "$TMPOUT"
-      echo -e "${BOLD}SDK AGENTS${RESET}  ${DIM}($(( agent_age / 60 ))m ago)${RESET}" >> "$TMPOUT"
+      # Cross-check status file with live processes — if no run_review.py
+      # is alive, the status file is stale even if it says "running"
+      agent_process_alive=$(pgrep -f "run_review.py" 2>/dev/null | head -1)
+      agent_status_label=$(python3 -c "
+import json
+d = json.load(open('$AGENT_STATUS'))
+s = d.get('status', '?')
+alive = bool('$agent_process_alive')
+if s == 'running' and not alive:
+    print('completed')  # process died but status not updated
+elif s == 'completed': print('completed')
+elif s == 'running': print('running')
+else: print(s)
+" 2>/dev/null) || agent_status_label="?"
+      echo -e "${BOLD}SDK AGENTS${RESET}  ${DIM}($agent_status_label, $(( agent_age / 60 ))m ago)${RESET}" >> "$TMPOUT"
       echo "─────────────────────────────────────" >> "$TMPOUT"
       python3 -c "
 import json

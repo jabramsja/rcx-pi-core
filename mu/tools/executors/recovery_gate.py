@@ -56,6 +56,7 @@ class FailureClass(Enum):
     TEST_FAILURE = "test_failure"
     AGENT_REVIEW_CRASH = "agent_review_crash"
     UNKNOWN_ERROR = "unknown_error"
+    NEEDS_PHASE_B = "needs_phase_b"
     # Tier 4 -- escalate (never recover)
     TERMINAL_POLICY = "terminal_policy"
     UNCLASSIFIED = "unclassified"
@@ -69,12 +70,13 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.PR_MERGE_CONFLICT: 2,
     FailureClass.GIT_STAGING_CONFLICT: 3, FailureClass.TEST_FAILURE: 3,
     FailureClass.AGENT_REVIEW_CRASH: 3, FailureClass.UNKNOWN_ERROR: 3,
+    FailureClass.NEEDS_PHASE_B: 3,
     FailureClass.TERMINAL_POLICY: 4, FailureClass.UNCLASSIFIED: 4,
 }
 
 _TERMINAL_STATUSES = frozenset({
     "question_for_founder", "max_rounds_reached",
-    "supervisor_rejected", "needs_phase_b",
+    "supervisor_rejected",
 })
 _TRANSIENT_KILL_CODES = frozenset({-9, -15, 137})
 
@@ -131,6 +133,10 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.TERMINAL_POLICY
     if embedded_status in _TERMINAL_STATUSES:
         return FailureClass.TERMINAL_POLICY
+
+    # Tier 3: needs_phase_b is recoverable (retry Phase B)
+    if status == "needs_phase_b" or embedded_status == "needs_phase_b":
+        return FailureClass.NEEDS_PHASE_B
 
     if status_failed and "merge_pr.sh failed" in reason_lower and (
         "not mergeable" in reason_lower
@@ -596,17 +602,34 @@ _DANGEROUS_COMMANDS = frozenset({
     "> /dev/sd", ":(){ :|:& };:",
 })
 
+# Pattern-based denylist: catch subcommand variations that exact strings miss.
+# In Tier 3 recovery, git reset/checkout/restore are never appropriate —
+# even "soft" variants can destabilize the pipeline working tree.
+_DANGEROUS_GIT_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\bgit\s+reset\b"),
+    re.compile(r"\bgit\s+checkout\b"),
+    re.compile(r"\bgit\s+restore\b"),
+]
+
 MAX_RECOVERY_ITERATIONS = 3
 _CLAUDE_TIMEOUT = 180
 _SHELL_TIMEOUT = 30
 _TRIVIAL_EXCERPTS = frozenset({"{", "}", "[", "]", ",", '"', '",', "{}", "[]"})
 
 
+def _targets_git_internals(text: str) -> bool:
+    """Check if text references .git/ internal paths."""
+    return ".git/" in text or ".git\\" in text
+
+
 def _is_dangerous_command(cmd: str) -> bool:
-    """Check if a shell command matches the denylist."""
+    """Check if a shell command matches the denylist or dangerous patterns."""
     cmd_lower = cmd.strip().lower()
     for denied in _DANGEROUS_COMMANDS:
         if denied in cmd_lower:
+            return True
+    for pattern in _DANGEROUS_GIT_PATTERNS:
+        if pattern.search(cmd_lower):
             return True
     return False
 
@@ -703,6 +726,9 @@ def _apply_edit(edit: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
     repo_resolved = repo_root.resolve()
     if not str(file_path).startswith(str(repo_resolved) + os.sep) and file_path != repo_resolved:
         return False, f"repo-escape blocked: {raw_path} resolves outside repo root"
+    git_dir = repo_resolved / ".git"
+    if str(file_path).startswith(str(git_dir) + os.sep) or file_path == git_dir:
+        return False, f"sensitive-path blocked: {raw_path} targets .git/ internals"
     old_text = edit.get("old_text", "")
     new_text = edit.get("new_text", "")
     if not file_path.exists():
@@ -943,6 +969,11 @@ def run_recovery_loop(
                     continue
                 if _is_dangerous_command(cmd):
                     cmd_results.append(f"BLOCKED: {cmd}")
+                    blocked = True
+                    all_ok = False
+                    continue
+                if _targets_git_internals(cmd):
+                    cmd_results.append(f"BLOCKED (sensitive path): {cmd}")
                     blocked = True
                     all_ok = False
                     continue
