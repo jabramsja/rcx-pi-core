@@ -655,7 +655,7 @@ def _parse_findings_from_text(text: str) -> list[dict[str, Any]]:
     if findings:
         return findings
 
-    if saw_envelope_markers and not valid_envelopes:
+    if saw_envelope_markers and not any_valid:
         return [{
             "title": "Malformed AGENT_ENVELOPE blocked structured bridge findings parsing",
             "severity": "critical",

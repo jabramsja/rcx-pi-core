@@ -1620,6 +1620,48 @@ def main(argv: list[str] | None = None) -> int:
         print("[error] Not in a git repository", file=sys.stderr)
         return 1
 
+    # Enforce linked-worktree execution: the dispatcher must NOT run in the
+    # primary worktree when it has dirty files.  Dirty files from interactive
+    # work cause scope drift, stale state SHA, and supervisor rejections.
+    # Create a fresh linked worktree from dev instead.
+    # Skip in test environments (RCX_SKIP_WORKTREE_CHECK=1).
+    skip_worktree_check = (
+        os.environ.get("RCX_SKIP_WORKTREE_CHECK") == "1"
+        or args.routing_record is not None  # explicit routing = caller owns scope
+    )
+    if not skip_worktree_check and not getattr(args, "surface", None):
+        try:
+            git_dir = subprocess.run(
+                ["git", "rev-parse", "--git-dir"],
+                cwd=repo_root, capture_output=True, text=True, check=True,
+            ).stdout.strip()
+            git_common = subprocess.run(
+                ["git", "rev-parse", "--git-common-dir"],
+                cwd=repo_root, capture_output=True, text=True, check=True,
+            ).stdout.strip()
+            is_primary = (Path(git_dir).resolve() == Path(git_common).resolve())
+            if is_primary:
+                dirty = subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    cwd=repo_root, capture_output=True, text=True, check=True,
+                ).stdout.strip()
+                if dirty:
+                    dirty_count = len(dirty.splitlines())
+                    print(
+                        f"[error] Dispatcher refused: primary worktree has {dirty_count} dirty file(s).\n"
+                        f"  Pipeline must run in a clean linked worktree to avoid scope drift.\n"
+                        f"\n"
+                        f"  Create one with:\n"
+                        f"    WT=\"/private/tmp/workingrcx_$(date +%s)\"\n"
+                        f"    git worktree add \"$WT\" origin/dev --detach\n"
+                        f"    cd \"$WT\" && git checkout -b jabramsja/<wave-name>\n"
+                        f"    # Then run dispatcher from $WT\n",
+                        file=sys.stderr,
+                    )
+                    return 1
+        except subprocess.CalledProcessError:
+            pass  # Can't detect worktree type — proceed anyway
+
     config = load_config(args.config) if args.config else load_config()
     wave_count = 0
 

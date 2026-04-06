@@ -2,7 +2,7 @@
 
 Date: 2026-04-01
 Status: In progress — 7/9 items landed, 3 remaining (items 2, 4 partial, 5)
-Phase-A-Lock: UNLOCKED
+Phase-A-Lock: LOCKED
 Task: [RECOVERY-TIER3-WIRING]
 Purpose: Wire Tier 3 recovery live into dispatcher execution and close the immediate pipeline hardening residue from PR #706.
 
@@ -46,6 +46,8 @@ Purpose: Wire Tier 3 recovery live into dispatcher execution and close the immed
 ## Grounding
 
 - **Authorization source:** `[RECOVERY-TIER3-WIRING]` in `TASKS.md` (founder-authorized 2026-03-31).
+- **Governing packet:** `reports/control_plane/recovery_tier3_wiring_2026-04-01.md` (this file; tracked in TASKS.md:506).
+- **Packet sequence:** `[PIPELINE-RECOVERY]` Phase 3 — Tier 3 wiring + hardening (TASKS.md:593).
 - **Parent task:** `[PIPELINE-RECOVERY]` IN PROGRESS.
 - **Depends on:** PR #706 (Tier 2+3 code) landed.
 - **Design reference:** `mu/docs/agents/PipelineRecovery.v0.md`.

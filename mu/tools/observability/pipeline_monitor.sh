@@ -139,9 +139,11 @@ find_newest_log() {
     "$repo_root"/.scratch/commit_executor_live.log \
     "$repo_root"/.scratch/phase_a_executor_live.log \
     "$repo_root"/.scratch/phase_b_executor_live.log \
+    "$repo_root"/.scratch/phase_b_implementer_output_*.txt \
     "$repo_root"/.scratch/phase_a_agent_review_*.stdout.log \
     "$repo_root"/.scratch/phase_a_bridge_*.stdout.log \
     "$repo_root"/.scratch/phase_b_bridge_*.stdout.log \
+    "$repo_root"/.scratch/phase_b_bridge_*.stderr.log \
     "$repo_root"/.scratch/phase_b_agent_review_*.stdout.log \
     /tmp/phase_b_*.txt /tmp/commit_*.txt /tmp/phase_a_*.txt \
     2>/dev/null | head -1) || true

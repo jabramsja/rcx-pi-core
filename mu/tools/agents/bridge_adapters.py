@@ -149,11 +149,40 @@ def _normalize_stdout_for_adapter(
         and "--output-format" in cmd
         and "stream-json" in cmd
     )
-    if not uses_claude_stream_json:
-        return stdout_text
+    if uses_claude_stream_json:
+        normalized = _extract_claude_stream_json_output(stdout_text)
+        return normalized if normalized is not None else stdout_text
 
-    normalized = _extract_claude_stream_json_output(stdout_text)
-    return normalized if normalized is not None else stdout_text
+    # Codex JSONL: extract agent_message text fields.
+    # Codex exec outputs JSONL where the envelope lives inside
+    # {"type":"item.completed","item":{"type":"agent_message","text":"..."}}
+    # The text field has escaped newlines that parse_envelope can't match.
+    # Check if envelope markers are at the top level (not inside JSON strings).
+    # A top-level marker has a newline after it, not an escaped \n.
+    if _AGENT_ENVELOPE_BEGIN + "\n" in stdout_text:
+        return stdout_text
+    # Try extracting from JSONL agent_message entries
+    agent_texts: list[str] = []
+    for line in stdout_text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            entry = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if entry.get("type") != "item.completed":
+            continue
+        item = entry.get("item")
+        if not isinstance(item, dict) or item.get("type") != "agent_message":
+            continue
+        text = item.get("text")
+        if isinstance(text, str) and text.strip():
+            agent_texts.append(text)
+    if agent_texts:
+        return "\n".join(agent_texts)
+
+    return stdout_text
 
 
 def _parse_ps_time_seconds(value: str) -> float:
