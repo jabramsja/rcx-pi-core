@@ -2292,7 +2292,7 @@ def run_post_merge_review(
         config = load_bridge_config(paths.repo_root / ".agent_bus" / "bridge_config.json")
     except Exception as exc:
         raise MetaBridgeError(f"Bridge config load failed: {exc}") from exc
-    adapter_name = "codex"
+    adapter_name = os.environ.get("RCX_BRIDGE_REVIEWER_OVERRIDE", "codex")
 
     if verbose:
         print(f"[post-merge] Running Codex post-merge review (timeout: {timeout_s}s)...")
@@ -2574,7 +2574,7 @@ def run_meta_review(
 
     # Load adapter config
     config = load_bridge_config(paths.repo_root / ".agent_bus" / "bridge_config.json")
-    adapter_name = "codex"
+    adapter_name = os.environ.get("RCX_BRIDGE_REVIEWER_OVERRIDE", "codex")
 
     if verbose:
         print(f"[meta-bridge] Running Codex meta-review (timeout: {timeout_s}s)...")
