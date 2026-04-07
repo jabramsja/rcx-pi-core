@@ -175,12 +175,28 @@ def merge_executor_config_overrides(overrides: dict[str, Any]) -> dict[str, Any]
 
 
 def load_executor_config(repo_root: Path) -> dict[str, Any]:
-    """Load executor config, preserving default nested keys when partially set."""
+    """Load executor config, preserving default nested keys when partially set.
+
+    Supports RCX_BRIDGE_REVIEWER_OVERRIDE env var to swap all reviewers
+    without modifying the committed config file. This avoids the
+    ``assume-unchanged`` workaround that breaks test_load_default_config.
+    Usage: export RCX_BRIDGE_REVIEWER_OVERRIDE=claude
+    """
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
     if not config_path.exists():
-        return copy.deepcopy(DEFAULT_EXECUTOR_CONFIG)
-    loaded = json.loads(config_path.read_text(encoding="utf-8"))
-    return merge_executor_config_overrides(loaded)
+        config = copy.deepcopy(DEFAULT_EXECUTOR_CONFIG)
+    else:
+        loaded = json.loads(config_path.read_text(encoding="utf-8"))
+        config = merge_executor_config_overrides(loaded)
+    # Apply reviewer override from environment if set
+    reviewer_override = os.environ.get("RCX_BRIDGE_REVIEWER_OVERRIDE", "").strip()
+    if reviewer_override:
+        for key in list(config.get("bridge_reviewers", {})):
+            config["bridge_reviewers"][key] = reviewer_override
+        for key in list(config.get("backends", {})):
+            if config["backends"][key] and config["backends"][key] != "claude":
+                config["backends"][key] = reviewer_override
+    return config
 
 
 def normalize_wave_id(raw: str) -> str:
