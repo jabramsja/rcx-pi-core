@@ -635,15 +635,17 @@ class TestPhaseAPlanCreation:
         with pytest.raises(phase_a_mod.PhaseAExecutorError, match="exactly one Phase-A-Lock control line"):
             phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
 
-    def test_lock_plan_rejects_missing_control_line(self, tmp_path):
+    def test_lock_plan_auto_inserts_missing_control_line(self, tmp_path):
+        """lock_plan auto-inserts Phase-A-Lock if missing, then locks it."""
         (tmp_path / "reports" / "control_plane").mkdir(parents=True)
         plan = tmp_path / "reports" / "control_plane" / "test.md"
         plan.write_text(
             "# Some plan\nStatus: draft\n",
             encoding="utf-8",
         )
-        with pytest.raises(phase_a_mod.PhaseAExecutorError, match="No Phase-A-Lock control line found"):
-            phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+        phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+        content = plan.read_text(encoding="utf-8")
+        assert "Phase-A-Lock: LOCKED" in content
 
 
 class TestPhaseADispatcherIntegration:

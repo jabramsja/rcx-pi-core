@@ -329,13 +329,27 @@ def verify_code_at_location(block: FindingBlock) -> tuple[bool, str, str | None]
         return False, "No LINES provided", "fabrication"
 
     # Security: Validate path to prevent traversal attacks
-    # ONLY allow paths within the current working directory (repo root)
+    # Allow paths within cwd OR the main repo (for linked worktrees where cwd
+    # is /tmp/workingrcx_* but agents cite /Users/.../WorkingRCX/ paths).
     # This prevents reading arbitrary files like /proc/self/environ or ~/.ssh/id_rsa
     # Uses resolved_path for ALL subsequent operations to prevent TOCTOU symlink races
     try:
         resolved_path = Path(block.file_path).resolve()
         cwd = Path.cwd().resolve()
-        if not resolved_path.is_relative_to(cwd):
+        # In a linked worktree, .git is a file pointing to the main repo.
+        # Accept paths within either the worktree or the main repo.
+        allowed_roots = [cwd]
+        git_path = cwd / ".git"
+        if git_path.is_file():
+            # Linked worktree: .git contains "gitdir: /main/repo/.git/worktrees/..."
+            gitdir_line = git_path.read_text().strip()
+            if gitdir_line.startswith("gitdir:"):
+                main_git_dir = Path(gitdir_line.split(":", 1)[1].strip()).resolve()
+                # Walk up from .git/worktrees/<name> to the main repo root
+                main_repo = main_git_dir.parent.parent.parent
+                if main_repo.is_dir():
+                    allowed_roots.append(main_repo)
+        if not any(resolved_path.is_relative_to(root) for root in allowed_roots):
             return False, f"Path not allowed: {block.file_path} (must be within project directory)", "fabrication"
     except (OSError, ValueError) as e:
         return False, f"Invalid path: {block.file_path} ({e})", "fabrication"
