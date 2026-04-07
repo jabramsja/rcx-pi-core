@@ -16,7 +16,7 @@ STATUS_PATH = REPO_ROOT / "STATUS.md"
 TASKS_PATH = REPO_ROOT / "TASKS.md"
 MANIFEST_PATH = REPO_ROOT / "roadmap" / "MANIFEST.md"
 META_BRIDGE_ROLLOUT_PATH = (
-    REPO_ROOT / "reports" / "control_plane" / "meta_bridge_rollout_2026-03-20.md"
+    REPO_ROOT / "reports" / "control_plane" / "archive" / "meta_bridge_rollout_2026-03-20.md"
 )
 
 LAYER_TOKENS = ("BOOTSTRAP", "META_CIRCULAR")

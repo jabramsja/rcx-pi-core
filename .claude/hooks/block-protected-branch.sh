@@ -8,12 +8,17 @@ CMD=$(jq -r '.tool_input.command // ""' < /dev/stdin 2>/dev/null || echo "")
 # Collapse newlines to single line for regex matching (catches multiline git commands)
 CMD_ONELINE=$(echo "$CMD" | tr '\n' ' ')
 
+# Strip content inside quotes and bash comments to avoid false positives.
+# e.g., echo "...git commit..." or # comment about git commit should NOT trigger.
+# Order: strip comments first (# to end of logical line), then quoted strings.
+CMD_STRIPPED=$(echo "$CMD_ONELINE" | sed -E 's/#[^;|&]*(;|&&|\|\||$)//g; s/'"'"'[^'"'"']*'"'"'//g; s/"[^"]*"//g')
+
 # Extract git subcommands: find words immediately after "git" (skipping -c key=val style flags).
 # Only block on actual git subcommands, not on branch names or other arguments that
 # happen to contain words like "commit" (e.g., git checkout -b pre-commit-fix).
 BLOCKED=false
 EXPECT_FLAG_ARG=false
-for word in $CMD_ONELINE; do
+for word in $CMD_STRIPPED; do
   # After a flag that takes an argument (e.g., -C <path>, -c key=val), skip the argument
   if [ "$EXPECT_FLAG_ARG" = "true" ]; then
     EXPECT_FLAG_ARG=false

@@ -19,6 +19,12 @@
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/block-protected-branch.sh",
             "timeout": 3,
             "statusMessage": "Checking branch safety..."
+          },
+          {
+            "type": "command",
+            "command": "CMD=$(jq -r '.tool_input.command // \"\"'); echo \"$CMD\" | grep -q 'sqlite3.*bridge\\.db' || exit 0; echo \"$CMD\" | grep -q '/private/tmp/workingrcx_' && exit 0; echo '{\"decision\":\"block\",\"reason\":\"USE mcp__sqlite__read_query for main repo bridge.db. sqlite3 is only allowed for linked worktrees at /private/tmp/workingrcx_*\"}'",
+            "timeout": 3,
+            "statusMessage": "Checking bridge.db access policy..."
           }
         ]
       }
@@ -103,6 +109,40 @@
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/validate-agent-compliance.sh",
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"systemMessage\":\"IDENTITY REINFORCEMENT (every message):\\n\\nYou are a senior principal engineer on an audited codebase. Your reputation depends on every action being defensible. Before your next action, ask: Would a reviewing expert find a step where I assumed instead of verified?\\n\\nCORE VALUES: (1) Never modify code you have not read. (2) Never skip protocol steps \u2014 skipping is a defect. (3) Never conjecture \u2014 diagnose with commands. (4) Your first instinct is a hypothesis, not a conclusion. (5) Say what you verified and what you did not.\\n\\nHARD RULES: Pipeline only (never manual commit/push). Worktree only (never main repo). MCP SQLite for bridge.db. Nohup for pipeline. Bot comments are signal.\\n\\nMEMORY: MEMORY.md and CLAUDE.md are MANDATORY. If not read in last 10 messages, read now.\"}'",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat ~/.claude/hard-rules.txt && echo \"\" && echo \"--- MEMORY.md ---\" && cat ~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/MEMORY.md",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "verifier|adversary|expert|structural-proof|grounding|fuzzer|translator|visualizer|advisor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SubagentStart\",\"additionalContext\":\"MANDATORY BEHAVIORAL OVERRIDES FOR SUBAGENTS: (1) Read code BEFORE implementing. (2) Lead with reasoning BEFORE acting. (3) Verify every assumption \u2014 grep locates, Read verifies. (4) Diagnosis first \u2014 trace path, reproduce, THEN fix. (5) Sequential investigation. (6) Never claim exists/absent based on grep counts alone. (7) CLAUDE.md and MEMORY.md are MANDATORY \u2014 Read them before starting review. Paths: CLAUDE.md in repo root, MEMORY.md at ~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/MEMORY.md\"}}'",
+            "timeout": 2
           }
         ]
       }
