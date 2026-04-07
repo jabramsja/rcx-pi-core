@@ -1,7 +1,9 @@
 #!/bin/bash
-# PostToolUse hook: injects a protocol reminder every 5th tool call.
-# Counters drift in long tool-call sequences where I optimize for completion
-# over verification. This hook creates friction at regular intervals.
+# PostToolUse hook: BLOCKS every 10th tool call for a forced verification step.
+# Injects friction reminder every 5th call (non-blocking).
+#
+# The blocking checkpoint forces a full stop and verification statement.
+# The non-blocking reminder creates lighter friction between checkpoints.
 #
 # Uses a counter file in /tmp — session-scoped, resets on restart.
 
@@ -16,7 +18,13 @@ else
 fi
 echo "$COUNT" > "$COUNTER_FILE"
 
-# Every 5th call, inject protocol reminder
+# Every 10th call: BLOCK — force verification step
+if [ $((COUNT % 10)) -eq 0 ]; then
+  echo '{"decision":"block","reason":"VERIFICATION CHECKPOINT (#'"$COUNT"'): You have made 10 tool calls since the last checkpoint. Before continuing, you MUST state: (1) What you are trying to accomplish. (2) What you have verified so far. (3) What assumption you are about to act on. Resume after stating these."}'
+  exit 0
+fi
+
+# Every 5th call (not 10th): non-blocking reminder
 if [ $((COUNT % 5)) -eq 0 ]; then
   echo '{"additionalContext":"TOOL-CALL CHECKPOINT (#'"$COUNT"'): Are you following override #7 (diagnosis first)? Are you verifying assumptions (#4) or shortcutting? If you are about to claim something works without running it, STOP."}'
 fi

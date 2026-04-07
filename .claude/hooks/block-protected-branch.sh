@@ -50,8 +50,43 @@ if [[ -z "${CLAUDE_PROJECT_DIR:-}" ]]; then
   jq -n '{"decision": "block", "reason": "CLAUDE_PROJECT_DIR not set - blocking for safety"}'
   exit 0
 fi
-cd "$CLAUDE_PROJECT_DIR" 2>/dev/null || {
-  jq -n '{"decision": "block", "reason": "Cannot cd to project directory - blocking for safety"}'
+
+# Determine the effective git directory: if the command cds to a worktree or
+# uses git -C <path>, check the branch THERE, not in the main repo.
+# This is critical for pipeline worktree operations where the main repo is on
+# dev but the worktree is on a feature branch.
+EFFECTIVE_GIT_DIR=""
+
+# Pattern 1: cd <path> && git ...
+if [[ "$CMD_ONELINE" =~ cd[[:space:]]+([^[:space:];&]+) ]]; then
+  CANDIDATE="${BASH_REMATCH[1]}"
+  # Strip quotes if present
+  CANDIDATE="${CANDIDATE%\"}"
+  CANDIDATE="${CANDIDATE#\"}"
+  CANDIDATE="${CANDIDATE%\'}"
+  CANDIDATE="${CANDIDATE#\'}"
+  if [ -d "$CANDIDATE/.git" ] || [ -f "$CANDIDATE/.git" ]; then
+    EFFECTIVE_GIT_DIR="$CANDIDATE"
+  fi
+fi
+
+# Pattern 2: git -C <path> ...
+if [ -z "$EFFECTIVE_GIT_DIR" ] && [[ "$CMD_ONELINE" =~ git[[:space:]]+-C[[:space:]]+([^[:space:]]+) ]]; then
+  CANDIDATE="${BASH_REMATCH[1]}"
+  CANDIDATE="${CANDIDATE%\"}"
+  CANDIDATE="${CANDIDATE#\"}"
+  if [ -d "$CANDIDATE/.git" ] || [ -f "$CANDIDATE/.git" ]; then
+    EFFECTIVE_GIT_DIR="$CANDIDATE"
+  fi
+fi
+
+# Fallback: main repo
+if [ -z "$EFFECTIVE_GIT_DIR" ]; then
+  EFFECTIVE_GIT_DIR="$CLAUDE_PROJECT_DIR"
+fi
+
+cd "$EFFECTIVE_GIT_DIR" 2>/dev/null || {
+  jq -n '{"decision": "block", "reason": "Cannot cd to git directory - blocking for safety"}'
   exit 0
 }
 
