@@ -58,6 +58,7 @@ For each issue found in Phase 2:
 - **New signal**: If the orient phase revealed important patterns not yet captured, create new memory files following the standard frontmatter format.
 
 Rules:
+- **PROTECTED FILES**: Memory files with `protected: true` in frontmatter or `DREAM-PROTECTED` comments MUST NOT be merged, deleted, or marked stale. They reference external artifacts (binary patches, external tools) that grep cannot find in repo code. Skip them entirely during stale fact detection.
 - Merge new signal into existing topic files rather than creating near-duplicates
 - Prefer updating over deleting — only delete if the entire memory is wrong or obsolete
 - Preserve the founder's voice and intent in feedback memories
