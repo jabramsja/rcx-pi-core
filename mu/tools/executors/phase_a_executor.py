@@ -814,8 +814,8 @@ def _parse_phase_a_findings(render_content: str) -> list[dict[str, Any]]:
     if envelope is not None:
         return _envelope_findings(envelope)
 
-    # Codex bridge raw output is JSONL where the authoritative envelope lives
-    # inside the final reviewer agent_message text, not at the file top level.
+    # Adapter raw output may wrap the envelope inside JSON structures.
+    # Try extracting text from both Codex JSONL and Claude stream-json formats.
     agent_messages: list[str] = []
     for line in render_content.splitlines():
         stripped = line.strip()
@@ -825,14 +825,22 @@ def _parse_phase_a_findings(render_content: str) -> list[dict[str, Any]]:
             payload = json.loads(stripped)
         except json.JSONDecodeError:
             continue
-        if payload.get("type") != "item.completed":
-            continue
-        item = payload.get("item")
-        if not isinstance(item, dict) or item.get("type") != "agent_message":
-            continue
-        text = item.get("text")
-        if isinstance(text, str) and text.strip():
-            agent_messages.append(text)
+        # Codex JSONL: {"type":"item.completed","item":{"type":"agent_message","text":"..."}}
+        if payload.get("type") == "item.completed":
+            item = payload.get("item")
+            if isinstance(item, dict) and item.get("type") == "agent_message":
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    agent_messages.append(text)
+        # Claude stream-json: {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}
+        elif payload.get("type") == "assistant":
+            message = payload.get("message")
+            if isinstance(message, dict):
+                for block in message.get("content", []):
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text")
+                        if isinstance(text, str) and text.strip():
+                            agent_messages.append(text)
 
     if agent_messages:
         normalized = "\n".join(agent_messages)
@@ -905,11 +913,22 @@ def lock_plan(repo_root: Path, plan_path: str) -> None:
     locked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*LOCKED\s*$", content)
     total = len(unlocked_lines) + len(locked_lines)
     if total == 0:
-        raise PhaseAExecutorError(
-            f"No Phase-A-Lock control line found in {plan_path}. "
-            "Expected exactly one line matching 'Phase-A-Lock: UNLOCKED' or "
-            "'Phase-A-Lock: LOCKED'."
-        )
+        # No lock line exists — insert one after the header block.
+        # The implementer may have rewritten the stub without including
+        # the Phase-A-Lock line. Insert it after Status: or Date: lines.
+        lines = content.splitlines()
+        insert_after = 0
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith(("Status:", "Date:", "Task:", "Wave ID:")):
+                insert_after = i + 1
+        lines.insert(insert_after, "Phase-A-Lock: UNLOCKED")
+        content = "\n".join(lines)
+        full_path.write_text(content, encoding="utf-8")
+        # Recompute after insert
+        unlocked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*UNLOCKED\s*$", content)
+        locked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*LOCKED\s*$", content)
+        total = len(unlocked_lines) + len(locked_lines)
     if total > 1:
         raise PhaseAExecutorError(
             f"Expected exactly one Phase-A-Lock control line in {plan_path}, "

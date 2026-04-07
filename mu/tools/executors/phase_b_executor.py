@@ -2242,6 +2242,13 @@ def run_phase_b(
                 cwd=str(repo_root), capture_output=True, text=True,
             ).returncode == 0
             try:
+                # Stash any dirty working-tree files (e.g. reviewer config swaps)
+                # so branch checkout doesn't fail on conflicts. Pop after checkout.
+                stash_result = subprocess.run(
+                    ["git", "stash", "--include-untracked"],
+                    cwd=str(repo_root), capture_output=True, text=True,
+                )
+                stashed = stash_result.returncode == 0 and "No local changes" not in stash_result.stdout
                 if branch_exists:
                     log(f"Step 2.5: Checking out existing feature branch {feature_branch}")
                     subprocess.run(
@@ -2255,7 +2262,18 @@ def run_phase_b(
                         cwd=str(repo_root), check=True, capture_output=True,
                     )
                 result["feature_branch"] = feature_branch
+                if stashed:
+                    subprocess.run(
+                        ["git", "stash", "pop"],
+                        cwd=str(repo_root), capture_output=True,
+                    )
             except subprocess.CalledProcessError as exc:
+                # Restore stash on failure
+                if stashed:
+                    subprocess.run(
+                        ["git", "stash", "pop"],
+                        cwd=str(repo_root), capture_output=True,
+                    )
                 return {"status": "error", "step": "ensure_feature_branch",
                         "errors": [f"Branch checkout failed (fail-closed): {exc}. "
                                    f"Cannot invoke implementer on protected branch '{current_branch}'."]}
