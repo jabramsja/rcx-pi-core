@@ -604,13 +604,97 @@ _DANGEROUS_COMMANDS = frozenset({
 })
 
 # Pattern-based denylist: catch subcommand variations that exact strings miss.
-# In Tier 3 recovery, git reset/checkout/restore are never appropriate —
-# even "soft" variants can destabilize the pipeline working tree.
+# In Tier 3 recovery, git reset/checkout/restore/push/clean are never
+# appropriate — even "soft" variants can destabilize the pipeline working tree.
+# The global-option group handles flags (e.g. --no-pager, -C <path>,
+# -c key=val) that appear between ``git`` and the subcommand.
+_GIT_GLOBAL_OPT = r"(?:\s+-[^\s]*(?:\s+[^-\s][^\s]*)?)*"
 _DANGEROUS_GIT_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\bgit\s+reset\b"),
-    re.compile(r"\bgit\s+checkout\b"),
-    re.compile(r"\bgit\s+restore\b"),
+    re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+reset\b"),
+    re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+checkout\b"),
+    re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+restore\b"),
+    re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+push\b"),
+    re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+clean\b"),
+    re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+config\b"),
+    re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+fetch\b"),
+    re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+pull\b"),
+    re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+clone\b"),
+    re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+stash\b"),
 ]
+
+# Layer 1: Shell metacharacters that enable command chaining, piping, subshells,
+# or redirection. Tier 3 recovery commands must be simple single commands.
+_SHELL_METACHAR_PATTERN = re.compile(
+    r"[;|&`]"
+    r"|>\s*>"
+    r"|[<>]"
+    r"|\$\("
+    r"|\$\{"
+    r"|\$[A-Za-z_]"
+    r"|\\."
+    r"|[\n\r]"
+)
+
+# Layer 7: Interpreter code-execution flags — python/node/ruby/perl with -c/-e
+# allow arbitrary code that can bypass every other denylist check.
+# Match only exact -c/-e/-p flags (not -E, --norc, etc.)
+_INTERPRETER_CODE_EXEC_PATTERN = re.compile(
+    r"\b(?:python[23]?(?:\.\d+)?|node|ruby|perl|lua)\s+"
+    r"(?:-[^\s]*\s+)*"
+    r"-[cep](?:\s|$)"
+)
+
+# Layer 6: Shell wrapper detection — sh/bash/zsh/dash/ksh with -c allow
+# arbitrary command execution that bypasses every other denylist.
+# Match only exact -c flag (not --norc, --rcfile, etc.)
+_SHELL_WRAPPER_PATTERN = re.compile(
+    r"\b(?:sh|bash|zsh|dash|ksh|csh|tcsh)\s+"
+    r"(?:-[^\s]*\s+)*"
+    r"-c(?:\s|$)"
+)
+
+# Layer 4: Network egress commands — recovery should never reach the network.
+_DANGEROUS_NETWORK_COMMANDS: frozenset[str] = frozenset({
+    "curl", "wget", "nc", "ncat", "nmap", "socat",
+    "ssh", "scp", "rsync", "ftp", "sftp", "telnet",
+})
+
+# Layer 8: Package-manager commands — direct installer CLIs are network egress +
+# supply-chain risk.
+_DANGEROUS_PACKAGE_MANAGERS: frozenset[str] = frozenset({
+    "pip", "pip3", "npm", "npx", "yarn", "pnpm",
+    "gem", "cargo", "composer", "brew", "apt", "apt-get", "yum", "dnf",
+    "apk", "pacman", "conda", "mamba", "pipx", "poetry", "uv",
+})
+
+# Layer 8b: Python modules that provide network capabilities.
+_DANGEROUS_PYTHON_MODULES: frozenset[str] = frozenset({
+    "http.server", "http.client", "smtplib", "ftplib",
+    "urllib", "urllib.request", "xmlrpc.server", "xmlrpc.client",
+    "simplehttpserver", "pip", "ensurepip",
+})
+
+_PYTHON_MODULE_RUN_PATTERN = re.compile(
+    r"\b(?:python[23]?(?:\.\d+)?)\s+"
+    r"(?:-[^\s]*\s+)*"
+    r"-m\s+(\S+)"
+)
+
+# Layer 5: Sensitive host paths that should never be read/written by recovery.
+_SENSITIVE_PATH_PATTERN = re.compile(
+    r"/etc/(?:passwd|shadow|sudoers|ssh)"
+    r"|/proc\b"
+    r"|/dev/(?!null|urandom)"
+    r"|(?:~|\$HOME|\$\{HOME\})/\.ssh\b"
+    r"|(?:~|\$HOME|\$\{HOME\})/\.gnupg\b"
+    r"|(?:~|\$HOME|\$\{HOME\})/\.aws\b"
+)
+
+# Command-position prefix commands (sudo, env, nohup, etc.)
+_COMMAND_PREFIXES: frozenset[str] = frozenset({
+    "sudo", "env", "nice", "nohup", "time", "timeout",
+    "strace", "ltrace", "ionice",
+})
 
 MAX_RECOVERY_ITERATIONS = 3
 _CLAUDE_TIMEOUT = 180
@@ -618,20 +702,170 @@ _SHELL_TIMEOUT = 30
 _TRIVIAL_EXCERPTS = frozenset({"{", "}", "[", "]", ",", '"', '",', "{}", "[]"})
 
 
+def _strip_shell_quotes(text: str) -> str:
+    """Remove shell quoting characters so regex patterns can match regardless of quoting."""
+    return text.replace('"', "").replace("'", "")
+
+
+def _get_command_basename(tokens: list[str]) -> str:
+    """Return the basename of the first command-position token.
+
+    Skips known prefix commands (sudo, env, nohup, etc.) AND their
+    arguments (flags like ``-u root``, env assignments like ``FOO=1``)
+    so that ``sudo -u root curl ...`` returns ``curl``.
+    """
+    i = 0
+    in_prefix = False
+    while i < len(tokens):
+        token = tokens[i]
+        basename = token.rsplit("/", 1)[-1]
+        if basename in _COMMAND_PREFIXES:
+            in_prefix = True
+            i += 1
+            continue
+        if in_prefix:
+            # Skip flags and their arguments belonging to the prefix command
+            if token.startswith("-"):
+                i += 1
+                # Flags like -u take the next token as argument
+                if i < len(tokens) and not tokens[i].startswith("-") and "=" not in tokens[i]:
+                    i += 1  # skip the flag's argument
+                continue
+            # Skip KEY=VALUE env assignments (e.g., env FOO=1 pip install)
+            if "=" in token:
+                i += 1
+                continue
+            # Skip numeric positional args (e.g., timeout 5, nice -10)
+            try:
+                float(token)
+                i += 1
+                continue
+            except ValueError:
+                pass
+            in_prefix = False
+        return basename
+    return tokens[-1].rsplit("/", 1)[-1] if tokens else ""
+
+
 def _targets_git_internals(text: str) -> bool:
-    """Check if text references .git/ internal paths."""
-    return ".git/" in text or ".git\\" in text
+    """Check if text references .git/ internal paths.
+
+    Strips shell quotes first so that ``cat ".git"/config`` is still caught.
+    """
+    normalized = _strip_shell_quotes(text)
+    return ".git/" in normalized or ".git\\" in normalized
+
+
+def _has_shell_metacharacters(cmd: str) -> bool:
+    """Return True if cmd contains shell metacharacters (chaining/redirect)."""
+    return bool(_SHELL_METACHAR_PATTERN.search(cmd))
+
+
+def _uses_network_command_normalized(cmd_lower: str) -> bool:
+    """Return True if pre-lowered cmd invokes a network egress tool."""
+    tokens = cmd_lower.split()
+    if not tokens:
+        return False
+    basename = _get_command_basename(tokens)
+    return basename in _DANGEROUS_NETWORK_COMMANDS
+
+
+def _uses_shell_wrapper_normalized(cmd_lower: str) -> bool:
+    """Return True if the command-position token is a shell with -c.
+
+    Uses ``match`` anchored to start of string (after quote stripping)
+    so that ``echo "bash -c"`` is NOT matched — only actual shell
+    wrapper invocations at command position.
+    """
+    return bool(_SHELL_WRAPPER_PATTERN.match(cmd_lower))
+
+
+def _uses_interpreter_code_exec_normalized(cmd_raw: str) -> bool:
+    """Return True if cmd invokes interpreter with lowercase -c/-e/-p.
+
+    Accepts RAW (non-lowered) input so -E (ignore env) is not confused
+    with -e (execute). The regex is compiled with re.IGNORECASE for the
+    interpreter name but the flag character [cep] is lowercase-only
+    since IGNORECASE would also match -C/-E/-P which are NOT code exec.
+    """
+    # Two-step: find interpreter name case-insensitively, then check
+    # if a lowercase -c/-e/-p flag follows
+    interp_match = re.search(
+        r"\b(?:python[23]?(?:\.\d+)?|node|ruby|perl|lua)\s+",
+        cmd_raw, re.IGNORECASE,
+    )
+    if not interp_match:
+        return False
+    after_interp = cmd_raw[interp_match.end():]
+    # Match optional preceding flags, then exactly -c, -e, or -p (lowercase only)
+    return bool(re.match(r"(?:-[^\s]*\s+)*-[cep](?:\s|$)", after_interp))
+
+
+def _uses_package_manager_normalized(cmd_lower: str) -> bool:
+    """Return True if pre-lowered cmd invokes a standalone package manager."""
+    tokens = cmd_lower.split()
+    if not tokens:
+        return False
+    basename = _get_command_basename(tokens)
+    return basename in _DANGEROUS_PACKAGE_MANAGERS
+
+
+def _uses_dangerous_python_module_normalized(cmd_lower: str) -> bool:
+    """Return True if pre-lowered cmd runs a network-capable Python module via -m."""
+    m = _PYTHON_MODULE_RUN_PATTERN.search(cmd_lower)
+    if not m:
+        return False
+    module = m.group(1)
+    return module in _DANGEROUS_PYTHON_MODULES or module.rsplit(".", 1)[0] in _DANGEROUS_PYTHON_MODULES
+
+
+def _targets_sensitive_paths(cmd: str) -> bool:
+    """Return True if cmd references sensitive host paths."""
+    return bool(_SENSITIVE_PATH_PATTERN.search(cmd))
 
 
 def _is_dangerous_command(cmd: str) -> bool:
-    """Check if a shell command matches the denylist or dangerous patterns."""
-    cmd_lower = cmd.strip().lower()
+    """Check if a shell command matches any of the 8 denylist layers.
+
+    All pattern/token checks run against a quote-stripped normalisation so
+    that ``"sh" -c "..."`` or ``"git" push`` cannot bypass word-boundary matching.
+    Note: ``_has_shell_metacharacters`` runs on the RAW command because quotes
+    don't neutralise metacharacters when ``shell=True``.
+    """
+    # Layer 1: metacharacter check on raw text
+    if _has_shell_metacharacters(cmd):
+        return True
+
+    # Quote-stripped text for remaining checks
+    normalized_raw = _strip_shell_quotes(cmd).strip()
+    normalized_lower = normalized_raw.lower()
+
+    # Layer 2: exact-match denylist
     for denied in _DANGEROUS_COMMANDS:
-        if denied in cmd_lower:
+        if denied in normalized_lower:
             return True
+    # Layer 3: git subcommand patterns with global-option awareness
     for pattern in _DANGEROUS_GIT_PATTERNS:
-        if pattern.search(cmd_lower):
+        if pattern.search(normalized_lower):
             return True
+    # Layer 4: network egress commands (command-position only)
+    if _uses_network_command_normalized(normalized_lower):
+        return True
+    # Layer 5: sensitive host paths (case-sensitive for $HOME)
+    if _targets_sensitive_paths(normalized_raw):
+        return True
+    # Layer 6: shell wrappers (sh -c, bash -c)
+    if _uses_shell_wrapper_normalized(normalized_lower):
+        return True
+    # Layer 7: interpreter code execution (python -c, node -e)
+    # Use raw (non-lowered) text because -E is NOT code exec, only -c/-e/-p are
+    if _uses_interpreter_code_exec_normalized(normalized_raw):
+        return True
+    # Layer 8: package managers + dangerous Python modules
+    if _uses_package_manager_normalized(normalized_lower):
+        return True
+    if _uses_dangerous_python_module_normalized(normalized_lower):
+        return True
     return False
 
 
