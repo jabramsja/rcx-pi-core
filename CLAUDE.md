@@ -49,7 +49,7 @@ RCX is a native structural substrate pursuing self-hosting and meta-circularity.
 | `mu/host/js/eval_step.js` | JavaScript substrate (L3 parity) |
 | `mu/tools/executors/` | Executor scripts (Phase A/B/commit automation) |
 | `mu/docs/core/` | Design specs |
-| `.claude/rules/` | Conditional rules: wave-protocol, agents, workflow, test-classification, l4-contract, doc-governance |
+| `.claude/rules/` | Conditional rules: wave-protocol, agents, workflow, test-classification, l4-contract, doc-governance, memory-protection |
 
 ## Compact Instructions
 

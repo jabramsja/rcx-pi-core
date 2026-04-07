@@ -44,6 +44,25 @@
             "timeout": 3
           }
         ]
+      },
+      {
+        "matcher": "Grep|Read|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/verify-before-concluding.sh",
+            "timeout": 2
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/tool-call-counter.sh",
+            "timeout": 2
+          }
+        ]
       }
     ],
     "Stop": [
@@ -54,6 +73,24 @@
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/should-dream.sh",
             "timeout": 5,
             "statusMessage": "Checking memory consolidation..."
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/check-reasoning-depth.sh",
+            "timeout": 3,
+            "statusMessage": "Checking reasoning depth..."
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/reinject-after-compact.sh",
+            "timeout": 2,
+            "statusMessage": "Re-injecting behavioral overrides..."
           }
         ]
       }
