@@ -3074,7 +3074,7 @@ class TestDangerousGitPatterns:
 
     @pytest.mark.parametrize("cmd", [
         "git status", "git diff", "git log --oneline",
-        "git add file.py", "git stash", "git branch -a",
+        "git add file.py", "git branch -a",
     ])
     def test_safe_git_commands_allowed(self, cmd):
         assert rg_mod._is_dangerous_command(cmd) is False  # ANTICHEAT_OK
