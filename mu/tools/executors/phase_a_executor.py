@@ -988,17 +988,13 @@ def lock_plan(repo_root: Path, plan_path: str) -> None:
             raise PhaseAExecutorError(
                 f"Expected one unlock line in {plan_path}, found {lock_replacements}"
             )
-    content = header + body
     # Already LOCKED — idempotent, just apply status text cleanup below.
-    # Update the Status field to reflect Phase B regardless of its current text.
-    # Root cause fix: the old substitution only matched one specific phrase
-    # ("not yet agent-reviewed or bridge-converged"), so plans with different
-    # Status text (e.g., "Phase A (plan under review)") kept a stale Status
-    # that contradicted Phase-A-Lock: LOCKED, triggering fail-closed in Phase B.
-    content, status_replacements = re.subn(
+    # Update the Status field in the HEADER only (P2 finding PR #749:
+    # body Status: lines must not be rewritten).
+    header, status_replacements = re.subn(
         r"(?m)^Status:\s*.*$",
         "Status: Phase B (locked, implementing)",
-        content,
+        header,
         count=1,
     )
     if status_replacements == 0:
@@ -1007,6 +1003,7 @@ def lock_plan(repo_root: Path, plan_path: str) -> None:
             "Phase B status not set",
             file=sys.stderr,
         )
+    content = header + body
     full_path.write_text(content, encoding="utf-8")
 
 

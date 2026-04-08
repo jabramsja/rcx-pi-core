@@ -758,6 +758,67 @@ class TestPhaseAPlanCreation:
         assert "\n\n## 1. Scope\n" in content
 
 
+    def test_lock_plan_ignores_status_lines_in_body(self, tmp_path):
+        """Status: in body must not be replaced; only header Status changes.
+
+        P2 bot finding (PR #749): the regex could match a body Status: line
+        before the header if the body appears first in the file, or the body
+        contains Status: in an example/constraint section.
+        """
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text(
+            "# Test Plan\n"
+            "Date: 2026-04-08\n"
+            "Status: Phase A (design -- not yet agent-reviewed or bridge-converged)\n"
+            "Phase-A-Lock: UNLOCKED\n"
+            "\n"
+            "## 1. Scope\n"
+            "\n"
+            "In this section, the Status: of the first item is draft.\n"
+            "Another line with Status: Phase A (example text).\n",
+            encoding="utf-8",
+        )
+        phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+        content = plan.read_text(encoding="utf-8")
+        header, body = content.split("## 1. Scope")
+        # Header Status replaced
+        assert "Status: Phase B (locked, implementing)" in header
+        # Body Status lines preserved
+        assert "Status: of the first item is draft" in body
+        assert "Status: Phase A (example text)" in body
+
+
+class TestStandaloneCommitMode:
+    """Tests for --standalone and --skip-supervisor commit executor flags."""
+
+    def test_standalone_caller_accepted(self, tmp_path):
+        """Standalone caller passes validation."""
+        handoff = _make_new_handoff()
+        handoff["caller"] = "standalone"
+        handoff["pre_commit_receipt_path"] = ""
+        valid, errors = commit_mod.validate_handoff(handoff)
+        assert valid, f"Standalone handoff rejected: {errors}"
+
+    def test_standalone_allows_empty_receipt_path(self, tmp_path):
+        """Standalone mode allows empty pre_commit_receipt_path."""
+        handoff = _make_new_handoff()
+        handoff["caller"] = "standalone"
+        handoff["pre_commit_receipt_path"] = ""
+        valid, errors = commit_mod.validate_handoff(handoff)
+        assert valid, f"Empty receipt path rejected in standalone: {errors}"
+        assert not any("pre_commit_receipt_path" in e for e in errors)
+
+    def test_non_standalone_rejects_empty_receipt_path(self):
+        """Non-standalone callers must have a receipt path."""
+        handoff = _make_new_handoff()
+        handoff["caller"] = "phase_b"
+        handoff["pre_commit_receipt_path"] = ""
+        valid, errors = commit_mod.validate_handoff(handoff)
+        assert not valid
+        assert any("pre_commit_receipt_path" in e for e in errors)
+
+
 class TestPhaseADispatcherIntegration:
     """Dispatcher correctly routes to phase_a_executor."""
 
