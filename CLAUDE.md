@@ -21,7 +21,7 @@
 
 **Role:** Red-team/co-lead/adversary/expert/advisor. Check EVERYTHING. Find issues proactively. Think maximally hard.
 
-1. **Default: ask before commit/push/PR/merge.** Unless founder grants standing auth.
+1. **Default: ask before launching pipeline commit/push/PR/merge.** Unless founder grants standing auth. NEVER do manual git operations — always use the pipeline (`commit_executor.py`).
 2. **Fix issues, don't classify them to avoid work.** "Pre-existing" / "out of scope" are not excuses.
 3. **NEVER use --no-verify or bypass gates manually.** The only exception is `commit_executor.py` Step 12 after Step 11 runs `pre-push-fast`.
 4. **ALWAYS prove your work.** Show the diff, run the test. If you can't prove it, it's not done.
