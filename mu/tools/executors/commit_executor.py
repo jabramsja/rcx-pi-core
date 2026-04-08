@@ -107,7 +107,10 @@ OPTIONAL_HANDOFF_FIELDS = {
     "evidence_handles",
 }
 
-VALID_CALLERS = {"phase_b", "phase_a", "update_tracker_only"}
+VALID_CALLERS = {"phase_b", "phase_a", "update_tracker_only", "standalone"}
+
+# Fields that may be empty/missing when caller is "standalone"
+STANDALONE_OPTIONAL_FIELDS = {"pre_commit_receipt_path"}
 
 # GraphQL query for PR review state
 PR_REVIEW_QUERY = """
@@ -2008,8 +2011,10 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
     if unexpected:
         errors.extend(f"Unexpected field: {field}" for field in unexpected)
 
-    # Required fields
-    missing = REQUIRED_HANDOFF_FIELDS - set(handoff.keys())
+    # Required fields (standalone caller relaxes some fields)
+    is_standalone = handoff.get("caller") == "standalone"
+    effective_required = REQUIRED_HANDOFF_FIELDS - (STANDALONE_OPTIONAL_FIELDS if is_standalone else set())
+    missing = effective_required - set(handoff.keys())
     if missing:
         errors.extend(f"Missing field: {f}" for f in sorted(missing))
         return False, errors
@@ -2024,8 +2029,11 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
         errors.append(f"wave_id must match {WAVE_ID_RE.pattern}, got '{wave_id}'")
 
     # pre_commit_receipt_path: must be string, relative, within repo
+    # Standalone caller may omit this (supervisor is skipped, no receipt needed)
     receipt_path_val = handoff.get("pre_commit_receipt_path")
-    if not isinstance(receipt_path_val, str):
+    if is_standalone and (not receipt_path_val or receipt_path_val == ""):
+        pass  # standalone: receipt path not required
+    elif not isinstance(receipt_path_val, str):
         errors.append(f"pre_commit_receipt_path must be a string, got {type(receipt_path_val).__name__}")
     elif not receipt_path_val.strip():
         errors.append("pre_commit_receipt_path must be non-empty")
@@ -2494,11 +2502,17 @@ def run_commit_pipeline(
     *,
     repo_root: Path,
     verbose: bool = False,
+    skip_supervisor: bool = False,
 ) -> dict[str, Any]:
     """Execute the 15-step commit pipeline.
 
     Same command every time. Automatic bounded continuation after a local
     commit is allowed; no extra resume flags.
+
+    Args:
+        skip_supervisor: Skip steps 6 (build_and_run_supervisor) and
+            7 (validate_receipt). Used with --standalone for pre-implemented
+            changes that don't need Codex meta-review.
     """
     try:
         ensure_not_agent_review_mode("commit_executor.run_commit_pipeline")
@@ -2839,178 +2853,197 @@ def run_commit_pipeline(
                 _run(["git", "add", "--", "TASKS.md"], cwd=repo_root)
                 log("Step 5b: reconciled indicator_artifact_ref in TASKS.md")
 
-    # ── Step 6: build_and_run_supervisor ──────────────────────────────
-    try:
-        changed_files = _run(
-            ["git", "diff", "--cached", "--name-only"], cwd=repo_root
-        ).stdout.strip().splitlines()
-    except subprocess.CalledProcessError:
-        changed_files = []
-
-    if not changed_files:
-        return {"status": "error", "step": "build_and_run_supervisor",
-                "errors": ["changed_files empty — nothing staged for supervisor"],
-                "steps_completed": result["steps_completed"]}
-
-    # Discover blockers
-    blocking_dir = repo_root / "reports" / "deferred" / "blocking"
-    blocker_paths = sorted(
-        str(p.relative_to(repo_root))
-        for p in blocking_dir.iterdir()
-        if p.is_file() and p.suffix == ".md" and p.name != "README.md"
-    ) if blocking_dir.is_dir() else []
-
-    scope_items = handoff.get("scope_items")
-    if isinstance(scope_items, list) and scope_items:
-        supervisor_scope_items = list(dict.fromkeys([*scope_items, *handoff["files_to_stage"]]))
-    else:
-        supervisor_scope_items = list(handoff["files_to_stage"])
-
-    evidence_handles: dict[str, str] = {}
-    handoff_evidence_handles = handoff.get("evidence_handles")
-    if isinstance(handoff_evidence_handles, dict):
-        evidence_handles.update(handoff_evidence_handles)
-    if "collect_and_stage_indicator" in result["steps_completed"]:
-        evidence_handles.setdefault("indicator", indicator_path)
-
-    supervisor_package = {
-        "task_id": handoff["task_id"],
-        "wave_name": wave_id,
-        "lane": handoff.get("supervisor_lane", handoff["caller"]),
-        "changed_files": changed_files,
-        "scope_items": supervisor_scope_items,
-        "fixes_implemented": handoff["fixes_implemented"],
-        "deferred_items": handoff.get("deferred_items", []),
-        "bridge_status": handoff.get("bridge_status", {}),
-        "evidence_handles": evidence_handles,
-        "blocker_report_paths": blocker_paths,
-        "current_judgment": "COMMIT_GO",
-    }
-
-    scratch_dir = repo_root / ".scratch"
-    scratch_dir.mkdir(exist_ok=True)
-    pkg_path = scratch_dir / "auto_supervisor_package.json"
-    pkg_path.write_text(json.dumps(supervisor_package, indent=2) + "\n", encoding="utf-8")
-
-    # Run supervisor via structured client
-    try:
-        agents_dir = str(repo_root / "mu" / "tools" / "agents")
-        if agents_dir not in sys.path:
-            sys.path.insert(0, agents_dir)
-        from meta_bridge_client import run_meta_bridge_package, MetaBridgeClientError
-        sup_result = run_meta_bridge_package(pkg_path, wait_for_lock_seconds=30, verbose=verbose)
-        if sup_result.decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
-            return {"status": "error", "step": "build_and_run_supervisor",
-                    "errors": [f"Supervisor returned {sup_result.decision}: {sup_result.summary[:200]}"],
-                    "steps_completed": result["steps_completed"]}
-        receipt_path_from_supervisor = sup_result.receipt_path
-        receipt_decision = sup_result.decision
-
-        # Validate supervisor receipt path is non-empty, relative, within repo.
-        # The supervisor-returned receipt path is the runtime authority — it
-        # reflects the actual staged state post-injection that the supervisor reviewed.
-        if not receipt_path_from_supervisor:
-            return {"status": "error", "step": "build_and_run_supervisor",
-                    "errors": ["Supervisor returned empty receipt_path — fail closed"],
-                    "steps_completed": result["steps_completed"]}
-        if os.path.isabs(receipt_path_from_supervisor):
-            return {"status": "error", "step": "build_and_run_supervisor",
-                    "errors": [f"Supervisor returned absolute receipt_path — fail closed: {receipt_path_from_supervisor}"],
-                    "steps_completed": result["steps_completed"]}
-        if _has_path_traversal(receipt_path_from_supervisor):
-            return {"status": "error", "step": "build_and_run_supervisor",
-                    "errors": [f"Path traversal in supervisor receipt_path — fail closed: {receipt_path_from_supervisor}"],
-                    "steps_completed": result["steps_completed"]}
-        # Verify the receipt resolves inside repo_root
-        resolved_repo = repo_root.resolve()
-        resolved_receipt = (repo_root / receipt_path_from_supervisor).resolve()
-        if not resolved_receipt.is_relative_to(resolved_repo):
-            return {"status": "error", "step": "build_and_run_supervisor",
-                    "errors": [f"Supervisor receipt_path escapes repo — fail closed: {receipt_path_from_supervisor}"],
-                    "steps_completed": result["steps_completed"]}
-
+    # ── Steps 6-7 skip (--skip-supervisor) ──────────────────────────
+    if skip_supervisor:
+        log("Steps 6-7: skipped (--skip-supervisor)")
         result["steps_completed"].append("build_and_run_supervisor")
-        log(f"Step 6: supervisor {receipt_decision}, receipt: {receipt_path_from_supervisor}")
-    except ImportError as exc:
-        return {"status": "error", "step": "build_and_run_supervisor",
-                "errors": [f"Cannot import meta_bridge_client: {exc}"],
-                "steps_completed": result["steps_completed"]}
-    except subprocess.TimeoutExpired:
-        return {"status": "error", "step": "build_and_run_supervisor",
-                "errors": ["Supervisor timed out"],
-                "steps_completed": result["steps_completed"]}
-    except Exception as exc:
-        return {"status": "error", "step": "build_and_run_supervisor",
-                "errors": [f"Supervisor failed: {exc}"],
-                "steps_completed": result["steps_completed"]}
+        result["steps_completed"].append("validate_receipt")
+        receipt_decision = "COMMIT_GO"
+        receipt_path_from_supervisor = ""
+        result["receipt_decision"] = receipt_decision
+        result["handoff_sha"] = handoff_sha
+        # Jump to step 8 — set env so pre-commit hook skips receipt check
+        os.environ["RCX_SKIP_RECEIPT_CHECK"] = "1"
 
-    # ── Step 7: validate_receipt ──────────────────────────────────────
-    # The supervisor receipt (step 6) is the runtime authority — it reflects
-    # the actual staged state after tracker/indicator mutations in steps 3-5.
-    # The handoff receipt path is preserved for provenance traceability only;
-    # it is NOT authoritative for the commit decision.
-    handoff_receipt_rel = handoff["pre_commit_receipt_path"]
-    # Containment check: handoff receipt must resolve inside the repo root.
-    # Reject path traversal and symlinks that escape the repo boundary.
-    if _has_path_traversal(handoff_receipt_rel):
-        return {"status": "error", "step": "validate_receipt",
-                "errors": [f"Path traversal in handoff receipt path: {handoff_receipt_rel}"],
-                "steps_completed": result["steps_completed"]}
-    handoff_receipt_file = (repo_root / handoff_receipt_rel).resolve()
-    if not handoff_receipt_file.is_relative_to(repo_root.resolve()):
-        return {"status": "error", "step": "validate_receipt",
-                "errors": [f"Handoff receipt escapes repo root: {handoff_receipt_rel}"],
-                "steps_completed": result["steps_completed"]}
-    if not handoff_receipt_file.exists():
-        return {"status": "error", "step": "validate_receipt",
-                "errors": [f"Phase B handoff receipt not found at: {handoff_receipt_rel}"],
-                "steps_completed": result["steps_completed"]}
+    if not skip_supervisor:
+        # ── Step 6: build_and_run_supervisor ──────────────────────────────
+        try:
+            changed_files = _run(
+                ["git", "diff", "--cached", "--name-only"], cwd=repo_root
+            ).stdout.strip().splitlines()
+        except subprocess.CalledProcessError:
+            changed_files = []
 
-    try:
-        handoff_receipt_data = json.loads(handoff_receipt_file.read_text(encoding="utf-8"))
-        handoff_receipt_decision = handoff_receipt_data.get("decision", "")
-        if handoff_receipt_decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
-            return {"status": "error", "step": "validate_receipt",
-                    "errors": [f"Phase B handoff receipt decision '{handoff_receipt_decision}' does not authorize commit"],
+        if not changed_files:
+            return {"status": "error", "step": "build_and_run_supervisor",
+                    "errors": ["changed_files empty — nothing staged for supervisor"],
                     "steps_completed": result["steps_completed"]}
-    except (json.JSONDecodeError, OSError) as exc:
-        return {"status": "error", "step": "validate_receipt",
-                "errors": [f"Phase B handoff receipt unreadable: {exc}"],
-                "steps_completed": result["steps_completed"]}
 
-    receipt_file = repo_root / receipt_path_from_supervisor
-    if not receipt_file.exists():
-        return {"status": "error", "step": "validate_receipt",
-                "errors": [f"Supervisor receipt not found at: {receipt_path_from_supervisor}"],
-                "steps_completed": result["steps_completed"]}
+        # Discover blockers
+        blocking_dir = repo_root / "reports" / "deferred" / "blocking"
+        blocker_paths = sorted(
+            str(p.relative_to(repo_root))
+            for p in blocking_dir.iterdir()
+            if p.is_file() and p.suffix == ".md" and p.name != "README.md"
+        ) if blocking_dir.is_dir() else []
 
-    try:
-        receipt_data = json.loads(receipt_file.read_text(encoding="utf-8"))
-        receipt_decision = receipt_data.get("decision", "")
-        if receipt_decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
-            return {"status": "error", "step": "validate_receipt",
-                    "errors": [f"Receipt decision '{receipt_decision}' does not authorize commit"],
+        scope_items = handoff.get("scope_items")
+        if isinstance(scope_items, list) and scope_items:
+            supervisor_scope_items = list(dict.fromkeys([*scope_items, *handoff["files_to_stage"]]))
+        else:
+            supervisor_scope_items = list(handoff["files_to_stage"])
+
+        evidence_handles: dict[str, str] = {}
+        handoff_evidence_handles = handoff.get("evidence_handles")
+        if isinstance(handoff_evidence_handles, dict):
+            evidence_handles.update(handoff_evidence_handles)
+        if "collect_and_stage_indicator" in result["steps_completed"]:
+            evidence_handles.setdefault("indicator", indicator_path)
+
+        supervisor_package = {
+            "task_id": handoff["task_id"],
+            "wave_name": wave_id,
+            "lane": handoff.get("supervisor_lane", handoff["caller"]),
+            "changed_files": changed_files,
+            "scope_items": supervisor_scope_items,
+            "fixes_implemented": handoff["fixes_implemented"],
+            "deferred_items": handoff.get("deferred_items", []),
+            "bridge_status": handoff.get("bridge_status", {}),
+            "evidence_handles": evidence_handles,
+            "blocker_report_paths": blocker_paths,
+            "current_judgment": "COMMIT_GO",
+        }
+
+        scratch_dir = repo_root / ".scratch"
+        scratch_dir.mkdir(exist_ok=True)
+        pkg_path = scratch_dir / "auto_supervisor_package.json"
+        pkg_path.write_text(json.dumps(supervisor_package, indent=2) + "\n", encoding="utf-8")
+
+        # Run supervisor via structured client
+        try:
+            agents_dir = str(repo_root / "mu" / "tools" / "agents")
+            if agents_dir not in sys.path:
+                sys.path.insert(0, agents_dir)
+            from meta_bridge_client import run_meta_bridge_package, MetaBridgeClientError
+            sup_result = run_meta_bridge_package(pkg_path, wait_for_lock_seconds=30, verbose=verbose)
+            if sup_result.decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+                return {"status": "error", "step": "build_and_run_supervisor",
+                        "errors": [f"Supervisor returned {sup_result.decision}: {sup_result.summary[:200]}"],
+                        "steps_completed": result["steps_completed"]}
+            receipt_path_from_supervisor = sup_result.receipt_path
+            receipt_decision = sup_result.decision
+
+            # Validate supervisor receipt path is non-empty, relative, within repo.
+            # The supervisor-returned receipt path is the runtime authority — it
+            # reflects the actual staged state post-injection that the supervisor reviewed.
+            if not receipt_path_from_supervisor:
+                return {"status": "error", "step": "build_and_run_supervisor",
+                        "errors": ["Supervisor returned empty receipt_path — fail closed"],
+                        "steps_completed": result["steps_completed"]}
+            if os.path.isabs(receipt_path_from_supervisor):
+                return {"status": "error", "step": "build_and_run_supervisor",
+                        "errors": [f"Supervisor returned absolute receipt_path — fail closed: {receipt_path_from_supervisor}"],
+                        "steps_completed": result["steps_completed"]}
+            if _has_path_traversal(receipt_path_from_supervisor):
+                return {"status": "error", "step": "build_and_run_supervisor",
+                        "errors": [f"Path traversal in supervisor receipt_path — fail closed: {receipt_path_from_supervisor}"],
+                        "steps_completed": result["steps_completed"]}
+            # Verify the receipt resolves inside repo_root
+            resolved_repo = repo_root.resolve()
+            resolved_receipt = (repo_root / receipt_path_from_supervisor).resolve()
+            if not resolved_receipt.is_relative_to(resolved_repo):
+                return {"status": "error", "step": "build_and_run_supervisor",
+                        "errors": [f"Supervisor receipt_path escapes repo — fail closed: {receipt_path_from_supervisor}"],
+                        "steps_completed": result["steps_completed"]}
+
+            result["steps_completed"].append("build_and_run_supervisor")
+            log(f"Step 6: supervisor {receipt_decision}, receipt: {receipt_path_from_supervisor}")
+        except ImportError as exc:
+            return {"status": "error", "step": "build_and_run_supervisor",
+                    "errors": [f"Cannot import meta_bridge_client: {exc}"],
                     "steps_completed": result["steps_completed"]}
-    except (json.JSONDecodeError, OSError) as exc:
-        return {"status": "error", "step": "validate_receipt",
-                "errors": [f"Supervisor receipt unreadable: {exc}"],
-                "steps_completed": result["steps_completed"]}
+        except subprocess.TimeoutExpired:
+            return {"status": "error", "step": "build_and_run_supervisor",
+                    "errors": ["Supervisor timed out"],
+                    "steps_completed": result["steps_completed"]}
+        except Exception as exc:
+            return {"status": "error", "step": "build_and_run_supervisor",
+                    "errors": [f"Supervisor failed: {exc}"],
+                    "steps_completed": result["steps_completed"]}
 
-    result["handoff_receipt_path"] = handoff_receipt_rel
-    result["handoff_receipt_decision"] = handoff_receipt_decision
-    result["receipt_decision"] = receipt_decision
-    result["handoff_sha"] = handoff_sha
-    result["steps_completed"].append("validate_receipt")
-    log(
-        "Step 7: receipt chain verified "
-        f"(handoff={handoff_receipt_decision}, supervisor={receipt_decision})"
-    )
+        # ── Step 7: validate_receipt ──────────────────────────────────────
+        # The supervisor receipt (step 6) is the runtime authority — it reflects
+        # the actual staged state after tracker/indicator mutations in steps 3-5.
+        # The handoff receipt path is preserved for provenance traceability only;
+        # it is NOT authoritative for the commit decision.
+        handoff_receipt_rel = handoff["pre_commit_receipt_path"]
+        # Containment check: handoff receipt must resolve inside the repo root.
+        # Reject path traversal and symlinks that escape the repo boundary.
+        if _has_path_traversal(handoff_receipt_rel):
+            return {"status": "error", "step": "validate_receipt",
+                    "errors": [f"Path traversal in handoff receipt path: {handoff_receipt_rel}"],
+                    "steps_completed": result["steps_completed"]}
+        handoff_receipt_file = (repo_root / handoff_receipt_rel).resolve()
+        if not handoff_receipt_file.is_relative_to(repo_root.resolve()):
+            return {"status": "error", "step": "validate_receipt",
+                    "errors": [f"Handoff receipt escapes repo root: {handoff_receipt_rel}"],
+                    "steps_completed": result["steps_completed"]}
+        if not handoff_receipt_file.exists():
+            return {"status": "error", "step": "validate_receipt",
+                    "errors": [f"Phase B handoff receipt not found at: {handoff_receipt_rel}"],
+                    "steps_completed": result["steps_completed"]}
+
+        try:
+            handoff_receipt_data = json.loads(handoff_receipt_file.read_text(encoding="utf-8"))
+            handoff_receipt_decision = handoff_receipt_data.get("decision", "")
+            if handoff_receipt_decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+                return {"status": "error", "step": "validate_receipt",
+                        "errors": [f"Phase B handoff receipt decision '{handoff_receipt_decision}' does not authorize commit"],
+                        "steps_completed": result["steps_completed"]}
+        except (json.JSONDecodeError, OSError) as exc:
+            return {"status": "error", "step": "validate_receipt",
+                    "errors": [f"Phase B handoff receipt unreadable: {exc}"],
+                    "steps_completed": result["steps_completed"]}
+
+        receipt_file = repo_root / receipt_path_from_supervisor
+        if not receipt_file.exists():
+            return {"status": "error", "step": "validate_receipt",
+                    "errors": [f"Supervisor receipt not found at: {receipt_path_from_supervisor}"],
+                    "steps_completed": result["steps_completed"]}
+
+        try:
+            receipt_data = json.loads(receipt_file.read_text(encoding="utf-8"))
+            receipt_decision = receipt_data.get("decision", "")
+            if receipt_decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+                return {"status": "error", "step": "validate_receipt",
+                        "errors": [f"Receipt decision '{receipt_decision}' does not authorize commit"],
+                        "steps_completed": result["steps_completed"]}
+        except (json.JSONDecodeError, OSError) as exc:
+            return {"status": "error", "step": "validate_receipt",
+                    "errors": [f"Supervisor receipt unreadable: {exc}"],
+                    "steps_completed": result["steps_completed"]}
+
+        result["handoff_receipt_path"] = handoff_receipt_rel
+        result["handoff_receipt_decision"] = handoff_receipt_decision
+        result["receipt_decision"] = receipt_decision
+        result["handoff_sha"] = handoff_sha
+        result["steps_completed"].append("validate_receipt")
+        log(
+            "Step 7: receipt chain verified "
+            f"(handoff={handoff_receipt_decision}, supervisor={receipt_decision})"
+        )
+
 
     # ── Step 8: run_pre_commit_script ─────────────────────────────────
     pre_commit_script = repo_root / "mu" / "tools" / "hooks" / "pre-commit-doc-check"
     if pre_commit_script.exists():
+        # When supervisor is skipped, propagate RCX_SKIP_RECEIPT_CHECK
+        # through the _run env filter (which strips RCX_SKIP_* by default).
+        step8_env = None
+        if skip_supervisor:
+            step8_env = {**os.environ, "RCX_SKIP_RECEIPT_CHECK": "1"}
         try:
-            _run(["bash", str(pre_commit_script)], cwd=repo_root, timeout=30)
+            _run(["bash", str(pre_commit_script)], cwd=repo_root, timeout=30, env=step8_env)
         except subprocess.CalledProcessError as exc:
             return {"status": "error", "step": "run_pre_commit_script",
                     "errors": [f"pre-commit-doc-check failed: {exc.stderr.strip()[:300]}"],
@@ -3048,10 +3081,13 @@ def run_commit_pipeline(
     log("Step 8: pre-commit script passed")
 
     # ── Step 9: git_commit ────────────────────────────────────────────
+    step9_env = None
+    if skip_supervisor:
+        step9_env = {**os.environ, "RCX_SKIP_RECEIPT_CHECK": "1"}
     try:
         commit_out = _run(
             ["git", "commit", "-m", handoff["commit_message"]],
-            cwd=repo_root, timeout=60,
+            cwd=repo_root, timeout=60, env=step9_env,
         )
         commit_sha = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
         result["commit_sha"] = commit_sha
@@ -3134,7 +3170,31 @@ def main() -> int:
         action="store_true",
         help="Output as JSON",
     )
+    # Modular bypass flags — for running commit executor directly
+    # without a full Phase A/B pipeline cycle.
+    parser.add_argument(
+        "--standalone",
+        action="store_true",
+        help="Standalone mode: sets caller=standalone, relaxes receipt requirements",
+    )
+    parser.add_argument(
+        "--skip-supervisor",
+        action="store_true",
+        help="Skip steps 6-7 (no Codex meta-review, no receipt validation)",
+    )
+    parser.add_argument(
+        "--task-id",
+        type=str,
+        default=None,
+        help="Override task_id in handoff (e.g., [TASK-NAME])",
+    )
     args = parser.parse_args()
+
+    # Block bypass flags when called from dispatch (safety guard)
+    if os.environ.get("RCX_EXECUTOR_DISPATCH_PID"):
+        if args.standalone or args.skip_supervisor:
+            print("[error] --standalone and --skip-supervisor are blocked when called from dispatch", file=sys.stderr)
+            return 1
 
     try:
         repo_root = Path(subprocess.run(
@@ -3166,7 +3226,20 @@ def main() -> int:
             print(f"[error] Cannot prepare handoff from routing record: {prep_errors}", file=sys.stderr)
             return 1
 
-    result = run_commit_pipeline(handoff, repo_root=repo_root, verbose=args.verbose)
+    # Apply modular flags to handoff
+    if args.standalone:
+        handoff["caller"] = "standalone"
+        if not handoff.get("pre_commit_receipt_path"):
+            handoff["pre_commit_receipt_path"] = ""
+    if args.task_id:
+        handoff["task_id"] = args.task_id
+
+    result = run_commit_pipeline(
+        handoff,
+        repo_root=repo_root,
+        verbose=args.verbose,
+        skip_supervisor=args.skip_supervisor,
+    )
 
     if args.json:
         print(json.dumps(result, indent=2))

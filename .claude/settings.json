@@ -33,6 +33,17 @@
             "statusMessage": "Checking if deep thinking required..."
           }
         ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/artifact-edit-gate.sh",
+            "timeout": 5,
+            "statusMessage": "Checking artifact edit policy..."
+          }
+        ]
       }
     ],
     "PostToolUse": [

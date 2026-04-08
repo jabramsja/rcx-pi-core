@@ -95,7 +95,7 @@ Do not rely on source analysis alone. **Run commands to verify your claims.**
 
 ## Output Expectations
 
-1. Include `CHECKED`, `NOT_CHECKED`, and explicit verdict token.
+1. Use `### CHECKED` with concrete bullet list of what you verified, `### NOT_CHECKED` with concrete bullet list of what you did not verify, and `### Verdict` with `VERDICT: <TOKEN>`. These exact section headers are required — do not substitute alternative headers.
 2. For violations, include precise fix direction tied to cited code.
 3. Approval requires explicit blocked-attack evidence, not prose confidence.
 

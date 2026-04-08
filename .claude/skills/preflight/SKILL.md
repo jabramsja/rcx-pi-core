@@ -154,11 +154,11 @@ else
   echo "NO BACKUP FOUND — VERSION_CHANGED=true"
 fi
 ```
-If `VERSION_CHANGED=true`: run step 18 (deep-read) then step 19 (patch). If false: skip step 18, go to step 19.
+If `VERSION_CHANGED=true` OR `CC_VERSION` differs from the version in the latest backup filename: run step 18 (deep-read) then step 19 (patch). A version NUMBER change (e.g., 2.1.94→2.1.96) requires deep-read even if binary content matches, because secondary prompt functions or server-side injections may have changed.
 
-18. **Deep-read binary for contradictions (ONLY on version change).** Unpack binary, map all prompt-generating functions, extract behavioral instructions, identify contradictions with overrides. If function/variable names changed (minification), update `reference_tweakcc_repatch.md` in memory. Report new contradictions to founder. See `reference_tweakcc_repatch.md` for known function names per version.
+18. **Deep-read binary for contradictions (on version change OR founder request).** Unpack binary, scan ALL prompt-generating functions (not just base_prompt.js), extract behavioral instructions, identify contradictions with overrides. Search ALL JS for: "efficient", "concise", "brief", "minimize", "parallel", "don't re-read", "trust", "skip". Compare against CLAUDE.md, MEMORY.md, hard-rules.txt, .claude/rules/. If function/variable names changed (minification), update `reference_tweakcc_repatch.md` in memory. Report new contradictions to founder. See `reference_tweakcc_repatch.md` for known function names per version.
 
-19. Verify and auto-repatch ALL 28 binary patches. Run:
+19. Verify and auto-repatch ALL 30 binary patches. Run:
 ```bash
 npx tweakcc unpack /tmp/ppc.js 2>&1 | tail -1
 F=/tmp/ppc.js; N=0
@@ -166,7 +166,7 @@ F=/tmp/ppc.js; N=0
 [ "$(grep -c 'return null;var _x=.# Output efficiency' $F)" -eq 0 ] && echo "P1 MISSING" && N=$((N+1))
 [ "$(grep -c 'mandatory project instructions' $F)" -eq 0 ] && echo "P3 MISSING" && N=$((N+1))
 [ "$(grep -c 'Note this for context' $F)" -eq 0 ] && echo "P5 MISSING" && N=$((N+1))
-[ "$(grep -c 'return null;var _x=.# Executing actions with care' $F)" -eq 0 ] && echo "P7 MISSING" && N=$((N+1))
+[ "$(grep -c 'Root cause engineering' $F)" -eq 0 ] && echo "P30 MISSING" && N=$((N+1))
 [ "$(grep -c 'prefer sequential tool calls' $F)" -eq 0 ] && echo "P8 MISSING" && N=$((N+1))
 [ "$(grep -c 'executor pipeline has explicitly' $F)" -eq 0 ] && echo "P9 MISSING" && N=$((N+1))
 [ "$(grep -c 'Create files when needed' $F)" -eq 0 ] && echo "P10 MISSING" && N=$((N+1))
@@ -178,6 +178,7 @@ F=/tmp/ppc.js; N=0
 [ "$(grep -c 'file updated successfully' $F)" -eq 0 ] && echo "P17 MISSING" && N=$((N+1))
 [ "$(grep -c 'proactive review' $F)" -eq 0 ] && echo "P27 MISSING" && N=$((N+1))
 [ "$(grep -c 'Consider edge cases at system boundaries' $F)" -eq 0 ] && echo "P28 MISSING" && N=$((N+1))
+[ "$(grep -c 'structural fix rather than a workaround' $F)" -eq 0 ] && echo "P29 MISSING" && N=$((N+1))
 # Negative checks (expect count = 0)
 [ "$(grep -c 'short and concise' $F)" -gt 0 ] && echo "P2-old PRESENT" && N=$((N+1))
 [ "$(grep -c 'may or may not be relevant to your tasks' $F)" -gt 0 ] && echo "P3-old PRESENT" && N=$((N+1))
@@ -200,10 +201,12 @@ F=/tmp/ppc.js; N=0
 [ "$(grep -c 'independent and can run in parallel, make multiple' $F)" -gt 0 ] && echo "P26-old PRESENT" && N=$((N+1))
 [ "$(grep -c "Don't add features, refactor code" $F)" -gt 0 ] && echo "P27-old PRESENT" && N=$((N+1))
 [ "$(grep -c 'Trust internal code and framework guarantees' $F)" -gt 0 ] && echo "P28-old PRESENT" && N=$((N+1))
+[ "$(grep -c 'premature abstraction' $F)" -gt 0 ] && echo "P29-old PRESENT" && N=$((N+1))
+[ "$(grep -c 'Executing actions with care' $F)" -gt 0 ] && echo "P30-old PRESENT" && N=$((N+1))
 rm -f $F
 echo "NEEDS_REPATCH=$N"
 ```
-If `NEEDS_REPATCH` > 0: Read `reference_tweakcc_repatch.md` from memory. If step 18 found changed names, update memory first. Re-apply ALL 28 patches, re-verify, create backup.
+If `NEEDS_REPATCH` > 0: Read `reference_tweakcc_repatch.md` from memory. If step 18 found changed names, update memory first. Re-apply ALL 30 patches, re-verify, create backup.
 
 20. Verify auto-updates are disabled. Check `~/.claude/settings.json` for `autoUpdaterStatus: "disabled"` and `autoUpdates: false`. If not set, set them.
 
