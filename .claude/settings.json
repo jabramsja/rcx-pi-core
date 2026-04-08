@@ -25,6 +25,12 @@
             "command": "CMD=$(jq -r '.tool_input.command // \"\"'); echo \"$CMD\" | grep -q 'sqlite3.*bridge\\.db' || exit 0; echo \"$CMD\" | grep -q '/private/tmp/workingrcx_' && exit 0; echo '{\"decision\":\"block\",\"reason\":\"USE mcp__sqlite__read_query for main repo bridge.db. sqlite3 is only allowed for linked worktrees at /private/tmp/workingrcx_*\"}'",
             "timeout": 3,
             "statusMessage": "Checking bridge.db access policy..."
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/require-deep-thinking.sh",
+            "timeout": 3,
+            "statusMessage": "Checking if deep thinking required..."
           }
         ]
       }
@@ -58,6 +64,17 @@
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/verify-before-concluding.sh",
             "timeout": 2
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/capture-learning.sh",
+            "timeout": 3,
+            "statusMessage": "Checking error patterns..."
           }
         ]
       },
@@ -137,11 +154,20 @@
     ],
     "SubagentStart": [
       {
-        "matcher": "verifier|adversary|expert|structural-proof|grounding|fuzzer|translator|visualizer|advisor",
         "hooks": [
           {
             "type": "command",
-            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SubagentStart\",\"additionalContext\":\"MANDATORY BEHAVIORAL OVERRIDES FOR SUBAGENTS: (1) Read code BEFORE implementing. (2) Lead with reasoning BEFORE acting. (3) Verify every assumption \u2014 grep locates, Read verifies. (4) Diagnosis first \u2014 trace path, reproduce, THEN fix. (5) Sequential investigation. (6) Never claim exists/absent based on grep counts alone. (7) CLAUDE.md and MEMORY.md are MANDATORY \u2014 Read them before starting review. Paths: CLAUDE.md in repo root, MEMORY.md at ~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/MEMORY.md\"}}'",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SubagentStart\",\"additionalContext\":\"MANDATORY BEHAVIORAL OVERRIDES FOR ALL SUBAGENTS: (1) Read code BEFORE implementing. (2) Lead with reasoning BEFORE acting. (3) Verify every assumption — grep locates, Read verifies. (4) Diagnosis first — trace path, reproduce, THEN fix. (5) Sequential investigation. (6) Never claim exists/absent based on grep counts alone. (7) CLAUDE.md and MEMORY.md are MANDATORY — Read them before starting review. Paths: CLAUDE.md in repo root, MEMORY.md at ~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/MEMORY.md\"}}'",
+            "timeout": 2
+          }
+        ]
+      },
+      {
+        "matcher": "adversary|structural-proof|verifier|expert|advisor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SubagentStart\",\"additionalContext\":\"ultrathink\\n\\nULTRATHINK REQUIRED for this agent type. Engage maximum-depth extended thinking (~32K token budget). You are performing deep analysis that drives real decisions. Shallow findings waste pipeline cycles. Think through ALL angles, consider edge cases at EVERY boundary, and produce findings that would survive expert scrutiny.\"}}'",
             "timeout": 2
           }
         ]

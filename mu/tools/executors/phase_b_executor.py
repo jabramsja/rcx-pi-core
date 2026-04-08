@@ -2427,7 +2427,7 @@ def run_phase_b(
                         "Saved agent review checkpoint drifted or was incomplete; "
                         "re-running SDK agent review"
                     )
-                agent_timeout = config.get("timeouts", {}).get("agent_review", 900)
+                agent_timeout = config.get("timeouts", {}).get("agent_review", 1500)
                 agent_result = run_sdk_agents(
                     repo_root,
                     agent_files,
