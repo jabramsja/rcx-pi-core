@@ -49,17 +49,35 @@ Applied to CC binary at `~/.local/share/claude/versions/2.1.92`. Takes effect on
 
 ## Open Items for Next Session
 
-1. **P1 bot finding follow-up:** `block-protected-branch.sh` comment-stripping fix exists on dev working tree but was NOT included in PR #746. The fix moves comment stripping to BEFORE newline collapse (`sed 's/#.*$//'` on original multi-line input). Needs to be committed via pipeline.
+*Updated 2026-04-08 after PR #747 merge and cleanup.*
 
-2. **P2 bot findings (deferred):**
+1. **~~P1 bot finding follow-up~~** — RESOLVED. `block-protected-branch.sh` fix was included in PR #746 (comment stripping before newline collapse). Bot thread on PR #745 resolved (the `settings.local.json` finding is moot — file deleted in PR #746).
+
+2. **P2 bot findings (deferred, carried):**
    - Cron evidence matcher accepts generic status words (`AWAITING`, `COMPLETE`) — could tighten to require `result-id` or MCP-specific patterns
    - SessionStart hook in `settings.json` has machine-specific `~/.claude/projects/-Users-jeffabrams-...` path — should derive from repo context
 
-3. **Pre-existing worktree test issue:** `test_agent_prompt_contract_injection.py::test_contract_injected_for_all_runtime_agents` fails in worktrees because DOC_STATUS header in agent contract file contains main repo path. Only affects worktree test runs, not CI.
+3. **Pre-existing worktree test issue (carried):** `test_agent_prompt_contract_injection.py::test_contract_injected_for_all_runtime_agents` fails in worktrees. Only affects worktree test runs, not CI.
 
-4. **11 stale `/tmp/workingrcx_*` directories** from prior pipeline sessions. Safe to clean up.
+4. **~~11 stale `/tmp/workingrcx_*` directories~~** — CLEANED (2026-04-08).
 
-5. **Next wave: [META-BRIDGE-BOUNDED-REVIEW-FIX]** — authorized in TASKS.md, has tracked packet at `reports/control_plane/meta_bridge_taskid_path_safety_2026-04-03.md`. Run through full pipeline (dispatcher → Phase A → Phase B → commit).
+5. **Commit executor modular bypass parameters** (founder-requested, 2026-04-08):
+   - Add `--standalone`, `--skip-supervisor`, `--task-id` flags for direct invocation without dispatch
+   - Block these flags when called from dispatch
+   - Add stop hook/startup validation for modular mode
+   - Document in a discoverable location (memory file or .claude/rules/)
+   - See `reports/control_plane/session_handoff_2026-04-08_preflight_hardening.md` for full pipeline friction log (8 issues)
+
+6. **Next wave: [META-BRIDGE-BOUNDED-REVIEW-FIX]** — authorized in TASKS.md, tracked packet at `reports/control_plane/meta_bridge_taskid_path_safety_2026-04-03.md`. Run through full pipeline.
+
+## What PR #747 Added (2026-04-08)
+
+- Preflight expanded 17→20 steps (config backup, version detect, deep-read, 28-patch verify, auto-update check)
+- Binary patches P27-P28 (CX4 "Doing tasks" contradictions)
+- CC auto-updates disabled (`autoUpdaterStatus: "disabled"`)
+- Full binary deep-read: 29 functions mapped, no hidden hooks
+- 73+21 stale local branches pruned (103→9)
+- All bot threads resolved, 12 stale tmp dirs cleaned
 
 ## Key State
 
@@ -67,8 +85,11 @@ Applied to CC binary at `~/.local/share/claude/versions/2.1.92`. Takes effect on
 Phase: 8c
 Debt: 12/12 (FLOOR=12)
 Authority: 312/312 (217/217 subset)
-Binary patches: 26 (P1-P26), backup at ~/.claude/patch_backups/
-PR #746: MERGED
-Next: META-BRIDGE-BOUNDED-REVIEW-FIX
+CC Version: 2.1.94 | Auto-updates: DISABLED
+Binary patches: 28 (P1-P28), backup at ~/.claude/patch_backups/
+Config protection: CLAUDE.md + MEMORY.md + 8 rules = 444 (read-only)
+PRs merged: #745, #746, #747
+Local branches: 9 (4 backup, 3 codex, 1 parked, dev)
+Next: commit executor modular bypass OR META-BRIDGE-BOUNDED-REVIEW-FIX
 Reviewer override: Claude (temporary, until Friday)
 ```

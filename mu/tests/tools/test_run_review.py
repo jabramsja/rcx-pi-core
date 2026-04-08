@@ -56,6 +56,7 @@ def test_run_agent_group_cancels_stale_tail(tmp_path):
             agent_timeout_s=10,
             single_tail_timeout_s=1,
             group_stale_timeout_s=5,
+            agent_stagger_s=0,
         )
 
         async def fake_run_single_agent(agent_name: str, retry_feedback: str = ""):
@@ -135,6 +136,7 @@ def test_streaming_progress_resets_stale_timer(tmp_path):
             agent_timeout_s=10,
             single_tail_timeout_s=1,
             group_stale_timeout_s=5,
+            agent_stagger_s=0,
         )
 
         progress_ticks: list[int] = []
@@ -562,5 +564,58 @@ def test_run_agent_group_retries_timed_out_partial_noncompliant_gate(monkeypatch
         assert calls["count"] == 2
         assert results[0].verdict == "SECURE"
         assert results[0].passed is True
+
+    asyncio.run(_run())
+
+
+def test_run_agent_group_skips_retry_for_meaningful_verdict():
+    """Retry is skipped when a non-compliant agent already has a valid verdict.
+
+    Root-cause fix: adversary producing NEEDS_HARDENING with non-compliant
+    format was retried, adding ~360s and pushing past the 900s wrapper
+    timeout (exit=-1). When the verdict is in AGENT_VERDICTS, the agent
+    completed its analysis — retrying for formatting wastes time budget.
+    """
+    async def _run() -> None:
+        orchestrator = rr_mod.ReviewOrchestrator(
+            ["mu/tools/runners/run_review.py"],
+            depth="quick",
+            verbose=False,
+            use_memory=False,
+            agent_timeout_s=10,
+            single_tail_timeout_s=5,
+            group_stale_timeout_s=10,
+            agent_stagger_s=0,
+        )
+
+        call_count = {"adversary": 0, "verifier": 0}
+
+        async def fake_run_single_agent(agent_name: str, retry_feedback: str = ""):
+            call_count[agent_name] = call_count.get(agent_name, 0) + 1
+            if agent_name == "adversary":
+                # Non-compliant format but meaningful verdict
+                return _result(
+                    "adversary",
+                    verdict="NEEDS_HARDENING",
+                    compliant=False,
+                    passed=False,
+                    blocks_merge=True,
+                    compliance_error="STRICT MODE: missing CHECKED section",
+                )
+            return _result("verifier", verdict="APPROVE")
+
+        orchestrator.run_single_agent = fake_run_single_agent  # type: ignore[method-assign]
+        results = await orchestrator.run_agent_group(["adversary", "verifier"])
+
+        by_name = {r.name: r for r in results}
+        # adversary: called once, NOT retried (meaningful verdict)
+        assert call_count["adversary"] == 1
+        assert by_name["adversary"].verdict == "NEEDS_HARDENING"
+        assert by_name["adversary"].is_compliant is False
+        # blocks_merge downgraded: meaningful verdict, format-only issue
+        assert by_name["adversary"].blocks_merge is False
+        # verifier: called once, compliant
+        assert call_count["verifier"] == 1
+        assert by_name["verifier"].verdict == "APPROVE"
 
     asyncio.run(_run())

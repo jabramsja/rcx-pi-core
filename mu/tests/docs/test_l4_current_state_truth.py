@@ -201,3 +201,49 @@ def test_stage0_vm_docs_match_shadow_path_wiring_and_l4_boundary() -> None:
     assert "for (let i = 0; i < maxSteps; i++) {" in js_kernel, (
         "JS runtime no longer shows the host loop that keeps L4 incomplete."
     )
+
+
+L3_ARCH_PATH = REPO_ROOT / "mu" / "docs" / "core" / "L3SubstrateArchitecture.v0.md"
+
+
+def test_l3_architecture_doc_contains_structural_content() -> None:
+    """L3 architecture doc must retain key structural content extracted from STATUS.md.
+
+    STATUS.md was optimized (489->166 lines) and structural details moved to this doc.
+    These assertions prevent the extracted content from being lost or deleted.
+    """
+    assert L3_ARCH_PATH.exists(), (
+        "L3SubstrateArchitecture.v0.md must exist — it holds structural content "
+        "extracted from STATUS.md."
+    )
+    text = _read(L3_ARCH_PATH)
+
+    # Core L3 definition
+    assert "projections run on minimal, auditable substrate" in text, (
+        "L3 architecture doc must define L3 as projections on minimal substrate."
+    )
+
+    # Seed categories
+    assert "Substrate (Core)" in text, (
+        "L3 architecture doc must list seed categories."
+    )
+
+    # Bootstrap primitives
+    assert "eval_step" in text and "max_steps" in text and "stack_guard" in text, (
+        "L3 architecture doc must list all bootstrap primitives."
+    )
+
+    # JS contraband patterns
+    assert "contraband_js.sh" in text, (
+        "L3 architecture doc must reference JS contraband enforcement."
+    )
+
+    # L4 research
+    assert "Can bootstrap primitives be eliminated" in text, (
+        "L3 architecture doc must retain the L4 research question."
+    )
+
+    # Cross-substrate testing
+    assert "parity_vectors.json" in text, (
+        "L3 architecture doc must reference the shared parity test vectors."
+    )

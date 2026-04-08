@@ -155,13 +155,191 @@ Recovery Loop:  Diagnose → Implement Fix → Verify → ─(pass)─→ Re-ent
 
 ## Learning Store
 
-Every recovery attempt is logged to `.agent_bus/recovery/recovery_log.json`. Over time, the learning store enables automatic promotion:
+The learning store turns recovery_log.json into an adaptive system. It sits on top of the existing logging infrastructure and adds three capabilities: pattern promotion, cross-session persistence, and subagent learning injection.
 
-- **Pattern detection**: If the same (failure_class, fix_action) succeeds 3+ times, promote to Tier 1 (deterministic auto-fix)
-- **Environment learning**: The pipeline learns YOUR machine's specific failure modes (e.g., "Bun AVX warnings always appear but are harmless", "pkill -f is dangerous on this machine")
-- **Regression detection**: If a previously-promoted Tier 1 fix starts failing, demote back to Tier 3
+### Architecture: Two-Tier Storage
 
-This transforms the recovery gate from a static classifier into an adaptive system that improves with each pipeline run.
+```
+Tier A: Ephemeral Log (per-worktree)
+  .agent_bus/recovery/recovery_log.json    ← already exists (RecoveryAttempt records)
+  - Written by attempt_recovery(), run_recovery_loop(), attempt_tier2_recovery()
+  - Capped at 500 entries, dies with worktree
+  - Raw event stream: every attempt, success or failure
+
+Tier B: Persistent Learning Store (main repo)
+  .agent_bus/recovery/learned_patterns.json  ← NEW
+  - Promoted patterns extracted from Tier A
+  - Survives worktree cleanup (synced to main repo before worktree teardown)
+  - Read at pipeline start, written after recovery events
+```
+
+**Sync protocol:** When a worktree is created, copy `learned_patterns.json` from the main repo. When a worktree is torn down (or after any successful promotion), sync `learned_patterns.json` back. Dispatch already has pre/post worktree hooks — add sync there.
+
+### Data Model: LearnedPattern
+
+```python
+@dataclass
+class LearnedPattern:
+    """A recovery pattern that has been observed enough times to be trusted."""
+    pattern_id: str                 # Stable hash of (failure_class, action, fingerprint)
+    failure_class: str              # FailureClass enum value
+    action: str                     # The fix action that worked
+    fingerprint: str                # Stderr/error text snippet for matching
+    promoted_tier: int              # Current tier (1=auto-fix, 2=auto-retry, 3=LLM)
+    original_tier: int              # Tier when first observed
+    success_count: int              # Total successful applications
+    failure_count: int              # Total failed applications after promotion
+    last_success: str               # ISO timestamp
+    last_failure: str | None        # ISO timestamp or None
+    created_at: str                 # First observation
+    updated_at: str                 # Last modification
+    environment_tags: list[str]     # Machine-specific context (e.g., ["no-avx", "darwin"])
+    detail: str                     # Human-readable description of what this pattern fixes
+    expired: bool                   # Soft-expired (not seen in 30 days)
+```
+
+**pattern_id derivation:** `sha256(f"{failure_class}:{action}:{fingerprint[:80]}")[:12]`. The fingerprint is the first 80 chars of the stderr pattern that triggered classification. This ensures the same failure on the same machine maps to the same pattern across worktrees and sessions.
+
+### Promotion Lifecycle
+
+```
+            observe()     observe()     observe()
+  Unknown  ─────────►  Seen (1x)  ─────────►  Seen (2x)  ─────────►  PROMOTED
+                           │                      │                    (Tier 1)
+                           │                      │                       │
+                       (different                (env                  apply()
+                        machine)                 change)                  │
+                           │                      │              ┌───────┤
+                           ▼                      ▼              │  success
+                     Reset counter          Reset counter        │    │
+                                                                 │    ▼
+                                                              observe()
+                                                              (count++)
+                                                                 │
+                                                              failure
+                                                                 │
+                                                                 ▼
+                                                              DEMOTED
+                                                             (Tier 2→3)
+```
+
+**Promotion rules:**
+1. Same `(failure_class, action)` succeeds **3 times** across **at least 2 distinct wave_ids** → promote to Tier 1
+2. The "distinct wave_ids" requirement prevents a single flaky wave from promoting a coincidental fix
+3. Promotion is idempotent — re-promoting an already-promoted pattern just updates `last_success`
+4. Promoted patterns are checked BEFORE the static classifier in `classify_failure()` — they override default tier assignment
+
+**Demotion rules:**
+1. A promoted Tier 1 pattern that fails → demote to Tier 2 (auto-retry, one more chance)
+2. A demoted Tier 2 pattern that fails again → demote to Tier 3 (back to LLM diagnosis)
+3. Demotion resets `failure_count` to 0 and increments a `demotion_count` field
+4. A pattern demoted 3 times is permanently locked at Tier 3 (unstable fix — don't trust)
+
+**Expiry:**
+- Patterns not seen for 30 days: set `expired: true` — still in the store but not auto-applied
+- Expired patterns can be re-promoted if observed again (resets the timer)
+- Patterns not seen for 90 days: eligible for cleanup (removed from store during compaction)
+
+### Cross-Session Persistence Bridge
+
+The recovery log (`recovery_log.json`) is ephemeral — it dies with the worktree. The learning store (`learned_patterns.json`) persists. The bridge between them:
+
+1. **On worktree creation:** Copy `learned_patterns.json` from main repo → worktree `.agent_bus/recovery/`
+2. **After each recovery attempt:** Check promotion eligibility against combined log (worktree log + store history)
+3. **On promotion/demotion:** Write updated `learned_patterns.json` in worktree
+4. **On worktree teardown:** Sync `learned_patterns.json` back to main repo (merge, not overwrite — concurrent worktrees may have different patterns)
+5. **Merge strategy:** Union of patterns. If same `pattern_id` exists in both, keep the one with higher `success_count` + more recent `updated_at`
+
+### Integration with .claude/rules/learning.md
+
+The Claude session learning log (`.claude/rules/learning.md`) and the recovery gate learning store serve different purposes but can cross-pollinate:
+
+| Aspect | `.claude/rules/learning.md` | `learned_patterns.json` |
+|--------|---------------------------|------------------------|
+| Scope | Main Claude session errors | Pipeline recovery attempts |
+| Written by | capture-learning.sh hook + manual | recovery_gate.py |
+| Read by | Main Claude (auto-loaded rule) | recovery_gate.py classify_failure() |
+| Format | Markdown fingerprint entries | Structured JSON |
+| Persistence | Git-tracked file (permanent) | .agent_bus file (synced) |
+
+**Cross-pollination protocol:**
+- When a new `LearnedPattern` is promoted, also append a corresponding entry to `.claude/rules/learning.md` so the main Claude session knows about it. Use the existing format: `- [DATE] PIPELINE | fingerprint: \`text\` | refs: N`
+- When `.claude/rules/learning.md` has a `FIXED` entry with a concrete fix action, the recovery gate can look for a matching `fingerprint` in the static classifier's patterns and consider it for Tier 1 candidacy
+- This is one-way advisory, not hard coupling — either system works independently
+
+### Subagent Learning Injection
+
+The 9 SDK review agents (adversary, verifier, etc.) currently start cold every run. The learning store can warm them:
+
+1. **At agent prompt construction** (`run_single_agent()` in `run_review.py`): Read `learned_patterns.json` and `.claude/rules/learning.md` for entries tagged with the current agent's failure patterns
+2. **Inject as `learning_context`** alongside existing `memory_context` and `cs_context`:
+   ```python
+   learning_entries = load_relevant_learnings(agent_name, self.files)
+   learning_context = format_learning_context(learning_entries, max_len=1000)
+   ```
+3. **Filter by relevance:** Only inject entries where `failure_class` matches patterns the agent would encounter (e.g., adversary gets security-related learnings, expert gets complexity learnings)
+4. **Budget:** Cap at 1000 tokens — learning context should not dominate the agent's prompt. Most recent entries first.
+
+### Environment Fingerprinting
+
+Different machines produce different failure patterns. The learning store captures environment context:
+
+```python
+def _environment_tags() -> list[str]:
+    tags = [sys.platform]                           # "darwin", "linux"
+    if not _has_avx_support():
+        tags.append("no-avx")                       # Bun AVX warnings
+    if shutil.which("claude") is None:
+        tags.append("no-claude-cli")                 # Tier 3 unavailable
+    return tags
+```
+
+Patterns are tagged at creation. Promotion considers environment: a pattern that works on `darwin+no-avx` but hasn't been seen on `linux` is only auto-applied on matching environments.
+
+### Security Constraints
+
+1. **No code execution from learned patterns.** Promoted Tier 1 fixes must map to existing `fix_fn` functions in recovery_gate.py — they cannot introduce new shell commands. The learning store adjusts ROUTING (which existing fix to apply), not BEHAVIOR.
+2. **Fingerprint poisoning.** An adversarial stderr message could match a learned pattern and trigger the wrong fix. Mitigation: fingerprints are matched against the FIRST 80 chars of the classifier's extracted signal, not raw stderr. The classifier extracts signal before matching.
+3. **Promotion flooding.** A rapid-fire test loop could generate 3+ successes for a bad pattern. Mitigation: "distinct wave_ids" requirement — 3 successes must span at least 2 different waves.
+4. **Demotion evasion.** A pattern that works 99% of the time but fails catastrophically 1%. Mitigation: single failure demotes immediately. The cost of one unnecessary LLM call (Tier 3) is far less than the cost of a silently wrong auto-fix.
+
+### Implementation Sketch
+
+```python
+# In recovery_gate.py — new functions
+
+def check_learned_patterns(
+    repo_root: Path, failure_class: str, stderr_signal: str
+) -> LearnedPattern | None:
+    """Check if a learned pattern matches this failure. Returns pattern or None."""
+    store = _load_learning_store(repo_root)
+    for pattern in store:
+        if (pattern["failure_class"] == failure_class
+                and not pattern["expired"]
+                and _fingerprint_matches(pattern["fingerprint"], stderr_signal)
+                and _environment_matches(pattern["environment_tags"])):
+            return LearnedPattern(**pattern)
+    return None
+
+def observe_outcome(
+    repo_root: Path, failure_class: str, action: str,
+    fingerprint: str, outcome: str, wave_id: str
+) -> None:
+    """Record an outcome and check for promotion/demotion."""
+    store = _load_learning_store(repo_root)
+    pattern = _find_or_create(store, failure_class, action, fingerprint)
+    if outcome == "success":
+        pattern.success_count += 1
+        pattern.last_success = _now_iso()
+        _check_promotion(pattern, store, wave_id)
+    else:
+        pattern.failure_count += 1
+        pattern.last_failure = _now_iso()
+        _check_demotion(pattern)
+    _save_learning_store(repo_root, store)
+```
+
+**Call sites:** Insert `check_learned_patterns()` at the top of `classify_failure()` (before static classification). Insert `observe_outcome()` at each `_save_recovery_log()` call site (6 total). The integration is mechanical — no architectural changes needed.
 
 ---
 

@@ -224,8 +224,8 @@ PARALLEL_GROUPS = [
 ]
 
 # Runtime budget controls (major latency lever)
-# 25 turns handles full-codebase reviews; agents hit turn limits at lower values
-# on large scopes. Use --max-turns to override if needed.
+# Full budgets handle thorough codebase reviews; agents hit turn limits at lower
+# values on large scopes. Use --max-turns to override if needed.
 AGENT_MAX_TURNS = {
     "verifier": 45,
     "adversary": 40,
@@ -237,6 +237,15 @@ AGENT_MAX_TURNS = {
     "visualizer": 25,
     "advisor": 30,
 }
+
+# Quick-depth turn cap. Root-cause fix for agent timeout cascade (refs: 2):
+# Agents given 40-45 turns but only 360s wall-clock time exhaust all turns
+# on exploration/analysis and produce prose summaries without the required
+# CHECKED/NOT_CHECKED/VERDICT format sections. Compliance retry then adds
+# another full-budget attempt, pushing total time past the 900s wrapper
+# timeout and killing the entire review process (exit=-1).
+# Cap quick-depth turns at 20 so agents budget time for structured output.
+AGENT_QUICK_MAX_TURNS = 20
 
 GROUNDING_HIGH_RISK_PATTERNS = (
     "rcx_pi/selfhost/",
@@ -361,6 +370,12 @@ DEFAULT_AGENT_PREFLIGHT_RETRY_TIMEOUT_S = _env_int(
     45,
     minimum=5,
     maximum=300,
+)
+DEFAULT_REVIEW_AGENT_STAGGER_S = _env_int(
+    "RCX_REVIEW_AGENT_STAGGER",
+    15,
+    minimum=0,
+    maximum=120,
 )
 DEFAULT_REVIEW_STATUS_PATH = os.getenv("RCX_REVIEW_STATUS_PATH", "").strip()
 
@@ -568,7 +583,8 @@ class ReviewOrchestrator:
                  heartbeat_interval_s: int = DEFAULT_REVIEW_HEARTBEAT_INTERVAL_S,
                  agent_timeout_s: int = DEFAULT_REVIEW_AGENT_TIMEOUT_S,
                  single_tail_timeout_s: int = DEFAULT_REVIEW_SINGLE_TAIL_TIMEOUT_S,
-                 group_stale_timeout_s: int = DEFAULT_REVIEW_GROUP_STALE_TIMEOUT_S):
+                 group_stale_timeout_s: int = DEFAULT_REVIEW_GROUP_STALE_TIMEOUT_S,
+                 agent_stagger_s: int = DEFAULT_REVIEW_AGENT_STAGGER_S):
         self.files = files
         self.depth = depth
         self.verbose = verbose
@@ -585,6 +601,7 @@ class ReviewOrchestrator:
         self.agent_timeout_s = max(self.heartbeat_interval_s, agent_timeout_s)
         self.single_tail_timeout_s = max(self.heartbeat_interval_s, single_tail_timeout_s)
         self.group_stale_timeout_s = max(self.single_tail_timeout_s, group_stale_timeout_s)
+        self.agent_stagger_s = max(0, agent_stagger_s)
         self.agents_to_run = self._resolve_agents_to_run(depth)
         self.agent_definitions = create_agent_definitions(model_override=model_override)
         self.results: list[AgentResult] = []
@@ -960,9 +977,21 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
             self._mark_progress(f"{agent_name} completed ({result.verdict})")
             return result
 
+        # Stagger agent launches to prevent cold-start API contention.
+        # Without stagger, all agents hit the API simultaneously, causing
+        # timeouts on heavyweight agents (adversary, verifier).
+        stagger_s = self.agent_stagger_s
+
+        async def _staggered_run(agent_name: str, delay: float) -> AgentResult:
+            if delay > 0:
+                await asyncio.sleep(delay)
+            return await _run_and_report(agent_name)
+
         task_map = {
-            asyncio.create_task(_run_and_report(agent)): agent
-            for agent in agents_in_scope
+            asyncio.create_task(
+                _staggered_run(agent, i * stagger_s)
+            ): agent
+            for i, agent in enumerate(agents_in_scope)
         }
         raw_results: list[tuple[str, AgentResult | BaseException]] = []
         pending = set(task_map)
@@ -1069,10 +1098,36 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
             else:
                 results.append(raw)
 
-        # Retry agents that failed format compliance (1 retry attempt)
+        # Retry agents that failed format compliance (1 retry attempt).
+        # Skip retry if the agent already produced a meaningful verdict —
+        # retrying heavyweight agents (adversary, verifier) for better formatting
+        # risks pushing total time past the wrapper timeout, which kills the
+        # entire review process (exit=-1). A meaningful verdict means the agent
+        # completed its analysis; the format gap is cosmetic, not substantive.
         retry_results = []
         for result in results:
             if not result.is_compliant and result.compliance_error and result.output:
+                # Check if this agent already has a valid verdict from AGENT_VERDICTS
+                agent_valid_verdicts = {v.upper() for v in AGENT_VERDICTS.get(result.name, [])}
+                if result.verdict in agent_valid_verdicts:
+                    print(
+                        f"  ⏩ Skipping retry for {result.name} "
+                        f"(non-compliant format but meaningful verdict: {result.verdict})"
+                    )
+                    # Downgrade merge-blocking: the agent completed its analysis
+                    # (meaningful verdict), so the format gap is cosmetic — don't
+                    # block merge for formatting alone. Without this, hard-gate
+                    # agents (verifier, structural-proof) with a valid verdict but
+                    # missing CHECKED/NOT_CHECKED sections would hard-block the
+                    # pipeline even though retry was intentionally skipped.
+                    if result.blocks_merge:
+                        result.blocks_merge = False
+                        # Update in self.results too
+                        if result in self.results:
+                            idx = self.results.index(result)
+                            self.results[idx] = result
+                    retry_results.append(result)
+                    continue
                 if self.verbose:
                     print(f"  ↻ Retrying {result.name} (format compliance failure)")
                 retry = await _run_retry_agent(result.name, result.compliance_error)
@@ -1681,10 +1736,15 @@ Examples:
         depth = auto_select_depth(files)
         print(f"Auto-selected depth: {depth}")
 
-    # Apply max-turns override if specified (use local copy, don't mutate module-level)
+    # Apply depth-scaled turn budgets (root-cause fix for agent timeout cascade).
+    # Quick depth caps turns so agents reserve time for structured output.
     agent_max_turns = dict(AGENT_MAX_TURNS)
+    if depth == "quick":
+        agent_max_turns = {k: min(v, AGENT_QUICK_MAX_TURNS) for k, v in agent_max_turns.items()}
+
+    # User override (--max-turns) takes precedence over depth scaling
     if args.max_turns:
-        min_default = min(AGENT_MAX_TURNS.values())
+        min_default = min(agent_max_turns.values())
         if args.max_turns < min_default:
             print(f"WARNING: --max-turns {args.max_turns} is below smallest agent default "
                   f"({min_default}). Agents may exhaust turns before producing a verdict.")

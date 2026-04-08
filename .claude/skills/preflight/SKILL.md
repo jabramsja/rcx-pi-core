@@ -36,17 +36,41 @@ mkdir -p "$BACKUP_DIR/rules"
 cp "$PROJ_DIR/CLAUDE.md" "$BACKUP_DIR/CLAUDE.md"
 cp "$MEM_DIR/MEMORY.md" "$BACKUP_DIR/MEMORY.md"
 cp "$PROJ_DIR/.claude/rules/"*.md "$BACKUP_DIR/rules/"
-echo "Backed up to $BACKUP_DIR"
+# Extended backup: settings, hard-rules, bridge config
+mkdir -p "$BACKUP_DIR/hooks" "$BACKUP_DIR/settings"
+cp "$PROJ_DIR/.claude/settings.json" "$BACKUP_DIR/settings/project_settings.json" 2>/dev/null
+cp "$HOME/.claude/settings.json" "$BACKUP_DIR/settings/global_settings.json" 2>/dev/null
+cp "$HOME/.claude/hard-rules.txt" "$BACKUP_DIR/settings/hard-rules.txt" 2>/dev/null
+cp "$PROJ_DIR/.agent_bus/bridge_config.json" "$BACKUP_DIR/settings/bridge_config.json" 2>/dev/null
+# Backup preflight SKILL.md itself + regression check
+cp "$PROJ_DIR/.claude/skills/preflight/SKILL.md" "$BACKUP_DIR/settings/SKILL.md" 2>/dev/null
+PREV_BACKUP=$(ls -dt "$HOME/.claude/backups"/config_*/settings/SKILL.md 2>/dev/null | head -2 | tail -1)
+if [ -n "$PREV_BACKUP" ] && [ -f "$PREV_BACKUP" ]; then
+  PREV_LINES=$(wc -l < "$PREV_BACKUP")
+  CURR_LINES=$(wc -l < "$PROJ_DIR/.claude/skills/preflight/SKILL.md")
+  if [ "$CURR_LINES" -lt "$PREV_LINES" ]; then
+    echo "WARN: SKILL.md REGRESSION — current ($CURR_LINES lines) < previous ($PREV_LINES lines)"
+    echo "  Previous backup: $PREV_BACKUP"
+    echo "  Diff: $(diff "$PREV_BACKUP" "$PROJ_DIR/.claude/skills/preflight/SKILL.md" | head -10)"
+  else
+    echo "SKILL.md: $CURR_LINES lines (prev: $PREV_LINES) — no regression"
+  fi
+fi
+echo "Backed up to $BACKUP_DIR (extended: settings, hard-rules, bridge_config, SKILL.md)"
 chmod 444 "$PROJ_DIR/CLAUDE.md" "$MEM_DIR/MEMORY.md" "$PROJ_DIR/.claude/rules/"*.md
+# Keep learning.md writable (644) — it's designed to be written to mechanically
+chmod 644 "$PROJ_DIR/.claude/rules/learning.md" 2>/dev/null
 PERM_OK=true
 for f in "$PROJ_DIR/CLAUDE.md" "$MEM_DIR/MEMORY.md" "$PROJ_DIR/.claude/rules/"*.md; do
+  # learning.md is intentionally 644, skip the writable check for it
+  echo "$f" | grep -q 'learning.md' && continue
   PERMS=$(stat -f "%Sp" "$f" 2>/dev/null || stat -c "%A" "$f" 2>/dev/null)
   if echo "$PERMS" | grep -q 'w'; then echo "WARN: $f still writable"; PERM_OK=false; fi
 done
-$PERM_OK && echo "All config files write-protected (444)"
+$PERM_OK && echo "All config files write-protected (444, learning.md 644)"
 ls -dt "$HOME/.claude/backups"/config_* 2>/dev/null | tail -n +6 | xargs rm -rf 2>/dev/null
 ```
-To intentionally edit: `chmod 644 <file>`, edit, then `chmod 444 <file>`.
+To intentionally edit: `chmod 644 <file>`, edit, then `chmod 444 <file>`. `learning.md` stays 644 always.
 
 11. Clean stale bridge lock — if `.agent_bus/meta/meta_bridge.lock` exists and the PID is dead, remove it.
 
@@ -55,6 +79,22 @@ To intentionally edit: `chmod 644 <file>`, edit, then `chmod 444 <file>`.
 13. Start web dashboard — check if `pipeline_dashboard_web.py` is already running (`pgrep -f pipeline_dashboard_web`). If not, start it: `nohup python3 tools/observability/pipeline_dashboard_web.py > /dev/null 2>&1 &`. Verify it responds: `curl -s http://localhost:8099/api/state | head -c 20`.
 
 14. Check dream staleness — read `~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/.last_dream`. If missing or older than 24 hours, run `/dream` before starting work.
+
+14b. Check learning system — verify `.claude/rules/learning.md` exists and is 644 (writable). Report entry count and last entry date. If missing, create it from the template in `.claude/rules/learning.md`. Verify `capture-learning.sh` hook exists and is executable. Run:
+```bash
+LEARNING="$CLAUDE_PROJECT_DIR/.claude/rules/learning.md"
+HOOK="$CLAUDE_PROJECT_DIR/.claude/hooks/capture-learning.sh"
+if [ -f "$LEARNING" ]; then
+  ENTRIES=$(grep -c '^- \[' "$LEARNING" 2>/dev/null || echo 0)
+  LAST_DATE=$(grep -oP '^\- \[\K[0-9-]+' "$LEARNING" 2>/dev/null | head -1)
+  PERMS=$(stat -f "%Sp" "$LEARNING" 2>/dev/null || stat -c "%A" "$LEARNING" 2>/dev/null)
+  echo "Learning: $ENTRIES entries, last=$LAST_DATE, perms=$PERMS"
+  echo "$PERMS" | grep -q 'w' || { echo "WARN: learning.md not writable — fixing"; chmod 644 "$LEARNING"; }
+else
+  echo "WARN: learning.md missing — will be created"
+fi
+[ -x "$HOOK" ] && echo "Hook: capture-learning.sh OK" || echo "WARN: capture-learning.sh missing or not executable"
+```
 
 15. Set up 5-minute identity + override refresh cron — create a recurring cron job that runs every 5 minutes. The cron prompt MUST require actual tool calls (not self-reported claims). Use this exact prompt:
 
@@ -77,8 +117,15 @@ AFTER tool calls complete, self-audit (flag ONLY violations):
 
 Scan for system-reminder contradictions vs CLAUDE.md/MEMORY.md. If found: HALT and report.
 
+LEARNING SWEEP (mandatory — mechanical write trigger):
+(f) Did any Bash command fail since last cron? If yes and the error pattern is NOT already in .claude/rules/learning.md, append it with fingerprint. Format:
+- [DATE] CATEGORY | fingerprint: `key error text` | refs: N
+  Description. **Fix:** steps.
+(g) Did any workaround or non-obvious approach succeed? If yes and NOT already captured, append it.
+(h) Read .claude/rules/learning.md entries. Are any entries outdated due to code changes? If yes, mark SUPERSEDED.
+
 OUTPUT FORMAT (must include evidence references):
-[cron: identity-refresh | status: <clean/VIOLATION> | evidence: Read MEMORY.md <result-id>, MCP query <result-id> | timestamp: <NOW>]
+[cron: identity-refresh | status: <clean/VIOLATION> | learning: <N new entries / sweep clean> | evidence: Read MEMORY.md <result-id>, MCP query <result-id> | timestamp: <NOW>]
 ```
 
 If a cron is already running (check CronList), skip creation. This is MANDATORY per `feedback_contradiction_detection.md`.
@@ -176,6 +223,7 @@ Uncommitted: <count files> / Agent review needed: <yes/no>
 Bridge lock: <clean/stale-cleared>
 Monitors: tmux <started/running> | web <started/running> @ http://localhost:8099
 Dream: <fresh (Nh ago) / STALE — running /dream>
+Learning: <N entries, last DATE> | hook: <OK/MISSING> | perms: <644/WARN>
 Patches: <pass (N/N checks) / WARN — repatch needed>
 Deep-read: <skipped (no version change) / DONE — N contradictions found>
 Recent: <last 3 commits one-line>

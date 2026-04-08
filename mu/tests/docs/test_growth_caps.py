@@ -21,7 +21,7 @@ BASELINE_CORE_DOCS = 48  # .md in mu/docs/ (all subdirs) — bumped for P6 Typed
 # Per-wave caps from DocGovernance.v0.md
 CAP_TEST_FILES = 108  # +1 for test_executor_config_alignment.py (timeout-budget enforcement)
 CAP_TOOL_SCRIPTS = 38  # +1 for _resolve_live_root.sh (tmux worktree resolution)
-CAP_CORE_DOCS = 11  # prior cap + 1 for PipelineRecovery.v0.md (recovery system design)
+CAP_CORE_DOCS = 12  # +1 for L3SubstrateArchitecture.v0.md (extracted from STATUS.md)
 
 
 def _count_test_files() -> int:
