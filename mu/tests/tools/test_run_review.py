@@ -612,6 +612,8 @@ def test_run_agent_group_skips_retry_for_meaningful_verdict():
         assert call_count["adversary"] == 1
         assert by_name["adversary"].verdict == "NEEDS_HARDENING"
         assert by_name["adversary"].is_compliant is False
+        # blocks_merge downgraded: meaningful verdict, format-only issue
+        assert by_name["adversary"].blocks_merge is False
         # verifier: called once, compliant
         assert call_count["verifier"] == 1
         assert by_name["verifier"].verdict == "APPROVE"

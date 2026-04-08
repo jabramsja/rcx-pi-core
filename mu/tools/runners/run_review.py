@@ -1114,6 +1114,18 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
                         f"  ⏩ Skipping retry for {result.name} "
                         f"(non-compliant format but meaningful verdict: {result.verdict})"
                     )
+                    # Downgrade merge-blocking: the agent completed its analysis
+                    # (meaningful verdict), so the format gap is cosmetic — don't
+                    # block merge for formatting alone. Without this, hard-gate
+                    # agents (verifier, structural-proof) with a valid verdict but
+                    # missing CHECKED/NOT_CHECKED sections would hard-block the
+                    # pipeline even though retry was intentionally skipped.
+                    if result.blocks_merge:
+                        result.blocks_merge = False
+                        # Update in self.results too
+                        if result in self.results:
+                            idx = self.results.index(result)
+                            self.results[idx] = result
                     retry_results.append(result)
                     continue
                 if self.verbose:
