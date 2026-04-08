@@ -82,8 +82,8 @@ RCX tracks host debt at three distinct granularities. Each ledger answers a diff
 | Ledger | Count | What It Measures | Baseline Source |
 |--------|-------|------------------|-----------------|
 | **Tracked markers** | 12 | Narrow official `@host_*` debt marker sites (6 Py decorator + 6 JS decorator) | `tools/checks/host_semantics_baseline.json` |
-| **Authority sites** | 217 | Named runtime sites with host-authority signals (120 Py + 97 JS) | `tools/checks/host_authority_inventory_baseline.json` |
-| **Total inventory** | 312 | Full named host-runtime surface (181 Py + 131 JS) | `tools/checks/host_authority_inventory_baseline.json` |
+| **Authority sites** | 217 | Named runtime sites with host-authority signals (120 Python + 97 JavaScript) | `tools/checks/host_authority_inventory_baseline.json` |
+| **Total inventory sites** | 312 | Full named host-runtime surface (181 Python + 131 JavaScript) | `tools/checks/host_authority_inventory_baseline.json` |
 
 ```
 THRESHOLD: 12
