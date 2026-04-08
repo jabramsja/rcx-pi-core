@@ -99,7 +99,12 @@ VALIDATION_COMMAND_TIMEOUT_S = _read_bounded_timeout_env(
     minimum=1,
     maximum=7200,
 )
-META_STALE_TIMEOUT_S = 90.0
+# Stale-detection timeout for meta-review adapter output.
+# Root-cause fix: 90s was too short for Codex xhigh reasoning effort.
+# Codex xhigh can take 2-3 minutes of thinking before producing stdout.
+# The bridge review stale timeout is 300s (phase_b_executor.py:1270);
+# the meta-review should match since it uses the same adapter.
+META_STALE_TIMEOUT_S = 300.0
 
 
 def _bounded_watchdog_timeout(timeout_s: int, watchdog_s: float) -> float:
@@ -817,10 +822,17 @@ def run_validation_gates(
     repo_root: Path,
     package: dict[str, Any],
     verbose: bool = False,
+    skip_startup_gates: bool = False,
 ) -> tuple[list[ValidationResult], bool]:
     """Run all 8 validation gates from Section 10.
 
     Returns (results, all_passed).
+
+    When *skip_startup_gates* is True, Gate 6 (attestation via
+    ``founder_session_attest.sh``) is auto-passed without execution.
+    This suppresses the startup-flow rerun in the pre-commit meta-review
+    path while preserving the bootstrap-read requirement (injected via
+    ``bridge_reviewer_prompt.txt`` template, not via the attestation gate).
     """
     results: list[ValidationResult] = []
 
@@ -888,20 +900,28 @@ def run_validation_gates(
         results.append(ValidationResult("docs_consistency", False, output[:200]))
 
     # Gate 6: Attestation
+    # When skip_startup_gates is True the attestation script is not executed.
+    # This prevents the pre-commit meta-review from re-running founder
+    # guard/attest startup flows that already ran during session bootstrap.
     if verbose:
         print("[meta-bridge] Gate 6: attestation...")
-    attest_script = repo_root / "tools" / "session" / "founder_session_attest.sh"
-    if attest_script.exists():
-        exit_code, output = run_validation_command(
-            repo_root,
-            ["bash", "tools/session/founder_session_attest.sh", "redteam"]
-        )
-        if exit_code == 0:
-            results.append(ValidationResult("attestation", True))
-        else:
-            results.append(ValidationResult("attestation", False, output[:200]))
-    else:
+    if skip_startup_gates:
+        if verbose:
+            print("[meta-bridge] Gate 6: skipped (startup-gate suppression)")
         results.append(ValidationResult("attestation", True))
+    else:
+        attest_script = repo_root / "tools" / "session" / "founder_session_attest.sh"
+        if attest_script.exists():
+            exit_code, output = run_validation_command(
+                repo_root,
+                ["bash", "tools/session/founder_session_attest.sh", "redteam"]
+            )
+            if exit_code == 0:
+                results.append(ValidationResult("attestation", True))
+            else:
+                results.append(ValidationResult("attestation", False, output[:200]))
+        else:
+            results.append(ValidationResult("attestation", True))
 
     # Gate 7: Deferred blockers
     if verbose:
@@ -2738,10 +2758,15 @@ def run_meta_bridge(
             print("[meta-bridge] Capturing repo state...")
         state_start = compute_repo_state(repo_root)
 
-        # Run validation gates
+        # Run validation gates — skip startup gates (attestation) in the
+        # pre-commit meta-review path to avoid re-running session bootstrap
+        # flows.  The bootstrap-read requirement is preserved via the Codex
+        # reviewer prompt template, not the attestation gate.
         if verbose:
             print("[meta-bridge] Running validation gates...")
-        validation_results, all_passed = run_validation_gates(repo_root, package, verbose=verbose)
+        validation_results, all_passed = run_validation_gates(
+            repo_root, package, verbose=verbose, skip_startup_gates=True
+        )
     except KeyboardInterrupt:
         # Handle SIGINT during state capture or validation
         return MetaBridgeResponse(

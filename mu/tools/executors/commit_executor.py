@@ -2560,6 +2560,20 @@ def run_commit_pipeline(
             "Resuming post-commit pipeline from local commit "
             f"{continuation['commit_sha'][:8]}"
         )
+        # If resuming after COMMIT_GO_HOLD_PUSH, skip directly to
+        # post-commit pipeline (steps 11-15).  Steps 1-10 already ran.
+        if "hold_check" in result["steps_completed"]:
+            result["receipt_decision"] = continuation.get("receipt_decision", "COMMIT_GO")
+            log("Prior run held at COMMIT_GO_HOLD_PUSH — continuing to push (steps 11-15)")
+            return _run_post_commit_pipeline(
+                handoff=handoff,
+                repo_root=repo_root,
+                result=result,
+                target_branch=target_branch,
+                base_branch=base_branch,
+                continuation_path=continuation_path,
+                log=log,
+            )
 
     # ── Step 2: ensure_feature_branch ────────────────────────────────
     try:
@@ -3064,12 +3078,24 @@ def run_commit_pipeline(
     if receipt_decision == "COMMIT_GO_HOLD_PUSH":
         sha = result.get("commit_sha", "unknown")
         result["steps_completed"].append("hold_check")
-        _clear_continuation_record(continuation_path)
+        # Write continuation record so re-run resumes at step 11.
+        _write_continuation_record(
+            continuation_path,
+            handoff_sha=handoff_sha,
+            target_branch=target_branch,
+            commit_sha=sha,
+            receipt_decision=receipt_decision,
+            steps_completed=result["steps_completed"],
+        )
         return {
             "status": "held",
             "commit_sha": sha,
             "steps_completed": result["steps_completed"],
-            "message": f"Committed locally. Pipeline held before push per COMMIT_GO_HOLD_PUSH.",
+            "message": (
+                "Committed locally. Pipeline held before push per"
+                " COMMIT_GO_HOLD_PUSH. Re-run with same --handoff to"
+                " continue (steps 11-15)."
+            ),
         }
 
     result["steps_completed"].append("hold_check")

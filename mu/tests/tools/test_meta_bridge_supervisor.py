@@ -1981,3 +1981,241 @@ class TestGate10GeneratedAttestationShape:
         assert not gate10.passed
         assert "missing behavioral proof" in gate10.error
         assert not all_passed
+
+
+# ===========================================================================
+# META-BRIDGE-BOUNDED-REVIEW-FIX regression tests
+# Covers: slash task-ID path safety, zero-match probe envelope, startup-flow
+# suppression.  Wave: meta-bridge-taskid-path-safety-2026-04-03.
+# ===========================================================================
+
+
+class TestFilesystemSafeToken:
+    """_filesystem_safe_token must neutralize all OS-unsafe characters."""
+
+    def test_forward_slash_replaced(self):
+        assert "/" not in meta._filesystem_safe_token("PIPELINE-RECOVERY/monitor-rebind")  # ANTICHEAT_OK: testing path-safety helper
+
+    def test_backslash_replaced(self):
+        assert "\\" not in meta._filesystem_safe_token("FOO\\BAR")  # ANTICHEAT_OK: testing path-safety helper
+
+    def test_colon_replaced(self):
+        token = meta._filesystem_safe_token("task:sub:id")  # ANTICHEAT_OK: testing path-safety helper
+        assert ":" not in token
+
+    def test_pipe_replaced(self):
+        token = meta._filesystem_safe_token("a|b|c")  # ANTICHEAT_OK: testing path-safety helper
+        assert "|" not in token
+
+    def test_space_replaced(self):
+        token = meta._filesystem_safe_token("task with spaces")  # ANTICHEAT_OK: testing path-safety helper
+        assert " " not in token
+
+    def test_brackets_preserved(self):
+        """Bracketed task IDs like [TASK-ID] keep their brackets."""
+        token = meta._filesystem_safe_token("[META-BRIDGE-S1]")  # ANTICHEAT_OK: testing path-safety helper
+        assert "[" in token and "]" in token
+
+    def test_empty_returns_unknown(self):
+        assert meta._filesystem_safe_token("") == "unknown"  # ANTICHEAT_OK: testing path-safety helper
+
+    def test_none_returns_unknown(self):
+        assert meta._filesystem_safe_token(None) == "unknown"  # ANTICHEAT_OK: testing path-safety helper
+
+    def test_dots_and_hyphens_preserved(self):
+        token = meta._filesystem_safe_token("task-2026.04.03")  # ANTICHEAT_OK: testing path-safety helper
+        assert token == "task-2026.04.03"
+
+    def test_realistic_slash_bearing_task_id(self):
+        """Exact reproduction of the crash-causing task ID from the plan."""
+        task_id = "[PIPELINE-RECOVERY/pipeline-monitor-worktree-rebind-2026-04-03]"
+        token = meta._filesystem_safe_token(task_id)  # ANTICHEAT_OK: testing path-safety helper
+        assert "/" not in token
+        assert "\\" not in token
+        # Must still be non-empty and recognizable
+        assert "PIPELINE-RECOVERY" in token
+        assert "pipeline-monitor-worktree-rebind" in token
+
+    def test_multiple_consecutive_slashes_collapse(self):
+        token = meta._filesystem_safe_token("a///b")  # ANTICHEAT_OK: testing path-safety helper
+        assert "/" not in token
+        # Multiple slashes should become a single hyphen
+        assert "a-b" == token
+
+    def test_result_is_valid_filename_component(self):
+        """Token must be usable as a filename on POSIX and macOS."""
+        unsafe = "[TASK/sub\\path:colon|pipe <angle> ?question *star]"
+        token = meta._filesystem_safe_token(unsafe)  # ANTICHEAT_OK: testing path-safety helper
+        # Must not contain any OS-unsafe characters
+        for ch in "/\\:*?\"<>|":
+            assert ch not in token, f"Unsafe char {ch!r} found in token {token!r}"
+
+
+class TestZeroMatchProbeTemplateGuidance:
+    """Template must instruct Codex not to abort on zero-match probe commands.
+
+    Regression for Problem B: the reviewer self-aborted when probe commands
+    like `rg` returned zero matches (exit code 1 with set -e).
+    """
+
+    def test_template_warns_against_set_e_pipefail(self):
+        package = {"task_id": "T", "wave_name": "w", "lane": "l"}
+        results = _make_validation_results(["gate1"], [])
+        prompt = meta.build_meta_reviewer_prompt(package, results, REPO_ROOT)
+        assert "set -e" in prompt
+        assert "pipefail" in prompt
+        assert "zero-match probe" in prompt
+
+    def test_template_says_empty_fields_are_legitimate(self):
+        package = {"task_id": "T", "wave_name": "w", "lane": "l"}
+        results = _make_validation_results(["gate1"], [])
+        prompt = meta.build_meta_reviewer_prompt(package, results, REPO_ROOT)
+        assert "bridge_status" in prompt
+        assert "blocker_report_paths" in prompt
+        assert "legitimately be empty" in prompt
+
+
+class TestStartupFlowSuppressionTemplate:
+    """Template must suppress founder guard/attest startup flows in meta-review.
+
+    Regression for Problem A: the pre-commit meta-review path was rerunning
+    founder guard/attest startup flows that should only execute once during
+    session bootstrap.
+    """
+
+    def test_template_suppresses_founder_session_guard(self):
+        package = {"task_id": "T", "wave_name": "w", "lane": "l"}
+        results = _make_validation_results(["gate1"], [])
+        prompt = meta.build_meta_reviewer_prompt(package, results, REPO_ROOT)
+        assert "founder_session_guard.sh" in prompt
+        assert "Do NOT invoke" in prompt
+
+    def test_template_suppresses_founder_session_attest(self):
+        package = {"task_id": "T", "wave_name": "w", "lane": "l"}
+        results = _make_validation_results(["gate1"], [])
+        prompt = meta.build_meta_reviewer_prompt(package, results, REPO_ROOT)
+        assert "founder_session_attest.sh" in prompt
+
+    def test_template_suppresses_skill_startup_workflows(self):
+        package = {"task_id": "T", "wave_name": "w", "lane": "l"}
+        results = _make_validation_results(["gate1"], [])
+        prompt = meta.build_meta_reviewer_prompt(package, results, REPO_ROOT)
+        assert "skill startup workflows" in prompt
+
+    def test_template_still_requires_bootstrap_read(self):
+        """FOUNDER_SESSION_BOOTSTRAP.md reading must remain required."""
+        package = {"task_id": "T", "wave_name": "w", "lane": "l"}
+        results = _make_validation_results(["gate1"], [])
+        prompt = meta.build_meta_reviewer_prompt(package, results, REPO_ROOT)
+        assert "FOUNDER_SESSION_BOOTSTRAP.md" in prompt
+        assert "REQUIRED" in prompt
+
+    def test_template_requires_silent_bootstrap(self):
+        """Bootstrap read must be silent — no echoed confirmations."""
+        package = {"task_id": "T", "wave_name": "w", "lane": "l"}
+        results = _make_validation_results(["gate1"], [])
+        prompt = meta.build_meta_reviewer_prompt(package, results, REPO_ROOT)
+        assert "silently" in prompt.lower() or "Do this silently" in prompt
+        assert "Do not print bootstrap confirmations" in prompt
+
+
+class TestStartupFlowSuppressionGatePath:
+    """run_validation_gates() must skip Gate 6 (attestation) when skip_startup_gates=True.
+
+    Regression for bridge round 1 finding: the staged tests only called
+    build_meta_reviewer_prompt() (template text), but the actual
+    run_validation_gates() path still invoked founder_session_attest.sh
+    before reviewer execution, contradicting the startup-flow suppression.
+    """
+
+    def _make_package(self):
+        return {
+            "task_id": "TEST-TASK",
+            "wave_name": "test-wave",
+            "lane": "test",
+            "scope_items": [],
+            "fixes_implemented": [],
+            "deferred_items": [],
+            "bridge_status": {},
+            "evidence_handles": {},
+            "blocker_report_paths": [],
+            "current_judgment": "COMMIT_GO",
+            "changed_files": [],
+        }
+
+    def test_gate6_skipped_when_skip_startup_gates_true(self):
+        """Gate 6 (attestation) must NOT call founder_session_attest.sh
+        when skip_startup_gates=True."""
+        package = self._make_package()
+        invoked_commands = []
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            invoked_commands.append(cmd_str)
+            return 0, "passed"
+
+        with patch.object(meta, "run_validation_command", side_effect=mock_run_validation), \
+             patch.object(meta, "check_dirty_state", return_value=meta.ValidationResult("dirty_state", True)), \
+             patch.object(meta, "check_deferred_blockers", return_value=meta.ValidationResult("deferred_blockers", True)), \
+             patch.object(meta, "check_tasks_authorization", return_value=meta.ValidationResult("tasks_auth", True)):
+            results, all_passed = meta.run_validation_gates(
+                REPO_ROOT, package, verbose=True, skip_startup_gates=True
+            )
+
+        # Attestation script must NOT appear in invoked commands.
+        attest_cmds = [c for c in invoked_commands if "founder_session_attest" in c]
+        assert attest_cmds == [], (
+            f"Gate 6 invoked founder_session_attest.sh despite skip_startup_gates=True: {attest_cmds}"
+        )
+        # Gate 6 must still produce a result (auto-pass).
+        gate6 = [r for r in results if r.name == "attestation"]
+        assert len(gate6) == 1, f"Expected exactly one attestation result, got {len(gate6)}"
+        assert gate6[0].passed is True
+
+    def test_gate6_runs_when_skip_startup_gates_false(self):
+        """Gate 6 (attestation) must call founder_session_attest.sh
+        when skip_startup_gates=False (default)."""
+        package = self._make_package()
+        invoked_commands = []
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            cmd_str = " ".join(str(c) for c in cmd)
+            invoked_commands.append(cmd_str)
+            return 0, "passed"
+
+        with patch.object(meta, "run_validation_command", side_effect=mock_run_validation), \
+             patch.object(meta, "check_dirty_state", return_value=meta.ValidationResult("dirty_state", True)), \
+             patch.object(meta, "check_deferred_blockers", return_value=meta.ValidationResult("deferred_blockers", True)), \
+             patch.object(meta, "check_tasks_authorization", return_value=meta.ValidationResult("tasks_auth", True)):
+            results, all_passed = meta.run_validation_gates(
+                REPO_ROOT, package, verbose=True, skip_startup_gates=False
+            )
+
+        # Attestation script MUST appear in invoked commands.
+        attest_cmds = [c for c in invoked_commands if "founder_session_attest" in c]
+        assert len(attest_cmds) == 1, (
+            f"Gate 6 must invoke founder_session_attest.sh when skip_startup_gates=False. "
+            f"Invoked: {invoked_commands}"
+        )
+
+    def test_all_gates_still_produce_results_when_skipping(self):
+        """All 8+ gates must produce results even when startup gates are skipped."""
+        package = self._make_package()
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            return 0, "passed"
+
+        with patch.object(meta, "run_validation_command", side_effect=mock_run_validation), \
+             patch.object(meta, "check_dirty_state", return_value=meta.ValidationResult("dirty_state", True)), \
+             patch.object(meta, "check_deferred_blockers", return_value=meta.ValidationResult("deferred_blockers", True)), \
+             patch.object(meta, "check_tasks_authorization", return_value=meta.ValidationResult("tasks_auth", True)):
+            results, all_passed = meta.run_validation_gates(
+                REPO_ROOT, package, verbose=False, skip_startup_gates=True
+            )
+
+        # Must have at least 8 gate results.
+        assert len(results) >= 8, (
+            f"Expected at least 8 gate results, got {len(results)}: "
+            f"{[r.name for r in results]}"
+        )
+        assert all_passed is True

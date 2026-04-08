@@ -887,17 +887,42 @@ def _format_phase_a_blocking_findings(findings: list[dict[str, Any]]) -> str:
 
 
 def _extract_bridge_decision(render_content: str) -> str:
-    """Parse the canonical bridge decision line from rendered output."""
+    """Parse the canonical bridge decision line from rendered output.
+
+    Uses first-wins semantics: the first non-SYNTHETIC ``Decision:`` token
+    is authoritative.  A later appended ``Decision: GO`` cannot override an
+    earlier ``Decision: REQUEST_CHANGES``.  SYNTHETIC reader turns are
+    skipped so the first real reviewer decision wins.  If only SYNTHETIC
+    tokens exist, the last one is surfaced as fail-closed input.
+    """
     decisions = [match.group(1) for match in BRIDGE_DECISION_RE.finditer(render_content)]
     if not decisions:
         return ""
-    # Bridge renders often start with a synthetic reader turn before the
-    # authoritative reviewer turn. Prefer the last non-synthetic decision, but
-    # still surface a terminal SYNTHETIC-only render as fail-closed input.
-    for decision in reversed(decisions):
+    # First-wins: the first non-SYNTHETIC decision is authoritative.
+    # This prevents an appended later Decision: token from silently
+    # flipping the bridge outcome (bridge R3 finding).
+    for decision in decisions:
         if decision != "SYNTHETIC":
             return decision
     return decisions[-1]
+
+
+def _split_plan_header(content: str) -> tuple[str, str]:
+    """Split plan packet into header and body at the first ``## `` heading.
+
+    The header contains metadata lines (Date, Status, Phase-A-Lock, Task,
+    Wave ID) that precede any markdown H2 section heading.  Body occurrences
+    of control-line patterns (e.g. ``Phase-A-Lock: UNLOCKED`` quoted inside
+    a code fence or documentation) must never be counted as control lines.
+
+    Returns ``(header, body)`` where ``header + body == content``.
+    If no ``## `` heading exists, the entire content is treated as header.
+    """
+    lines = content.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.startswith("## "):
+            return "".join(lines[:i]), "".join(lines[i:])
+    return content, ""
 
 
 def lock_plan(repo_root: Path, plan_path: str) -> None:
@@ -906,53 +931,82 @@ def lock_plan(repo_root: Path, plan_path: str) -> None:
     Idempotent: if the packet is already LOCKED, applies status text cleanup
     and returns without error. Fails closed with a structured error if the
     control line is missing, malformed, or duplicated.
+
+    Only the header section (before the first ``## `` heading) is inspected
+    for Phase-A-Lock control lines.  Body occurrences (code fences, docs)
+    are ignored so they cannot inflate the control-line count.
     """
     full_path = repo_root / plan_path
     content = full_path.read_text(encoding="utf-8")
-    unlocked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*UNLOCKED\s*$", content)
-    locked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*LOCKED\s*$", content)
+
+    # Split at first ## heading — control lines live in the header only.
+    header, body = _split_plan_header(content)
+
+    # Use [ \t]* (not \s*) before $ to avoid greedily eating newlines
+    # that separate the header from the body.  \s includes \n which,
+    # combined with multiline $, can consume blank lines between the
+    # control line and the first ## heading — causing header+body
+    # concatenation without a newline separator (bridge R2 finding).
+    unlocked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*UNLOCKED[ \t]*$", header)
+    locked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*LOCKED[ \t]*$", header)
     total = len(unlocked_lines) + len(locked_lines)
     if total == 0:
         # No lock line exists — insert one after the header block.
         # The implementer may have rewritten the stub without including
         # the Phase-A-Lock line. Insert it after Status: or Date: lines.
-        lines = content.splitlines()
+        hdr_lines = header.splitlines()
         insert_after = 0
-        for i, line in enumerate(lines):
+        for i, line in enumerate(hdr_lines):
             stripped = line.strip()
             if stripped.startswith(("Status:", "Date:", "Task:", "Wave ID:")):
                 insert_after = i + 1
-        lines.insert(insert_after, "Phase-A-Lock: UNLOCKED")
-        content = "\n".join(lines)
+        hdr_lines.insert(insert_after, "Phase-A-Lock: UNLOCKED")
+        header = "\n".join(hdr_lines)
+        if not header.endswith("\n"):
+            header += "\n"
+        content = header + body
         full_path.write_text(content, encoding="utf-8")
-        # Recompute after insert
-        unlocked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*UNLOCKED\s*$", content)
-        locked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*LOCKED\s*$", content)
+        # Recompute after insert (header only)
+        header, body = _split_plan_header(content)
+        unlocked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*UNLOCKED[ \t]*$", header)
+        locked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*LOCKED[ \t]*$", header)
         total = len(unlocked_lines) + len(locked_lines)
     if total > 1:
         raise PhaseAExecutorError(
             f"Expected exactly one Phase-A-Lock control line in {plan_path}, "
             f"found {len(unlocked_lines)} unlocked and {len(locked_lines)} locked"
         )
-    # Exactly one control line exists
+    # Exactly one control line exists — operate on header, then rejoin.
     if unlocked_lines:
-        content, lock_replacements = re.subn(
-            r"(?m)^Phase-A-Lock:\s*UNLOCKED\s*$",
+        header, lock_replacements = re.subn(
+            r"(?m)^Phase-A-Lock:\s*UNLOCKED[ \t]*$",
             "Phase-A-Lock: LOCKED",
-            content,
+            header,
             count=1,
         )
         if lock_replacements != 1:
             raise PhaseAExecutorError(
                 f"Expected one unlock line in {plan_path}, found {lock_replacements}"
             )
-    # Already LOCKED — idempotent, just apply status text cleanup below
-    content = re.sub(
-        r"not yet agent-reviewed or bridge-converged",
-        "bridge-converged",
+    content = header + body
+    # Already LOCKED — idempotent, just apply status text cleanup below.
+    # Update the Status field to reflect Phase B regardless of its current text.
+    # Root cause fix: the old substitution only matched one specific phrase
+    # ("not yet agent-reviewed or bridge-converged"), so plans with different
+    # Status text (e.g., "Phase A (plan under review)") kept a stale Status
+    # that contradicted Phase-A-Lock: LOCKED, triggering fail-closed in Phase B.
+    content, status_replacements = re.subn(
+        r"(?m)^Status:\s*.*$",
+        "Status: Phase B (locked, implementing)",
         content,
         count=1,
     )
+    if status_replacements == 0:
+        print(
+            f"[phase-a] WARNING: lock_plan found no Status: line in {plan_path}; "
+            "Phase B status not set",
+            file=sys.stderr,
+        )
     full_path.write_text(content, encoding="utf-8")
 
 
@@ -1208,13 +1262,20 @@ def run_phase_a(
                     parsed_findings = _parse_phase_a_findings(
                         raw_content if raw_content else render_content
                     )
+                    # Critical severity = always blocking regardless of
+                    # reviewer-declared disposition (bridge R3 finding:
+                    # a non_blocking disposition must not suppress critical).
+                    # High severity = blocking only when disposition is
+                    # absent/unknown (reviewer can explicitly mark high as
+                    # non_blocking).
                     blocking = [
                         f
                         for f in parsed_findings
                         if f.get("disposition") == "blocking"
+                        or f.get("severity") == "critical"
                         or (
                             f.get("disposition") not in ("blocking", "non_blocking")
-                            and f.get("severity") in ("critical", "high")
+                            and f.get("severity") == "high"
                         )
                     ]
                     non_blocking = [f for f in parsed_findings if f not in blocking]
