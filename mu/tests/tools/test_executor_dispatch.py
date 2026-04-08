@@ -593,7 +593,7 @@ class TestPhaseAPlanCreation:
         phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
         content = plan.read_text()
         assert "Phase-A-Lock: LOCKED" in content
-        assert "bridge-converged" in content
+        assert "Phase B (locked, implementing)" in content
 
     def test_create_plan_draft_rejects_path_traversal(self, tmp_path):
         scope = {"request": "create executors", "summary": "executor plan"}
@@ -624,7 +624,7 @@ class TestPhaseAPlanCreation:
         phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
         content = plan.read_text(encoding="utf-8")
         assert content.count("Phase-A-Lock: LOCKED") == 1
-        assert "bridge-converged" in content
+        assert "Phase B (locked, implementing)" in content
 
     def test_lock_plan_rejects_multiple_control_lines(self, tmp_path):
         (tmp_path / "reports" / "control_plane").mkdir(parents=True)
@@ -648,6 +648,114 @@ class TestPhaseAPlanCreation:
         phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
         content = plan.read_text(encoding="utf-8")
         assert "Phase-A-Lock: LOCKED" in content
+
+    def test_lock_plan_ignores_body_phase_a_lock_lines(self, tmp_path):
+        """Body occurrences of Phase-A-Lock must not inflate the control-line count.
+
+        Regression for bridge round 1 finding: a packet whose body contains
+        ``Phase-A-Lock: UNLOCKED`` (e.g. inside a code fence) crashed with
+        ``PhaseAExecutorError: Expected exactly one Phase-A-Lock control line``.
+        """
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text(
+            "# Plan\n"
+            "Status: Phase A (plan under review)\n"
+            "Phase-A-Lock: UNLOCKED\n"
+            "Task: [TEST]\n"
+            "\n"
+            "## 1. Scope\n"
+            "\n"
+            "Example of the header format:\n"
+            "```\n"
+            "Phase-A-Lock: UNLOCKED\n"
+            "```\n"
+            "\n"
+            "The line `Phase-A-Lock: LOCKED` appears in documentation.\n",
+            encoding="utf-8",
+        )
+        # Must NOT raise — body occurrences are ignored.
+        phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+        content = plan.read_text(encoding="utf-8")
+        # Header control line is locked.
+        lines = content.split("## 1. Scope")
+        header = lines[0]
+        assert "Phase-A-Lock: LOCKED" in header
+        assert "Phase B (locked, implementing)" in header
+        # Body text is preserved verbatim.
+        body = lines[1]
+        assert "Phase-A-Lock: UNLOCKED" in body
+        assert "Phase-A-Lock: LOCKED" in body
+
+    def test_lock_plan_body_locked_line_preserved(self, tmp_path):
+        """A LOCKED line in the body does not prevent header locking."""
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text(
+            "# Plan\n"
+            "Status: draft\n"
+            "Phase-A-Lock: UNLOCKED\n"
+            "\n"
+            "## 2. Work items\n"
+            "\n"
+            "Phase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+        content = plan.read_text(encoding="utf-8")
+        header, body = content.split("## 2. Work items")
+        assert "Phase-A-Lock: LOCKED" in header
+        assert "Phase-A-Lock: LOCKED" in body
+
+    def test_lock_plan_preserves_blank_line_before_h2(self, tmp_path):
+        """lock_plan must not corrupt the control line when a blank line
+        separates it from the first ## heading.
+
+        Regression for bridge R2 finding: the old \\s*$ regex greedily ate
+        the blank-line newlines, producing ``Phase-A-Lock: LOCKED## 1. Scope``
+        which made Phase B reject the reused packet.
+        """
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text(
+            "# Plan\n"
+            "Status: draft\n"
+            "Phase-A-Lock: UNLOCKED\n"
+            "\n"
+            "## 1. Scope\n"
+            "\n"
+            "Body\n",
+            encoding="utf-8",
+        )
+        phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+        content = plan.read_text(encoding="utf-8")
+        # The control line must NOT be concatenated with the H2 heading.
+        assert "LOCKED##" not in content, (
+            f"Control line corrupted — newline separator eaten: {content!r}"
+        )
+        assert "Phase-A-Lock: LOCKED\n" in content
+        assert "\n\n## 1. Scope\n" in content
+        assert "Phase B (locked, implementing)" in content
+
+    def test_lock_plan_idempotent_preserves_blank_line_before_h2(self, tmp_path):
+        """Idempotent lock (already LOCKED) must also preserve the blank line."""
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text(
+            "# Plan\n"
+            "Status: Phase A (plan under review)\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\n"
+            "## 1. Scope\n"
+            "\n"
+            "Body\n",
+            encoding="utf-8",
+        )
+        phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+        content = plan.read_text(encoding="utf-8")
+        assert "LOCKED##" not in content
+        assert "Phase-A-Lock: LOCKED\n" in content
+        assert "\n\n## 1. Scope\n" in content
 
 
 class TestPhaseADispatcherIntegration:
@@ -809,7 +917,8 @@ Phase-A-Lock: UNLOCKED
         )
         assert phase_a_mod._extract_bridge_decision(render_content) == "GO"  # ANTICHEAT_OK: testing internal bridge decision parser
 
-    def test_extract_bridge_decision_uses_last_valid_turn(self):
+    def test_extract_bridge_decision_uses_first_wins(self):
+        """First non-SYNTHETIC decision wins — a later GO cannot override REQUEST_CHANGES (bridge R3)."""
         render_content = (
             "# Bridge Job x\n\n"
             "## Reader turn\n"
@@ -817,9 +926,10 @@ Phase-A-Lock: UNLOCKED
             "## Reviewer turn\n"
             "Decision: GO\n"
         )
-        assert phase_a_mod._extract_bridge_decision(render_content) == "GO"  # ANTICHEAT_OK: testing internal bridge decision parser
+        assert phase_a_mod._extract_bridge_decision(render_content) == "REQUEST_CHANGES"  # ANTICHEAT_OK: testing internal bridge decision parser
 
-    def test_extract_bridge_decision_prefers_terminal_error_over_earlier_request_changes(self):
+    def test_extract_bridge_decision_first_wins_over_terminal_error(self):
+        """First non-SYNTHETIC decision wins even when a later token is ERROR (bridge R3)."""
         render_content = (
             "# Bridge Job x\n\n"
             "## Reader turn\n"
@@ -827,7 +937,30 @@ Phase-A-Lock: UNLOCKED
             "## Reviewer turn\n"
             "Decision: ERROR\n"
         )
-        assert phase_a_mod._extract_bridge_decision(render_content) == "ERROR"  # ANTICHEAT_OK: testing terminal bridge decision parsing
+        assert phase_a_mod._extract_bridge_decision(render_content) == "REQUEST_CHANGES"  # ANTICHEAT_OK: testing first-wins bridge decision parsing
+
+    def test_extract_bridge_decision_synthetic_then_real_returns_real(self):
+        """SYNTHETIC is skipped; the first real decision wins (bridge R3 regression)."""
+        render_content = (
+            "# Bridge Job x\n\n"
+            "- Decision: SYNTHETIC\n"
+            "- Decision: REQUEST_CHANGES\n"
+            "- Decision: GO\n"
+        )
+        assert phase_a_mod._extract_bridge_decision(render_content) == "REQUEST_CHANGES"  # ANTICHEAT_OK: testing first-wins after SYNTHETIC skip
+
+    def test_extract_bridge_decision_only_synthetic_returns_synthetic(self):
+        """When all decisions are SYNTHETIC, the last one is returned as fail-closed."""
+        render_content = "Decision: SYNTHETIC\nDecision: SYNTHETIC\n"
+        assert phase_a_mod._extract_bridge_decision(render_content) == "SYNTHETIC"  # ANTICHEAT_OK: testing SYNTHETIC-only fallback
+
+    def test_extract_bridge_decision_single_go_returns_go(self):
+        """Single non-SYNTHETIC decision returns as-is."""
+        assert phase_a_mod._extract_bridge_decision("Decision: GO\n") == "GO"  # ANTICHEAT_OK: testing single-decision case
+
+    def test_extract_bridge_decision_empty_returns_empty(self):
+        """No Decision: tokens returns empty string."""
+        assert phase_a_mod._extract_bridge_decision("No decisions here\n") == ""  # ANTICHEAT_OK: testing no-decision case
 
     def test_request_changes_continues_loop(self, tmp_path, monkeypatch):
         """REQUEST_CHANGES continues the loop (regression check)."""
@@ -1134,6 +1267,115 @@ END_AGENT_ENVELOPE"""
             "status": "new",
         }]
 
+    def test_critical_nonblocking_disposition_still_blocks(self, tmp_path, monkeypatch):
+        """A critical finding with non_blocking disposition must still be treated as blocking.
+
+        Bridge R3 finding: the blocking filter let reviewer-declared non_blocking
+        disposition suppress critical severity findings, causing them to converge
+        as advisory-only.
+        """
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
+        bridge_calls = {"n": 0}
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            bridge_calls["n"] += 1
+            rendered = rendered_dir / f"{job_id}.md"
+            if bridge_calls["n"] < 3:
+                rendered.write_text("Decision: REQUEST_CHANGES\n\nFix critical issue.\n")
+                return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": ""}
+            rendered.write_text("Decision: GO\n\nFixed.\n")
+            return {"exit_code": 0, "stdout": "GO\n", "stderr": ""}
+
+        def fake_parse_findings(_content):
+            if bridge_calls["n"] < 3:
+                return [{
+                    "class": "DEFECT",
+                    "severity": "critical",
+                    "disposition": "non_blocking",
+                    "title": "Critical finding with non_blocking disposition",
+                    "detail": "This must still be treated as blocking.",
+                    "file": "test.py",
+                    "line_start": 1,
+                    "line_end": 1,
+                    "evidence_cmd": "",
+                    "evidence_result": "",
+                    "status": "persisting",
+                }]
+            return []
+
+        implementer_called = {"n": 0}
+
+        def fake_invoke(repo_root, prompt, *, backend="claude", timeout=900, verbose=False):
+            implementer_called["n"] += 1
+            # Rewrite the plan so Phase A detects a content change.
+            plan_dir = repo_root / "reports" / "control_plane"
+            plan_files = list(plan_dir.glob("test_plan_*.md"))
+            assert plan_files, "No plan file found in reports/control_plane/"
+            plan_file = plan_files[0]
+            content = plan_file.read_text(encoding="utf-8")
+            plan_file.write_text(content + f"\n<!-- implementer round {implementer_called['n']} -->\n", encoding="utf-8")
+            return {"status": "success", "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+        monkeypatch.setattr(phase_a_mod, "_parse_phase_a_findings", fake_parse_findings)
+        monkeypatch.setattr(phase_a_mod, "_invoke_implementer", fake_invoke)
+        monkeypatch.setattr(
+            phase_a_mod, "checkpoint_commit_plan",
+            lambda *a, **kw: {"sha": "fake_sha"},
+        )
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        # The critical finding must have triggered the implementer, NOT converged as GO.
+        assert implementer_called["n"] >= 1, (
+            "Critical finding with non_blocking disposition must invoke the implementer, "
+            "not converge as advisory-only GO"
+        )
+        assert result["status"] == "converged"
+
+    def test_high_nonblocking_disposition_converges_as_go(self, tmp_path, monkeypatch):
+        """A high finding with non_blocking disposition should converge as GO.
+
+        Complement to the critical test above — high severity CAN be marked
+        non_blocking by the reviewer, and that must converge.
+        """
+        rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
+
+        def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+            rendered = rendered_dir / f"{job_id}.md"
+            rendered.write_text("Decision: REQUEST_CHANGES\n\nNon-blocking only.\n")
+            return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": ""}
+
+        def fake_parse_findings(_content):
+            return [{
+                "class": "DEFECT",
+                "severity": "high",
+                "disposition": "non_blocking",
+                "title": "High finding explicitly marked non_blocking",
+                "detail": "Reviewer determined this is advisory.",
+                "file": "test.py",
+                "line_start": 1,
+                "line_end": 1,
+                "evidence_cmd": "",
+                "evidence_result": "",
+                "status": "new",
+            }]
+
+        monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
+        monkeypatch.setattr(phase_a_mod, "run_bridge_design_review", fake_run_bridge)
+        monkeypatch.setattr(phase_a_mod, "_parse_phase_a_findings", fake_parse_findings)
+
+        result = phase_a_mod.run_phase_a(tmp_path, "test_plan", max_bridge_rounds=5)
+        # High + non_blocking → converges as GO (no implementer invocation).
+        assert result["status"] == "converged"
+        assert result.get("non_blocking_count", 0) == 1
+
     def test_bridge_failure_no_rendered_output_fails_closed(self, tmp_path, monkeypatch):
         """Bridge failure with no rendered output fails closed."""
         self._setup_phase_a(tmp_path, monkeypatch)
@@ -1202,7 +1444,11 @@ END_AGENT_ENVELOPE"""
         assert result["status"] == "max_rounds_reached"
 
     def test_terminal_bridge_error_decision_fails_closed(self, tmp_path, monkeypatch):
-        """Phase A must fail closed when the final reviewer turn reports ERROR."""
+        """Phase A must fail closed when the reviewer turn reports ERROR.
+
+        Uses a single ERROR decision (no preceding REQUEST_CHANGES) so
+        first-wins semantics (bridge R3) yield ERROR as expected.
+        """
         rendered_dir = self._setup_phase_a(tmp_path, monkeypatch)
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
@@ -1211,7 +1457,7 @@ END_AGENT_ENVELOPE"""
         def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text(
-                "Decision: REQUEST_CHANGES\n\nInterim reader turn.\n\nDecision: ERROR\n\nReviewer failed closed.\n"
+                "Decision: ERROR\n\nReviewer failed closed.\n"
             )
             return {"exit_code": 1, "stdout": "", "stderr": "reviewer error"}
 
@@ -1325,8 +1571,11 @@ END_AGENT_ENVELOPE"""
         assert "do NOT open governing packets, prior replay notes, or downstream implementation files" in task_text
         assert result["exit_code"] == 0
 
-    def test_bridge_design_review_uses_configured_reviewer(self, tmp_path):
+    def test_bridge_design_review_uses_configured_reviewer(self, tmp_path, monkeypatch):
         """Phase A bridge review must honor executor-configured reviewer backend."""
+        # Unset env override so the test exercises config-driven reviewer selection,
+        # not the global RCX_BRIDGE_REVIEWER_OVERRIDE env var.
+        monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
         tools_agents = tmp_path / "tools" / "agents"
         tools_agents.mkdir(parents=True)
         fake_bridge = tools_agents / "bridge_supervisor.py"
@@ -3067,7 +3316,8 @@ class TestCommitContinuationAndBotFreshness:
         assert resumed["commit_sha"] != original_head
         assert resumed["receipt_decision"] == "COMMIT_GO"
 
-    def test_hold_continuation_returns_held_and_clears_record(self, tmp_path):
+    def test_hold_continuation_resumes_post_commit_pipeline(self, tmp_path):
+        """Re-running after COMMIT_GO_HOLD_PUSH resumes at steps 11-15."""
         repo, env = _init_git_repo(tmp_path)
         subprocess.run(
             ["git", "checkout", "-b", "jabramsja/test-wave-id"],
@@ -3093,13 +3343,20 @@ class TestCommitContinuationAndBotFreshness:
             "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit", "hold_check"],
         }))
 
-        with patch.object(commit_mod, "_run_post_commit_pipeline") as mock_helper:
+        captured: dict[str, object] = {}
+
+        def fake_post_commit_pipeline(**kwargs):
+            captured["result"] = kwargs["result"].copy()
+            return {"status": "continued", "steps_completed": kwargs["result"]["steps_completed"]}
+
+        with patch.object(commit_mod, "_run_post_commit_pipeline", side_effect=fake_post_commit_pipeline) as mock_helper:
             result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
 
-        assert result["status"] == "held"
-        assert result["commit_sha"] == head_sha
-        assert not continuation_path.exists()
-        mock_helper.assert_not_called()
+        assert result["status"] == "continued"
+        assert mock_helper.call_count == 1
+        resumed = captured["result"]
+        assert resumed["commit_sha"] == head_sha
+        assert resumed["receipt_decision"] == "COMMIT_GO_HOLD_PUSH"
 
     def test_has_fresh_connector_review_requires_current_head_commit(self):
         pr_data = {
@@ -6246,7 +6503,7 @@ class TestPhaseATrackedPacketReuse:
         assert result["status"] == "converged"
         content = locked.read_text(encoding="utf-8")
         assert content.count("Phase-A-Lock: LOCKED") == 1
-        assert "bridge-converged" in content
+        assert "Phase B (locked, implementing)" in content
 
 
 class TestFindTrackedPacket:

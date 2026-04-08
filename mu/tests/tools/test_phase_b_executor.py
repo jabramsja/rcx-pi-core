@@ -813,8 +813,11 @@ class TestBridgeRenderAssociation:
             idx = call_args.index("--job-id")
             assert call_args[idx + 1] == "phase-b-r1-abc12345"
 
-    def test_run_bridge_review_uses_configured_reviewer(self, tmp_path):
+    def test_run_bridge_review_uses_configured_reviewer(self, tmp_path, monkeypatch):
         """Phase B bridge review must honor executor-configured reviewer backend."""
+        # Unset env override so the test exercises config-driven reviewer selection,
+        # not the global RCX_BRIDGE_REVIEWER_OVERRIDE env var.
+        monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
         config_dir = tmp_path / "mu" / "tools" / "executors"
         config_dir.mkdir(parents=True)
         (config_dir / "executor_config.json").write_text(
