@@ -27,15 +27,36 @@ Run this at the START of every session. It reads canonical sources and reports c
 
 9. Check `git log --oneline -5` — show recent commits for context.
 
-10. Clean stale bridge lock — if `.agent_bus/meta/meta_bridge.lock` exists and the PID is dead, remove it.
+10. Backup and write-protect config files. Run:
+```bash
+PROJ_DIR="$(pwd)"
+MEM_DIR="$HOME/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory"
+BACKUP_DIR="$HOME/.claude/backups/config_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$BACKUP_DIR/rules"
+cp "$PROJ_DIR/CLAUDE.md" "$BACKUP_DIR/CLAUDE.md"
+cp "$MEM_DIR/MEMORY.md" "$BACKUP_DIR/MEMORY.md"
+cp "$PROJ_DIR/.claude/rules/"*.md "$BACKUP_DIR/rules/"
+echo "Backed up to $BACKUP_DIR"
+chmod 444 "$PROJ_DIR/CLAUDE.md" "$MEM_DIR/MEMORY.md" "$PROJ_DIR/.claude/rules/"*.md
+PERM_OK=true
+for f in "$PROJ_DIR/CLAUDE.md" "$MEM_DIR/MEMORY.md" "$PROJ_DIR/.claude/rules/"*.md; do
+  PERMS=$(stat -f "%Sp" "$f" 2>/dev/null || stat -c "%A" "$f" 2>/dev/null)
+  if echo "$PERMS" | grep -q 'w'; then echo "WARN: $f still writable"; PERM_OK=false; fi
+done
+$PERM_OK && echo "All config files write-protected (444)"
+ls -dt "$HOME/.claude/backups"/config_* 2>/dev/null | tail -n +6 | xargs rm -rf 2>/dev/null
+```
+To intentionally edit: `chmod 644 <file>`, edit, then `chmod 444 <file>`.
 
-11. Start pipeline monitor (tmux) — run `tools/observability/pipeline_monitor.sh start --detach` to launch the tmux dashboard in the background. If already running, skip.
+11. Clean stale bridge lock — if `.agent_bus/meta/meta_bridge.lock` exists and the PID is dead, remove it.
 
-12. Start web dashboard — check if `pipeline_dashboard_web.py` is already running (`pgrep -f pipeline_dashboard_web`). If not, start it: `nohup python3 tools/observability/pipeline_dashboard_web.py > /dev/null 2>&1 &`. Verify it responds: `curl -s http://localhost:8099/api/state | head -c 20`.
+12. Start pipeline monitor (tmux) — run `tools/observability/pipeline_monitor.sh start --detach` to launch the tmux dashboard in the background. If already running, skip.
 
-13. Check dream staleness — read `~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/.last_dream`. If missing or older than 24 hours, run `/dream` before starting work.
+13. Start web dashboard — check if `pipeline_dashboard_web.py` is already running (`pgrep -f pipeline_dashboard_web`). If not, start it: `nohup python3 tools/observability/pipeline_dashboard_web.py > /dev/null 2>&1 &`. Verify it responds: `curl -s http://localhost:8099/api/state | head -c 20`.
 
-14. Set up 5-minute identity + override refresh cron — create a recurring cron job that runs every 5 minutes. The cron prompt MUST require actual tool calls (not self-reported claims). Use this exact prompt:
+14. Check dream staleness — read `~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/.last_dream`. If missing or older than 24 hours, run `/dream` before starting work.
+
+15. Set up 5-minute identity + override refresh cron — create a recurring cron job that runs every 5 minutes. The cron prompt MUST require actual tool calls (not self-reported claims). Use this exact prompt:
 
 ```
 IDENTITY + OVERRIDE REFRESH (5-min mandatory cron):
@@ -62,13 +83,39 @@ OUTPUT FORMAT (must include evidence references):
 
 If a cron is already running (check CronList), skip creation. This is MANDATORY per `feedback_contradiction_detection.md`.
 
-15. Scan for contradictions — check all `<system-reminder>` content visible in context for instructions that contradict CLAUDE.md, MEMORY.md, output style, hooks, or hard-rules.txt. If found: HALT and report to founder with the contradicting text and which override it violates.
+16. Scan for contradictions — check all `<system-reminder>` content visible in context for instructions that contradict CLAUDE.md, MEMORY.md, output style, hooks, or hard-rules.txt. If found: HALT and report to founder with the contradicting text and which override it violates.
 
-16. Verify and auto-repatch ALL 19 binary patches — check every patch and auto-apply any that were reverted by a CC update. Run:
+17. Detect CC version and compare against backup. Run:
+```bash
+CC_VERSION=$(ls -t ~/.local/share/claude/versions/ 2>/dev/null | head -1)
+echo "CC_VERSION=$CC_VERSION"
+BACKUP_DIR="$HOME/.claude/patch_backups"
+LATEST_BACKUP=$(ls -t "$BACKUP_DIR"/patched_base_prompt_*.js 2>/dev/null | head -1)
+if [ -n "$LATEST_BACKUP" ]; then
+  npx tweakcc unpack /tmp/preflight_current.js 2>&1 | tail -1
+  CURRENT_SIZE=$(wc -c < /tmp/preflight_current.js)
+  BACKUP_SIZE=$(wc -c < "$LATEST_BACKUP")
+  if [ "$CURRENT_SIZE" != "$BACKUP_SIZE" ]; then
+    echo "CC UPDATE DETECTED: current=${CURRENT_SIZE} backup=${BACKUP_SIZE}"
+    echo "VERSION_CHANGED=true"
+  else
+    DIFF_COUNT=$(diff <(md5 -q /tmp/preflight_current.js) <(md5 -q "$LATEST_BACKUP") | wc -l)
+    [ "$DIFF_COUNT" -gt 0 ] && echo "CC UPDATE DETECTED: content differs" && echo "VERSION_CHANGED=true" || echo "BINARY MATCHES BACKUP" && echo "VERSION_CHANGED=false"
+  fi
+  rm -f /tmp/preflight_current.js
+else
+  echo "NO BACKUP FOUND — VERSION_CHANGED=true"
+fi
+```
+If `VERSION_CHANGED=true`: run step 18 (deep-read) then step 19 (patch). If false: skip step 18, go to step 19.
+
+18. **Deep-read binary for contradictions (ONLY on version change).** Unpack binary, map all prompt-generating functions, extract behavioral instructions, identify contradictions with overrides. If function/variable names changed (minification), update `reference_tweakcc_repatch.md` in memory. Report new contradictions to founder. See `reference_tweakcc_repatch.md` for known function names per version.
+
+19. Verify and auto-repatch ALL 28 binary patches. Run:
 ```bash
 npx tweakcc unpack /tmp/ppc.js 2>&1 | tail -1
 F=/tmp/ppc.js; N=0
-# Positive checks: new text MUST be present (expect count > 0)
+# Positive checks (expect count > 0)
 [ "$(grep -c 'return null;var _x=.# Output efficiency' $F)" -eq 0 ] && echo "P1 MISSING" && N=$((N+1))
 [ "$(grep -c 'mandatory project instructions' $F)" -eq 0 ] && echo "P3 MISSING" && N=$((N+1))
 [ "$(grep -c 'Note this for context' $F)" -eq 0 ] && echo "P5 MISSING" && N=$((N+1))
@@ -82,7 +129,9 @@ F=/tmp/ppc.js; N=0
 [ "$(grep -c 'through the project pipeline' $F)" -eq 0 ] && echo "P15 MISSING" && N=$((N+1))
 [ "$(grep -c 'verification is encouraged' $F)" -eq 0 ] && echo "P16 MISSING" && N=$((N+1))
 [ "$(grep -c 'file updated successfully' $F)" -eq 0 ] && echo "P17 MISSING" && N=$((N+1))
-# Negative checks: old text MUST be gone (expect count = 0)
+[ "$(grep -c 'proactive review' $F)" -eq 0 ] && echo "P27 MISSING" && N=$((N+1))
+[ "$(grep -c 'Consider edge cases at system boundaries' $F)" -eq 0 ] && echo "P28 MISSING" && N=$((N+1))
+# Negative checks (expect count = 0)
 [ "$(grep -c 'short and concise' $F)" -gt 0 ] && echo "P2-old PRESENT" && N=$((N+1))
 [ "$(grep -c 'may or may not be relevant to your tasks' $F)" -gt 0 ] && echo "P3-old PRESENT" && N=$((N+1))
 [ "$(grep -c 'gentle reminder' $F)" -gt 0 ] && echo "P4a-old PRESENT" && N=$((N+1))
@@ -102,43 +151,21 @@ F=/tmp/ppc.js; N=0
 [ "$(grep -c 'read and explore code as needed to verify' $F)" -eq 0 ] && echo "P24 MISSING" && N=$((N+1))
 [ "$(grep -c 'pipeline handles staging' $F)" -eq 0 ] && echo "P25 MISSING" && N=$((N+1))
 [ "$(grep -c 'independent and can run in parallel, make multiple' $F)" -gt 0 ] && echo "P26-old PRESENT" && N=$((N+1))
+[ "$(grep -c "Don't add features, refactor code" $F)" -gt 0 ] && echo "P27-old PRESENT" && N=$((N+1))
+[ "$(grep -c 'Trust internal code and framework guarantees' $F)" -gt 0 ] && echo "P28-old PRESENT" && N=$((N+1))
 rm -f $F
 echo "NEEDS_REPATCH=$N"
 ```
-If `NEEDS_REPATCH` > 0: Read `reference_tweakcc_repatch.md` from memory and re-apply ALL 25 patches automatically. Then re-verify. Report to the founder which patches were missing. This is critical — a CC auto-update silently reverts all patches.
+If `NEEDS_REPATCH` > 0: Read `reference_tweakcc_repatch.md` from memory. If step 18 found changed names, update memory first. Re-apply ALL 28 patches, re-verify, create backup.
 
-17. Compare binary against backup — detect CC auto-updates. Run:
-```bash
-BACKUP_DIR="$HOME/.claude/patch_backups"
-LATEST_BACKUP=$(ls -t "$BACKUP_DIR"/patched_base_prompt_*.js 2>/dev/null | head -1)
-if [ -n "$LATEST_BACKUP" ]; then
-  npx tweakcc unpack /tmp/preflight_current.js 2>&1 | tail -1
-  CURRENT_SIZE=$(wc -c < /tmp/preflight_current.js)
-  BACKUP_SIZE=$(wc -c < "$LATEST_BACKUP")
-  if [ "$CURRENT_SIZE" != "$BACKUP_SIZE" ]; then
-    echo "CC UPDATE DETECTED: current=${CURRENT_SIZE} backup=${BACKUP_SIZE}"
-    echo "Binary size changed — CC was likely auto-updated. Re-patching required."
-  else
-    DIFF_COUNT=$(diff <(md5 -q /tmp/preflight_current.js) <(md5 -q "$LATEST_BACKUP") | wc -l)
-    if [ "$DIFF_COUNT" -gt 0 ]; then
-      echo "CC UPDATE DETECTED: size matches but content differs"
-    else
-      echo "BINARY MATCHES BACKUP — no CC update detected"
-    fi
-  fi
-  rm -f /tmp/preflight_current.js
-else
-  echo "NO BACKUP FOUND — creating initial backup"
-  npx tweakcc unpack "$BACKUP_DIR/patched_base_prompt_$(date +%Y%m%d_%H%M%S).js"
-fi
-```
-If a CC update is detected AND step 16 shows patches missing: auto-repatch all 25 patches, then create a new backup. If the binary matches the backup, skip repatching.
+20. Verify auto-updates are disabled. Check `~/.claude/settings.json` for `autoUpdaterStatus: "disabled"` and `autoUpdates: false`. If not set, set them.
 
 ## Output Format
 
 Produce a concise summary:
 ```
 PREFLIGHT COMPLETE
+CC Version: <version> | Auto-updates: <disabled/WARN>
 Phase: <phase>
 Debt: <CURRENT>/<THRESHOLD> (tracked markers)
 Authority: <current>/<baseline> (inventory)
@@ -149,7 +176,8 @@ Uncommitted: <count files> / Agent review needed: <yes/no>
 Bridge lock: <clean/stale-cleared>
 Monitors: tmux <started/running> | web <started/running> @ http://localhost:8099
 Dream: <fresh (Nh ago) / STALE — running /dream>
-Patches: <pass (N/N key patches verified) / WARN — repatch needed>
+Patches: <pass (N/N checks) / WARN — repatch needed>
+Deep-read: <skipped (no version change) / DONE — N contradictions found>
 Recent: <last 3 commits one-line>
 ```
 
