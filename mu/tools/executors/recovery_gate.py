@@ -6,19 +6,24 @@ Import constraints: only stdlib + executor_common.
 """
 from __future__ import annotations
 
+import atexit
+import fcntl
+import hashlib
 import json
 import os
 import re
+import shutil
 import signal
 import sqlite3
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple, Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -620,6 +625,12 @@ _DANGEROUS_GIT_PATTERNS: list[re.Pattern[str]] = [
     re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+pull\b"),
     re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+clone\b"),
     re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+stash\b"),
+    # Layer 3b: git -c key=val allows config injection on ANY subcommand
+    # (e.g. git -c core.pager=evil diff, git -c credential.helper=!sh status).
+    # Block all git -c forms — Tier 3 recovery never needs runtime config.
+    # Uses _GIT_GLOBAL_OPT to catch -c after preceding global options
+    # (e.g. git --no-pager -c alias.status=!sh status).
+    re.compile(rf"\bgit{_GIT_GLOBAL_OPT}\s+-c\b"),
 ]
 
 # Layer 1: Shell metacharacters that enable command chaining, piping, subshells,
@@ -667,33 +678,227 @@ _DANGEROUS_PACKAGE_MANAGERS: frozenset[str] = frozenset({
     "apk", "pacman", "conda", "mamba", "pipx", "poetry", "uv",
 })
 
-# Layer 8b: Python modules that provide network capabilities.
+# Layer 8b: Python stdlib modules that either reach the network or
+# execute arbitrary host code when invoked via ``python -m``.  Bridge R3
+# Finding 2: ``python3 -m trace --trace script.py`` and ``python3 -m pdb
+# script.py`` executed the target script unchecked because Layer 11's
+# ``-m`` short-circuit delegated module safety to this denylist, yet
+# ``trace``/``pdb`` and their execution-capable siblings were absent.
+# The denylist now covers:
+#   - Network modules (http/smtp/ftp/xmlrpc/urllib)
+#   - Package managers (pip/ensurepip)
+#   - Script-execution stdlib modules: ``trace``, ``pdb``, ``runpy``,
+#     ``zipapp``, ``timeit``, ``cProfile``/``profile``, ``py_compile``,
+#     ``compileall``, ``venv``.  All of these accept a script/module
+#     argument and execute it (``cProfile``/``trace``/``pdb``/``profile``
+#     wrap the target in an instrumented runner; ``runpy`` runs a file
+#     or module as ``__main__``; ``timeit`` parses a code string;
+#     ``zipapp`` can bundle arbitrary sources into an executable archive;
+#     ``py_compile``/``compileall`` write bytecode files; ``venv``
+#     writes a virtualenv tree with activators).
+# Module names are lowercased so entries must match the lowercased form.
 _DANGEROUS_PYTHON_MODULES: frozenset[str] = frozenset({
+    # Network / package-manager modules
     "http.server", "http.client", "smtplib", "ftplib",
     "urllib", "urllib.request", "xmlrpc.server", "xmlrpc.client",
     "simplehttpserver", "pip", "ensurepip",
+    # Script-execution stdlib modules (Bridge R3 Finding 2)
+    "trace", "pdb", "runpy", "zipapp",
+    "timeit", "cprofile", "profile",
+    "py_compile", "compileall", "venv",
 })
 
+# ``-m\s*`` (zero-or-more whitespace) catches both the canonical
+# ``python3 -m trace`` and the short-flag-glued ``python3 -mtrace``
+# form (Python accepts both; the latter would otherwise bypass Layer 8b
+# because the prior ``-m\s+`` regex required at least one space).
 _PYTHON_MODULE_RUN_PATTERN = re.compile(
     r"\b(?:python[23]?(?:\.\d+)?)\s+"
     r"(?:-[^\s]*\s+)*"
-    r"-m\s+(\S+)"
+    r"-m\s*(\S+)"
 )
 
 # Layer 5: Sensitive host paths that should never be read/written by recovery.
+# Uses prefix matching (e.g. /etc/pass) to catch shell globs (/etc/pass*).
+# Covers absolute home paths (/root/.ssh, /home/<user>/.ssh) in addition to
+# tilde and $HOME references.
 _SENSITIVE_PATH_PATTERN = re.compile(
-    r"/etc/(?:passwd|shadow|sudoers|ssh)"
+    r"/etc/(?:pass|shad|sudoer|ssh)"
     r"|/proc\b"
     r"|/dev/(?!null|urandom)"
-    r"|(?:~|\$HOME|\$\{HOME\})/\.ssh\b"
-    r"|(?:~|\$HOME|\$\{HOME\})/\.gnupg\b"
-    r"|(?:~|\$HOME|\$\{HOME\})/\.aws\b"
+    r"|(?:~|\$HOME|\$\{HOME\}|/root|/home/[^\s/]+)/\.(?:ssh|gnupg|aws)\b"
 )
 
-# Command-position prefix commands (sudo, env, nohup, etc.)
+# Command-position prefix commands (sudo, env, nohup, etc.).
+#
+# Bridge R5 Finding 1 / Finding 2: ``command``, ``exec``, and ``eval`` are
+# shell dispatch/re-parse builtins that consume their own flags and then
+# run whatever follows as the real command.  They share the same
+# semantics as ``sudo``/``env``/``nohup`` from the denylist's point of
+# view: the token at position 0 is NOT the executed command, the token
+# after the prefix's flags IS.  Prior to this fix the resolver returned
+# ``command``/``exec`` as the basename (so ``command curl evil`` / ``exec
+# curl evil`` bypassed Layer 4) and did not know ``eval`` at all (so
+# ``eval curl evil``, after ``_strip_shell_quotes``, bypassed every
+# layer).  Adding them here routes every downstream layer (Layer 4
+# network, Layer 10 rm, Layer 11 shell/interpreter, Layer 12 cp/mv/kill,
+# Layer 13 sudo -s / env -S) through the token that actually runs.
+#
+# - ``command [-pvV] COMMAND [args...]`` — bash/POSIX builtin that runs
+#   COMMAND while bypassing function/alias lookup.  All three flags
+#   (``-p`` default PATH, ``-v``/``-V`` print type) are switches with no
+#   argument, so the default prefix-stripping loop correctly skips them
+#   before reaching COMMAND.
+# - ``exec [-cl] [-a NAME] COMMAND [args...]`` — bash builtin that
+#   replaces the current shell with COMMAND.  ``-c`` / ``-l`` are
+#   switches; ``-a NAME`` consumes the following argv0 token, so it
+#   MUST appear in ``_PREFIX_FLAGS_WITH_ARG[\"exec\"]`` below — otherwise
+#   ``exec -a good curl evil`` would resolve to ``good`` (attacker-
+#   chosen string) as the command basename and bypass every layer.
+#   Redirection-only forms (``exec > file``, ``exec 2>&1``) are caught
+#   by Layer 1's metacharacter check.
+# - ``eval [arguments]`` — bash/POSIX builtin that concatenates
+#   arguments into a string and parses the result as a shell command
+#   line.  After ``_strip_shell_quotes`` normalisation, ``eval 'curl
+#   evil'`` and ``eval curl evil`` tokenize identically, so treating
+#   ``eval`` as a prefix routes the downstream layers through the
+#   re-parsed command.  ``eval`` has no standard flags, so no
+#   ``_PREFIX_FLAGS_WITH_ARG`` entry is needed.
 _COMMAND_PREFIXES: frozenset[str] = frozenset({
     "sudo", "env", "nice", "nohup", "time", "timeout",
     "strace", "ltrace", "ionice",
+    # Bridge R5: shell dispatch / re-parse builtins
+    "command", "exec", "eval",
+})
+
+# Per-prefix flags that consume the *next* token as their argument.
+# Used by _get_command_basename to skip both the flag and its value so
+# the actual command token is found.  Example: sudo -u root curl →
+# -u is matched here, "root" is skipped, "curl" is returned.
+# NOTE: All short flags are LOWERCASED because all callers of
+# _get_command_basename pass lowercased tokens.
+_PREFIX_FLAGS_WITH_ARG: dict[str, frozenset[str]] = {
+    "sudo": frozenset({
+        "-u", "--user", "-g", "--group", "-c", "--close-from",
+        "-d", "--chdir", "-h", "--host", "-p", "--prompt",
+        "-r", "--chroot", "-t", "--command-timeout", "--other-user",
+    }),
+    "env": frozenset({
+        "-c", "--chdir", "-u", "--unset",
+    }),
+    "timeout": frozenset({
+        "-s", "--signal", "-k", "--kill-after",
+    }),
+    "nice": frozenset({"-n", "--adjustment"}),
+    "strace": frozenset({
+        "-e", "--trace", "-o", "--output", "-p", "--attach",
+        "-s", "--string-limit",
+    }),
+    "ltrace": frozenset({"-e", "-o", "-p", "-s", "-n", "-f"}),
+    "ionice": frozenset({
+        "-c", "--class", "-n", "--classdata", "-p", "--pid",
+    }),
+    # Bridge R5 Finding 1: ``exec -a NAME COMMAND`` sets argv[0] for
+    # COMMAND.  The resolver must skip both ``-a`` and the NAME token so
+    # the basename lookup reaches COMMAND itself — otherwise
+    # ``exec -a good curl http://evil.com`` resolves to ``good`` and
+    # every downstream layer (Layer 4 network in particular) is
+    # bypassed.  ``command`` and ``eval`` have no arg-consuming flags
+    # in their POSIX/bash forms so no entries are needed for them.
+    "exec": frozenset({"-a"}),
+}
+
+# Layer 13: Prefix-native exec-mode flags.  Bridge R3 Finding 1: the
+# prefix-stripping resolver assumed every prefix flag was either a bare
+# switch or a ``--flag VALUE`` pair whose value was inert (``sudo -u
+# root``, ``env -u VAR``).  Several prefix flags actually spawn a shell
+# or re-parse a string as a full command line, so the resolver loses
+# the real executable instead of reaching it:
+#
+# - ``sudo -s/--shell`` / ``sudo -i/--login`` — run the target user's
+#   shell.  The shell itself IS the executed command; nothing else in
+#   argv is needed to reach a PID.
+# - ``env -S/--split-string STRING`` — env parses STRING as a shell
+#   command line and execs the result.  The command is inside STRING,
+#   not at token position, so Layer 4 / Layer 11 never see it.
+# - ``env -P/--path PATH`` — BSD env resolves the following utility
+#   against a caller-supplied PATH, so basename lookup is meaningless
+#   (the PATH may point at a malicious directory).
+#
+# All four modes execute code that no other layer can inspect.  Tier 3
+# recovery has no legitimate need for any of them; block unconditionally.
+_DANGEROUS_PREFIX_EXEC_FLAGS: dict[str, frozenset[str]] = {
+    "sudo": frozenset({"-s", "--shell", "-i", "--login"}),
+    "env":  frozenset({"-s", "--split-string", "-p", "--path"}),
+}
+
+# Layer 9: Command-composition utilities that execute subcommands.
+# xargs/watch/parallel run arbitrary programs; find -exec/-execdir/-ok/
+# -okdir all run arbitrary commands against matched paths.  Bridge R3
+# Finding 3: ``-execdir`` and ``-okdir`` (GNU find) were not covered by
+# the prior ``-exec``-only regex, so ``find . -execdir curl {} +`` and
+# ``find . -okdir curl {} +`` reached the Tier 3 shell executor.  None
+# of the four forms have legitimate use in Tier 3 recovery.
+_COMMAND_COMPOSITION_PATTERN = re.compile(
+    r"\bxargs\b"
+    r"|\bwatch\s"
+    r"|\bparallel\b"
+    r"|\bfind\b.*\s-(?:exec|ok)(?:dir)?\b"
+)
+
+# Layer 10: Destructive file-system commands — any rm/rmdir/unlink/shred at
+# command position (with or without flags) is blocked.  Tier 3 recovery
+# should never delete files.
+_DANGEROUS_DESTRUCTIVE_COMMANDS: frozenset[str] = frozenset({
+    "rm", "rmdir", "unlink", "shred",
+})
+
+# Layer 11: Shell / interpreter execution — the shell wrapper (Layer 6) and
+# code-exec flag (Layer 7) rules only block ``-c/-e/-p`` forms.  Script-file
+# invocations (``bash poc.sh``, ``python3 poc.py``) and dot-source builtins
+# (``. poc.sh``, ``source poc.sh``) execute arbitrary code without those
+# flags and previously bypassed the denylist (Bridge R1 Finding 2).
+#
+# This layer blocks at command position (after prefix stripping):
+# - Any shell basename (sh, bash, zsh, dash, ksh, csh, tcsh, ...) with or
+#   without arguments.  Tier 3 recovery has no legitimate need to spawn a
+#   shell; even bare ``bash`` is suspicious.
+# - The dot-source builtin tokens ``.`` and ``source``.
+# - Any code interpreter (python/python3, node, ruby, perl, lua, php, ...)
+#   invoked with a positional (non-flag) argument.  ``-m <module>`` pairs
+#   are allowed at this layer because Layer 8b already enforces the
+#   dangerous-module denylist.
+_SHELL_INTERPRETER_BASENAMES: frozenset[str] = frozenset({
+    "sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh",
+    "ash", "mksh", "yash", "fish", "rbash",
+})
+
+_CODE_INTERPRETER_BASENAMES: frozenset[str] = frozenset({
+    "node", "nodejs", "ruby", "perl", "lua", "php", "tclsh",
+    "awk", "gawk", "mawk",
+})
+
+# Dot-source builtins match on the raw token (``.`` has no filesystem
+# basename form); ``source`` is a bash/zsh alias for the same builtin.
+_DOT_BUILTIN_TOKENS: frozenset[str] = frozenset({".", "source"})
+
+# Matches python, python2, python3, python2.7, python3.10, python3.11, etc.
+_PYTHON_BASENAME_PATTERN = re.compile(r"^python(?:[23](?:\.\d+)?)?$")
+
+# Layer 12: File-data movement (cp/mv) and process-signalling (kill/pkill/
+# killall) commands.  Bridge R2 Finding: the prior denylist let
+# ``cp .env /tmp/leak``, ``mv recovery_gate.py /tmp/recovery_gate.py``,
+# ``kill 12345``, and ``pkill -f claude`` reach the Tier 3 shell executor
+# because Layer 10 only covered destructive filesystem commands
+# (rm/rmdir/unlink/shred), not data-exfiltration moves or process kills.
+# Tier 3 recovery has no legitimate need to copy or move repo files, nor
+# to signal other processes — the pipeline supervisor owns process
+# lifecycle and git owns file restoration.  Matching is at command
+# position (prefix-aware) so ``sudo cp``, ``env mv``, ``sudo kill`` are
+# also blocked.
+_DANGEROUS_COPY_MOVE_KILL_COMMANDS: frozenset[str] = frozenset({
+    "cp", "mv",
+    "kill", "pkill", "killall",
 })
 
 MAX_RECOVERY_ITERATIONS = 3
@@ -707,32 +912,96 @@ def _strip_shell_quotes(text: str) -> str:
     return text.replace('"', "").replace("'", "")
 
 
-def _get_command_basename(tokens: list[str]) -> str:
-    """Return the basename of the first command-position token.
+# POSIX shell env-assignment pattern: variable name is
+# ``[A-Za-z_][A-Za-z0-9_]*`` followed by ``=``.  POSIX shells allow zero
+# or more ``NAME=value`` assignments at the start of a simple command,
+# even without an explicit ``env``/``sudo`` prefix.  For example,
+# ``FOO=1 curl http://x`` runs ``curl`` with ``FOO=1`` in its
+# environment — ``FOO=1`` is NOT the command.  Bridge R4 Finding 1:
+# the prefix-stripping resolver only recognised ``KEY=value`` tokens
+# inside an active prefix zone, so bare leading assignments resolved
+# to the assignment token itself as the command basename and bypassed
+# every downstream denylist layer (network, shell, rm, cp, interpreter,
+# etc.).  Matching a POSIX-valid identifier (not just any ``=``) avoids
+# false positives on literal filenames or arguments that happen to
+# contain ``=`` (e.g. ``./a=b``).
+_ENV_ASSIGNMENT_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
-    Skips known prefix commands (sudo, env, nohup, etc.) AND their
-    arguments (flags like ``-u root``, env assignments like ``FOO=1``)
-    so that ``sudo -u root curl ...`` returns ``curl``.
+
+def _is_env_assignment(token: str) -> bool:
+    """Return True if ``token`` is a POSIX ``NAME=value`` env assignment.
+
+    Used by the prefix-stripping state machines (``_resolve_command_start``
+    and ``_uses_dangerous_prefix_exec_mode_normalized``) to consume leading
+    env assignments — both bare (``FOO=1 curl ...``) and prefix-wrapped
+    (``sudo FOO=1 curl ...``, ``env FOO=1 pip ...``) — so the resolver
+    reaches the real command instead of stopping at the assignment.
+    """
+    return bool(_ENV_ASSIGNMENT_PATTERN.match(token))
+
+
+def _resolve_command_start(tokens: list[str]) -> int:
+    """Return the index of the first non-prefix command-position token.
+
+    Encodes the prefix-stripping state machine shared by
+    ``_get_command_basename`` and ``_get_command_body_tokens``.  Returns
+    ``len(tokens)`` if every token is consumed by prefix handling (e.g.
+    bare ``sudo`` with no trailing command).
     """
     i = 0
-    in_prefix = False
+    current_prefix: str | None = None
     while i < len(tokens):
         token = tokens[i]
-        basename = token.rsplit("/", 1)[-1]
-        if basename in _COMMAND_PREFIXES:
-            in_prefix = True
+        # POSIX shell: leading ``NAME=value`` assignments precede the real
+        # command (``FOO=1 curl ...`` runs ``curl``).  This check runs
+        # BEFORE the prefix lookup so bare leading assignments (no
+        # ``env``/``sudo`` prefix) are consumed the same way the shell
+        # would consume them.  It also handles mid-zone sudo-style
+        # assignments (``sudo FOO=1 curl ...``) that the prefix-zone
+        # fallback previously caught via the broader ``"=" in token``
+        # check.  Bridge R4 Finding 1: without this, bare leading
+        # assignments resolved to the assignment token itself and every
+        # downstream denylist layer (network/shell/rm/cp/interpreter)
+        # was bypassed.
+        if _is_env_assignment(token):
             i += 1
             continue
-        if in_prefix:
-            # Skip flags and their arguments belonging to the prefix command
+        basename = token.rsplit("/", 1)[-1]
+        if basename in _COMMAND_PREFIXES:
+            current_prefix = basename
+            i += 1
+            continue
+        if current_prefix is not None:
+            # Skip flags belonging to the prefix command itself
             if token.startswith("-"):
-                i += 1
-                # Flags like -u take the next token as argument
-                if i < len(tokens) and not tokens[i].startswith("-") and "=" not in tokens[i]:
-                    i += 1  # skip the flag's argument
-                continue
-            # Skip KEY=VALUE env assignments (e.g., env FOO=1 pip install)
-            if "=" in token:
+                if "=" not in token and i + 1 < len(tokens):
+                    flags = _PREFIX_FLAGS_WITH_ARG.get(current_prefix, frozenset())
+                    if token.startswith("--"):
+                        consumes = token in flags
+                    else:
+                        # Bridge re-entry Finding 1: check EVERY char in a
+                        # combined short-flag bundle, not just the last.
+                        # A reordered bundle like ``sudo -un root curl``
+                        # puts the arg-consuming ``-u`` BEFORE the boolean
+                        # ``-n``; checking only the trailing char (``-n``)
+                        # treated the bundle as non-consuming, leaving the
+                        # next token (the user value ``root``) in place
+                        # and routing it to the command position while
+                        # ``curl`` silently bypassed the denylist.  The
+                        # existing ``-nu`` (u at end) form already matched
+                        # because the last-char check caught ``-u``; any-
+                        # char iteration makes both orderings symmetric,
+                        # aligning with the intent documented in the
+                        # ``test_get_command_basename_flag_arguments``
+                        # ``-nu`` case (``-n`` standalone then ``-u``
+                        # takes arg).  This mirrors the Layer 13
+                        # dangerous-flag iterator pattern at line 1316 ff.
+                        consumes = len(token) >= 2 and any(
+                            f"-{ch}" in flags for ch in token[1:]
+                        )
+                    if consumes:
+                        i += 2  # Skip flag and its argument
+                        continue
                 i += 1
                 continue
             # Skip numeric positional args (e.g., timeout 5, nice -10)
@@ -742,9 +1011,49 @@ def _get_command_basename(tokens: list[str]) -> str:
                 continue
             except ValueError:
                 pass
-            in_prefix = False
-        return basename
-    return tokens[-1].rsplit("/", 1)[-1] if tokens else ""
+            current_prefix = None
+        return i
+    return len(tokens)
+
+
+def _get_command_basename(tokens: list[str]) -> str:
+    """Return the basename of the first command-position token.
+
+    Skips known prefix commands (sudo, env, nohup, etc.) and their own
+    flags (``-i``, ``-n``, etc.), flag arguments (``-u root``,
+    ``--user root``), env assignments (``FOO=1``), and numeric positional
+    args (``timeout 5``).  Flag-argument skipping uses the per-prefix
+    ``_PREFIX_FLAGS_WITH_ARG`` map to avoid heuristic parsing.
+    """
+    if not tokens:
+        return ""
+    start = _resolve_command_start(tokens)
+    if start >= len(tokens):
+        # Prefix-handling exhausted every token (e.g. ``sudo -u root`` with
+        # no trailing command).  Fall back to the last token's basename so
+        # downstream basename lookups stay bounded.
+        return tokens[-1].rsplit("/", 1)[-1]
+    return tokens[start].rsplit("/", 1)[-1]
+
+
+def _get_command_body_tokens(tokens: list[str]) -> list[str]:
+    """Return the token slice starting at the resolved command position.
+
+    Parallel to ``_get_command_basename`` but preserves the full remaining
+    argv so callers can inspect the command AND its arguments after prefix
+    stripping.  ``env bash -c 'foo'`` returns ``['bash', '-c', "'foo'"]``,
+    ``sudo -u root python3 poc.py`` returns ``['python3', 'poc.py']``.
+
+    Used by the prefix-aware shell-wrapper / script-file detectors (Bridge
+    R1 Findings 1 & 2: prefix commands and script-file invocations must
+    not hide shell/interpreter execution from the denylist).
+    """
+    if not tokens:
+        return []
+    start = _resolve_command_start(tokens)
+    if start >= len(tokens):
+        return []
+    return tokens[start:]
 
 
 def _targets_git_internals(text: str) -> bool:
@@ -771,13 +1080,106 @@ def _uses_network_command_normalized(cmd_lower: str) -> bool:
 
 
 def _uses_shell_wrapper_normalized(cmd_lower: str) -> bool:
-    """Return True if the command-position token is a shell with -c.
+    """Return True if the command at command position is a shell with -c.
 
-    Uses ``match`` anchored to start of string (after quote stripping)
-    so that ``echo "bash -c"`` is NOT matched — only actual shell
-    wrapper invocations at command position.
+    Resolves the command position via ``_get_command_body_tokens`` so that
+    prefix commands (``env bash -c 'foo'``, ``sudo bash -c 'foo'``,
+    ``sudo -u root bash -c 'foo'``) cannot hide the shell wrapper behind
+    the prefix.  Without the prefix strip the previous ``match`` at string
+    start matched ``bash`` at position 0 only and every prefix-wrapped form
+    bypassed the check (Bridge R1 Finding 1).
+
+    The stripped body is re-joined before regex matching so that the
+    existing ``_SHELL_WRAPPER_PATTERN`` (which requires ``-c`` after the
+    shell name) still works, and so that ``echo "bash -c"`` is still NOT
+    matched — ``echo`` has no prefix-strip semantics, its body starts at
+    ``echo``, and the shell regex does not match there.
     """
-    return bool(_SHELL_WRAPPER_PATTERN.match(cmd_lower))
+    tokens = cmd_lower.split()
+    body = _get_command_body_tokens(tokens)
+    if not body:
+        return False
+    body_str = " ".join(body)
+    return bool(_SHELL_WRAPPER_PATTERN.match(body_str))
+
+
+def _is_python_basename(basename: str) -> bool:
+    """Return True if the basename is any python interpreter variant."""
+    return bool(_PYTHON_BASENAME_PATTERN.match(basename))
+
+
+def _uses_shell_or_interpreter_execution_normalized(cmd_lower: str) -> bool:
+    """Return True if the command invokes a shell, dot-source builtin, or
+    code interpreter at command position (Layer 11, Bridge R1 Finding 2).
+
+    Catches execution paths that Layers 6 and 7 miss:
+
+    - ``bash poc.sh`` / ``sh poc.sh`` — shell with a script-file argument
+      (Layer 6 only checks ``-c``).
+    - ``. poc.sh`` / ``source poc.sh`` — dot-source builtin that reads a
+      script file into the current shell context.
+    - ``python3 poc.py`` / ``node index.js`` — interpreter with a script
+      file argument (Layer 7 only checks ``-c/-e/-p``).
+
+    Command-position resolution runs through ``_get_command_body_tokens``
+    so prefix commands (``env bash poc.sh``, ``sudo python3 poc.py``) are
+    covered too.
+
+    Interpreter + ``-m <module>`` is NOT blocked by this layer — the
+    dangerous-module denylist in ``_uses_dangerous_python_module_normalized``
+    (Layer 8b) enforces the module scope.  Bare flag-only forms like
+    ``python3 --version`` remain allowed.
+    """
+    tokens = cmd_lower.split()
+    body = _get_command_body_tokens(tokens)
+    if not body:
+        return False
+
+    first = body[0]
+
+    # Dot-source builtin — raw-token equality (``.`` has no basename form).
+    if first in _DOT_BUILTIN_TOKENS:
+        return True
+
+    basename = first.rsplit("/", 1)[-1]
+
+    # Shell basename at command position is always blocked in Tier 3 —
+    # bare ``bash``, ``bash poc.sh``, ``bash -c ...``, ``sh script.sh``.
+    if basename in _SHELL_INTERPRETER_BASENAMES:
+        return True
+
+    # Code interpreter at command position with a non-flag positional
+    # argument.  ``-m <module>`` and ``-m<module>`` (glued) forms hand off
+    # to module invocation mode (module denylist enforced separately by
+    # Layer 8b).  Pure-flag forms (``python3 --version``, ``python3 -h``)
+    # and bare ``python3`` are allowed.
+    if basename in _CODE_INTERPRETER_BASENAMES or _is_python_basename(basename):
+        idx = 1
+        while idx < len(body):
+            arg = body[idx]
+            if arg == "-m" or (arg.startswith("-m") and len(arg) > 2):
+                # ``-m <module> [args...]`` or the short-flag-glued
+                # ``-m<module> [args...]`` form is module invocation, not
+                # a script-file invocation.  Python accepts both spellings
+                # (``python3 -mjson.tool data.json`` is equivalent to
+                # ``python3 -m json.tool data.json``), and Layer 8b's
+                # ``_PYTHON_MODULE_RUN_PATTERN`` already handles both via
+                # its ``-m\s*(\S+)`` regex — so dangerous glued forms like
+                # ``python3 -mpip install evil`` and ``python3 -mtrace
+                # script.py`` remain blocked upstream by the dangerous-
+                # module denylist.  Everything after the ``-m`` (or glued
+                # module name) is the module's own argv — Layer 11 must
+                # not re-parse it as a script positional, otherwise safe
+                # invocations like ``python3 -m pytest tests/``,
+                # ``python3 -mpytest tests/`` or ``python3 -mjson.tool
+                # data.json`` would be blocked.
+                return False
+            if arg.startswith("-"):
+                idx += 1
+                continue
+            # Non-flag positional argument — script file or similar.
+            return True
+    return False
 
 
 def _uses_interpreter_code_exec_normalized(cmd_raw: str) -> bool:
@@ -824,8 +1226,163 @@ def _targets_sensitive_paths(cmd: str) -> bool:
     return bool(_SENSITIVE_PATH_PATTERN.search(cmd))
 
 
+def _uses_command_composition_normalized(cmd_lower: str) -> bool:
+    """Return True if cmd uses xargs/watch/parallel/find-exec composition."""
+    return bool(_COMMAND_COMPOSITION_PATTERN.search(cmd_lower))
+
+
+def _uses_destructive_command_normalized(cmd_lower: str) -> bool:
+    """Return True if the command-position basename is a destructive FS command."""
+    tokens = cmd_lower.split()
+    if not tokens:
+        return False
+    basename = _get_command_basename(tokens)
+    return basename in _DANGEROUS_DESTRUCTIVE_COMMANDS
+
+
+def _uses_copy_move_kill_normalized(cmd_lower: str) -> bool:
+    """Return True if the command-position basename is cp/mv/kill/pkill/killall.
+
+    Layer 12: Tier 3 recovery must not move or copy repo files (exfiltration
+    of secrets, relocation of source files) and must not signal other
+    processes (supervisor/agent disruption).  Prefix-aware via
+    ``_get_command_basename`` so ``sudo cp``, ``env mv``, ``nohup kill``
+    are all caught.
+    """
+    tokens = cmd_lower.split()
+    if not tokens:
+        return False
+    basename = _get_command_basename(tokens)
+    return basename in _DANGEROUS_COPY_MOVE_KILL_COMMANDS
+
+
+def _uses_dangerous_prefix_exec_mode_normalized(cmd_lower: str) -> bool:
+    """Return True if a prefix command uses an exec-mode flag (Layer 13).
+
+    Bridge R3 Finding 1: ``sudo -s``, ``sudo -i``, ``env -S STRING`` and
+    ``env -P PATH`` all execute code that the command-position basename
+    resolver cannot reach — the "command" is either the prefix tool
+    itself running a shell (``sudo -s``) or encoded in a flag argument
+    that the resolver treats as an inert value (``env -S "curl evil"``).
+    Layer 13 scans every token in the prefix zone (before the first
+    non-flag, non-argument command-position token) and blocks the
+    command outright if any token matches a per-prefix dangerous-flag
+    set.
+
+    Handles four token shapes:
+      - Long option: ``--shell`` / ``--split-string`` / ``--path``
+      - Long option with value: ``--split-string=curl`` / ``--path=/tmp``
+      - Short option: ``-s``, ``-i``, ``-p``
+      - Combined / glued short option: ``-ns`` (= ``-n -s``), ``-Scurl``
+        (= ``-S curl``).  Every letter after the leading dash is checked
+        against the dangerous-flag set, so both combination forms are
+        caught.
+
+    Prefix-stripping semantics mirror ``_resolve_command_start`` so that
+    flag-with-arg pairs (``sudo -u user``, ``env -c /tmp``) are skipped
+    correctly and chained prefixes (``sudo env -S ...``) are scanned
+    end-to-end.
+    """
+    tokens = cmd_lower.split()
+    if not tokens:
+        return False
+    i = 0
+    current_prefix: str | None = None
+    while i < len(tokens):
+        token = tokens[i]
+
+        # POSIX shell: leading ``NAME=value`` assignments precede the
+        # real command (``FOO=1 sudo -s`` still invokes sudo).  Consume
+        # them unconditionally so the state machine reaches the prefix
+        # lookup below.  Without this, a bare leading assignment would
+        # trigger the ``current_prefix is None`` early return and
+        # Layer 13 would miss dangerous exec-mode flags entirely
+        # (``FOO=1 sudo -s`` → bypass).  Matches both before the first
+        # prefix AND sudo-style mid-zone assignments (``sudo FOO=1 -s``),
+        # replacing the later ``if "=" in token`` fallback with a single
+        # POSIX-strict identifier check.
+        if _is_env_assignment(token):
+            i += 1
+            continue
+
+        basename = token.rsplit("/", 1)[-1]
+
+        # Enter (or re-enter) the prefix zone when a prefix basename
+        # appears — chained prefixes like ``sudo env nohup ...`` all
+        # contribute their own dangerous-flag sets.
+        if basename in _COMMAND_PREFIXES:
+            current_prefix = basename
+            i += 1
+            continue
+
+        if current_prefix is None:
+            return False
+
+        dangerous = _DANGEROUS_PREFIX_EXEC_FLAGS.get(current_prefix, frozenset())
+
+        # Long option: --flag or --flag=value
+        if token.startswith("--"):
+            bare = token.split("=", 1)[0]
+            if bare in dangerous:
+                return True
+            if "=" not in token and i + 1 < len(tokens):
+                flags = _PREFIX_FLAGS_WITH_ARG.get(current_prefix, frozenset())
+                if token in flags:
+                    i += 2
+                    continue
+            i += 1
+            continue
+
+        # Short option: -s, -si (combined), -Scurl (glued value).
+        # Check every character after the leading dash so combined and
+        # glued forms both route to the dangerous-flag set.
+        if token.startswith("-") and len(token) >= 2:
+            for ch in token[1:]:
+                if f"-{ch}" in dangerous:
+                    return True
+            if "=" not in token and i + 1 < len(tokens):
+                flags = _PREFIX_FLAGS_WITH_ARG.get(current_prefix, frozenset())
+                # Bridge re-entry Finding 1: same any-char-in-bundle
+                # check as ``_resolve_command_start``.  A reordered bundle
+                # like ``sudo -un root -s`` needed the flag-arg pair
+                # ``-u root`` skipped to reach the trailing dangerous
+                # ``-s``; with the old ``f"-{token[-1]}" in flags`` check
+                # only the last char (``-n``) was inspected, the pair was
+                # NOT skipped, and Layer 13 returned False on the
+                # intervening ``root`` positional — bypassing the shell-
+                # flag block.  Matching any arg-consuming flag in the
+                # bundle mirrors the dangerous-flag iterator above and
+                # routes Layer 13 through the real exec-mode flag.
+                if any(f"-{ch}" in flags for ch in token[1:]):
+                    i += 2
+                    continue
+            i += 1
+            continue
+
+        # env KEY=VALUE assignment — stays in the prefix zone.
+        if "=" in token:
+            i += 1
+            continue
+
+        # Numeric positional (``timeout 30``, ``nice -5``) — still in
+        # the prefix zone; the next non-numeric token is the command.
+        try:
+            float(token)
+            i += 1
+            continue
+        except ValueError:
+            pass
+
+        # Non-flag, non-numeric, non-assignment token → command position
+        # reached.  Layer 13 has nothing more to check; downstream layers
+        # (Layer 4, Layer 11, Layer 12) inspect the command itself.
+        return False
+
+    return False
+
+
 def _is_dangerous_command(cmd: str) -> bool:
-    """Check if a shell command matches any of the 8 denylist layers.
+    """Check if a shell command matches the 13 denylist layers.
 
     All pattern/token checks run against a quote-stripped normalisation so
     that ``"sh" -c "..."`` or ``"git" push`` cannot bypass word-boundary matching.
@@ -848,6 +1405,11 @@ def _is_dangerous_command(cmd: str) -> bool:
     for pattern in _DANGEROUS_GIT_PATTERNS:
         if pattern.search(normalized_lower):
             return True
+    # Layer 13: prefix-native exec-mode flags (sudo -s/-i, env -S/-P).
+    # Runs EARLY so prefix-encoded execution modes are caught before the
+    # command-basename resolver would have to trust a synthetic target.
+    if _uses_dangerous_prefix_exec_mode_normalized(normalized_lower):
+        return True
     # Layer 4: network egress commands (command-position only)
     if _uses_network_command_normalized(normalized_lower):
         return True
@@ -865,6 +1427,21 @@ def _is_dangerous_command(cmd: str) -> bool:
     if _uses_package_manager_normalized(normalized_lower):
         return True
     if _uses_dangerous_python_module_normalized(normalized_lower):
+        return True
+    # Layer 9: command-composition utilities (xargs, find -exec, watch, parallel)
+    if _uses_command_composition_normalized(normalized_lower):
+        return True
+    # Layer 10: destructive file-system commands (rm, rmdir, unlink, shred)
+    if _uses_destructive_command_normalized(normalized_lower):
+        return True
+    # Layer 11: shell / interpreter execution paths that bypass Layer 6/7
+    # (bash poc.sh, python3 poc.py, . poc.sh, source poc.sh)
+    if _uses_shell_or_interpreter_execution_normalized(normalized_lower):
+        return True
+    # Layer 12: file-data movement (cp/mv) and process-signalling
+    # (kill/pkill/killall) — Bridge R2 Finding: these flowed through the
+    # Tier 3 shell executor unblocked.
+    if _uses_copy_move_kill_normalized(normalized_lower):
         return True
     return False
 
@@ -1351,6 +1928,1191 @@ RECOVERY_LOG_FILE = RECOVERY_LOG_DIR / "recovery_log.json"
 RECOVERY_STATUS_FILE = RECOVERY_LOG_DIR / "recovery_status.json"
 MAX_LOG_ENTRIES = 500
 
+# ---------------------------------------------------------------------------
+# Learning store -- persistent pattern promotion/demotion (Tier B)
+# Design doc: mu/docs/agents/PipelineRecovery.v0.md lines 156-251
+# ---------------------------------------------------------------------------
+
+LEARNED_PATTERNS_FILE = ".agent_bus/recovery/learned_patterns.json"
+# Durable dead-letter directory for deferred syncs that could not acquire
+# the main-repo lock within the finite flush timeout.  Each pending store
+# snapshot is written as a uniquely-named JSON file so the write does NOT
+# require the main-repo lock (per-file atomicity only).  The next successful
+# _sync_to_main_repo drains these files under the lock, folding them into
+# the merged output before the atomic rename, then deletes them.  This is
+# the mechanism that satisfies the Tier B persistence contract (design doc
+# line 172) when the in-memory _pending_main_repo_syncs list would otherwise
+# die with the process — Bridge R9 re-entry Finding 1.
+LEARNED_PATTERNS_INBOX_DIR = ".agent_bus/recovery/learned_patterns.inbox"
+PROMOTION_THRESHOLD = 3        # success count required for promotion
+PROMOTION_WAVE_THRESHOLD = 2   # distinct wave_ids required for promotion
+DEMOTION_LOCK_THRESHOLD = 3    # permanent Tier 3 lock after this many demotions
+EXPIRY_DAYS = 30               # pattern expiry (days since last success)
+CLEANUP_DAYS = 90              # pattern cleanup (days since last update)
+LOCK_TIMEOUT_S = 5             # max wait for main-repo file lock
+FLUSH_LOCK_TIMEOUT_S = 30      # max wait for lock at process exit (atexit flush)
+MIN_FINGERPRINT_LENGTH = 16    # minimum normalized fingerprint length for promotion
+
+# Module-level state for deferred main-repo syncs (lock-timeout fallback).
+# Best-effort in-memory retry between recovery events.  For at-exit
+# durability (when the process cannot wait for the main-repo lock), see
+# LEARNED_PATTERNS_INBOX_DIR and _inbox_write_snapshot().
+_pending_main_repo_syncs: list[tuple[Path, dict]] = []
+
+
+class LearnedMatch(NamedTuple):
+    """Result from check_learned_patterns when a promoted pattern matches."""
+    failure_class: FailureClass
+    tier: int
+    pattern_id: str
+    action: str
+
+
+def _normalize_fingerprint(raw: str) -> str:
+    """Strip whitespace and collapse consecutive whitespace to single spaces.
+
+    Applied at both observation (storage/hashing) and lookup (matching) time
+    to ensure consistent fingerprint comparison.
+    """
+    return " ".join(raw.split())
+
+
+def _extract_classifier_signal(result: dict[str, Any]) -> str:
+    """Replicate classify_failure's signal extraction without classification.
+
+    Extracts stderr, stdout, parses embedded JSON via _parse_json_object,
+    extracts embedded_reason via _summarize_json_value, and returns combined
+    text. This is the same processed signal that classify_failure() inspects
+    at its combined_text variable (lines 122-124).
+    """
+    try:
+        stderr = result.get("stderr", "")
+        stdout = result.get("stdout", "")
+        embedded_stdout = _parse_json_object(stdout)
+        embedded_stderr = _parse_json_object(stderr)
+        embedded_reason = " ".join(
+            part
+            for part in (
+                _summarize_json_value(embedded_stdout),
+                _summarize_json_value(embedded_stderr),
+            )
+            if part
+        )
+        combined_text = " ".join(
+            part for part in (stderr, stdout, embedded_reason)
+            if isinstance(part, str) and part
+        )
+        return combined_text
+    except Exception:
+        return result.get("stderr", "")
+
+
+def _has_avx_support() -> bool:
+    """Check if the CPU supports AVX instructions.
+
+    Returns True on non-x86 platforms (AVX is x86-specific).
+    """
+    import platform
+    machine = platform.machine().lower()
+    if machine not in ("x86_64", "amd64", "i386", "i686"):
+        return True  # non-x86, AVX not applicable
+    if sys.platform == "linux":
+        try:
+            with open("/proc/cpuinfo", "r") as f:
+                cpuinfo = f.read()
+            return "avx" in cpuinfo.lower()
+        except OSError:
+            return True  # can't check, assume present
+    if sys.platform == "darwin":
+        try:
+            proc = subprocess.run(
+                ["sysctl", "-n", "hw.optional.avx1_0"],
+                capture_output=True, text=True, timeout=5)
+            return proc.stdout.strip() == "1"
+        except (subprocess.TimeoutExpired, OSError):
+            return True  # can't check, assume present
+    return True  # unknown platform, assume present
+
+
+def _environment_tags() -> list[str]:
+    """Capture the current machine's environment context.
+
+    Returns a sorted list of tags: [sys.platform] plus optional capability
+    tags ("no-avx", "no-claude-cli") per design doc lines 288-294.
+    """
+    try:
+        tags = [sys.platform]
+        if not _has_avx_support():
+            tags.append("no-avx")
+        if shutil.which("claude") is None:
+            tags.append("no-claude-cli")
+        return sorted(tags)
+    except Exception:
+        return [sys.platform]
+
+
+def _environment_matches(pattern_tags: list[str] | None) -> bool:
+    """Check if the current environment matches a pattern's recorded tags.
+
+    Returns True if pattern_tags is empty/None (backwards compatibility).
+    Returns True on exact set equality with current _environment_tags().
+    Fail-closed: returns False on any exception.
+    """
+    try:
+        if not pattern_tags:
+            return True  # backwards compat: pre-environment patterns are universal
+        current = _environment_tags()
+        return sorted(pattern_tags) == sorted(current)
+    except Exception:
+        return False
+
+
+def _resolve_main_repo_root(repo_root: Path) -> Path:
+    """Return the main repo root for merge-on-sync persistence.
+
+    Uses git rev-parse --git-common-dir to find the common git dir.
+    If repo_root is already the main repo, returns repo_root unchanged.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse",
+             "--path-format=absolute", "--git-common-dir"],
+            capture_output=True, text=True, timeout=10)
+        if proc.returncode != 0:
+            return repo_root
+        common_dir = Path(proc.stdout.strip())
+        # The main repo working tree is the parent of .git
+        main_root = common_dir.parent
+        if main_root == repo_root:
+            return repo_root  # already main repo
+        if main_root.is_dir():
+            return main_root
+        return repo_root
+    except (subprocess.TimeoutExpired, OSError):
+        return repo_root
+
+
+def _merge_stores(base: dict, incoming: dict) -> dict:
+    """Pure-function union merge per design doc line 251.
+
+    All pattern_ids from both inputs are unioned. Same-id conflicts use
+    per-field merge:
+
+    - When both records share the same ``environment_tags`` (or either is
+      empty for backwards compatibility), higher ``success_count`` wins
+      and ties are broken by more recent ``updated_at``.  This is the
+      same-environment cross-worktree case — pooling evidence is safe.
+
+    - When the two records have DIFFERENT non-empty ``environment_tags``,
+      the more recent ``updated_at`` wins regardless of ``success_count``.
+      Environment change is a counter-reset event (design doc lifecycle
+      diagram lines 210–214: "different machine" / "env change" → "Reset
+      counter"), so the latest observation represents the pattern's
+      current era.  Using ``success_count`` as the tiebreaker would
+      resurrect the stale old-environment snapshot with its (higher)
+      pre-reset counter and silently drop the reset that
+      ``observe_outcome`` just performed (Bridge R1 Finding 3).
+
+    ``distinct_wave_ids`` is set-unioned only when both records share the
+    same environment_tags; when environments differ, it is taken from the
+    winning record only (no cross-environment union).
+    """
+    base_patterns = base.get("patterns", {})
+    incoming_patterns = incoming.get("patterns", {})
+    merged_patterns: dict[str, dict] = {}
+
+    all_ids = set(base_patterns.keys()) | set(incoming_patterns.keys())
+    for pid in all_ids:
+        b_rec = base_patterns.get(pid)
+        i_rec = incoming_patterns.get(pid)
+        if b_rec is None:
+            merged_patterns[pid] = dict(i_rec)
+            continue
+        if i_rec is None:
+            merged_patterns[pid] = dict(b_rec)
+            continue
+        # Both exist — per-field merge.
+        b_sc = b_rec.get("success_count", 0)
+        i_sc = i_rec.get("success_count", 0)
+        b_env = b_rec.get("environment_tags", []) or []
+        i_env = i_rec.get("environment_tags", []) or []
+        # "Environments match" covers exact equality plus the backwards
+        # compat case where either side predates environment tagging.
+        envs_match_or_empty = (
+            sorted(b_env) == sorted(i_env) or not b_env or not i_env
+        )
+        if not envs_match_or_empty:
+            # Cross-environment conflict — updated_at is the authoritative
+            # "era" marker.  Deterministic tiebreak on equal timestamps:
+            # incoming wins (treat incoming as the newer-arriving writer).
+            b_ts = b_rec.get("updated_at", "")
+            i_ts = i_rec.get("updated_at", "")
+            if i_ts > b_ts:
+                winner, loser = i_rec, b_rec
+            elif b_ts > i_ts:
+                winner, loser = b_rec, i_rec
+            else:
+                winner, loser = i_rec, b_rec
+        elif b_sc > i_sc:
+            winner, loser = b_rec, i_rec
+        elif i_sc > b_sc:
+            winner, loser = i_rec, b_rec
+        else:
+            # Same-environment tie: break by more recent updated_at.
+            b_ts = b_rec.get("updated_at", "")
+            i_ts = i_rec.get("updated_at", "")
+            if i_ts > b_ts:
+                winner, loser = i_rec, b_rec
+            else:
+                winner, loser = b_rec, i_rec
+        merged_rec = dict(winner)
+        # Safety ratchet fields: always take the strictest value from
+        # BOTH records to prevent a stale high-success snapshot from
+        # resurrecting a demoted or permanently-locked pattern.
+        merged_demotion = max(
+            winner.get("demotion_count", 0),
+            loser.get("demotion_count", 0),
+        )
+        merged_locked = (
+            winner.get("permanently_locked", False)
+            or loser.get("permanently_locked", False)
+        )
+        merged_rec["demotion_count"] = merged_demotion
+        merged_rec["permanently_locked"] = merged_locked
+        if merged_locked:
+            merged_rec["promoted_tier"] = 3
+        elif merged_demotion > 0:
+            # Demotion ratchet: when either record has demotion history,
+            # take the worst (highest-numbered / most-demoted) tier to
+            # prevent a stale high-success snapshot from resurrecting a
+            # demoted pattern back to a lower tier number.
+            w_tier = winner.get("promoted_tier")
+            l_tier = loser.get("promoted_tier")
+            # Treat None as "not promoted" (no tier to ratchet)
+            if w_tier is not None and l_tier is not None:
+                merged_rec["promoted_tier"] = max(w_tier, l_tier)
+            elif l_tier is not None:
+                merged_rec["promoted_tier"] = l_tier
+            # else: winner's tier stands (loser has no tier)
+        # distinct_wave_ids merge is environment-aware
+        w_env = winner.get("environment_tags", [])
+        l_env = loser.get("environment_tags", [])
+        w_waves = winner.get("distinct_wave_ids", [])
+        l_waves = loser.get("distinct_wave_ids", [])
+        if sorted(w_env) == sorted(l_env) or not w_env or not l_env:
+            # Same environment (or backwards-compat empty): set-union
+            merged_rec["distinct_wave_ids"] = sorted(
+                set(w_waves) | set(l_waves)
+            )
+        else:
+            # Different environments: take winner's only
+            merged_rec["distinct_wave_ids"] = list(w_waves)
+        merged_patterns[pid] = merged_rec
+
+    # Metadata: use more recent last_modified
+    base_meta = base.get("metadata", {})
+    incoming_meta = incoming.get("metadata", {})
+    if incoming_meta.get("last_modified", "") > base_meta.get("last_modified", ""):
+        merged_meta = dict(incoming_meta)
+    else:
+        merged_meta = dict(base_meta)
+
+    return {"patterns": merged_patterns, "metadata": merged_meta}
+
+
+def _overlay_ratchet_record(base: dict, incoming: dict) -> dict:
+    """Overlay ``incoming`` record on top of ``base`` with a safety ratchet.
+
+    Same-repo overlay semantics: the incoming (caller's authoritative)
+    snapshot wins for normal scalar fields such as ``action``,
+    ``success_count``, ``failure_count``, ``last_success``, and
+    ``updated_at``.  However, the monotonically-growing safety triad —
+    ``demotion_count``, ``permanently_locked``, and (conditionally)
+    ``promoted_tier`` — must survive stale concurrent writers.
+
+    Field-level rules:
+
+    - ``demotion_count``: always ``max(base, incoming)``.  ``dc`` is
+      append-only in the live code (``observe_outcome`` only
+      increments it); any decrease in the incoming view is stale.
+
+    - ``permanently_locked``: always ``base OR incoming``.  Once a
+      pattern is permanently locked, no stale writer may unlock it.
+
+    - ``promoted_tier``: tricky.  Unlike ``dc`` and ``locked``, tier is
+      NOT monotonic — ``observe_outcome`` legitimately re-promotes a
+      demoted pattern back to tier 1 after enough fresh successes, and
+      legitimately demotes it back later.  Unconditional ``max`` would
+      freeze the tier at the worst value ever seen and block every
+      re-promotion, which breaks the live failure-recovery loop.
+
+      We only pin the tier when the caller's view is provably stale on
+      demotion state — i.e. when ``incoming.dc < base.dc``.  Because
+      ``dc`` is append-only, this inequality uniquely identifies a
+      writer that failed to observe a demotion already on disk.  For
+      ``incoming.dc == base.dc`` (same demotion view, legitimate
+      re-promotion or concurrent writer that agrees) and for
+      ``incoming.dc > base.dc`` (caller is demoting further, strictly
+      ahead of disk), the caller's tier is authoritative.
+
+      When the merged record ends up ``permanently_locked``, the tier
+      is forced to 3 regardless of staleness — a locked pattern must
+      not be addressable.
+
+    Reason: repairs Bridge R5 Finding 12 / R9 re-entry Finding 1 (same
+    ``pattern_id`` stale concurrent overlay erasing a recorded
+    demotion) without regressing ``observe_outcome``'s single-writer
+    re-promotion loop, which the earlier unconditional-``max`` ratchet
+    broke (see ``test_permanent_lock_after_3_demotions``).  The
+    cross-worktree ``_merge_stores`` path uses a different policy (it
+    has environment tags and an updated_at tie-break and is re-entered
+    only on linked-worktree sync) — do not conflate the two.
+    """
+    merged = dict(incoming)
+    base_dc = base.get("demotion_count", 0)
+    incoming_dc = incoming.get("demotion_count", 0)
+    merged_dem = max(base_dc, incoming_dc)
+    merged_locked = (
+        base.get("permanently_locked", False)
+        or incoming.get("permanently_locked", False)
+    )
+    merged["demotion_count"] = merged_dem
+    merged["permanently_locked"] = merged_locked
+    # distinct_wave_ids: environment-aware merge, mirroring
+    # ``_merge_stores`` semantics exactly.
+    #
+    # - Same environment (or either side empty for backwards compat):
+    #   set-union, so concurrent same-pattern writers with different
+    #   wave attributions each contribute to the cumulative set.
+    #   Without this union, the later overlay save drops the prior
+    #   writer's wave evidence (Bridge R8 Finding 2: same-repo
+    #   overlay merge drops same-ID success and wave evidence under
+    #   stale concurrent writers).
+    #
+    # - Different non-empty environments: take ``incoming`` only
+    #   (already set by ``merged = dict(incoming)`` above).  This is
+    #   the counter-reset path — ``observe_outcome`` resets the
+    #   pattern when the environment changes (see
+    #   ``test_environment_change_resets_counters``), so the base
+    #   record on disk is from a prior "era" whose wave attributions
+    #   do NOT carry forward.  Unconditional union would resurrect
+    #   the stale old-environment wave list and silently invert the
+    #   reset.
+    base_env = base.get("environment_tags", []) or []
+    incoming_env = incoming.get("environment_tags", []) or []
+    envs_match_or_empty = (
+        sorted(base_env) == sorted(incoming_env) or not base_env or not incoming_env
+    )
+    if envs_match_or_empty:
+        base_waves = base.get("distinct_wave_ids", []) or []
+        incoming_waves = incoming.get("distinct_wave_ids", []) or []
+        merged["distinct_wave_ids"] = sorted(set(base_waves) | set(incoming_waves))
+    # else: merged["distinct_wave_ids"] already holds incoming's list
+    # from the ``merged = dict(incoming)`` at the top of the function.
+    if merged_locked:
+        # Locked pattern: force lowest (strictest) tier so it never
+        # exits the permanently_locked state via a stale caller.
+        merged["promoted_tier"] = 3
+    elif incoming_dc < base_dc:
+        # Stale-writer detection: caller observed a dc lower than disk,
+        # which is only possible if they missed a demotion already
+        # recorded.  Treat their tier as untrusted and keep the
+        # on-disk tier to prevent resurrection.  Treat None as "no
+        # tier to ratchet".
+        b_tier = base.get("promoted_tier")
+        if b_tier is not None:
+            merged["promoted_tier"] = b_tier
+        # else: base has no tier — incoming's tier (already in merged)
+        # stands; there's nothing to ratchet against.
+    # else: incoming_dc >= base_dc — caller saw at least as many
+    # demotions as disk, so their tier change (either demoting further
+    # or re-promoting after enough successes) is authoritative and the
+    # incoming tier (already in merged) stands unchanged.
+    return merged
+
+
+def _validate_pattern_record(record: dict) -> bool:
+    """Check that a pattern record has required fields."""
+    if not isinstance(record, dict):
+        return False
+    if not isinstance(record.get("pattern_id"), str):
+        return False
+    if not isinstance(record.get("fingerprint"), str):
+        return False
+    if not isinstance(record.get("failure_class"), str):
+        return False
+    return True
+
+
+def _empty_store() -> dict:
+    """Return an empty learning store with metadata."""
+    return {
+        "patterns": {},
+        "metadata": {"last_modified": datetime.now(timezone.utc).isoformat()},
+    }
+
+
+def _load_learning_store(repo_root: Path) -> dict:
+    """Load learned_patterns.json with merge-on-sync from main repo.
+
+    Reads worktree copy, and if in a linked worktree also reads the main
+    repo copy, merging via _merge_stores(). Returns empty store on any error.
+    """
+    def _read_store(path: Path) -> dict | None:
+        try:
+            if not path.exists():
+                return None
+            raw = path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                return None
+            if not isinstance(data.get("patterns"), dict):
+                return None
+            # Validate and filter individual records
+            valid_patterns = {}
+            for pid, rec in data["patterns"].items():
+                if not _validate_pattern_record(rec):
+                    continue
+                # Defaults for backwards compatibility
+                if "environment_tags" not in rec:
+                    rec["environment_tags"] = []
+                if "distinct_wave_ids" not in rec:
+                    rec["distinct_wave_ids"] = []
+                valid_patterns[pid] = rec
+            data["patterns"] = valid_patterns
+            if "metadata" not in data:
+                data["metadata"] = {"last_modified": ""}
+            return data
+        except (json.JSONDecodeError, ValueError, KeyError, OSError) as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to read learning store at %s: %s", path, exc)
+            return None
+
+    worktree_path = repo_root / LEARNED_PATTERNS_FILE
+    worktree_store = _read_store(worktree_path)
+
+    main_root = _resolve_main_repo_root(repo_root)
+    main_store = None
+    if main_root != repo_root:
+        main_path = main_root / LEARNED_PATTERNS_FILE
+        main_store = _read_store(main_path)
+
+    if worktree_store is None and main_store is None:
+        return _empty_store()
+    if worktree_store is None:
+        return main_store  # type: ignore[return-value]
+    if main_store is None:
+        return worktree_store
+    return _merge_stores(worktree_store, main_store)
+
+
+def _save_learning_store(repo_root: Path, store: dict) -> None:
+    """Write learned_patterns.json with merge-on-sync to main repo.
+
+    Uses atomic temp-file-plus-os.rename(). Main repo write is serialized
+    via fcntl.flock(). On lock timeout, defers sync to _pending_main_repo_syncs.
+
+    Durability contract (Bridge Round 1 Finding — same-repo lock-timeout
+    in-memory-only loss window).  When the caller is operating directly
+    on the main repo (``main_root == repo_root``) there is no separate
+    worktree copy to serve as a durable fallback, so a failed
+    ``_sync_to_main_repo`` (lock-open failure, lock acquisition timeout,
+    or mid-critical-section OSError) would leave the snapshot only in
+    the in-memory ``_pending_main_repo_syncs`` list.  That list dies
+    with the process on crash/SIGKILL before the ``atexit`` flush
+    runs, silently losing the learned pattern and violating the
+    Tier B persistence contract (design doc line 172: "synced to main
+    repo before worktree teardown").
+
+    Fix: on the same-repo path, whenever the normal sync fails, write
+    a durable dead-letter inbox snapshot via ``_inbox_write_snapshot``.
+    The inbox file is a uniquely-named JSON blob under
+    ``LEARNED_PATTERNS_INBOX_DIR`` and requires NO main-repo lock (each
+    file is independent, collision-free via ``uuid4()``), so the
+    fallback cannot itself deadlock on the lock-timeout path.  The
+    next successful ``_sync_to_main_repo`` from any process drains the
+    inbox under the lock, folds every snapshot into the merged output
+    via ``_overlay_ratchet_record`` (which is idempotent when the
+    inbox snapshot and the caller store contain the same record), and
+    deletes the drained files after the atomic rename.  A process
+    crash between the inbox write and the next sync leaves the
+    snapshot durably on disk for the following process to recover.
+
+    The linked-worktree branch (``main_root != repo_root``) already
+    writes the worktree copy atomically BEFORE calling
+    ``_sync_to_main_repo``, so that worktree copy is the durable
+    fallback — no inbox pre-write is required on that branch.  Adding
+    one would be redundant because the worktree path is a
+    per-worktree single-writer file that cannot race and is already
+    recoverable via the next load/sync cycle.
+    """
+    global _pending_main_repo_syncs
+    store.setdefault("metadata", {})["last_modified"] = datetime.now(timezone.utc).isoformat()
+
+    def _atomic_write(path: Path, data: dict) -> None:
+        os.makedirs(path.parent, exist_ok=True)
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(
+            json.dumps(data, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        os.rename(str(tmp_path), str(path))
+
+    # Determine main repo root before any writes — needed to decide
+    # whether the worktree path IS the shared main path.
+    main_root = _resolve_main_repo_root(repo_root)
+
+    if main_root != repo_root:
+        # Linked worktree: write local copy (single-writer safe), then
+        # sync to main repo with lock-serialized read-merge-write.
+        try:
+            worktree_path = repo_root / LEARNED_PATTERNS_FILE
+            _atomic_write(worktree_path, store)
+        except OSError as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to write learning store (worktree): %s", exc)
+            return
+
+    # Sync to main repo (or same repo) with lock-serialized write.
+    # For linked worktrees: full _merge_stores so cross-worktree patterns are
+    # preserved with conflict resolution (higher success_count wins).
+    # For same-repo: overlay merge — incoming patterns overwrite same-ID
+    # existing patterns (the caller's modifications are authoritative), but
+    # patterns only in existing (from concurrent writers) are preserved.
+    # Full _merge_stores would be wrong here: it picks the record with higher
+    # success_count, which undoes intentional resets (e.g., env-change counter
+    # reset in observe_outcome where success_count drops from 2 to 1).
+    overlay = (main_root == repo_root)
+    synced = _sync_to_main_repo(
+        main_root, store, blocking=False, overlay=overlay,
+    )
+
+    # Same-repo durability fallback: the normal sync deferred (lock
+    # timeout / open failure / mid-critical-section OSError) and there
+    # is no worktree-side copy on this branch, so the only remaining
+    # copy would be ``_pending_main_repo_syncs`` — which is in-memory
+    # only.  Write a durable dead-letter inbox snapshot now so a crash
+    # before the next sync or the ``atexit`` flush cannot lose the
+    # observation.  The inbox write is best-effort: if it also fails
+    # (e.g., directory unwriteable) the learning store gracefully
+    # degrades to best-effort in-memory retry — recovery is
+    # non-load-bearing and must never crash the pipeline.
+    if not synced and main_root == repo_root:
+        _inbox_write_snapshot(main_root, store)
+
+
+# ---------------------------------------------------------------------------
+# Durable dead-letter inbox (Bridge R9 re-entry Finding 1)
+# ---------------------------------------------------------------------------
+# Problem: ``_flush_pending_syncs`` is the at-process-exit last-resort sync.
+# If the main-repo lock is held past ``FLUSH_LOCK_TIMEOUT_S``, the previous
+# design re-enqueued the pending store to the in-memory
+# ``_pending_main_repo_syncs`` list and returned.  The process then exited
+# with the list still populated, so the Tier B learned patterns were never
+# persisted to disk — the data died with the process despite having a
+# perfectly good worktree copy in scope at flush time.  This broke the
+# Tier B persistence contract (design doc line 172: "synced to main repo
+# before worktree teardown").
+#
+# Fix: a durable on-disk dead-letter inbox.  When the flush-path lock
+# attempt fails, each pending store snapshot is written as a uniquely-named
+# JSON file in ``{main_root}/.agent_bus/recovery/learned_patterns.inbox/``.
+# Writing a uniquely-named file does NOT require the main-repo lock (each
+# file is independent), so the inbox write cannot deadlock and is atomic
+# via temp-file-plus-``os.rename()``.  The next successful
+# ``_sync_to_main_repo`` call — from any process in any worktree — drains
+# the inbox under the lock, folds every snapshot into the merged output
+# before the atomic rename, then deletes the drained inbox files.  Data is
+# durably on disk between flush and the next sync, so a process exit after
+# flush-timeout does not lose learned patterns.
+
+def _inbox_dir(main_root: Path) -> Path:
+    """Return the dead-letter inbox directory under ``main_root``."""
+    return main_root / LEARNED_PATTERNS_INBOX_DIR
+
+
+def _inbox_write_snapshot(main_root: Path, store: dict) -> bool:
+    """Atomically write ``store`` as a uniquely-named inbox snapshot file.
+
+    No lock required: each call produces a unique filename via ``uuid4()``,
+    so concurrent writers cannot collide.  The write is atomic (temp-file
+    plus ``os.rename()``) so a crash mid-write cannot leave a truncated
+    snapshot for the drain path to choke on.
+
+    Returns True on success, False on OSError.  Caller should treat failure
+    as a best-effort degradation — the learning store cannot crash the
+    recovery path.
+    """
+    try:
+        inbox = _inbox_dir(main_root)
+        os.makedirs(str(inbox), exist_ok=True)
+        # Monotonic-ish prefix for drain ordering + uuid4 for uniqueness.
+        # Use perf_counter_ns for tight ordering across multiple deferrals
+        # in the same process; uuid4 keeps cross-process collisions away.
+        name = f"{time.time_ns():020d}-{uuid.uuid4().hex}.json"
+        final_path = inbox / name
+        tmp_path = inbox / f".{name}.tmp"
+        tmp_path.write_text(
+            json.dumps(store, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        os.rename(str(tmp_path), str(final_path))
+        return True
+    except (OSError, TypeError, ValueError) as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Failed to write learning-store inbox snapshot at %s: %s",
+            main_root, exc)
+        return False
+
+
+def _inbox_read_snapshots(main_root: Path) -> list[tuple[Path, dict]]:
+    """Read all inbox snapshot files for ``main_root``.
+
+    Returns a list of ``(path, store)`` tuples.  Files that are corrupt,
+    truncated, partially-written, or have unexpected schema are skipped —
+    the drain path must never crash the sync.  Caller is responsible for
+    deleting the files after the merged output has been successfully
+    written.
+
+    Ordered by filename (which embeds ``time.time_ns()``) so older
+    snapshots are merged first — the per-field merge in ``_merge_stores``
+    is associative, but ordering gives deterministic behavior on equal
+    timestamps.
+    """
+    inbox = _inbox_dir(main_root)
+    try:
+        if not inbox.is_dir():
+            return []
+        entries = sorted(inbox.iterdir(), key=lambda p: p.name)
+    except OSError:
+        return []
+
+    snapshots: list[tuple[Path, dict]] = []
+    for path in entries:
+        # Skip the in-flight temp files from atomic writes.
+        name = path.name
+        if name.startswith(".") or not name.endswith(".json"):
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except (OSError, json.JSONDecodeError, ValueError):
+            # Truncated or not-yet-complete write — skip this cycle;
+            # the next drain will retry.  Do NOT delete: the file may
+            # still be in the middle of an atomic rename from another
+            # process.
+            continue
+        if not isinstance(data, dict) or not isinstance(
+            data.get("patterns"), dict
+        ):
+            # Malformed — the file is valid JSON but not a store shape.
+            # Delete so it doesn't re-poison every subsequent drain.
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            continue
+        snapshots.append((path, data))
+    return snapshots
+
+
+def _inbox_delete_snapshots(paths: list[Path]) -> None:
+    """Delete a batch of inbox snapshot files after successful drain.
+
+    Tolerates concurrent deletion (another drain may have already removed
+    the file) and other per-file errors — the goal is best-effort cleanup.
+    Orphaned inbox files are harmless: they will be re-merged on the next
+    drain and eventually cleaned up then.
+    """
+    for path in paths:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def _sync_to_main_repo(
+    main_root: Path, store: dict, *, blocking: bool = False,
+    overlay: bool = False,
+) -> bool:
+    """Sync learning store to main repo with file-lock serialization.
+
+    When overlay=False (default, for cross-worktree sync), uses full
+    _merge_stores with conflict resolution.  When overlay=True (for
+    same-repo sync), incoming patterns overwrite same-ID existing patterns
+    while preserving patterns only in the existing store.
+
+    Returns True on success, False on failure/timeout.
+    """
+    global _pending_main_repo_syncs
+    main_path = main_root / LEARNED_PATTERNS_FILE
+    lock_path = Path(str(main_path) + ".lock")
+
+    try:
+        os.makedirs(main_path.parent, exist_ok=True)
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+    except OSError as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Failed to open lockfile %s: %s", lock_path, exc)
+        _pending_main_repo_syncs.append((main_root, dict(store)))
+        return False
+
+    acquired = False
+    try:
+        if blocking:
+            # Use a finite timeout even for "blocking" calls to prevent
+            # indefinite hangs at process exit (Bridge R3 Finding 3).
+            deadline = time.monotonic() + FLUSH_LOCK_TIMEOUT_S
+            while time.monotonic() < deadline:
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                    break
+                except (IOError, OSError):
+                    time.sleep(0.1)
+        else:
+            # Non-blocking retry loop with timeout
+            deadline = time.monotonic() + LOCK_TIMEOUT_S
+            while time.monotonic() < deadline:
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                    break
+                except (IOError, OSError):
+                    time.sleep(0.1)
+
+        if not acquired:
+            import logging
+            timeout_used = FLUSH_LOCK_TIMEOUT_S if blocking else LOCK_TIMEOUT_S
+            logging.getLogger(__name__).warning(
+                "Lock timeout (%ds) for main-repo sync at %s; deferring",
+                timeout_used, main_path)
+            _pending_main_repo_syncs.append((main_root, dict(store)))
+            return False
+
+        # Read current main repo copy, merge, write
+        existing = None
+        try:
+            if main_path.exists():
+                raw = main_path.read_text(encoding="utf-8")
+                data = json.loads(raw)
+                if isinstance(data, dict) and isinstance(data.get("patterns"), dict):
+                    existing = data
+        except (json.JSONDecodeError, ValueError, OSError):
+            existing = None
+
+        # Drain pending snapshots for this main_root BEFORE computing the
+        # merged output.  Bridge R4 Finding 2: previously the pending list
+        # was filtered post-write without being applied, so a same-repo
+        # save that timed out and appended a snapshot to
+        # ``_pending_main_repo_syncs`` would have that snapshot silently
+        # dropped on the next successful save — any patterns unique to
+        # the deferred snapshot (not present in the caller's later
+        # ``store``) were permanently lost.  Folding the pending
+        # snapshots in here ensures the post-write filter is honest: it
+        # only removes entries that are actually represented in the
+        # merged output that just went to disk.
+        pending_for_root = [
+            (r, s) for r, s in _pending_main_repo_syncs
+            if r == main_root
+        ]
+
+        # Drain the durable dead-letter inbox for this main_root.  Any
+        # snapshots that a previous flush-path lock timeout pushed to
+        # disk (Bridge R9 re-entry Finding 1) are folded into the merged
+        # output alongside the in-memory pending entries.  We read them
+        # BEFORE the merge and delete them AFTER the atomic rename — if
+        # the write fails, the files stay on disk and the next drain
+        # retries.  Ordered by filename (monotonic ns prefix) so
+        # deterministic on equal-timestamp conflicts.
+        inbox_snapshots = _inbox_read_snapshots(main_root)
+
+        if overlay:
+            # Same-repo overlay order (oldest → newest): inbox snapshots
+            # (durable carry-over from previous flush timeouts) are the
+            # oldest, then in-memory pending snapshots (deferred from
+            # earlier saves in THIS process), then any on-disk state
+            # from concurrent/prior successful writes, and finally the
+            # caller's current ``store`` — the authoritative latest
+            # snapshot, which wins on pattern_id conflicts for scalar
+            # fields (action, counters, timestamps).
+            #
+            # Safety ratchet (Bridge R5 Finding 12 / R9 re-entry
+            # Finding 1): for every same-ID conflict we pass the pair
+            # through ``_overlay_ratchet_record`` so that
+            # ``demotion_count``, ``permanently_locked``, and
+            # ``promoted_tier`` take the strictest value across both
+            # sides.  Without this ratchet, a stale writer running
+            # after an earlier demotion or permanent lock would
+            # overwrite those fields via ``dict.update`` and resurrect
+            # the pattern to a higher-trust tier — exactly the defect
+            # reproduced by the Phase B R9 re-entry repro script.
+            merged_patterns: dict[str, Any] = {}
+            sources: list[dict[str, Any]] = []
+            for _ipath, inbox_store in inbox_snapshots:
+                sources.append(inbox_store.get("patterns", {}))
+            for _r, pending_store in pending_for_root:
+                sources.append(pending_store.get("patterns", {}))
+            if existing is not None:
+                sources.append(existing.get("patterns", {}))
+            sources.append(store.get("patterns", {}))
+            for source in sources:
+                for pid, rec in source.items():
+                    if pid in merged_patterns:
+                        merged_patterns[pid] = _overlay_ratchet_record(
+                            merged_patterns[pid], rec,
+                        )
+                    else:
+                        merged_patterns[pid] = dict(rec)
+            fallback_meta = (
+                existing.get("metadata", {}) if existing is not None else {}
+            )
+            merged = {
+                "patterns": merged_patterns,
+                "metadata": store.get("metadata", fallback_meta),
+            }
+        else:
+            # Cross-worktree: full field-level union via _merge_stores.
+            # Associative, so fold-left over (existing, store, *pending,
+            # *inbox) produces a deterministic merged result regardless
+            # of insertion order.
+            if existing is not None:
+                merged = _merge_stores(existing, store)
+            else:
+                merged = dict(store)
+            for _r, pending_store in pending_for_root:
+                merged = _merge_stores(merged, pending_store)
+            for _ipath, inbox_store in inbox_snapshots:
+                merged = _merge_stores(merged, inbox_store)
+
+        merged.setdefault("metadata", {})["last_modified"] = (
+            datetime.now(timezone.utc).isoformat()
+        )
+
+        # Atomic write
+        tmp_path = main_path.with_suffix(".tmp")
+        tmp_path.write_text(
+            json.dumps(merged, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        os.rename(str(tmp_path), str(main_path))
+
+        # Atomic rename succeeded — NOW it is safe to delete the inbox
+        # files we folded in.  If deletion fails for some entries, they
+        # will be re-merged harmlessly on the next drain.
+        _inbox_delete_snapshots([p for p, _s in inbox_snapshots])
+
+        # Successful sync — remove the pending entries we just absorbed
+        # into the merged output.  Safe now because ``pending_for_root``
+        # was folded into ``merged`` above; post-write filter no longer
+        # silently discards data.
+        _pending_main_repo_syncs = [
+            (r, s) for r, s in _pending_main_repo_syncs
+            if r != main_root
+        ]
+        return True
+
+    except OSError as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Failed to sync learning store to main repo: %s", exc)
+        if not blocking:
+            _pending_main_repo_syncs.append((main_root, dict(store)))
+        return False
+    finally:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            os.close(lock_fd)
+        except OSError:
+            pass
+
+
+def _flush_pending_syncs() -> None:
+    """Drain _pending_main_repo_syncs at process exit (atexit handler).
+
+    Pre-merges all deferred stores for the same main_root before syncing
+    once per root. This prevents earlier entries from being dropped when
+    _sync_to_main_repo removes all matching entries on success.
+
+    Uses a bounded blocking lock (``FLUSH_LOCK_TIMEOUT_S``) to prevent
+    indefinite hangs at process exit (Bridge R3 Finding 3).  When the
+    lock cannot be acquired within that bound, the deferred store is
+    written to the durable dead-letter inbox
+    (``LEARNED_PATTERNS_INBOX_DIR``) via ``_inbox_write_snapshot`` — the
+    next successful ``_sync_to_main_repo`` call from any process drains
+    the inbox under the lock and folds every snapshot into the merged
+    output before the atomic rename.  This is what satisfies the Tier B
+    persistence contract (design doc line 172) when the in-memory
+    ``_pending_main_repo_syncs`` list would otherwise die with the
+    process — Bridge R9 re-entry Finding 1.
+    """
+    global _pending_main_repo_syncs
+    try:
+        # Group and pre-merge all pending stores by main_root so a single
+        # sync per root contains all deferred patterns.
+        grouped: dict[str, tuple[Path, dict]] = {}
+        for main_root, store in _pending_main_repo_syncs:
+            key = str(main_root)
+            if key in grouped:
+                _, existing = grouped[key]
+                grouped[key] = (main_root, _merge_stores(existing, store))
+            else:
+                grouped[key] = (main_root, dict(store))
+
+        # Clear the pending list before syncing — _sync_to_main_repo will
+        # not find (or remove) stale entries.
+        _pending_main_repo_syncs = []
+
+        for _key, (main_root, merged_store) in grouped.items():
+            if _sync_to_main_repo(
+                main_root, merged_store, blocking=True,
+            ):
+                continue
+            # Sync failed (lock timeout or OSError).  ``_sync_to_main_repo``
+            # may have re-appended this main_root's store to
+            # ``_pending_main_repo_syncs`` on the lock-timeout path — that
+            # re-enqueue is an in-memory best-effort that dies with the
+            # process and does NOT satisfy the Tier B persistence
+            # contract.  Durably persist to the dead-letter inbox so the
+            # next successful ``_sync_to_main_repo`` (from any process in
+            # any worktree) merges the snapshot into the main repo store.
+            if _inbox_write_snapshot(main_root, merged_store):
+                # The on-disk copy is the durable source of truth now.
+                # Remove any in-memory re-enqueue ``_sync_to_main_repo``
+                # just added for this root — keeping both would double-
+                # merge the same data on the next sync (harmless but
+                # wasteful) and would also cause the subsequent re-flush
+                # to re-write an already-persisted snapshot.
+                _pending_main_repo_syncs = [
+                    (r, s) for r, s in _pending_main_repo_syncs
+                    if r != main_root
+                ]
+            else:
+                # Inbox write also failed — best-effort degradation, keep
+                # the in-memory re-enqueue (if any) so a later in-process
+                # event can retry.  Do NOT raise: the learning store is
+                # a best-effort optimization layer, not a load-bearing
+                # dependency.  If the re-enqueue was not performed by
+                # ``_sync_to_main_repo`` (OSError path with
+                # ``blocking=True``), re-append here ourselves so the
+                # flush-side guarantee "nothing silently vanishes"
+                # still holds.
+                already_enqueued = any(
+                    r == main_root for r, _s in _pending_main_repo_syncs
+                )
+                if not already_enqueued:
+                    _pending_main_repo_syncs.append(
+                        (main_root, merged_store),
+                    )
+    except Exception:
+        pass  # Never mask other exit behavior
+
+
+atexit.register(_flush_pending_syncs)
+
+
+def check_learned_patterns(
+    repo_root: Path, result: dict[str, Any],
+) -> Optional[LearnedMatch]:
+    """Pre-classification override from the learning store.
+
+    Matches promoted patterns against the first 80 chars of the classifier's
+    extracted signal (not raw stderr). Requires step match + fingerprint
+    substring match + environment match. Returns None on no match or error
+    (fail-closed to static classifier).
+    """
+    try:
+        store = _load_learning_store(repo_root)
+        lookup_signal = _normalize_fingerprint(
+            _extract_classifier_signal(result)[:80]
+        )
+        # Use executor name as fallback when step is missing — prevents
+        # distinct executor surfaces from collapsing into the same scope.
+        # Final fallback must match ``attempt_recovery`` at line 3519 (and
+        # the parallel sites at :1590 and :3505) which all use ``"unknown"``
+        # for the no-step/no-executor case; any other literal here silently
+        # breaks the learned-override lookup because recorded patterns are
+        # keyed off ``step="unknown"`` but would be looked up with ``""``.
+        # (Bot review PR #751 Comment 2 — P2: align missing-step fallback
+        # with attempt_recovery scope key.)
+        result_step = result.get("step") or result.get("executor", "unknown")
+        now = datetime.now(timezone.utc)
+
+        # Collect all matching patterns, then select the strongest match
+        # (longest fingerprint = most specific, then highest success_count).
+        best_match: Optional[LearnedMatch] = None
+        best_fp_len = -1
+        best_success = -1
+
+        for pid, pattern in store.get("patterns", {}).items():
+            # Skip non-promoted patterns (tier > 1 means not promoted to Tier 1)
+            promoted_tier = pattern.get("promoted_tier")
+            if promoted_tier is None or promoted_tier > 2:
+                continue
+            # Skip permanently locked patterns
+            if pattern.get("permanently_locked", False):
+                continue
+            # Check expiry
+            last_success = pattern.get("last_success", "")
+            if last_success:
+                try:
+                    ls_dt = datetime.fromisoformat(last_success)
+                    if ls_dt.tzinfo is None:
+                        ls_dt = ls_dt.replace(tzinfo=timezone.utc)
+                    if (now - ls_dt).days > EXPIRY_DAYS:
+                        continue
+                except (ValueError, TypeError):
+                    continue
+            # Condition 1: step match
+            if pattern.get("step", "") != result_step:
+                continue
+            # Condition 2: fingerprint substring match
+            stored_fp = _normalize_fingerprint(pattern.get("fingerprint", ""))
+            if not stored_fp or stored_fp not in lookup_signal:
+                continue
+            # Condition 3: environment match
+            if not _environment_matches(pattern.get("environment_tags")):
+                continue
+
+            # All conditions met — candidate match
+            try:
+                fc = FailureClass(pattern["failure_class"])
+            except (ValueError, KeyError):
+                continue
+
+            fp_len = len(stored_fp)
+            success_count = pattern.get("success_count", 0)
+            if (fp_len > best_fp_len) or (
+                fp_len == best_fp_len and success_count > best_success
+            ):
+                best_match = LearnedMatch(
+                    failure_class=fc,
+                    tier=promoted_tier,
+                    pattern_id=pid,
+                    action=pattern.get("action", ""),
+                )
+                best_fp_len = fp_len
+                best_success = success_count
+
+        return best_match
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "check_learned_patterns failed (fail-closed to static): %s", exc)
+        return None
+
+
+def observe_outcome(
+    repo_root: Path,
+    failure_class: FailureClass,
+    action: str,
+    fingerprint: str,
+    outcome: str,
+    wave_id: str,
+    step: str,
+    result: dict[str, Any],
+) -> None:
+    """Record recovery outcome with environment tags, check promotion/demotion.
+
+    Fingerprint is derived from _extract_classifier_signal(result)[:80] by the
+    caller. Environment tags are captured at observation time.
+    """
+    try:
+        store = _load_learning_store(repo_root)
+        normalized_fp = _normalize_fingerprint(fingerprint[:80])
+        pattern_id = hashlib.sha256(
+            f"{failure_class.value}:{action}:{step}:{normalized_fp}".encode()
+        ).hexdigest()[:12]
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        current_env = _environment_tags()
+
+        patterns = store.get("patterns", {})
+        record = patterns.get(pattern_id)
+
+        if record is None:
+            record = {
+                "pattern_id": pattern_id,
+                "fingerprint": normalized_fp,
+                "failure_class": failure_class.value,
+                "action": action,
+                "step": step,
+                "environment_tags": current_env,
+                "success_count": 0,
+                "failure_count": 0,
+                "demotion_count": 0,
+                "promoted_tier": None,
+                "permanently_locked": False,
+                "distinct_wave_ids": [],
+                "last_success": None,
+                "updated_at": now_iso,
+                "created_at": now_iso,
+            }
+        else:
+            # Environment-change counter reset (design doc lines 210-214)
+            stored_env = record.get("environment_tags", [])
+            if stored_env and sorted(stored_env) != sorted(current_env):
+                record["success_count"] = 0
+                record["distinct_wave_ids"] = []
+                # Clear promoted_tier so the pattern must re-earn promotion
+                # on the new environment (an already-promoted pattern must not
+                # be auto-applied on an environment where it hasn't proven itself)
+                record["promoted_tier"] = None
+            record["environment_tags"] = current_env
+
+        record["updated_at"] = now_iso
+
+        if outcome == "success":
+            record["success_count"] = record.get("success_count", 0) + 1
+            record["last_success"] = now_iso
+            # Append wave_id (deduplicated)
+            wave_ids = record.get("distinct_wave_ids", [])
+            if wave_id not in wave_ids:
+                wave_ids.append(wave_id)
+            record["distinct_wave_ids"] = wave_ids
+
+            # Promotion gate
+            sc = record["success_count"]
+            n_waves = len(record["distinct_wave_ids"])
+            fp_len = len(normalized_fp)
+            if (
+                sc >= PROMOTION_THRESHOLD
+                and n_waves >= PROMOTION_WAVE_THRESHOLD
+                and fp_len >= MIN_FINGERPRINT_LENGTH
+                and not record.get("permanently_locked", False)
+            ):
+                record["promoted_tier"] = 1
+        else:
+            record["failure_count"] = record.get("failure_count", 0) + 1
+            # Demotion: if currently promoted, demote one tier
+            current_tier = record.get("promoted_tier")
+            if current_tier is not None and current_tier <= 2:
+                if current_tier == 1:
+                    record["promoted_tier"] = 2
+                elif current_tier == 2:
+                    record["promoted_tier"] = 3
+                record["demotion_count"] = record.get("demotion_count", 0) + 1
+                record["failure_count"] = 0  # reset on demotion
+                # Permanent lock check
+                if record["demotion_count"] >= DEMOTION_LOCK_THRESHOLD:
+                    record["promoted_tier"] = 3
+                    record["permanently_locked"] = True
+
+        patterns[pattern_id] = record
+        store["patterns"] = patterns
+        _save_learning_store(repo_root, store)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "observe_outcome failed (non-fatal): %s", exc)
+
 
 @dataclass
 class RecoveryAttempt:
@@ -1724,8 +3486,39 @@ def attempt_recovery(
     Returns dict with: recovered, action, tier, failure_class, detail, exhausted.
     """
     t0 = time.monotonic()
-    fc = classify_failure(result)
-    tier = tier_for(fc)
+    # Learning store pre-classification override (before static classifier)
+    learned = check_learned_patterns(repo_root, result)
+    if learned is not None:
+        # Terminal-policy outcomes must NEVER be overridden by learned patterns.
+        # classify_failure() is a pure dict-inspection function — safe to call.
+        static_fc = classify_failure(result)
+        static_tier = tier_for(static_fc)
+        if static_tier >= 4:
+            # Hard escalation — ignore learned override entirely.
+            fc, tier = static_fc, static_tier
+        else:
+            fc, tier = learned.failure_class, learned.tier
+            # Validate the promoted tier has a handler for this failure class.
+            # Tier 3 always has a handler (recovery_loop). Tier 4 is escalation.
+            # Tier 1/2 require registered fix functions — without one the pattern
+            # strands at "no_fix_registered" and never demotes (Bridge R3 Finding 2).
+            _has_handler = (
+                tier >= 3
+                or (tier == 1 and fc in _TIER1_FIXES)
+                or (tier == 2 and fc in _TIER2_FIXES)
+            )
+            if not _has_handler:
+                # Observe as failed to trigger demotion, then fall through.
+                _step = result.get("step") or result.get("executor", "unknown")
+                observe_outcome(
+                    repo_root, fc, learned.action,
+                    _extract_classifier_signal(result)[:80],
+                    "failed", wave_id, _step, result,
+                )
+                fc, tier = static_fc, static_tier
+    else:
+        fc = classify_failure(result)
+        tier = tier_for(fc)
     # Use executor name as fallback when step is missing — prevents
     # distinct timeout sites (e.g. phase_b_executor vs commit_executor)
     # from collapsing into the same (wave_id, "unknown", class) bucket
@@ -1789,6 +3582,14 @@ def attempt_recovery(
             detail = str(loop_result["log"][-1].get("detail", "")).strip()
         if not detail:
             detail = _load_recovery_status(repo_root).get("detail", "")
+        # Observe outcome for learning store (Tier 3 exit)
+        t3_outcome = "success" if loop_result.get("recovered") else "failed"
+        observe_outcome(
+            repo_root, fc, "recovery_loop",
+            _extract_classifier_signal(result)[:80],
+            t3_outcome, wave_id,
+            step, result,
+        )
         return _make_result(
             loop_result.get("recovered", False),
             "recovery_loop",
@@ -1815,6 +3616,14 @@ def attempt_recovery(
                 invocation_id=invocation_id)
             attempts.append(asdict(attempt_rec))
             _save_recovery_log(repo_root, attempts)
+            # Observe outcome for learning store (Tier 2 exit)
+            t2_outcome = "success" if fix_result.get("fixed") else "failed"
+            observe_outcome(
+                repo_root, fc, fix_result.get("action", "unknown"),
+                _extract_classifier_signal(result)[:80],
+                t2_outcome, wave_id,
+                step, result,
+            )
             _finish_recovery_status(
                 repo_root,
                 recovered=fix_result.get("fixed", False),
@@ -1867,6 +3676,14 @@ def attempt_recovery(
         invocation_id=invocation_id)
     attempts.append(asdict(attempt))
     _save_recovery_log(repo_root, attempts)
+    # Observe outcome for learning store (Tier 1 exit)
+    t1_outcome = "success" if fix_result.get("fixed") else "failed"
+    observe_outcome(
+        repo_root, fc, fix_result.get("action", "unknown"),
+        _extract_classifier_signal(result)[:80],
+        t1_outcome, wave_id,
+        step, result,
+    )
     _finish_recovery_status(
         repo_root,
         recovered=fix_result.get("fixed", False),
