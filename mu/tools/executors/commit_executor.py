@@ -2078,11 +2078,32 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
         if _has_path_traversal(receipt_path_val):
             errors.append(f"Path traversal in pre_commit_receipt_path: {receipt_path_val}")
 
-    # files_to_stage must be non-empty list of strings
+    # files_to_stage must be a list. It can be EMPTY only when
+    # force_add_files is non-empty (e.g. a `.claude/`-only commit
+    # where build_commit_handoff's auto-move routed every path to
+    # force_add_files via the string-startswith check). A commit with
+    # zero total files (both lists empty) is still an error.
+    #
+    # Rationale: `git add -f` at commit_executor Step 4 correctly
+    # handles force_add_files entries regardless of whether
+    # files_to_stage is also populated. Requiring files_to_stage
+    # non-empty INDEPENDENTLY would forbid an otherwise-valid class
+    # of commits — any wave whose entire scope lives under `.claude/`
+    # (hook/config/skill hardening waves). This was diagnosed during
+    # the block-protected-branch-lexer follow-up wave 2026-04-11 when
+    # the 3-file `.claude/hooks/*` commit could not produce a valid
+    # handoff despite the dirty files being semantically commit-ready.
     fts = handoff.get("files_to_stage")
-    if not isinstance(fts, list) or not fts:
-        errors.append("files_to_stage must be a non-empty list")
-    elif not all(isinstance(f, str) for f in fts):
+    _faf_preview = handoff.get("force_add_files")
+    _has_force_add = isinstance(_faf_preview, list) and len(_faf_preview) > 0
+    if not isinstance(fts, list):
+        errors.append("files_to_stage must be a list")
+    elif not fts and not _has_force_add:
+        errors.append(
+            "files_to_stage or force_add_files must be non-empty "
+            "(commit must have at least one file)"
+        )
+    elif fts and not all(isinstance(f, str) for f in fts):
         errors.append("files_to_stage entries must be strings")
     else:
         for f in fts:

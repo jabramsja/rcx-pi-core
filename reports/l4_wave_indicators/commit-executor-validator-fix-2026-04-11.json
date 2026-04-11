@@ -1,0 +1,24 @@
+{
+  "wave_id": "commit-executor-validator-fix-2026-04-11",
+  "repeat_run_speedup_ratio": 1.111145,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.416005,
+  "repeat_run_raw_seconds": [
+    0.462242,
+    0.416005
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.462242
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.878247
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-04-11T21:28:52Z",
+  "collector_version": "2.2.0"
+}
