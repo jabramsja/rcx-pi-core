@@ -238,14 +238,39 @@ AGENT_MAX_TURNS = {
     "advisor": 30,
 }
 
-# Quick-depth turn cap. Root-cause fix for agent timeout cascade (refs: 2):
-# Agents given 40-45 turns but only 360s wall-clock time exhaust all turns
-# on exploration/analysis and produce prose summaries without the required
-# CHECKED/NOT_CHECKED/VERDICT format sections. Compliance retry then adds
-# another full-budget attempt, pushing total time past the 900s wrapper
-# timeout and killing the entire review process (exit=-1).
-# Cap quick-depth turns at 20 so agents budget time for structured output.
-AGENT_QUICK_MAX_TURNS = 20
+# Per-agent quick-depth turn cap.  Root-cause fix for agent timeout cascade
+# (refs: 2) plus 2026-04-11 follow-up for the adversary-specific turn-budget
+# starvation identified when phase_b v2 hit ``agent_exit_code=3`` via
+# ``max_turns_reached`` at ``{maxTurns:20, turnCount:21}`` on adversary.
+#
+# History:
+#  - Before PR #748 (2026-04-08): no cap, agents got their full AGENT_MAX_TURNS
+#    (40-45) and burned wall-clock on exploration instead of structured output,
+#    causing wrapper-timeout kills (exit=-1).
+#  - PR #748: added a SCALAR cap of 20 uniformly across all agents. Worked for
+#    verifier/expert/structural-proof but starved adversary (research + repro +
+#    structured report cannot fit in 20 turns for a real scope).
+#  - 2026-04-11: converted to per-agent dict so adversary (and fuzzer) can
+#    exceed 20 while verifier/expert/structural-proof stay capped for
+#    structured-output discipline.
+#
+# Design rule: the per-agent cap should match or slightly exceed the standalone
+# runner's default (e.g. ``run_adversary.py:37`` uses ``max_turns=25``, so the
+# orchestrator quick-cap for adversary is ``30`` to give a small margin for
+# parallel-orchestrator overhead and for slightly-larger scopes).  Agents not
+# listed in the dict fall back to ``_QUICK_DEFAULT`` (20) for safety.
+_QUICK_DEFAULT = 20
+AGENT_QUICK_MAX_TURNS = {
+    "verifier":         20,  # validation-heavy; 20 sufficient to write CHECKED/NOT_CHECKED + APPROVE/REQUEST_CHANGES
+    "adversary":        30,  # research + repro + structured report; 20 starves (observed 21>20 on small scopes)
+    "expert":           20,  # simplification review; 20 sufficient
+    "structural-proof": 20,  # proof verification; 20 sufficient
+    "grounding":        20,  # grounding check; 20 sufficient
+    "fuzzer":           25,  # fuzz exploration benefits from slightly more
+    "translator":       20,  # scope check; 20 sufficient
+    "visualizer":       15,  # visualization is quick
+    "advisor":          20,  # advisory pass; 20 sufficient
+}
 
 GROUNDING_HIGH_RISK_PATTERNS = (
     "rcx_pi/selfhost/",
@@ -868,7 +893,40 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
         elif timed_out:
             verdict = "UNKNOWN"
 
-        passed = agent_passed(agent_name, verdict) and is_compliant
+        # Compliance is decoupled from `passed` (2026-04-11 fix).
+        #
+        # Previously: `passed = agent_passed(verdict) and is_compliant` — any
+        # format drift on a positive verdict (verifier APPROVE with missing
+        # CHECKED section, adversary SECURE with missing VECTORS section, etc.)
+        # would flip `passed=False`, and since verifier/adversary/structural-proof
+        # are in HARD_GATE_AGENTS, `blocks_merge` would be set — a single cosmetic
+        # format miss on a substantively positive verdict caused a hard gate
+        # failure and pipeline retry cascade (observed 2026-04-10 learning-store
+        # followup wave: verifier APPROVE + is_compliant=False → retry:adversary
+        # → timeout → hard_gate_failed).
+        #
+        # Why decoupling is safe (verified 2026-04-11):
+        # - `agent_passed()` uses strict membership in AGENT_PASS_VERDICTS,
+        #   so only explicit allowlisted tokens (APPROVE/SECURE/PROVEN/...)
+        #   can make it True. Noise, CANCELLED, UNKNOWN, empty → False.
+        # - `extract_verdict_secure()` strips fenced code blocks, requires
+        #   `Verdict:` markers, and only matches tokens from the agent's
+        #   allowlist — cannot manufacture a positive verdict from noise.
+        # - Cancelled/timeout paths above force verdict to CANCELLED/UNKNOWN,
+        #   which are not in any pass set, so `agent_passed` returns False
+        #   independent of compliance.
+        # - Adversary still has its own evidence-gated block at line below
+        #   (`adversary_blocks_merge`) that explicitly consults `is_compliant`
+        #   and requires machine-checkable proof markers — that is the
+        #   authoritative adversary hard-gate path, not this `passed` flag.
+        # - `is_compliant` still reaches `AgentResult` on return, so the
+        #   orchestrator's compliance retry loop still fires on format drift.
+        #
+        # Net effect: format drift on a positive verdict no longer hard-gate-fails,
+        # but the retry loop still attempts to re-run the agent for clean output.
+        # If retry also returns a positive verdict, the wave proceeds — which
+        # is the correct behavior because the substantive signal is positive.
+        passed = agent_passed(agent_name, verdict)
         is_hard_gate = agent_name in HARD_GATE_AGENTS
         blocks_merge = is_hard_gate and not passed
         infra_error = "AGENT ERROR" in result_text or "AGENT API ERROR" in result_text
@@ -1738,9 +1796,14 @@ Examples:
 
     # Apply depth-scaled turn budgets (root-cause fix for agent timeout cascade).
     # Quick depth caps turns so agents reserve time for structured output.
+    # 2026-04-11: per-agent cap via AGENT_QUICK_MAX_TURNS dict with
+    # ``_QUICK_DEFAULT`` fallback for agents not explicitly listed.
     agent_max_turns = dict(AGENT_MAX_TURNS)
     if depth == "quick":
-        agent_max_turns = {k: min(v, AGENT_QUICK_MAX_TURNS) for k, v in agent_max_turns.items()}
+        agent_max_turns = {
+            k: min(v, AGENT_QUICK_MAX_TURNS.get(k, _QUICK_DEFAULT))
+            for k, v in agent_max_turns.items()
+        }
 
     # User override (--max-turns) takes precedence over depth scaling
     if args.max_turns:
