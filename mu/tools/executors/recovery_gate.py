@@ -2935,7 +2935,14 @@ def check_learned_patterns(
         )
         # Use executor name as fallback when step is missing — prevents
         # distinct executor surfaces from collapsing into the same scope.
-        result_step = result.get("step") or result.get("executor", "")
+        # Final fallback must match ``attempt_recovery`` at line 3519 (and
+        # the parallel sites at :1590 and :3505) which all use ``"unknown"``
+        # for the no-step/no-executor case; any other literal here silently
+        # breaks the learned-override lookup because recorded patterns are
+        # keyed off ``step="unknown"`` but would be looked up with ``""``.
+        # (Bot review PR #751 Comment 2 — P2: align missing-step fallback
+        # with attempt_recovery scope key.)
+        result_step = result.get("step") or result.get("executor", "unknown")
         now = datetime.now(timezone.utc)
 
         # Collect all matching patterns, then select the strongest match
