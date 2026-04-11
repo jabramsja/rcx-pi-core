@@ -2598,14 +2598,45 @@ def test_bridge_turn_wall_time_cap_fails_closed(tmp_path: Path, monkeypatch: pyt
 
 
 def test_bridge_zero_output_watchdog_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reviewer stderr spam must not mask a zero-byte stdout stall."""
+    """Reviewer stderr spam must not mask a zero-byte stdout stall.
+
+    Structural fix 2026-04-11: the noisy_reviewer script now writes stderr
+    BEFORE blocking on stdin.read(), and the watchdog timeout is widened
+    from 200ms to 500ms. The original 200ms timeout was racing with Python
+    interpreter cold-start under heavy CI load: the bridge's zero_output
+    Timer started right after `proc.stdin.close()`, but the child Python
+    process took >200ms (cold-start + import + first-loop-iteration) to
+    write its first stderr line under load — the watchdog killed the
+    process group BEFORE any stderr was captured, leaving raw_text empty
+    and failing both the `startswith("[stderr]\\n")` and `"noise" in raw_text`
+    assertions.
+
+    Two-part structural fix:
+      (1) noisy_reviewer.py writes "noise\\n" to stderr BEFORE sys.stdin.read()
+          — guarantees the parent's stderr_thread captures at least one line
+          BEFORE the watchdog timer even starts, regardless of interpreter
+          cold-start time.
+      (2) BRIDGE_ZERO_OUTPUT_TIMEOUT_S widened 0.2 → 0.5 for headroom on
+          subsequent loop iterations after stdin closes. Still aggressive
+          enough to prove the watchdog actually fires during the noisy loop
+          (the loop runs for 0.02s × 20 = 0.4s total, so a 0.5s timeout
+          guarantees the kill while the loop is still emitting stderr).
+    """
     paths, _ = _setup_bridge_repo(tmp_path)
 
     noisy_agent = paths.repo_root / "noisy_reviewer.py"
     noisy_agent.write_text(
         "import sys\n"
         "import time\n"
+        # Pre-stdin stderr write: the parent's stderr_thread is already
+        # draining (started before stdin write), so this line is captured
+        # BEFORE the zero_output watchdog timer starts (timer starts at
+        # bridge_adapters.py:635, after proc.stdin.close()).
+        "sys.stderr.write('noise\\n')\n"
+        "sys.stderr.flush()\n"
         "sys.stdin.read()\n"
+        # Post-stdin loop: keep writing stderr to prove that aggressive
+        # stderr does NOT prevent the zero_output watchdog from firing.
         "for _ in range(20):\n"
         "    sys.stderr.write('noise\\n')\n"
         "    sys.stderr.flush()\n"
@@ -2621,10 +2652,12 @@ def test_bridge_zero_output_watchdog_fails_closed(tmp_path: Path, monkeypatch: p
         "env": {},
     }
     paths.config_path.write_text(json.dumps(config), encoding="utf-8")
-    # Keep the watchdog aggressive while giving CI enough process-start headroom
-    # for the noisy reviewer to emit at least one stderr line.
-    monkeypatch.setattr(bridge, "BRIDGE_ZERO_OUTPUT_TIMEOUT_S", 0.2)
-    monkeypatch.setattr(bridge, "BRIDGE_MAX_TURN_WALL_TIME_S", 1.0)
+    # Watchdog wide enough to allow at least one post-stdin stderr line
+    # to land while still firing during the noisy loop. The pre-stdin
+    # stderr write (above) already populates raw_text with [stderr]\nnoise\n
+    # before the timer starts, so this widening is defense-in-depth.
+    monkeypatch.setattr(bridge, "BRIDGE_ZERO_OUTPUT_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(bridge, "BRIDGE_MAX_TURN_WALL_TIME_S", 2.0)
 
     job_id = bridge.submit_job(
         paths,

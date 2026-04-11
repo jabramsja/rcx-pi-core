@@ -619,3 +619,183 @@ def test_run_agent_group_skips_retry_for_meaningful_verdict():
         assert by_name["verifier"].verdict == "APPROVE"
 
     asyncio.run(_run())
+
+
+# =============================================================================
+# Regression: 2026-04-11 wave — run-review-turn-budget-and-compliance
+# =============================================================================
+#
+# Two-part fix landed in this wave:
+#  1. Per-agent quick-depth turn budget (was scalar 20, now dict with
+#     adversary=30) — fixes adversary max_turns_reached {maxTurns:20,
+#     turnCount:21} exit=1 observed on 2026-04-10 learning-store followup.
+#  2. Compliance decoupled from `passed` computation at run_review.py:929 —
+#     fixes verifier APPROVE + is_compliant=False → blocks_merge cascade.
+
+
+def test_agent_quick_max_turns_is_per_agent_dict():
+    """Root cause fix: scalar cap starved adversary research+repro+report.
+
+    Before 2026-04-11: ``AGENT_QUICK_MAX_TURNS = 20`` (scalar) applied
+    uniformly. Adversary agent needed 21+ turns for real scopes (observed
+    in learning-store followup wave) — hit ``max_turns_reached`` and
+    exited 1, cascading into hard_gate_failed.
+
+    After: per-agent dict with adversary=30 (matches standalone
+    ``run_adversary.py:37 max_turns=25`` with margin for orchestrator
+    overhead). Agents missing from the dict fall back to ``_QUICK_DEFAULT``.
+    """
+    # Must be a dict (not scalar) so per-agent budgets are tunable.
+    assert isinstance(rr_mod.AGENT_QUICK_MAX_TURNS, dict)
+    # Adversary must have a larger budget than verifier (research workflow
+    # vs. validation-only workflow).
+    assert rr_mod.AGENT_QUICK_MAX_TURNS["adversary"] == 30
+    assert rr_mod.AGENT_QUICK_MAX_TURNS["verifier"] == 20
+    assert rr_mod.AGENT_QUICK_MAX_TURNS["structural-proof"] == 20
+    assert rr_mod.AGENT_QUICK_MAX_TURNS["adversary"] > rr_mod.AGENT_QUICK_MAX_TURNS["verifier"]
+    # Default fallback constant exists and is conservative (20).
+    assert rr_mod._QUICK_DEFAULT == 20  # ANTICHEAT_OK: regression test for private fallback constant — _QUICK_DEFAULT IS the unit under test
+    # Unknown agents fall back to the default via .get().
+    unknown_budget = rr_mod.AGENT_QUICK_MAX_TURNS.get("unknown-agent", rr_mod._QUICK_DEFAULT)  # ANTICHEAT_OK: regression test for fallback semantics
+    assert unknown_budget == 20
+
+
+def test_quick_depth_lookup_applies_per_agent_cap():
+    """Regression: quick-depth rescaling must use the per-agent dict with fallback.
+
+    Simulates the lookup at ``run_review.py:1801-1806`` that caps each
+    agent's ``AGENT_MAX_TURNS`` value with its per-agent quick budget.
+    """
+    baseline = {
+        "verifier": 45,
+        "adversary": 45,
+        "structural-proof": 45,
+        "unknown-agent": 45,  # not in AGENT_QUICK_MAX_TURNS
+    }
+    capped = {
+        k: min(v, rr_mod.AGENT_QUICK_MAX_TURNS.get(k, rr_mod._QUICK_DEFAULT))  # ANTICHEAT_OK: simulating the actual lookup at run_review.py:1801-1806
+        for k, v in baseline.items()
+    }
+    assert capped["verifier"] == 20
+    assert capped["adversary"] == 30  # the critical adversary bump
+    assert capped["structural-proof"] == 20
+    assert capped["unknown-agent"] == 20  # fallback
+
+
+def test_verifier_approve_with_compliance_drift_passes(monkeypatch):
+    """Root cause fix: format drift on APPROVE must not hard-gate-fail.
+
+    Before 2026-04-11: ``passed = agent_passed(verdict) and is_compliant``
+    meant verifier returning APPROVE with missing CHECKED section would
+    flip passed=False. verifier is in HARD_GATE_AGENTS, so blocks_merge
+    was set, forcing pipeline retry cascade (observed 2026-04-10
+    learning-store followup wave: verifier APPROVE + is_compliant=False
+    → retry:adversary → hard_gate_failed).
+
+    After: ``passed = agent_passed(verdict)`` only. ``is_compliant``
+    still surfaces on AgentResult for downstream retry loop, but format
+    drift on a substantively positive verdict does not trigger hard-gate
+    failure.
+    """
+    async def _run() -> None:
+        # Agent returns APPROVE verdict but with missing CHECKED section.
+        # The verdict line is present so extract_verdict_secure returns
+        # "APPROVE", but validate_compliance (monkeypatched below) returns
+        # is_compliant=False to simulate format drift.
+        async def fake_query(*, prompt, options):
+            yield types.SimpleNamespace(
+                result=(
+                    "### Verdict\n"
+                    "VERDICT: APPROVE\n\n"
+                    "LGTM — reviewed the patch and confirmed the change is safe.\n"
+                    "# Missing the required ### CHECKED and ### NOT_CHECKED sections\n"
+                )
+            )
+
+        def fake_validate_compliance(output):
+            # Simulate strict-mode compliance failure: missing CHECKED section.
+            # This is what run_review.validate_compliance would return for
+            # the fake output above under real strict mode.
+            return (False, "STRICT MODE: missing CHECKED section", {})
+
+        monkeypatch.setattr(rr_mod, "query", fake_query)
+        monkeypatch.setattr(rr_mod, "build_query_options", lambda *args, **kwargs: object())
+        monkeypatch.setattr(rr_mod, "validate_compliance", fake_validate_compliance)
+
+        orchestrator = rr_mod.ReviewOrchestrator(
+            ["reports/control_plane/example_packet.md"],
+            depth="quick",
+            verbose=False,
+            use_memory=False,
+            agent_timeout_s=10,
+            single_tail_timeout_s=5,
+            group_stale_timeout_s=10,
+        )
+        result = await orchestrator.run_single_agent("verifier")
+
+        # Substantive verdict extracted from agent output.
+        assert result.verdict == "APPROVE"
+        # Compliance still flagged False — the format drift signal is preserved
+        # for the retry loop and downstream consumers.
+        assert result.is_compliant is False
+        # KEY REGRESSION: passed must be True despite is_compliant=False,
+        # because agent_passed("verifier", "APPROVE") is True and the
+        # 2026-04-11 fix removed the `and is_compliant` conjunction.
+        assert result.passed is True, (
+            f"verifier APPROVE with compliance drift must still pass the "
+            f"hard gate (is_compliant={result.is_compliant}, "
+            f"verdict={result.verdict}, passed={result.passed})"
+        )
+        # Hard gate not triggered: blocks_merge must be False for a passing
+        # verifier, regardless of format drift.
+        assert result.blocks_merge is False
+        # Verifier is classified as a hard gate agent regardless.
+        assert result.is_hard_gate is True
+
+    asyncio.run(_run())
+
+
+def test_adversary_secure_with_compliance_drift_still_passes(monkeypatch):
+    """Companion to verifier test: adversary SECURE + format drift must pass.
+
+    Adversary SECURE verdict + missing CHECKED section should NOT
+    hard-gate-fail because (a) SECURE is in AGENT_PASS_VERDICTS, and
+    (b) adversary_blocks_merge requires ADVERSARY_BLOCKING_VERDICTS
+    (VULNERABLE/NEEDS_HARDENING) to even consider blocking. A SECURE
+    verdict with format drift is not a blocking condition.
+    """
+    async def _run() -> None:
+        async def fake_query(*, prompt, options):
+            yield types.SimpleNamespace(
+                result=(
+                    "### Verdict\n"
+                    "VERDICT: SECURE\n\n"
+                    "No vulnerabilities found. The code is secure.\n"
+                )
+            )
+
+        def fake_validate_compliance(output):
+            return (False, "STRICT MODE: missing CHECKED section", {})
+
+        monkeypatch.setattr(rr_mod, "query", fake_query)
+        monkeypatch.setattr(rr_mod, "build_query_options", lambda *args, **kwargs: object())
+        monkeypatch.setattr(rr_mod, "validate_compliance", fake_validate_compliance)
+
+        orchestrator = rr_mod.ReviewOrchestrator(
+            ["reports/control_plane/example_packet.md"],
+            depth="quick",
+            verbose=False,
+            use_memory=False,
+            agent_timeout_s=10,
+            single_tail_timeout_s=5,
+            group_stale_timeout_s=10,
+        )
+        result = await orchestrator.run_single_agent("adversary")
+
+        assert result.verdict == "SECURE"
+        assert result.is_compliant is False
+        # KEY REGRESSION: passed must be True despite compliance drift.
+        assert result.passed is True
+        # blocks_merge False because SECURE is not a blocking verdict for
+        # adversary and passed=True means is_hard_gate+not passed is False.
+        assert result.blocks_merge is False
