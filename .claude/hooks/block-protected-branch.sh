@@ -5,27 +5,53 @@ set -euo pipefail
 
 CMD=$(jq -r '.tool_input.command // ""' < /dev/stdin 2>/dev/null || echo "")
 
-# 2026-04-11 PR #746 P1 fix (corrected): strip bash comments PER LINE
-# BEFORE flattening newlines. The previous order (flatten first, then
-# strip with `#[^;|&]*$`) was unsafe: a multiline command like
-# "# this is a comment\ngit commit -m x" became
-# "# this is a comment git commit -m x" after `tr '\n' ' '`, then the
-# `#[^;|&]*$` strip removed everything from `#` to end of the flattened
-# string, erasing the `git commit`. Result: BLOCKED stayed false and the
-# protected-branch guard was bypassed. Bot finding: PR #746 review,
-# P1 inline comment at line 14.
+# 2026-04-11 PR #746 P1 fix + PR #754 P1 follow-up: strip bash comments
+# PER LINE BEFORE flattening newlines, AND only match `#` at word
+# boundaries (start of line or after whitespace) — `#` INSIDE a word
+# (e.g. `echo foo#bar`) is literal text, not a comment delimiter in bash.
 #
-# Fix: strip per-line comments with `s/#.*$//g` against the ORIGINAL
-# multiline CMD. sed processes input line by line by default, so `.*$`
-# matches "rest of line" for each line — the comment on line 1 is
-# stripped without affecting subsequent lines. Then flatten newlines
-# and strip quoted strings as before.
+# Prior iterations and their bugs:
+#
+#   v1 (pre-2026-04-11 P746): `CMD_ONELINE=$(tr '\n' ' '); CMD_STRIPPED=$(sed 's/#[^;|&]*(;|&&|\|\||$)//g' ...)`
+#     BUG: flatten first, then strip. A multiline command like
+#     "# this is a comment\ngit commit -m x" flattened to
+#     "# this is a comment git commit -m x", then sed matched from
+#     `#` to end-of-flattened-string (no `;|&` separator present),
+#     erasing `git commit`. BLOCKED stayed false → protected-branch
+#     guard was BYPASSED for multiline input starting with a comment.
+#     Bot finding: PR #746 P1 inline at line 14.
+#     BENEFIT by accident: correctly handled `echo foo#bar; git commit -m x`
+#     because `[^;|&]*` stopped at `;`.
+#
+#   v2 (first PR #754 attempt): `CMD_NOCOMMENTS=$(sed 's/#.*$//g' <<< CMD); CMD_ONELINE=$(tr '\n' ' ' <<< CMD_NOCOMMENTS)`
+#     BUG: strip first, then flatten — correct order for multiline —
+#     BUT the regex `#.*$` treats EVERY `#` as comment start. For
+#     `echo foo#bar; git commit -m x`, the `.*$` match eats
+#     `#bar; git commit -m x`, leaving `echo foo`. BLOCKED stayed
+#     false → protected-branch guard BYPASSED again.
+#     Bot finding: PR #754 P1 inline at line 28 (reproduced on tmp
+#     main-branch repo: hook returned allow for the foo#bar case).
+#
+#   v3 (this fix, 2026-04-11): `CMD_NOCOMMENTS=$(sed -E 's/(^|[[:space:]])#.*$/\1/g' <<< CMD); ...`
+#     Per-line processing (handles v1 multiline bug) AND word-boundary
+#     match (handles v2 foo#bar bug). `(^|[[:space:]])` matches either
+#     beginning-of-line or whitespace before the `#`. `\1` backreference
+#     preserves the matched anchor character (so the preceding
+#     whitespace isn't consumed by the substitution).
+#
+# Verified via 6 smoke tests (see protocol_wave_execution tests or run
+# the inline scenarios in the commit message): (A) multiline comment
+# + git commit BLOCKS, (B) single-line inline comment does NOT block,
+# (C) quoted git commit does NOT block, (D) bare git commit BLOCKS,
+# (F) `git checkout -b pre-commit-fix` does NOT block, (G) NEW
+# `echo foo#bar; git commit -m x` BLOCKS (this is the PR #754 P1
+# regression scenario).
 #
 # NOTE on BSD sed: `[^\n]` inside a character class is NOT a newline
 # exclusion — it's literal `\` and `n` — so `[^\n]*$` would fail to
 # match comments containing the letter `n`. Always use `.*$` against
 # line-oriented input.
-CMD_NOCOMMENTS=$(echo "$CMD" | sed -E 's/#.*$//g')
+CMD_NOCOMMENTS=$(echo "$CMD" | sed -E 's/(^|[[:space:]])#.*$/\1/g')
 
 # Collapse newlines to single line for regex matching (catches multiline git commands)
 CMD_ONELINE=$(echo "$CMD_NOCOMMENTS" | tr '\n' ' ')

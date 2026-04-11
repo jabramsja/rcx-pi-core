@@ -1,24 +1,24 @@
 {
   "wave_id": "pipeline-followups-2026-04-11",
-  "repeat_run_speedup_ratio": 1.254842,
+  "repeat_run_speedup_ratio": 1.207884,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.366498,
+  "step_growth_slope": 0.406611,
   "repeat_run_raw_seconds": [
-    0.459897,
-    0.366498
+    0.491139,
+    0.406611
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.459897
+      "elapsed_seconds": 0.491139
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.826395
+      "elapsed_seconds": 0.89775
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-11T17:34:55Z",
+  "collection_timestamp_utc": "2026-04-11T18:06:10Z",
   "collector_version": "2.2.0"
 }

@@ -2771,8 +2771,19 @@ def test_bridge_turn_timeout_env_override_allows_longer_reviewer_turn(
     )
     assert bridge.run_job(paths, job_id, pause_after_reader=True) == "PAUSED"
 
+    # 2026-04-11 pipeline-followups fix: widened env override from 1.0s to
+    # 5.0s to eliminate CPU-load timing race. The test's purpose is to
+    # verify that `RCX_BRIDGE_MAX_TURN_WALL_TIME_S` env var WIDENS the
+    # default cap — as long as override > default AND override > subprocess
+    # wall time, the test proves its point. The sleepy_reviewer subprocess
+    # takes ~0.2s sleep + ~0.3s Python cold-start + envelope print, so
+    # typical wall time is ~0.5s. The old 1.0s override had only 2x
+    # headroom, which was insufficient under CPU load (observed racing
+    # during pre-push-fast while a commit_executor remediation subprocess
+    # was consuming CPU for 10 min in parallel). 5.0s gives ~10x headroom
+    # and still proves the override widens the cap (default is 0.05s).
     monkeypatch.setattr(bridge, "BRIDGE_MAX_TURN_WALL_TIME_S", 0.05)
-    monkeypatch.setenv("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", "1.0")
+    monkeypatch.setenv("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", "5.0")
 
     assert bridge.continue_job(paths, job_id) == "GO"
 
