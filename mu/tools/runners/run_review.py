@@ -893,42 +893,50 @@ Do NOT end with raw exploration text. Summarize your findings into the required 
         elif timed_out:
             verdict = "UNKNOWN"
 
-        # Compliance is decoupled from `passed` (2026-04-11 fix).
+        # Two-axis hard-gate / compliance separation (2026-04-11 v2 fix after
+        # PR #752 Codex bot P1 finding "Preserve non-compliant approvals as
+        # non-passing results").
         #
-        # Previously: `passed = agent_passed(verdict) and is_compliant` — any
-        # format drift on a positive verdict (verifier APPROVE with missing
-        # CHECKED section, adversary SECURE with missing VECTORS section, etc.)
-        # would flip `passed=False`, and since verifier/adversary/structural-proof
-        # are in HARD_GATE_AGENTS, `blocks_merge` would be set — a single cosmetic
-        # format miss on a substantively positive verdict caused a hard gate
-        # failure and pipeline retry cascade (observed 2026-04-10 learning-store
-        # followup wave: verifier APPROVE + is_compliant=False → retry:adversary
-        # → timeout → hard_gate_failed).
+        # The first iteration of this fix (PR #752) collapsed `passed` and
+        # `is_compliant` into one signal: `passed = agent_passed(verdict)`.
+        # The Codex bot correctly identified that this regressed correctness:
+        # `get_exit_code()` (run_review.py:1497-1522) only emits soft warnings
+        # via `not r.passed`, so a verifier APPROVE with format drift returned
+        # exit code 0 instead of 2/3, silently dropping the compliance failure
+        # signal. Bot finding URL: PR #752 review submitted 2026-04-11T05:32:22Z.
         #
-        # Why decoupling is safe (verified 2026-04-11):
-        # - `agent_passed()` uses strict membership in AGENT_PASS_VERDICTS,
-        #   so only explicit allowlisted tokens (APPROVE/SECURE/PROVEN/...)
-        #   can make it True. Noise, CANCELLED, UNKNOWN, empty → False.
-        # - `extract_verdict_secure()` strips fenced code blocks, requires
-        #   `Verdict:` markers, and only matches tokens from the agent's
-        #   allowlist — cannot manufacture a positive verdict from noise.
-        # - Cancelled/timeout paths above force verdict to CANCELLED/UNKNOWN,
-        #   which are not in any pass set, so `agent_passed` returns False
-        #   independent of compliance.
-        # - Adversary still has its own evidence-gated block at line below
-        #   (`adversary_blocks_merge`) that explicitly consults `is_compliant`
-        #   and requires machine-checkable proof markers — that is the
-        #   authoritative adversary hard-gate path, not this `passed` flag.
-        # - `is_compliant` still reaches `AgentResult` on return, so the
-        #   orchestrator's compliance retry loop still fires on format drift.
+        # The correct structural fix splits the two concepts:
         #
-        # Net effect: format drift on a positive verdict no longer hard-gate-fails,
-        # but the retry loop still attempts to re-run the agent for clean output.
-        # If retry also returns a positive verdict, the wave proceeds — which
-        # is the correct behavior because the substantive signal is positive.
-        passed = agent_passed(agent_name, verdict)
+        #   - `verdict_pass`: pure verdict-allowlist membership. Used to compute
+        #     `blocks_merge` so that format drift on a positive verdict does
+        #     NOT hard-gate-fail (preserving the original cascade fix from PR
+        #     #752 — verifier APPROVE + drift no longer triggers
+        #     hard_gate_failed and the adversary retry timeout cascade).
+        #
+        #   - `passed`: combined verdict + compliance signal. Restored to
+        #     `verdict_pass and is_compliant` so that `get_exit_code()` still
+        #     surfaces compliance drift as a soft warning (exit code 2). The
+        #     downstream phase_b consumer treats exit code 2 as
+        #     "warnings-only, continue to bridge review" at
+        #     phase_b_executor.py:2475-2483 — no hard cascade, but the signal
+        #     is preserved for bridge classification.
+        #
+        # Truth table (verifier hard-gate agent):
+        #   | verdict | is_compliant | verdict_pass | passed | blocks_merge | get_exit_code |
+        #   |---------|--------------|--------------|--------|--------------|---------------|
+        #   | APPROVE | True         | True         | True   | False        | 0 (clean)     |
+        #   | APPROVE | False        | True         | False  | False        | 2 (soft warn) |
+        #   | UNKNOWN | True         | False        | False  | True         | 1 (hard fail) |
+        #   | UNKNOWN | False        | False        | False  | True         | 3 (hard+drift)|
+        #
+        # The middle row is the original cascade case. Under this fix it
+        # surfaces as exit code 2 (soft warning) → phase_b reads 2 → continues
+        # to bridge review with `agent_review_warning_only=True`. No hard
+        # cascade, no retry storm, but the compliance signal is not lost.
+        verdict_pass = agent_passed(agent_name, verdict)
+        passed = verdict_pass and is_compliant  # restored: compliance flows into get_exit_code soft warning
         is_hard_gate = agent_name in HARD_GATE_AGENTS
-        blocks_merge = is_hard_gate and not passed
+        blocks_merge = is_hard_gate and not verdict_pass  # decoupled from compliance
         infra_error = "AGENT ERROR" in result_text or "AGENT API ERROR" in result_text
 
         # Evidence-gated adversary blocking: failing adversary verdicts only block
