@@ -1951,6 +1951,39 @@ def build_commit_handoff(
             except (subprocess.SubprocessError, OSError):
                 pass
 
+    # 2026-04-11 git multi-path .claude pathspec resolver workaround
+    # (PR pipeline-followups-2026-04-11):
+    # Move any `.claude/...` paths that slipped past the check-ignore probe
+    # above into `force_add_files`. This works around a git quirk where
+    # multi-path `git add -- .claude/hooks/foo.sh mu/tools/bar.py` fails
+    # with "The following paths are ignored by one of your .gitignore
+    # files: .claude" even though `git check-ignore -q .claude/hooks/foo.sh`
+    # returns NOT ignored (the negation rule `!.claude/hooks/` at line 106
+    # of .gitignore is honored by single-path add but the multi-path
+    # resolver short-circuits at the parent `.claude/` ignore rule at line
+    # 104 before walking the negation chain). `git add -f` bypasses the
+    # short-circuit, and commit_executor's Step 4 uses `git add -f` for
+    # `force_add_files`, so moving these paths there avoids the issue.
+    #
+    # Verified 2026-04-11 via 3 controlled tests in worktree
+    # workingrcx_hook_denylist_1775885905:
+    #   `git add -- .claude/hooks/check-reasoning-depth.sh` → exit 0
+    #   `git add -- mu/tools/runners/run_review.py mu/tests/tools/test_run_review.py` → exit 0
+    #   `git add -- .claude/hooks/check-reasoning-depth.sh mu/tools/runners/run_review.py` → exit 1
+    #   `git add -f -- .claude/hooks/check-reasoning-depth.sh mu/tools/runners/run_review.py` → exit 0
+    #
+    # The fix is minimal: only `.claude/...` paths are affected (other
+    # negation-rule directories under an ignored parent could have the
+    # same issue but this is the only one currently in use). If the bug
+    # is ever fixed in git or the project's .gitignore structure changes,
+    # this workaround is safe to leave in place (force_add_files uses
+    # `git add -f` which is a superset of `git add`).
+    for f in list(effective_files):
+        if f.startswith(".claude/") or f.startswith("./.claude/"):
+            effective_files.remove(f)
+            if f not in effective_force:
+                effective_force.append(f)
+
     # Auto-find latest COMMIT_GO receipt if not provided
     # Use the canonical receipt path — no directory-sort discovery.
     # The commit executor's Step 6 runs the supervisor and gets a fresh
