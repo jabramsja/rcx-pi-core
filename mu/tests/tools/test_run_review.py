@@ -682,20 +682,24 @@ def test_quick_depth_lookup_applies_per_agent_cap():
     assert capped["unknown-agent"] == 20  # fallback
 
 
-def test_verifier_approve_with_compliance_drift_passes(monkeypatch):
-    """Root cause fix: format drift on APPROVE must not hard-gate-fail.
+def test_verifier_approve_with_compliance_drift_does_not_block_merge(monkeypatch):
+    """Root cause fix v2 (PR #752 follow-up): format drift on a positive
+    hard-gate verdict must NOT hard-gate-fail (preserves cascade prevention),
+    BUT MUST still surface as a soft warning (preserves correctness signal
+    that the Codex bot P1 finding flagged on PR #752 commit 00ef979a).
 
-    Before 2026-04-11: ``passed = agent_passed(verdict) and is_compliant``
-    meant verifier returning APPROVE with missing CHECKED section would
-    flip passed=False. verifier is in HARD_GATE_AGENTS, so blocks_merge
-    was set, forcing pipeline retry cascade (observed 2026-04-10
-    learning-store followup wave: verifier APPROVE + is_compliant=False
-    → retry:adversary → hard_gate_failed).
+    The two-axis split at run_review.py:929:
+      verdict_pass = agent_passed(verdict)        # pure verdict allowlist
+      passed = verdict_pass and is_compliant      # combined → soft warning
+      blocks_merge = is_hard_gate and not verdict_pass  # decoupled from compliance
 
-    After: ``passed = agent_passed(verdict)`` only. ``is_compliant``
-    still surfaces on AgentResult for downstream retry loop, but format
-    drift on a substantively positive verdict does not trigger hard-gate
-    failure.
+    Truth table for verifier APPROVE + drift:
+      verdict_pass = True  (APPROVE in {APPROVE})
+      passed = True and False = False  → get_exit_code returns 2 (soft warn)
+      blocks_merge = True and not True = False  → no hard cascade
+
+    Phase B reads exit code 2 → continues to bridge with
+    agent_review_warning_only=True (phase_b_executor.py:2475-2483).
     """
     async def _run() -> None:
         # Agent returns APPROVE verdict but with missing CHECKED section.
@@ -735,34 +739,66 @@ def test_verifier_approve_with_compliance_drift_passes(monkeypatch):
 
         # Substantive verdict extracted from agent output.
         assert result.verdict == "APPROVE"
-        # Compliance still flagged False — the format drift signal is preserved
-        # for the retry loop and downstream consumers.
+        # Compliance still flagged False — the format drift signal is preserved.
         assert result.is_compliant is False
-        # KEY REGRESSION: passed must be True despite is_compliant=False,
-        # because agent_passed("verifier", "APPROVE") is True and the
-        # 2026-04-11 fix removed the `and is_compliant` conjunction.
-        assert result.passed is True, (
-            f"verifier APPROVE with compliance drift must still pass the "
-            f"hard gate (is_compliant={result.is_compliant}, "
+        # KEY REGRESSION (PR #752 bot P1 fix): passed must be False because
+        # is_compliant is False. This is what flows into get_exit_code() and
+        # surfaces as exit code 2 (soft warning). The bot correctly identified
+        # that previously this returned exit code 0 (silently dropping the
+        # compliance failure signal).
+        assert result.passed is False, (
+            f"verifier APPROVE with compliance drift must NOT report passed=True; "
+            f"the soft-warning signal is required by get_exit_code() at "
+            f"run_review.py:1518 (is_compliant={result.is_compliant}, "
             f"verdict={result.verdict}, passed={result.passed})"
         )
-        # Hard gate not triggered: blocks_merge must be False for a passing
-        # verifier, regardless of format drift.
-        assert result.blocks_merge is False
+        # KEY REGRESSION (PR #752 original wave): blocks_merge must be False
+        # because verdict_pass is True (APPROVE is in the verifier pass set).
+        # This preserves the original cascade-prevention fix — format drift
+        # on a positive verdict does not trigger hard_gate_failed.
+        assert result.blocks_merge is False, (
+            f"verifier APPROVE (positive verdict) must NOT trigger blocks_merge; "
+            f"the cascade-prevention from the run-review-turn-budget-fix wave "
+            f"depends on this (blocks_merge={result.blocks_merge}, "
+            f"verdict={result.verdict})"
+        )
         # Verifier is classified as a hard gate agent regardless.
         assert result.is_hard_gate is True
+
+        # End-to-end: verify get_exit_code() returns 2 (soft warning), not
+        # 0 (clean) and not 1/3 (hard fail). This is the bot finding's core
+        # claim — non-compliant hard-gate results must surface as exit 2.
+        orchestrator.results = [result]
+        exit_code = orchestrator.get_exit_code()
+        assert exit_code == 2, (
+            f"non-compliant verifier APPROVE must return exit code 2 (soft warn), "
+            f"got {exit_code}. Per get_exit_code() at run_review.py:1518, "
+            f"a result with not r.blocks_merge AND not r.passed should land in "
+            f"the soft_failures list and return 2."
+        )
 
     asyncio.run(_run())
 
 
-def test_adversary_secure_with_compliance_drift_still_passes(monkeypatch):
-    """Companion to verifier test: adversary SECURE + format drift must pass.
+def test_adversary_secure_with_compliance_drift_does_not_block_merge(monkeypatch):
+    """Companion to verifier test: adversary SECURE + format drift must NOT
+    trigger blocks_merge but MUST surface as a soft warning.
 
-    Adversary SECURE verdict + missing CHECKED section should NOT
-    hard-gate-fail because (a) SECURE is in AGENT_PASS_VERDICTS, and
-    (b) adversary_blocks_merge requires ADVERSARY_BLOCKING_VERDICTS
-    (VULNERABLE/NEEDS_HARDENING) to even consider blocking. A SECURE
-    verdict with format drift is not a blocking condition.
+    Adversary SECURE verdict + missing CHECKED section:
+      verdict_pass = True   (SECURE in {SECURE})
+      passed = True and False = False  → get_exit_code returns 2
+      blocks_merge = True and not True = False  → no hard cascade
+
+    Bonus: even though `adversary_blocks_merge()` is the authoritative
+    adversary hard-gate path, it only fires for ADVERSARY_BLOCKING_VERDICTS
+    (VULNERABLE/NEEDS_HARDENING), not SECURE. So a SECURE+drift never reaches
+    that code path.
+
+    P2 fix from PR #752 bot review: this test was previously broken — it
+    defined `async def _run()` but never called `asyncio.run(_run())`, so
+    the assertions never executed and the test always passed regardless of
+    regressions. The asyncio.run line at the end of this function is the
+    fix.
     """
     async def _run() -> None:
         async def fake_query(*, prompt, options):
@@ -794,8 +830,23 @@ def test_adversary_secure_with_compliance_drift_still_passes(monkeypatch):
 
         assert result.verdict == "SECURE"
         assert result.is_compliant is False
-        # KEY REGRESSION: passed must be True despite compliance drift.
-        assert result.passed is True
-        # blocks_merge False because SECURE is not a blocking verdict for
-        # adversary and passed=True means is_hard_gate+not passed is False.
+        # NEW SEMANTICS (v2 fix): passed must be False because is_compliant
+        # is False. The soft-warning signal flows into get_exit_code().
+        assert result.passed is False, (
+            f"adversary SECURE with compliance drift must NOT report passed=True; "
+            f"is_compliant={result.is_compliant}, verdict={result.verdict}"
+        )
+        # blocks_merge False because verdict_pass=True (SECURE in pass set).
         assert result.blocks_merge is False
+        assert result.is_hard_gate is True
+
+        # End-to-end: get_exit_code() returns 2 for the non-compliant signal.
+        orchestrator.results = [result]
+        exit_code = orchestrator.get_exit_code()
+        assert exit_code == 2, (
+            f"non-compliant adversary SECURE must return exit 2, got {exit_code}"
+        )
+
+    # P2 fix: actually execute the coroutine. Without this line, the assertions
+    # above never run (the test always trivially passes).
+    asyncio.run(_run())

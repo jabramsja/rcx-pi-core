@@ -1,0 +1,24 @@
+{
+  "wave_id": "bot-findings-and-hook-denylist-2026-04-11",
+  "repeat_run_speedup_ratio": 1.203451,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.377412,
+  "repeat_run_raw_seconds": [
+    0.454197,
+    0.377412
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.454197
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.831609
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-04-11T06:05:47Z",
+  "collector_version": "2.2.0"
+}
