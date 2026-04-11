@@ -427,6 +427,79 @@ class TestWaveIdBounds:
         assert not valid
         assert any("Absolute path in force_add_files" in e for e in errors)
 
+    def test_validate_handoff_accepts_empty_files_to_stage_when_force_add_non_empty(self):
+        """Regression: a `.claude/`-only commit has every path auto-routed to
+        force_add_files by build_commit_handoff's string-startswith check,
+        leaving files_to_stage empty. The commit is semantically valid
+        (git add -f at Step 4 handles force_add_files correctly), so the
+        validator must NOT reject this shape.
+
+        Diagnosed 2026-04-11 during block-protected-branch-lexer follow-up
+        wave: the 3-file `.claude/hooks/*` commit could not pass validation
+        despite being commit-ready. Root cause at commit_executor.py:2082-
+        2086 was `not fts` clause rejecting empty independent of force_add.
+        Structural fix landed by this test's wave.
+        """
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_schema_handoff(
+                files_to_stage=[],
+                force_add_files=[
+                    ".claude/hooks/_block_protected_branch_tokenize.py",
+                    ".claude/hooks/block-protected-branch.sh",
+                    ".claude/hooks/test_block_protected_branch.sh",
+                ],
+            )
+        )
+        assert valid, (
+            f"Expected validation to pass for empty files_to_stage + "
+            f"non-empty force_add_files, got errors: {errors}"
+        )
+        assert not any("files_to_stage must be a non-empty list" in e for e in errors)
+        assert not any("must be non-empty" in e and "files_to_stage" in e for e in errors)
+
+    def test_validate_handoff_rejects_both_files_lists_empty(self):
+        """A commit with zero files is still an error: the new validator
+        accepts files_to_stage OR force_add_files non-empty, but not both
+        empty. Preserves the 'commit must have at least one file' invariant.
+        """
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_schema_handoff(
+                files_to_stage=[],
+                force_add_files=[],
+            )
+        )
+        assert not valid
+        assert any(
+            "files_to_stage or force_add_files must be non-empty" in e
+            for e in errors
+        ), f"Expected new empty-both error, got: {errors}"
+
+    def test_validate_handoff_rejects_files_to_stage_non_list(self):
+        """files_to_stage must be a list type, not a string/dict/None. The
+        new validator checks type first, independent of the empty-list case.
+        """
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_schema_handoff(files_to_stage="not-a-list")
+        )
+        assert not valid
+        assert any("files_to_stage must be a list" in e for e in errors)
+
+    def test_validate_handoff_accepts_files_to_stage_non_empty_force_add_empty(self):
+        """Regression invariance: the common case (non-empty files_to_stage,
+        empty force_add_files) must still validate cleanly. Protects against
+        regressions in the else-branch path of the new code.
+        """
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_schema_handoff(
+                files_to_stage=["mu/tools/executors/commit_executor.py"],
+                force_add_files=[],
+            )
+        )
+        assert valid, (
+            f"Expected validation to pass for standard non-empty "
+            f"files_to_stage + empty force_add_files, got errors: {errors}"
+        )
+
     def test_missing_supervisor_receipt_blocks_pipeline(self, tmp_path):
         """When supervisor receipt path doesn't exist on disk, step 7 fails closed."""
         from collections import namedtuple
