@@ -1149,25 +1149,30 @@ def _uses_shell_or_interpreter_execution_normalized(cmd_lower: str) -> bool:
         return True
 
     # Code interpreter at command position with a non-flag positional
-    # argument.  ``-m <module>`` forms hand off to module invocation mode
-    # (module denylist enforced separately by Layer 8b).  Pure-flag forms
-    # (``python3 --version``, ``python3 -h``) and bare ``python3`` are
-    # allowed.
+    # argument.  ``-m <module>`` and ``-m<module>`` (glued) forms hand off
+    # to module invocation mode (module denylist enforced separately by
+    # Layer 8b).  Pure-flag forms (``python3 --version``, ``python3 -h``)
+    # and bare ``python3`` are allowed.
     if basename in _CODE_INTERPRETER_BASENAMES or _is_python_basename(basename):
         idx = 1
         while idx < len(body):
             arg = body[idx]
-            if arg == "-m":
-                # ``-m <module> [args...]`` is module invocation, not a
-                # script-file invocation.  Everything after ``-m`` is the
-                # module's own argv — Layer 11 must not re-parse it as a
-                # script positional, otherwise safe invocations like
-                # ``python3 -m pytest tests/`` or ``python3 -m json.tool
-                # data.json`` would be blocked.  Layer 8b
-                # (``_uses_dangerous_python_module_normalized``) enforces
-                # the dangerous-module denylist on the module name itself,
-                # so dangerous cases like ``python3 -m pip install evil``
-                # and ``python3 -m http.server`` remain blocked upstream.
+            if arg == "-m" or (arg.startswith("-m") and len(arg) > 2):
+                # ``-m <module> [args...]`` or the short-flag-glued
+                # ``-m<module> [args...]`` form is module invocation, not
+                # a script-file invocation.  Python accepts both spellings
+                # (``python3 -mjson.tool data.json`` is equivalent to
+                # ``python3 -m json.tool data.json``), and Layer 8b's
+                # ``_PYTHON_MODULE_RUN_PATTERN`` already handles both via
+                # its ``-m\s*(\S+)`` regex — so dangerous glued forms like
+                # ``python3 -mpip install evil`` and ``python3 -mtrace
+                # script.py`` remain blocked upstream by the dangerous-
+                # module denylist.  Everything after the ``-m`` (or glued
+                # module name) is the module's own argv — Layer 11 must
+                # not re-parse it as a script positional, otherwise safe
+                # invocations like ``python3 -m pytest tests/``,
+                # ``python3 -mpytest tests/`` or ``python3 -mjson.tool
+                # data.json`` would be blocked.
                 return False
             if arg.startswith("-"):
                 idx += 1
