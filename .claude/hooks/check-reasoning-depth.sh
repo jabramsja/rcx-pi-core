@@ -87,10 +87,18 @@ fi
 # Triggers regardless of attribution context. The pattern catches
 # "most likely", "likely", "probably" used to dilute claim certainty
 # without backing diagnostic evidence.
+#
+# 2026-04-11 PR #753 P2 fix: HAS_DIAG_OR_HYPOTH escape clause now includes
+# the same diagnostic patterns as Check 4's HAS_DIAGNOSTIC (output shows /
+# stderr shows / exit code N / traceback / the (error|exception) at /
+# result.r[0-9] / traced to / verified by ...). Without these patterns,
+# responses like "stderr shows exit code 1 ..." were incorrectly blocked
+# despite citing concrete diagnostic evidence. Bot finding: PR #753 review
+# submitted 2026-04-11T06:21:14Z, P2 inline comment.
 HAS_DENIED_HEDGE=$(echo "$MSG" | grep -iEc "(\bmost likely\b|\blikely\b|\bprobably\b|\bmost likely\b)" || true)
-HAS_DIAG_OR_HYPOTH=$(echo "$MSG" | grep -iEc "(\.py:[0-9]+|\.js:[0-9]+|\.sh:[0-9]+|line [0-9]+|hypothesis:|I have not (yet )?verified|haven.t verified|verified by)" || true)
+HAS_DIAG_OR_HYPOTH=$(echo "$MSG" | grep -iEc "(\.py:[0-9]+|\.js:[0-9]+|\.sh:[0-9]+|line [0-9]+|output shows|stderr shows|exit code [0-9]|traceback|the (error|exception) (at|in|from)|result.*r[0-9]+\b|traced to|verified by (running|reading|checking)|hypothesis:|I have not (yet )?verified|haven.t verified|verified by)" || true)
 if [ "$HAS_DENIED_HEDGE" -gt 0 ] && [ "$HAS_DIAG_OR_HYPOTH" -eq 0 ]; then
-    echo '{"decision":"block","reason":"BLOCKED: Response uses denied hedge word (likely/probably/most likely) without diagnostic evidence or explicit hypothesis marker. These words are on the deny list per founder directive 2026-04-11. Either (1) cite file:line that proves the claim, or (2) state \"hypothesis: X\" / \"I have not yet verified Y\" explicitly. Lazy hedging cloaked in fake humility is not acceptable."}'
+    echo '{"decision":"block","reason":"BLOCKED: Response uses denied hedge word (likely/probably/most likely) without diagnostic evidence or explicit hypothesis marker. These words are on the deny list per founder directive 2026-04-11. Cite (1) file:line that proves the claim, OR (2) stderr/output/exit-code/traceback evidence, OR (3) explicit \"hypothesis: X\" / \"I have not yet verified Y\" marker. Lazy hedging cloaked in fake humility is not acceptable."}'
     exit 0
 fi
 

@@ -5,13 +5,34 @@ set -euo pipefail
 
 CMD=$(jq -r '.tool_input.command // ""' < /dev/stdin 2>/dev/null || echo "")
 
-# Collapse newlines to single line for regex matching (catches multiline git commands)
-CMD_ONELINE=$(echo "$CMD" | tr '\n' ' ')
+# 2026-04-11 PR #746 P1 fix (corrected): strip bash comments PER LINE
+# BEFORE flattening newlines. The previous order (flatten first, then
+# strip with `#[^;|&]*$`) was unsafe: a multiline command like
+# "# this is a comment\ngit commit -m x" became
+# "# this is a comment git commit -m x" after `tr '\n' ' '`, then the
+# `#[^;|&]*$` strip removed everything from `#` to end of the flattened
+# string, erasing the `git commit`. Result: BLOCKED stayed false and the
+# protected-branch guard was bypassed. Bot finding: PR #746 review,
+# P1 inline comment at line 14.
+#
+# Fix: strip per-line comments with `s/#.*$//g` against the ORIGINAL
+# multiline CMD. sed processes input line by line by default, so `.*$`
+# matches "rest of line" for each line — the comment on line 1 is
+# stripped without affecting subsequent lines. Then flatten newlines
+# and strip quoted strings as before.
+#
+# NOTE on BSD sed: `[^\n]` inside a character class is NOT a newline
+# exclusion — it's literal `\` and `n` — so `[^\n]*$` would fail to
+# match comments containing the letter `n`. Always use `.*$` against
+# line-oriented input.
+CMD_NOCOMMENTS=$(echo "$CMD" | sed -E 's/#.*$//g')
 
-# Strip content inside quotes and bash comments to avoid false positives.
-# e.g., echo "...git commit..." or # comment about git commit should NOT trigger.
-# Order: strip comments first (# to end of logical line), then quoted strings.
-CMD_STRIPPED=$(echo "$CMD_ONELINE" | sed -E 's/#[^;|&]*(;|&&|\|\||$)//g; s/'"'"'[^'"'"']*'"'"'//g; s/"[^"]*"//g')
+# Collapse newlines to single line for regex matching (catches multiline git commands)
+CMD_ONELINE=$(echo "$CMD_NOCOMMENTS" | tr '\n' ' ')
+
+# Strip content inside quotes to avoid false positives like
+# echo "...git commit...". Comments are already stripped above.
+CMD_STRIPPED=$(echo "$CMD_ONELINE" | sed -E "s/'[^']*'//g; s/\"[^\"]*\"//g")
 
 # Extract git subcommands: find words immediately after "git" (skipping -c key=val style flags).
 # Only block on actual git subcommands, not on branch names or other arguments that
