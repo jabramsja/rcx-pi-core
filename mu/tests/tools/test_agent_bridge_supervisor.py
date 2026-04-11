@@ -2600,27 +2600,48 @@ def test_bridge_turn_wall_time_cap_fails_closed(tmp_path: Path, monkeypatch: pyt
 def test_bridge_zero_output_watchdog_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Reviewer stderr spam must not mask a zero-byte stdout stall.
 
-    Structural fix 2026-04-11: the noisy_reviewer script now writes stderr
-    BEFORE blocking on stdin.read(), and the watchdog timeout is widened
-    from 200ms to 500ms. The original 200ms timeout was racing with Python
-    interpreter cold-start under heavy CI load: the bridge's zero_output
-    Timer started right after `proc.stdin.close()`, but the child Python
-    process took >200ms (cold-start + import + first-loop-iteration) to
-    write its first stderr line under load — the watchdog killed the
-    process group BEFORE any stderr was captured, leaving raw_text empty
-    and failing both the `startswith("[stderr]\\n")` and `"noise" in raw_text`
-    assertions.
+    Structural fix 2026-04-11 (revised after CI failure trace):
 
-    Two-part structural fix:
-      (1) noisy_reviewer.py writes "noise\\n" to stderr BEFORE sys.stdin.read()
-          — guarantees the parent's stderr_thread captures at least one line
-          BEFORE the watchdog timer even starts, regardless of interpreter
-          cold-start time.
-      (2) BRIDGE_ZERO_OUTPUT_TIMEOUT_S widened 0.2 → 0.5 for headroom on
-          subsequent loop iterations after stdin closes. Still aggressive
-          enough to prove the watchdog actually fires during the noisy loop
-          (the loop runs for 0.02s × 20 = 0.4s total, so a 0.5s timeout
-          guarantees the kill while the loop is still emitting stderr).
+    The original test set BRIDGE_ZERO_OUTPUT_TIMEOUT_S=0.2 and used
+    `for _ in range(20):` with sleep(0.02), giving ~0.4s subprocess wall
+    time. This had TWO race failure modes:
+
+    Failure mode (A) — slow machine, watchdog wins by accident:
+      Local Mac under load — Python cold-start + first-iteration delay
+      exceeded 200ms, watchdog killed the subprocess BEFORE any stderr
+      was captured, raw_text was empty, both `startswith("[stderr]\\n")`
+      and `"noise" in raw_text` assertions failed.
+
+    Failure mode (B) — fast machine, subprocess wins by accident:
+      CI runner (verified 2026-04-11 trace from
+      github.com/jabramsja/rcx-pi-core/pull/752 test job
+      24275289795) — bounded loop completed in <500ms, subprocess EXITED
+      naturally before the watchdog fired, _run_adapter_buffered returned
+      `[stderr]\\nnoise\\n...` as the captured `output`, bridge_supervisor
+      called parse_envelope(output) which raised
+      `BridgeError("Agent output missing BEGIN_AGENT_ENVELOPE")` instead
+      of the expected `BridgeAdapterError("produced no stdout")`. The
+      test expected the watchdog kill path but got the natural-exit path.
+
+    Both failure modes share a root cause: the test was racing the
+    bounded subprocess loop against the watchdog timer. The structural
+    fix removes the race entirely by making the subprocess loop UNBOUNDED
+    so natural completion is impossible — the watchdog is guaranteed to
+    be the only termination path. The agent config `timeout_s: 30` is
+    the final safety net (the parent's `_kill_after_timeout` watchdog
+    fires after 30s if the zero_output watchdog also fails).
+
+    Three-part structural fix:
+      (1) noisy_reviewer.py writes "noise\\n" to stderr BEFORE
+          sys.stdin.read() — guarantees the parent's stderr_thread
+          captures at least one line BEFORE the watchdog timer even
+          starts (handles failure mode A).
+      (2) Loop changed from `for _ in range(20):` to `while True:` so
+          the subprocess never naturally exits. Removes the natural-exit
+          race that caused failure mode B in CI.
+      (3) BRIDGE_ZERO_OUTPUT_TIMEOUT_S=0.5 (was 0.2), BRIDGE_MAX_TURN_WALL_TIME_S=2.0
+          (was 1.0) — moderate widening for cold-start headroom while
+          keeping the watchdog aggressive enough to prove it fires.
     """
     paths, _ = _setup_bridge_repo(tmp_path)
 
@@ -2631,13 +2652,19 @@ def test_bridge_zero_output_watchdog_fails_closed(tmp_path: Path, monkeypatch: p
         # Pre-stdin stderr write: the parent's stderr_thread is already
         # draining (started before stdin write), so this line is captured
         # BEFORE the zero_output watchdog timer starts (timer starts at
-        # bridge_adapters.py:635, after proc.stdin.close()).
+        # bridge_adapters.py:635, after proc.stdin.close()). This handles
+        # failure mode A (Python cold-start exceeding the 0.5s budget).
         "sys.stderr.write('noise\\n')\n"
         "sys.stderr.flush()\n"
         "sys.stdin.read()\n"
-        # Post-stdin loop: keep writing stderr to prove that aggressive
-        # stderr does NOT prevent the zero_output watchdog from firing.
-        "for _ in range(20):\n"
+        # Post-stdin UNBOUNDED loop: keeps writing stderr forever so the
+        # subprocess never naturally exits. The zero_output watchdog
+        # (BRIDGE_ZERO_OUTPUT_TIMEOUT_S=0.5) is the only termination path,
+        # which is exactly what the test is verifying. The agent config
+        # timeout_s=30 is the final safety net if the watchdog itself fails.
+        # This handles failure mode B (CI runner finishing the loop before
+        # the watchdog fires).
+        "while True:\n"
         "    sys.stderr.write('noise\\n')\n"
         "    sys.stderr.flush()\n"
         "    time.sleep(0.02)\n",
@@ -2652,10 +2679,9 @@ def test_bridge_zero_output_watchdog_fails_closed(tmp_path: Path, monkeypatch: p
         "env": {},
     }
     paths.config_path.write_text(json.dumps(config), encoding="utf-8")
-    # Watchdog wide enough to allow at least one post-stdin stderr line
-    # to land while still firing during the noisy loop. The pre-stdin
-    # stderr write (above) already populates raw_text with [stderr]\nnoise\n
-    # before the timer starts, so this widening is defense-in-depth.
+    # Watchdog wide enough for cold-start headroom but still aggressive.
+    # The unbounded loop above guarantees the watchdog is the termination
+    # path regardless of how fast the machine runs the subprocess.
     monkeypatch.setattr(bridge, "BRIDGE_ZERO_OUTPUT_TIMEOUT_S", 0.5)
     monkeypatch.setattr(bridge, "BRIDGE_MAX_TURN_WALL_TIME_S", 2.0)
 
