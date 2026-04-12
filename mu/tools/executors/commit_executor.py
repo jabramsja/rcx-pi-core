@@ -1427,7 +1427,7 @@ def _build_bot_remediation_prompt(
         f"(wave: {wave_id}). Fix each issue directly in the files.",
         "",
         "Rules:",
-        "- Edit only the files mentioned in the findings.",
+        "- Edit existing files or create new files as needed to fix each finding.",
         "- Do NOT run git commands, tests, or hooks. Just edit files.",
         f"- This is remediation round {remediation_round}/{BOT_REMEDIATION_MAX_ROUNDS}.",
         "",
@@ -1484,11 +1484,16 @@ def _poll_ci_checks_fallback(
         if not checks:
             _time.sleep(poll_interval)
             continue
-        any_failed = any(c.get("conclusion") == "FAILURE" for c in checks)
-        if any_failed:
+        # Treat any non-SUCCESS conclusion (FAILURE, CANCELLED, TIMED_OUT,
+        # ACTION_REQUIRED, STALE) as failed — not just FAILURE.
+        _non_success = [
+            c for c in checks
+            if c.get("conclusion") and c["conclusion"] != "SUCCESS"
+        ]
+        if _non_success:
             if log:
-                failed_names = [c.get("name", "?") for c in checks if c.get("conclusion") == "FAILURE"]
-                log(f"CI check(s) failed: {', '.join(failed_names)}")
+                failed_names = [f"{c.get('name', '?')}={c['conclusion']}" for c in _non_success]
+                log(f"CI check(s) not successful: {', '.join(failed_names)}")
             return False
         all_done = all(c.get("conclusion") for c in checks)
         if all_done:
@@ -1704,6 +1709,19 @@ def _attempt_bot_finding_remediation(
                 repo_root, current_findings, wave_id, pr_number,
                 repo_owner, repo_name, log,
             )
+            # Stage + amend the deferred report into the commit so it's not
+            # lost on merge (PR #760 bot finding 5).
+            try:
+                deferred_dir = repo_root / "reports" / "deferred" / "non_blocking"
+                report_name = f"pr{pr_number}_bot_auto_deferred_{wave_id}.md"
+                report_path = deferred_dir / report_name
+                if report_path.exists():
+                    _run(["git", "add", "-f", "--", str(report_path.relative_to(repo_root))],
+                         cwd=repo_root, timeout=30)
+                    _run(["git", "commit", "--amend", "--no-edit"], cwd=repo_root, timeout=30)
+                    log(f"Step 15: deferred report amended into commit")
+            except subprocess.CalledProcessError as exc:
+                log(f"Step 15: failed to amend deferred report (non-fatal): {exc}")
             return None  # success — caller proceeds to merge
 
         # Stage only finding-scoped files, fail closed on out-of-scope changes
@@ -3468,6 +3486,23 @@ def main() -> int:
             print(f"[commit-executor] Bot findings: {len(result['bot_findings'])}")
             for bf in result["bot_findings"]:
                 print(f"  - {bf['author']}: {bf['body'][:100]}...")
+
+    # Fix 2: standalone recovery — when --standalone hits bot_findings_pending,
+    # invoke recovery gate directly so P1 findings reach Tier 3 diagnosis
+    # instead of silently exiting.
+    if result.get("status") == "bot_findings_pending" and args.standalone:
+        try:
+            from mu.tools.executors.recovery_gate import attempt_recovery
+            from mu.tools.executors.executor_common import normalize_wave_id
+            wave_id = normalize_wave_id(handoff.get("wave_id", "unknown"))
+            recovery = attempt_recovery(repo_root, result, wave_id)
+            result["recovery"] = recovery
+            if args.verbose or not args.json:
+                print(f"[commit-executor] Recovery: class={recovery.get('failure_class')} "
+                      f"tier={recovery.get('tier')} recovered={recovery.get('recovered')}")
+        except Exception as exc:
+            if args.verbose or not args.json:
+                print(f"[commit-executor] Recovery gate unavailable in standalone: {exc}")
 
     return 0 if result.get("status") in ("success", "held") else 1
 

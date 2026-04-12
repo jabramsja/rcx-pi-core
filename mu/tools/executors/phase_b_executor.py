@@ -2462,8 +2462,9 @@ def run_phase_b(
                 result["agent_review_stdout_path"] = agent_result.get("stdout_path")
                 log(f"Agent review exit code: {agent_result['exit_code']}")
 
-                if agent_result["exit_code"] < 0:
+                if agent_result["exit_code"] < 0 or agent_result["exit_code"] == 4:
                     # Negative exits (-1 timeout, -2 stale, -3 aggregation-hang)
+                    # and exit=4 (INFRA_FAILURE_EXIT_CODE in run_review.py:351)
                     # mean the agent review NEVER COMPLETED — no findings to forward.
                     # Fail closed: re-running is safer than proceeding blind.
                     return {
