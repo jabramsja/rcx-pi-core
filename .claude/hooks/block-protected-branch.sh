@@ -42,7 +42,9 @@ fi
 # causes the branch check to run in the "wrong" worktree whose branch
 # is typically protected (dev/main), triggering BLOCK anyway -
 # fail-closed.
-CMD_ONELINE=$(printf '%s' "$CMD" | tr '\n' ' ')
+# Strip per-line comments BEFORE flattening (learning.md 2026-04-11: strip-then-flatten,
+# not flatten-then-strip). Then flatten to one line for pattern matching.
+CMD_ONELINE=$(printf '%s' "$CMD" | sed -E 's/(^|[[:space:]])#.*$/\1/g' | tr '\n' ' ')
 
 # Extract git subcommands: find words immediately after "git" (skipping -c key=val style flags).
 # Only block on actual git subcommands, not on branch names or other arguments that

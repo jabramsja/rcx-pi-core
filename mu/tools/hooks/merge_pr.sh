@@ -29,6 +29,9 @@ REPO_NAME="rcx-pi-core"
 GH_REPO="${REPO_OWNER}/${REPO_NAME}"
 SWEEP_COUNT=10
 POST_MERGE_WAIT=75
+# Derive repo root from script location (mu/tools/hooks/merge_pr.sh),
+# not from cwd — the caller may set cwd outside the repo.
+REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,7 +65,7 @@ resolve_threads() {
                         nodes {
                             id
                             isResolved
-                            comments(first: 1) { nodes { author { login } } }
+                            comments(first: 1) { nodes { author { login } body path } }
                         }
                     }
                 }
@@ -186,6 +189,54 @@ describe_latest_bot_issue_comment() {
     esac
 }
 
+extract_sweep_findings() {
+    # Extract unresolved bot-authored finding content from a PR and append
+    # to the sweep_findings.json file for pipeline remediation.
+    local pr_num="$1"
+    local output_file="$2"
+    local cursor=""
+    local has_next="true"
+
+    while [ "$has_next" = "true" ]; do
+        local after_clause=""
+        [ -n "$cursor" ] && after_clause=", after: \"$cursor\""
+
+        local response
+        response=$(gh api graphql -f query="{
+            repository(owner: \"$REPO_OWNER\", name: \"$REPO_NAME\") {
+                pullRequest(number: $pr_num) {
+                    reviewThreads(first: 100$after_clause) {
+                        pageInfo { hasNextPage endCursor }
+                        nodes {
+                            id
+                            isResolved
+                            comments(first: 1) { nodes { author { login } body path } }
+                        }
+                    }
+                }
+            }
+        }" 2>/dev/null || true)
+
+        [ -z "$response" ] && break
+
+        has_next=$(echo "$response" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false')
+        cursor=$(echo "$response" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // empty')
+
+        # Extract unresolved bot findings with content
+        echo "$response" | jq -c --arg bot "$BOT_LOGIN" --arg pr "$pr_num" '
+            .data.repository.pullRequest.reviewThreads.nodes[]
+            | select(.isResolved == false)
+            | select(.comments.nodes[0].author.login == $bot)
+            | {
+                pr: ($pr | tonumber),
+                path: .comments.nodes[0].path,
+                body: .comments.nodes[0].body,
+                thread_id: .id
+              }
+        ' 2>/dev/null >> "$output_file" || true
+    done
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -203,15 +254,21 @@ if [ "$FLAG" = "--sweep-only" ]; then
     echo ""
     echo "--- Sweeping last $SWEEP_COUNT merged PRs ---"
     merged_prs=$(gh pr list --repo "$GH_REPO" --state merged --limit "$SWEEP_COUNT" --json number --jq '.[].number' 2>/dev/null || true)
+    SWEEP_FILE="${REPO_ROOT}/.agent_bus/meta/sweep_findings.json"
+    mkdir -p "$(dirname "$SWEEP_FILE")"
+    : > "$SWEEP_FILE"  # truncate
     if [ -z "$merged_prs" ]; then
         echo "  No merged PRs found"
     else
         while IFS= read -r pr; do
             [ -z "$pr" ] && continue
+            extract_sweep_findings "$pr" "$SWEEP_FILE"
             resolve_threads "$pr" "sweep"
             describe_latest_bot_issue_comment "$pr" "sweep"
         done <<< "$merged_prs"
     fi
+    FINDING_COUNT=$(wc -l < "$SWEEP_FILE" | tr -d ' ')
+    echo "  Extracted $FINDING_COUNT unresolved finding(s) to $SWEEP_FILE"
     echo ""
     echo "=== Sweep complete ==="
     exit 0
@@ -247,16 +304,22 @@ echo ""
 # Step 4: Sweep recent merged PRs (opt-in via --sweep)
 if [ "$FLAG" = "--sweep" ]; then
     echo "--- Step 4: Sweeping last $SWEEP_COUNT merged PRs ---"
+    SWEEP_FILE="${REPO_ROOT}/.agent_bus/meta/sweep_findings.json"
+    mkdir -p "$(dirname "$SWEEP_FILE")"
+    : > "$SWEEP_FILE"  # truncate
     merged_prs=$(gh pr list --repo "$GH_REPO" --state merged --limit "$SWEEP_COUNT" --json number --jq '.[].number' 2>/dev/null || true)
     if [ -z "$merged_prs" ]; then
         echo "  No merged PRs found"
     else
         while IFS= read -r pr; do
             [ -z "$pr" ] && continue
+            extract_sweep_findings "$pr" "$SWEEP_FILE"
             resolve_threads "$pr" "sweep"
             describe_latest_bot_issue_comment "$pr" "sweep"
         done <<< "$merged_prs"
     fi
+    FINDING_COUNT=$(wc -l < "$SWEEP_FILE" | tr -d ' ')
+    echo "  Extracted $FINDING_COUNT unresolved finding(s) to $SWEEP_FILE"
     echo ""
 else
     echo "--- Step 4: Skipped (use --sweep to sweep recent merged PRs) ---"
