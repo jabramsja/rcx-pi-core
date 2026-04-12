@@ -1427,7 +1427,9 @@ def _build_bot_remediation_prompt(
         f"(wave: {wave_id}). Fix each issue directly in the files.",
         "",
         "Rules:",
-        "- Edit existing files or create new files as needed to fix each finding.",
+        "- Edit the files mentioned in the findings. You may also create new files",
+        "  in the SAME directories as the finding paths if the fix requires a helper.",
+        "  Do NOT create files in unrelated directories — the staging guard will reject them.",
         "- Do NOT run git commands, tests, or hooks. Just edit files.",
         f"- This is remediation round {remediation_round}/{BOT_REMEDIATION_MAX_ROUNDS}.",
         "",
@@ -1484,11 +1486,12 @@ def _poll_ci_checks_fallback(
         if not checks:
             _time.sleep(poll_interval)
             continue
-        # Treat any non-SUCCESS conclusion (FAILURE, CANCELLED, TIMED_OUT,
-        # ACTION_REQUIRED, STALE) as failed — not just FAILURE.
+        # Treat non-passing conclusions as failed.  GitHub considers SUCCESS,
+        # SKIPPED and NEUTRAL as passing for required-check purposes.
+        _PASSING = {"SUCCESS", "SKIPPED", "NEUTRAL"}
         _non_success = [
             c for c in checks
-            if c.get("conclusion") and c["conclusion"] != "SUCCESS"
+            if c.get("conclusion") and c["conclusion"] not in _PASSING
         ]
         if _non_success:
             if log:
@@ -1743,7 +1746,8 @@ def _attempt_bot_finding_remediation(
                     _run(["git", "add", "-f", "--", str(report_path.relative_to(repo_root))],
                          cwd=repo_root, timeout=30)
                     _run(["git", "commit", "--amend", "--no-edit"], cwd=repo_root, timeout=30)
-                    log(f"Step 15: deferred report amended into commit")
+                    _run(["git", "push", "--force-with-lease"], cwd=repo_root, timeout=60)
+                    log(f"Step 15: deferred report amended into commit and pushed")
             except subprocess.CalledProcessError as exc:
                 log(f"Step 15: failed to amend deferred report (non-fatal): {exc}")
             return None  # success — caller proceeds to merge
@@ -3529,6 +3533,11 @@ def main() -> int:
             if args.verbose or not args.json:
                 print(f"[commit-executor] Recovery gate unavailable in standalone: {exc}")
 
+    # Propagate recovery result: if recovery succeeded, treat as recoverable
+    # (exit 0 so the caller can re-invoke).
+    recovery = result.get("recovery", {})
+    if recovery.get("recovered"):
+        return 0
     return 0 if result.get("status") in ("success", "held") else 1
 
 
