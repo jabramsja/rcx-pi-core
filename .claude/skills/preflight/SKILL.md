@@ -247,11 +247,11 @@ F=/tmp/ppc.js; N=0
 [ "$(grep -c 'premature abstraction' $F)" -gt 0 ] && echo "P29-old PRESENT" && N=$((N+1))
 [ "$(grep -cF "Don't add features, refactor, or introduce abstractions beyond" $F)" -gt 0 ] && echo "P29-v2.1.101-old PRESENT" && N=$((N+1))
 # v2.1.101 negative checks
-[ "$(grep -cF \"Don't create planning, decision, or analysis documents unless\" $F)" -gt 0 ] && echo "P31-old PRESENT" && N=$((N+1))
+[ "$(grep -cF "Don't create planning, decision, or analysis documents unless" $F)" -gt 0 ] && echo "P31-old PRESENT" && N=$((N+1))
 [ "$(grep -c 'Length limits: keep text between tool calls' $F)" -gt 0 ] && echo "P32-old PRESENT" && N=$((N+1))
 # P33-P39 negative checks
 [ "$(grep -c 'Brief is good' $F)" -gt 0 ] && echo "P33-old PRESENT (yvf)" && N=$((N+1))
-[ "$(grep -cF \"Don't narrate your internal deliberation\" $F)" -gt 0 ] && echo "P34-old PRESENT (yvf)" && N=$((N+1))
+[ "$(grep -cF "Don't narrate your internal deliberation" $F)" -gt 0 ] && echo "P34-old PRESENT (yvf)" && N=$((N+1))
 [ "$(grep -c 'End-of-turn summary: one or two sentences' $F)" -gt 0 ] && echo "P35-old PRESENT (yvf)" && N=$((N+1))
 [ "$(grep -c 'minimize interruptions, prefer action over planning' $F)" -gt 0 ] && echo "P36-old PRESENT (iLf)" && N=$((N+1))
 [ "$(grep -c 'Start implementing right away' $F)" -gt 0 ] && echo "P37-old PRESENT (nLf)" && N=$((N+1))
