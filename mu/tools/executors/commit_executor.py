@@ -2529,7 +2529,8 @@ def _run_post_commit_pipeline(
 
     try:
         verify_root = _resolve_post_merge_verify_root(repo_root, base_branch, log=log)
-        _run(["git", "pull"], cwd=verify_root, timeout=60)
+        _run(["git", "fetch", "origin", base_branch], cwd=verify_root, timeout=60)
+        _run(["git", "merge", "--ff-only", f"origin/{base_branch}"], cwd=verify_root, timeout=60)
         head_sha = _run(["git", "rev-parse", "HEAD"], cwd=verify_root).stdout.strip()
         status_output = _run(["git", "status", "--short"], cwd=verify_root).stdout.strip()
         if status_output:
