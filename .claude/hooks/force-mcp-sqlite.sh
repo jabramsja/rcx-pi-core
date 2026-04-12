@@ -38,9 +38,21 @@ if echo "$CMD" | grep -qE 'sqlite3\s+.*bridge\.db|sqlite3\s+.*\.agent_bus'; then
     # Strategy: pull all tokens after 'sqlite3', skip option flags (leading -),
     # take the first positional argument as the DB path.
     DB_ARG=""
+    _skip_next=false
+    # Known sqlite3 flags that take a value argument
+    _VALUE_FLAGS="-cmd -separator -newline -nullvalue -init"
     for _tok in $(echo "$CMD" | grep -oE 'sqlite3\s+.*' | sed 's/sqlite3\s\+//'); do
+      if [ "$_skip_next" = "true" ]; then
+        _skip_next=false
+        continue  # skip value argument of previous flag
+      fi
       case "$_tok" in
-        -*) continue ;;  # skip option flags
+        -*)
+            # Check if this flag takes a value
+            for _vf in $_VALUE_FLAGS; do
+              [ "$_tok" = "$_vf" ] && _skip_next=true && break
+            done
+            continue ;;
         *)  DB_ARG="$_tok"; break ;;
       esac
     done

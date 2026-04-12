@@ -2702,6 +2702,30 @@ def _run_post_commit_pipeline(
     )
     if findings_result["outcome"] == "error":
         return findings_result["response"]
+
+    # Inject sweep findings from prior merged PRs (merge_pr.sh --sweep writes
+    # .agent_bus/meta/sweep_findings.json with unresolved bot finding content).
+    sweep_file = repo_root / ".agent_bus" / "meta" / "sweep_findings.json"
+    if sweep_file.exists():
+        try:
+            sweep_lines = [ln.strip() for ln in sweep_file.read_text().splitlines() if ln.strip()]
+            sweep_findings = [json.loads(ln) for ln in sweep_lines]
+            if sweep_findings:
+                existing = findings_result.get("bot_findings", [])
+                for sf in sweep_findings:
+                    existing.append({
+                        "author": "chatgpt-codex-connector[bot]",
+                        "path": sf.get("path", ""),
+                        "body": sf.get("body", ""),
+                        "source": f"sweep-pr-{sf.get('pr', '?')}",
+                    })
+                findings_result["bot_findings"] = existing
+                if findings_result["outcome"] != "bot_findings":
+                    findings_result["outcome"] = "bot_findings"
+                log(f"Step 15: injected {len(sweep_findings)} sweep finding(s) from prior PRs")
+        except (json.JSONDecodeError, OSError, KeyError) as exc:
+            log(f"Step 15: failed to load sweep findings (non-fatal): {exc}")
+
     if findings_result["outcome"] == "bot_findings" and review_wait_timed_out is None:
         # Only remediate bot findings if the bot actually reviewed the
         # current HEAD.  On timeout, stale threads from previous commits
