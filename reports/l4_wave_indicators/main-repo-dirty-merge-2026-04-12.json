@@ -1,24 +1,24 @@
 {
   "wave_id": "main-repo-dirty-merge-2026-04-12",
-  "repeat_run_speedup_ratio": 1.123961,
+  "repeat_run_speedup_ratio": 1.307738,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.416244,
+  "step_growth_slope": 0.438883,
   "repeat_run_raw_seconds": [
-    0.467842,
-    0.416244
+    0.573944,
+    0.438883
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.467842
+      "elapsed_seconds": 0.573944
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.884086
+      "elapsed_seconds": 1.012827
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-12T07:52:04Z",
+  "collection_timestamp_utc": "2026-04-12T08:08:56Z",
   "collector_version": "2.2.0"
 }
