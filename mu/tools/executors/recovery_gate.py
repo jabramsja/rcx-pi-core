@@ -62,6 +62,7 @@ class FailureClass(Enum):
     AGENT_REVIEW_CRASH = "agent_review_crash"
     UNKNOWN_ERROR = "unknown_error"
     NEEDS_PHASE_B = "needs_phase_b"
+    BOT_FINDINGS_PENDING = "bot_findings_pending"
     # Tier 4 -- escalate (never recover)
     TERMINAL_POLICY = "terminal_policy"
     UNCLASSIFIED = "unclassified"
@@ -76,6 +77,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.GIT_STAGING_CONFLICT: 3, FailureClass.TEST_FAILURE: 3,
     FailureClass.AGENT_REVIEW_CRASH: 3, FailureClass.UNKNOWN_ERROR: 3,
     FailureClass.NEEDS_PHASE_B: 3,
+    FailureClass.BOT_FINDINGS_PENDING: 3,
     FailureClass.TERMINAL_POLICY: 4, FailureClass.UNCLASSIFIED: 4,
 }
 
@@ -142,6 +144,10 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     # Tier 3: needs_phase_b is recoverable (retry Phase B)
     if status == "needs_phase_b" or embedded_status == "needs_phase_b":
         return FailureClass.NEEDS_PHASE_B
+
+    # Tier 3: bot_findings_pending with P1 unresolved → re-invoke implementer
+    if status == "bot_findings_pending" or embedded_status == "bot_findings_pending":
+        return FailureClass.BOT_FINDINGS_PENDING
 
     if status_failed and "merge_pr.sh failed" in reason_lower and (
         "not mergeable" in reason_lower

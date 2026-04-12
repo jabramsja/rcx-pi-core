@@ -1723,6 +1723,10 @@ def main(argv: list[str] | None = None) -> int:
                 break
             # Recovery gate: classify failure and attempt Tier 1/2 auto-fix
             # "timeout" is included so PROCESS_TIMEOUT reaches Tier 2 recovery
+            # "bot_findings_pending" is deliberately excluded — classify_failure
+            # returns UNCLASSIFIED (tier 4) for it, which hits the tier>=3
+            # fail-closed break.  Letting it fall through preserves normal
+            # --retries behavior so the executor can re-poll bot review state.
             if result.get("status") in ("failed", "timeout"):
                 _wave_id = normalize_wave_id(
                     record.get("wave_name") or record.get("wave_id", ""))
