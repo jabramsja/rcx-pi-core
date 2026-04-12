@@ -1446,6 +1446,59 @@ def _build_bot_remediation_prompt(
     return "\n".join(lines)
 
 
+def _poll_ci_checks_fallback(
+    repo_root: Path,
+    pr_number: str,
+    *,
+    timeout: int = 300,
+    poll_interval: int = 15,
+    log: Any = None,
+) -> bool:
+    """Fallback CI poll when ``gh pr checks --watch`` exits prematurely.
+
+    ``gh pr checks --watch --required`` exits 1 when checks are still
+    pending (not started or in progress), which the caller interprets as
+    CI failure.  This function polls ``gh pr view --json statusCheckRollup``
+    until every check has a conclusion, then returns True iff none FAILED.
+    """
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        try:
+            out = subprocess.run(
+                ["gh", "pr", "view", pr_number, "--json", "statusCheckRollup"],
+                cwd=repo_root, capture_output=True, text=True, timeout=30,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            _time.sleep(poll_interval)
+            continue
+        if out.returncode != 0:
+            _time.sleep(poll_interval)
+            continue
+        try:
+            checks = json.loads(out.stdout).get("statusCheckRollup", [])
+        except (json.JSONDecodeError, ValueError):
+            _time.sleep(poll_interval)
+            continue
+        if not checks:
+            _time.sleep(poll_interval)
+            continue
+        any_failed = any(c.get("conclusion") == "FAILURE" for c in checks)
+        if any_failed:
+            if log:
+                failed_names = [c.get("name", "?") for c in checks if c.get("conclusion") == "FAILURE"]
+                log(f"CI check(s) failed: {', '.join(failed_names)}")
+            return False
+        all_done = all(c.get("conclusion") for c in checks)
+        if all_done:
+            return True
+        _time.sleep(poll_interval)
+    if log:
+        log(f"CI poll timed out after {timeout}s")
+    return False
+
+
 def _auto_defer_bot_findings(
     repo_root: Path,
     findings: list[dict[str, Any]],
@@ -1771,14 +1824,18 @@ def _attempt_bot_finding_remediation(
             )
             log(f"Step 15: CI passed on remediation commit {current_head[:8]}")
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, TimeoutError) as exc:
-            log(f"Step 15: CI failed after remediation round {round_num}: {exc}")
-            return {
-                "status": "bot_findings_pending",
-                "bot_findings": current_findings,
-                "pr_number": pr_number,
-                "steps_completed": result["steps_completed"],
-                "remediation_rounds_attempted": round_num,
-            }
+            # gh pr checks --watch exits 1 on pending checks (not failed).
+            # Fallback to polling before giving up.
+            log(f"Step 15: gh pr checks exited ({exc.__class__.__name__}), polling CI as fallback")
+            if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=300, log=log):
+                log(f"Step 15: CI failed after remediation round {round_num}")
+                return {
+                    "status": "bot_findings_pending",
+                    "bot_findings": current_findings,
+                    "pr_number": pr_number,
+                    "steps_completed": result["steps_completed"],
+                    "remediation_rounds_attempted": round_num,
+                }
 
         # Request fresh bot review and wait
         try:
@@ -2472,21 +2529,16 @@ def _run_post_commit_pipeline(
                 target_branch=target_branch,
             )
             log("Step 14: CI passed")
-        except subprocess.CalledProcessError as exc:
-            return {"status": "error", "step": "wait_ci",
-                    "errors": [f"CI checks failed: {exc.stderr.strip()}"],
-                    "steps_completed": result["steps_completed"],
-                    "pr_number": pr_number}
-        except subprocess.TimeoutExpired:
-            return {"status": "error", "step": "wait_ci",
-                    "errors": ["CI wait timed out after 600s"],
-                    "steps_completed": result["steps_completed"],
-                    "pr_number": pr_number}
-        except TimeoutError as exc:
-            return {"status": "error", "step": "wait_ci",
-                    "errors": [str(exc)],
-                    "steps_completed": result["steps_completed"],
-                    "pr_number": pr_number}
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, TimeoutError) as exc:
+            # gh pr checks --watch exits 1 on pending checks (not failed).
+            # Fallback to polling before giving up.
+            log(f"Step 14: gh pr checks exited ({exc.__class__.__name__}), polling CI as fallback")
+            if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=300, log=log):
+                return {"status": "error", "step": "wait_ci",
+                        "errors": [f"CI checks failed (confirmed by polling): {exc}"],
+                        "steps_completed": result["steps_completed"],
+                        "pr_number": pr_number}
+            log("Step 14: CI passed (confirmed by polling fallback)")
     else:
         log(f"Step 14: required checks already passed for PR #{pr_number}, skipping")
 
