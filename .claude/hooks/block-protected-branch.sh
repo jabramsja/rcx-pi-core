@@ -5,67 +5,51 @@ set -euo pipefail
 
 CMD=$(jq -r '.tool_input.command // ""' < /dev/stdin 2>/dev/null || echo "")
 
-# 2026-04-11 PR #746 P1 fix + PR #754 P1 follow-up: strip bash comments
-# PER LINE BEFORE flattening newlines, AND only match `#` at word
-# boundaries (start of line or after whitespace) — `#` INSIDE a word
-# (e.g. `echo foo#bar`) is literal text, not a comment delimiter in bash.
+# 2026-04-11 block-protected-branch lexer rewrite: replace the recursive
+# sed-regex comment-and-quote stripping (v1-v3 fix cycle; see the packet
+# at reports/control_plane/block_protected_branch_lexer_2026-04-11.md
+# for the full history, bot findings, and design rationale) with a
+# bash-aware state-machine tokenizer that correctly handles POSIX
+# word-boundary comments, single-quoted strings, double-quoted strings,
+# unquoted backslash escapes, line continuations, and fail-closed
+# behavior on malformed input (unclosed quote or trailing backslash at
+# end-of-input).
 #
-# Prior iterations and their bugs:
-#
-#   v1 (pre-2026-04-11 P746): `CMD_ONELINE=$(tr '\n' ' '); CMD_STRIPPED=$(sed 's/#[^;|&]*(;|&&|\|\||$)//g' ...)`
-#     BUG: flatten first, then strip. A multiline command like
-#     "# this is a comment\ngit commit -m x" flattened to
-#     "# this is a comment git commit -m x", then sed matched from
-#     `#` to end-of-flattened-string (no `;|&` separator present),
-#     erasing `git commit`. BLOCKED stayed false → protected-branch
-#     guard was BYPASSED for multiline input starting with a comment.
-#     Bot finding: PR #746 P1 inline at line 14.
-#     BENEFIT by accident: correctly handled `echo foo#bar; git commit -m x`
-#     because `[^;|&]*` stopped at `;`.
-#
-#   v2 (first PR #754 attempt): `CMD_NOCOMMENTS=$(sed 's/#.*$//g' <<< CMD); CMD_ONELINE=$(tr '\n' ' ' <<< CMD_NOCOMMENTS)`
-#     BUG: strip first, then flatten — correct order for multiline —
-#     BUT the regex `#.*$` treats EVERY `#` as comment start. For
-#     `echo foo#bar; git commit -m x`, the `.*$` match eats
-#     `#bar; git commit -m x`, leaving `echo foo`. BLOCKED stayed
-#     false → protected-branch guard BYPASSED again.
-#     Bot finding: PR #754 P1 inline at line 28 (reproduced on tmp
-#     main-branch repo: hook returned allow for the foo#bar case).
-#
-#   v3 (this fix, 2026-04-11): `CMD_NOCOMMENTS=$(sed -E 's/(^|[[:space:]])#.*$/\1/g' <<< CMD); ...`
-#     Per-line processing (handles v1 multiline bug) AND word-boundary
-#     match (handles v2 foo#bar bug). `(^|[[:space:]])` matches either
-#     beginning-of-line or whitespace before the `#`. `\1` backreference
-#     preserves the matched anchor character (so the preceding
-#     whitespace isn't consumed by the substitution).
-#
-# Verified via 6 smoke tests (see protocol_wave_execution tests or run
-# the inline scenarios in the commit message): (A) multiline comment
-# + git commit BLOCKS, (B) single-line inline comment does NOT block,
-# (C) quoted git commit does NOT block, (D) bare git commit BLOCKS,
-# (F) `git checkout -b pre-commit-fix` does NOT block, (G) NEW
-# `echo foo#bar; git commit -m x` BLOCKS (this is the PR #754 P1
-# regression scenario).
-#
-# NOTE on BSD sed: `[^\n]` inside a character class is NOT a newline
-# exclusion — it's literal `\` and `n` — so `[^\n]*$` would fail to
-# match comments containing the letter `n`. Always use `.*$` against
-# line-oriented input.
-CMD_NOCOMMENTS=$(echo "$CMD" | sed -E 's/(^|[[:space:]])#.*$/\1/g')
+# The helper at _block_protected_branch_tokenize.py implements the
+# lexer contract. On any parser error it exits 2 and writes no tokens
+# to stdout; the hook converts that into a BLOCK decision so malformed
+# input cannot turn into an allow path.
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The tokenizer emits NUL-terminated tokens (not newline-terminated)
+# so that a shell word containing an embedded newline (e.g. a
+# single-quoted multiline string) is not fragmented into multiple
+# words by the consumer loop below. Buffer the output through a temp
+# file because bash command substitution ($(...)) strips NUL bytes
+# from its captured output, which would corrupt the delimiter stream.
+CMD_TOKENS_FILE=$(mktemp)
+trap 'rm -f "$CMD_TOKENS_FILE"' EXIT
+if ! printf '%s' "$CMD" \
+      | python3 "$HOOK_DIR/_block_protected_branch_tokenize.py" \
+      >"$CMD_TOKENS_FILE" 2>/dev/null; then
+  jq -n '{"decision": "block", "reason": "block-protected-branch: tokenizer parser error - blocking for safety"}'
+  exit 0
+fi
 
-# Collapse newlines to single line for regex matching (catches multiline git commands)
-CMD_ONELINE=$(echo "$CMD_NOCOMMENTS" | tr '\n' ' ')
-
-# Strip content inside quotes to avoid false positives like
-# echo "...git commit...". Comments are already stripped above.
-CMD_STRIPPED=$(echo "$CMD_ONELINE" | sed -E "s/'[^']*'//g; s/\"[^\"]*\"//g")
+# Raw one-line view of the command for the best-effort worktree-path
+# detectors at Patterns 1 and 2 below. These are NOT the safety gate -
+# they only pick which directory to branch-check in. The safety gate is
+# the BLOCKED flag, which uses the tokenizer above. Over-detection here
+# causes the branch check to run in the "wrong" worktree whose branch
+# is typically protected (dev/main), triggering BLOCK anyway -
+# fail-closed.
+CMD_ONELINE=$(printf '%s' "$CMD" | tr '\n' ' ')
 
 # Extract git subcommands: find words immediately after "git" (skipping -c key=val style flags).
 # Only block on actual git subcommands, not on branch names or other arguments that
 # happen to contain words like "commit" (e.g., git checkout -b pre-commit-fix).
 BLOCKED=false
 EXPECT_FLAG_ARG=false
-for word in $CMD_STRIPPED; do
+while IFS= read -r -d '' word; do
   # After a flag that takes an argument (e.g., -C <path>, -c key=val), skip the argument
   if [ "$EXPECT_FLAG_ARG" = "true" ]; then
     EXPECT_FLAG_ARG=false
@@ -91,7 +75,7 @@ for word in $CMD_STRIPPED; do
     esac
     NEXT_IS_GIT_SUB=false
   fi
-done
+done < "$CMD_TOKENS_FILE"
 if [ "$BLOCKED" = "false" ]; then
   exit 0
 fi
