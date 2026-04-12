@@ -3066,7 +3066,11 @@ def _unescape_backtick_field(s: str) -> str:
     Reverses _escape_backtick_field: \` → `, \\ → \.
     Uses regex to process escape sequences left-to-right without overlap.
     """
-    return re.sub(r"\\(.)", r"\1", s)
+    # Only unescape the two sequences produced by _escape_backtick_field:
+    #   \` → `   and   \\ → \
+    # Other backslash sequences (e.g. \t, \n, path\to\file) are preserved
+    # so manually authored fingerprints with literal backslashes are not corrupted.
+    return re.sub(r"\\([`\\])", r"\1", s)
 
 
 # Regex supports backslash-escaped backticks within the delimited fields:
