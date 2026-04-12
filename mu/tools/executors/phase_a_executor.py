@@ -1498,7 +1498,7 @@ def run_phase_a(
     if not _run_bridge_convergence(start_round=1, agent_review_context=agent_review_bridge_ctx):
         return result
 
-    if defer_agent_review and not result["agent_review_ran"] and config.get("agent_review_enabled", True):
+    if defer_agent_review and not result["agent_review_ran"]:
         refined_plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
         if _plan_is_placeholder_stub(refined_plan_content):
             result["status"] = "error"
@@ -1508,17 +1508,18 @@ def run_phase_a(
                 "deferred SDK review can run."
             )
             return result
-        review_ok, agent_review_bridge_ctx = _run_phase_a_agent_review(
-            f"Running deferred SDK agent review on refined plan (depth={review_depth})..."
-        )
-        if not review_ok:
-            return result
-        if result.get("agent_review_warning_only"):
-            if not _run_bridge_convergence(
-                start_round=result["bridge_rounds"] + 1,
-                agent_review_context=agent_review_bridge_ctx,
-            ):
+        if config.get("agent_review_enabled", True):
+            review_ok, agent_review_bridge_ctx = _run_phase_a_agent_review(
+                f"Running deferred SDK agent review on refined plan (depth={review_depth})..."
+            )
+            if not review_ok:
                 return result
+            if result.get("agent_review_warning_only"):
+                if not _run_bridge_convergence(
+                    start_round=result["bridge_rounds"] + 1,
+                    agent_review_context=agent_review_bridge_ctx,
+                ):
+                    return result
 
     # Lock the plan
     try:
