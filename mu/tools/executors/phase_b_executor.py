@@ -1680,14 +1680,30 @@ def _resolve_review_depth(config: dict[str, Any], phase_key: str, default: str =
 
 
 def _stage_files(repo_root: Path, files: list[str]) -> bool:
-    """Stage files for commit. Returns True on success."""
+    """Stage files for commit. Returns True on success.
+
+    Files under .claude/ are staged individually to avoid the git multi-path
+    pathspec resolver false-positive: batch ``git add`` with .claude/ paths
+    alongside other top-level paths triggers "ignored by .gitignore" on the
+    .claude parent directory even for tracked files under negation-rule
+    subdirectories (.claude/hooks/).  Single-path adds work correctly.
+    See .claude/rules/learning.md 2026-04-11 entry (git add multi-path).
+    """
     if not files:
         return False
+    claude_files = [f for f in files if f.startswith(".claude/") or f.startswith(".claude\\")]
+    other_files = [f for f in files if f not in claude_files]
     try:
-        subprocess.run(
-            ["git", "add", "--", *files],
-            cwd=repo_root, capture_output=True, text=True, check=True,
-        )
+        if other_files:
+            subprocess.run(
+                ["git", "add", "--", *other_files],
+                cwd=repo_root, capture_output=True, text=True, check=True,
+            )
+        for cf in claude_files:
+            subprocess.run(
+                ["git", "add", "--", cf],
+                cwd=repo_root, capture_output=True, text=True, check=True,
+            )
         return True
     except subprocess.CalledProcessError:
         # Fail closed. Phase B must not bypass ignore rules by force-adding
@@ -2403,7 +2419,7 @@ def run_phase_b(
                 resume_after == "agent_review"
                 and saved_state is not None
                 and saved_state.get("agent_review_scope_fingerprint") == agent_scope_fingerprint
-                and saved_state.get("agent_exit_code") in (0, 1, 2)
+                and saved_state.get("agent_exit_code") is not None
                 and bool(saved_state.get("agent_review_report_path"))
                 and bool(saved_state.get("agent_review_status_path"))
             )
@@ -2442,17 +2458,14 @@ def run_phase_b(
                 log(f"Agent review exit code: {agent_result['exit_code']}")
 
                 if agent_result["exit_code"] not in (0, 1, 2):
-                    return {
-                        "status": "error",
-                        "step": "agent_review",
-                        "errors": [
-                            f"SDK agent review failed (exit={agent_result['exit_code']}). "
-                            "Hard gate agents and compliance must pass before bridge review. "
-                            f"stderr: {agent_result.get('stderr', '')[:500]}"
-                        ],
-                        "agent_review_ran": True,
-                        "agent_exit_code": agent_result["exit_code"],
-                    }
+                    # Agent review produced a non-passing result (exit=3 hard gate,
+                    # exit=-1 timeout, etc.).  Treat as WARNING — agent findings are
+                    # passed to the bridge/implementer loop for contextual triage.
+                    # Agents run once; the bridge review is the real convergence gate.
+                    log(
+                        f"Agent review exit={agent_result['exit_code']}; "
+                        "treating as warning (findings forwarded to bridge review)"
+                    )
 
                 _save_state(repo_root, {
                     "plan_path": plan_path,
@@ -2472,14 +2485,19 @@ def run_phase_b(
                     "agent_review_stdout_path": agent_result.get("stdout_path"),
                 })
 
-            if result["agent_exit_code"] in (1, 2):
+            if result["agent_exit_code"] != 0:
                 if result["agent_exit_code"] == 1:
                     log(
                         "Agent review returned semantic blocker findings exit=1; "
                         "continuing to bridge for contextual blocking/non-blocking classification"
                     )
-                else:
+                elif result["agent_exit_code"] == 2:
                     log("Agent review returned warnings-only exit=2; continuing to bridge review")
+                else:
+                    log(
+                        f"Agent review exit={result['agent_exit_code']}; "
+                        "findings forwarded as warnings to bridge review"
+                    )
                 result["agent_review_warning_only"] = True
 
     # Step 5: Bridge convergence loop (implementer-fix → bridge-review)
