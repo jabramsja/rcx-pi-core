@@ -3492,6 +3492,7 @@ def main() -> int:
     # instead of silently exiting.
     if result.get("status") == "bot_findings_pending" and args.standalone:
         try:
+            sys.path.insert(0, str(repo_root))
             from mu.tools.executors.recovery_gate import attempt_recovery
             from mu.tools.executors.executor_common import normalize_wave_id
             wave_id = normalize_wave_id(handoff.get("wave_id", "unknown"))
