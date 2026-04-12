@@ -1723,7 +1723,9 @@ def main(argv: list[str] | None = None) -> int:
                 break
             # Recovery gate: classify failure and attempt Tier 1/2 auto-fix
             # "timeout" is included so PROCESS_TIMEOUT reaches Tier 2 recovery
-            if result.get("status") in ("failed", "timeout"):
+            # "bot_findings_pending" is included so unresolved bot findings
+            # reach recovery instead of falling through silently
+            if result.get("status") in ("failed", "timeout", "bot_findings_pending"):
                 _wave_id = normalize_wave_id(
                     record.get("wave_name") or record.get("wave_id", ""))
                 recovery = attempt_recovery(repo_root, result, _wave_id)

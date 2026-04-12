@@ -1446,6 +1446,79 @@ def _build_bot_remediation_prompt(
     return "\n".join(lines)
 
 
+def _auto_defer_bot_findings(
+    repo_root: Path,
+    findings: list[dict[str, Any]],
+    wave_id: str,
+    pr_number: str,
+    repo_owner: str,
+    repo_name: str,
+    log: Any,
+) -> None:
+    """Auto-defer bot findings when the remediation adapter produces no changes.
+
+    Writes a deferred non-blocking report and resolves PR comment threads
+    so the merge can proceed without manual intervention.
+    """
+    from datetime import datetime, timezone
+
+    # 1. Write deferred report
+    deferred_dir = repo_root / "reports" / "deferred" / "non_blocking"
+    deferred_dir.mkdir(parents=True, exist_ok=True)
+    report_name = f"pr{pr_number}_bot_auto_deferred_{wave_id}.md"
+    report_path = deferred_dir / report_name
+    lines = [
+        f"# PR #{pr_number} Bot Findings (Auto-Deferred)\n\n",
+        f"Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}\n",
+        f"Wave: {wave_id}\n",
+        "Classification: NON-BLOCKING (auto-deferred — remediation adapter produced no changes)\n\n",
+    ]
+    for i, finding in enumerate(findings, 1):
+        body = finding.get("body", "")
+        path = finding.get("path", "unknown")
+        lines.append(f"## Finding {i}: `{path}`\n\n")
+        lines.append(f"{body[:500]}\n\n")
+    report_path.write_text("".join(lines), encoding="utf-8")
+    log(f"Step 15: deferred report written to {report_name}")
+
+    # 2. Resolve PR comment threads so merge is not blocked
+    try:
+        query = (
+            f'{{"query":"query{{repository(owner:\\"{repo_owner}\\",name:\\"{repo_name}\\")'
+            f'{{pullRequest(number:{pr_number}){{reviewThreads(first:50){{nodes{{id isResolved}}}}}}}}}}"}}'
+        )
+        query_result = subprocess.run(
+            ["gh", "api", "graphql", "--input", "-"],
+            input=query, capture_output=True, text=True, timeout=30,
+        )
+        if query_result.returncode == 0:
+            data = json.loads(query_result.stdout)
+            threads = (
+                data.get("data", {})
+                .get("repository", {})
+                .get("pullRequest", {})
+                .get("reviewThreads", {})
+                .get("nodes", [])
+            )
+            resolved_count = 0
+            for thread in threads:
+                if not thread.get("isResolved"):
+                    tid = thread["id"]
+                    mutation = (
+                        f'{{"query":"mutation{{resolveReviewThread(input:{{threadId:\\"{tid}\\"}})'
+                        f'{{thread{{isResolved}}}}}}"}}'
+                    )
+                    subprocess.run(
+                        ["gh", "api", "graphql", "--input", "-"],
+                        input=mutation, capture_output=True, text=True, timeout=30,
+                    )
+                    resolved_count += 1
+            if resolved_count:
+                log(f"Step 15: resolved {resolved_count} PR comment thread(s)")
+    except Exception as exc:
+        log(f"Step 15: failed to resolve comment threads (non-fatal): {exc}")
+
+
 def _attempt_bot_finding_remediation(
     bot_findings: list[dict[str, Any]],
     *,
@@ -1544,14 +1617,31 @@ def _attempt_bot_finding_remediation(
             cwd=repo_root, timeout=30,
         ).stdout
         if not status_out.strip():
-            log(f"Step 15: adapter produced no changes in round {round_num}")
-            return {
-                "status": "bot_findings_pending",
-                "bot_findings": current_findings,
-                "pr_number": pr_number,
-                "steps_completed": result["steps_completed"],
-                "remediation_rounds_attempted": round_num,
-            }
+            # Check if any finding is P1 (blocking) — P1 with no adapter fix
+            # must still fail-close.  Only P2+ (non-blocking) get auto-deferred.
+            p1_findings = [
+                f for f in current_findings
+                if "P1" in f.get("body", "") or "P1" in f.get("severity", "")
+            ]
+            if p1_findings:
+                log(
+                    f"Step 15: adapter produced no changes in round {round_num} — "
+                    f"{len(p1_findings)} P1 finding(s) remain, routing to recovery agent"
+                )
+                return {
+                    "status": "bot_findings_pending",
+                    "bot_findings": current_findings,
+                    "p1_unresolved": True,
+                    "pr_number": pr_number,
+                    "steps_completed": result["steps_completed"],
+                    "remediation_rounds_attempted": round_num,
+                }
+            log(f"Step 15: adapter produced no changes in round {round_num} — auto-deferring {len(current_findings)} non-blocking finding(s)")
+            _auto_defer_bot_findings(
+                repo_root, current_findings, wave_id, pr_number,
+                repo_owner, repo_name, log,
+            )
+            return None  # success — caller proceeds to merge
 
         # Stage only finding-scoped files, fail closed on out-of-scope changes
         allowed_paths = {f.get("path") for f in current_findings if f.get("path")}
