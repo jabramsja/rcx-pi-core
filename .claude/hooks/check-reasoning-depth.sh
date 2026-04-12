@@ -198,5 +198,16 @@ if [ "$HAS_CLAIM" -gt 0 ] && [ "$HAS_VERIFY" -eq 0 ]; then
     exit 0
 fi
 
+# --- Check 10: Self-classification of findings without impact verification ---
+# Catches "filed as non-blocking", "P2 non-blocking", "deferred as non-blocking"
+# without evidence of having verified the finding's pipeline impact.
+# Prevents the systematic bias of classifying findings as non-blocking to avoid work.
+HAS_DEFER_CLASSIFY=$(echo "$MSG" | grep -iEc "(filed as (deferred|non.blocking)|classification.*non.blocking|P2.*non.blocking|non.blocking.*deferred|filing as non.blocking|classif.*as.*non.blocking)" || true)
+HAS_IMPACT_VERIFY=$(echo "$MSG" | grep -iEc "(does not (affect|break|block)|no pipeline impact|verified.*not.*critical|checked.*critical.path|not on critical path|does not cause)" || true)
+if [ "$HAS_DEFER_CLASSIFY" -gt 0 ] && [ "$HAS_IMPACT_VERIFY" -eq 0 ]; then
+    echo '{"decision":"block","reason":"BLOCKED: Classifying a finding as non-blocking without verifying pipeline impact. Before deferring, verify: (1) does this file affect hooks/executors/checks/preflight? (2) does a failure here cause silent regressions? If yes → BLOCKING regardless of P-level. Cite the evidence for your classification."}'
+    exit 0
+fi
+
 # Allow stop
 exit 0

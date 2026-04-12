@@ -1704,6 +1704,30 @@ def _attempt_bot_finding_remediation(
                     "steps_completed": result["steps_completed"],
                     "remediation_rounds_attempted": round_num,
                 }
+            # Critical-path guard: findings on hooks, executors, checks, or
+            # preflight are ALWAYS blocking regardless of P-level — the bot's
+            # severity badge measures code quality, not pipeline impact.
+            _CRITICAL_PATH_PREFIXES = (
+                ".claude/hooks/", ".claude/skills/", "mu/tools/executors/",
+                "mu/tools/checks/", "tools/checks/", "mu/tools/hooks/",
+            )
+            critical_findings = [
+                f for f in current_findings
+                if any(f.get("path", "").startswith(pfx) for pfx in _CRITICAL_PATH_PREFIXES)
+            ]
+            if critical_findings:
+                log(
+                    f"Step 15: adapter produced no changes in round {round_num} — "
+                    f"{len(critical_findings)} finding(s) on critical-path files, routing to recovery"
+                )
+                return {
+                    "status": "bot_findings_pending",
+                    "bot_findings": current_findings,
+                    "p1_unresolved": True,
+                    "pr_number": pr_number,
+                    "steps_completed": result["steps_completed"],
+                    "remediation_rounds_attempted": round_num,
+                }
             log(f"Step 15: adapter produced no changes in round {round_num} — auto-deferring {len(current_findings)} non-blocking finding(s)")
             _auto_defer_bot_findings(
                 repo_root, current_findings, wave_id, pr_number,
