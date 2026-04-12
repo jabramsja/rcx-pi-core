@@ -1,24 +1,24 @@
 {
   "wave_id": "bot-sweep-fixes-2026-04-12",
-  "repeat_run_speedup_ratio": 1.625376,
+  "repeat_run_speedup_ratio": 1.421133,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.411621,
+  "step_growth_slope": 0.377769,
   "repeat_run_raw_seconds": [
-    0.669039,
-    0.411621
+    0.53686,
+    0.377769
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.669039
+      "elapsed_seconds": 0.53686
     },
     {
       "step": 2,
-      "elapsed_seconds": 1.08066
+      "elapsed_seconds": 0.914629
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-12T09:29:49Z",
+  "collection_timestamp_utc": "2026-04-12T09:45:42Z",
   "collector_version": "2.2.0"
 }

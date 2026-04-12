@@ -1752,8 +1752,16 @@ def _attempt_bot_finding_remediation(
                 log(f"Step 15: failed to amend deferred report (non-fatal): {exc}")
             return None  # success — caller proceeds to merge
 
-        # Stage only finding-scoped files, fail closed on out-of-scope changes
-        allowed_paths = {f.get("path") for f in current_findings if f.get("path")}
+        # Stage finding-scoped files + same-directory helpers, fail closed on rest.
+        # The remediation prompt allows creating helper files in the same
+        # directories as finding paths, so the staging guard must match.
+        finding_paths = {f.get("path") for f in current_findings if f.get("path")}
+        allowed_dirs = {str(Path(p).parent) for p in finding_paths if p}
+        allowed_paths = set(finding_paths)  # exact finding paths always allowed
+
+        def _is_same_dir_helper(fp: str) -> bool:
+            """Return True if fp is a new file in a finding's directory."""
+            return any(str(Path(fp).parent) == d for d in allowed_dirs)
         changed_lines = [ln for ln in status_out.splitlines() if ln.strip()]
         scoped_entries: list[tuple[str, str]] = []
         out_of_scope_entries: list[tuple[str, str]] = []
@@ -1769,7 +1777,7 @@ def _attempt_bot_finding_remediation(
                     "remediation_rounds_attempted": round_num,
                 }
             status_code, file_path = parsed_line
-            if file_path in allowed_paths:
+            if file_path in allowed_paths or _is_same_dir_helper(file_path):
                 scoped_entries.append((status_code, file_path))
             elif not file_path.startswith(TRANSIENT_STATUS_PREFIXES):
                 out_of_scope_entries.append((status_code, file_path))
@@ -1804,7 +1812,14 @@ def _attempt_bot_finding_remediation(
             }
 
         try:
-            _run(["git", "add", "--"] + scoped_files, cwd=repo_root, timeout=30)
+            # Split .claude/ paths into individual staging to avoid the git
+            # multi-path pathspec resolver false-positive (learning.md 2026-04-11).
+            _claude_files = [f for f in scoped_files if f.startswith(".claude/")]
+            _other_files = [f for f in scoped_files if not f.startswith(".claude/")]
+            if _other_files:
+                _run(["git", "add", "--"] + _other_files, cwd=repo_root, timeout=30)
+            for _cf in _claude_files:
+                _run(["git", "add", "--", _cf], cwd=repo_root, timeout=30)
 
             # Mint bot-remediation receipt (type B) so the pre-commit hook
             # sees a valid receipt for this staged state.  This is a
