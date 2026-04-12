@@ -1,4 +1,7 @@
 #!/bin/bash
+# NOTE: No RCX_PIPELINE_SESSION bypass here — agent compliance validation is
+# security-critical (fabrication detection, fail-closed) and must run even for
+# pipeline subprocesses.  See bridge round 1 finding 1 (2026-04-12).
 # =============================================================================
 # Agent Compliance Validator Hook
 #

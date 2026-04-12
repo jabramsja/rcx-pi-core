@@ -1,6 +1,10 @@
 #!/bin/bash
 # Claude Code Stop hook: check if memory consolidation (/dream) is overdue.
 # Fires at conversation end. If 24+ hours since last dream, tells Claude to run /dream.
+
+# Pipeline bypass: set by bridge_adapters.py for all pipeline subprocesses.
+[ "${RCX_PIPELINE_SESSION:-}" = "1" ] && exit 0
+
 MEMORY_DIR="$HOME/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory"
 
 # If memory dir doesn't exist, skip silently (non-standard checkout path)

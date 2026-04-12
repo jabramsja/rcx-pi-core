@@ -5,6 +5,16 @@
 #
 # The hook receives JSON on stdin with last_assistant_message.
 #
+# Scope: applies ONLY to the main interactive Claude Code session.
+# Pipeline subprocess sessions (phase_a/b executor, commit_executor,
+# meta_bridge supervisor, bridge_adapters, executor_dispatch) use the
+# bridge review loop for quality enforcement. Blocking pipeline subagents
+# with interactive-discipline checks causes --print sessions to exit
+# non-zero with empty stdout (diagnosed 2026-04-12, session 3aef9ac4).
+# Env var bypass: set by bridge_adapters.py for all pipeline subprocesses.
+# Simpler and more reliable than ancestry walk (which fails on orphaned processes).
+[ "${RCX_PIPELINE_SESSION:-}" = "1" ] && exit 0
+#
 # Check 1 (claim-without-evidence): blocks short responses (<800 chars)
 #   that contain claim language but no verification language.
 #
@@ -201,6 +211,20 @@ HAS_RESOLVE_ACTION=$(echo "$MSG" | grep -iEc "(resolveReviewThread|resolve.*thre
 HAS_FOUNDER_OVERRIDE=$(echo "$MSG" | grep -iEc "(founder (said|authorized|approved|directed)|per founder|founder override|you said|your directive|your direction)" || true)
 if [ "$HAS_RESOLVE_ACTION" -gt 0 ] && [ "$HAS_FOUNDER_OVERRIDE" -eq 0 ]; then
     echo '{"decision":"block","reason":"BLOCKED: Attempting to manually resolve PR threads or force-merge without founder authorization. Bot comments are signal — READ them first. The pipeline should handle thread resolution and merge. If the pipeline cannot, ask the founder for direction instead of bypassing."}'
+    exit 0
+fi
+
+# --- Check 12: "failed" without root-cause diagnosis ---
+# Catches responses that report something "failed" without tracing to file:line.
+# Prevents lazy labeling of failures as "known pattern" or "intermittent" without
+# actually diagnosing THIS instance. Must cite file:line OR explicit "diagnosing now".
+# NOTE: Runs BEFORE the MSG_LEN early exit — long messages that mention failure
+# without diagnosis are exactly what this check must catch.
+HAS_FAILED=$(echo "$MSG" | grep -iEc "(^|[^A-Za-z-])(failed|failure|died|crashed|error.*exit|exit.*error|non-zero exit)([^A-Za-z-]|$)" || true)
+HAS_DIAG_EVIDENCE=$(echo "$MSG" | grep -iEc "(file:line|:[0-9]+|\.py:[0-9]|\.sh:[0-9]|root cause|traced to|diagnosing now|will diagnose|let me trace|let me diagnose)" || true)
+HAS_KNOWN_COSMETIC=$(echo "$MSG" | grep -iEc "(cosmetic|non-blocking.*failure|edits applied despite|work gets done)" || true)
+if [ "$HAS_FAILED" -gt 0 ] && [ "$HAS_DIAG_EVIDENCE" -eq 0 ] && [ "$HAS_KNOWN_COSMETIC" -eq 0 ]; then
+    echo '{"decision":"block","reason":"BLOCKED: Response mentions failure/error without root-cause diagnosis. Before reporting a failure, you MUST: (1) read the log or session JSONL, (2) trace to source file:line, (3) cite the evidence. Saying \"failed\" without \"traced to file.py:123\" is not acceptable. If you are about to diagnose, say \"diagnosing now\" explicitly."}'
     exit 0
 fi
 

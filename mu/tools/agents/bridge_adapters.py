@@ -480,6 +480,11 @@ def _prepare_adapter_env(spec: AdapterSpec, context: dict[str, str]) -> tuple[li
     # Strip nesting-detection vars so Claude Code subprocess doesn't refuse to start
     for nest_var in ("CLAUDECODE", "CLAUDE_CODE_SESSION", "CLAUDE_CODE"):
         env.pop(nest_var, None)
+    # Mark this as a pipeline session so hooks (check-reasoning-depth.sh,
+    # artifact-edit-gate.sh, etc.) bypass interactive-discipline checks.
+    # Env var is simpler and more reliable than process-ancestry walking,
+    # which fails when the parent executor is killed by a timeout.
+    env["RCX_PIPELINE_SESSION"] = "1"
     if spec.env:
         env.update({key: _expand_value(value, context) for key, value in spec.env.items()})
     return cmd, env

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Pipeline bypass: set by bridge_adapters.py for all pipeline subprocesses.
+[ "${RCX_PIPELINE_SESSION:-}" = "1" ] && exit 0
 # PostToolUse hook: verify STATUS.md authority counts match baseline after edit.
 # Catches stale authority/total inventory numbers that caused 4+ commit failures
 # in the W3E-W4C session.

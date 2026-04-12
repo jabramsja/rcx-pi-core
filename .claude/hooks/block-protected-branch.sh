@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# NOTE: No RCX_PIPELINE_SESSION bypass here — protected-branch blocking is
+# security-critical and must run even for pipeline subprocesses. Pipeline
+# worktrees are on feature branches so the check passes naturally.
+# See bridge round 1 finding 2 (2026-04-12).
 # PreToolUse hook on Bash: block git commit/push on protected branches (dev, main).
 # Catches the "committed on dev, had to create branch after" mistake.
 set -euo pipefail

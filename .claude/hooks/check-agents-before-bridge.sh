@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Pipeline bypass: set by bridge_adapters.py for all pipeline subprocesses.
+[ "${RCX_PIPELINE_SESSION:-}" = "1" ] && exit 0
 # PreToolUse hook on Bash: check agents ran recently before bridge_supervisor.py review/submit.
 # Catches the "skipped agents, went straight to bridge" protocol violation.
 # NOTE: Setup/diagnostic subcommands (init, status, render, events, doctor) are NOT gated.
