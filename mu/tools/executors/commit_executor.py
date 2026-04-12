@@ -1708,7 +1708,7 @@ def _attempt_bot_finding_remediation(
             # preflight are ALWAYS blocking regardless of P-level — the bot's
             # severity badge measures code quality, not pipeline impact.
             _CRITICAL_PATH_PREFIXES = (
-                ".claude/hooks/", ".claude/skills/", "mu/tools/executors/",
+                ".claude/hooks/", ".claude/skills/preflight/", "mu/tools/executors/",
                 "mu/tools/checks/", "tools/checks/", "mu/tools/hooks/",
             )
             critical_findings = [

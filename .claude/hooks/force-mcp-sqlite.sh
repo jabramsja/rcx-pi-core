@@ -29,7 +29,16 @@ if echo "$CMD" | grep -qE 'sqlite3\s+.*bridge\.db|sqlite3\s+.*\.agent_bus'; then
     [ "$RESOLVED_DIR" != "$RESOLVED_COMMON" ] && IS_LINKED=true
   fi
   if [ "$IS_LINKED" = "true" ]; then
-    exit 0  # Allow sqlite3 in linked worktrees
+    # Only allow sqlite3 on the WORKTREE's own bridge.db, NOT the main repo's.
+    # Extract the sqlite3 target path from the command.
+    MAIN_REPO=$(cd "$GIT_COMMON" 2>/dev/null && cd .. && pwd -P)
+    MAIN_AGENT_BUS="$MAIN_REPO/.agent_bus"
+    if echo "$CMD" | grep -qF "$MAIN_AGENT_BUS"; then
+      jq -n --arg reason "BLOCKED: sqlite3 targets the MAIN repo bridge.db ($MAIN_AGENT_BUS) from a linked worktree. Use MCP SQLite for main-repo inspection. Direct sqlite3 is only allowed on the worktree's own .agent_bus/." \
+        '{"decision":"block","reason":$reason}'
+      exit 0
+    fi
+    exit 0  # Allow sqlite3 on worktree's own bridge.db
   fi
   jq -n --arg reason "BLOCKED: Direct sqlite3 access to bridge.db is not allowed in the main repo. Use MCP SQLite (mcp__sqlite__read_query / mcp__sqlite__write_query) for all bridge.db inspection. Hard rule: ~/.claude/hard-rules.txt" \
     '{"decision":"block","reason":$reason}'
