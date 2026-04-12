@@ -1485,7 +1485,7 @@ def _auto_defer_bot_findings(
     try:
         query = (
             f'{{"query":"query{{repository(owner:\\"{repo_owner}\\",name:\\"{repo_name}\\")'
-            f'{{pullRequest(number:{pr_number}){{reviewThreads(first:50){{nodes{{id isResolved}}}}}}}}}}"}}'
+            f'{{pullRequest(number:{pr_number}){{reviewThreads(first:50){{nodes{{id isResolved comments(first:1){{nodes{{author{{login}}}}}}}}}}}}}}}}"}}'
         )
         query_result = subprocess.run(
             ["gh", "api", "graphql", "--input", "-"],
@@ -1503,6 +1503,13 @@ def _auto_defer_bot_findings(
             resolved_count = 0
             for thread in threads:
                 if not thread.get("isResolved"):
+                    # Only resolve bot-authored threads — human threads must
+                    # remain unresolved for manual review.
+                    first_comments = thread.get("comments", {}).get("nodes", [])
+                    if first_comments:
+                        thread_author = first_comments[0].get("author", {}).get("login", "")
+                        if not _is_bot_review_author(thread_author):
+                            continue
                     tid = thread["id"]
                     mutation = (
                         f'{{"query":"mutation{{resolveReviewThread(input:{{threadId:\\"{tid}\\"}})'
@@ -1617,16 +1624,19 @@ def _attempt_bot_finding_remediation(
             cwd=repo_root, timeout=30,
         ).stdout
         if not status_out.strip():
-            # Check if any finding is P1 (blocking) — P1 with no adapter fix
-            # must still fail-close.  Only P2+ (non-blocking) get auto-deferred.
-            p1_findings = [
+            # Check if any finding is P0 or P1 (blocking) — these with no
+            # adapter fix must still fail-close.  Only P2+ get auto-deferred.
+            blocking_findings = [
                 f for f in current_findings
-                if "P1" in f.get("body", "") or "P1" in f.get("severity", "")
+                if any(
+                    sev in f.get("body", "") or sev in f.get("severity", "")
+                    for sev in ("P0", "P1")
+                )
             ]
-            if p1_findings:
+            if blocking_findings:
                 log(
                     f"Step 15: adapter produced no changes in round {round_num} — "
-                    f"{len(p1_findings)} P1 finding(s) remain, routing to recovery agent"
+                    f"{len(blocking_findings)} P0/P1 finding(s) remain, routing to recovery agent"
                 )
                 return {
                     "status": "bot_findings_pending",
