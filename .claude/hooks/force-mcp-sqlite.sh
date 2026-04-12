@@ -30,10 +30,25 @@ if echo "$CMD" | grep -qE 'sqlite3\s+.*bridge\.db|sqlite3\s+.*\.agent_bus'; then
   fi
   if [ "$IS_LINKED" = "true" ]; then
     # Only allow sqlite3 on the WORKTREE's own bridge.db, NOT the main repo's.
-    # Extract the sqlite3 target path from the command.
+    # Resolve the main repo path and check if the sqlite3 target resolves there.
     MAIN_REPO=$(cd "$GIT_COMMON" 2>/dev/null && cd .. && pwd -P)
     MAIN_AGENT_BUS="$MAIN_REPO/.agent_bus"
-    if echo "$CMD" | grep -qF "$MAIN_AGENT_BUS"; then
+    # Extract the db path argument from the sqlite3 command robustly.
+    # sqlite3 may have flags before the filename (e.g. sqlite3 -readonly /path/db).
+    # Strategy: pull all tokens after 'sqlite3', skip option flags (leading -),
+    # take the first positional argument as the DB path.
+    DB_ARG=""
+    for _tok in $(echo "$CMD" | grep -oE 'sqlite3\s+.*' | sed 's/sqlite3\s\+//'); do
+      case "$_tok" in
+        -*) continue ;;  # skip option flags
+        *)  DB_ARG="$_tok"; break ;;
+      esac
+    done
+    if [ -z "$DB_ARG" ]; then
+      exit 0  # No db path found — allow (non-file sqlite3 usage)
+    fi
+    RESOLVED_DB=$(cd "$(dirname "$DB_ARG" 2>/dev/null)" 2>/dev/null && echo "$(pwd -P)/$(basename "$DB_ARG")" || echo "$DB_ARG")
+    if echo "$RESOLVED_DB" | grep -qF "$MAIN_AGENT_BUS"; then
       jq -n --arg reason "BLOCKED: sqlite3 targets the MAIN repo bridge.db ($MAIN_AGENT_BUS) from a linked worktree. Use MCP SQLite for main-repo inspection. Direct sqlite3 is only allowed on the worktree's own .agent_bus/." \
         '{"decision":"block","reason":$reason}'
       exit 0

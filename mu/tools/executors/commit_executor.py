@@ -1427,7 +1427,9 @@ def _build_bot_remediation_prompt(
         f"(wave: {wave_id}). Fix each issue directly in the files.",
         "",
         "Rules:",
-        "- Edit existing files or create new files as needed to fix each finding.",
+        "- Edit the files mentioned in the findings. You may also create new files",
+        "  in the SAME directories as the finding paths if the fix requires a helper.",
+        "  Do NOT create files in unrelated directories — the staging guard will reject them.",
         "- Do NOT run git commands, tests, or hooks. Just edit files.",
         f"- This is remediation round {remediation_round}/{BOT_REMEDIATION_MAX_ROUNDS}.",
         "",
@@ -1484,11 +1486,12 @@ def _poll_ci_checks_fallback(
         if not checks:
             _time.sleep(poll_interval)
             continue
-        # Treat any non-SUCCESS conclusion (FAILURE, CANCELLED, TIMED_OUT,
-        # ACTION_REQUIRED, STALE) as failed — not just FAILURE.
+        # Treat non-passing conclusions as failed.  GitHub considers SUCCESS,
+        # SKIPPED and NEUTRAL as passing for required-check purposes.
+        _PASSING = {"SUCCESS", "SKIPPED", "NEUTRAL"}
         _non_success = [
             c for c in checks
-            if c.get("conclusion") and c["conclusion"] != "SUCCESS"
+            if c.get("conclusion") and c["conclusion"] not in _PASSING
         ]
         if _non_success:
             if log:
@@ -1743,13 +1746,22 @@ def _attempt_bot_finding_remediation(
                     _run(["git", "add", "-f", "--", str(report_path.relative_to(repo_root))],
                          cwd=repo_root, timeout=30)
                     _run(["git", "commit", "--amend", "--no-edit"], cwd=repo_root, timeout=30)
-                    log(f"Step 15: deferred report amended into commit")
+                    _run(["git", "push", "--force-with-lease"], cwd=repo_root, timeout=60)
+                    log(f"Step 15: deferred report amended into commit and pushed")
             except subprocess.CalledProcessError as exc:
                 log(f"Step 15: failed to amend deferred report (non-fatal): {exc}")
             return None  # success — caller proceeds to merge
 
-        # Stage only finding-scoped files, fail closed on out-of-scope changes
-        allowed_paths = {f.get("path") for f in current_findings if f.get("path")}
+        # Stage finding-scoped files + same-directory helpers, fail closed on rest.
+        # The remediation prompt allows creating helper files in the same
+        # directories as finding paths, so the staging guard must match.
+        finding_paths = {f.get("path") for f in current_findings if f.get("path")}
+        allowed_dirs = {str(Path(p).parent) for p in finding_paths if p}
+        allowed_paths = set(finding_paths)  # exact finding paths always allowed
+
+        def _is_same_dir_helper(fp: str) -> bool:
+            """Return True if fp is a new file in a finding's directory."""
+            return any(str(Path(fp).parent) == d for d in allowed_dirs)
         changed_lines = [ln for ln in status_out.splitlines() if ln.strip()]
         scoped_entries: list[tuple[str, str]] = []
         out_of_scope_entries: list[tuple[str, str]] = []
@@ -1765,7 +1777,7 @@ def _attempt_bot_finding_remediation(
                     "remediation_rounds_attempted": round_num,
                 }
             status_code, file_path = parsed_line
-            if file_path in allowed_paths:
+            if file_path in allowed_paths or _is_same_dir_helper(file_path):
                 scoped_entries.append((status_code, file_path))
             elif not file_path.startswith(TRANSIENT_STATUS_PREFIXES):
                 out_of_scope_entries.append((status_code, file_path))
@@ -1800,7 +1812,14 @@ def _attempt_bot_finding_remediation(
             }
 
         try:
-            _run(["git", "add", "--"] + scoped_files, cwd=repo_root, timeout=30)
+            # Split .claude/ paths into individual staging to avoid the git
+            # multi-path pathspec resolver false-positive (learning.md 2026-04-11).
+            _claude_files = [f for f in scoped_files if f.startswith(".claude/")]
+            _other_files = [f for f in scoped_files if not f.startswith(".claude/")]
+            if _other_files:
+                _run(["git", "add", "--"] + _other_files, cwd=repo_root, timeout=30)
+            for _cf in _claude_files:
+                _run(["git", "add", "--", _cf], cwd=repo_root, timeout=30)
 
             # Mint bot-remediation receipt (type B) so the pre-commit hook
             # sees a valid receipt for this staged state.  This is a
@@ -3529,6 +3548,11 @@ def main() -> int:
             if args.verbose or not args.json:
                 print(f"[commit-executor] Recovery gate unavailable in standalone: {exc}")
 
+    # Propagate recovery result: if recovery succeeded, treat as recoverable
+    # (exit 0 so the caller can re-invoke).
+    recovery = result.get("recovery", {})
+    if recovery.get("recovered"):
+        return 0
     return 0 if result.get("status") in ("success", "held") else 1
 
 
