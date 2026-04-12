@@ -106,7 +106,7 @@ fi
 # Catches "Option A / Option B" or "Three options" near error/failure discussion
 # without file:line evidence. Proposing fixes before finding the root cause.
 HAS_OPTIONS=$(echo "$MSG" | grep -iEc "(option [A-C]|three options|two options|options:|approaches:|the fix (would|should|could) be)" || true)
-HAS_ERROR_CONTEXT=$(echo "$MSG" | grep -iEc "(fail|error|crash|broke|issue|bug|timeout|dead|killed)" || true)
+HAS_ERROR_CONTEXT=$(echo "$MSG" | grep -iEc "(fail|error|crash|broke|issue|bug|timeout|dead|killed|P1 Badge|P1.*finding|bot.*finding|finding.*P1)" || true)
 HAS_ROOT_EVIDENCE=$(echo "$MSG" | grep -iEc "(\.py:[0-9]+|\.js:[0-9]+|\.sh:[0-9]+|line [0-9]+|at line|result.*r[0-9]+\b)" || true)
 if [ "$HAS_OPTIONS" -gt 0 ] && [ "$HAS_ERROR_CONTEXT" -gt 0 ] && [ "$HAS_ROOT_EVIDENCE" -eq 0 ]; then
     echo '{"decision":"block","reason":"Response proposes fix options before completing root-cause diagnosis. Find the source code file:line that causes the issue FIRST, then propose the fix. Options without diagnosis is premature closure."}'
@@ -164,7 +164,7 @@ fi
 # Catches "restart", "re-dispatch", "retry the pipeline", "clear stale state"
 # without a diagnosed root cause file:line. Restarting without understanding
 # why it failed is the #1 premature-closure pattern in this codebase.
-HAS_RESTART=$(echo "$MSG" | grep -iEc "(^|[^A-Za-z-])(restart|re-dispatch|re-launch|retry the pipeline|clear stale state|restart from)([^A-Za-z-]|$)" || true)
+HAS_RESTART=$(echo "$MSG" | grep -iEc "(^|[^A-Za-z-])(restart(ing|ed|s)?|re-dispatch(ing|ed)?|re-launch(ing|ed)?|retry the pipeline|clear stale state|restart from)([^A-Za-z-]|$)" || true)
 HAS_DIAGNOSIS=$(echo "$MSG" | grep -iEc "(\.py:[0-9]+|\.js:[0-9]+|root cause.*at|traced to|the (bug|issue|problem) is (at|in)|line [0-9]+ (of|in))" || true)
 if [ "$HAS_RESTART" -gt 0 ] && [ "$HAS_DIAGNOSIS" -eq 0 ]; then
     echo '{"decision":"block","reason":"BLOCKED: Attempting to restart/retry pipeline without stating the diagnosed root cause file:line. Restarting without diagnosis is a PROTOCOL VIOLATION. Read the dispatch log, trace to source code, cite the file:line, THEN restart."}'
