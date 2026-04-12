@@ -1484,6 +1484,10 @@ def run_phase_a(
             "Plan draft is still a placeholder stub — deferring SDK agent review "
             "until bridge/implementer produces a real plan"
         )
+    elif not config.get("agent_review_enabled", True):
+        log("SDK agent review DISABLED via executor_config.json (agent_review_enabled=false)")
+        result["agent_exit_code"] = 0
+        result["agent_review_ran"] = False
     else:
         review_ok, agent_review_bridge_ctx = _run_phase_a_agent_review(
             f"Running SDK agent review on plan (depth={review_depth})..."
@@ -1504,17 +1508,18 @@ def run_phase_a(
                 "deferred SDK review can run."
             )
             return result
-        review_ok, agent_review_bridge_ctx = _run_phase_a_agent_review(
-            f"Running deferred SDK agent review on refined plan (depth={review_depth})..."
-        )
-        if not review_ok:
-            return result
-        if result.get("agent_review_warning_only"):
-            if not _run_bridge_convergence(
-                start_round=result["bridge_rounds"] + 1,
-                agent_review_context=agent_review_bridge_ctx,
-            ):
+        if config.get("agent_review_enabled", True):
+            review_ok, agent_review_bridge_ctx = _run_phase_a_agent_review(
+                f"Running deferred SDK agent review on refined plan (depth={review_depth})..."
+            )
+            if not review_ok:
                 return result
+            if result.get("agent_review_warning_only"):
+                if not _run_bridge_convergence(
+                    start_round=result["bridge_rounds"] + 1,
+                    agent_review_context=agent_review_bridge_ctx,
+                ):
+                    return result
 
     # Lock the plan
     try:
