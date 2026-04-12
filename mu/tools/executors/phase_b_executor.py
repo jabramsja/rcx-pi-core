@@ -2398,6 +2398,11 @@ def run_phase_b(
     if _skip_through_bridge:
         log(f"Step 4: SKIPPED (resume_after={resume_after})")
         result["agent_review_ran"] = True
+    elif not config.get("agent_review_enabled", True):
+        log("Step 4: SDK agent review DISABLED via executor_config.json (agent_review_enabled=false)")
+        result["agent_exit_code"] = 0
+        result["agent_review_ran"] = False
+        result["agent_review_warning_only"] = False
     else:
         review_depth = _resolve_review_depth(config, "phase_b")
         log(f"Running SDK agent review on changed files (depth={review_depth})...")
