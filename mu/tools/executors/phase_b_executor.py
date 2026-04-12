@@ -2419,7 +2419,7 @@ def run_phase_b(
                 resume_after == "agent_review"
                 and saved_state is not None
                 and saved_state.get("agent_review_scope_fingerprint") == agent_scope_fingerprint
-                and saved_state.get("agent_exit_code") is not None
+                and saved_state.get("agent_exit_code", -1) >= 0
                 and bool(saved_state.get("agent_review_report_path"))
                 and bool(saved_state.get("agent_review_status_path"))
             )
@@ -2457,11 +2457,26 @@ def run_phase_b(
                 result["agent_review_stdout_path"] = agent_result.get("stdout_path")
                 log(f"Agent review exit code: {agent_result['exit_code']}")
 
+                if agent_result["exit_code"] < 0:
+                    # Negative exits (-1 timeout, -2 stale, -3 aggregation-hang)
+                    # mean the agent review NEVER COMPLETED — no findings to forward.
+                    # Fail closed: re-running is safer than proceeding blind.
+                    return {
+                        "status": "error",
+                        "step": "agent_review",
+                        "errors": [
+                            f"SDK agent review infrastructure failure (exit={agent_result['exit_code']}). "
+                            "Review did not complete. "
+                            f"stderr: {agent_result.get('stderr', '')[:500]}"
+                        ],
+                        "agent_review_ran": True,
+                        "agent_exit_code": agent_result["exit_code"],
+                    }
                 if agent_result["exit_code"] not in (0, 1, 2):
-                    # Agent review produced a non-passing result (exit=3 hard gate,
-                    # exit=-1 timeout, etc.).  Treat as WARNING — agent findings are
-                    # passed to the bridge/implementer loop for contextual triage.
-                    # Agents run once; the bridge review is the real convergence gate.
+                    # exit=3 (hard gate) means agents RAN and produced findings.
+                    # Treat as WARNING — findings forwarded to bridge/implementer
+                    # loop for contextual triage.  Agents run once; the bridge
+                    # review is the real convergence gate.
                     log(
                         f"Agent review exit={agent_result['exit_code']}; "
                         "treating as warning (findings forwarded to bridge review)"
