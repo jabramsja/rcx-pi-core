@@ -164,7 +164,7 @@ fi
 # Catches "restart", "re-dispatch", "retry the pipeline", "clear stale state"
 # without a diagnosed root cause file:line. Restarting without understanding
 # why it failed is the #1 premature-closure pattern in this codebase.
-HAS_RESTART=$(echo "$MSG" | grep -iEc "(restart|re-dispatch|re-launch|retry the pipeline|clear stale state|restart from)" || true)
+HAS_RESTART=$(echo "$MSG" | grep -iEc "(^|[^A-Za-z-])(restart|re-dispatch|re-launch|retry the pipeline|clear stale state|restart from)([^A-Za-z-]|$)" || true)
 HAS_DIAGNOSIS=$(echo "$MSG" | grep -iEc "(\.py:[0-9]+|\.js:[0-9]+|root cause.*at|traced to|the (bug|issue|problem) is (at|in)|line [0-9]+ (of|in))" || true)
 if [ "$HAS_RESTART" -gt 0 ] && [ "$HAS_DIAGNOSIS" -eq 0 ]; then
     echo '{"decision":"block","reason":"BLOCKED: Attempting to restart/retry pipeline without stating the diagnosed root cause file:line. Restarting without diagnosis is a PROTOCOL VIOLATION. Read the dispatch log, trace to source code, cite the file:line, THEN restart."}'

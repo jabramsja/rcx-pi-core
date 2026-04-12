@@ -3747,7 +3747,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=json.dumps(payload))
             if cmd[:2] == ["bash", str(merge_script)]:
                 return completed(cmd)
-            if cmd[:2] == ["git", "pull"]:
+            if cmd[:2] == ["git", "fetch"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "merge", "--ff-only"]:
                 return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -3929,7 +3931,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=json.dumps(payload))
             if cmd[:2] == ["bash", str(merge_script)]:
                 return completed(cmd)
-            if cmd[:2] == ["git", "pull"]:
+            if cmd[:2] == ["git", "fetch"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "merge", "--ff-only"]:
                 return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -4269,7 +4273,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=json.dumps(payload))
             if cmd[:2] == ["bash", str(merge_script)]:
                 return completed(cmd)
-            if cmd[:2] == ["git", "pull"]:
+            if cmd[:2] == ["git", "fetch"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "merge", "--ff-only"]:
                 return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -4392,7 +4398,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=json.dumps(payload))
             if cmd[:2] == ["bash", str(merge_script)]:
                 return completed(cmd)
-            if cmd[:2] == ["git", "pull"]:
+            if cmd[:2] == ["git", "fetch"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "merge", "--ff-only"]:
                 return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -4499,7 +4507,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=json.dumps(payload))
             if cmd[:2] == ["bash", str(merge_script)]:
                 return completed(cmd)
-            if cmd[:2] == ["git", "pull"]:
+            if cmd[:2] == ["git", "fetch"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "merge", "--ff-only"]:
                 return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -4643,7 +4653,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=json.dumps(payload))
             if cmd[:2] == ["bash", str(merge_script)]:
                 return completed(cmd)
-            if cmd[:2] == ["git", "pull"]:
+            if cmd[:2] == ["git", "fetch"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "merge", "--ff-only"]:
                 return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -4754,7 +4766,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=json.dumps(payload))
             if cmd[:2] == ["bash", str(merge_script)]:
                 return completed(cmd)
-            if cmd[:2] == ["git", "pull"]:
+            if cmd[:2] == ["git", "fetch"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "merge", "--ff-only"]:
                 return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -4948,7 +4962,9 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout=json.dumps(payload))
             if cmd[:2] == ["bash", str(merge_script)]:
                 return completed(cmd)
-            if cmd[:2] == ["git", "pull"]:
+            if cmd[:2] == ["git", "fetch"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "merge", "--ff-only"]:
                 return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -5054,7 +5070,7 @@ class TestCommitContinuationAndBotFreshness:
             "pr_number": "673",
         }
         merge_cwds = []
-        pull_cwds = []
+        fetch_cwds = []
 
         def completed(cmd, stdout="", stderr=""):
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
@@ -5104,9 +5120,13 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:2] == ["bash", str(merge_script)]:
                 merge_cwds.append(cwd)
                 return completed(cmd)
-            if cmd[:2] == ["git", "pull"]:
-                pull_cwds.append(cwd)
+            if cmd[:2] == ["git", "fetch"]:
+                fetch_cwds.append(cwd)
                 return completed(cmd)
+            if cmd[:3] == ["git", "merge", "--ff-only"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "pull"]:
+                raise AssertionError("git pull must not be used in post-merge verify path; use git fetch + git merge --ff-only")
             if cmd[:2] == ["git", "status"]:
                 return completed(cmd)
             if cmd[:2] == ["git", "checkout"]:
@@ -5129,7 +5149,7 @@ class TestCommitContinuationAndBotFreshness:
         assert post_commit["merge_sha"] == "merge456"
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert merge_cwds == [repo.parent]
-        assert pull_cwds == [dev_worktree]
+        assert fetch_cwds == [dev_worktree]
 
 
 class TestModularSurfaceEntrypoints:
