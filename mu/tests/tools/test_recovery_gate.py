@@ -696,11 +696,22 @@ class TestClaimAndRemoveBridgeLock:
         lock_path.write_text("original\n")
         original_ino = lock_path.stat().st_ino
 
-        # Replace the path with a new file (different inode)
+        # Replace the path with a new file (different inode).
+        # On tmpfs (Linux CI), unlink+recreate can reuse the same inode.
+        # Force a different inode by writing to a sibling path first, then
+        # renaming over the original — os.rename is atomic and the new file
+        # was allocated on a different inode before the original was freed.
+        replacement_path = lock_path.with_suffix(".replacement")
+        replacement_path.write_text("replacement\n")
+        replacement_ino = replacement_path.stat().st_ino
+        if replacement_ino == original_ino:
+            # Extremely unlikely with rename approach, but if the FS still
+            # reuses the inode, skip the test rather than fail on a setup issue.
+            import pytest
+            pytest.skip("filesystem reused inode despite rename trick — cannot test inode race")
         lock_path.unlink()
-        lock_path.write_text("replacement\n")
-        replacement_ino = lock_path.stat().st_ino
-        assert original_ino != replacement_ino, "test setup: inodes must differ"
+        replacement_path.rename(lock_path)
+        assert lock_path.stat().st_ino == replacement_ino
 
         # The function opens the current file, which is the replacement.
         # It acquires LOCK_EX on the replacement, and since fstat == stat
