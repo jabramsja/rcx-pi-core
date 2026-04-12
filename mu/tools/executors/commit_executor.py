@@ -2716,7 +2716,7 @@ def _run_post_commit_pipeline(
                     existing.append({
                         "author": "chatgpt-codex-connector[bot]",
                         "path": sf.get("path", ""),
-                        "body": sf.get("body", ""),
+                        "body": sf.get("body", "")[:500],
                         "source": f"sweep-pr-{sf.get('pr', '?')}",
                     })
                 findings_result["bot_findings"] = existing

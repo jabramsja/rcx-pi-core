@@ -29,6 +29,9 @@ REPO_NAME="rcx-pi-core"
 GH_REPO="${REPO_OWNER}/${REPO_NAME}"
 SWEEP_COUNT=10
 POST_MERGE_WAIT=75
+# Derive repo root from script location (mu/tools/hooks/merge_pr.sh),
+# not from cwd — the caller may set cwd outside the repo.
+REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -251,7 +254,7 @@ if [ "$FLAG" = "--sweep-only" ]; then
     echo ""
     echo "--- Sweeping last $SWEEP_COUNT merged PRs ---"
     merged_prs=$(gh pr list --repo "$GH_REPO" --state merged --limit "$SWEEP_COUNT" --json number --jq '.[].number' 2>/dev/null || true)
-    SWEEP_FILE="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.agent_bus/meta/sweep_findings.json"
+    SWEEP_FILE="${REPO_ROOT}/.agent_bus/meta/sweep_findings.json"
     mkdir -p "$(dirname "$SWEEP_FILE")"
     : > "$SWEEP_FILE"  # truncate
     if [ -z "$merged_prs" ]; then
@@ -301,7 +304,7 @@ echo ""
 # Step 4: Sweep recent merged PRs (opt-in via --sweep)
 if [ "$FLAG" = "--sweep" ]; then
     echo "--- Step 4: Sweeping last $SWEEP_COUNT merged PRs ---"
-    SWEEP_FILE="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.agent_bus/meta/sweep_findings.json"
+    SWEEP_FILE="${REPO_ROOT}/.agent_bus/meta/sweep_findings.json"
     mkdir -p "$(dirname "$SWEEP_FILE")"
     : > "$SWEEP_FILE"  # truncate
     merged_prs=$(gh pr list --repo "$GH_REPO" --state merged --limit "$SWEEP_COUNT" --json number --jq '.[].number' 2>/dev/null || true)
