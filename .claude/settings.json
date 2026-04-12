@@ -22,7 +22,7 @@
           },
           {
             "type": "command",
-            "command": "CMD=$(jq -r '.tool_input.command // \"\"'); echo \"$CMD\" | grep -q 'sqlite3.*bridge\\.db' || exit 0; echo \"$CMD\" | grep -q '/private/tmp/workingrcx_' && exit 0; echo '{\"decision\":\"block\",\"reason\":\"USE mcp__sqlite__read_query for main repo bridge.db. sqlite3 is only allowed for linked worktrees at /private/tmp/workingrcx_*\"}'",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/force-mcp-sqlite.sh",
             "timeout": 3,
             "statusMessage": "Checking bridge.db access policy..."
           },

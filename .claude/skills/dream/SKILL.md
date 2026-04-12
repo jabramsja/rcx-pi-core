@@ -72,6 +72,12 @@ Rules:
 4. Add pointers to newly created memory files.
 5. Reorder entries by importance/frequency of use (protocols and feedback first, references last).
 6. Verify every file referenced in `MEMORY.md` actually exists.
+7. **Update the `.last_dream` sentinel — CANONICAL FORMAT REQUIRED.**
+   Run this exact command (no alternatives):
+   ```bash
+   date +%Y-%m-%d > ~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/.last_dream
+   ```
+   **DO NOT** freelance another format (no ISO 8601, no epoch seconds, no `date -u`, no timestamps with `T`/`Z`). The `should-dream.sh` Stop hook only parses `YYYY-MM-DD`, all-digit epoch, and ISO 8601 — any other format blocks session end with "overdue by 493,292h". Canonical format is `YYYY-MM-DD`. Parallel worktree sessions that write to the same memory directory must use the same format. See `.claude/rules/learning.md` 2026-04-10 entries for the prior regressions this rule prevents.
 
 ## Output Format
 
