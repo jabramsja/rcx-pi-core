@@ -7670,3 +7670,57 @@ class TestLoadRelevantLearnings:
         new_pos = result.find("new entry")
         old_pos = result.find("old entry")
         assert new_pos < old_pos
+
+    def _write_learning_md_entries(self, repo_root, entries):
+        """Write structured learning.md entries with explicit dates and categories.
+
+        entries: list of (date, category, fingerprint) tuples.
+        Entries are written in the given order (to test sort behavior).
+        """
+        md_path = repo_root / ".claude" / "rules" / "learning.md"
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        lines = []
+        for date, category, fingerprint in entries:
+            lines.append(f"- [{date}] {category} | fingerprint: `{fingerprint}`")
+            lines.append(f"  Body text for {fingerprint}.")
+        md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_learning_md_entries_sorted_newest_first(self, tmp_path):
+        """Entries appended at EOF by _export_to_learning_md are older dates
+        but appear last in the file.  load_relevant_learnings must still
+        return them sorted newest-first by date."""
+        self._write_store(tmp_path, {})
+        # Simulate: curated newest entry at top, then older curated entry,
+        # then a recently-promoted entry (newer date) appended at EOF.
+        self._write_learning_md_entries(tmp_path, [
+            ("2026-04-10", "PIPELINE", "middle_entry"),
+            ("2026-04-05", "PIPELINE", "oldest_entry"),
+            ("2026-04-13", "PIPELINE", "newest_promoted_at_eof"),
+        ])
+        result = rg_mod.load_relevant_learnings("verifier", [], tmp_path)
+        newest_pos = result.find("newest_promoted_at_eof")
+        middle_pos = result.find("middle_entry")
+        oldest_pos = result.find("oldest_entry")
+        # All three should appear
+        assert newest_pos >= 0, "newest entry missing from output"
+        assert middle_pos >= 0, "middle entry missing from output"
+        assert oldest_pos >= 0, "oldest entry missing from output"
+        # Sorted: newest first, then middle, then oldest
+        assert newest_pos < middle_pos < oldest_pos
+
+    def test_learning_md_same_date_entries_preserved(self, tmp_path):
+        """Entries with the same date maintain stable relative order."""
+        self._write_store(tmp_path, {})
+        self._write_learning_md_entries(tmp_path, [
+            ("2026-04-13", "PIPELINE", "entry_a"),
+            ("2026-04-13", "PIPELINE", "entry_b"),
+            ("2026-04-10", "PIPELINE", "older_entry"),
+        ])
+        result = rg_mod.load_relevant_learnings("verifier", [], tmp_path)
+        a_pos = result.find("entry_a")
+        b_pos = result.find("entry_b")
+        older_pos = result.find("older_entry")
+        assert a_pos >= 0 and b_pos >= 0 and older_pos >= 0
+        # Same-date entries should come before older
+        assert a_pos < older_pos
+        assert b_pos < older_pos

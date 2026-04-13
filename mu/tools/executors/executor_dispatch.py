@@ -280,6 +280,8 @@ def build_surface_command(args: argparse.Namespace) -> list[str]:
             cmd.extend(["--routing-record", routing_payload])
         if args.bootstrap_exception:
             cmd.append("--bootstrap-exception")
+        if getattr(args, "task_id", ""):
+            cmd.extend(["--task-id", args.task_id])
     elif args.surface == "pre-commit-supervisor":
         cmd = [
             sys.executable,

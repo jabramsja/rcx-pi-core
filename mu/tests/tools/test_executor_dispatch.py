@@ -5188,6 +5188,35 @@ class TestModularSurfaceEntrypoints:
         assert "--bootstrap-exception" in cmd
         assert "--verbose" in cmd
 
+    def test_phase_b_surface_forwards_task_id(self, tmp_path):
+        routing_path = tmp_path / "routing.json"
+        routing_path.write_text('{"decision":"ROUTE_PHASE_B","summary":"test"}', encoding="utf-8")
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-b",
+                "--plan", "reports/control_plane/example.md",
+                "--routing-record-path", str(routing_path),
+                "--task-id", "PIPELINE-RECOVERY",
+            ]
+        )
+        cmd = dispatch_mod.build_surface_command(args)
+        assert "--task-id" in cmd
+        tid_idx = cmd.index("--task-id")
+        assert cmd[tid_idx + 1] == "PIPELINE-RECOVERY"
+
+    def test_phase_b_surface_omits_task_id_when_empty(self, tmp_path):
+        routing_path = tmp_path / "routing.json"
+        routing_path.write_text('{"decision":"ROUTE_PHASE_B","summary":"test"}', encoding="utf-8")
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-b",
+                "--plan", "reports/control_plane/example.md",
+                "--routing-record-path", str(routing_path),
+            ]
+        )
+        cmd = dispatch_mod.build_surface_command(args)
+        assert "--task-id" not in cmd
+
     def test_pre_commit_surface_builds_supervisor_command(self, tmp_path):
         package_path = tmp_path / "package.json"
         package_path.write_text("{}", encoding="utf-8")
