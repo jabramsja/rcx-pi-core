@@ -1,4 +1,6 @@
 #!/bin/bash
+# Pipeline bypass: set by bridge_adapters.py for all pipeline subprocesses.
+[ "${RCX_PIPELINE_SESSION:-}" = "1" ] && exit 0
 # PostToolUse hook for Grep, Read, Bash results.
 # Injects a lightweight verification reminder as additionalContext.
 # This directly addresses the failure mode of jumping to conclusions

@@ -1,4 +1,6 @@
 #!/bin/bash
+# Pipeline bypass: set by bridge_adapters.py for all pipeline subprocesses.
+[ "${RCX_PIPELINE_SESSION:-}" = "1" ] && exit 0
 # PostCompact hook: re-injects critical behavioral overrides after context compaction.
 # When context compacts, CLAUDE.md emphasis gets summarized away.
 # This hook restores the highest-priority rules at system-reminder level.

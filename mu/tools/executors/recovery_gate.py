@@ -226,25 +226,22 @@ def _fix_result(fixed: bool, action: str, detail: str) -> dict[str, Any]:
 
 
 def fix_stale_bridge_lock(repo_root: Path) -> dict[str, Any]:
-    """Remove .agent_bus/bridge.lock if owning PID is dead."""
+    """Remove .agent_bus/bridge.lock if no live process holds the flock.
+
+    Uses _claim_and_remove_bridge_lock for atomic probe+remove: acquires
+    LOCK_EX|LOCK_NB (proving no live holder), verifies inode identity, and
+    unlinks — all while holding the exclusive lock.  This replaces the legacy
+    PID-only check which false-positived recovery when the PID was dead but
+    the flock was still held by a live fd (Bridge R4 Finding).
+    """
     lock_path = repo_root / ".agent_bus" / "bridge.lock"
     if not lock_path.exists():
         return _fix_result(False, "noop", "bridge.lock not found")
-    try:
-        pid = int(lock_path.read_text(encoding="utf-8").strip().splitlines()[0].strip())
-    except (ValueError, IndexError, OSError):
-        lock_path.write_text("", encoding="utf-8")
-        return _fix_result(True, "truncate_corrupt_lock", "bridge.lock unreadable, truncated")
-    try:
-        os.kill(pid, 0)
-        return _fix_result(False, "noop", f"bridge.lock held by live PID {pid}")
-    except ProcessLookupError:
-        lock_path.write_text("", encoding="utf-8")
-        return _fix_result(True, "truncate_dead_pid_lock",
-                           f"bridge.lock held by dead PID {pid}, truncated")
-    except PermissionError:
-        return _fix_result(False, "noop",
-                           f"bridge.lock held by PID {pid}, permission denied on signal")
+    if _claim_and_remove_bridge_lock(lock_path):
+        return _fix_result(True, "claim_and_remove_stale_lock",
+                           "bridge.lock atomically claimed and removed (flock unheld)")
+    return _fix_result(False, "noop",
+                       "bridge.lock held by a live flock — cannot remove")
 
 
 def fix_stale_git_index_lock(repo_root: Path) -> dict[str, Any]:
@@ -350,6 +347,91 @@ def _load_config_timeouts(repo_root: Path) -> dict[str, Any]:
         return {}
 
 
+def _probe_bridge_lock_unheld(lock_path: Path) -> bool:
+    """Probe whether bridge.lock's flock is held by a live process.
+
+    Returns True if the lock file does not exist or exists but no process
+    holds the flock (safe to unlink).  Returns False if a live process
+    holds the flock.
+
+    **WARNING:** Do NOT use this function in a probe-then-act pattern
+    (probe → unlink).  The gap between probe return and unlink is a TOCTOU
+    window — another process can acquire the flock after the probe releases
+    it, and unlinking a held flock creates a new inode (Bridge R3 Finding).
+    Use ``_claim_and_remove_bridge_lock`` instead for atomic probe+remove.
+
+    Probe pattern mirrors bridge_supervisor.py health-check (lines 2196-2199):
+    non-blocking LOCK_EX succeeds iff no process holds the flock.
+    """
+    if not lock_path.exists():
+        return True
+    try:
+        fd = os.open(str(lock_path), os.O_RDONLY)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return True
+        except (IOError, OSError):
+            # A live process holds the flock — NOT safe to unlink.
+            return False
+        finally:
+            os.close(fd)
+    except OSError:
+        # File disappeared between exists() and open() — treat as unheld.
+        return True
+
+
+def _claim_and_remove_bridge_lock(lock_path: Path) -> bool:
+    """Atomically probe and remove bridge.lock — closes the TOCTOU window.
+
+    Opens the lock file, acquires LOCK_EX|LOCK_NB, and — while still holding
+    the exclusive lock — verifies the path still refers to the same inode,
+    then unlinks.  This eliminates the race window in the probe-then-unlink
+    pattern (Bridge R3 Finding: between probe return and unlink, another
+    process can acquire the flock on the same inode, and unlinking then
+    creates a new inode that allows parallel bridge acquisition).
+
+    Inode identity check: after acquiring LOCK_EX, ``fstat(fd)`` is compared
+    with ``stat(lock_path)``.  If the inodes differ, the path was replaced
+    between ``open()`` and ``flock()`` — we must NOT unlink the replacement
+    (it may belong to a legitimate bridge supervisor).
+
+    Returns True if the lock file was removed (or did not exist).
+    Returns False if a live process holds the flock, or the path was replaced.
+    """
+    if not lock_path.exists():
+        return True
+    try:
+        fd = os.open(str(lock_path), os.O_RDONLY)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # We hold the exclusive lock on this inode — no other process
+            # can hold LOCK_EX on it concurrently.
+            removed = False
+            try:
+                fd_stat = os.fstat(fd)
+                path_stat = os.stat(str(lock_path))
+                if (fd_stat.st_ino == path_stat.st_ino
+                        and fd_stat.st_dev == path_stat.st_dev):
+                    # Path still refers to the inode we locked — safe to unlink.
+                    lock_path.unlink(missing_ok=True)
+                    removed = True
+                # else: path was replaced — do NOT unlink the replacement.
+            except OSError:
+                # Path disappeared after our open — already removed by someone.
+                removed = True
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return removed
+        except (IOError, OSError):
+            # A live process holds the flock — NOT safe to remove.
+            return False
+        finally:
+            os.close(fd)
+    except OSError:
+        # File disappeared between exists() and open() — treat as removed.
+        return True
+
+
 def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     """Increase timeout by 50% (capped at 2x original) via env var override.
 
@@ -362,12 +444,41 @@ def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     override back to executor_config.json between attempts, so reading
     ``current`` from disk on the second recovery would already reflect
     the first bump — compounding past the intended cap.
+
+    Also clears the bridge lock when the bridge-owning executor
+    (phase_b_executor) timed out AND the lock can be atomically claimed and
+    removed — a timeout during a bridge review round leaves the lock held by
+    a dead process, and the re-launched executor would immediately fail on
+    the stale lock.  The lock is NOT cleared for other executors (e.g.
+    commit_executor) because they do not own the bridge lock, and is NOT
+    cleared even for phase_b_executor if a live process holds the flock.
+
+    Bridge R3 fix: the lock is now claimed and removed atomically via
+    ``_claim_and_remove_bridge_lock`` (LOCK_EX held across unlink + inode
+    identity check).  The prior probe-then-unlink pattern had a TOCTOU
+    window where another process could acquire the flock between the probe
+    return and the unlink, creating a new inode at the same path and
+    breaking mutual exclusion.
     """
     timeouts = _load_config_timeouts(repo_root)
     # Determine which executor timed out from the result
     result = kw.get("result", {})
     executor = result.get("executor", "phase_b_executor")
     timeout_key = executor if executor in timeouts else "phase_b_executor"
+
+    # Clear stale bridge lock ONLY when the bridge-owning executor timed out.
+    # phase_b_executor drives bridge review; its timeout leaves bridge.lock
+    # held by a dead PID.  Other executors (commit_executor, phase_a_executor)
+    # never hold the bridge lock, so clearing it would violate the
+    # control-plane mutual-exclusion invariant.
+    #
+    # Bridge R3 fix: uses _claim_and_remove_bridge_lock for atomic
+    # probe+remove (LOCK_EX held across unlink + inode identity check).
+    # The prior probe-then-unlink pattern had a TOCTOU window.
+    lock_path = repo_root / ".agent_bus" / "bridge.lock"
+    lock_cleared = False
+    if executor == "phase_b_executor" and lock_path.exists():
+        lock_cleared = _claim_and_remove_bridge_lock(lock_path)
     current = timeouts.get(timeout_key, 3600)
     # Track original baseline across sequential recoveries.  On the first
     # call the env var is absent so we seed it from the (still-original)
@@ -382,10 +493,11 @@ def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     new_timeout = min(int(current * 1.5), baseline * 2)
     os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] = str(new_timeout)
     os.environ["RCX_RECOVERY_TIMEOUT_KEY"] = timeout_key
+    lock_msg = " + bridge.lock cleared" if lock_cleared else ""
     return _fix_result(True, "increase_timeout",
                        f"timeout for {timeout_key} increased from {current}s "
                        f"to {new_timeout}s (capped at 2x original {baseline}s) "
-                       f"via RCX_RECOVERY_TIMEOUT_OVERRIDE")
+                       f"via RCX_RECOVERY_TIMEOUT_OVERRIDE{lock_msg}")
 
 
 def fix_transient_kill(repo_root: Path, **kw: Any) -> dict[str, Any]:
@@ -395,19 +507,26 @@ def fix_transient_kill(repo_root: Path, **kw: Any) -> dict[str, Any]:
 
 
 def fix_aggregation_hang(repo_root: Path, **kw: Any) -> dict[str, Any]:
-    """Clear bridge lock and mark stale bridge DB jobs as failed.
+    """Clear bridge lock (after flock probe) and mark stale bridge DB jobs as failed.
 
     Does NOT delete bridge.db — it is the shared job/transcript SQLite bus
-    used by bridge_supervisor.py. Only the lock file is removed and
-    in-progress/pending jobs for the CURRENT WAVE are marked as failed.
+    used by bridge_supervisor.py. Only the lock file is removed (atomically
+    claimed and unlinked while LOCK_EX is held, with inode identity check)
+    and in-progress/pending jobs for the CURRENT WAVE are marked as failed.
     Jobs belonging to other waves (identified by scope_hint) are untouched.
+
+    Bridge R3 fix: uses _claim_and_remove_bridge_lock for atomic
+    probe+remove.  The prior probe-then-unlink pattern had a TOCTOU window
+    where another process could acquire the flock between the probe return
+    and the unlink.
     """
     wave_id = kw.get("wave_id", "")
     cleared: list[str] = []
-    # Clear bridge.lock
+    # Clear bridge.lock — atomic claim+remove (LOCK_EX held across unlink).
+    # Bridge R3 fix: closes the TOCTOU window from the prior
+    # probe-then-unlink pattern.
     lock_path = repo_root / ".agent_bus" / "bridge.lock"
-    if lock_path.exists():
-        lock_path.unlink(missing_ok=True)
+    if lock_path.exists() and _claim_and_remove_bridge_lock(lock_path):
         cleared.append(str(lock_path.relative_to(repo_root)))
     # Mark stale/stuck jobs in bridge.db as failed (preserve the DB itself).
     # Wave-scoped: only mark jobs whose scope_hint matches this wave EXACTLY.
@@ -2924,6 +3043,117 @@ def _flush_pending_syncs() -> None:
 atexit.register(_flush_pending_syncs)
 
 
+# ---------------------------------------------------------------------------
+# Cross-pollination: learning.md ↔ learning store
+# ---------------------------------------------------------------------------
+
+LEARNING_MD_REL = Path(".claude") / "rules" / "learning.md"
+
+
+def _escape_backtick_field(s: str) -> str:
+    """Escape backticks and backslashes for backtick-delimited wire format.
+
+    Used by _export_to_learning_md (write path) and should be used when
+    authoring FIXED entries with backtick-bearing fingerprints or actions.
+    Order matters: escape backslashes first, then backticks.
+    """
+    return s.replace("\\", "\\\\").replace("`", "\\`")
+
+
+def _unescape_backtick_field(s: str) -> str:
+    r"""Unescape a backtick-delimited wire format field.
+
+    Reverses _escape_backtick_field: \` → `, \\ → \.
+    Uses regex to process escape sequences left-to-right without overlap.
+    """
+    # Only unescape the two sequences produced by _escape_backtick_field:
+    #   \` → `   and   \\ → \
+    # Other backslash sequences (e.g. \t, \n, path\to\file) are preserved
+    # so manually authored fingerprints with literal backslashes are not corrupted.
+    return re.sub(r"\\([`\\])", r"\1", s)
+
+
+# Regex supports backslash-escaped backticks within the delimited fields:
+#   (?:[^`\\]|\\.)+ = one or more of: (non-backtick-non-backslash) | (backslash + any char)
+_FIXED_ENTRY_RE = re.compile(
+    r"^-\s*\[.*?\]\s*FIXED\s*\|\s*fingerprint:\s*`((?:[^`\\]|\\.)+)`\s*\|\s*action:\s*`((?:[^`\\]|\\.)+)`",
+)
+
+
+def _export_to_learning_md(record: dict, repo_root: Path) -> None:
+    """Append a promoted pattern to .claude/rules/learning.md.
+
+    Append-only: opens file in "a" mode — never reads or rewrites existing
+    content.  Uses fcntl advisory lock for concurrent safety (same pattern
+    as _save_learning_store).  Gracefully no-ops on any error.
+    """
+    try:
+        md_path = repo_root / LEARNING_MD_REL
+        os.makedirs(md_path.parent, exist_ok=True)
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        fingerprint = _escape_backtick_field(record.get("fingerprint", ""))
+        success_count = record.get("success_count", 0)
+        entry = (
+            f"- [{date_str}] PIPELINE | fingerprint: `{fingerprint}` "
+            f"| refs: {success_count}\n"
+        )
+        lock_path = Path(str(md_path) + ".lock")
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+        try:
+            deadline = time.monotonic() + LOCK_TIMEOUT_S
+            acquired = False
+            while time.monotonic() < deadline:
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                    break
+                except (IOError, OSError):
+                    time.sleep(0.1)
+            if not acquired:
+                return  # graceful no-op on lock timeout
+            with open(md_path, "a", encoding="utf-8") as f:
+                f.write(entry)
+        finally:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except (IOError, OSError):
+                pass
+            os.close(lock_fd)
+    except (OSError, TypeError, ValueError) as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "_export_to_learning_md failed (non-fatal): %s", exc)
+
+
+def _load_session_fixed_entries(repo_root: Path) -> list[dict]:
+    """Parse FIXED entries from .claude/rules/learning.md.
+
+    FIXED entry grammar:
+        - [DATE] FIXED | fingerprint: `<text>` | action: `<fix description>`
+
+    Returns list of dicts with keys: fingerprint, action.
+    Returns empty list if file absent or on any error.
+    """
+    try:
+        md_path = repo_root / LEARNING_MD_REL
+        if not md_path.exists():
+            return []
+        entries: list[dict] = []
+        for line in md_path.read_text(encoding="utf-8").splitlines():
+            m = _FIXED_ENTRY_RE.match(line.strip())
+            if m:
+                entries.append({
+                    "fingerprint": _unescape_backtick_field(m.group(1)),
+                    "action": _unescape_backtick_field(m.group(2)),
+                })
+        return entries
+    except (OSError, TypeError, ValueError) as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "_load_session_fixed_entries failed (non-fatal): %s", exc)
+        return []
+
+
 def check_learned_patterns(
     repo_root: Path, result: dict[str, Any],
 ) -> Optional[LearnedMatch]:
@@ -3085,6 +3315,7 @@ def observe_outcome(
             record["distinct_wave_ids"] = wave_ids
 
             # Promotion gate
+            prev_tier = record.get("promoted_tier")
             sc = record["success_count"]
             n_waves = len(record["distinct_wave_ids"])
             fp_len = len(normalized_fp)
@@ -3095,6 +3326,9 @@ def observe_outcome(
                 and not record.get("permanently_locked", False)
             ):
                 record["promoted_tier"] = 1
+                # Export on first promotion transition only
+                if prev_tier != 1:
+                    _export_to_learning_md(record, repo_root)
         else:
             record["failure_count"] = record.get("failure_count", 0) + 1
             # Demotion: if currently promoted, demote one tier
@@ -3525,6 +3759,34 @@ def attempt_recovery(
     else:
         fc = classify_failure(result)
         tier = tier_for(fc)
+        # FIXED-entry fallback: consult .claude/rules/learning.md for
+        # manually curated Tier 1 candidates when no auto-observed match.
+        # Auto-observed patterns take priority (richer matching semantics).
+        if tier < 4:
+            _fixed_entries = _load_session_fixed_entries(repo_root)
+            if _fixed_entries:
+                _lookup = _normalize_fingerprint(
+                    _extract_classifier_signal(result)[:80]
+                )
+                for _fe in _fixed_entries:
+                    _fe_fp = _normalize_fingerprint(_fe["fingerprint"])
+                    if _fe_fp and _fe_fp in _lookup:
+                        # Validate Tier 1 has a handler for this failure class
+                        # before accepting the FIXED match.  Without this guard
+                        # a FIXED entry for a Tier 2 failure (e.g. PROCESS_TIMEOUT)
+                        # would force tier=1 where no handler exists, producing
+                        # "no_fix_registered" and suppressing the working Tier 2
+                        # recovery (Bridge R1 Finding 3).
+                        if fc not in _TIER1_FIXES:
+                            continue
+                        learned = LearnedMatch(
+                            failure_class=fc,
+                            tier=1,
+                            pattern_id="fixed_entry",
+                            action=_fe["action"],
+                        )
+                        tier = 1
+                        break
     # Use executor name as fallback when step is missing — prevents
     # distinct timeout sites (e.g. phase_b_executor vs commit_executor)
     # from collapsing into the same (wave_id, "unknown", class) bucket

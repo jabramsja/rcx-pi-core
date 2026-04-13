@@ -23,17 +23,8 @@ COUNTER_FILE="/tmp/.rcx_tool_call_counter"
 # this hook — its parent is the Claude Code session) until PID 1 or until
 # an ancestor matches one of the known pipeline executor command-line
 # fragments.  POSIX-portable (ps + case glob), no bash-only constructs.
-_pid=${PPID}
-while [ -n "${_pid}" ] && [ "${_pid}" != "1" ] && [ "${_pid}" != "0" ]; do
-    _cmd=$(ps -p "${_pid}" -o command= 2>/dev/null || printf '')
-    case "${_cmd}" in
-        *phase_a_executor.py*|*phase_b_executor.py*|*commit_executor.py*|*meta_bridge_supervisor*|*bridge_adapters*|*executor_dispatch*)
-            exit 0
-            ;;
-    esac
-    _pid=$(ps -p "${_pid}" -o ppid= 2>/dev/null | tr -d ' ')
-    [ -z "${_pid}" ] && break
-done
+# Pipeline bypass: set by bridge_adapters.py for all pipeline subprocesses.
+[ "${RCX_PIPELINE_SESSION:-}" = "1" ] && exit 0
 
 # Increment counter
 if [ -f "$COUNTER_FILE" ]; then

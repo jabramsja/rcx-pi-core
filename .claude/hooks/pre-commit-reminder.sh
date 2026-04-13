@@ -1,4 +1,6 @@
 #!/bin/bash
+# Pipeline bypass: set by bridge_adapters.py for all pipeline subprocesses.
+[ "${RCX_PIPELINE_SESSION:-}" = "1" ] && exit 0
 # Claude Code PreToolUse hook: targeted compliance checklist before commits.
 #
 # Instead of dumping full MEMORY.md/CLAUDE.md (already in context), this hook

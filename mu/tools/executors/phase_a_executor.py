@@ -1361,14 +1361,36 @@ def run_phase_a(
                             timeout=900,
                             verbose=verbose,
                         )
+                        # Always check if the plan file was modified, even on
+                        # adapter-level failure.  The implementer may have
+                        # successfully edited the file via Edit tool calls
+                        # before claude --print exited non-zero (e.g. session
+                        # ended mid-tool-call without a final text response,
+                        # causing the adapter to report error despite edits
+                        # having been applied).
+                        plan_file = repo_root / rel_plan_path
+                        try:
+                            new_content = plan_file.read_text(encoding="utf-8")
+                        except (OSError, FileNotFoundError):
+                            # Plan file missing/unreadable after implementer run.
+                            # Treat as unmodified — the bridge will detect the
+                            # missing file on its next round.
+                            new_content = current_plan_content
+                        plan_actually_changed = hash(new_content) != plan_hash_before
                         if impl_result["status"] != "success":
-                            log(
-                                f"Implementer failed: {impl_result['status']} — continuing "
-                                "with unmodified plan"
-                            )
+                            if plan_actually_changed:
+                                log(
+                                    f"Implementer reported {impl_result['status']} but plan "
+                                    f"WAS modified ({len(new_content.splitlines())} lines) "
+                                    f"— treating as successful edit"
+                                )
+                            else:
+                                log(
+                                    f"Implementer failed: {impl_result['status']} — continuing "
+                                    "with unmodified plan"
+                                )
                         else:
-                            new_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
-                            if hash(new_content) == plan_hash_before:
+                            if not plan_actually_changed:
                                 log(f"WARNING: Implementer returned success but {rel_plan_path} "
                                     f"was NOT modified. Plan may have been written elsewhere. "
                                     f"Failing closed to prevent infinite stub loop.")

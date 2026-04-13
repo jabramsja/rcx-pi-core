@@ -3,6 +3,9 @@
 # Blocks direct sqlite3 CLI access to bridge.db.
 # Hard rule: "ALWAYS use MCP SQLite for main repo bridge.db inspection."
 #
+# Pipeline bypass: set by bridge_adapters.py for all pipeline subprocesses.
+[ "${RCX_PIPELINE_SESSION:-}" = "1" ] && exit 0
+#
 # This hook fires on every Bash tool call. If the command references
 # bridge.db with sqlite3 (not via MCP), it blocks with a JSON decision.
 

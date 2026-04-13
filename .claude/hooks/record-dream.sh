@@ -1,4 +1,6 @@
 #!/bin/bash
+# Pipeline bypass: set by bridge_adapters.py for all pipeline subprocesses.
+[ "${RCX_PIPELINE_SESSION:-}" = "1" ] && exit 0
 # Claude Code PostToolUse hook: record timestamp when /dream skill completes.
 # Matcher: Skill (fires after any skill invocation)
 # Best-effort: never blocks, never fails the tool call.
