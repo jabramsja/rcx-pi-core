@@ -36,6 +36,7 @@ try:
         ensure_not_agent_review_mode,
         ExecutorCommonError,
         normalize_wave_id,
+        process_descendants,
         terminate_process_tree,
     )
 except ImportError:
@@ -51,6 +52,7 @@ except ImportError:
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
     normalize_wave_id = _mod.normalize_wave_id
+    process_descendants = _mod.process_descendants
     terminate_process_tree = _mod.terminate_process_tree
 
 try:
@@ -968,11 +970,26 @@ def _run_executor_in_group(
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        # Kill entire process group to clean up grandchildren
+        # Collect the full descendant tree BEFORE killing the process group.
+        # Children spawned with start_new_session=True (e.g. claude --print
+        # via bridge_adapters.py:576) live in separate sessions and survive
+        # os.killpg.  After killpg they get reparented to PID 1 and become
+        # unreachable via PPID-tree walking.  Snapshot them first.
+        try:
+            pre_kill_descendants = process_descendants(proc.pid, cwd=cwd)
+        except Exception:
+            pre_kill_descendants = set()
+        # Kill the process group (catches same-session children)
         try:
             os.killpg(proc.pid, signal.SIGTERM)
         except OSError:
             pass
+        # Kill descendants from the pre-kill snapshot (catches cross-session children)
+        for pid in sorted(pre_kill_descendants, reverse=True):
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
         try:
             terminate_process_tree(proc.pid, cwd=cwd)
         except Exception:

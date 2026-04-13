@@ -271,7 +271,12 @@ class TestInvokeImplementer:
             assert result["exit_code"] == -2
 
     def test_passes_configured_output_watchdogs_to_adapter(self, tmp_path):
-        """Implementer output watchdogs inherit the configured stale budget."""
+        """Implementer stale budget is passed; zero_output is disabled (None).
+
+        claude --print defers stdout until final text response, so
+        zero_output_timeout produces false-positive kills on active
+        implementer sessions (verified 2026-04-13, session 34ffd8cf).
+        """
         self._setup_bridge_config(tmp_path)
         config_dir = tmp_path / "mu" / "tools" / "executors"
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -288,7 +293,7 @@ class TestInvokeImplementer:
 
         assert result["status"] == "success"
         assert mock_ba.run_adapter.call_args.kwargs["stale_timeout_s"] == 123.0
-        assert mock_ba.run_adapter.call_args.kwargs["zero_output_timeout_s"] == 123.0
+        assert mock_ba.run_adapter.call_args.kwargs["zero_output_timeout_s"] is None
 
     def test_nonzero_exit_returns_error(self, tmp_path):
         """Non-timeout failure from bridge adapter returns error status."""
