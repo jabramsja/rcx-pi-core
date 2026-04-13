@@ -123,6 +123,74 @@ class TestBuildImplementationPrompt:
         assert "commit/push governance commands" in prompt
         assert "Phase B-local validation" in prompt
 
+    def test_prompt_includes_learning_context_when_provided(self, tmp_path):
+        learning = "## Learning Context\n\nKnown pipeline patterns:\n- [test_failure] error → fix"
+        prompt = impl_mod.build_implementation_prompt(
+            "plan content",
+            repo_root=tmp_path,
+            wave_id="test-wave",
+            learning_context=learning,
+        )
+        assert "## Learning Context" in prompt
+        assert "Known pipeline patterns" in prompt
+
+    def test_prompt_excludes_learning_context_when_empty(self, tmp_path):
+        prompt = impl_mod.build_implementation_prompt(
+            "plan content",
+            repo_root=tmp_path,
+            wave_id="test-wave",
+            learning_context="",
+        )
+        assert "## Learning Context" not in prompt
+
+    def test_prompt_default_learning_context_is_empty(self, tmp_path):
+        """Default learning_context kwarg produces no Learning Context section."""
+        prompt = impl_mod.build_implementation_prompt(
+            "plan content",
+            repo_root=tmp_path,
+            wave_id="test-wave",
+        )
+        assert "## Learning Context" not in prompt
+
+
+class TestPhaseBExecutorLearningContextWiring:
+    """Verify phase_b_executor passes learning_context to build_implementation_prompt."""
+
+    def test_all_call_sites_pass_learning_context_kwarg(self):
+        """All build_implementation_prompt() call sites in phase_b_executor.py
+        must pass learning_context= kwarg."""
+        import inspect
+        source = inspect.getsource(pb_mod.run_phase_b)
+        # Count call sites
+        call_sites = [i for i in range(len(source)) if source[i:].startswith("build_implementation_prompt(")]
+        assert len(call_sites) >= 4, (
+            f"Expected at least 4 build_implementation_prompt() call sites, found {len(call_sites)}"
+        )
+        # Verify each call site passes learning_context
+        for idx in call_sites:
+            # Find the closing paren by tracking nesting
+            depth = 0
+            end = idx
+            for j in range(idx, min(idx + 2000, len(source))):
+                if source[j] == '(':
+                    depth += 1
+                elif source[j] == ')':
+                    depth -= 1
+                    if depth == 0:
+                        end = j
+                        break
+            call_text = source[idx:end + 1]
+            assert "learning_context=" in call_text, (
+                f"build_implementation_prompt() call at offset {idx} does not pass "
+                f"learning_context= kwarg. Call text:\n{call_text[:300]}"
+            )
+
+    def test_phase_b_executor_imports_load_relevant_learnings(self):
+        """phase_b_executor.py must import load_relevant_learnings at runtime."""
+        import inspect
+        source = inspect.getsource(pb_mod.run_phase_b)
+        assert "load_relevant_learnings" in source
+
 
 class TestImplementerDoesNotUseBridgeSupervisorReview:
     """CRITICAL: implementer must NOT invoke bridge_supervisor.py review.

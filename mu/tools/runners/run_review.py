@@ -110,6 +110,18 @@ except Exception as _agent_memory_error:
     def get_pattern_context(*args, **kwargs):
         return ""
 
+# Import learning store warming (executor-side, no runner-side side effects)
+LEARNING_STORE_AVAILABLE = False
+LEARNING_STORE_IMPORT_ERROR = ""
+try:
+    from tools.executors.recovery_gate import load_relevant_learnings
+    LEARNING_STORE_AVAILABLE = True
+except Exception as _learning_import_error:
+    LEARNING_STORE_IMPORT_ERROR = str(_learning_import_error)
+
+    def load_relevant_learnings(*args, **kwargs):
+        return ""
+
 # Import shared FINDING extraction (single source of truth)
 from tools.runners.validate_agent_compliance import extract_finding_blocks
 from tools.runners.agent_runner_common import sanitize_files
@@ -597,7 +609,8 @@ class ReviewOrchestrator:
     """Orchestrates parallel agent execution and result synthesis."""
 
     def __init__(self, files: list[str], depth: str = "full", verbose: bool = False,
-                 use_memory: bool = True, pr_number: int | None = None,
+                 use_memory: bool = True, use_learning: bool = True,
+                 pr_number: int | None = None,
                  show_warnings: bool = False,
                  continue_on_hard_gate: bool = True,
                  force_grounding: bool = False,
@@ -614,6 +627,7 @@ class ReviewOrchestrator:
         self.depth = depth
         self.verbose = verbose
         self.use_memory = use_memory
+        self.use_learning = use_learning
         self.pr_number = pr_number
         self.show_warnings = show_warnings
         self.continue_on_hard_gate = continue_on_hard_gate
@@ -646,6 +660,13 @@ class ReviewOrchestrator:
                 print(
                     "⚠️  Agent memory disabled: "
                     f"{AGENT_MEMORY_IMPORT_ERROR}"
+                )
+        if self.use_learning and not LEARNING_STORE_AVAILABLE:
+            self.use_learning = False
+            if self.verbose:
+                print(
+                    "⚠️  Learning store disabled: "
+                    f"{LEARNING_STORE_IMPORT_ERROR}"
                 )
 
     def _mark_progress(self, label: str) -> None:
@@ -752,14 +773,25 @@ Please address these issues in your response. Ensure you:
 ---
 """
 
+        # Build learning context (pipeline-recovery patterns from learning store)
+        # Independent of use_memory: learning store is pipeline-recovery knowledge,
+        # not session memory. Suppressed in report-packet review mode (evidence-only
+        # discipline) and when --no-learning is set.
+        learning_context = ""
+        report_packet_context = build_report_packet_context(self.files)
+        if self.use_learning and not report_packet_context:
+            learning_context = load_relevant_learnings(
+                agent_name, self.files, active_repo_root,
+            )
+
         # Inject control-surface review context when high-risk files are in scope
         cs_context = _build_control_surface_context(self.files)
-        report_packet_context = build_report_packet_context(self.files)
 
         prompt = f"""You are the RCX {agent_name.replace('-', ' ').title()} Agent.
 
 {agent_def.prompt}
 {memory_context}
+{learning_context}
 {retry_section}
 {cs_context}
 {report_packet_context}
@@ -1717,6 +1749,11 @@ Examples:
         help="Disable agent memory (finding storage and regression checking)"
     )
     parser.add_argument(
+        "--no-learning",
+        action="store_true",
+        help="Disable learning store warming (pipeline-recovery pattern injection)"
+    )
+    parser.add_argument(
         "--show-warnings",
         action="store_true",
         help="Show full warning details (default: summary only)"
@@ -1830,6 +1867,7 @@ Examples:
             depth=depth,
             verbose=args.verbose,
             use_memory=not args.no_memory,
+            use_learning=not args.no_learning,
             pr_number=args.pr_number,
             show_warnings=args.show_warnings,
             continue_on_hard_gate=(not args.fail_fast_hard_gate),

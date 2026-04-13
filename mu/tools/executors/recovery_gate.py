@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import unicodedata
 import signal
 import sqlite3
 import subprocess
@@ -3965,3 +3966,221 @@ def attempt_recovery(
     return _make_result(fix_result.get("fixed", False),
                         fix_result.get("action", "unknown"), tier, fc,
                         fix_result.get("detail", ""), False)
+
+
+# ---------------------------------------------------------------------------
+# Subagent warming: learning store → prompt injection
+# ---------------------------------------------------------------------------
+
+# Static mapping of agent names to relevant FailureClass values for filtering.
+# None = unfiltered (all entries).  List = include only matching failure_class.
+# SCOPE-DOWN: taxonomy has no domain-level categories (security, complexity, etc.)
+# for non-pipeline agents; those receive unfiltered.  Deferred pending FailureClass
+# taxonomy extension per PipelineRecovery.v0.md:280.
+_AGENT_FAILURE_CLASS_MAP: dict[str, list[str] | None] = {
+    # Implementation agents — pipeline-subset: only failure classes
+    # that produce actionable learnings for build/test execution
+    "implementer":      ["test_failure", "git_staging_conflict", "process_timeout",
+                         "implementer_stale", "needs_phase_b", "mixed_staging"],
+    # Depth agents — pipeline-subset: test/edge-case execution focus
+    "grounding":        ["test_failure", "needs_phase_b", "unknown_error"],
+    "fuzzer":           ["test_failure", "unknown_error", "process_timeout"],
+    # All other agents — unfiltered (SCOPE-DOWN)
+    "verifier":         None,
+    "adversary":        None,
+    "expert":           None,
+    "structural-proof": None,
+    "translator":       None,
+    "visualizer":       None,
+    "advisor":          None,
+}
+
+# Confusable-character translation table for prompt-safety sanitization.
+# Greek/Cyrillic visual lookalikes mapped to Latin equivalents.
+# Same table as shared_agent_utils._KEYWORD_CONFUSABLE_TRANSLATION.
+_LEARNING_CONFUSABLE_TRANSLATION = str.maketrans({
+    "Α": "A", "А": "A",
+    "Β": "B", "В": "B",
+    "С": "C",
+    "Ε": "E", "Е": "E",
+    "Η": "H",
+    "І": "I", "Ι": "I",
+    "Κ": "K",
+    "М": "M",
+    "Ν": "N",
+    "Ο": "O", "О": "O",
+    "Ρ": "P", "Р": "P",
+    "Ѕ": "S",
+    "Τ": "T", "Т": "T",
+    "Υ": "Y",
+    "Χ": "X",
+    "а": "a",
+    "е": "e",
+    "і": "i",
+    "ј": "j",
+    "ο": "o", "о": "o",
+    "р": "p",
+    "ѕ": "s",
+    "с": "c",
+    "х": "x",
+    "у": "y",
+})
+
+_LEARNING_ZERO_WIDTH_RE = re.compile(
+    r'[\u000b\u000c\u0085\u200b\u200c\u200d\u2028\u2029\u2060\ufeff]'
+)
+
+
+def _sanitize_learning_output(text: str, max_len: int = 4000) -> str:
+    """Sanitize learning store output before prompt injection.
+
+    Replicates the complete security-relevant measure set from
+    shared_agent_utils.sanitize_for_prompt using only stdlib (re, unicodedata).
+    This avoids importing tools.runners.shared_agent_utils into executor-side
+    code (that module has import-time side effects: env clearing, SDK monkey-patching).
+
+    Steps:
+    1. NFKC Unicode normalization
+    2. Confusable-character translation (Greek/Cyrillic → Latin)
+    3. Zero-width/line-separator control character stripping
+    4. Triple-backtick escaping
+    5. Newline/CR replacement with space
+    6. Instruction-like pattern redaction (word-bounded)
+    7. Verdict-marker redaction (case-insensitive)
+    8. Truncation to max_len AFTER sanitization
+    """
+    if not text:
+        return ""
+
+    # 1. NFKC normalization
+    text = unicodedata.normalize('NFKC', text)
+
+    # 2. Confusable-character translation
+    text = text.translate(_LEARNING_CONFUSABLE_TRANSLATION)
+
+    # 3. Strip zero-width characters
+    text = _LEARNING_ZERO_WIDTH_RE.sub('', text)
+
+    # 4. Escape triple backticks
+    text = text.replace('```', '` ` `')
+
+    # 5. Replace newlines/carriage returns
+    text = text.replace('\n', ' ').replace('\r', ' ')
+
+    # 6. Instruction-like pattern redaction (word-bounded)
+    word_patterns = [
+        r'ignore\s+previous',
+        r'disregard',
+        r'new\s+instructions',
+        r'system\s+prompt',
+        r'forget\s+everything',
+        r'you\s+are\s+now',
+        r'override\s+instructions',
+    ]
+    for pattern in word_patterns:
+        text = re.sub(r'\b' + pattern + r'\b', '[REDACTED]', text, flags=re.IGNORECASE)
+
+    # 7. Verdict-marker redaction
+    verdict_patterns = [
+        r'VERDICT\s*:',
+        r'OVERALL_VERDICT\s*:',
+    ]
+    for pattern in verdict_patterns:
+        text = re.sub(pattern, '[REDACTED]', text, flags=re.IGNORECASE)
+
+    # 8. Truncate AFTER sanitization, at entry boundary (never mid-entry).
+    # After step 5, newlines are spaces; entries are delimited by " - [".
+    if len(text) > max_len:
+        truncated = text[:max_len]
+        # Find the last entry boundary so we don't split mid-record.
+        last_boundary = truncated.rfind(' - [')
+        if last_boundary > 0:
+            text = truncated[:last_boundary]
+        else:
+            text = truncated
+
+    return text
+
+
+def load_relevant_learnings(
+    agent_name: str,
+    files: list[str],
+    repo_root: Path,
+) -> str:
+    """Load learning store patterns relevant to an agent, sanitized for prompt injection.
+
+    Reads two data sources:
+    1. learned_patterns.json via _load_learning_store() — promoted patterns with
+       full metadata (failure_class, action, fingerprint, success_count, etc.)
+    2. FIXED entries from .claude/rules/learning.md via _load_session_fixed_entries()
+       — session-captured fixes with fingerprint + action only.
+
+    Filters JSON entries by failure_class using _AGENT_FAILURE_CLASS_MAP.
+    FIXED entries are included unfiltered (no failure_class metadata).
+
+    Budget: 4000 characters total, JSON entries first (sorted by updated_at desc),
+    then FIXED entries in reverse file order. Truncates at entry boundaries.
+
+    Returns sanitized formatted string, or empty string on no content/error.
+    """
+    try:
+        store = _load_learning_store(repo_root)
+        fixed_entries = _load_session_fixed_entries(repo_root)
+    except Exception:
+        return ""
+
+    # Collect JSON pattern entries
+    patterns = store.get("patterns", {})
+    allowed_classes = _AGENT_FAILURE_CLASS_MAP.get(agent_name)  # None = unfiltered
+
+    json_entries: list[dict] = []
+    for _pid, record in patterns.items():
+        if not isinstance(record, dict):
+            continue
+        fc = record.get("failure_class", "")
+        # Filter by failure_class if the agent has a filter list
+        if allowed_classes is not None and fc not in allowed_classes:
+            continue
+        json_entries.append(record)
+
+    # Sort by updated_at descending (most recent first = higher signal)
+    json_entries.sort(key=lambda r: r.get("updated_at", ""), reverse=True)
+
+    # Format entries within budget — header length is reserved upfront so
+    # that header + body fits within MAX_LEN before sanitization.
+    MAX_LEN = 4000
+    header = "## Learning Context\n\nKnown pipeline patterns and fixes:\n"
+    parts: list[str] = []
+    current_len = len(header)  # reserve header space in budget
+
+    # JSON entries first
+    for rec in json_entries:
+        fp = rec.get("fingerprint", "")
+        action = rec.get("action", "")
+        fc = rec.get("failure_class", "")
+        sc = rec.get("success_count", 0)
+        entry = f"- [{fc}] {fp} → {action} (success:{sc})"
+        entry_len = len(entry) + 1  # +1 for newline join
+        if current_len + entry_len > MAX_LEN:
+            break
+        parts.append(entry)
+        current_len += entry_len
+
+    # FIXED entries in reverse file order (append-only file, last = most recent)
+    for fix in reversed(fixed_entries):
+        fp = fix.get("fingerprint", "")
+        action = fix.get("action", "")
+        entry = f"- [session-fix] {fp} → {action}"
+        entry_len = len(entry) + 1
+        if current_len + entry_len > MAX_LEN:
+            break
+        parts.append(entry)
+        current_len += entry_len
+
+    if not parts:
+        return ""
+
+    body = "\n".join(parts)
+    raw_output = header + body
+
+    return _sanitize_learning_output(raw_output, max_len=MAX_LEN)

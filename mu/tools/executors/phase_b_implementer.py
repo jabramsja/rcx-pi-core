@@ -68,6 +68,7 @@ def build_implementation_prompt(
     repo_root: Path,
     wave_id: str,
     scope_hint: str = "",
+    learning_context: str = "",
 ) -> str:
     """Build a structured implementation prompt from a locked plan.
 
@@ -76,7 +77,12 @@ def build_implementation_prompt(
     2. Implement the specified changes
     3. Run only the Phase B-local validation commands
     4. Report results as structured JSON
+
+    Args:
+        learning_context: Pre-computed, sanitized learning store output from
+            load_relevant_learnings(). Injected as-is when non-empty.
     """
+    learning_section = f"\n{learning_context}\n" if learning_context else ""
     return f"""You are a code implementation agent. Your job is to implement
 the changes described in the locked plan below. You are NOT a reviewer —
 you write code.
@@ -84,7 +90,7 @@ you write code.
 ## Locked Plan
 
 {plan_content}
-
+{learning_section}
 ## Instructions
 
 1. Read the plan carefully.
