@@ -3080,6 +3080,31 @@ _FIXED_ENTRY_RE = re.compile(
     r"^-\s*\[.*?\]\s*FIXED\s*\|\s*fingerprint:\s*`((?:[^`\\]|\\.)+)`\s*\|\s*action:\s*`((?:[^`\\]|\\.)+)`",
 )
 
+# Regex for ALL learning.md entries (not just FIXED).
+# Format: - [DATE] CATEGORY | fingerprint: `text` | ...
+# Captures: date, category, fingerprint.  Description is the multi-line
+# body that follows (handled by _load_learning_md_entries below).
+_LEARNING_MD_ENTRY_RE = re.compile(
+    r"^-\s*\[(\d{4}-\d{2}-\d{2})\]\s*([A-Z]+)\s*\|\s*fingerprint:\s*`((?:[^`\\]|\\.)+)`"
+)
+
+# Map agent names to relevant learning.md categories.
+# None = unfiltered (receives all categories).
+# Agents that work on pipeline infrastructure see PIPELINE/HOOK/WORKTREE/DISPATCH.
+# Agents that review code quality see broader categories.
+_AGENT_CATEGORY_MAP: dict[str, list[str] | None] = {
+    "implementer": ["PIPELINE", "HOOK", "WORKTREE", "DISPATCH", "BRIDGE"],
+    "grounding": ["PIPELINE", "HOOK", "DEBUG"],
+    "fuzzer": ["PIPELINE", "DEBUG"],
+    "verifier": None,       # unfiltered — sees all
+    "adversary": None,      # unfiltered — sees all
+    "expert": None,         # unfiltered — sees all
+    "structural-proof": None,
+    "translator": None,
+    "visualizer": None,
+    "advisor": None,
+}
+
 
 def _export_to_learning_md(record: dict, repo_root: Path) -> None:
     """Append a promoted pattern to .claude/rules/learning.md.
@@ -3152,6 +3177,57 @@ def _load_session_fixed_entries(repo_root: Path) -> list[dict]:
         import logging
         logging.getLogger(__name__).warning(
             "_load_session_fixed_entries failed (non-fatal): %s", exc)
+        return []
+
+
+def _load_learning_md_entries(repo_root: Path) -> list[dict]:
+    """Parse ALL learning.md entries into structured dicts.
+
+    Reads every entry matching ``- [DATE] CATEGORY | fingerprint: `text` ...``
+    and extracts the multi-line description body that follows (indented lines
+    until the next top-level entry or EOF).
+
+    Returns list of dicts with keys: date, category, fingerprint, body.
+    Skips entries marked SUPERSEDED.  Returns empty list on any error.
+    """
+    try:
+        md_path = repo_root / LEARNING_MD_REL
+        if not md_path.exists():
+            return []
+        lines = md_path.read_text(encoding="utf-8").splitlines()
+        entries: list[dict] = []
+        current: dict | None = None
+        body_lines: list[str] = []
+
+        for line in lines:
+            m = _LEARNING_MD_ENTRY_RE.match(line.strip())
+            if m:
+                # Save previous entry
+                if current is not None:
+                    current["body"] = " ".join(body_lines).strip()[:500]
+                    entries.append(current)
+                # Check for SUPERSEDED
+                if "SUPERSEDED BY:" in line:
+                    current = None
+                    body_lines = []
+                    continue
+                current = {
+                    "date": m.group(1),
+                    "category": m.group(2),
+                    "fingerprint": _unescape_backtick_field(m.group(3)),
+                }
+                body_lines = []
+            elif current is not None and line.startswith("  "):
+                body_lines.append(line.strip())
+        # Final entry
+        if current is not None:
+            current["body"] = " ".join(body_lines).strip()[:500]
+            entries.append(current)
+        return entries
+    except (OSError, TypeError, ValueError) as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "_load_learning_md_entries failed (non-fatal): %s", exc)
         return []
 
 
@@ -4109,27 +4185,34 @@ def load_relevant_learnings(
 ) -> str:
     """Load learning store patterns relevant to an agent, sanitized for prompt injection.
 
-    Reads two data sources:
+    Reads three data sources (priority order):
     1. learned_patterns.json via _load_learning_store() — promoted patterns with
        full metadata (failure_class, action, fingerprint, success_count, etc.)
     2. FIXED entries from .claude/rules/learning.md via _load_session_fixed_entries()
        — session-captured fixes with fingerprint + action only.
+    3. ALL learning.md entries via _load_learning_md_entries() — curated diagnostic
+       knowledge with fingerprints, root causes, and structural fixes.  This is the
+       richest source (46+ entries) and the primary channel for warming subagents with
+       pipeline knowledge they cannot see from .claude/rules/ (separate sessions).
 
-    Filters JSON entries by failure_class using _AGENT_FAILURE_CLASS_MAP.
-    FIXED entries are included unfiltered (no failure_class metadata).
+    Filters: JSON entries by failure_class (_AGENT_FAILURE_CLASS_MAP).
+    Learning.md entries by category (_AGENT_CATEGORY_MAP).
+    FIXED entries are included unfiltered (no metadata to filter on).
 
-    Budget: 4000 characters total, JSON entries first (sorted by updated_at desc),
-    then FIXED entries in reverse file order. Truncates at entry boundaries.
+    Budget: 4000 characters total.  Store entries first (most validated),
+    then learning.md entries (most numerous/rich), then FIXED entries.
+    Truncates at entry boundaries.
 
     Returns sanitized formatted string, or empty string on no content/error.
     """
     try:
         store = _load_learning_store(repo_root)
         fixed_entries = _load_session_fixed_entries(repo_root)
+        md_entries = _load_learning_md_entries(repo_root)
     except Exception:
         return ""
 
-    # Collect JSON pattern entries
+    # Collect JSON pattern entries (Tier 1: promoted, validated)
     patterns = store.get("patterns", {})
     allowed_classes = _AGENT_FAILURE_CLASS_MAP.get(agent_name)  # None = unfiltered
 
@@ -4138,35 +4221,59 @@ def load_relevant_learnings(
         if not isinstance(record, dict):
             continue
         fc = record.get("failure_class", "")
-        # Filter by failure_class if the agent has a filter list
         if allowed_classes is not None and fc not in allowed_classes:
             continue
         json_entries.append(record)
 
-    # Sort by updated_at descending (most recent first = higher signal)
     json_entries.sort(key=lambda r: r.get("updated_at", ""), reverse=True)
 
-    # Format entries within budget — header length is reserved upfront so
-    # that header + body fits within MAX_LEN before sanitization.
+    # Filter learning.md entries by category for this agent (Tier 2: curated)
+    allowed_categories = _AGENT_CATEGORY_MAP.get(agent_name)  # None = unfiltered
+    filtered_md: list[dict] = []
+    for entry in md_entries:
+        cat = entry.get("category", "")
+        if allowed_categories is not None and cat not in allowed_categories:
+            continue
+        filtered_md.append(entry)
+    # Most recent first (entries are stored newest-first in learning.md)
+    # — already in file order which is newest-first, no re-sort needed.
+
+    # Format entries within budget
     MAX_LEN = 4000
     header = "## Learning Context\n\nKnown pipeline patterns and fixes:\n"
     parts: list[str] = []
-    current_len = len(header)  # reserve header space in budget
+    current_len = len(header)
 
-    # JSON entries first
+    # JSON store entries first (most validated)
     for rec in json_entries:
         fp = rec.get("fingerprint", "")
         action = rec.get("action", "")
         fc = rec.get("failure_class", "")
         sc = rec.get("success_count", 0)
         entry = f"- [{fc}] {fp} → {action} (success:{sc})"
-        entry_len = len(entry) + 1  # +1 for newline join
+        entry_len = len(entry) + 1
         if current_len + entry_len > MAX_LEN:
             break
         parts.append(entry)
         current_len += entry_len
 
-    # FIXED entries in reverse file order (append-only file, last = most recent)
+    # Learning.md entries second (curated diagnostic knowledge)
+    for md_rec in filtered_md:
+        fp = md_rec.get("fingerprint", "")
+        cat = md_rec.get("category", "")
+        body = md_rec.get("body", "")
+        # Truncate body to first sentence or 120 chars for budget
+        short_body = body[:120].split(". ")[0] if body else ""
+        entry = f"- [{cat}] {fp}"
+        if short_body:
+            entry += f" — {short_body}"
+        entry_len = len(entry) + 1
+        if current_len + entry_len > MAX_LEN:
+            break
+        parts.append(entry)
+        current_len += entry_len
+
+    # FIXED entries last (session-captured, least metadata)
     for fix in reversed(fixed_entries):
         fp = fix.get("fingerprint", "")
         action = fix.get("action", "")
