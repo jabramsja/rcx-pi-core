@@ -222,9 +222,18 @@ def invoke_implementer(
     if stale_timeout_s <= 0:
         stale_timeout_s = DEFAULT_IMPLEMENTER_STALE_TIMEOUT_S
     stale_timeout_s = min(float(timeout), stale_timeout_s)
-    # Silent no-output hangs should trip even if helper subprocesses keep the
-    # adapter process tree "active" enough to defeat stale fingerprint checks.
-    zero_output_timeout_s = stale_timeout_s
+    # Do NOT use zero_output_timeout for the implementer path.
+    # claude --print defers all stdout until after the model's final text
+    # response — intermediate tool calls (Read, Edit, Bash, etc.) produce
+    # no stdout.  A complex implementer session can run 35+ tool calls
+    # over 300+ seconds with zero stdout, triggering a false-positive kill.
+    # The stale_timeout already guards against true subprocess hangs by
+    # monitoring process-level activity, and the adapter's main timeout_s
+    # watchdog enforces the wall-clock budget.
+    # Evidence: session 34ffd8cf (2026-04-13) made 35 tool calls across
+    # 113 events but was killed at 300s for "no stdout" while actively
+    # working (last event: mid-Bash-tool-call).
+    zero_output_timeout_s = None
 
     AdapterSpec = _bridge_adapters.AdapterSpec
     BridgeAdapterError = _bridge_adapters.BridgeAdapterError

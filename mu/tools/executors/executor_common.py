@@ -218,12 +218,18 @@ def normalize_wave_id(raw: str) -> str:
 
 
 def process_descendants(root_pid: int, *, cwd: Path | None = None) -> set[int]:
-    """Return descendant PIDs for a live root process."""
+    """Return descendant PIDs for a process tree.
+
+    Collects the PPID tree from ALL processes (``ps -axo pid=,ppid=``)
+    and walks from *root_pid* down.  The root does NOT need to be alive —
+    descendants that were spawned before the root died still show the
+    original PPID in the snapshot (reparenting to PID 1 happens
+    asynchronously and may not have occurred yet).  This is critical for
+    the timeout-kill path: the dispatcher kills the Phase A process group
+    first (``os.killpg``), then calls this function to sweep up children
+    in separate sessions (``start_new_session=True`` adapters).
+    """
     if root_pid <= 0:
-        return set()
-    try:
-        os.kill(root_pid, 0)
-    except (ProcessLookupError, PermissionError):
         return set()
 
     try:
