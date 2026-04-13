@@ -98,18 +98,6 @@ except Exception as _agent_memory_error:
     AGENT_MEMORY_AVAILABLE = False
     AGENT_MEMORY_IMPORT_ERROR = str(_agent_memory_error)
 
-# Import learning store warming (executor-side, no runner-side side effects)
-LEARNING_STORE_AVAILABLE = False
-LEARNING_STORE_IMPORT_ERROR = ""
-try:
-    from tools.executors.recovery_gate import load_relevant_learnings
-    LEARNING_STORE_AVAILABLE = True
-except Exception as _learning_import_error:
-    LEARNING_STORE_IMPORT_ERROR = str(_learning_import_error)
-
-    def load_relevant_learnings(*args, **kwargs):
-        return ""
-
     def store_finding(*args, **kwargs):
         return None
 
@@ -120,6 +108,18 @@ except Exception as _learning_import_error:
         return ""
 
     def get_pattern_context(*args, **kwargs):
+        return ""
+
+# Import learning store warming (executor-side, no runner-side side effects)
+LEARNING_STORE_AVAILABLE = False
+LEARNING_STORE_IMPORT_ERROR = ""
+try:
+    from tools.executors.recovery_gate import load_relevant_learnings
+    LEARNING_STORE_AVAILABLE = True
+except Exception as _learning_import_error:
+    LEARNING_STORE_IMPORT_ERROR = str(_learning_import_error)
+
+    def load_relevant_learnings(*args, **kwargs):
         return ""
 
 # Import shared FINDING extraction (single source of truth)
