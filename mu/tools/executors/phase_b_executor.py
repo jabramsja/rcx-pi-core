@@ -2173,6 +2173,18 @@ def run_phase_b(
             load_executor_config,
         )
 
+    # Import load_relevant_learnings for subagent warming
+    try:
+        from recovery_gate import load_relevant_learnings
+    except ImportError:
+        _rg_path = SCRIPT_DIR / "recovery_gate.py"
+        import importlib.util as _rg_ilu
+        _rg_spec = _rg_ilu.spec_from_file_location("recovery_gate", str(_rg_path))
+        _rg_mod = _rg_ilu.module_from_spec(_rg_spec)
+        assert _rg_spec.loader is not None
+        _rg_spec.loader.exec_module(_rg_mod)
+        load_relevant_learnings = _rg_mod.load_relevant_learnings
+
     config = load_executor_config(repo_root)
     backend = config.get("backends", {}).get(
         "phase_b_executor",
@@ -2202,6 +2214,13 @@ def run_phase_b(
             f"Checkout-state fence excludes {len(fenced_out_files)} file(s) "
             "from this wave-owned scope"
         )
+
+    # Compute learning context once for all implementer invocations
+    learning_context = load_relevant_learnings(
+        "implementer", plan_declared_files or [], repo_root,
+    )
+    if learning_context:
+        log(f"Learning context loaded ({len(learning_context)} chars)")
 
     # Track implementer-changed files: snapshot before, diff after
     implementer_changed: set[str] = set()
@@ -2318,6 +2337,7 @@ def run_phase_b(
             plan.get("content", ""),
             repo_root=repo_root,
             wave_id=wave_id,
+            learning_context=learning_context,
         )
         impl_result = invoke_implementer(
             repo_root, impl_prompt,
@@ -2742,6 +2762,7 @@ def run_phase_b(
                 repo_root=repo_root,
                 wave_id=wave_id,
                 scope_hint=f"Fix {bridge_decision} findings from bridge round {round_num}",
+                learning_context=learning_context,
             )
             fix_result = invoke_implementer(
                 repo_root, fix_prompt,
@@ -2801,6 +2822,7 @@ def run_phase_b(
                         repo_root=repo_root,
                         wave_id=wave_id,
                         scope_hint=f"Fix pytest failures from bridge round {round_num}",
+                        learning_context=learning_context,
                     )
                     pre_pytest_fix_files = set(_collect_changed_files(repo_root))
                     pytest_fix = invoke_implementer(
@@ -3098,6 +3120,7 @@ def run_phase_b(
                     repo_root=repo_root,
                     wave_id=wave_id,
                     scope_hint="Fix findings from bridge/supervisor review",
+                    learning_context=learning_context,
                 )
                 impl_result = invoke_implementer(
                     repo_root, reentry_prompt,
