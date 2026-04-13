@@ -975,7 +975,10 @@ def _run_executor_in_group(
         # via bridge_adapters.py:576) live in separate sessions and survive
         # os.killpg.  After killpg they get reparented to PID 1 and become
         # unreachable via PPID-tree walking.  Snapshot them first.
-        pre_kill_descendants = process_descendants(proc.pid, cwd=cwd)
+        try:
+            pre_kill_descendants = process_descendants(proc.pid, cwd=cwd)
+        except Exception:
+            pre_kill_descendants = set()
         # Kill the process group (catches same-session children)
         try:
             os.killpg(proc.pid, signal.SIGTERM)

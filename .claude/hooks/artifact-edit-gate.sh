@@ -55,12 +55,13 @@ case "$FILE_PATH" in
 esac
 
 # --- Artifact detection ---
+# Match both absolute (*/reports/...) and root-relative (reports/...) paths.
 IS_ARTIFACT=false
 case "$FILE_PATH" in
-  */reports/control_plane/*) IS_ARTIFACT=true ;;
-  */.agent_bus/*)             IS_ARTIFACT=true ;;
-  */.scratch/*)               IS_ARTIFACT=true ;;
-  */post_merge_package.json)  IS_ARTIFACT=true ;;
+  */reports/control_plane/*|reports/control_plane/*) IS_ARTIFACT=true ;;
+  */.agent_bus/*|.agent_bus/*)                       IS_ARTIFACT=true ;;
+  */.scratch/*|.scratch/*)                           IS_ARTIFACT=true ;;
+  */post_merge_package.json|post_merge_package.json) IS_ARTIFACT=true ;;
 esac
 
 # --- L3 parity reminder (non-blocking) for substrate files ---
