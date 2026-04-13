@@ -217,12 +217,14 @@ def build_surface_parser() -> argparse.ArgumentParser:
 
     phase_a = sub.add_parser("phase-a", help="Run Phase A executor")
     phase_a.add_argument("--plan-name", required=True, help="Plan packet slug")
+    phase_a.add_argument("--task-id", default="", help="TASKS.md task ID (e.g. PIPELINE-RECOVERY). Propagated to Phase B and commit handoff.")
     phase_a.add_argument("--max-rounds", type=int, default=15)
     phase_a.add_argument("-v", "--verbose", action="store_true")
     phase_a.add_argument("--json", action="store_true")
 
     phase_b = sub.add_parser("phase-b", help="Run Phase B executor")
     phase_b.add_argument("--plan", default=None, help="Locked plan packet path")
+    phase_b.add_argument("--task-id", default="", help="TASKS.md task ID (e.g. PIPELINE-RECOVERY). Used in commit handoff.")
     phase_b.add_argument("--routing-record-path", type=Path, help="Path to routing record JSON")
     phase_b.add_argument("--routing-record-json", help="Routing record JSON string")
     phase_b.add_argument("--max-rounds", type=int, default=10)
@@ -424,6 +426,7 @@ def run_recoverable_surface_command(
     surface_record = {
         "decision": decision,
         "wave_name": wave_id,
+        "task_id": getattr(args, "task_id", "") or "",
     }
     result: dict[str, Any] | None = None
 
