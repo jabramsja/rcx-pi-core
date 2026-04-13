@@ -4235,8 +4235,10 @@ def load_relevant_learnings(
         if allowed_categories is not None and cat not in allowed_categories:
             continue
         filtered_md.append(entry)
-    # Most recent first (entries are stored newest-first in learning.md)
-    # — already in file order which is newest-first, no re-sort needed.
+    # Sort by date descending — curated entries at the top of learning.md
+    # are newest-first, but _export_to_learning_md() appends promoted entries
+    # at EOF which would otherwise be consumed last under the budget cap.
+    filtered_md.sort(key=lambda e: e.get("date", ""), reverse=True)
 
     # Format entries within budget
     MAX_LEN = 4000
