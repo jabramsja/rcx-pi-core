@@ -1095,6 +1095,13 @@ def run_phase_a(
             pass
 
     config = load_executor_config(repo_root)
+    implementer_backend = config.get("backends", {}).get("phase_a_executor", "codex")
+    if not isinstance(implementer_backend, str) or not implementer_backend.strip():
+        raise PhaseAExecutorError(
+            "Invalid implementer backend "
+            f"{implementer_backend!r} for phase_a_executor; expected non-empty string"
+        )
+    implementer_backend = implementer_backend.strip()
 
     # Load routing record for scope context
     try:
@@ -1357,7 +1364,7 @@ def run_phase_a(
                         log("Invoking implementer to fix blocking findings...")
                         impl_result = _invoke_implementer(
                             repo_root, impl_prompt,
-                            backend="claude",
+                            backend=implementer_backend,
                             timeout=900,
                             verbose=verbose,
                         )

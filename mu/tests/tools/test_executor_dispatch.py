@@ -128,7 +128,7 @@ class TestDispatcherConfig:
         assert "bridge_turn_timeouts" in config
         assert "timeouts" in config
         assert "bridge_loop_limits" in config
-        assert config["backends"]["phase_b_executor"] == "claude"
+        assert config["backends"]["phase_b_executor"] == "codex"
         # bridge_reviewers may be overridden by RCX_BRIDGE_REVIEWER_OVERRIDE env var
         expected_reviewer = os.environ.get("RCX_BRIDGE_REVIEWER_OVERRIDE", "codex")
         assert config["bridge_reviewers"]["phase_a"] == expected_reviewer
@@ -1076,6 +1076,12 @@ Phase-A-Lock: UNLOCKED
         """Phase A implementer prompt must forbid unrelated dirty-diff spelunking."""
         rendered_dir = self._setup_phase_a(tmp_path, monkeypatch, placeholder_stub=True)
         captured: dict[str, str] = {}
+        config_path = tmp_path / "mu" / "tools" / "executors"
+        config_path.mkdir(parents=True, exist_ok=True)
+        (config_path / "executor_config.json").write_text(
+            json.dumps({"backends": {"phase_a_executor": "claude"}}),
+            encoding="utf-8",
+        )
 
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -1100,6 +1106,7 @@ Phase-A-Lock: UNLOCKED
 
         def fake_invoke(repo_root, prompt, *, backend="claude", timeout=900, verbose=False):
             captured["prompt"] = prompt
+            captured["backend"] = backend
             captured["timeout"] = str(timeout)
             return {"status": "error", "stderr": "stop after prompt capture"}
 
@@ -1122,6 +1129,7 @@ Phase-A-Lock: UNLOCKED
         assert "do NOT try to solve the underlying implementation in this turn" in prompt
         assert "Reproduce with: nl -ba reports/control_plane/test_plan_2026-04-02.md" in prompt
         assert "Evidence result: The packet is still a stub" in prompt
+        assert captured["backend"] == "claude"
 
     def test_deferred_agent_review_accepts_authorization_section_alias(self, tmp_path, monkeypatch):
         """Deferred Phase A review must treat Authorization as equivalent to Grounding."""

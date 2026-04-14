@@ -3512,7 +3512,7 @@ def run_phase_b(
         fixes_implemented=["Phase B implementation per locked plan"],
         files_to_stage=wave_owned_files,
         pre_commit_receipt_path=receipt_path,
-        commit_message=f"feat: Phase B implementation for {wave_id}\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+        commit_message=f"feat: Phase B implementation for {wave_id}\n\nCo-Authored-By: Codex GPT-5.4 xhigh <noreply@openai.com>",
         pr_title=f"feat: Phase B - {wave_id}",
         pr_body=f"## Summary\nPhase B implementation per locked plan at {plan_path}",
         supervisor_lane="hooks/agents/bridge control-surface",
