@@ -1357,7 +1357,7 @@ def run_phase_a(
                         log("Invoking implementer to fix blocking findings...")
                         impl_result = _invoke_implementer(
                             repo_root, impl_prompt,
-                            backend="claude",
+                            backend="codex",
                             timeout=900,
                             verbose=verbose,
                         )

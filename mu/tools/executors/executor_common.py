@@ -28,7 +28,7 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
         "post_merge_supervisor": "codex",
         "dialectic_executor": "codex",
         "phase_a_executor": "codex",
-        "phase_b_executor": "claude",
+        "phase_b_executor": "codex",
         "commit_executor": None,
     },
     "bridge_reviewers": {
