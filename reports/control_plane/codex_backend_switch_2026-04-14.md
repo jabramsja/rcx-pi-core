@@ -91,7 +91,8 @@ backend switch commit.
 **B. Phase A / Phase B implementer routing coherence**
 
 - Update the Phase A implementer invocation so the blocking-finding fix path no
-  longer hardcodes Claude when the control-surface default has moved to Codex.
+  longer hardcodes either Claude or Codex and instead honors the configured
+  Phase A implementer backend, with Codex remaining the default.
 - Update Phase B generated handoff metadata so commit messages and operator truth
   no longer claim Claude authorship for a Codex implementer path.
 
@@ -140,5 +141,7 @@ Before any Phase B rerun or commit packaging:
    `phase_b_executor` backend.
 2. The targeted executor tests that assert default backend behavior pass with
    `codex` as the default.
-3. The final candidate can be staged from only the "Included in this wave" file
+3. The Phase A blocking-finding rewrite path preserves explicit backend
+   overrides instead of forcing Codex during implementer retries.
+4. The final candidate can be staged from only the "Included in this wave" file
    list without pulling in startup-hardening surfaces.
