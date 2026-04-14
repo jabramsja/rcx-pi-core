@@ -15,6 +15,7 @@ from tests.repo_root import REPO_ROOT
 STATUS_PATH = REPO_ROOT / "STATUS.md"
 TASKS_PATH = REPO_ROOT / "TASKS.md"
 MANIFEST_PATH = REPO_ROOT / "roadmap" / "MANIFEST.md"
+CONTROL_PLANE_README_PATH = REPO_ROOT / "reports" / "control_plane" / "README.md"
 META_BRIDGE_ROLLOUT_PATH = (
     REPO_ROOT / "reports" / "control_plane" / "archive" / "meta_bridge_rollout_2026-03-20.md"
 )
@@ -24,6 +25,10 @@ LAYER_TOKENS = ("BOOTSTRAP", "META_CIRCULAR")
 # Shared regex for extracting NEXT section from TASKS.md (used by multiple tests)
 _NEXT_SECTION_RE = re.compile(
     r"## NEXT \(short, bounded follow-ups\)\n(.*?)\n## VECTOR ",
+    re.DOTALL,
+)
+_NOW_SECTION_RE = re.compile(
+    r"## NOW \(normally empty; founder-directed exceptions may pin an active Codex queue\)\n(.*?)\n---\n\n## NEXT ",
     re.DOTALL,
 )
 
@@ -212,6 +217,48 @@ def test_tasks_next_section_has_active_work_only() -> None:
         "('- [ ] ...' or '- **Name**'), completed tasks ('- ~~**Name**~~'), "
         "or an explicit empty marker ('No active items')."
     )
+
+
+def test_now_next_tracked_packets_use_canonical_field_and_are_derivable() -> None:
+    """
+    Active NOW/NEXT tasks must expose canonical tracked packets that the
+    supervisor helper can derive mechanically.
+    """
+    from mu.tools.agents import meta_bridge_supervisor as meta
+
+    tasks_text = TASKS_PATH.read_text(encoding="utf-8")
+    now_match = _NOW_SECTION_RE.search(tasks_text)
+    next_match = _NEXT_SECTION_RE.search(tasks_text)
+    assert now_match, "Could not isolate TASKS.md NOW section."
+    assert next_match, "Could not isolate TASKS.md NEXT section."
+
+    active_text = f"{now_match.group(1)}\n{next_match.group(1)}"
+    assert "**Packet:**" not in active_text, (
+        "Active NOW/NEXT task entries must use '**Tracked packet:**', not "
+        "'**Packet:**', so canonical rollout-packet derivation stays live."
+    )
+
+    entry_re = re.compile(
+        r"^- (?:~~)?\*\*(\[[^\]]+\])\*\*.*?(?=\n- (?:~~)?\*\*\[|\Z)",
+        re.DOTALL | re.MULTILINE,
+    )
+    tracked_entries: list[tuple[str, str]] = []
+    for entry_match in entry_re.finditer(active_text):
+        entry_text = entry_match.group(0)
+        tracked_match = re.search(r"\*\*Tracked packet:\*\*\s*`([^`]+)`", entry_text)
+        if tracked_match:
+            tracked_entries.append((entry_match.group(1), tracked_match.group(1)))
+
+    assert tracked_entries, "Expected at least one active NOW/NEXT tracked packet entry."
+    for task_id, expected_packet in tracked_entries:
+        packet, err = meta.get_canonical_rollout_packet_for_task(REPO_ROOT, task_id)
+        assert err is None, (
+            f"Canonical tracked packet derivation failed for active task {task_id}: {err}"
+        )
+        assert packet == expected_packet, (
+            f"Canonical tracked packet mismatch for {task_id}: "
+            f"expected {expected_packet}, got {packet}"
+        )
 
 
 # =============================================================================
@@ -976,3 +1023,22 @@ def test_tasks_next_completed_item_count() -> None:
             f"TASKS.md NEXT has {len(completed)} completed (struck-through) items "
             f"but no historical disclaimer. Add 'No active NEXT items' or similar."
         )
+
+
+def test_control_plane_readme_points_at_existing_canonical_packets() -> None:
+    """Control-plane README must not advertise missing root packet paths."""
+    text = CONTROL_PLANE_README_PATH.read_text(encoding="utf-8")
+    expected_refs = (
+        "reports/control_plane/archive/meta_bridge_rollout_2026-03-20.md",
+        "reports/control_plane/post_redteam_structural_queue_2026-03-20.md",
+    )
+    stale_refs = (
+        "`meta_bridge_rollout_2026-03-20.md`",
+        "`post_merge_supervisor_plan_2026-03-21.md`",
+        "`executor_surfaces_plan_2026-03-22.md`",
+    )
+    for ref in expected_refs:
+        assert ref in text, f"Control-plane README missing canonical packet ref: {ref}"
+        assert (REPO_ROOT / ref).exists(), f"Canonical packet ref must exist: {ref}"
+    for stale in stale_refs:
+        assert stale not in text, f"Control-plane README still advertises stale root packet ref: {stale}"

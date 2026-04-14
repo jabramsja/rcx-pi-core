@@ -2074,6 +2074,13 @@ class TestZeroMatchProbeTemplateGuidance:
         assert "blocker_report_paths" in prompt
         assert "legitimately be empty" in prompt
 
+    def test_template_uses_existing_archived_rollout_packet_path(self):
+        package = {"task_id": "T", "wave_name": "w", "lane": "l"}
+        results = _make_validation_results(["gate1"], [])
+        prompt = meta.build_meta_reviewer_prompt(package, results, REPO_ROOT)
+        assert "reports/control_plane/archive/meta_bridge_rollout_2026-03-20.md" in prompt
+        assert "reports/control_plane/meta_bridge_rollout_2026-03-20.md" not in prompt
+
 
 class TestStartupFlowSuppressionTemplate:
     """Template must suppress founder guard/attest startup flows in meta-review.

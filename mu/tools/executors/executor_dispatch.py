@@ -32,6 +32,7 @@ try:
         DEFAULT_EXECUTOR_CONFIG,
         load_executor_config as _common_load_executor_config,
         load_routing_record as _common_load_routing_record,
+        ROUTING_RECORD_PATH as _COMMON_ROUTING_RECORD_PATH,
         merge_executor_config_overrides,
         ensure_not_agent_review_mode,
         ExecutorCommonError,
@@ -48,6 +49,7 @@ except ImportError:
     DEFAULT_EXECUTOR_CONFIG = _mod.DEFAULT_EXECUTOR_CONFIG
     _common_load_executor_config = _mod.load_executor_config
     _common_load_routing_record = _mod.load_routing_record
+    _COMMON_ROUTING_RECORD_PATH = _mod.ROUTING_RECORD_PATH
     merge_executor_config_overrides = _mod.merge_executor_config_overrides
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
@@ -177,6 +179,10 @@ def validate_routing_record_freshness(record: dict[str, Any], repo_root: Path) -
         )
 
     return True, "fresh"
+
+
+def _canonical_routing_record_path(repo_root: Path) -> Path:
+    return (repo_root / _COMMON_ROUTING_RECORD_PATH).resolve()
 
 
 def resolve_executor(decision: str) -> str | None:
@@ -1309,6 +1315,7 @@ def dispatch(
     *,
     config: dict[str, Any] | None = None,
     repo_root: Path | None = None,
+    routing_record_path: Path | None = None,
     skip_freshness: bool = False,
     verbose: bool = False,
 ) -> dict[str, Any]:
@@ -1362,17 +1369,43 @@ def dispatch(
     if not skip_freshness:
         fresh, msg = validate_routing_record_freshness(record, repo)
         if not fresh:
+            is_noncanonical_explicit = (
+                routing_record_path is not None
+                and routing_record_path.resolve() != _canonical_routing_record_path(repo)
+            )
             if verbose:
                 print(f"[dispatch] Routing record stale: {msg}")
-                print("[dispatch] Auto-refreshing via post-merge supervisor...")
-            refreshed, refresh_record = _auto_refresh_routing(repo, verbose=verbose)
-            if not refreshed or refresh_record is None:
+                if is_noncanonical_explicit:
+                    print(
+                        "[dispatch] Explicit noncanonical routing record is caller-owned; "
+                        "refusing in-place refresh."
+                    )
+                else:
+                    print("[dispatch] Auto-refreshing via post-merge supervisor...")
+            if is_noncanonical_explicit:
                 return {
                     "status": "stale",
                     "decision": decision,
                     "executor": executor_name,
-                    "message": f"Routing record is stale: {msg}. "
-                               f"Auto-refresh failed — re-run post-merge supervisor manually.",
+                    "message": (
+                        f"Routing record is stale: {msg}. Explicit noncanonical routing records are "
+                        "caller-owned and must be regenerated from authoritative routing instead of "
+                        f"being rewritten in place: {routing_record_path}"
+                    ),
+                }
+            else:
+                refreshed, refresh_record = _auto_refresh_routing(repo, verbose=verbose)
+            if not refreshed or refresh_record is None:
+                refresh_message = (
+                    "Explicit routing record rebind failed — refresh the packet-owned routing file."
+                    if is_noncanonical_explicit
+                    else "Auto-refresh failed — re-run post-merge supervisor manually."
+                )
+                return {
+                    "status": "stale",
+                    "decision": decision,
+                    "executor": executor_name,
+                    "message": f"Routing record is stale: {msg}. {refresh_message}",
                 }
             # Use the refreshed record for the rest of dispatch
             record = refresh_record
@@ -1519,9 +1552,11 @@ def dispatch(
                     break
             if plan_path:
                 executor_args.extend(["--plan", plan_path])
-            # Phase B always needs the routing record, even with a tracked
-            # packet, because downstream supervisor packaging and commit
-            # handoff use task_id, wave_name, and related routing metadata.
+            # Phase B always needs the routing record. With a tracked packet,
+            # downstream supervisor packaging and commit handoff still consume
+            # task_id, wave_name, and the canonical candidate metadata.
+            # Without a tracked packet, Phase B derives scope directly from the
+            # routing record and therefore still fails closed on it.
             executor_args.extend(["--routing-record", json.dumps(record)])
         else:
             executor_args.extend(["--routing-record", json.dumps(record)])
@@ -1732,6 +1767,7 @@ def main(argv: list[str] | None = None) -> int:
                     record,
                     config=config,
                     repo_root=repo_root,
+                    routing_record_path=args.routing_record if args.routing_record else None,
                     skip_freshness=args.skip_freshness,
                     verbose=args.verbose,
                 )

@@ -25,9 +25,7 @@ Relationship to other lanes:
 - promote only the small subset of packets that `TASKS.md` or other canonical
   trackers must point at directly
 
-Current tracked packets:
+Canonical packet references:
 
-- `meta_bridge_rollout_2026-03-20.md`
-- `post_merge_supervisor_plan_2026-03-21.md`
-- `executor_surfaces_plan_2026-03-22.md`
-- `post_redteam_structural_queue_2026-03-20.md`
+- `reports/control_plane/archive/meta_bridge_rollout_2026-03-20.md`
+- `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`

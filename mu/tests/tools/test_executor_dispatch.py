@@ -178,6 +178,50 @@ class TestDispatcherInputValidation:
         assert "agent review mode" in result["message"]
 
 
+class TestDispatcherFreshnessRefresh:
+    """Freshness refresh behavior."""
+
+    def test_noncanonical_explicit_record_fails_closed_instead_of_rebinding(
+        self, tmp_path, monkeypatch,
+    ):
+        routing_file = tmp_path / "routing.json"
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "wave_name": "explicit-wave",
+            "task_id": "[EXPLICIT-WAVE]",
+            "state_sha": "stale-state",
+            "next_candidates": [],
+        }
+        routing_file.write_text(json.dumps(record), encoding="utf-8")
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_auto_refresh_routing",
+            lambda *a, **k: pytest.fail("noncanonical explicit records must not use post-merge refresh"),
+        )
+
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 1, stdout="{}", stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+
+        result = dispatch_mod.dispatch(
+            record,
+            repo_root=tmp_path,
+            routing_record_path=routing_file,
+        )
+
+        persisted = json.loads(routing_file.read_text(encoding="utf-8"))
+        assert result["status"] == "stale"
+        assert "caller-owned" in result["message"]
+        assert persisted == record
+        assert calls == []
+
+
 # ===========================================================================
 # Shared test helpers
 # ===========================================================================
@@ -1745,6 +1789,16 @@ class TestDialecticProposalExtraction:
     def test_empty_candidates(self):
         proposal = dialectic_mod.extract_proposal({"next_candidates": []})
         assert proposal["candidate"] == ""
+
+    def test_build_prompt_uses_archived_rollout_fallback(self, tmp_path):
+        repo = tmp_path / "repo"
+        archive_dir = repo / "reports" / "control_plane" / "archive"
+        archive_dir.mkdir(parents=True)
+        archived_rollout = archive_dir / "meta_bridge_rollout_2026-03-20.md"
+        archived_rollout.write_text("# Archived rollout marker\n", encoding="utf-8")
+        proposal = {"candidate": "broad thing", "bounded": False}
+        prompt = dialectic_mod.build_dialectic_prompt(proposal, {}, repo)
+        assert "# Archived rollout marker" in prompt
 
 
 class TestDialecticEnvelopeParsing:
@@ -6827,13 +6881,13 @@ class TestDispatcherPlanlessPhaseB:
         assert "--routing-record" in call_args
         assert "--plan" not in call_args
 
-    def test_phase_b_with_tracked_packet_passes_plan(self, tmp_path):
-        """Tracked-packet Phase B still carries the authoritative routing record."""
+    def test_phase_b_with_tracked_packet_passes_plan_and_routing_record(self, tmp_path):
+        """When tracked_packet exists in candidates, dispatcher passes --plan and --routing-record."""
         record = {
             "decision": "ROUTE_PHASE_B",
             "summary": "test",
-            "wave_name": "codex-startup-hardening-2026-04-14",
             "task_id": "[CODEX-STARTUP-HARDENING]",
+            "wave_name": "codex-startup-hardening-2026-04-14",
             "next_candidates": [{"candidate": "do", "tracked_packet": "reports/plan.md"}],
         }
         with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
@@ -6847,9 +6901,9 @@ class TestDispatcherPlanlessPhaseB:
         assert "--plan" in call_args
         assert "reports/plan.md" in call_args
         assert "--routing-record" in call_args
-        routing_payload = json.loads(call_args[call_args.index("--routing-record") + 1])
-        assert routing_payload["task_id"] == "[CODEX-STARTUP-HARDENING]"
-        assert routing_payload["wave_name"] == "codex-startup-hardening-2026-04-14"
+        routing_record = json.loads(call_args[call_args.index("--routing-record") + 1])
+        assert routing_record["task_id"] == "[CODEX-STARTUP-HARDENING]"
+        assert routing_record["wave_name"] == "codex-startup-hardening-2026-04-14"
 
 
 class TestTrackedPacketPathTraversal:
@@ -7052,6 +7106,27 @@ class TestRecoveryGateWiring:
     @staticmethod
     def _base_args(routing_file):
         return ["--routing-record", str(routing_file), "--skip-freshness"]
+
+    def test_main_passes_explicit_routing_path_into_dispatch(self, tmp_path):
+        routing_file = self._routing_file(tmp_path)
+        captured_kwargs = {}
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+
+        def fake_dispatch(record, **kwargs):
+            captured_kwargs.update(kwargs)
+            return {
+                "status": "success",
+                "decision": "ROUTE_PHASE_B",
+                "executor": "phase_b_executor",
+            }
+
+        with patch.object(dispatch_mod, "dispatch", side_effect=fake_dispatch), \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            exit_code = dispatch_mod.main(["--routing-record", str(routing_file)])
+
+        assert exit_code == 0
+        assert captured_kwargs["routing_record_path"] == routing_file
 
     def test_recovery_gate_wired_on_failure(self, tmp_path):
         """attempt_recovery is called when dispatch returns failed status."""
