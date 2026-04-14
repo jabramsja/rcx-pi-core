@@ -2182,16 +2182,15 @@ def run_recovery_loop(
                 child_pid=recovery_proc.pid,
                 child_role=spec.name,
             )
-            if spec.prompt_via_stdin:
-                stdin_handle = getattr(recovery_proc, "stdin", None)
-                prompt_input = agent_invocation["prompt_input"]
-                if stdin_handle is not None and prompt_input is not None:
-                    try:
-                        stdin_handle.write(prompt_input)
-                        stdin_handle.close()
-                    except (BrokenPipeError, OSError):
-                        pass
-            stdout, stderr = recovery_proc.communicate(timeout=spec.timeout_s)
+            prompt_input = (
+                agent_invocation["prompt_input"]
+                if spec.prompt_via_stdin
+                else None
+            )
+            stdout, stderr = recovery_proc.communicate(
+                input=prompt_input,
+                timeout=spec.timeout_s,
+            )
             raw_response = bridge_adapters._normalize_stdout_for_adapter(  # ANTICHEAT_OK: recovery must parse the configured adapter's wrapped stdout
                 spec,
                 agent_invocation["cmd"],

@@ -1,7 +1,7 @@
 """Tests for recovery_gate: failure classifier and Tier 1–3 recovery."""
 from __future__ import annotations
 
-import fcntl, json, os, re, sqlite3, subprocess, sys
+import fcntl, io, json, os, re, sqlite3, subprocess, sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -81,9 +81,12 @@ class FakePopen:
         self._communicate_exc = communicate_exc
         self._communicate_calls = 0
         self.killed = False
+        self.stdin = io.StringIO()
+        self.last_input = None
 
-    def communicate(self, timeout=None):
+    def communicate(self, input=None, timeout=None):
         self._communicate_calls += 1
+        self.last_input = input
         if self._communicate_exc is not None and self._communicate_calls == 1:
             raise self._communicate_exc
         return self._stdout, self._stderr
@@ -1593,6 +1596,49 @@ class TestRecoveryLoop:
         status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
         assert status["outcome"] == "exhausted"
         assert status["last_action"] == "exhausted"
+
+    def test_prompt_via_stdin_uses_communicate_input_without_closed_pipe_error(self, tmp_path):
+        result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
+        agent_response = json.dumps({
+            "action": "skip",
+            "commands": [],
+            "explanation": "manual follow-up required",
+        })
+
+        class ClosedPipeSensitivePopen(FakePopen):
+            def communicate(self, input=None, timeout=None):
+                if input is None and getattr(self.stdin, "closed", False):
+                    raise ValueError("I/O operation on closed file.")
+                return super().communicate(input=input, timeout=timeout)
+
+        fake = ClosedPipeSensitivePopen(stdout=agent_response, pid=7777)
+
+        invocation = {
+            "bridge_adapters": SimpleNamespace(
+                _normalize_stdout_for_adapter=lambda _spec, _cmd, text: text
+            ),
+            "spec": SimpleNamespace(name="codex", prompt_via_stdin=True, timeout_s=1200),
+            "cmd": ["codex", "exec", "-", "--json"],
+            "env": {},
+            "command_label": "codex exec - --json",
+            "prompt_input": "PROMPT_PAYLOAD",
+            "prompt_path": Path("recovery_prompt.txt"),
+        }
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *args, **kwargs: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = lambda *args, **kwargs: fake
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            with patch.object(rg_mod, "_resolve_recovery_agent_invocation", return_value=invocation):
+                r = rg_mod.run_recovery_loop(tmp_path, result, "w1", max_iterations=1)
+
+        assert r["recovered"] is False
+        assert r["iterations"] == 1
+        assert fake.last_input == "PROMPT_PAYLOAD"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["state"] == "tier3_skipped"
+        assert status["outcome"] == "skipped"
 
 
 class TestDangerousCommandDetection:

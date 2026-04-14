@@ -529,10 +529,14 @@ class TestPrepareCommitHandoff:
             receipt_path=".agent_bus/meta/pre_commit_receipts/receipt_test.json",
             bridge_rounds=1,
             reentry=False,
+            unblocks_wave_id="wave-codex-startup-hardening-2026-04-14",
+            unblocks_runtime_blocker="INV_STRUCTURAL_FORWARD_MOTION",
         )
         assert "Class: MAINTENANCE" in note
         assert "no_op_proof:" in note
         assert "defer_reason_code: PIPELINE_HARDENING" in note
+        assert "unblocks_wave_id: wave-codex-startup-hardening-2026-04-14" in note
+        assert "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION" in note
         assert "evidence_command:" in note
 
     def test_build_phase_b_tracker_note_maintenance_rejects_runtime_paths(self):
@@ -609,10 +613,18 @@ class TestLoadPlanPacketPathTraversal:
         plan_dir = repo / "reports"
         plan_dir.mkdir(parents=True)
         plan_file = plan_dir / "plan.md"
-        plan_file.write_text("Phase-A-Lock: LOCKED\nStatus: ACTIVE\nTask: [TEST-PLAN]\n")
+        plan_file.write_text(
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [TEST-PLAN]\n"
+            "Unblocks wave id: wave-upstream-2026-04-14\n"
+            "Unblocks runtime blocker: INV_STRUCTURAL_FORWARD_MOTION\n"
+        )
         result = pb_mod.load_plan_packet(repo, "reports/plan.md")
         assert result["phase_a_lock"] == "LOCKED"
         assert result["task_id"] == "[TEST-PLAN]"
+        assert result["unblocks_wave_id"] == "wave-upstream-2026-04-14"
+        assert result["unblocks_runtime_blocker"] == "INV_STRUCTURAL_FORWARD_MOTION"
 
 
 class TestBlockerDiscovery:
@@ -665,6 +677,59 @@ class TestBlockerDiscovery:
                 if p.is_file() and p.suffix == ".md" and p.name != "README.md"
             )
         assert blocker_paths == []
+
+
+@pytest.mark.usefixtures("mock_routing_record")
+class TestMaintenanceTrackerMetadataPropagation:
+    """Phase B must propagate maintenance unblock metadata through the live handoff path."""
+
+    def test_run_phase_b_threads_plan_unblocks_metadata_into_handoff(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        plan = repo / "reports" / "control_plane" / "plan.md"
+        plan.write_text(
+            "# Plan\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Unblocks wave id: wave-codex-startup-hardening-2026-04-14\n"
+            "Unblocks runtime blocker: INV_STRUCTURAL_FORWARD_MOTION\n",
+            encoding="utf-8",
+        )
+
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_class": "MAINTENANCE",
+            "target_gate_id": "G8",
+        }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["TASKS.md"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0, "stdout": "GO\n", "stderr": "",
+                 "decision": "GO", "job_id": "j1",
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json") as mock_handoff:
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        tracker_note_text = mock_handoff.call_args.kwargs["tracker_note_text"]
+        assert "Class: MAINTENANCE" in tracker_note_text
+        assert "unblocks_wave_id: wave-codex-startup-hardening-2026-04-14" in tracker_note_text
+        assert "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION" in tracker_note_text
 
 
 @pytest.mark.usefixtures("mock_routing_record")

@@ -849,6 +849,10 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
             result["status"] = clean.split(":", 1)[1].strip()
         if clean.startswith("Task:"):
             result["task_id"] = clean.split(":", 1)[1].strip()
+        if clean.startswith("Unblocks wave id:") or clean.startswith("unblocks_wave_id:"):
+            result["unblocks_wave_id"] = clean.split(":", 1)[1].strip()
+        if clean.startswith("Unblocks runtime blocker:") or clean.startswith("unblocks_runtime_blocker:"):
+            result["unblocks_runtime_blocker"] = clean.split(":", 1)[1].strip()
 
     return result
 
@@ -1900,6 +1904,8 @@ def _build_phase_b_tracker_note(
     receipt_path: str,
     bridge_rounds: int,
     reentry: bool,
+    unblocks_wave_id: str = "",
+    unblocks_runtime_blocker: str = "",
 ) -> str:
     """Render an L4-compliant tracker note for a Phase B commit handoff."""
     display_task = (task_id or "").strip() or wave_id
@@ -1967,6 +1973,10 @@ def _build_phase_b_tracker_note(
             ),
             "defer_reason_code": "PIPELINE_HARDENING",
         })
+        if unblocks_wave_id:
+            tracker_kwargs["unblocks_wave_id"] = unblocks_wave_id
+        if unblocks_runtime_blocker:
+            tracker_kwargs["unblocks_runtime_blocker"] = unblocks_runtime_blocker
 
     fields = TrackerSyncNoteFields(
         wave_id=wave_id,
@@ -3551,6 +3561,8 @@ def run_phase_b(
         receipt_path=receipt_path,
         bridge_rounds=result.get("bridge_rounds", 0),
         reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
+        unblocks_wave_id=plan.get("unblocks_wave_id", ""),
+        unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
     )
     log(f"Preparing commit handoff ({len(wave_owned_files)} wave-owned files)...")
     handoff_path = prepare_commit_handoff(

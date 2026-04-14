@@ -8,6 +8,8 @@ Phase: B
 Wave class: MAINTENANCE
 Target gate: G8
 Governing packet: This file
+Unblocks wave id: wave-codex-startup-hardening-2026-04-14
+Unblocks runtime blocker: INV_STRUCTURAL_FORWARD_MOTION
 
 ## Grounding / Authorization
 
@@ -61,7 +63,10 @@ separate honest unit:
 7. commit-handoff / recovery repair:
    - `mu/tools/executors/recovery_gate.py`
    - `mu/tests/tools/test_recovery_gate.py`
-8. recovery observability truth:
+8. L4 tracker-window enforcement truth:
+   - `mu/tools/checks/enforce_l4_execution_contract.py`
+   - `mu/tests/tools/test_l4_execution_contract_enforcement.py`
+9. recovery observability truth:
    - `mu/tools/observability/pipeline_dashboard.py`
 
 ## Work Items
@@ -101,6 +106,10 @@ separate honest unit:
 - The recovery gate must classify the resulting tracker-note marker mismatch as
   a deterministic repair path, rebuild the canonical Phase B handoff note, and
   retry the commit surface without relying on a human.
+- The staged L4 tracker-note enforcer must bind the touched current note
+  against the newest-first tracker history window; it must not treat the oldest
+  `TASKS.md` note as the adjacent baseline when enforcing MAINTENANCE cadence
+  and NO_OP throttle.
 - Tier 3 recovery must route through the configured bridge-backed agent backend
   already used by the control-plane, not a hardcoded `claude --print` path.
 - Recovery observability must describe the actor generically as the recovery
@@ -131,7 +140,9 @@ separate honest unit:
    control-surface files in its stage.
 6. A Phase B `MAINTENANCE` handoff produces a valid tracker note that the
    commit executor accepts without manual repair.
-7. Tier 3 recovery uses the configured control-plane backend instead of a
+7. The staged L4 tracker-note enforcer evaluates the touched current note
+   against the newest tracker window instead of an oldest-first slice.
+8. Tier 3 recovery uses the configured control-plane backend instead of a
    hardcoded Claude path, and deterministic tracker-note mismatch repair is
    available before the loop falls back to generic LLM diagnosis.
 
@@ -149,6 +160,9 @@ separate honest unit:
 5. `mu/tests/tools/test_phase_b_executor.py` proves a `MAINTENANCE` Phase B
    handoff emits `no_op_proof:` / `defer_reason_code:` and rejects runtime
    paths.
-6. `mu/tests/tools/test_recovery_gate.py` proves tracker-note contract drift is
+6. `mu/tests/tools/test_l4_execution_contract_enforcement.py` proves the
+   current touched tracker note is evaluated against the newest-first window in
+   the staged enforcement path.
+7. `mu/tests/tools/test_recovery_gate.py` proves tracker-note contract drift is
    classified deterministically, repaired from the Phase B handoff, and that
    Tier 3 recovery no longer exposes a Claude-only waiting state.
