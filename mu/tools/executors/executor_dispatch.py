@@ -1490,7 +1490,9 @@ def dispatch(
             executor_args.extend(["--plan-name", plan_name])
         elif executor_name == "phase_b_executor":
             # Phase B: prefer --plan from next_candidates tracked_packet,
-            # fall back to planless mode (routing record as authority source)
+            # but always pass the routing record so task_id and other
+            # authoritative routing fields do not fall back to ambient repo
+            # state inside phase_b_executor.
             candidates = record.get("next_candidates", [])
             plan_path = None
             for c in candidates:
@@ -1517,11 +1519,10 @@ def dispatch(
                     break
             if plan_path:
                 executor_args.extend(["--plan", plan_path])
-            else:
-                # Planless mode: Phase B derives scope from routing record.
-                # The routing record must have wave_name, summary, and
-                # next_candidates for this to succeed (fail-closed in Phase B).
-                executor_args.extend(["--routing-record", json.dumps(record)])
+            # Phase B always needs the routing record, even with a tracked
+            # packet, because downstream supervisor packaging and commit
+            # handoff use task_id, wave_name, and related routing metadata.
+            executor_args.extend(["--routing-record", json.dumps(record)])
         else:
             executor_args.extend(["--routing-record", json.dumps(record)])
         if executor_name in _JSON_EXECUTORS:
