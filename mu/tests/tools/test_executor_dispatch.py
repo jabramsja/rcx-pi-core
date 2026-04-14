@@ -6828,10 +6828,12 @@ class TestDispatcherPlanlessPhaseB:
         assert "--plan" not in call_args
 
     def test_phase_b_with_tracked_packet_passes_plan(self, tmp_path):
-        """When tracked_packet exists in candidates, dispatcher passes --plan."""
+        """Tracked-packet Phase B still carries the authoritative routing record."""
         record = {
             "decision": "ROUTE_PHASE_B",
             "summary": "test",
+            "wave_name": "codex-startup-hardening-2026-04-14",
+            "task_id": "[CODEX-STARTUP-HARDENING]",
             "next_candidates": [{"candidate": "do", "tracked_packet": "reports/plan.md"}],
         }
         with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
@@ -6844,6 +6846,10 @@ class TestDispatcherPlanlessPhaseB:
         call_args = mock_run.call_args[0][0]
         assert "--plan" in call_args
         assert "reports/plan.md" in call_args
+        assert "--routing-record" in call_args
+        routing_payload = json.loads(call_args[call_args.index("--routing-record") + 1])
+        assert routing_payload["task_id"] == "[CODEX-STARTUP-HARDENING]"
+        assert routing_payload["wave_name"] == "codex-startup-hardening-2026-04-14"
 
 
 class TestTrackedPacketPathTraversal:
