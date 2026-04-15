@@ -29,7 +29,7 @@ from typing import Any, NamedTuple, Optional
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 try:
-    from executor_common import normalize_wave_id
+    from executor_common import load_executor_config, normalize_wave_id
 except ImportError:
     import importlib.util as _ilu
     _common_path = SCRIPT_DIR / "executor_common.py"
@@ -37,6 +37,7 @@ except ImportError:
     _mod = _ilu.module_from_spec(_spec)
     assert _spec.loader is not None
     _spec.loader.exec_module(_mod)
+    load_executor_config = _mod.load_executor_config
     normalize_wave_id = _mod.normalize_wave_id
 
 # ---------------------------------------------------------------------------
@@ -51,6 +52,8 @@ class FailureClass(Enum):
     STALE_EXECUTOR_STATE = "stale_executor_state"
     STALE_CONTINUATION = "stale_continuation"
     MIXED_STAGING = "mixed_staging"
+    TRACKER_NOTE_CONTRACT = "tracker_note_contract"
+    FEATURE_BRANCH_MISMATCH = "feature_branch_mismatch"
     # Tier 2 -- auto-retry with adjustment (zero tokens)
     PROCESS_TIMEOUT = "process_timeout"
     TRANSIENT_KILL = "transient_kill"
@@ -71,7 +74,8 @@ class FailureClass(Enum):
 _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.STALE_BRIDGE_LOCK: 1, FailureClass.STALE_GIT_INDEX_LOCK: 2,
     FailureClass.STALE_EXECUTOR_STATE: 1, FailureClass.STALE_CONTINUATION: 1,
-    FailureClass.MIXED_STAGING: 1,
+    FailureClass.MIXED_STAGING: 1, FailureClass.TRACKER_NOTE_CONTRACT: 1,
+    FailureClass.FEATURE_BRANCH_MISMATCH: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
     FailureClass.AGGREGATION_HANG: 2, FailureClass.IMPLEMENTER_STALE: 2,
     FailureClass.PR_MERGE_CONFLICT: 2,
@@ -87,6 +91,9 @@ _TERMINAL_STATUSES = frozenset({
     "supervisor_rejected",
 })
 _TRANSIENT_KILL_CODES = frozenset({-9, -15, 137})
+_FEATURE_BRANCH_RE = re.compile(
+    r"On branch (?P<current>[^,\n]+), expected (?P<base>\S+) or (?P<target>\S+)"
+)
 
 
 def tier_for(fc: FailureClass) -> int:
@@ -171,6 +178,10 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.STALE_CONTINUATION
     if _looks_like_mixed_staging(stderr, stdout, step):
         return FailureClass.MIXED_STAGING
+    if _looks_like_tracker_note_contract_mismatch(result):
+        return FailureClass.TRACKER_NOTE_CONTRACT
+    if _looks_like_feature_branch_mismatch(result):
+        return FailureClass.FEATURE_BRANCH_MISMATCH
 
     # Tier 2: transient / timeout issues
     if status == "timeout":
@@ -216,6 +227,110 @@ def _looks_like_mixed_staging(stderr: str, stdout: str, step: str) -> bool:
                 if line[0] in "MADRCU" and line[1] in "MADRCU":
                     return True
     return False
+
+
+def _extract_validation_errors(result: dict[str, Any]) -> list[str]:
+    """Collect structured validation errors from the result and embedded JSON."""
+    errors: list[str] = []
+    for candidate in (
+        result,
+        _parse_json_object(result.get("stdout", "")),
+        _parse_json_object(result.get("stderr", "")),
+    ):
+        if not isinstance(candidate, dict):
+            continue
+        raw_errors = candidate.get("errors")
+        if not isinstance(raw_errors, list):
+            continue
+        for item in raw_errors:
+            text = str(item).strip()
+            if text:
+                errors.append(text)
+    return errors
+
+
+def _looks_like_tracker_note_contract_mismatch(result: dict[str, Any]) -> bool:
+    """Detect the commit validate_inputs tracker-note marker mismatch."""
+    errors = _extract_validation_errors(result)
+    if not errors:
+        return False
+    missing_markers = [
+        text for text in errors
+        if text.startswith("tracker_note_text missing required field marker:")
+    ]
+    if not missing_markers:
+        return False
+    missing_no_op = any("no_op_proof:" in text for text in missing_markers)
+    missing_defer_reason = any("defer_reason_code:" in text for text in missing_markers)
+    if not (missing_no_op and missing_defer_reason):
+        return False
+    steps = {
+        str(candidate.get("step", "")).strip()
+        for candidate in (
+            result,
+            _parse_json_object(result.get("stdout", "")),
+            _parse_json_object(result.get("stderr", "")),
+        )
+        if isinstance(candidate, dict) and candidate.get("step")
+    }
+    return "validate_inputs" in steps or not steps
+
+
+def _extract_result_candidates(result: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for candidate in (
+        result,
+        _parse_json_object(result.get("stdout", "")),
+        _parse_json_object(result.get("stderr", "")),
+    ):
+        if isinstance(candidate, dict):
+            candidates.append(candidate)
+    return candidates
+
+
+def _effective_result_step(result: dict[str, Any]) -> str:
+    for candidate in _extract_result_candidates(result):
+        step = str(candidate.get("step", "")).strip()
+        if step:
+            return step
+    for candidate in _extract_result_candidates(result):
+        executor = str(candidate.get("executor", "")).strip()
+        if executor:
+            return executor
+    return "unknown"
+
+
+def _extract_feature_branch_expectation(result: dict[str, Any]) -> dict[str, str] | None:
+    combined_parts: list[str] = []
+    reason_text = _summarize_result_reason(result)
+    if reason_text:
+        combined_parts.append(reason_text)
+    for candidate in _extract_result_candidates(result):
+        for key in ("error", "detail", "message", "stderr", "stdout"):
+            value = candidate.get(key)
+            excerpt = _summarize_json_value(value)
+            if excerpt:
+                combined_parts.append(excerpt)
+        errors = candidate.get("errors")
+        if isinstance(errors, list):
+            combined_parts.extend(str(item) for item in errors if isinstance(item, str))
+    combined_text = "\n".join(combined_parts)
+    match = _FEATURE_BRANCH_RE.search(combined_text)
+    if not match:
+        return None
+    return {key: match.group(key).strip() for key in ("current", "base", "target")}
+
+
+def _looks_like_feature_branch_mismatch(result: dict[str, Any]) -> bool:
+    expectation = _extract_feature_branch_expectation(result)
+    if expectation is None:
+        return False
+    steps = {
+        str(candidate.get("step", "")).strip()
+        for candidate in _extract_result_candidates(result)
+        if candidate.get("step")
+    }
+    return "ensure_feature_branch" in steps or not steps
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +433,198 @@ def fix_mixed_staging(repo_root: Path) -> dict[str, Any]:
         return _fix_result(False, "reset_failed", f"git reset failed: {exc}")
 
 
+def _load_executor_module_from_repo(repo_root: Path, module_name: str) -> Any:
+    """Load an executor helper module from the current repo on demand."""
+    executors_dir = repo_root / "mu" / "tools" / "executors"
+    if str(executors_dir) not in sys.path:
+        sys.path.insert(0, str(executors_dir))
+    try:
+        import importlib
+        return importlib.import_module(module_name)
+    except ImportError:
+        import importlib.util as _ilu
+        module_path = executors_dir / f"{module_name}.py"
+        spec = _ilu.spec_from_file_location(module_name, str(module_path))
+        module = _ilu.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
+
+def fix_tracker_note_contract(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Regenerate a canonical MAINTENANCE tracker note for a Phase B handoff."""
+    handoff_path = repo_root / ".agent_bus" / "executors" / "phase_b_handoff.json"
+    if not handoff_path.exists():
+        return _fix_result(False, "handoff_missing", f"handoff file missing at {handoff_path}")
+
+    try:
+        handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return _fix_result(False, "handoff_invalid", f"could not read handoff JSON: {exc}")
+    if not isinstance(handoff, dict):
+        return _fix_result(False, "handoff_invalid", "handoff payload was not a JSON object")
+    if str(handoff.get("caller", "")).strip() != "phase_b":
+        return _fix_result(False, "unsupported_caller", "tracker-note repair only supports Phase B handoffs")
+    if str(handoff.get("wave_class", "")).strip() != "MAINTENANCE":
+        return _fix_result(False, "unsupported_wave_class", "tracker-note repair only supports MAINTENANCE handoffs")
+
+    try:
+        phase_b_mod = _load_executor_module_from_repo(repo_root, "phase_b_executor")
+        commit_mod = _load_executor_module_from_repo(repo_root, "commit_executor")
+    except Exception as exc:
+        return _fix_result(False, "module_load_failed", f"could not load executor helpers: {exc}")
+
+    files_to_stage = [
+        str(path).strip()
+        for path in handoff.get("files_to_stage", [])
+        if str(path).strip()
+    ]
+    test_files = [
+        path for path in files_to_stage
+        if path.startswith("mu/tests/") or "/test_" in path or path.endswith("_test.py")
+    ]
+    scope_items = handoff.get("scope_items", [])
+    plan_path = next(
+        (str(item).strip() for item in scope_items if str(item).strip()),
+        "<phase-b-plan-unavailable>",
+    )
+    bridge_status = handoff.get("bridge_status", {})
+    if not isinstance(bridge_status, dict):
+        bridge_status = {}
+    try:
+        tracker_note_text = phase_b_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: recovery reuses the Phase B tracker-note generator
+            wave_id=str(handoff.get("wave_id", "")).strip(),
+            task_id=str(handoff.get("task_id", "")).strip() or "[PIPELINE-RECOVERY]",
+            wave_class="MAINTENANCE",
+            target_gate_id=str(handoff.get("target_gate_id", "G8")).strip() or "G8",
+            plan_path=plan_path,
+            changed_files=files_to_stage,
+            test_files=test_files,
+            receipt_path=str(handoff.get("pre_commit_receipt_path", "")).strip(),
+            bridge_rounds=int(bridge_status.get("rounds", 0) or 0),
+            reentry=bool(bridge_status.get("reentry")),
+        )
+    except Exception as exc:
+        return _fix_result(False, "note_rebuild_failed", f"could not rebuild tracker note: {exc}")
+
+    repaired_handoff = dict(handoff)
+    repaired_handoff["tracker_note_text"] = tracker_note_text
+    valid, errors = commit_mod.validate_handoff(repaired_handoff)
+    if not valid:
+        return _fix_result(
+            False,
+            "repaired_handoff_invalid",
+            "rebuilt tracker note still failed validation: " + "; ".join(errors[:5]),
+        )
+
+    try:
+        handoff_path.write_text(json.dumps(repaired_handoff, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        return _fix_result(False, "handoff_write_failed", f"could not rewrite handoff JSON: {exc}")
+
+    return _fix_result(
+        True,
+        "rebuild_phase_b_handoff_tracker_note",
+        f"rewrote tracker_note_text in {handoff_path} using the Phase B MAINTENANCE tracker-note generator",
+    )
+
+
+def fix_feature_branch_mismatch(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Move the worktree onto the canonical target branch for the active handoff."""
+    result = kw.get("result", {})
+    expectation = _extract_feature_branch_expectation(result)
+    handoff_path = repo_root / ".agent_bus" / "executors" / "phase_b_handoff.json"
+    if not handoff_path.exists():
+        return _fix_result(False, "handoff_missing", f"handoff file missing at {handoff_path}")
+    try:
+        handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return _fix_result(False, "handoff_invalid", f"could not read handoff JSON: {exc}")
+    if not isinstance(handoff, dict):
+        return _fix_result(False, "handoff_invalid", "handoff payload was not a JSON object")
+
+    wave_id = str(handoff.get("wave_id", "")).strip()
+    branch_prefix = str(handoff.get("branch_prefix", "")).strip()
+    base_branch = str(handoff.get("base_branch", "")).strip()
+    if not wave_id or not branch_prefix or not base_branch:
+        return _fix_result(
+            False,
+            "handoff_missing_branch_fields",
+            "handoff missing wave_id, branch_prefix, or base_branch",
+        )
+    target_branch = f"{branch_prefix}/{wave_id}"
+
+    if expectation is not None:
+        if expectation["base"] != base_branch or expectation["target"] != target_branch:
+            return _fix_result(
+                False,
+                "branch_contract_mismatch",
+                f"handoff expects {base_branch} or {target_branch}, but failure text expected "
+                f"{expectation['base']} or {expectation['target']}",
+            )
+
+    try:
+        current_proc = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "current_branch_failed", f"git rev-parse HEAD failed: {exc}")
+    if current_proc.returncode != 0:
+        detail = (current_proc.stderr or current_proc.stdout or "").strip()
+        return _fix_result(False, "current_branch_failed", detail or "git rev-parse HEAD failed")
+    current_branch = current_proc.stdout.strip()
+
+    if current_branch == target_branch:
+        return _fix_result(True, "already_on_target_branch", f"already on {target_branch}")
+
+    local_target_exists = False
+    try:
+        local_check = subprocess.run(
+            ["git", "rev-parse", "--verify", f"refs/heads/{target_branch}"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "target_branch_probe_failed", f"git rev-parse target branch failed: {exc}")
+    local_target_exists = local_check.returncode == 0
+
+    checkout_cmd = ["git", "checkout", target_branch]
+    if not local_target_exists:
+        checkout_cmd = ["git", "checkout", "-b", target_branch, base_branch]
+
+    try:
+        checkout_proc = subprocess.run(
+            checkout_cmd,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "branch_switch_failed", f"{' '.join(checkout_cmd)} failed: {exc}")
+    if checkout_proc.returncode != 0:
+        detail = (checkout_proc.stderr or checkout_proc.stdout or "").strip()
+        return _fix_result(
+            False,
+            "branch_switch_failed",
+            detail or f"{' '.join(checkout_cmd)} returned {checkout_proc.returncode}",
+        )
+
+    action = "checkout_expected_feature_branch" if local_target_exists else "create_expected_feature_branch"
+    detail = (
+        f"switched from {current_branch} to canonical target branch {target_branch}"
+        if local_target_exists
+        else f"created canonical target branch {target_branch} from {base_branch} and preserved the worktree"
+    )
+    return _fix_result(True, action, detail)
+
+
 _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.STALE_BRIDGE_LOCK: lambda root, **kw: fix_stale_bridge_lock(root),
     # STALE_GIT_INDEX_LOCK demoted to Tier 2: no sound ownership check exists
@@ -328,6 +635,8 @@ _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.STALE_CONTINUATION: lambda root, **kw: fix_stale_executor_state(
         root, wave_id=kw.get("wave_id", "")),
     FailureClass.MIXED_STAGING: lambda root, **kw: fix_mixed_staging(root),
+    FailureClass.TRACKER_NOTE_CONTRACT: fix_tracker_note_contract,
+    FailureClass.FEATURE_BRANCH_MISMATCH: fix_feature_branch_mismatch,
 }
 
 
@@ -724,7 +1033,7 @@ _TIER2_FIXES: dict[FailureClass, Any] = {
 
 
 # ---------------------------------------------------------------------------
-# Tier 3 LLM recovery loop (small focused prompt via claude --print)
+# Tier 3 LLM recovery loop (small focused prompt via configured recovery agent)
 # ---------------------------------------------------------------------------
 
 _DANGEROUS_COMMANDS = frozenset({
@@ -1028,7 +1337,6 @@ _DANGEROUS_COPY_MOVE_KILL_COMMANDS: frozenset[str] = frozenset({
 })
 
 MAX_RECOVERY_ITERATIONS = 3
-_CLAUDE_TIMEOUT = 180
 _SHELL_TIMEOUT = 30
 _TRIVIAL_EXCERPTS = frozenset({"{", "}", "[", "]", ",", '"', '",', "{}", "[]"})
 
@@ -1036,6 +1344,73 @@ _TRIVIAL_EXCERPTS = frozenset({"{", "}", "[", "]", ",", '"', '",', "{}", "[]"})
 def _strip_shell_quotes(text: str) -> str:
     """Remove shell quoting characters so regex patterns can match regardless of quoting."""
     return text.replace('"', "").replace("'", "")
+
+
+def _load_bridge_adapters_module(repo_root: Path) -> Any:
+    """Load bridge_adapters lazily so recovery stays repo-config driven."""
+    agents_dir = repo_root / "mu" / "tools" / "agents"
+    if str(agents_dir) not in sys.path:
+        sys.path.insert(0, str(agents_dir))
+    try:
+        import importlib
+        return importlib.import_module("bridge_adapters")
+    except ImportError:
+        import importlib.util as _ilu
+        module_path = agents_dir / "bridge_adapters.py"
+        spec = _ilu.spec_from_file_location("bridge_adapters", str(module_path))
+        module = _ilu.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
+
+def _resolve_recovery_agent_invocation(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    step: str,
+    iteration: int,
+    prompt: str,
+) -> dict[str, Any]:
+    """Resolve the configured recovery agent command through bridge config."""
+    config = load_executor_config(repo_root)
+    backend = str(
+        config.get("backends", {}).get("recovery_gate")
+        or config.get("backends", {}).get("phase_b_executor")
+        or "codex"
+    ).strip() or "codex"
+
+    bridge_adapters = _load_bridge_adapters_module(repo_root)
+    bridge_config_path = repo_root / ".agent_bus" / "bridge_config.json"
+    bridge_config = bridge_adapters.load_bridge_config(bridge_config_path)
+    spec = bridge_adapters.get_adapter(bridge_config, backend)
+
+    scratch_dir = repo_root / ".scratch"
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    prompt_token = normalize_wave_id(f"{wave_id}-{step}-{iteration + 1}")
+    prompt_path = scratch_dir / f"recovery_agent_{prompt_token}.txt"
+    prompt_path.write_text(prompt, encoding="utf-8")
+
+    cmd, env = bridge_adapters._prepare_adapter_env(  # ANTICHEAT_OK: recovery must reuse bridge-config command expansion
+        spec,
+        {
+            "prompt_file": str(prompt_path),
+            "repo_root": str(repo_root),
+            "job_id": f"recovery-{prompt_token}",
+            "turn_id": f"tier3-{iteration + 1}",
+            "agent_role": "recovery",
+        },
+    )
+    command_label = " ".join(str(part) for part in cmd)
+    return {
+        "bridge_adapters": bridge_adapters,
+        "spec": spec,
+        "cmd": cmd,
+        "env": env,
+        "command_label": command_label,
+        "prompt_input": prompt if spec.prompt_via_stdin else None,
+        "prompt_path": prompt_path,
+    }
 
 
 # POSIX shell env-assignment pattern: variable name is
@@ -1576,10 +1951,10 @@ def _build_diagnosis_prompt(
     result: dict[str, Any], wave_id: str, iteration: int,
     repo_root: Path,
 ) -> str:
-    """Build a ~2K token diagnosis prompt for claude --print."""
+    """Build a ~2K token diagnosis prompt for the configured recovery agent."""
     fc = result.get("failure_class", result.get("recovery", {}).get("failure_class", "unknown"))
     tier = result.get("tier", result.get("recovery", {}).get("tier", 3))
-    step = result.get("step", "unknown")
+    step = _effective_result_step(result)
     stderr = result.get("stderr", "")
     stdout = result.get("stdout", "")
     # Truncate to keep within token budget
@@ -1713,7 +2088,7 @@ def run_recovery_loop(
     """
     loop_log: list[dict[str, Any]] = []
     fc = result.get("failure_class", result.get("recovery", {}).get("failure_class", "unknown"))
-    step = result.get("step") or result.get("executor", "unknown")
+    step = _effective_result_step(result)
     failure_class = (
         FailureClass(fc)
         if fc in FailureClass._value2member_map_
@@ -1740,44 +2115,112 @@ def run_recovery_loop(
     for i in range(max_iterations):
         iteration_t0 = time.monotonic()
         prompt = _build_diagnosis_prompt(result, wave_id, i, repo_root)
+        try:
+            agent_invocation = _resolve_recovery_agent_invocation(
+                repo_root,
+                wave_id=wave_id,
+                step=step,
+                iteration=i,
+                prompt=prompt,
+            )
+        except Exception as exc:
+            dur = round(time.monotonic() - iteration_t0, 3)
+            detail = f"recovery agent setup failed: {exc}"
+            loop_log.append({
+                "iteration": i + 1,
+                "action": "error",
+                "detail": detail,
+                "duration_s": dur,
+            })
+            _log_tier3_attempt(
+                repo_root, wave_id, step, fc, i + 1,
+                "error", "failed", dur, detail,
+                invocation_id=invocation_id,
+            )
+            _update_recovery_status(
+                repo_root,
+                state="tier3_error",
+                current_iteration=i + 1,
+                child_pid=0,
+                child_role="",
+                current_command="",
+                last_action="error",
+                detail=_excerpt(detail),
+            )
+            continue
+
+        command_label = _excerpt(agent_invocation["command_label"])
         _update_recovery_status(
             repo_root,
-            state="tier3_waiting_on_claude",
+            state="tier3_waiting_on_agent",
             current_iteration=i + 1,
             last_action="diagnose",
             child_pid=0,
             child_role="",
-            current_command="claude --print",
+            current_command=command_label,
             detail=_excerpt(_summarize_result_reason(result)),
         )
 
-        # Call claude --print for diagnosis
-        claude_proc = None
+        # Call the configured recovery agent through the same bridge-config path
+        # used by the rest of the pipeline surfaces.
+        recovery_proc = None
+        spec = agent_invocation["spec"]
+        bridge_adapters = agent_invocation["bridge_adapters"]
         try:
-            claude_proc = subprocess.Popen(
-                ["claude", "--print", "-p", prompt],
+            recovery_proc = subprocess.Popen(
+                agent_invocation["cmd"],
+                stdin=subprocess.PIPE if spec.prompt_via_stdin else None,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=repo_root,
+                env=agent_invocation["env"],
                 start_new_session=True,
             )
             _update_recovery_status(
                 repo_root,
-                child_pid=claude_proc.pid,
-                child_role="claude",
+                child_pid=recovery_proc.pid,
+                child_role=spec.name,
             )
-            stdout, _stderr = claude_proc.communicate(timeout=_CLAUDE_TIMEOUT)
-            raw_response = stdout.strip()
+            prompt_input = (
+                agent_invocation["prompt_input"]
+                if spec.prompt_via_stdin
+                else None
+            )
+            stdout, stderr = recovery_proc.communicate(
+                input=prompt_input,
+                timeout=spec.timeout_s,
+            )
+            raw_response = bridge_adapters._normalize_stdout_for_adapter(  # ANTICHEAT_OK: recovery must parse the configured adapter's wrapped stdout
+                spec,
+                agent_invocation["cmd"],
+                stdout,
+            ).strip()
+            stderr_response = bridge_adapters._normalize_stdout_for_adapter(  # ANTICHEAT_OK: codex may place authoritative output on stderr
+                spec,
+                agent_invocation["cmd"],
+                stderr,
+            ).strip()
+            if stderr_response:
+                if not raw_response:
+                    raw_response = stderr_response
+                else:
+                    raw_response = f"{raw_response}\n[stderr]\n{stderr_response}".strip()
+            if recovery_proc.returncode != 0:
+                tail = _excerpt(raw_response or stderr_response or stderr or stdout)
+                raise RuntimeError(
+                    f"recovery agent '{spec.name}' exited {recovery_proc.returncode}: {tail}"
+                )
         except subprocess.TimeoutExpired:
-            _terminate_process_tree(claude_proc)
+            _terminate_process_tree(recovery_proc)
             dur = round(time.monotonic() - iteration_t0, 3)
+            detail = f"recovery agent '{spec.name}' timed out after {spec.timeout_s}s"
             loop_log.append({
                 "iteration": i + 1, "action": "timeout",
-                "detail": "claude --print timed out",
+                "detail": detail,
                 "duration_s": dur})
             _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
-                               "timeout", "failed", dur, "claude --print timed out",
+                               "timeout", "failed", dur, detail,
                                invocation_id=invocation_id)
             _update_recovery_status(
                 repo_root,
@@ -1786,17 +2229,17 @@ def run_recovery_loop(
                 child_role="",
                 current_command="",
                 last_action="timeout",
-                detail="claude --print timed out",
+                detail=_excerpt(detail),
             )
             continue
-        except OSError as exc:
+        except Exception as exc:
             dur = round(time.monotonic() - iteration_t0, 3)
             loop_log.append({
                 "iteration": i + 1, "action": "error",
-                "detail": f"claude invocation failed: {exc}",
+                "detail": f"recovery agent invocation failed: {exc}",
                 "duration_s": dur})
             _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
-                               "error", "failed", dur, f"claude invocation failed: {exc}",
+                               "error", "failed", dur, f"recovery agent invocation failed: {exc}",
                                invocation_id=invocation_id)
             _update_recovery_status(
                 repo_root,
@@ -1805,7 +2248,7 @@ def run_recovery_loop(
                 child_role="",
                 current_command="",
                 last_action="error",
-                detail=_excerpt(f"claude invocation failed: {exc}"),
+                detail=_excerpt(f"recovery agent invocation failed: {exc}"),
             )
             continue
 
@@ -3255,7 +3698,7 @@ def check_learned_patterns(
         # keyed off ``step="unknown"`` but would be looked up with ``""``.
         # (Bot review PR #751 Comment 2 — P2: align missing-step fallback
         # with attempt_recovery scope key.)
-        result_step = result.get("step") or result.get("executor", "unknown")
+        result_step = _effective_result_step(result)
         now = datetime.now(timezone.utc)
 
         # Collect all matching patterns, then select the strongest match
@@ -3826,7 +4269,7 @@ def attempt_recovery(
             )
             if not _has_handler:
                 # Observe as failed to trigger demotion, then fall through.
-                _step = result.get("step") or result.get("executor", "unknown")
+                _step = _effective_result_step(result)
                 observe_outcome(
                     repo_root, fc, learned.action,
                     _extract_classifier_signal(result)[:80],
@@ -3868,7 +4311,7 @@ def attempt_recovery(
     # distinct timeout sites (e.g. phase_b_executor vs commit_executor)
     # from collapsing into the same (wave_id, "unknown", class) bucket
     # (Bridge R6 Finding 1 fix).
-    step = result.get("step") or result.get("executor", "unknown")
+    step = _effective_result_step(result)
 
     attempts = _load_recovery_log(repo_root)
     prior = _count_prior_attempts(attempts, wave_id, step, fc.value)

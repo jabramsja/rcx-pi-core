@@ -110,6 +110,16 @@ BRIDGE_REVIEW_STALE_TIMEOUT = 120.0
 BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT = 60.0
 DEFAULT_PYTEST_GATE_TIMEOUT_S = 300
 MAX_PYTEST_GATE_TIMEOUT_S = 900
+_MAINTENANCE_FORBIDDEN_PREFIXES = (
+    "mu/host/",
+    "mu/substrate/",
+    "mu/closures/",
+    "mu/bridge/",
+    "mu/programs/",
+    "rcx_pi/selfhost/",
+    "mu/tools/compilers/",
+    "tools/compilers/",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +388,14 @@ def _collect_supervisor_deferred_items(
     if deferred_packet_path:
         deferred_items.add(deferred_packet_path)
     return sorted(deferred_items)
+
+
+def _collect_supervisor_evidence_handles(repo_root: Path, wave_id: str) -> dict[str, str]:
+    """Return only package evidence handles that already exist in repo truth."""
+    indicator_rel = f"reports/l4_wave_indicators/{wave_id}.json"
+    if (repo_root / indicator_rel).exists():
+        return {"indicator": indicator_rel}
+    return {}
 
 
 def _extract_agent_envelope_payloads(render_text: str) -> tuple[list[str], bool, bool]:
@@ -829,6 +847,12 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
             result["phase_a_lock"] = clean.split(":", 1)[1].strip()
         if clean.startswith("Status:"):
             result["status"] = clean.split(":", 1)[1].strip()
+        if clean.startswith("Task:"):
+            result["task_id"] = clean.split(":", 1)[1].strip()
+        if clean.startswith("Unblocks wave id:") or clean.startswith("unblocks_wave_id:"):
+            result["unblocks_wave_id"] = clean.split(":", 1)[1].strip()
+        if clean.startswith("Unblocks runtime blocker:") or clean.startswith("unblocks_runtime_blocker:"):
+            result["unblocks_runtime_blocker"] = clean.split(":", 1)[1].strip()
 
     return result
 
@@ -853,6 +877,13 @@ def validate_inputs(
     lock = plan.get("phase_a_lock", "")
     if lock not in ("LOCKED", "ROUTING_RECORD_AUTHORITY"):
         errors.append(f"Plan Phase-A-Lock must be LOCKED (or ROUTING_RECORD_AUTHORITY for planless), got {lock}")
+
+    plan_task_id = str(plan.get("task_id", "")).strip()
+    routing_task_id = str(routing_record.get("task_id", "")).strip()
+    if plan_task_id and routing_task_id and plan_task_id != routing_task_id:
+        errors.append(
+            f"Plan task_id {plan_task_id} does not match routing task_id {routing_task_id}"
+        )
 
     if errors:
         raise PhaseBExecutorError(
@@ -1873,12 +1904,10 @@ def _build_phase_b_tracker_note(
     receipt_path: str,
     bridge_rounds: int,
     reentry: bool,
+    unblocks_wave_id: str = "",
+    unblocks_runtime_blocker: str = "",
 ) -> str:
     """Render an L4-compliant tracker note for a Phase B commit handoff."""
-    # Phase B produces implementation work — MAINTENANCE requires no_op_proof/defer_reason_code
-    # which are not available here. Guard to L4_ENABLER if routing says MAINTENANCE.
-    if wave_class == "MAINTENANCE":
-        wave_class = "L4_ENABLER"
     display_task = (task_id or "").strip() or wave_id
     if display_task.startswith("[") and display_task.endswith("]"):
         display_task = display_task[1:-1]
@@ -1918,15 +1947,42 @@ def _build_phase_b_tracker_note(
         progress_after += ", reentry=true"
     progress_after += ", explicit receipt authority, and an L4-compliant tracker note."
 
+    tracker_kwargs: dict[str, str] = {
+        "evidence_command": evidence_command,
+        "evidence_delta": evidence_delta,
+        "progress_proof_before": progress_before,
+        "progress_proof_after": progress_after,
+    }
+    if wave_class == "MAINTENANCE":
+        runtime_like = [
+            path for path in changed_files
+            if path.startswith(_MAINTENANCE_FORBIDDEN_PREFIXES)
+        ]
+        if runtime_like:
+            offenders = ", ".join(runtime_like[:3])
+            if len(runtime_like) > 3:
+                offenders += f" (+{len(runtime_like) - 3} more)"
+            raise PhaseBExecutorError(
+                "MAINTENANCE Phase B handoff cannot claim no-op proof while wave-owned files include "
+                f"runtime/substrate paths: {offenders}"
+            )
+        tracker_kwargs.update({
+            "no_op_proof": (
+                "wave-owned scope is limited to control-surface/tooling/test/doc files; "
+                f"no host/runtime/substrate paths are present in this handoff ({len(changed_files)} file(s))"
+            ),
+            "defer_reason_code": "PIPELINE_HARDENING",
+        })
+        if unblocks_wave_id:
+            tracker_kwargs["unblocks_wave_id"] = unblocks_wave_id
+        if unblocks_runtime_blocker:
+            tracker_kwargs["unblocks_runtime_blocker"] = unblocks_runtime_blocker
+
     fields = TrackerSyncNoteFields(
         wave_id=wave_id,
         title=f"{display_task} — commit-ready Phase B handoff",
         wave_class=wave_class,
         target_gate_id=target_gate_id,
-        evidence_command=evidence_command,
-        evidence_delta=evidence_delta,
-        progress_proof_before=progress_before,
-        progress_proof_after=progress_after,
         primary_blocker_class="INTEGRATION",
         primary_invariant_id="INV_STRUCTURAL_FORWARD_MOTION",
         indicator_artifact_ref=indicator_path,
@@ -1934,6 +1990,7 @@ def _build_phase_b_tracker_note(
             f"python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} "
             f"--output {indicator_path}"
         ),
+        **tracker_kwargs,
     )
     return render_tracker_sync_note(fields)
 
@@ -2143,6 +2200,10 @@ def run_phase_b(
             log(f"Planless mode: derived context from routing record (wave={plan.get('wave_id', '?')})")
         except PhaseBExecutorError as exc:
             return {"status": "error", "step": "derive_planless_context", "errors": [str(exc)]}
+
+    plan_task_id = str(plan.get("task_id", "")).strip()
+    if plan_task_id and not str(routing_record.get("task_id", "")).strip():
+        routing_record["task_id"] = plan_task_id
 
     log(f"Phase-A-Lock: {plan.get('phase_a_lock', 'unknown')}")
 
@@ -2961,7 +3022,7 @@ def run_phase_b(
             "fixes_implemented": ["Phase B implementation per locked plan (resumed from NEEDS_PHASE_B)"],
             "deferred_items": deferred_items,
             "bridge_status": {"rounds": result.get("bridge_rounds", 0), "total_rounds": _total_bridge_rounds(repo_root), "reentry": True},
-            "evidence_handles": {},
+            "evidence_handles": _collect_supervisor_evidence_handles(repo_root, wave_id),
             "blocker_report_paths": blocker_paths,
             "current_judgment": "COMMIT_GO",
         }
@@ -3056,7 +3117,7 @@ def run_phase_b(
             "fixes_implemented": ["Phase B implementation per locked plan"],
             "deferred_items": deferred_items,
             "bridge_status": {"rounds": result.get("bridge_rounds", 0), "total_rounds": _total_bridge_rounds(repo_root)},
-            "evidence_handles": {"indicator": f"reports/l4_wave_indicators/{wave_id}.json"},
+            "evidence_handles": _collect_supervisor_evidence_handles(repo_root, wave_id),
             "blocker_report_paths": blocker_paths,
             "current_judgment": "COMMIT_GO",
         }
@@ -3500,6 +3561,8 @@ def run_phase_b(
         receipt_path=receipt_path,
         bridge_rounds=result.get("bridge_rounds", 0),
         reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
+        unblocks_wave_id=plan.get("unblocks_wave_id", ""),
+        unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
     )
     log(f"Preparing commit handoff ({len(wave_owned_files)} wave-owned files)...")
     handoff_path = prepare_commit_handoff(

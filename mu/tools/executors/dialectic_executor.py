@@ -63,7 +63,7 @@ def build_dialectic_prompt(
     """Build the Codex dialectic narrowing prompt."""
     # Read rollout packet for context
     rollout_path = repo_root / routing_record.get("rollout_packet_path",
-        "reports/control_plane/meta_bridge_rollout_2026-03-20.md")
+        "reports/control_plane/archive/meta_bridge_rollout_2026-03-20.md")
     rollout_content = ""
     if rollout_path.exists():
         try:

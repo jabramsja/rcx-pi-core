@@ -506,6 +506,60 @@ time.sleep(10.0)
     assert elapsed < 2.0
 
 
+def test_run_adapter_buffered_stop_after_stderr_meta_envelope_uses_raw_transcript_fallback(
+    tmp_path: Path,
+) -> None:
+    lingering_agent = tmp_path / "lingering_buffered_stderr_meta_agent.py"
+    lingering_agent.write_text(
+        """\
+import sys
+import time
+
+sys.stdin.read()
+sys.stderr.write("BEGIN_META_ENVELOPE\\n")
+sys.stderr.write("{\\n")
+sys.stderr.write('  "decision": "ROUTE_PHASE_A",\\n')
+sys.stderr.write('  "summary": "stderr raw transcript fallback",\\n')
+sys.stderr.write('  "findings": [],\\n')
+sys.stderr.write('  "request_for_claude": "Continue"\\n')
+sys.stderr.write("}\\n")
+sys.stderr.write("END_META_ENVELOPE\\n")
+sys.stderr.flush()
+time.sleep(10.0)
+""",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=[sys.executable, str(lingering_agent)],
+        timeout_s=5,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    with patch.object(adapters, "_authoritative_output_so_far", return_value=""):
+        output = adapters.run_adapter(
+            spec,
+            prompt_text="review prompt",
+            prompt_path=prompt_path,
+            repo_root=tmp_path,
+            job_id="job-1",
+            turn_id="r1-meta",
+            agent_role="meta-reviewer",
+            raw_output_path=raw_output_path,
+            stop_after_envelope=True,
+        )
+    elapsed = time.monotonic() - start
+
+    assert "BEGIN_META_ENVELOPE" in output
+    assert '"summary": "stderr raw transcript fallback"' in output
+    assert elapsed < 2.0
+
+
 def test_run_adapter_streaming_stop_after_envelope_uses_raw_transcript_fallback(tmp_path: Path) -> None:
     lingering_agent = tmp_path / "lingering_streaming_codex_agent.py"
     lingering_agent.write_text(

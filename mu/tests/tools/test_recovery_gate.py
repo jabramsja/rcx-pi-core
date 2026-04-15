@@ -1,9 +1,10 @@
 """Tests for recovery_gate: failure classifier and Tier 1–3 recovery."""
 from __future__ import annotations
 
-import fcntl, json, os, re, sqlite3, subprocess, sys
+import fcntl, io, json, os, re, sqlite3, subprocess, sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 import pytest
 
@@ -31,6 +32,74 @@ def make_empty_store():
     }
 
 
+def install_mock_recovery_agent(
+    monkeypatch,
+    *,
+    backend: str = "codex",
+    timeout_s: int = 1200,
+    cmd: list[str] | None = None,
+):
+    """Patch recovery-gate agent resolution to a deterministic fake adapter."""
+    cmd = cmd or ["codex", "exec", "-", "--json"]
+    invocation = {
+        "bridge_adapters": SimpleNamespace(
+            _normalize_stdout_for_adapter=lambda _spec, _cmd, text: text
+        ),
+        "spec": SimpleNamespace(name=backend, prompt_via_stdin=True, timeout_s=timeout_s),
+        "cmd": list(cmd),
+        "env": {},
+        "command_label": " ".join(cmd),
+        "prompt_input": None,
+        "prompt_path": Path("recovery_prompt.txt"),
+    }
+    monkeypatch.setattr(
+        rg_mod,
+        "_resolve_recovery_agent_invocation",
+        lambda *args, **kwargs: invocation,
+    )
+    return invocation
+
+
+def init_feature_branch_test_repo(repo_root: Path) -> None:
+    subprocess.run(["git", "init"], cwd=repo_root, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "RCX Test"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (repo_root / "tracked.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=repo_root, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(["git", "branch", "-M", "dev"], cwd=repo_root, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "checkout", "-b", "wrong-branch"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _default_mock_recovery_agent(monkeypatch):
+    install_mock_recovery_agent(monkeypatch)
+
+
 class FakePopen:
     def __init__(
         self,
@@ -47,9 +116,12 @@ class FakePopen:
         self._communicate_exc = communicate_exc
         self._communicate_calls = 0
         self.killed = False
+        self.stdin = io.StringIO()
+        self.last_input = None
 
-    def communicate(self, timeout=None):
+    def communicate(self, input=None, timeout=None):
         self._communicate_calls += 1
+        self.last_input = input
         if self._communicate_exc is not None and self._communicate_calls == 1:
             raise self._communicate_exc
         return self._stdout, self._stderr
@@ -175,6 +247,32 @@ class TestClassifyFailure:
             {"status": "error", "step": "some_step",
              "stderr": "something unexpected"}) == FailureClass.UNKNOWN_ERROR
 
+    def test_tracker_note_contract_mismatch(self):
+        payload = {
+            "status": "error",
+            "step": "validate_inputs",
+            "errors": [
+                "tracker_note_text missing required field marker: no_op_proof:",
+                "tracker_note_text missing required field marker: defer_reason_code:",
+            ],
+        }
+        assert rg_mod.classify_failure(
+            {"status": "failed", "step": "commit_executor", "stdout": json.dumps(payload)}
+        ) == FailureClass.TRACKER_NOTE_CONTRACT
+
+    def test_feature_branch_mismatch(self):
+        payload = {
+            "status": "error",
+            "step": "ensure_feature_branch",
+            "errors": [
+                "On branch wrong-branch, expected dev or jabramsja/pipeline-wave"
+            ],
+            "steps_completed": ["validate_inputs"],
+        }
+        assert rg_mod.classify_failure(
+            {"status": "failed", "executor": "commit_executor", "stdout": json.dumps(payload)}
+        ) == FailureClass.FEATURE_BRANCH_MISMATCH
+
     def test_embedded_bridge_error_classified_as_agent_review_crash(self):
         stdout = json.dumps({
             "status": "error",
@@ -240,11 +338,122 @@ class TestTierMapping:
         tier1 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 1}
         assert tier1 == {FailureClass.STALE_BRIDGE_LOCK,
                          FailureClass.STALE_EXECUTOR_STATE, FailureClass.STALE_CONTINUATION,
-                         FailureClass.MIXED_STAGING}
+                         FailureClass.MIXED_STAGING, FailureClass.TRACKER_NOTE_CONTRACT,
+                         FailureClass.FEATURE_BRANCH_MISMATCH}
         # STALE_GIT_INDEX_LOCK demoted to Tier 2 (no sound ownership check)
         assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
         tier4 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 4}
         assert tier4 == {FailureClass.TERMINAL_POLICY, FailureClass.UNCLASSIFIED}
+
+
+class TestFixTrackerNoteContract:
+    def test_rebuilds_phase_b_maintenance_handoff(self, tmp_path, monkeypatch):
+        phase_b_mod = load_module(
+            "phase_b_executor_for_recovery_test",
+            _EXECUTORS_DIR / "phase_b_executor.py",
+        )
+        commit_mod = load_module(
+            "commit_executor_for_recovery_test",
+            _EXECUTORS_DIR / "commit_executor.py",
+        )
+        monkeypatch.setattr(
+            rg_mod,
+            "_load_executor_module_from_repo",
+            lambda _repo_root, module_name: {
+                "phase_b_executor": phase_b_mod,
+                "commit_executor": commit_mod,
+            }[module_name],
+        )
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        handoff = {
+            "caller": "phase_b",
+            "wave_id": "wave-maintenance",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_class": "MAINTENANCE",
+            "target_gate_id": "G8",
+            "files_to_stage": [
+                "mu/tools/executors/recovery_gate.py",
+                "mu/tests/tools/test_recovery_gate.py",
+            ],
+            "force_add_files": [],
+            "pre_commit_receipt_path": ".agent_bus/meta/pre_commit_receipts/receipt_test.json",
+            "tracker_note_text": "- Tracker sync note (2026-04-14, wave-maintenance): **bad note.**. Class: L4_ENABLER.",
+            "scope_items": ["reports/control_plane/pipeline_control_surface_split_2026-04-14.md"],
+            "bridge_status": {"rounds": 1},
+            "fixes_implemented": ["repair tracker note"],
+            "branch_prefix": "codex",
+            "base_branch": "dev",
+            "commit_message": "test",
+            "pr_title": "test",
+            "pr_body": "test",
+        }
+        handoff_path = handoff_dir / "phase_b_handoff.json"
+        handoff_path.write_text(json.dumps(handoff), encoding="utf-8")
+
+        result = rg_mod.fix_tracker_note_contract(tmp_path)
+        assert result["fixed"] is True, result
+
+        repaired = json.loads(handoff_path.read_text(encoding="utf-8"))
+        note = repaired["tracker_note_text"]
+        assert "Class: MAINTENANCE" in note
+        assert "no_op_proof:" in note
+        assert "defer_reason_code: PIPELINE_HARDENING" in note
+
+
+class TestFixFeatureBranchMismatch:
+    def test_creates_expected_target_branch_from_base(self, tmp_path):
+        init_feature_branch_test_repo(tmp_path)
+        (tmp_path / "tracked.txt").write_text("wave change\n", encoding="utf-8")
+        subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True, capture_output=True, text=True)
+
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        wave_id = "pipeline-control-surface-split-2026-04-14"
+        (handoff_dir / "phase_b_handoff.json").write_text(
+            json.dumps(
+                {
+                    "wave_id": wave_id,
+                    "branch_prefix": "jabramsja",
+                    "base_branch": "dev",
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = {
+            "status": "failed",
+            "executor": "commit_executor",
+            "stdout": json.dumps(
+                {
+                    "status": "error",
+                    "step": "ensure_feature_branch",
+                    "errors": [
+                        f"On branch wrong-branch, expected dev or jabramsja/{wave_id}"
+                    ],
+                }
+            ),
+        }
+
+        repair = rg_mod.fix_feature_branch_mismatch(tmp_path, result=result)
+
+        assert repair["fixed"] is True, repair
+        assert repair["action"] == "create_expected_feature_branch"
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert branch == f"jabramsja/{wave_id}"
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        assert staged == ["tracked.txt"]
 
 
 class TestFixStaleBridgeLock:
@@ -488,6 +697,44 @@ class TestAttemptRecovery:
         r = rg_mod.attempt_recovery(
             tmp_path, {"status": "error", "stderr": "bridge.lock held", "step": "bridge_loop"}, "w1")
         assert r["recovered"] is True and r["tier"] == 1
+
+    def test_tier1_feature_branch_mismatch_recovers_and_logs_embedded_step(self, tmp_path):
+        init_feature_branch_test_repo(tmp_path)
+        (tmp_path / "tracked.txt").write_text("wave change\n", encoding="utf-8")
+        subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True, capture_output=True, text=True)
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True, exist_ok=True)
+        wave_id = "pipeline-control-surface-split-2026-04-14"
+        (handoff_dir / "phase_b_handoff.json").write_text(
+            json.dumps(
+                {
+                    "wave_id": wave_id,
+                    "branch_prefix": "jabramsja",
+                    "base_branch": "dev",
+                }
+            ),
+            encoding="utf-8",
+        )
+        payload = {
+            "status": "error",
+            "step": "ensure_feature_branch",
+            "errors": [
+                f"On branch wrong-branch, expected dev or jabramsja/{wave_id}"
+            ],
+            "steps_completed": ["validate_inputs"],
+        }
+
+        r = rg_mod.attempt_recovery(
+            tmp_path,
+            {"status": "failed", "executor": "commit_executor", "stdout": json.dumps(payload)},
+            wave_id,
+        )
+
+        assert r["recovered"] is True
+        assert r["tier"] == 1
+        assert r["failure_class"] == "feature_branch_mismatch"
+        entries = rg_mod._load_recovery_log(tmp_path)  # ANTICHEAT_OK
+        assert entries[-1]["step"] == "ensure_feature_branch"
 
     def test_tier2_index_lock_has_placeholder_fix(self, tmp_path):
         """index.lock is Tier 2 with a registered placeholder fix — returns demoted_to_tier2."""
@@ -1168,8 +1415,12 @@ class TestTier2AttemptRecovery:
 
 
 class TestRecoveryLoop:
+    @pytest.fixture(autouse=True)
+    def _mock_recovery_agent(self, monkeypatch):
+        install_mock_recovery_agent(monkeypatch)
+
     def test_diagnose_and_fix(self, tmp_path):
-        """Mock claude --print returning a shell fix, verify it runs."""
+        """Mock configured recovery agent returning a shell fix, verify it runs."""
         result = {"status": "failed", "step": "pre_commit",
                   "stderr": "test_x failed", "stdout": ""}
         claude_response = json.dumps({
@@ -1321,7 +1572,7 @@ class TestRecoveryLoop:
         """Verify claude call timeout is handled gracefully."""
         result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
         fake = FakePopen(
-            communicate_exc=subprocess.TimeoutExpired(cmd="claude", timeout=60),
+            communicate_exc=subprocess.TimeoutExpired(cmd="codex exec", timeout=60),
             pid=9999,
         )
         popen_kwargs = {}
@@ -1345,6 +1596,49 @@ class TestRecoveryLoop:
         status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
         assert status["outcome"] == "exhausted"
         assert status["last_action"] == "exhausted"
+
+    def test_prompt_via_stdin_uses_communicate_input_without_closed_pipe_error(self, tmp_path):
+        result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
+        agent_response = json.dumps({
+            "action": "skip",
+            "commands": [],
+            "explanation": "manual follow-up required",
+        })
+
+        class ClosedPipeSensitivePopen(FakePopen):
+            def communicate(self, input=None, timeout=None):
+                if input is None and getattr(self.stdin, "closed", False):
+                    raise ValueError("I/O operation on closed file.")
+                return super().communicate(input=input, timeout=timeout)
+
+        fake = ClosedPipeSensitivePopen(stdout=agent_response, pid=7777)
+
+        invocation = {
+            "bridge_adapters": SimpleNamespace(
+                _normalize_stdout_for_adapter=lambda _spec, _cmd, text: text
+            ),
+            "spec": SimpleNamespace(name="codex", prompt_via_stdin=True, timeout_s=1200),
+            "cmd": ["codex", "exec", "-", "--json"],
+            "env": {},
+            "command_label": "codex exec - --json",
+            "prompt_input": "PROMPT_PAYLOAD",
+            "prompt_path": Path("recovery_prompt.txt"),
+        }
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *args, **kwargs: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = lambda *args, **kwargs: fake
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            with patch.object(rg_mod, "_resolve_recovery_agent_invocation", return_value=invocation):
+                r = rg_mod.run_recovery_loop(tmp_path, result, "w1", max_iterations=1)
+
+        assert r["recovered"] is False
+        assert r["iterations"] == 1
+        assert fake.last_input == "PROMPT_PAYLOAD"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["state"] == "tier3_skipped"
+        assert status["outcome"] == "skipped"
 
 
 class TestDangerousCommandDetection:
@@ -1400,6 +1694,10 @@ class TestApplyEditRepoEscape:
 
 
 class TestRecoveryLoopDurableLogging:
+    @pytest.fixture(autouse=True)
+    def _mock_recovery_agent(self, monkeypatch):
+        install_mock_recovery_agent(monkeypatch)
+
     def test_iterations_persisted_to_recovery_log(self, tmp_path):
         """Each Tier 3 iteration is durably logged to recovery_log.json."""
         result = {"status": "failed", "step": "pre_commit",
@@ -1503,15 +1801,15 @@ class TestRecoveryStatusRendering:
                     "wave_invocation_count": 1,
                     "tuple_attempt_index": 1,
                     "retry_target": "commit_executor",
-                    "state": "tier3_waiting_on_claude",
+                    "state": "tier3_waiting_on_agent",
                     "owner_pid": 999999,
                     "child_pid": 888888,
-                    "child_role": "claude",
+                    "child_role": "codex",
                     "reason": "connector stalled",
                     "updated_at": (now - timedelta(seconds=120)).isoformat(),
                     "current_iteration": 2,
                     "max_iterations": 3,
-                    "current_command": "claude --print",
+                    "current_command": "codex exec - --json",
                     "explanation": "trying a narrower fix",
                     "detail": "",
                 }
@@ -1522,7 +1820,7 @@ class TestRecoveryStatusRendering:
         assert "POSSIBLY HUNG — Tier 3 recovery" in rendered
         assert "asking the recovery agent what to try" in rendered
         assert "Current try: 2/3" in rendered
-        assert "Process IDs: owner 999999 (dead) · claude 888888 (dead)" in rendered
+        assert "Process IDs: owner 999999 (dead) · codex 888888 (dead)" in rendered
 
         (status_path / "recovery_status.json").write_text(
             json.dumps(
@@ -1576,7 +1874,7 @@ class TestRecoveryStatusRendering:
                     "state": "tier3_verifying",
                     "owner_pid": 1234,
                     "child_pid": 5678,
-                    "child_role": "claude",
+                    "child_role": "codex",
                     "reason": "phase_b timed out",
                     "updated_at": (now - timedelta(seconds=8)).isoformat(),
                     "current_iteration": 2,
@@ -1827,15 +2125,15 @@ class TestRecoveryWebSnapshot:
                     "wave_invocation_count": 4,
                     "tuple_attempt_index": 2,
                     "retry_target": "phase_a_executor",
-                    "state": "tier3_waiting_on_claude",
+                    "state": "tier3_waiting_on_agent",
                     "reason": "Bridge subprocess failed in round 1",
                     "explanation": "trying a narrower fix",
                     "current_iteration": 2,
                     "max_iterations": 3,
                     "owner_pid": 123,
                     "child_pid": 456,
-                    "child_role": "claude",
-                    "current_command": "claude --print",
+                    "child_role": "codex",
+                    "current_command": "codex exec - --json",
                     "updated_at": now.isoformat(),
                 }
             ),
@@ -1848,7 +2146,7 @@ class TestRecoveryWebSnapshot:
         assert snapshot["reason"] == "Bridge subprocess failed in round 1"
         assert snapshot["current_iteration"] == 2
         assert snapshot["max_iterations"] == 3
-        assert snapshot["child_role"] == "claude"
+        assert snapshot["child_role"] == "codex"
 
     def test_snapshot_reason_prefers_detail_over_numeric_reason(self, tmp_path):
         status_path = tmp_path / ".agent_bus" / "recovery"
@@ -2333,7 +2631,7 @@ esac
                     "failure_class": "agent_review_crash",
                     "wave_id": "wave-recovery",
                     "retry_target": "phase_a_executor",
-                    "state": "tier3_waiting_on_claude",
+                    "state": "tier3_waiting_on_agent",
                     "reason": "Bridge subprocess failed in round 1",
                     "current_iteration": 2,
                     "max_iterations": 3,
@@ -3097,7 +3395,7 @@ esac
                     "wave_invocation_count": 2,
                     "tuple_attempt_index": 1,
                     "retry_target": "phase_b_executor",
-                    "state": "tier3_waiting_on_claude",
+                    "state": "tier3_waiting_on_agent",
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                     "invocation_id": "wave-active-phase_b_executor-agent_review_crash-01",
                 }
@@ -3164,7 +3462,7 @@ esac
                     "wave_invocation_count": 2,
                     "tuple_attempt_index": 1,
                     "retry_target": "phase_b_executor",
-                    "state": "tier3_waiting_on_claude",
+                    "state": "tier3_waiting_on_agent",
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                     "invocation_id": "wave-active-phase_b_executor-agent_review_crash-01",
                 }

@@ -588,17 +588,44 @@ def _run_adapter_buffered(
             f"Adapter '{spec.name}' command not executable: {cmd[0]}"
         ) from exc
 
-    stdout_lines: list[str] = []
+    stdout_buf = io.StringIO()
     stderr_buf = io.StringIO()
     stdout_progress = threading.Event()
+    envelope_terminated = threading.Event()
 
-    # Drain stderr concurrently to prevent pipe deadlock when child writes
-    # heavily to stderr while we block reading stdout line-by-line.
+    def _stop_after_envelope(line: str, sink: io.StringIO) -> None:
+        if (
+            not stop_after_envelope
+            or envelope_terminated.is_set()
+        ):
+            return
+        if (
+            _contains_complete_adapter_envelope(
+                _authoritative_output_so_far(spec, cmd, sink.getvalue())
+            )
+            or _raw_transcript_contains_complete_adapter_envelope(raw_output_path)
+        ):
+            envelope_terminated.set()
+            # Give the adapter a moment to flush trailing bytes before
+            # terminating any lingering subprocess tree.
+            time.sleep(0.05)
+            _kill_process_group(proc, wait_for_exit=True)
+
+    def _record_stdout_progress(line: str, sink: io.StringIO) -> None:
+        stdout_progress.set()
+        _stop_after_envelope(line, sink)
+
+    stdout_thread = threading.Thread(
+        target=_tee_stream,
+        args=(proc.stdout, stdout_buf, None, write_stdout_raw, _record_stdout_progress),
+        daemon=True,
+    )
     stderr_thread = threading.Thread(
         target=_tee_stream,
         args=(proc.stderr, stderr_buf, None, write_stderr_raw),
         daemon=True,
     )
+    stdout_thread.start()
     stderr_thread.start()
 
     # Watchdog timer: kill the ENTIRE process group if it exceeds timeout_s.
@@ -606,7 +633,6 @@ def _run_adapter_buffered(
     timed_out = threading.Event()
     zero_output_timed_out = threading.Event()
     stale_timed_out = threading.Event()
-    envelope_terminated = threading.Event()
     stale_watchdog_stop, stale_watchdog = _start_stale_watchdog(
         proc,
         raw_output_path,
@@ -643,23 +669,26 @@ def _run_adapter_buffered(
             )
             zero_output_watchdog.daemon = True
             zero_output_watchdog.start()
-        for line in proc.stdout:
-            stdout_lines.append(line)
-            stdout_progress.set()
-            write_stdout_raw(line)
-            if (
-                stop_after_envelope
-                and not envelope_terminated.is_set()
-                and (
-                    _contains_complete_adapter_envelope(
-                        _authoritative_output_so_far(spec, cmd, "".join(stdout_lines))
+        deadline = time.monotonic() + spec.timeout_s
+        wait_slice = 0.2 if stop_after_envelope else spec.timeout_s
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(cmd, spec.timeout_s)
+            try:
+                proc.wait(timeout=min(wait_slice, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                if stop_after_envelope and (
+                    envelope_terminated.is_set()
+                    or _contains_complete_adapter_envelope(
+                        _authoritative_output_so_far(spec, cmd, stdout_buf.getvalue())
                     )
                     or _raw_transcript_contains_complete_adapter_envelope(raw_output_path)
-                )
-            ):
-                envelope_terminated.set()
-                _kill_process_group(proc, wait_for_exit=True)
-        proc.wait(timeout=spec.timeout_s)
+                ):
+                    envelope_terminated.set()
+                    _kill_process_group(proc, wait_for_exit=True)
+                    continue
         watchdog.cancel()
         if zero_output_watchdog is not None:
             zero_output_watchdog.cancel()
@@ -675,6 +704,7 @@ def _run_adapter_buffered(
             stale_watchdog.join(timeout=5)
         _kill_process_group(proc, wait_for_exit=True)
         proc.wait()
+        stdout_thread.join(timeout=5)
         stderr_thread.join(timeout=5)
         if raw_fh is not None:
             raw_fh.close()
@@ -688,6 +718,7 @@ def _run_adapter_buffered(
         if proc.returncode is None:
             _kill_process_group(proc, wait_for_exit=True)
             proc.wait()
+        stdout_thread.join(timeout=5)
         stderr_thread.join(timeout=5)
         if raw_fh is not None:
             raw_fh.close()
@@ -695,9 +726,11 @@ def _run_adapter_buffered(
             f"Adapter '{spec.name}' timed out after {spec.timeout_s}s"
         )
 
-    stderr_thread.join(timeout=5)
+    join_timeout = 0.2 if envelope_terminated.is_set() else 5
+    stdout_thread.join(timeout=join_timeout)
+    stderr_thread.join(timeout=join_timeout)
 
-    output = _normalize_stdout_for_adapter(spec, cmd, "".join(stdout_lines))
+    output = _normalize_stdout_for_adapter(spec, cmd, stdout_buf.getvalue())
     stderr_text = stderr_buf.getvalue()
     if stderr_text:
         if not output.strip() and _contains_complete_adapter_envelope(stderr_text):

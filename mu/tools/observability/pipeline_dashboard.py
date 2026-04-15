@@ -201,7 +201,7 @@ def _human_recovery_state(value: str) -> str:
         "tier2_fixed": "applied the deterministic fix",
         "tier2_failed": "the deterministic fix failed",
         "tier2_unhandled": "no safe deterministic fix was available",
-        "tier3_waiting_on_claude": "asking the recovery agent what to try",
+        "tier3_waiting_on_agent": "asking the recovery agent what to try",
         "tier3_timeout": "the recovery agent timed out",
         "tier3_error": "the recovery agent hit an execution error",
         "tier3_parse_error": "the recovery agent answered in the wrong format",

@@ -938,7 +938,8 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
     """
     Parse ordered tracker sync notes from TASKS.md Ra section.
 
-    Returns list of dicts in document order (first = most recent).
+    TASKS.md appends tracker notes oldest -> newest. Return newest-first so
+    notes[0] is always the current wave for cadence/window enforcement.
     Only includes notes that have a Class: marker.
     Historical L4_CLASS_A is aliased to L4_STRUCTURAL.
     """
@@ -1016,7 +1017,7 @@ def parse_tracker_notes(text: str) -> list[dict[str, str | None]]:
             "raw": body,
         })
 
-    return notes
+    return list(reversed(notes))
 
 
 def extract_touched_tracker_wave_ids(tasks_diff: str) -> list[str]:
