@@ -91,6 +91,8 @@ _TERMINAL_STATUSES = frozenset({
     "supervisor_rejected",
 })
 _TRANSIENT_KILL_CODES = frozenset({-9, -15, 137})
+STALE_BRIDGE_LOCK_WAIT_TIMEOUT_S = 30.0
+STALE_BRIDGE_LOCK_WAIT_POLL_S = 0.5
 _FEATURE_BRANCH_RE = re.compile(
     r"On branch (?P<current>[^,\n]+), expected (?P<base>\S+) or (?P<target>\S+)"
 )
@@ -165,18 +167,18 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.PR_MERGE_CONFLICT
 
     # Tier 1: deterministic lock/state issues
-    if "bridge.lock" in reason_text:
+    if "bridge.lock" in reason_lower or "bridge.lock" in combined_lower:
         return FailureClass.STALE_BRIDGE_LOCK
-    if "index.lock" in reason_text:
+    if "index.lock" in reason_lower or "index.lock" in combined_lower:
         return FailureClass.STALE_GIT_INDEX_LOCK
-    if "phase_b_state.json" in reason_text or "stale_state" in status:
+    if "phase_b_state.json" in reason_lower or "phase_b_state.json" in combined_lower or "stale_state" in status:
         return FailureClass.STALE_EXECUTOR_STATE
     if (
         "stale continuation" in reason_lower
         or "continuation record is stale" in reason_lower
     ):
         return FailureClass.STALE_CONTINUATION
-    if _looks_like_mixed_staging(stderr, stdout, step):
+    if _looks_like_mixed_staging(result):
         return FailureClass.MIXED_STAGING
     if _looks_like_tracker_note_contract_mismatch(result):
         return FailureClass.TRACKER_NOTE_CONTRACT
@@ -216,9 +218,49 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     return FailureClass.UNCLASSIFIED
 
 
-def _looks_like_mixed_staging(stderr: str, stdout: str, step: str) -> bool:
-    """Detect mixed staged/unstaged state from error signals."""
+def _looks_like_mixed_staging(result: dict[str, Any]) -> bool:
+    """Detect mixed staged/unstaged state from error signals.
+
+    Structured non-staging commit failures must win over incidental raw stdout
+    chatter. This keeps agent-stream text like "mixed staging state" from
+    reclassifying a later `run_pre_push_script` failure as a staging defect.
+    """
+    stderr = str(result.get("stderr", "") or "")
+    stdout = str(result.get("stdout", "") or "")
+    step = str(result.get("step", "") or "")
     combined_lower = f"{stderr} {stdout}".lower()
+    staging_steps = {
+        "ensure_tracker_note",
+        "stage_files",
+        "collect_and_stage_indicator",
+        "git_commit",
+    }
+    non_staging_commit_steps = {
+        "validate_inputs",
+        "ensure_feature_branch",
+        "build_and_run_supervisor",
+        "validate_receipt",
+        "run_pre_commit_script",
+        "hold_check",
+        "run_pre_push_script",
+        "git_push",
+        "ensure_pr",
+        "wait_ci",
+        "ensure_review_clear_and_merge",
+    }
+    structured_steps = {
+        str(candidate.get("step", "")).strip()
+        for candidate in _extract_result_candidates(result)
+        if candidate.get("step")
+    }
+    if step:
+        structured_steps.add(step)
+    if (
+        structured_steps
+        and structured_steps.isdisjoint(staging_steps)
+        and not structured_steps.isdisjoint(non_staging_commit_steps)
+    ):
+        return False
     if "mixed" in combined_lower and "staging" in combined_lower:
         return True
     if step in ("stage_files", "git_commit"):
@@ -356,8 +398,17 @@ def fix_stale_bridge_lock(repo_root: Path) -> dict[str, Any]:
     if _claim_and_remove_bridge_lock(lock_path):
         return _fix_result(True, "claim_and_remove_stale_lock",
                            "bridge.lock atomically claimed and removed (flock unheld)")
+    deadline = time.monotonic() + STALE_BRIDGE_LOCK_WAIT_TIMEOUT_S
+    while time.monotonic() < deadline:
+        time.sleep(STALE_BRIDGE_LOCK_WAIT_POLL_S)
+        if _claim_and_remove_bridge_lock(lock_path):
+            return _fix_result(
+                True,
+                "wait_and_remove_stale_lock",
+                "bridge.lock released during bounded wait and was atomically removed",
+            )
     return _fix_result(False, "noop",
-                       "bridge.lock held by a live flock — cannot remove")
+                       "bridge.lock held by a live flock after bounded wait — cannot remove")
 
 
 def fix_stale_git_index_lock(repo_root: Path) -> dict[str, Any]:
@@ -488,6 +539,15 @@ def fix_tracker_note_contract(repo_root: Path, **kw: Any) -> dict[str, Any]:
         (str(item).strip() for item in scope_items if str(item).strip()),
         "<phase-b-plan-unavailable>",
     )
+    plan_content = ""
+    if plan_path != "<phase-b-plan-unavailable>":
+        try:
+            plan_file = (repo_root / plan_path).resolve()
+            plan_file.relative_to(repo_root.resolve())
+            if plan_file.is_file():
+                plan_content = plan_file.read_text(encoding="utf-8")
+        except (OSError, ValueError):
+            plan_content = ""
     bridge_status = handoff.get("bridge_status", {})
     if not isinstance(bridge_status, dict):
         bridge_status = {}
@@ -498,6 +558,7 @@ def fix_tracker_note_contract(repo_root: Path, **kw: Any) -> dict[str, Any]:
             wave_class="MAINTENANCE",
             target_gate_id=str(handoff.get("target_gate_id", "G8")).strip() or "G8",
             plan_path=plan_path,
+            plan_content=plan_content,
             changed_files=files_to_stage,
             test_files=test_files,
             receipt_path=str(handoff.get("pre_commit_receipt_path", "")).strip(),
@@ -581,7 +642,6 @@ def fix_feature_branch_mismatch(repo_root: Path, **kw: Any) -> dict[str, Any]:
     if current_branch == target_branch:
         return _fix_result(True, "already_on_target_branch", f"already on {target_branch}")
 
-    local_target_exists = False
     try:
         local_check = subprocess.run(
             ["git", "rev-parse", "--verify", f"refs/heads/{target_branch}"],
@@ -594,9 +654,33 @@ def fix_feature_branch_mismatch(repo_root: Path, **kw: Any) -> dict[str, Any]:
         return _fix_result(False, "target_branch_probe_failed", f"git rev-parse target branch failed: {exc}")
     local_target_exists = local_check.returncode == 0
 
-    checkout_cmd = ["git", "checkout", target_branch]
-    if not local_target_exists:
-        checkout_cmd = ["git", "checkout", "-b", target_branch, base_branch]
+    try:
+        remote_check = subprocess.run(
+            ["git", "ls-remote", "--heads", "origin", target_branch],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "target_branch_probe_failed", f"git ls-remote target branch failed: {exc}")
+    remote_target_exists = bool(remote_check.stdout.strip())
+
+    if local_target_exists or remote_target_exists:
+        collisions: list[str] = []
+        if local_target_exists:
+            collisions.append(f"local branch {target_branch}")
+        if remote_target_exists:
+            collisions.append(f"remote branch origin/{target_branch}")
+        collision_text = " and ".join(collisions)
+        return _fix_result(
+            False,
+            "target_branch_collision",
+            f"refusing to switch from {current_branch} to {target_branch}: {collision_text} already exists; "
+            "feature-branch recovery must fail closed on branch collisions",
+        )
+
+    checkout_cmd = ["git", "checkout", "-b", target_branch, base_branch]
 
     try:
         checkout_proc = subprocess.run(
@@ -616,13 +700,8 @@ def fix_feature_branch_mismatch(repo_root: Path, **kw: Any) -> dict[str, Any]:
             detail or f"{' '.join(checkout_cmd)} returned {checkout_proc.returncode}",
         )
 
-    action = "checkout_expected_feature_branch" if local_target_exists else "create_expected_feature_branch"
-    detail = (
-        f"switched from {current_branch} to canonical target branch {target_branch}"
-        if local_target_exists
-        else f"created canonical target branch {target_branch} from {base_branch} and preserved the worktree"
-    )
-    return _fix_result(True, action, detail)
+    detail = f"created canonical target branch {target_branch} from {base_branch} and preserved the worktree"
+    return _fix_result(True, "create_expected_feature_branch", detail)
 
 
 _TIER1_FIXES: dict[FailureClass, Any] = {
@@ -2182,11 +2261,7 @@ def run_recovery_loop(
                 child_pid=recovery_proc.pid,
                 child_role=spec.name,
             )
-            prompt_input = (
-                agent_invocation["prompt_input"]
-                if spec.prompt_via_stdin
-                else None
-            )
+            prompt_input = agent_invocation["prompt_input"] if spec.prompt_via_stdin else None
             stdout, stderr = recovery_proc.communicate(
                 input=prompt_input,
                 timeout=spec.timeout_s,
@@ -2571,6 +2646,17 @@ def _extract_classifier_signal(result: dict[str, Any]) -> str:
             part for part in (stderr, stdout, embedded_reason)
             if isinstance(part, str) and part
         )
+        reason_text = _summarize_result_reason(result)
+        step = _effective_result_step(result)
+        if reason_text:
+            prefix = f"{step}: {reason_text}" if step else reason_text
+            if combined_text:
+                normalized_prefix = _normalize_fingerprint(prefix)
+                normalized_combined = _normalize_fingerprint(combined_text)
+                if normalized_prefix in normalized_combined:
+                    return combined_text
+                return f"{prefix} {combined_text}"
+            return prefix
         return combined_text
     except Exception:
         return result.get("stderr", "")
@@ -3930,6 +4016,17 @@ def _parse_json_object(value: Any) -> dict[str, Any]:
         try:
             parsed = json.loads(candidate)
         except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    decoder = json.JSONDecoder()
+    brace_positions = [idx for idx, ch in enumerate(text) if ch == "{"]
+    for start in reversed(brace_positions):
+        try:
+            parsed, end = decoder.raw_decode(text[start:])
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        if text[start + end:].strip():
             continue
         if isinstance(parsed, dict):
             return parsed

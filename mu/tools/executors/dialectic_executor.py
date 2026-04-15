@@ -12,7 +12,7 @@ Control flow:
 4. Write narrowed proposal to .agent_bus/executors/dialectic_result.json
 5. Trigger post-merge supervisor with narrowed proposal
 
-See: reports/control_plane/executor_surfaces_plan_2026-03-22.md Section B.1
+See: reports/archive/control_plane/executor_surfaces_plan_2026-03-22.md Section B.1
 """
 
 from __future__ import annotations

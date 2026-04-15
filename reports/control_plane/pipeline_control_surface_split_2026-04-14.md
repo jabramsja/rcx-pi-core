@@ -8,8 +8,6 @@ Phase: B
 Wave class: MAINTENANCE
 Target gate: G8
 Governing packet: This file
-Unblocks wave id: wave-codex-startup-hardening-2026-04-14
-Unblocks runtime blocker: INV_STRUCTURAL_FORWARD_MOTION
 
 ## Grounding / Authorization
 
@@ -33,6 +31,16 @@ The blocking defects from that bridge review are controlling for this split:
    into meta-review prompts.
 3. The startup packet no longer matched the staged candidate because the stage
    also contained control-surface files outside startup-hardening scope.
+
+## Consecutive Maintenance Bypass
+
+This MAINTENANCE split is the bounded control-surface pass required before the
+separate startup-hardening follow-up can rerun honestly. For tracker-note
+generation and `enforce_l4_execution_contract.py`, the intended bypass linkage
+is:
+
+- `unblocks_wave_id: wave-codex-startup-hardening-2026-04-14`
+- `unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION`
 
 ## Scope
 
@@ -61,9 +69,10 @@ separate honest unit:
    - `mu/tests/tools/test_meta_bridge_supervisor.py`
    - `mu/tests/docs/test_status_tasks_consistency.py`
 7. commit-handoff / recovery repair:
+   - `mu/tools/executors/commit_executor.py`
    - `mu/tools/executors/recovery_gate.py`
    - `mu/tests/tools/test_recovery_gate.py`
-8. L4 tracker-window enforcement truth:
+8. L4 checker / governance truth:
    - `mu/tools/checks/enforce_l4_execution_contract.py`
    - `mu/tests/tools/test_l4_execution_contract_enforcement.py`
 9. recovery observability truth:
@@ -74,10 +83,12 @@ separate honest unit:
 **A. Explicit routing fail-closed**
 
 - Stale noncanonical explicit routing records must NOT be refreshed in place.
+- Stale inline routing records must auto-refresh only when they still match the
+  canonical routing file; caller-owned inline records must fail closed.
 - The dispatcher must return a stale/fail-closed result that tells the caller
   to regenerate authoritative routing.
 - The dispatcher test must prove the record file is left untouched and that no
-  executor is launched on the stale explicit payload.
+  executor is launched on the stale caller-owned payload.
 
 **B. Archived control-plane path truth**
 
@@ -103,17 +114,21 @@ separate honest unit:
 - Phase B must emit a contract-complete `MAINTENANCE` tracker note when the
   routed wave class is `MAINTENANCE`; it must not silently coerce the note body
   to `L4_ENABLER`.
+- The commit executor must surface the actionable tail of `pre-commit-doc-check`
+  output even when the hook writes noisy stdout and no stderr.
 - The recovery gate must classify the resulting tracker-note marker mismatch as
   a deterministic repair path, rebuild the canonical Phase B handoff note, and
   retry the commit surface without relying on a human.
-- The staged L4 tracker-note enforcer must bind the touched current note
-  against the newest-first tracker history window; it must not treat the oldest
-  `TASKS.md` note as the adjacent baseline when enforcing MAINTENANCE cadence
-  and NO_OP throttle.
 - Tier 3 recovery must route through the configured bridge-backed agent backend
   already used by the control-plane, not a hardcoded `claude --print` path.
 - Recovery observability must describe the actor generically as the recovery
   agent so the operator surfaces stop leaking stale Claude-only truth.
+- The L4 tracker-note parser must evaluate the newest appended tracker notes,
+  not the oldest historical notes, before enforcing the consecutive
+  `MAINTENANCE` cap.
+- Recovery classifier signal extraction must anchor on the terminal structured
+  commit error instead of Codex JSONL stream chatter, so a `run_pre_push_script`
+  failure cannot be mislabeled as `mixed_staging`.
 
 ## Constraints
 
@@ -140,17 +155,19 @@ separate honest unit:
    control-surface files in its stage.
 6. A Phase B `MAINTENANCE` handoff produces a valid tracker note that the
    commit executor accepts without manual repair.
-7. The staged L4 tracker-note enforcer evaluates the touched current note
-   against the newest tracker window instead of an oldest-first slice.
-8. Tier 3 recovery uses the configured control-plane backend instead of a
+7. Tier 3 recovery uses the configured control-plane backend instead of a
    hardcoded Claude path, and deterministic tracker-note mismatch repair is
    available before the loop falls back to generic LLM diagnosis.
+8. The L4 `MAINTENANCE` cadence check reads current tracker history
+   newest-first.
+9. Recovery fingerprints and mixed-staging classification reflect the terminal
+   commit failure, not adapter-stream noise.
 
 ## Acceptance Criteria
 
 1. `mu/tests/tools/test_executor_dispatch.py` proves stale explicit routing
-   records return a stale result without rewriting the record or dispatching an
-   executor.
+   records fail closed without rewriting the record, and that stale inline
+   records only auto-refresh when they still match canonical routing truth.
 2. `mu/tests/tools/test_meta_bridge_supervisor.py` proves the prompt uses
    `reports/control_plane/archive/meta_bridge_rollout_2026-03-20.md`.
 3. `mu/tests/docs/test_status_tasks_consistency.py` proves
@@ -160,9 +177,14 @@ separate honest unit:
 5. `mu/tests/tools/test_phase_b_executor.py` proves a `MAINTENANCE` Phase B
    handoff emits `no_op_proof:` / `defer_reason_code:` and rejects runtime
    paths.
-6. `mu/tests/tools/test_l4_execution_contract_enforcement.py` proves the
-   current touched tracker note is evaluated against the newest-first window in
-   the staged enforcement path.
-7. `mu/tests/tools/test_recovery_gate.py` proves tracker-note contract drift is
+6. `mu/tests/tools/test_recovery_gate.py` proves tracker-note contract drift is
    classified deterministically, repaired from the Phase B handoff, and that
    Tier 3 recovery no longer exposes a Claude-only waiting state.
+7. `mu/tests/tools/test_l4_execution_contract_enforcement.py` proves appended
+   tracker notes are parsed newest-first before cadence checks inspect
+   `notes[0]`.
+8. `mu/tests/tools/test_recovery_gate.py` proves noisy Codex JSONL preceding a
+   `run_pre_push_script` failure still fingerprints and classifies the real
+   pre-push error instead of collapsing to `mixed_staging`.
+9. `mu/tests/tools/test_executor_dispatch.py` proves Step 8 still surfaces the
+   real `pre-commit-doc-check` stdout failure when stderr is empty.

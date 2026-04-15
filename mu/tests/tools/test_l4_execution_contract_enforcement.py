@@ -373,13 +373,12 @@ class TestParseTrackerNotes:
         "No phase/debt change.\n"
     )
 
-    def test_parses_notes_newest_first_from_repo_order(self) -> None:
+    def test_parses_notes_in_document_order(self) -> None:
         notes = parse_tracker_notes(self.SAMPLE_RA)
         assert len(notes) == 3  # only notes with Class: markers
         assert notes[0]["wave_class"] == "MAINTENANCE"
         assert notes[1]["wave_class"] == "L4_STRUCTURAL"
         assert notes[2]["wave_class"] == "MAINTENANCE"
-        assert [n["wave_id"] for n in notes] == ["wave-c", "wave-b", "wave-a"]
 
     def test_extracts_gate_per_note(self) -> None:
         notes = parse_tracker_notes(self.SAMPLE_RA)
@@ -424,6 +423,17 @@ class TestParseTrackerNotes:
         notes = parse_tracker_notes(text)
         assert notes[0]["wave_class"] == "MAINTENANCE"
         assert notes[1]["wave_class"] == "L4_STRUCTURAL"
+
+    def test_parser_reverses_append_order_so_newest_note_is_first(self) -> None:
+        text = (
+            "## Ra\n\n"
+            "- Tracker sync note (2026-04-07, old-wave): **Old wave.** "
+            "Class: MAINTENANCE. Gate: G5. NO_OP_PROOF: tooling.\n"
+            "- Tracker sync note (2026-04-14, new-wave): **New wave.** "
+            "Class: L4_ENABLER. Gate: G8. Evidence: current fix.\n"
+        )
+        notes = parse_tracker_notes(text)
+        assert [note["wave_id"] for note in notes] == ["new-wave", "old-wave"]
 
 
 # =============================================================================
@@ -1133,28 +1143,6 @@ class TestWaveBinding:
 
         assert bound is not None
         assert bound["wave_id"] == "current-wave"
-
-    def test_bound_current_note_keeps_newest_followup_window(self) -> None:
-        text = (
-            "## Ra\n\n"
-            "- Tracker sync note (2026-04-07, oldest-maint): **Oldest.** "
-            "Class: MAINTENANCE. target_gate_id: G8. no_op_proof: tooling only. "
-            "FOUNDER_OVERRIDE:oldest-maint.\n"
-            "- Tracker sync note (2026-04-13, previous-enabler): **Previous.** "
-            "Class: L4_ENABLER. target_gate_id: G8.\n"
-            "- Tracker sync note (2026-04-14, current-maint): **Current.** "
-            "Class: MAINTENANCE. target_gate_id: G8. no_op_proof: tooling only. "
-            "FOUNDER_OVERRIDE:current-maint.\n"
-        )
-        notes = parse_tracker_notes(text)
-        bound = bind_note_from_touched_wave_ids(notes, ["current-maint"])
-        window_notes = [bound] + [n for n in notes if n["wave_id"] != "current-maint"]
-
-        assert [n["wave_id"] for n in window_notes[:3]] == [
-            "current-maint",
-            "previous-enabler",
-            "oldest-maint",
-        ]
 
 
 # =============================================================================

@@ -215,6 +215,19 @@ def _run(
         timeout=timeout, env=run_env,
     )
 
+
+def _tail_failure_excerpt(text: str, *, limit: int = 1000, max_lines: int = 20) -> str:
+    """Keep the actionable tail of noisy hook output."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return ""
+    lines = [line for line in cleaned.splitlines() if line.strip()]
+    tail = "\n".join(lines[-max_lines:]).strip() if lines else cleaned
+    if len(tail) <= limit:
+        return tail
+    return tail[-limit:]
+
+
 def _is_test_file(path: str) -> bool:
     normalized = path.replace("\\", "/")
     return (
@@ -368,6 +381,111 @@ def _resolve_post_merge_verify_root(repo_root: Path, base_branch: str, *, log: A
         return branch_worktree
     _run(["git", "checkout", base_branch], cwd=repo_root)
     return repo_root
+
+
+def _probe_feature_branch_existence(repo_root: Path, target_branch: str) -> tuple[bool, bool]:
+    """Return local/remote existence for the canonical target branch."""
+    local_check = _run(
+        ["git", "rev-parse", "--verify", f"refs/heads/{target_branch}"],
+        cwd=repo_root,
+        check=False,
+    )
+    remote_check = _run(
+        ["git", "ls-remote", "--heads", "origin", target_branch],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    return local_check.returncode == 0, bool(remote_check.stdout.strip())
+
+
+def _tracked_dirty_paths(repo_root: Path) -> set[str]:
+    """Return tracked paths that differ from HEAD."""
+    dirty: set[str] = set()
+    diff_proc = _run(
+        ["git", "diff", "--name-only", "HEAD"],
+        cwd=repo_root,
+        check=False,
+    )
+    if diff_proc.returncode == 0:
+        dirty.update(
+            path.strip()
+            for path in diff_proc.stdout.splitlines()
+            if path.strip()
+        )
+    return dirty
+
+
+def _untracked_worktree_paths(repo_root: Path) -> set[str]:
+    """Return untracked repo-relative paths."""
+    dirty: set[str] = set()
+    untracked_proc = _run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=repo_root,
+        check=False,
+    )
+    if untracked_proc.returncode == 0:
+        dirty.update(
+            path.strip()
+            for path in untracked_proc.stdout.splitlines()
+            if path.strip()
+        )
+    return dirty
+
+
+def _dirty_worktree_paths(repo_root: Path) -> set[str]:
+    """Return repo-relative dirty/untracked paths, excluding transient executor state."""
+    dirty = _tracked_dirty_paths(repo_root) | _untracked_worktree_paths(repo_root)
+    return {
+        path for path in dirty
+        if path and not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+    }
+
+
+def _capture_scope_snapshot(
+    repo_root: Path,
+    pathspecs: list[str],
+ ) -> dict[str, bytes | None]:
+    """Capture exact worktree bytes for dirty wave-owned files."""
+    snapshot: dict[str, bytes | None] = {}
+    for path in pathspecs:
+        full_path = repo_root / path
+        if full_path.exists():
+            snapshot[path] = full_path.read_bytes()
+        else:
+            snapshot[path] = None
+    return snapshot
+
+
+def _clear_scope_for_branch_rebind(
+    repo_root: Path,
+    *,
+    tracked_paths: list[str],
+    untracked_paths: list[str],
+) -> None:
+    """Temporarily clear a bounded dirty scope so the target checkout can proceed."""
+    if tracked_paths:
+        _run(
+            ["git", "restore", "--source=HEAD", "--staged", "--worktree", "--", *tracked_paths],
+            cwd=repo_root,
+            timeout=120,
+        )
+    for path in untracked_paths:
+        full_path = repo_root / path
+        if full_path.exists():
+            full_path.unlink()
+
+
+def _restore_scope_snapshot(repo_root: Path, snapshot: dict[str, bytes | None]) -> None:
+    """Restore the captured bounded scope onto the rebound branch."""
+    for path, payload in snapshot.items():
+        full_path = repo_root / path
+        if payload is None:
+            if full_path.exists():
+                full_path.unlink()
+            continue
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_bytes(payload)
 
 
 def _handoff_sha(handoff: dict[str, Any]) -> str:
@@ -2889,36 +3007,25 @@ def run_commit_pipeline(
                 "errors": ["Cannot determine current branch"],
                 "steps_completed": result["steps_completed"]}
 
+    try:
+        local_target_exists, remote_target_exists = _probe_feature_branch_existence(
+            repo_root,
+            target_branch,
+        )
+    except subprocess.TimeoutExpired:
+        return {"status": "error", "step": "ensure_feature_branch",
+                "errors": ["Timeout checking target branch collisions"],
+                "steps_completed": result["steps_completed"]}
+
     if current == base_branch:
-        # On dev — check for collisions, then create
-        try:
-            local_check = _run(
-                ["git", "rev-parse", "--verify", f"refs/heads/{target_branch}"],
-                cwd=repo_root, check=False,
-            )
-            if local_check.returncode == 0:
-                return {"status": "error", "step": "ensure_feature_branch",
-                        "errors": [f"Local branch {target_branch} already exists"],
-                        "steps_completed": result["steps_completed"]}
-        except subprocess.TimeoutExpired:
+        if local_target_exists:
             return {"status": "error", "step": "ensure_feature_branch",
-                    "errors": ["Timeout checking local branches"],
+                    "errors": [f"Local branch {target_branch} already exists"],
                     "steps_completed": result["steps_completed"]}
-
-        try:
-            remote_check = _run(
-                ["git", "ls-remote", "--heads", "origin", target_branch],
-                cwd=repo_root, check=False, timeout=30,
-            )
-            if remote_check.stdout.strip():
-                return {"status": "error", "step": "ensure_feature_branch",
-                        "errors": [f"Remote branch {target_branch} already exists"],
-                        "steps_completed": result["steps_completed"]}
-        except subprocess.TimeoutExpired:
+        if remote_target_exists:
             return {"status": "error", "step": "ensure_feature_branch",
-                    "errors": ["Timeout checking remote branches"],
+                    "errors": [f"Remote branch {target_branch} already exists"],
                     "steps_completed": result["steps_completed"]}
-
         try:
             _run(["git", "checkout", "-b", target_branch], cwd=repo_root)
             log(f"Step 2: created branch {target_branch}")
@@ -2929,9 +3036,88 @@ def run_commit_pipeline(
     elif current == target_branch:
         log(f"Step 2: already on {target_branch}")
     else:
-        return {"status": "error", "step": "ensure_feature_branch",
-                "errors": [f"On branch {current}, expected {base_branch} or {target_branch}"],
-                "steps_completed": result["steps_completed"]}
+        if local_target_exists or remote_target_exists:
+            collisions: list[str] = []
+            if local_target_exists:
+                collisions.append(f"local branch {target_branch}")
+            if remote_target_exists:
+                collisions.append(f"remote branch origin/{target_branch}")
+            collision_text = " and ".join(collisions)
+            return {"status": "error", "step": "ensure_feature_branch",
+                    "errors": [
+                        f"On branch {current}, expected {base_branch} or {target_branch}. "
+                        f"Refusing auto-rebind because {collision_text} already exists"
+                    ],
+                    "steps_completed": result["steps_completed"]}
+        allowed_paths = sorted({
+            path for path in [
+                *handoff.get("files_to_stage", []),
+                *handoff.get("force_add_files", []),
+            ]
+            if isinstance(path, str) and path.strip()
+        })
+        tracked_dirty = {
+            path for path in _tracked_dirty_paths(repo_root)
+            if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+        }
+        untracked_dirty = {
+            path for path in _untracked_worktree_paths(repo_root)
+            if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+        }
+        dirty_paths = tracked_dirty | untracked_dirty
+        outside_scope = sorted(set(dirty_paths) - set(allowed_paths))
+        if outside_scope:
+            preview = ", ".join(outside_scope[:10])
+            if len(outside_scope) > 10:
+                preview += ", ..."
+            return {"status": "error", "step": "ensure_feature_branch",
+                    "errors": [
+                        "Refusing auto-rebind because dirty paths outside the wave scope are present: "
+                        f"{preview}"
+                    ],
+                    "steps_completed": result["steps_completed"]}
+        scoped_dirty = sorted(set(dirty_paths) & set(allowed_paths))
+        snapshot: dict[str, bytes | None] = {}
+        try:
+            # When dev has diverged on wave-owned files, a raw checkout can fail
+            # closed with "would be overwritten by checkout". Snapshot only the
+            # bounded dirty scope, clear it, rebind to the fresh target branch
+            # from dev, then restore the exact bytes onto the canonical branch.
+            if scoped_dirty:
+                snapshot = _capture_scope_snapshot(
+                    repo_root,
+                    scoped_dirty,
+                )
+                _clear_scope_for_branch_rebind(
+                    repo_root,
+                    tracked_paths=sorted(set(tracked_dirty) & set(allowed_paths)),
+                    untracked_paths=sorted(set(untracked_dirty) & set(allowed_paths)),
+                )
+            _run(["git", "checkout", "-b", target_branch, base_branch], cwd=repo_root)
+            if snapshot:
+                _restore_scope_snapshot(repo_root, snapshot)
+            log(
+                "Step 2: rebound worktree from "
+                f"{current} to {target_branch} using {base_branch} as base"
+            )
+        except subprocess.CalledProcessError as exc:
+            if snapshot:
+                current_after_failure = _run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    cwd=repo_root,
+                    check=False,
+                ).stdout.strip()
+                if current_after_failure == current:
+                    try:
+                        _restore_scope_snapshot(repo_root, snapshot)
+                    except subprocess.CalledProcessError:
+                        pass
+            failed_cmd = exc.cmd if isinstance(exc.cmd, list) else []
+            detail = (exc.stderr or exc.stdout or "").strip()
+            cmd_text = " ".join(str(part) for part in failed_cmd) or "step-2 rebind helper"
+            return {"status": "error", "step": "ensure_feature_branch",
+                    "errors": [f"Step 2 rebind failed while running `{cmd_text}`: {detail}"],
+                    "steps_completed": result["steps_completed"]}
 
     if "ensure_feature_branch" not in result["steps_completed"]:
         result["steps_completed"].append("ensure_feature_branch")
@@ -3337,8 +3523,12 @@ def run_commit_pipeline(
         try:
             _run(["bash", str(pre_commit_script)], cwd=repo_root, timeout=30, env=step8_env)
         except subprocess.CalledProcessError as exc:
+            failure_detail = _tail_failure_excerpt(exc.stderr or exc.stdout or "", limit=1000)
+            error_text = "pre-commit-doc-check failed"
+            if failure_detail:
+                error_text = f"{error_text}: {failure_detail}"
             return {"status": "error", "step": "run_pre_commit_script",
-                    "errors": [f"pre-commit-doc-check failed: {exc.stderr.strip()[:300]}"],
+                    "errors": [error_text],
                     "steps_completed": result["steps_completed"]}
         except subprocess.TimeoutExpired:
             return {"status": "error", "step": "run_pre_commit_script",

@@ -529,15 +529,35 @@ class TestPrepareCommitHandoff:
             receipt_path=".agent_bus/meta/pre_commit_receipts/receipt_test.json",
             bridge_rounds=1,
             reentry=False,
-            unblocks_wave_id="wave-codex-startup-hardening-2026-04-14",
-            unblocks_runtime_blocker="INV_STRUCTURAL_FORWARD_MOTION",
         )
         assert "Class: MAINTENANCE" in note
         assert "no_op_proof:" in note
         assert "defer_reason_code: PIPELINE_HARDENING" in note
-        assert "unblocks_wave_id: wave-codex-startup-hardening-2026-04-14" in note
-        assert "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION" in note
         assert "evidence_command:" in note
+
+    def test_build_phase_b_tracker_note_maintenance_includes_plan_bypass_fields(self):
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing plan-driven maintenance bypass fields
+            wave_id="codex-startup-hardening-2026-04-14",
+            task_id="[CODEX-STARTUP-HARDENING]",
+            wave_class="MAINTENANCE",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/codex_startup_hardening_2026-04-14.md",
+            plan_content=(
+                "## Consecutive Maintenance Bypass\n"
+                "unblocks_wave_id: wave-codex-backend-switch-2026-04-14\n"
+                "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION\n"
+            ),
+            changed_files=[
+                "mu/tools/session/check_codex_startup_state.py",
+                "mu/tests/tools/test_codex_startup_state.py",
+            ],
+            test_files=["mu/tests/tools/test_codex_startup_state.py"],
+            receipt_path=".agent_bus/meta/pre_commit_receipts/receipt_test.json",
+            bridge_rounds=2,
+            reentry=False,
+        )
+        assert "unblocks_wave_id: wave-codex-backend-switch-2026-04-14" in note
+        assert "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION" in note
 
     def test_build_phase_b_tracker_note_maintenance_rejects_runtime_paths(self):
         with pytest.raises(pb_mod.PhaseBExecutorError, match="runtime/substrate paths"):
@@ -613,18 +633,10 @@ class TestLoadPlanPacketPathTraversal:
         plan_dir = repo / "reports"
         plan_dir.mkdir(parents=True)
         plan_file = plan_dir / "plan.md"
-        plan_file.write_text(
-            "Phase-A-Lock: LOCKED\n"
-            "Status: ACTIVE\n"
-            "Task: [TEST-PLAN]\n"
-            "Unblocks wave id: wave-upstream-2026-04-14\n"
-            "Unblocks runtime blocker: INV_STRUCTURAL_FORWARD_MOTION\n"
-        )
+        plan_file.write_text("Phase-A-Lock: LOCKED\nStatus: ACTIVE\nTask: [TEST-PLAN]\n")
         result = pb_mod.load_plan_packet(repo, "reports/plan.md")
         assert result["phase_a_lock"] == "LOCKED"
         assert result["task_id"] == "[TEST-PLAN]"
-        assert result["unblocks_wave_id"] == "wave-upstream-2026-04-14"
-        assert result["unblocks_runtime_blocker"] == "INV_STRUCTURAL_FORWARD_MOTION"
 
 
 class TestBlockerDiscovery:
@@ -677,59 +689,6 @@ class TestBlockerDiscovery:
                 if p.is_file() and p.suffix == ".md" and p.name != "README.md"
             )
         assert blocker_paths == []
-
-
-@pytest.mark.usefixtures("mock_routing_record")
-class TestMaintenanceTrackerMetadataPropagation:
-    """Phase B must propagate maintenance unblock metadata through the live handoff path."""
-
-    def test_run_phase_b_threads_plan_unblocks_metadata_into_handoff(self, tmp_path):
-        repo = tmp_path / "repo"
-        repo.mkdir()
-        (repo / "reports" / "control_plane").mkdir(parents=True)
-        (repo / ".agent_bus").mkdir()
-        plan = repo / "reports" / "control_plane" / "plan.md"
-        plan.write_text(
-            "# Plan\n"
-            "Phase-A-Lock: LOCKED\n"
-            "Status: ACTIVE\n"
-            "Task: [PIPELINE-RECOVERY]\n"
-            "Unblocks wave id: wave-codex-startup-hardening-2026-04-14\n"
-            "Unblocks runtime blocker: INV_STRUCTURAL_FORWARD_MOTION\n",
-            encoding="utf-8",
-        )
-
-        mock_impl = _make_mock_impl()
-        routing = {
-            **_VALID_ROUTING_RECORD,
-            "task_id": "[PIPELINE-RECOVERY]",
-            "wave_class": "MAINTENANCE",
-            "target_gate_id": "G8",
-        }
-
-        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
-             patch.object(pb_mod, "load_routing_record", return_value=routing), \
-             patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md"]), \
-             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["TASKS.md"]), \
-             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
-             patch.object(pb_mod, "run_bridge_review", return_value={
-                 "exit_code": 0, "stdout": "GO\n", "stderr": "",
-                 "decision": "GO", "job_id": "j1",
-             }), \
-             patch.object(pb_mod, "_stage_files", return_value=True), \
-             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
-                 "exit_code": 0,
-                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
-                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
-             }), \
-             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json") as mock_handoff:
-            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
-
-        assert result["status"] == "commit_ready"
-        tracker_note_text = mock_handoff.call_args.kwargs["tracker_note_text"]
-        assert "Class: MAINTENANCE" in tracker_note_text
-        assert "unblocks_wave_id: wave-codex-startup-hardening-2026-04-14" in tracker_note_text
-        assert "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION" in tracker_note_text
 
 
 @pytest.mark.usefixtures("mock_routing_record")
@@ -2092,6 +2051,44 @@ class TestDeferredPacketFiling:
         )
         assert deferred_items == ["reports/deferred/non_blocking/wave_bridge_nonblockers.md"]
 
+    def test_record_non_blocking_findings_replaces_prior_packet_contents(self, tmp_path):
+        existing = [
+            {"title": "Old nit", "class": "DOC_ACCURACY", "severity": "low", "file": "old.py", "disposition": "non_blocking"},
+        ]
+        updated = [
+            {"title": "New nit", "class": "DOC_ACCURACY", "severity": "low", "file": "new.py", "disposition": "non_blocking"},
+        ]
+
+        findings, packet_path = pb_mod._record_non_blocking_findings(  # ANTICHEAT_OK: testing internal executor functions
+            tmp_path,
+            "wave",
+            existing,
+            updated,
+        )
+
+        assert findings == updated
+        assert packet_path is not None
+        content = packet_path.read_text(encoding="utf-8")
+        assert "New nit" in content
+        assert "Old nit" not in content
+
+    def test_record_non_blocking_findings_deletes_packet_when_empty(self, tmp_path):
+        findings = [
+            {"title": "Lingering nit", "class": "DOC_ACCURACY", "severity": "low", "file": "foo.py", "disposition": "non_blocking"},
+        ]
+        packet_path = pb_mod._write_deferred_packet(tmp_path, "wave", findings)  # ANTICHEAT_OK: testing internal executor functions
+
+        current_findings, refreshed_packet = pb_mod._record_non_blocking_findings(  # ANTICHEAT_OK: testing internal executor functions
+            tmp_path,
+            "wave",
+            findings,
+            [],
+        )
+
+        assert current_findings == []
+        assert refreshed_packet is None
+        assert not packet_path.exists()
+
 
 @pytest.mark.usefixtures("mock_routing_record")
 class TestOnlyBlockingToImplementer:
@@ -2792,6 +2789,93 @@ class TestStatePersistence:
 
         assert result.get("resumed_from") == "bridge_round_1"
         assert result.get("deferred_packet_path") == "reports/deferred/non_blocking/plan_bridge_nonblockers.md"
+
+
+@pytest.mark.usefixtures("mock_routing_record")
+class TestBridgeFixPendingResume:
+    """Initial bridge-fix checkpoints must survive crashes between review and fix."""
+
+    def test_request_changes_checkpoints_before_fix_implementer(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        impl_success = dict(mock_impl.invoke_implementer.return_value)
+        mock_impl.invoke_implementer.side_effect = [
+            impl_success,
+            RuntimeError("Simulated crash before bridge fix implementer completes"),
+        ]
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "",
+                 "decision": "REQUEST_CHANGES", "job_id": "phase-b-r1-test",
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
+            with pytest.raises(RuntimeError, match="Simulated crash"):
+                pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        state = pb_mod._load_state(repo)  # ANTICHEAT_OK: testing internal executor functions
+        assert state is not None
+        assert state["completed_step"] == "bridge_fix_pending"
+        assert state["current_bridge_round"] == 1
+        assert state["bridge_decision"] == "REQUEST_CHANGES"
+        assert state["bridge_fix_findings"]
+
+    def test_resume_from_bridge_fix_pending_invokes_fix_then_resumes_next_round(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        pb_mod._save_state(repo, {  # ANTICHEAT_OK: testing internal executor functions
+            "plan_path": "reports/control_plane/plan.md",
+            "completed_step": "bridge_fix_pending",
+            "wave_id": "plan",
+            "bridge_rounds": 1,
+            "current_bridge_round": 1,
+            "bridge_decision": "REQUEST_CHANGES",
+            "bridge_fix_findings": "Fix the blocker from round 1",
+            "deferred_packet_path": "reports/deferred/non_blocking/plan_bridge_nonblockers.md",
+        })
+
+        mock_impl = _make_mock_impl()
+        bridge_calls: list[str] = []
+
+        def bridge_go(*args, **kwargs):
+            bridge_calls.append(kwargs.get("job_id", ""))
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": kwargs.get("job_id", "phase-b-r2-test"),
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_go), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result.get("resumed_from") == "bridge_fix_pending"
+        assert result["status"] == "commit_ready"
+        assert mock_impl.invoke_implementer.call_count == 1
+        assert bridge_calls and any("phase-b-r2-" in job_id for job_id in bridge_calls)
 
 
 @pytest.mark.usefixtures("mock_routing_record")
@@ -3851,6 +3935,104 @@ class TestResumeNeedsPhaseB:
         assert result["status"] == "commit_ready"
         assert captured_package["value"]["evidence_handles"] == {}
 
+    def test_reentry_go_without_non_blocking_clears_stale_deferred_packet(self, tmp_path):
+        """A clean re-entry bridge pass must delete obsolete deferred packets before supervisor reruns."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        initial_render = (
+            "BEGIN_AGENT_ENVELOPE\n"
+            + json.dumps({
+                "job_id": "j1",
+                "turn_id": "t1",
+                "agent_role": "reviewer",
+                "decision": "REQUEST_CHANGES",
+                "summary": "minor nits",
+                "touched_files_claimed": [],
+                "validations_claimed": [],
+                "request_for_next_agent": "",
+                "findings": [
+                    {
+                        "title": "Doc drift",
+                        "class": "DOC_ACCURACY",
+                        "severity": "low",
+                        "file": "mu/tools/executors/dialectic_executor.py",
+                        "disposition": "non_blocking",
+                        "status": "new",
+                    },
+                ],
+            })
+            + "\nEND_AGENT_ENVELOPE"
+        )
+        reentry_render = (
+            "BEGIN_AGENT_ENVELOPE\n"
+            + json.dumps({
+                "job_id": "j2",
+                "turn_id": "t2",
+                "agent_role": "reviewer",
+                "decision": "GO",
+                "summary": "clean",
+                "touched_files_claimed": [],
+                "validations_claimed": [],
+                "request_for_next_agent": "",
+                "findings": [],
+            })
+            + "\nEND_AGENT_ENVELOPE"
+        )
+
+        supervisor_calls = {"count": 0}
+        captured_package = {}
+
+        def supervisor_side(_repo_root, package_path, **_kw):
+            supervisor_calls["count"] += 1
+            if supervisor_calls["count"] == 1:
+                return {
+                    "exit_code": 0,
+                    "parsed": {
+                        "decision": "NEEDS_PHASE_B",
+                        "summary": "Deferred packet is stale",
+                        "status": "success",
+                        "findings": [],
+                        "request_for_claude": "Regenerate or delete the stale deferred packet.",
+                    },
+                    "receipt_path": "",
+                }
+            captured_package["value"] = json.loads(Path(package_path).read_text(encoding="utf-8"))
+            return {
+                "exit_code": 0,
+                "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tools/executors/dialectic_executor.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=[
+                 "mu/tools/executors/dialectic_executor.py",
+                 "reports/control_plane/plan.md",
+             ]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=[
+                 {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "", "decision": "REQUEST_CHANGES", "job_id": "j1"},
+                 {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j2"},
+             ]), \
+             patch.object(pb_mod, "_read_bridge_review_material", side_effect=[
+                 (initial_render, []),
+                 (reentry_render, []),
+             ]), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor_side):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert result.get("deferred_packet_path") is None
+        assert captured_package["value"]["deferred_items"] == []
+        assert not (
+            repo / "reports" / "deferred" / "non_blocking" / "plan_bridge_nonblockers.md"
+        ).exists()
+
     def test_resume_from_bridge_converged_reruns_sdk_and_bridge_when_scope_fingerprint_drifted(self, tmp_path):
         """A drifted bridge_converged checkpoint must not skip directly to supervisor."""
         repo = tmp_path / "repo"
@@ -4692,6 +4874,35 @@ class TestPlanlessPhaseB:
         assert captured["repo_root"] == repo
         assert captured["plan_path"] is None
         assert captured["routing_record_override"] == routing_record
+
+    def test_main_attempts_standalone_recovery_on_failure(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        recovery_calls: dict[str, object] = {}
+
+        def fake_git_rev_parse(args, capture_output, text, check):
+            return SimpleNamespace(stdout=str(repo))
+
+        def fake_run_phase_b(repo_root, plan_path, **kwargs):
+            return {"status": "error", "step": "implementer_bridge_fix", "wave_id": "standalone-wave"}
+
+        def fake_attempt_recovery(repo_root, result, wave_id):
+            recovery_calls["repo_root"] = repo_root
+            recovery_calls["status"] = result["status"]
+            recovery_calls["wave_id"] = wave_id
+            return {"recovered": True, "failure_class": "unknown_error", "tier": 3}
+
+        monkeypatch.setattr(pb_mod.subprocess, "run", fake_git_rev_parse)
+        monkeypatch.setattr(pb_mod, "run_phase_b", fake_run_phase_b)
+        monkeypatch.setattr(sys, "argv", ["phase_b_executor.py"])
+
+        with patch.dict(sys.modules, {"recovery_gate": SimpleNamespace(attempt_recovery=fake_attempt_recovery)}):
+            exit_code = pb_mod.main()
+
+        assert exit_code == 0
+        assert recovery_calls["repo_root"] == repo
+        assert recovery_calls["status"] == "error"
+        assert recovery_calls["wave_id"] == "standalone-wave"
 
 
 class TestSdkReviewDepthContract:
