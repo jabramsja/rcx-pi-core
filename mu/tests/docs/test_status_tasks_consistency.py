@@ -1030,6 +1030,8 @@ def test_control_plane_readme_points_at_existing_canonical_packets() -> None:
     text = CONTROL_PLANE_README_PATH.read_text(encoding="utf-8")
     expected_refs = (
         "reports/control_plane/archive/meta_bridge_rollout_2026-03-20.md",
+        "reports/archive/control_plane/post_merge_supervisor_plan_2026-03-21.md",
+        "reports/archive/control_plane/executor_surfaces_plan_2026-03-22.md",
         "reports/control_plane/post_redteam_structural_queue_2026-03-20.md",
     )
     stale_refs = (

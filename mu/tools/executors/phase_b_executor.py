@@ -110,6 +110,8 @@ BRIDGE_REVIEW_STALE_TIMEOUT = 120.0
 BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT = 60.0
 DEFAULT_PYTEST_GATE_TIMEOUT_S = 300
 MAX_PYTEST_GATE_TIMEOUT_S = 900
+_PLAN_UNBLOCKS_WAVE_RE = re.compile(r"unblocks_wave_id:\s*([A-Za-z0-9_-]+)")
+_PLAN_UNBLOCKS_BLOCKER_RE = re.compile(r"unblocks_runtime_blocker:\s*([^\n]+)")
 _MAINTENANCE_FORBIDDEN_PREFIXES = (
     "mu/host/",
     "mu/substrate/",
@@ -313,6 +315,21 @@ def _write_deferred_packet(
     return packet_path
 
 
+def _clear_deferred_packet(repo_root: Path, wave_id: str) -> None:
+    """Remove the canonical deferred packet for a wave when no findings remain."""
+    packet_path = (
+        repo_root
+        / "reports"
+        / "deferred"
+        / "non_blocking"
+        / f"{normalize_wave_id(wave_id)}_bridge_nonblockers.md"
+    )
+    try:
+        packet_path.unlink()
+    except FileNotFoundError:
+        return
+
+
 def _resolve_bridge_reviewer(config: dict[str, Any], phase_key: str, default: str = "codex") -> str:
     """Resolve bridge reviewer backend from executor config."""
     reviewer = config.get("bridge_reviewers", {}).get(phase_key, default)
@@ -342,13 +359,11 @@ def _record_non_blocking_findings(
     wave_class: str = "",
     target_gate_id: str = "",
 ) -> tuple[list[dict[str, Any]], Path | None]:
-    """Merge non-blocking findings by stable key and refresh the deferred packet."""
+    """Replace non-blocking findings with the latest bridge truth."""
     if not new_findings:
-        return existing_findings, None
-    merged: dict[str, dict[str, Any]] = {
-        _finding_key(finding): finding
-        for finding in existing_findings
-    }
+        _clear_deferred_packet(repo_root, wave_id)
+        return [], None
+    merged: dict[str, dict[str, Any]] = {}
     for finding in new_findings:
         merged[_finding_key(finding)] = finding
     merged_findings = list(merged.values())
@@ -356,6 +371,70 @@ def _record_non_blocking_findings(
         repo_root, wave_id, merged_findings,
         wave_class=wave_class, target_gate_id=target_gate_id,
     )
+
+
+def _sync_deferred_non_blocking_state(
+    repo_root: Path,
+    wave_id: str,
+    existing_findings: list[dict[str, Any]],
+    new_findings: list[dict[str, Any]],
+    *,
+    previous_packet_path: str | None,
+    executor_created: set[str],
+    wave_class: str = "",
+    target_gate_id: str = "",
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Refresh deferred packet state from the latest bridge findings."""
+    current_findings, packet_path = _record_non_blocking_findings(
+        repo_root,
+        wave_id,
+        existing_findings,
+        new_findings,
+        wave_class=wave_class,
+        target_gate_id=target_gate_id,
+    )
+    if packet_path is None:
+        if previous_packet_path:
+            executor_created.discard(previous_packet_path)
+        return current_findings, None
+    rel_path = str(packet_path.relative_to(repo_root))
+    executor_created.add(rel_path)
+    return current_findings, rel_path
+
+
+def _checkpoint_bridge_fix_pending(
+    repo_root: Path,
+    *,
+    plan_path: str,
+    wave_id: str,
+    round_num: int,
+    bridge_decision: str,
+    bridge_fix_findings: str,
+    changed_files: list[str],
+    deferred_packet_path: str | None,
+    implementer_changed: set[str],
+    executor_created: set[str],
+    baseline_wave_files: set[str],
+    all_non_blocking: list[dict[str, Any]],
+    finding_history: dict[str, int],
+) -> None:
+    """Persist the exact pre-fix bridge state so crash-resume can continue honestly."""
+    _save_state(repo_root, {
+        "plan_path": plan_path,
+        "completed_step": "bridge_fix_pending",
+        "wave_id": wave_id,
+        "bridge_rounds": round_num,
+        "current_bridge_round": round_num,
+        "bridge_decision": bridge_decision,
+        "bridge_fix_findings": bridge_fix_findings,
+        "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
+        "deferred_packet_path": deferred_packet_path,
+        "implementer_changed": sorted(implementer_changed),
+        "executor_created": sorted(executor_created),
+        "baseline_wave_files": sorted(baseline_wave_files),
+        "all_non_blocking": all_non_blocking,
+        "finding_history": finding_history,
+    })
 
 
 def _supervisor_reason_text(parsed: dict[str, Any]) -> str:
@@ -849,12 +928,22 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
             result["status"] = clean.split(":", 1)[1].strip()
         if clean.startswith("Task:"):
             result["task_id"] = clean.split(":", 1)[1].strip()
-        if clean.startswith("Unblocks wave id:") or clean.startswith("unblocks_wave_id:"):
-            result["unblocks_wave_id"] = clean.split(":", 1)[1].strip()
-        if clean.startswith("Unblocks runtime blocker:") or clean.startswith("unblocks_runtime_blocker:"):
-            result["unblocks_runtime_blocker"] = clean.split(":", 1)[1].strip()
 
     return result
+
+
+def _extract_maintenance_bypass_fields(plan_content: str) -> tuple[str, str]:
+    """Read optional consecutive-maintenance bypass fields from the plan text."""
+    if not plan_content:
+        return "", ""
+    unblocks_wave_match = _PLAN_UNBLOCKS_WAVE_RE.search(plan_content)
+    unblocks_blocker_match = _PLAN_UNBLOCKS_BLOCKER_RE.search(plan_content)
+    if not unblocks_wave_match or not unblocks_blocker_match:
+        return "", ""
+    return (
+        unblocks_wave_match.group(1).strip(),
+        unblocks_blocker_match.group(1).strip(),
+    )
 
 
 def validate_inputs(
@@ -1899,13 +1988,12 @@ def _build_phase_b_tracker_note(
     wave_class: str = "L4_ENABLER",
     target_gate_id: str,
     plan_path: str,
+    plan_content: str = "",
     changed_files: list[str],
     test_files: list[str],
     receipt_path: str,
     bridge_rounds: int,
     reentry: bool,
-    unblocks_wave_id: str = "",
-    unblocks_runtime_blocker: str = "",
 ) -> str:
     """Render an L4-compliant tracker note for a Phase B commit handoff."""
     display_task = (task_id or "").strip() or wave_id
@@ -1973,10 +2061,14 @@ def _build_phase_b_tracker_note(
             ),
             "defer_reason_code": "PIPELINE_HARDENING",
         })
-        if unblocks_wave_id:
-            tracker_kwargs["unblocks_wave_id"] = unblocks_wave_id
-        if unblocks_runtime_blocker:
-            tracker_kwargs["unblocks_runtime_blocker"] = unblocks_runtime_blocker
+        unblocks_wave_id, unblocks_runtime_blocker = _extract_maintenance_bypass_fields(
+            plan_content,
+        )
+        if unblocks_wave_id and unblocks_runtime_blocker:
+            tracker_kwargs.update({
+                "unblocks_wave_id": unblocks_wave_id,
+                "unblocks_runtime_blocker": unblocks_runtime_blocker,
+            })
 
     fields = TrackerSyncNoteFields(
         wave_id=wave_id,
@@ -2294,6 +2386,7 @@ def run_phase_b(
     all_non_blocking: list[dict[str, Any]] = []
     # Track repeat-finding counts across bridge rounds (key → consecutive blocking count)
     finding_history: dict[str, int] = {}
+    changed_files: list[str] = []
 
     # Restore wave-owned file tracking from persisted state (R7-1: crash-resume)
     if saved_state and resume_after:
@@ -2312,11 +2405,166 @@ def run_phase_b(
     # from supervisor packaging on resume.
     baseline_wave_files |= (set(_collect_baseline_wave_files(repo_root, plan_path)) - fenced_out_files)
 
+    def _build_bridge_fix_prompt(round_num: int, bridge_decision: str, findings_for_impl: str) -> str:
+        """Build the implementer prompt for a bridge-fix round."""
+        return build_implementation_prompt(
+            plan.get("content", "")
+            + f"\n\n## Bridge Round {round_num} Findings ({bridge_decision})\n\n"
+            + findings_for_impl,
+            repo_root=repo_root,
+            wave_id=wave_id,
+            scope_hint=f"Fix {bridge_decision} findings from bridge round {round_num}",
+            learning_context=learning_context,
+        )
+
+    def _complete_bridge_fix(
+        round_num: int,
+        fix_result: dict[str, Any],
+        pre_fix_files: set[str],
+    ) -> dict[str, Any] | None:
+        """Finalize a bridge-fix implementer run and persist the completed round."""
+        nonlocal implementer_changed, changed_files
+
+        log(f"Implementer fix result: {fix_result['status']}")
+
+        if fix_result["status"] != "success":
+            return {
+                "status": "error",
+                "step": "implementer_bridge_fix",
+                "errors": [
+                    f"Implementer failed during bridge fix round {round_num}: "
+                    f"{fix_result['status']} (exit={fix_result['exit_code']})"
+                ],
+            }
+
+        # Track what the fix round changed. The local pytest pass should only
+        # exercise tests introduced or edited by this fix round, not every
+        # pre-existing test file already present in the broader replay scope.
+        post_fix_files = set(_collect_changed_files(repo_root))
+        current_fix_changed = sorted(post_fix_files - pre_fix_files)
+        implementer_changed |= set(current_fix_changed)
+        changed_files = _collect_wave_owned_files(
+            repo_root,
+            plan_path,
+            plan_declared_files,
+            implementer_changed or None,
+            executor_created or None,
+            baseline_wave_files or None,
+        )
+        log(
+            f"Changed files after bridge fix: {len(changed_files)} "
+            f"(current fix touched {len(current_fix_changed)})"
+        )
+
+        test_files = [
+            f for f in current_fix_changed
+            if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")
+        ]
+        if test_files:
+            log(f"Running pytest on {len(test_files)} newly changed test file(s)...")
+            pytest_result = _run_pytest_on_files(repo_root, test_files, timeout=pytest_gate_timeout)
+            if not pytest_result["passed"]:
+                log(f"pytest FAILED (exit={pytest_result['exit_code']}) — feeding back to implementer as blocking")
+                pytest_prompt = build_implementation_prompt(
+                    plan.get("content", "")
+                    + f"\n\n## pytest FAILURE after bridge round {round_num}\n\n"
+                    + f"Exit code: {pytest_result['exit_code']}\n"
+                    + f"stdout:\n{pytest_result['stdout'][:3000]}\n"
+                    + f"stderr:\n{pytest_result['stderr'][:1000]}",
+                    repo_root=repo_root,
+                    wave_id=wave_id,
+                    scope_hint=f"Fix pytest failures from bridge round {round_num}",
+                    learning_context=learning_context,
+                )
+                pre_pytest_fix_files = set(_collect_changed_files(repo_root))
+                pytest_fix = invoke_implementer(
+                    repo_root, pytest_prompt,
+                    backend=backend, model_override=model,
+                    timeout=timeout, verbose=verbose,
+                )
+                if pytest_fix["status"] != "success":
+                    return {
+                        "status": "error",
+                        "step": "pytest_fix",
+                        "errors": [f"Implementer failed fixing pytest failures: {pytest_fix['status']}"],
+                    }
+                post_pytest_fix_files = set(_collect_changed_files(repo_root))
+                implementer_changed |= (post_pytest_fix_files - pre_pytest_fix_files)
+                changed_files = _collect_wave_owned_files(
+                    repo_root,
+                    plan_path,
+                    plan_declared_files,
+                    implementer_changed or None,
+                    executor_created or None,
+                    baseline_wave_files or None,
+                )
+
+        _save_state(repo_root, {
+            "plan_path": plan_path,
+            "completed_step": f"bridge_round_{round_num}",
+            "wave_id": wave_id,
+            "bridge_rounds": round_num,
+            "current_bridge_round": round_num,
+            "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
+            "deferred_packet_path": deferred_packet_path,
+            "implementer_changed": sorted(implementer_changed),
+            "executor_created": sorted(executor_created),
+            "baseline_wave_files": sorted(baseline_wave_files),
+            "all_non_blocking": all_non_blocking,
+            "finding_history": finding_history,
+        })
+        return None
+
+    def _apply_bridge_fix(round_num: int, bridge_decision: str, findings_for_impl: str) -> dict[str, Any] | None:
+        """Run the post-bridge implementer fix and persist the completed round."""
+        pre_fix_files = set(_collect_changed_files(repo_root))
+        fix_prompt = _build_bridge_fix_prompt(round_num, bridge_decision, findings_for_impl)
+        fix_result = invoke_implementer(
+            repo_root, fix_prompt,
+            backend=backend, model_override=model,
+            timeout=timeout, verbose=verbose,
+        )
+        return _complete_bridge_fix(round_num, fix_result, pre_fix_files)
+
+    def _complete_reentry_fix(
+        impl_result: dict[str, Any],
+        pre_reentry_files: set[str],
+    ) -> dict[str, Any] | None:
+        """Record a re-entry implementer pass before the next bridge review."""
+        nonlocal implementer_changed, changed_files
+
+        log(f"Implementer re-entry: {impl_result['status']}")
+        if impl_result["status"] != "success":
+            _clear_state(repo_root)
+            return {
+                "status": "error",
+                "step": "implementer_reentry",
+                "errors": [f"Implementer re-entry failed: {impl_result['status']}"],
+            }
+
+        post_reentry_files = set(_collect_changed_files(repo_root))
+        implementer_changed |= (post_reentry_files - pre_reentry_files)
+        changed_files = _collect_wave_owned_files(
+            repo_root,
+            plan_path,
+            plan_declared_files,
+            implementer_changed or None,
+            executor_created or None,
+            baseline_wave_files or None,
+        )
+        log(
+            f"Re-entry changed files: {len(changed_files)} "
+            f"(implementer touched {len(post_reentry_files - pre_reentry_files)})"
+        )
+        return None
+
     # Determine which steps to skip based on resume state
-    _RESUME_ORDER = ["implementer", "agent_review", "bridge_converged", "needs_phase_b_reentry"]
+    _RESUME_ORDER = ["implementer", "agent_review", "bridge_fix_pending", "bridge_converged", "needs_phase_b_reentry"]
     _skip_to_reentry = resume_after == "needs_phase_b_reentry"
+    _resume_bridge_fix_pending = resume_after == "bridge_fix_pending"
     _skip_through_bridge = (
-        resume_after.startswith("bridge_round_") or resume_after == "bridge_converged"
+        resume_after.startswith("bridge_round_")
+        or resume_after in {"bridge_fix_pending", "bridge_converged"}
         or _skip_to_reentry
     )
     _skip_through_implementer = resume_after in {"implementer", "agent_review"} or _skip_through_bridge
@@ -2614,6 +2862,28 @@ def run_phase_b(
     if _skip_through_bridge and resume_after.startswith("bridge_round_"):
         _resume_bridge_round = saved_state.get("current_bridge_round", 0) if saved_state else 0
         log(f"Resuming bridge loop from round {_resume_bridge_round + 1}")
+    if _resume_bridge_fix_pending:
+        pending_round = saved_state.get("current_bridge_round", 0) if saved_state else 0
+        pending_decision = str(saved_state.get("bridge_decision", "") or "") if saved_state else ""
+        pending_findings = str(saved_state.get("bridge_fix_findings", "") or "") if saved_state else ""
+        if pending_round <= 0 or not pending_findings:
+            result["status"] = "error"
+            result["step"] = "bridge_fix_resume"
+            result["errors"] = [
+                "Saved bridge-fix checkpoint was incomplete; missing round number or findings payload."
+            ]
+            _clear_state(repo_root)
+            return result
+        log(f"Resuming pending bridge fix from round {pending_round} ({pending_decision or 'REQUEST_CHANGES'})")
+        result["bridge_rounds"] = pending_round
+        bridge_fix_error = _apply_bridge_fix(
+            pending_round,
+            pending_decision or "REQUEST_CHANGES",
+            pending_findings,
+        )
+        if bridge_fix_error is not None:
+            return bridge_fix_error
+        _resume_bridge_round = pending_round
 
     for round_num in range(1, max_bridge_rounds + 1):
         if bridge_converged:
@@ -2697,16 +2967,25 @@ def run_phase_b(
                 ]
                 _clear_state(repo_root)
                 return result
-            if non_blocking_findings:
-                all_non_blocking, packet_path = _record_non_blocking_findings(
-                    repo_root, wave_id, all_non_blocking, non_blocking_findings,
-                    wave_class=wave_class, target_gate_id=target_gate_id,
+            if render or raw_texts:
+                prior_deferred_packet_path = deferred_packet_path
+                all_non_blocking, deferred_packet_path = _sync_deferred_non_blocking_state(
+                    repo_root,
+                    wave_id,
+                    all_non_blocking,
+                    non_blocking_findings,
+                    previous_packet_path=prior_deferred_packet_path,
+                    executor_created=executor_created,
+                    wave_class=wave_class,
+                    target_gate_id=target_gate_id,
                 )
-                if packet_path is not None:
-                    deferred_packet_path = str(packet_path.relative_to(repo_root))
-                    executor_created.add(deferred_packet_path)
+                if deferred_packet_path is not None:
                     result["deferred_packet_path"] = deferred_packet_path
                     log(f"Filed {len(non_blocking_findings)} non-blocking finding(s) from GO to {deferred_packet_path}")
+                else:
+                    result.pop("deferred_packet_path", None)
+                    if prior_deferred_packet_path:
+                        log("Cleared stale deferred non-blocking packet after GO")
             log("Bridge converged: GO")
             bridge_converged = True
             break
@@ -2781,17 +3060,25 @@ def run_phase_b(
                     _clear_state(repo_root)
                     return result
 
-            # Auto-file non-blocking findings to deferred packet
-            if non_blocking_findings:
-                all_non_blocking, packet_path = _record_non_blocking_findings(
-                    repo_root, wave_id, all_non_blocking, non_blocking_findings,
-                    wave_class=wave_class, target_gate_id=target_gate_id,
+            if render or raw_texts:
+                prior_deferred_packet_path = deferred_packet_path
+                all_non_blocking, deferred_packet_path = _sync_deferred_non_blocking_state(
+                    repo_root,
+                    wave_id,
+                    all_non_blocking,
+                    non_blocking_findings,
+                    previous_packet_path=prior_deferred_packet_path,
+                    executor_created=executor_created,
+                    wave_class=wave_class,
+                    target_gate_id=target_gate_id,
                 )
-                if packet_path is not None:
-                    deferred_packet_path = str(packet_path.relative_to(repo_root))
-                    executor_created.add(deferred_packet_path)
+                if deferred_packet_path is not None:
                     result["deferred_packet_path"] = deferred_packet_path
                     log(f"Filed {len(non_blocking_findings)} non-blocking finding(s) to {deferred_packet_path}")
+                else:
+                    result.pop("deferred_packet_path", None)
+                    if prior_deferred_packet_path:
+                        log("Cleared stale deferred non-blocking packet after latest bridge review")
 
             # If ALL findings are non-blocking, treat as converged
             if parsed_findings and not blocking_findings:
@@ -2810,120 +3097,33 @@ def run_phase_b(
                 # Couldn't parse structured findings — send raw text
                 findings_for_impl = findings_text[:4000]
 
+            _checkpoint_bridge_fix_pending(
+                repo_root,
+                plan_path=plan_path,
+                wave_id=wave_id,
+                round_num=round_num,
+                bridge_decision=bridge_decision,
+                bridge_fix_findings=findings_for_impl,
+                changed_files=changed_files,
+                deferred_packet_path=deferred_packet_path,
+                implementer_changed=implementer_changed,
+                executor_created=executor_created,
+                baseline_wave_files=baseline_wave_files,
+                all_non_blocking=all_non_blocking,
+                finding_history=finding_history,
+            )
             log(f"Bridge: {bridge_decision} — {len(blocking_findings)} blocking, "
                 f"{len(non_blocking_findings)} non-blocking — re-invoking implementer")
-
-            # Snapshot before fix, track after
             pre_fix_files = set(_collect_changed_files(repo_root))
-            # Re-invoke implementer to fix what bridge flagged
-            fix_prompt = build_implementation_prompt(
-                plan.get("content", "")
-                + f"\n\n## Bridge Round {round_num} Findings ({bridge_decision})\n\n"
-                + findings_for_impl,
-                repo_root=repo_root,
-                wave_id=wave_id,
-                scope_hint=f"Fix {bridge_decision} findings from bridge round {round_num}",
-                learning_context=learning_context,
-            )
+            fix_prompt = _build_bridge_fix_prompt(round_num, bridge_decision, findings_for_impl)
             fix_result = invoke_implementer(
                 repo_root, fix_prompt,
                 backend=backend, model_override=model,
                 timeout=timeout, verbose=verbose,
             )
-            log(f"Implementer fix result: {fix_result['status']}")
-
-            # FAIL CLOSED on implementer failure during bridge loop
-            if fix_result["status"] != "success":
-                return {
-                    "status": "error",
-                    "step": "implementer_bridge_fix",
-                    "errors": [
-                        f"Implementer failed during bridge fix round {round_num}: "
-                        f"{fix_result['status']} (exit={fix_result['exit_code']})"
-                    ],
-                }
-
-            # Track what the fix round changed. The local pytest pass should only
-            # exercise tests introduced or edited by this fix round, not every
-            # pre-existing test file already present in the broader replay scope.
-            post_fix_files = set(_collect_changed_files(repo_root))
-            current_fix_changed = sorted(post_fix_files - pre_fix_files)
-            implementer_changed |= set(current_fix_changed)
-            # Recollect changed files after implementer fix (scoped to wave outputs)
-            changed_files = _collect_wave_owned_files(
-                repo_root,
-                plan_path,
-                plan_declared_files,
-                implementer_changed or None,
-                executor_created or None,
-                baseline_wave_files or None,
-            )
-            log(
-                f"Changed files after bridge fix: {len(changed_files)} "
-                f"(current fix touched {len(current_fix_changed)})"
-            )
-
-            # Run pytest only on test files changed by this bridge-fix pass.
-            test_files = [
-                f for f in current_fix_changed
-                if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")
-            ]
-            if test_files:
-                log(f"Running pytest on {len(test_files)} newly changed test file(s)...")
-                pytest_result = _run_pytest_on_files(repo_root, test_files, timeout=pytest_gate_timeout)
-                if not pytest_result["passed"]:
-                    log(f"pytest FAILED (exit={pytest_result['exit_code']}) — feeding back to implementer as blocking")
-                    # Feed pytest failure back as a blocking finding for next round
-                    pytest_prompt = build_implementation_prompt(
-                        plan.get("content", "")
-                        + f"\n\n## pytest FAILURE after bridge round {round_num}\n\n"
-                        + f"Exit code: {pytest_result['exit_code']}\n"
-                        + f"stdout:\n{pytest_result['stdout'][:3000]}\n"
-                        + f"stderr:\n{pytest_result['stderr'][:1000]}",
-                        repo_root=repo_root,
-                        wave_id=wave_id,
-                        scope_hint=f"Fix pytest failures from bridge round {round_num}",
-                        learning_context=learning_context,
-                    )
-                    pre_pytest_fix_files = set(_collect_changed_files(repo_root))
-                    pytest_fix = invoke_implementer(
-                        repo_root, pytest_prompt,
-                        backend=backend, model_override=model,
-                        timeout=timeout, verbose=verbose,
-                    )
-                    if pytest_fix["status"] != "success":
-                        return {
-                            "status": "error",
-                            "step": "pytest_fix",
-                            "errors": [f"Implementer failed fixing pytest failures: {pytest_fix['status']}"],
-                        }
-                    # Track what the pytest-fix pass changed
-                    post_pytest_fix_files = set(_collect_changed_files(repo_root))
-                    implementer_changed |= (post_pytest_fix_files - pre_pytest_fix_files)
-                    changed_files = _collect_wave_owned_files(
-                        repo_root,
-                        plan_path,
-                        plan_declared_files,
-                        implementer_changed or None,
-                        executor_created or None,
-                        baseline_wave_files or None,
-                    )
-
-            # Persist state after each bridge round
-            _save_state(repo_root, {
-                "plan_path": plan_path,
-                "completed_step": f"bridge_round_{round_num}",
-                "wave_id": wave_id,
-                "bridge_rounds": round_num,
-                "current_bridge_round": round_num,
-                "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
-                "deferred_packet_path": deferred_packet_path,
-                "implementer_changed": sorted(implementer_changed),
-                "executor_created": sorted(executor_created),
-                "baseline_wave_files": sorted(baseline_wave_files),
-                "all_non_blocking": all_non_blocking,
-                "finding_history": finding_history,
-            })
+            bridge_fix_error = _complete_bridge_fix(round_num, fix_result, pre_fix_files)
+            if bridge_fix_error is not None:
+                return bridge_fix_error
             continue
 
         if bridge_result["exit_code"] != 0:
@@ -2970,6 +3170,7 @@ def run_phase_b(
     # jump directly into the re-entry loop below.
     supervisor_parsed: dict[str, Any] = {}
     refresh_reentry_findings = False
+    skip_reentry_implementer_once = False
     if _skip_to_reentry:
         log("Resuming into NEEDS_PHASE_B re-entry (skipping supervisor)")
         changed_files = _collect_wave_owned_files(
@@ -3171,9 +3372,11 @@ def run_phase_b(
                     baseline_wave_files or None,
                 )
                 log("Re-entry: checkpoint drift detected; refreshing bridge findings before re-invoking implementer")
+            elif skip_reentry_implementer_once:
+                skip_reentry_implementer_once = False
+                log("Re-entry: implementer already ran for the prior bridge findings; proceeding to review")
             else:
                 log("Re-invoking implementer for fixes...")
-                # R7-2: pre/post git diff tracking for re-entry implementer
                 pre_reentry_files = set(_collect_changed_files(repo_root))
                 reentry_prompt = build_implementation_prompt(
                     plan.get("content", "") + "\n\n## Re-entry Findings\n\n"
@@ -3188,29 +3391,9 @@ def run_phase_b(
                     backend=backend, model_override=model,
                     timeout=timeout, verbose=verbose,
                 )
-                log(f"Implementer re-entry: {impl_result['status']}")
-
-                # FAIL CLOSED on re-entry implementer failure
-                if impl_result["status"] != "success":
-                    _clear_state(repo_root)
-                    return {
-                        "status": "error",
-                        "step": "implementer_reentry",
-                        "errors": [f"Implementer re-entry failed: {impl_result['status']}"],
-                    }
-
-                # R7-2: recompute implementer_changed after re-entry
-                post_reentry_files = set(_collect_changed_files(repo_root))
-                implementer_changed |= (post_reentry_files - pre_reentry_files)
-                changed_files = _collect_wave_owned_files(
-                    repo_root, plan_path, plan_declared_files,
-                    implementer_changed or None, executor_created or None,
-                    baseline_wave_files or None,
-                )
-                log(
-                    f"Re-entry changed files: {len(changed_files)} "
-                    f"(implementer touched {len(post_reentry_files - pre_reentry_files)})"
-                )
+                reentry_fix_error = _complete_reentry_fix(impl_result, pre_reentry_files)
+                if reentry_fix_error is not None:
+                    return reentry_fix_error
 
             if changed_files:
                 log(f"Re-entry: staging {len(changed_files)} wave-owned files before bridge review...")
@@ -3262,15 +3445,23 @@ def run_phase_b(
                     ]
                     _clear_state(repo_root)
                     return result
-                if non_blocking_findings:
-                    all_non_blocking, packet_path = _record_non_blocking_findings(
-                        repo_root, wave_id, all_non_blocking, non_blocking_findings
+                if render or raw_texts:
+                    prior_deferred_packet_path = deferred_packet_path
+                    all_non_blocking, deferred_packet_path = _sync_deferred_non_blocking_state(
+                        repo_root,
+                        wave_id,
+                        all_non_blocking,
+                        non_blocking_findings,
+                        previous_packet_path=prior_deferred_packet_path,
+                        executor_created=executor_created,
                     )
-                    if packet_path is not None:
-                        deferred_packet_path = str(packet_path.relative_to(repo_root))
-                        executor_created.add(deferred_packet_path)
+                    if deferred_packet_path is not None:
                         result["deferred_packet_path"] = deferred_packet_path
                         log(f"Re-entry GO: filed {len(non_blocking_findings)} non-blocking finding(s)")
+                    else:
+                        result.pop("deferred_packet_path", None)
+                        if prior_deferred_packet_path:
+                            log("Re-entry GO cleared stale deferred non-blocking packet")
                 log("Bridge re-entry converged: GO")
                 reentry_converged = True
                 break
@@ -3342,15 +3533,23 @@ def run_phase_b(
                         _clear_state(repo_root)
                         return result
 
-                if non_blocking_findings:
-                    all_non_blocking, packet_path = _record_non_blocking_findings(
-                        repo_root, wave_id, all_non_blocking, non_blocking_findings
+                if render or raw_texts:
+                    prior_deferred_packet_path = deferred_packet_path
+                    all_non_blocking, deferred_packet_path = _sync_deferred_non_blocking_state(
+                        repo_root,
+                        wave_id,
+                        all_non_blocking,
+                        non_blocking_findings,
+                        previous_packet_path=prior_deferred_packet_path,
+                        executor_created=executor_created,
                     )
-                    if packet_path is not None:
-                        deferred_packet_path = str(packet_path.relative_to(repo_root))
-                        executor_created.add(deferred_packet_path)
+                    if deferred_packet_path is not None:
                         result["deferred_packet_path"] = deferred_packet_path
                         log(f"Re-entry: filed {len(non_blocking_findings)} non-blocking finding(s)")
+                    else:
+                        result.pop("deferred_packet_path", None)
+                        if prior_deferred_packet_path:
+                            log("Re-entry bridge cleared stale deferred non-blocking packet")
 
                 if parsed_findings and not blocking_findings:
                     log(f"Re-entry: all {len(non_blocking_findings)} findings non-blocking — treating as GO")
@@ -3392,6 +3591,25 @@ def run_phase_b(
                     "finding_history": finding_history,
                     "reentry_findings": findings_for_impl,
                 })
+                log("Re-entry: checkpointed bridge findings; re-invoking implementer in-branch")
+                pre_reentry_files = set(_collect_changed_files(repo_root))
+                reentry_prompt = build_implementation_prompt(
+                    plan.get("content", "") + "\n\n## Re-entry Findings\n\n"
+                    + findings_for_impl,
+                    repo_root=repo_root,
+                    wave_id=wave_id,
+                    scope_hint="Fix findings from bridge/supervisor review",
+                    learning_context=learning_context,
+                )
+                impl_result = invoke_implementer(
+                    repo_root, reentry_prompt,
+                    backend=backend, model_override=model,
+                    timeout=timeout, verbose=verbose,
+                )
+                reentry_fix_error = _complete_reentry_fix(impl_result, pre_reentry_files)
+                if reentry_fix_error is not None:
+                    return reentry_fix_error
+                skip_reentry_implementer_once = True
                 continue
 
             # Fail closed: nonzero exit with unrecognized/empty decision
@@ -3461,6 +3679,10 @@ def run_phase_b(
         supervisor_package["changed_files"] = changed_files
         all_dirty_reentry2 = _collect_changed_files(repo_root)
         supervisor_package["fenced_files"] = [f for f in all_dirty_reentry2 if f not in set(changed_files)]
+        supervisor_package["deferred_items"] = _collect_supervisor_deferred_items(
+            changed_files,
+            deferred_packet_path,
+        )
         supervisor_package["bridge_status"] = {"rounds": result.get("bridge_rounds", 0), "total_rounds": _total_bridge_rounds(repo_root), "reentry": True}
         # Refresh blocker acknowledgment (may have changed during re-entry)
         blocking_dir = repo_root / "reports" / "deferred" / "blocking"
@@ -3556,13 +3778,12 @@ def run_phase_b(
         wave_class=wave_class,
         target_gate_id=target_gate_id,
         plan_path=plan_path,
+        plan_content=plan.get("content", ""),
         changed_files=wave_owned_files,
         test_files=handoff_test_files,
         receipt_path=receipt_path,
         bridge_rounds=result.get("bridge_rounds", 0),
         reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
-        unblocks_wave_id=plan.get("unblocks_wave_id", ""),
-        unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
     )
     log(f"Preparing commit handoff ({len(wave_owned_files)} wave-owned files)...")
     handoff_path = prepare_commit_handoff(
@@ -3702,6 +3923,30 @@ def main() -> int:
         routing_record_override=routing_record_override,
     )
 
+    if result.get("status") not in ("success", "ready", "commit_ready"):
+        try:
+            from recovery_gate import attempt_recovery
+        except ImportError:
+            _rg_path = SCRIPT_DIR / "recovery_gate.py"
+            import importlib.util as _rg_ilu
+            _rg_spec = _rg_ilu.spec_from_file_location("recovery_gate", str(_rg_path))
+            _rg_mod = _rg_ilu.module_from_spec(_rg_spec)
+            assert _rg_spec.loader is not None
+            _rg_spec.loader.exec_module(_rg_mod)
+            attempt_recovery = _rg_mod.attempt_recovery
+        try:
+            recovery_wave = str(
+                result.get("wave_id")
+                or (routing_record_override or {}).get("wave_name", "")
+                or (routing_record_override or {}).get("wave_id", "")
+                or (Path(args.plan).stem if args.plan else "wave-unknown")
+            ).strip() or "wave-unknown"
+            recovery = attempt_recovery(repo_root, result, normalize_wave_id(recovery_wave))
+            result["recovery"] = recovery
+        except Exception as exc:
+            if args.verbose or not args.json:
+                print(f"[phase-b] Recovery gate unavailable in standalone: {exc}")
+
     if args.json:
         print(json.dumps(result, indent=2))
     else:
@@ -3709,7 +3954,13 @@ def main() -> int:
         if result.get("errors"):
             for e in result["errors"]:
                 print(f"[phase-b] Error: {e}")
+        if result.get("recovery"):
+            recovery = result["recovery"]
+            print(f"[phase-b] Recovery: class={recovery.get('failure_class')} "
+                  f"tier={recovery.get('tier')} recovered={recovery.get('recovered')}")
 
+    if result.get("recovery", {}).get("recovered"):
+        return 0
     return 0 if result.get("status") in ("success", "ready", "commit_ready") else 1
 
 

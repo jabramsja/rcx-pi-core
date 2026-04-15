@@ -221,6 +221,104 @@ class TestDispatcherFreshnessRefresh:
         assert persisted == record
         assert calls == []
 
+    def test_inline_stale_record_without_path_fails_closed_when_not_canonical(
+        self, tmp_path, monkeypatch,
+    ):
+        canonical_dir = tmp_path / ".agent_bus" / "routing"
+        canonical_dir.mkdir(parents=True)
+        (canonical_dir / "post_merge_routing.json").write_text(
+            json.dumps(
+                {
+                    "decision": "ROUTE_PHASE_B",
+                    "summary": "canonical",
+                    "wave_name": "canonical-wave",
+                    "task_id": "[CANONICAL-WAVE]",
+                    "state_sha": "canonical-state",
+                    "next_candidates": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "inline",
+            "wave_name": "caller-owned-wave",
+            "task_id": "[CALLER-OWNED-WAVE]",
+            "state_sha": "stale-state",
+            "next_candidates": [],
+        }
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_auto_refresh_routing",
+            lambda *a, **k: pytest.fail("caller-owned inline records must not auto-refresh"),
+        )
+
+        result = dispatch_mod.dispatch(record, repo_root=tmp_path)
+
+        assert result["status"] == "stale"
+        assert "caller-owned" in result["message"]
+        assert "rebound implicitly" in result["message"]
+
+    def test_inline_stale_record_matching_canonical_allows_refresh(
+        self, tmp_path, monkeypatch,
+    ):
+        canonical_dir = tmp_path / ".agent_bus" / "meta"
+        canonical_dir.mkdir(parents=True)
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "canonical-inline",
+            "wave_name": "canonical-wave",
+            "task_id": "[CANONICAL-WAVE]",
+            "state_sha": "stale-state",
+            "next_candidates": [],
+        }
+        (canonical_dir / "post_merge_routing.json").write_text(
+            json.dumps(record),
+            encoding="utf-8",
+        )
+        refreshed_record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "refreshed",
+            "wave_name": "canonical-wave",
+            "task_id": "[CANONICAL-WAVE]",
+            "state_sha": "fresh-state",
+            "next_candidates": [],
+        }
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "validate_routing_record_freshness",
+            lambda *a, **k: (False, "stale for proof"),
+        )
+        auto_refresh_calls = []
+
+        def fake_refresh(*args, **kwargs):
+            auto_refresh_calls.append((args, kwargs))
+            return True, refreshed_record
+
+        monkeypatch.setattr(dispatch_mod, "_auto_refresh_routing", fake_refresh)
+
+        def fake_run(args, cwd, timeout):
+            return subprocess.CompletedProcess(args, 0, stdout='{"status":"success"}', stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_continue_successful_executor_chain",
+            lambda *a, **k: {
+                "status": "success",
+                "decision": refreshed_record["decision"],
+                "executor": "phase_a_executor",
+            },
+        )
+
+        result = dispatch_mod.dispatch(record, repo_root=tmp_path)
+
+        assert result["status"] == "success"
+        assert result["decision"] == "ROUTE_PHASE_A"
+        assert auto_refresh_calls
+
 
 # ===========================================================================
 # Shared test helpers
@@ -461,19 +559,24 @@ class TestCommitPipelineValidation:
     """Commit pipeline pre-checks (new schema)."""
 
     def test_wrong_branch_fails(self, tmp_path):
-        """On wrong branch → error at ensure_feature_branch."""
+        """On wrong branch with a colliding target → error at ensure_feature_branch."""
         repo = tmp_path / "repo"
         repo.mkdir()
         env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
                "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
         subprocess.run(["git", "init"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=repo, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, capture_output=True)
         subprocess.run(["git", "commit", "--allow-empty", "-m", "init"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "branch", "-m", "dev"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "checkout", "-b", "jabramsja/test-wave-id"], cwd=repo, capture_output=True, env=env)
         subprocess.run(["git", "checkout", "-b", "wrong-branch"], cwd=repo, capture_output=True, env=env)
 
         handoff = _make_new_handoff()
         result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
         assert result["status"] == "error"
         assert result["step"] == "ensure_feature_branch"
+        assert any("Refusing auto-rebind" in e for e in result["errors"])
 
     def test_missing_receipt_fails(self, tmp_path):
         """Missing receipt → error at validate_receipt (after supervisor)."""
@@ -2033,17 +2136,51 @@ class TestEnsureFeatureBranch:
         result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
         assert "ensure_feature_branch" in result.get("steps_completed", [])
 
-    def test_10_on_other_branch_errors(self, tmp_path):
-        """Test 10: On other branch → error."""
+    def test_10_on_other_branch_rebinds_when_target_absent(self, tmp_path):
+        """Test 10: On other branch with dev divergence → stash/rebind from dev."""
         repo, env = _init_git_repo(tmp_path)
+        (repo / "file1.py").write_text("base\n")
+        subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "add file1"], cwd=repo, capture_output=True, env=env)
         subprocess.run(
             ["git", "checkout", "-b", "other-branch"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        subprocess.run(["git", "checkout", "dev"], cwd=repo, capture_output=True, env=env)
+        (repo / "file1.py").write_text("dev change\n")
+        subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "dev change"], cwd=repo, capture_output=True, env=env)
+        subprocess.run(["git", "checkout", "other-branch"], cwd=repo, capture_output=True, env=env)
+        (repo / "file1.py").write_text("worktree change\n")
+        handoff = _make_new_handoff()
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+        assert "ensure_feature_branch" in result.get("steps_completed", [])
+        current = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert current == "jabramsja/test-wave-id"
+        assert (repo / "file1.py").read_text() == "worktree change\n"
+
+    def test_10b_on_other_branch_with_target_collision_errors(self, tmp_path):
+        """On other branch with an existing target → fail closed."""
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        subprocess.run(
+            ["git", "checkout", "-b", "other-branch", "dev"],
             cwd=repo, capture_output=True, env=env,
         )
         handoff = _make_new_handoff()
         result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
         assert result["status"] == "error"
         assert result["step"] == "ensure_feature_branch"
+        assert any("Refusing auto-rebind" in e for e in result["errors"])
 
     def test_11_remote_collision_errors(self, tmp_path):
         """Test 11: Remote branch collision → error (mocked)."""
@@ -2938,8 +3075,8 @@ class TestReceiptAndCommit:
             f"Step 7 should succeed with full receipt chain. Got: {result}"
         )
 
-    def test_24_pre_commit_script_failure_errors(self, tmp_path):
-        """Test 24: Pre-commit script failure → error at step 8."""
+    def test_24_pre_commit_script_failure_surfaces_stdout_when_stderr_empty(self, tmp_path):
+        """Step 8 should surface hook stdout if pre-commit-doc-check writes no stderr."""
         repo, env = _init_git_repo(tmp_path)
         # Pre-insert wave_id so tracker note step skips
         tasks = repo / "TASKS.md"
@@ -2958,7 +3095,12 @@ class TestReceiptAndCommit:
         hooks_dir = repo / "mu" / "tools" / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
         script = hooks_dir / "pre-commit-doc-check"
-        script.write_text("#!/bin/bash\necho 'FAIL' >&2\nexit 1\n")
+        script.write_text(
+            "#!/bin/bash\n"
+            "for i in $(seq 1 80); do echo \"noise $i\"; done\n"
+            "echo 'growth cap failed'\n"
+            "exit 1\n"
+        )
         script.chmod(0o755)
 
         # Stage file1.py to compute staged_sha for valid receipt
@@ -2985,6 +3127,7 @@ class TestReceiptAndCommit:
 
         assert result["status"] == "error"
         assert result["step"] == "run_pre_commit_script"
+        assert any("growth cap failed" in e for e in result["errors"])
 
     def test_step11_pre_push_failure_surfaces_stdout_when_stderr_empty(self, tmp_path):
         """Step 11 should surface stdout if pre-push-fast writes no stderr."""

@@ -185,6 +185,21 @@ def _canonical_routing_record_path(repo_root: Path) -> Path:
     return (repo_root / _COMMON_ROUTING_RECORD_PATH).resolve()
 
 
+def _load_routing_record_json(path: Path) -> dict[str, Any] | None:
+    """Best-effort JSON object load without imposing freshness validation."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _matches_canonical_routing_record(record: dict[str, Any], repo_root: Path) -> bool:
+    """Return True when the inline record still matches the canonical routing file."""
+    canonical_record = _load_routing_record_json(_canonical_routing_record_path(repo_root))
+    return canonical_record == record
+
+
 def resolve_executor(decision: str) -> str | None:
     """Map a routing decision to an executor name."""
     return ROUTING_DISPATCH.get(decision)
@@ -1369,6 +1384,10 @@ def dispatch(
     if not skip_freshness:
         fresh, msg = validate_routing_record_freshness(record, repo)
         if not fresh:
+            is_inline_caller_owned = (
+                routing_record_path is None
+                and not _matches_canonical_routing_record(record, repo)
+            )
             is_noncanonical_explicit = (
                 routing_record_path is not None
                 and routing_record_path.resolve() != _canonical_routing_record_path(repo)
@@ -1379,6 +1398,11 @@ def dispatch(
                     print(
                         "[dispatch] Explicit noncanonical routing record is caller-owned; "
                         "refusing in-place refresh."
+                    )
+                elif is_inline_caller_owned:
+                    print(
+                        "[dispatch] Inline routing record does not match the canonical "
+                        "routing file; refusing implicit rebind."
                     )
                 else:
                     print("[dispatch] Auto-refreshing via post-merge supervisor...")
@@ -1391,6 +1415,17 @@ def dispatch(
                         f"Routing record is stale: {msg}. Explicit noncanonical routing records are "
                         "caller-owned and must be regenerated from authoritative routing instead of "
                         f"being rewritten in place: {routing_record_path}"
+                    ),
+                }
+            if is_inline_caller_owned:
+                return {
+                    "status": "stale",
+                    "decision": decision,
+                    "executor": executor_name,
+                    "message": (
+                        f"Routing record is stale: {msg}. Inline routing records that do not match "
+                        "the canonical routing file are caller-owned and must be regenerated from "
+                        "authoritative routing instead of being rebound implicitly."
                     ),
                 }
             else:
@@ -1523,9 +1558,7 @@ def dispatch(
             executor_args.extend(["--plan-name", plan_name])
         elif executor_name == "phase_b_executor":
             # Phase B: prefer --plan from next_candidates tracked_packet,
-            # but always pass the routing record so task_id and other
-            # authoritative routing fields do not fall back to ambient repo
-            # state inside phase_b_executor.
+            # fall back to planless mode (routing record as authority source)
             candidates = record.get("next_candidates", [])
             plan_path = None
             for c in candidates:
@@ -1552,12 +1585,12 @@ def dispatch(
                     break
             if plan_path:
                 executor_args.extend(["--plan", plan_path])
-            # Phase B always needs the routing record. With a tracked packet,
-            # downstream supervisor packaging and commit handoff still consume
-            # task_id, wave_name, and the canonical candidate metadata.
-            # Without a tracked packet, Phase B derives scope directly from the
-            # routing record and therefore still fails closed on it.
-            executor_args.extend(["--routing-record", json.dumps(record)])
+                executor_args.extend(["--routing-record", json.dumps(record)])
+            else:
+                # Planless mode: Phase B derives scope from routing record.
+                # The routing record must have wave_name, summary, and
+                # next_candidates for this to succeed (fail-closed in Phase B).
+                executor_args.extend(["--routing-record", json.dumps(record)])
         else:
             executor_args.extend(["--routing-record", json.dumps(record)])
         if executor_name in _JSON_EXECUTORS:

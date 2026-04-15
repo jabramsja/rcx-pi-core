@@ -1,24 +1,24 @@
 {
   "wave_id": "pipeline-control-surface-split-2026-04-14",
-  "repeat_run_speedup_ratio": 1.205202,
+  "repeat_run_speedup_ratio": 1.177462,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.404469,
+  "step_growth_slope": 0.391127,
   "repeat_run_raw_seconds": [
-    0.487467,
-    0.404469
+    0.460537,
+    0.391127
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.487467
+      "elapsed_seconds": 0.460537
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.891936
+      "elapsed_seconds": 0.851664
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-14T23:57:44Z",
+  "collection_timestamp_utc": "2026-04-15T15:40:24Z",
   "collector_version": "2.2.0"
 }
