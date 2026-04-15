@@ -939,7 +939,7 @@ class TestAttemptRecovery:
 
     def test_tier1_feature_branch_mismatch_recovers_and_logs_embedded_step(self, tmp_path):
         repo = TestFixFeatureBranchMismatch()
-        repo._init_repo(tmp_path)
+        repo._init_repo(tmp_path)  # ANTICHEAT_OK: shared test fixture helper
         (tmp_path / "tracked.txt").write_text("wave change\n", encoding="utf-8")
         subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True, capture_output=True, text=True)
         handoff_dir = tmp_path / ".agent_bus" / "executors"
