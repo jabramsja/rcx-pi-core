@@ -60,6 +60,41 @@ def install_mock_recovery_agent(
     return invocation
 
 
+def init_feature_branch_test_repo(repo_root: Path) -> None:
+    subprocess.run(["git", "init"], cwd=repo_root, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "RCX Test"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (repo_root / "tracked.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=repo_root, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(["git", "branch", "-M", "dev"], cwd=repo_root, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "checkout", "-b", "wrong-branch"],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _default_mock_recovery_agent(monkeypatch):
     install_mock_recovery_agent(monkeypatch)
@@ -367,42 +402,8 @@ class TestFixTrackerNoteContract:
 
 
 class TestFixFeatureBranchMismatch:
-    def _init_repo(self, repo_root: Path) -> None:
-        subprocess.run(["git", "init"], cwd=repo_root, check=True, capture_output=True, text=True)
-        subprocess.run(
-            ["git", "config", "user.email", "test@example.com"],
-            cwd=repo_root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.name", "RCX Test"],
-            cwd=repo_root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        (repo_root / "tracked.txt").write_text("base\n", encoding="utf-8")
-        subprocess.run(["git", "add", "tracked.txt"], cwd=repo_root, check=True, capture_output=True, text=True)
-        subprocess.run(
-            ["git", "commit", "-m", "init"],
-            cwd=repo_root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        subprocess.run(["git", "branch", "-M", "dev"], cwd=repo_root, check=True, capture_output=True, text=True)
-        subprocess.run(
-            ["git", "checkout", "-b", "wrong-branch"],
-            cwd=repo_root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-
     def test_creates_expected_target_branch_from_base(self, tmp_path):
-        self._init_repo(tmp_path)
+        init_feature_branch_test_repo(tmp_path)
         (tmp_path / "tracked.txt").write_text("wave change\n", encoding="utf-8")
         subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True, capture_output=True, text=True)
 
@@ -698,8 +699,7 @@ class TestAttemptRecovery:
         assert r["recovered"] is True and r["tier"] == 1
 
     def test_tier1_feature_branch_mismatch_recovers_and_logs_embedded_step(self, tmp_path):
-        repo = TestFixFeatureBranchMismatch()
-        repo._init_repo(tmp_path)
+        init_feature_branch_test_repo(tmp_path)
         (tmp_path / "tracked.txt").write_text("wave change\n", encoding="utf-8")
         subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True, capture_output=True, text=True)
         handoff_dir = tmp_path / ".agent_bus" / "executors"
