@@ -24,7 +24,7 @@ def test_founder_learning_snapshot_preserves_fixed_entry_dates(tmp_path):
         encoding="utf-8",
     )
 
-    entries = snapshot_mod._load_learning_entries(learning_md)
+    entries = snapshot_mod._load_learning_entries(learning_md)  # ANTICHEAT_OK: tool unit test
     dated = [entry for entry in entries if entry.get("date")]
     dated.sort(
         key=lambda entry: (entry.get("date", ""), entry.get("category", "")),
@@ -52,7 +52,7 @@ def test_run_returns_timeout_result_instead_of_raising(monkeypatch):
 
     monkeypatch.setattr(startup_mod.subprocess, "run", fake_run)
 
-    result = startup_mod._run(["python3", "-c", "pass"], timeout=1)
+    result = startup_mod._run(["python3", "-c", "pass"], timeout=1)  # ANTICHEAT_OK: tool unit test
 
     assert result.returncode == 124
     assert result.stdout == "partial stdout"
@@ -86,7 +86,7 @@ def test_binary_guard_version_drift_fails(monkeypatch, tmp_path):
         ),
     )
 
-    result = startup_mod._audit_binary_guard(codex_home, tmp_path)
+    result = startup_mod._audit_binary_guard(codex_home, tmp_path)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "version drift" in result.detail
 
@@ -105,7 +105,7 @@ def test_models_cache_canaries_fail(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_models_cache(codex_home)
+    result = startup_mod._check_models_cache(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "stale friendly-persona canaries present" in result.detail
 
@@ -136,7 +136,7 @@ def test_models_cache_allows_vendor_personality_friendly_lane(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_models_cache(codex_home)
+    result = startup_mod._check_models_cache(codex_home)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "OK"
     assert "personality_friendly variants" in result.detail
@@ -148,7 +148,7 @@ def test_models_cache_invalid_json_fails_closed(tmp_path):
     models_cache = codex_home / "models_cache.json"
     models_cache.write_text("{not valid json", encoding="utf-8")
 
-    result = startup_mod._check_models_cache(codex_home)
+    result = startup_mod._check_models_cache(codex_home)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "FAIL"
     assert "invalid JSON" in result.detail
@@ -166,7 +166,7 @@ def test_prompt_hook_disabled_canary_is_accepted(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_prompt_hook(codex_home)
+    result = startup_mod._check_prompt_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "OK"
     assert "disabled intentionally" in result.detail
 
@@ -181,7 +181,7 @@ def test_session_start_hook_missing_canaries_fails(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "missing canaries" in result.detail
 
@@ -198,7 +198,7 @@ def test_session_start_hook_comment_only_canaries_fail(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert (
         "code-bound canaries" in result.detail
@@ -231,7 +231,7 @@ def test_session_start_hook_valid_sessionstart_payload_is_accepted(tmp_path, mon
     )
 
     monkeypatch.setattr(startup_mod, "_repo_root", lambda: repo_root)
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "OK"
 
 
@@ -260,10 +260,10 @@ def test_session_start_hook_requires_target_repo_anchor_for_linked_worktree(tmp_
     )
 
     monkeypatch.setattr(startup_mod, "_repo_root", lambda: target_repo)
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "OK"
-    assert startup_mod._session_start_target_repo(hook_path.read_text(encoding="utf-8")) == target_repo
+    assert startup_mod._session_start_target_repo(hook_path.read_text(encoding="utf-8")) == target_repo  # ANTICHEAT_OK: tool unit test
 
 
 def test_session_start_hook_accepts_primary_checkout_anchor_from_git_common_dir(tmp_path, monkeypatch):
@@ -300,7 +300,7 @@ def test_session_start_hook_accepts_primary_checkout_anchor_from_git_common_dir(
 
     monkeypatch.setattr(startup_mod, "_run", fake_run)
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "OK"
 
@@ -330,7 +330,7 @@ def test_session_start_hook_wrong_target_repo_fails(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr(startup_mod, "_repo_root", lambda: expected_repo)
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "FAIL"
     assert "target repo anchor mismatch" in result.detail
@@ -352,7 +352,7 @@ def test_session_start_hook_payload_without_emit_fails(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "emission structure" in result.detail
 
@@ -375,7 +375,7 @@ def test_session_start_hook_payload_dumped_off_stdout_fails(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "emission structure" in result.detail
 
@@ -402,7 +402,7 @@ def test_session_start_hook_dead_payload_constant_does_not_count(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "emission structure" in result.detail
 
@@ -431,7 +431,7 @@ def test_session_start_hook_wrong_emitted_payload_fails_even_with_dead_canaries(
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "FAIL"
     assert "missing emitted payload canaries" in result.detail
@@ -459,7 +459,7 @@ def test_session_start_hook_emit_must_thread_argument_into_additional_context(tm
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "FAIL"
     assert "emission structure" in result.detail
@@ -483,7 +483,7 @@ def test_session_start_hook_top_level_exit_before_main_fails(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "unsafe top-level execution" in result.detail
 
@@ -506,7 +506,7 @@ def test_session_start_hook_top_level_assign_call_before_main_fails(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "unsafe top-level execution" in result.detail
 
@@ -533,7 +533,7 @@ def test_session_start_hook_main_raise_before_emit_fails(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "emission structure" in result.detail
 
@@ -560,7 +560,7 @@ def test_session_start_hook_nonzero_after_emit_fails(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "emission structure" in result.detail
 
@@ -588,7 +588,7 @@ def test_session_start_hook_extra_stdout_noise_fails(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "emission structure" in result.detail
 
@@ -617,7 +617,7 @@ def test_session_start_hook_unapproved_env_skip_before_emit_fails(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "FAIL"
     assert "unapproved pre-emit environment gates" in result.detail
@@ -651,7 +651,7 @@ def test_session_start_hook_allows_known_disable_env_gate(tmp_path, monkeypatch)
 
     monkeypatch.setattr(startup_mod, "_repo_root", lambda: repo_root)
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "OK"
 
@@ -677,7 +677,7 @@ def test_session_start_hook_does_not_execute_main_side_effects_during_audit(tmp_
         encoding="utf-8",
     )
 
-    result = startup_mod._check_session_start_hook(codex_home)
+    result = startup_mod._check_session_start_hook(codex_home)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "FAIL"
     assert not marker.exists()
@@ -697,7 +697,7 @@ def test_prompt_hook_requires_anchor_canaries_when_enabled(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_prompt_hook(codex_home)
+    result = startup_mod._check_prompt_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "missing code-bound RCX protocol canaries" in result.detail
 
@@ -717,7 +717,7 @@ def test_prompt_hook_enabled_with_code_bound_canaries_is_accepted(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_prompt_hook(codex_home)
+    result = startup_mod._check_prompt_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "OK"
 
 
@@ -735,7 +735,7 @@ def test_prompt_hook_enabled_nonzero_execution_fails(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_prompt_hook(codex_home)
+    result = startup_mod._check_prompt_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "return 0 or None" in result.detail
 
@@ -756,7 +756,7 @@ def test_prompt_hook_enabled_output_fails(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_prompt_hook(codex_home)
+    result = startup_mod._check_prompt_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "active prompt hook emitted output" in result.detail
 
@@ -775,7 +775,7 @@ def test_prompt_hook_enabled_comment_only_canaries_fail(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_prompt_hook(codex_home)
+    result = startup_mod._check_prompt_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "missing code-bound RCX protocol canaries" in result.detail
 
@@ -798,7 +798,7 @@ def test_prompt_hook_enabled_top_level_side_effect_fails_without_execution(tmp_p
         encoding="utf-8",
     )
 
-    result = startup_mod._check_prompt_hook(codex_home)
+    result = startup_mod._check_prompt_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "unsafe top-level execution" in result.detail
     assert not marker.exists()
@@ -819,7 +819,7 @@ def test_prompt_hook_disabled_comment_with_active_output_fails(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_prompt_hook(codex_home)
+    result = startup_mod._check_prompt_hook(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "active code" in result.detail or "emitted output" in result.detail
 
@@ -841,7 +841,7 @@ def test_prompt_hook_disabled_top_level_side_effect_fails_without_execution(tmp_
         encoding="utf-8",
     )
 
-    result = startup_mod._check_prompt_hook(codex_home)
+    result = startup_mod._check_prompt_hook(codex_home)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "FAIL"
     assert "unsafe top-level execution" in result.detail
@@ -873,7 +873,7 @@ def test_default_rules_reject_unsafe_manual_git_allows(tmp_path, rule, expected_
     rules_dir.mkdir(parents=True)
     (rules_dir / "default.rules").write_text(rule, encoding="utf-8")
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert expected_fragment in result.detail
 
@@ -887,7 +887,7 @@ def test_default_rules_reject_multiline_manual_git_fetch_allow(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "git fetch origin" in result.detail
 
@@ -922,7 +922,7 @@ def test_default_rules_reject_identifier_backed_allow_aliases(tmp_path, rule, ex
     rules_dir.mkdir(parents=True)
     (rules_dir / "default.rules").write_text(rule, encoding="utf-8")
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert expected_fragment in result.detail
 
@@ -954,7 +954,7 @@ def test_default_rules_reject_script_backed_execution_allows(tmp_path, rule, exp
     rules_dir.mkdir(parents=True)
     (rules_dir / "default.rules").write_text(rule, encoding="utf-8")
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert expected_fragment in result.detail
 
@@ -984,7 +984,7 @@ def test_default_rules_reject_broad_interpreter_allows(tmp_path, rule, expected_
     rules_dir.mkdir(parents=True)
     (rules_dir / "default.rules").write_text(rule, encoding="utf-8")
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert expected_fragment in result.detail
 
@@ -998,7 +998,7 @@ def test_default_rules_reject_multiline_broad_interpreter_allow(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "python3 <broad interpreter allow>" in result.detail
 
@@ -1019,7 +1019,7 @@ def test_default_rules_accept_fully_specified_interpreter_invocations(tmp_path, 
     rules_dir.mkdir(parents=True)
     (rules_dir / "default.rules").write_text(rule, encoding="utf-8")
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "OK"
     assert "no disallowed manual git write/fetch allow rules detected" in result.detail
 
@@ -1033,7 +1033,7 @@ def test_default_rules_accept_shell_wrapped_fixed_repo_script_invocation(tmp_pat
         encoding="utf-8",
     )
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "OK"
     assert "no disallowed manual git write/fetch allow rules detected" in result.detail
@@ -1048,7 +1048,7 @@ def test_default_rules_accept_read_only_git_branch_listing(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "OK"
     assert "no disallowed manual git write/fetch allow rules detected" in result.detail
 
@@ -1062,7 +1062,7 @@ def test_default_rules_accept_multiline_read_only_git_branch_listing(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "OK"
     assert "no disallowed manual git write/fetch allow rules detected" in result.detail
 
@@ -1094,7 +1094,7 @@ def test_default_rules_reject_unsafe_shell_wrapped_git_allows(tmp_path, rule, ex
     rules_dir.mkdir(parents=True)
     (rules_dir / "default.rules").write_text(rule, encoding="utf-8")
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert expected_fragment in result.detail
 
@@ -1124,7 +1124,7 @@ def test_default_rules_reject_shell_wrapped_git_variants_with_newlines_and_env_s
     rules_dir.mkdir(parents=True)
     (rules_dir / "default.rules").write_text(rule, encoding="utf-8")
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert expected_fragment in result.detail
 
@@ -1144,7 +1144,7 @@ def test_default_rules_reject_shell_wrapped_broad_env_python_allow(tmp_path, rul
     rules_dir.mkdir(parents=True)
     (rules_dir / "default.rules").write_text(rule, encoding="utf-8")
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "python3 <broad interpreter allow>" in result.detail
 
@@ -1162,7 +1162,7 @@ def test_default_rules_reject_shell_wrapped_broad_interpreter_variants(tmp_path,
     rules_dir.mkdir(parents=True)
     (rules_dir / "default.rules").write_text(rule, encoding="utf-8")
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "python3 <broad interpreter allow>" in result.detail
 
@@ -1176,7 +1176,7 @@ def test_default_rules_accept_safe_shell_wrapped_git_branch_listing(tmp_path):
         encoding="utf-8",
     )
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "OK"
     assert "no disallowed manual git write/fetch allow rules detected" in result.detail
 
@@ -1190,7 +1190,7 @@ def test_default_rules_accept_safe_env_split_shell_wrapped_git_branch_listing(tm
         encoding="utf-8",
     )
 
-    result = startup_mod._check_default_rules(codex_home)
+    result = startup_mod._check_default_rules(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "OK"
     assert "no disallowed manual git write/fetch allow rules detected" in result.detail
 
@@ -1210,7 +1210,7 @@ def test_dashboard_health_rejects_unrelated_json_service():
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        healthy, detail = startup_mod._dashboard_health(server.server_address[1])
+        healthy, detail = startup_mod._dashboard_health(server.server_address[1])  # ANTICHEAT_OK: tool unit test
         assert healthy is False
         assert "missing keys" in detail
     finally:
@@ -1248,7 +1248,7 @@ def test_web_dashboard_recovery_starts_requested_port(monkeypatch, tmp_path):
     monkeypatch.setattr(startup_mod, "_dashboard_health", fake_health)
     monkeypatch.setattr(startup_mod.subprocess, "Popen", fake_popen)
 
-    result = startup_mod._ensure_web_dashboard(tmp_path, port=8123)
+    result = startup_mod._ensure_web_dashboard(tmp_path, port=8123)  # ANTICHEAT_OK: tool unit test
 
     assert health_calls == [8123, 8123]
     assert popen_calls == [
@@ -1274,7 +1274,7 @@ def test_web_dashboard_recovery_spawn_failure_fails_closed(monkeypatch, tmp_path
         lambda *args, **kwargs: (_ for _ in ()).throw(OSError("spawn failed")),
     )
 
-    result = startup_mod._ensure_web_dashboard(tmp_path, port=8123)
+    result = startup_mod._ensure_web_dashboard(tmp_path, port=8123)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "FAIL"
     assert "failed closed after recovery attempt" in result.detail
@@ -1306,7 +1306,7 @@ def test_tmux_monitor_signature_accepts_live_pane_content(monkeypatch, tmp_path)
 
     monkeypatch.setattr(startup_mod, "_run", fake_run)
 
-    healthy, detail = startup_mod._tmux_monitor_signature(tmp_path, startup_mod.TMUX_SESSION)
+    healthy, detail = startup_mod._tmux_monitor_signature(tmp_path, startup_mod.TMUX_SESSION)  # ANTICHEAT_OK: tool unit test
 
     assert healthy is True
     assert "pipeline monitor panes" in detail
@@ -1326,7 +1326,7 @@ def test_tmux_monitor_signature_accepts_live_pane_content(monkeypatch, tmp_path)
     ],
 )
 def test_tmux_pane_1_rejects_monitor_error_only_output(pane_body, detail_fragment):
-    healthy, detail = startup_mod._tmux_pane_has_live_content(
+    healthy, detail = startup_mod._tmux_pane_has_live_content(  # ANTICHEAT_OK: tool unit test
         "PANE 1 · LIVE PIPELINE LOG",
         pane_body,
     )
@@ -1361,7 +1361,7 @@ def test_tmux_monitor_signature_rejects_pane_1_monitor_errors(monkeypatch, tmp_p
 
     monkeypatch.setattr(startup_mod, "_run", fake_run)
 
-    healthy, detail = startup_mod._tmux_monitor_signature(tmp_path, startup_mod.TMUX_SESSION)
+    healthy, detail = startup_mod._tmux_monitor_signature(tmp_path, startup_mod.TMUX_SESSION)  # ANTICHEAT_OK: tool unit test
 
     assert healthy is False
     assert "PANE 1 · LIVE PIPELINE LOG missing live state content" in detail
@@ -1382,7 +1382,7 @@ def test_tmux_session_stable_rejects_session_without_monitor_panes(monkeypatch, 
     )
     monkeypatch.setattr(startup_mod, "_run", lambda *args, **kwargs: next(calls))
 
-    stable, detail = startup_mod._tmux_session_stable(
+    stable, detail = startup_mod._tmux_session_stable(  # ANTICHEAT_OK: tool unit test
         tmp_path,
         startup_mod.TMUX_SESSION,
         checks=1,
@@ -1424,7 +1424,7 @@ def test_tmux_session_stable_rejects_degraded_pane_content(monkeypatch, tmp_path
 
     monkeypatch.setattr(startup_mod, "_run", fake_run)
 
-    stable, detail = startup_mod._tmux_session_stable(
+    stable, detail = startup_mod._tmux_session_stable(  # ANTICHEAT_OK: tool unit test
         tmp_path,
         startup_mod.TMUX_SESSION,
         checks=1,
@@ -1441,7 +1441,7 @@ def test_tmux_monitor_requires_monitor_script_even_for_existing_session(monkeypa
         lambda *args, **kwargs: (True, "session rcx-pipeline active with pipeline monitor panes"),
     )
 
-    result = startup_mod._ensure_tmux_monitor(tmp_path)
+    result = startup_mod._ensure_tmux_monitor(tmp_path)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "FAIL"
     assert "missing monitor script" in result.detail
@@ -1465,7 +1465,7 @@ def test_tmux_monitor_recovers_when_restart_establishes_session(monkeypatch, tmp
         lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", ""),
     )
 
-    result = startup_mod._ensure_tmux_monitor(tmp_path)
+    result = startup_mod._ensure_tmux_monitor(tmp_path)  # ANTICHEAT_OK: tool unit test
     assert result.status == "OK"
     assert "started; session rcx-pipeline active" in result.detail
 
@@ -1493,7 +1493,7 @@ def test_tmux_monitor_fails_closed_when_restart_does_not_establish_session(monke
         ),
     )
 
-    result = startup_mod._ensure_tmux_monitor(tmp_path)
+    result = startup_mod._ensure_tmux_monitor(tmp_path)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "failed closed after recovery attempt" in result.detail
 
@@ -1521,7 +1521,7 @@ def test_tmux_monitor_fails_closed_when_start_exits_non_zero_after_partial_start
         ),
     )
 
-    result = startup_mod._ensure_tmux_monitor(tmp_path)
+    result = startup_mod._ensure_tmux_monitor(tmp_path)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
     assert "failed closed after recovery attempt" in result.detail
     assert "tmux state=session rcx-pipeline active" in result.detail
