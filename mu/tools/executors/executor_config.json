@@ -4,6 +4,7 @@
     "dialectic_executor": "codex",
     "phase_a_executor": "codex",
     "phase_b_executor": "codex",
+    "bot_remediation": "codex",
     "commit_executor": null
   },
   "bridge_reviewers": {

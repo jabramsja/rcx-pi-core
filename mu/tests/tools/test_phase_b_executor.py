@@ -638,6 +638,26 @@ class TestLoadPlanPacketPathTraversal:
         assert result["phase_a_lock"] == "LOCKED"
         assert result["task_id"] == "[TEST-PLAN]"
 
+    def test_markdown_bypass_lines_parse(self, tmp_path):
+        """Markdown-bulleted bypass tokens must parse without quote residue."""
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "# Plan\n"
+            "Status: ACTIVE\n"
+            "Task: [TEST-PLAN]\n"
+            "1. `Phase-A-Lock: LOCKED`\n"
+            "- `unblocks_wave_id: wave-upstream-2026-04-14`\n"
+            "- `unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION`\n"
+        )
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+        assert result["phase_a_lock"] == "LOCKED"
+        assert result["task_id"] == "[TEST-PLAN]"
+        assert result["unblocks_wave_id"] == "wave-upstream-2026-04-14"
+        assert result["unblocks_runtime_blocker"] == "INV_STRUCTURAL_FORWARD_MOTION"
+
 
 class TestBlockerDiscovery:
     """Phase B executor discovers active blocking packets for supervisor package."""

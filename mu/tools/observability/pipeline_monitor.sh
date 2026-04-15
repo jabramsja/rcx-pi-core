@@ -122,32 +122,58 @@ file_is_recent() {
   [ "$age" -lt "$IDLE_WINDOW_SECONDS" ]
 }
 
+file_has_visible_content() {
+  local path="$1"
+  [ -s "$path" ] || return 1
+  grep -q '[^[:space:]]' "$path" 2>/dev/null
+}
+
+find_newest_recent_log() {
+  local newest=""
+  newest="$(
+    shopt -s nullglob
+    for candidate in "$@"; do
+      [ -f "$candidate" ] || continue
+      file_is_recent "$candidate" || continue
+      file_has_visible_content "$candidate" || continue
+      printf '%s\t%s\n' "$(file_mtime_seconds "$candidate")" "$candidate"
+    done | sort -rn -k1,1 | head -1 | cut -f2-
+  )"
+  printf '%s\n' "$newest"
+}
+
 find_newest_log() {
-  local log=""
   local repo_root=""
   # Live tee output (from 'exec' command) takes priority
-  if file_is_recent "$LIVE_LOG"; then
+  if file_is_recent "$LIVE_LOG" && file_has_visible_content "$LIVE_LOG"; then
     echo "$LIVE_LOG"
     return
   fi
-  # Collect all recent pipeline logs and pick the most recently modified.
-  # Avoids pinning to idle executor log while subprocess logs are still active.
+  # After the explicit live tee log, choose the freshest real pipeline surface
+  # across reviewer transcripts and stdout/live logs. Bridge stderr placeholders
+  # stay in a final fallback tier so they cannot outrank fresher real output.
   repo_root="$(resolve_repo_root)"
   [ -n "$repo_root" ] || return
   local newest=""
-  newest=$(ls -t \
+  newest="$(find_newest_recent_log \
+    "$repo_root"/.agent_bus/raw/phase-b-*/*reviewer*.txt \
+    "$repo_root"/.agent_bus/raw/phase-a-*/*reviewer*.txt \
     "$repo_root"/.scratch/commit_executor_live.log \
     "$repo_root"/.scratch/phase_a_executor_live.log \
     "$repo_root"/.scratch/phase_b_executor_live.log \
     "$repo_root"/.scratch/phase_b_implementer_output_*.txt \
     "$repo_root"/.scratch/phase_a_agent_review_*.stdout.log \
+    "$repo_root"/.scratch/phase_b_agent_review_*.stdout.log \
     "$repo_root"/.scratch/phase_a_bridge_*.stdout.log \
     "$repo_root"/.scratch/phase_b_bridge_*.stdout.log \
-    "$repo_root"/.scratch/phase_b_bridge_*.stderr.log \
-    "$repo_root"/.scratch/phase_b_agent_review_*.stdout.log \
-    /tmp/phase_b_*.txt /tmp/commit_*.txt /tmp/phase_a_*.txt \
-    2>/dev/null | head -1) || true
-  if [ -n "$newest" ] && file_is_recent "$newest"; then
+    /tmp/phase_b_*.txt /tmp/commit_*.txt /tmp/phase_a_*.txt)"
+  if [ -n "$newest" ]; then
+    echo "$newest"
+    return
+  fi
+  newest="$(find_newest_recent_log \
+    "$repo_root"/.scratch/phase_b_bridge_*.stderr.log)"
+  if [ -n "$newest" ]; then
     echo "$newest"
     return
   fi
@@ -172,7 +198,7 @@ render_idle_screen() {
   printf '\033[1;36mPane 1: live pipeline log\033[0m  %s\n' "$now"
   echo ""
   echo "  This pane shows the raw live log from the active phase."
-  echo "  No active pipeline log in the last 5 minutes."
+  echo "  No active pipeline log in the last 1 hour."
   echo "  The last wave finished or went quiet."
   echo ""
   echo "  Branch: $branch"

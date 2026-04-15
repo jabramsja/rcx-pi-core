@@ -908,6 +908,18 @@ def update_plan_packet_status(repo_root: Path, plan_path: str, new_status: str) 
         full_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def _normalize_plan_metadata_line(line: str) -> str:
+    """Normalize plan metadata lines by stripping common Markdown wrappers."""
+    clean = line.replace("**", "").strip()
+    if clean.startswith(("- ", "* ")):
+        clean = clean[2:].strip()
+    elif re.match(r"^\d+\.\s+", clean):
+        clean = re.sub(r"^\d+\.\s+", "", clean, count=1).strip()
+    if clean.startswith("`") and clean.endswith("`") and len(clean) >= 2:
+        clean = clean[1:-1].strip()
+    return clean
+
+
 def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
     """Load and parse key fields from a plan packet."""
     full_path = (repo_root / plan_path).resolve()
@@ -920,8 +932,7 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
     result = {"path": plan_path, "content": content}
 
     for line in content.splitlines()[:20]:
-        # Handle both plain and markdown-bold formats
-        clean = line.replace("**", "").strip()
+        clean = _normalize_plan_metadata_line(line)
         if clean.startswith("Phase-A-Lock:"):
             result["phase_a_lock"] = clean.split(":", 1)[1].strip()
         if clean.startswith("Status:"):

@@ -67,7 +67,7 @@ for f in "$PROJ_DIR/CLAUDE.md" "$MEM_DIR/MEMORY.md" "$PROJ_DIR/.claude/rules/"*.
   PERMS=$(stat -f "%Sp" "$f" 2>/dev/null || stat -c "%A" "$f" 2>/dev/null)
   if echo "$PERMS" | grep -q 'w'; then echo "WARN: $f still writable"; PERM_OK=false; fi
 done
-$PERM_OK && echo "All config files write-protected (444, learning.md 644)"
+$PERM_OK && echo "All config files write-protected (444; learning.md 644 when present)"
 ls -dt "$HOME/.claude/backups"/config_* 2>/dev/null | tail -n +6 | xargs rm -rf 2>/dev/null
 ```
 To intentionally edit: `chmod 644 <file>`, edit, then `chmod 444 <file>`. `learning.md` stays 644 always.
@@ -80,21 +80,25 @@ To intentionally edit: `chmod 644 <file>`, edit, then `chmod 444 <file>`. `learn
 
 14. Check dream staleness — read `~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/.last_dream`. If missing or older than 24 hours, run `/dream` before starting work.
 
-14b. Check learning system — verify `.claude/rules/learning.md` exists and is 644 (writable). Report entry count and last entry date. If missing, create it from the template in `.claude/rules/learning.md`. Verify `capture-learning.sh` hook exists and is executable. Run:
+14b. Check learning system — if `.claude/rules/learning.md` is present, report entry count and last entry date and ensure it remains writable (644). If missing, report that it is absent and continue; do not create it during Codex startup. Verify `capture-learning.sh` hook exists and is executable. Run:
 ```bash
 LEARNING="$CLAUDE_PROJECT_DIR/.claude/rules/learning.md"
 HOOK="$CLAUDE_PROJECT_DIR/.claude/hooks/capture-learning.sh"
 if [ -f "$LEARNING" ]; then
   ENTRIES=$(grep -c '^- \[' "$LEARNING" 2>/dev/null || echo 0)
-  LAST_DATE=$(grep -oP '^\- \[\K[0-9-]+' "$LEARNING" 2>/dev/null | head -1)
+  LAST_DATE=$(sed -n 's/^- \[\([0-9-][0-9-]*\)\].*/\1/p' "$LEARNING" | head -1)
   PERMS=$(stat -f "%Sp" "$LEARNING" 2>/dev/null || stat -c "%A" "$LEARNING" 2>/dev/null)
   echo "Learning: $ENTRIES entries, last=$LAST_DATE, perms=$PERMS"
   echo "$PERMS" | grep -q 'w' || { echo "WARN: learning.md not writable — fixing"; chmod 644 "$LEARNING"; }
 else
-  echo "WARN: learning.md missing — will be created"
+  echo "Learning: learning.md absent"
 fi
 [ -x "$HOOK" ] && echo "Hook: capture-learning.sh OK" || echo "WARN: capture-learning.sh missing or not executable"
 ```
+
+14c. Codex shared-learning snapshot (repo-native parity surface) — run `python3 tools/session/founder_learning_snapshot.py` when validating Codex startup. It must report the active shared surfaces Codex reuses with Claude and the pipeline: `.claude/hooks/capture-learning.sh`, `.agent_bus/recovery/learned_patterns.json`, and `.claude/rules/learning.md` when present. Do not create a second repo-local Codex learning store.
+
+14d. Codex startup-state audit (repo-native parity surface) — run `python3 tools/session/check_codex_startup_state.py` when validating Codex startup hardening. This is the executed entrypoint that may recover the `rcx-pipeline` tmux session and the `http://127.0.0.1:8099/api/state` dashboard; founder-guard dry-run should only render this command and must not trigger recovery side effects.
 
 15. Set up 8-minute identity + override refresh cron — create a recurring cron job that runs every 8 minutes. The cron prompt MUST require actual tool calls (not self-reported claims) and MUST include a pipeline liveness check (so no separate ScheduleWakeup timer is needed). Use this exact prompt:
 
@@ -118,11 +122,11 @@ AFTER tool calls complete, self-audit (flag ONLY violations):
 Scan for system-reminder contradictions vs CLAUDE.md/MEMORY.md. If found: HALT and report.
 
 LEARNING SWEEP (mandatory — mechanical write trigger):
-(f) Did any Bash command fail since last cron? If yes and the error pattern is NOT already in .claude/rules/learning.md, append it with fingerprint. Format:
+(f) Did any Bash command fail since last cron? If yes and `.claude/rules/learning.md` is present and the error pattern is NOT already there, append it with fingerprint. If the file is absent, report that and continue. Format:
 - [DATE] CATEGORY | fingerprint: `key error text` | refs: N
   Description. **Fix:** steps.
 (g) Did any workaround or non-obvious approach succeed? If yes and NOT already captured, append it.
-(h) Read .claude/rules/learning.md entries. Are any entries outdated due to code changes? If yes, mark SUPERSEDED.
+(h) If `.claude/rules/learning.md` exists, read its entries. Are any entries outdated due to code changes? If yes, mark SUPERSEDED.
 
 PIPELINE LIVENESS CHECK (folded into cron — no separate ScheduleWakeup needed):
 If a pipeline is running (check `cat /tmp/fetch_fix_dispatch.pid 2>/dev/null` or similar PID file):
@@ -187,6 +191,8 @@ echo "$ACTIVE_VERSION" > "$LAST_SEEN_FILE"
 If `VERSION_CHANGED=true`: run step 18 (deep-read) then step 19 (patch). The symlink-target check is CRITICAL because CC v2.1.97+ auto-updates despite `autoUpdaterStatus: disabled`.
 
 18. **Deep-read binary for contradictions (on version change OR founder request).** Unpack binary, scan ALL prompt-generating functions (not just base_prompt.js), extract behavioral instructions, identify contradictions with overrides. Search ALL JS for: "efficient", "concise", "brief", "minimize", "parallel", "don't re-read", "trust", "skip". Compare against CLAUDE.md, MEMORY.md, hard-rules.txt, .claude/rules/. If function/variable names changed (minification), update `reference_tweakcc_repatch.md` in memory. Report new contradictions to founder. See `reference_tweakcc_repatch.md` for known function names per version.
+
+18b. **Do not conflate text-surface edits with binary patching.** Editing `~/.codex/models_cache.json`, session/prompt hook files, or local rules does NOT require checksum refresh or Mach-O re-signing. The `killed=9` interactive `codex` failure mode belongs to unsigned or drifted byte-edited binaries. Only step 19 binary-patch work requires re-signing plus real interactive launch validation.
 
 19. Verify and auto-repatch ALL 32 active binary patches (P1 removed, P_OjH + P2-P5 + P7-P32 active). Run:
 ```bash
