@@ -726,6 +726,51 @@ class TestLoadPlanPacketPathTraversal:
         assert result["unblocks_wave_id"] == "wave-upstream-2026-04-14"
         assert result["unblocks_runtime_blocker"] == "INV_STRUCTURAL_FORWARD_MOTION"
 
+    def test_header_metadata_wins_over_later_narrative_bullets(self, tmp_path):
+        """Canonical header metadata must not be overwritten by later bullets."""
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "# Plan\n"
+            "Status: Phase A (design - bridge-converged)\n"
+            "Task: [TEST-PLAN]\n"
+            "Phase-A-Lock: LOCKED\n"
+            "intro line\n"
+            "- Status: ACTIVE (unparked 2026-03-28)\n"
+            "- Phase-A-Lock: UNLOCKED\n"
+            "- `FOUNDER_OVERRIDE:plan-override-2026-04-16 (founder authorized packet follow-up)`\n"
+            "- `unblocks_wave_id: wave-upstream-2026-04-14`\n"
+            "- `unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION`\n"
+        )
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+        assert result["status"] == "Phase A (design - bridge-converged)"
+        assert result["task_id"] == "[TEST-PLAN]"
+        assert result["phase_a_lock"] == "LOCKED"
+        assert result["founder_override"] == "plan-override-2026-04-16"
+        assert result["unblocks_wave_id"] == "wave-upstream-2026-04-14"
+        assert result["unblocks_runtime_blocker"] == "INV_STRUCTURAL_FORWARD_MOTION"
+
+    @pytest.mark.parametrize(
+        ("plan_content", "expected"),
+        [
+            (
+                "Unblocks wave id: wave-upstream-2026-04-14\n"
+                "Unblocks runtime blocker: INV_STRUCTURAL_FORWARD_MOTION\n",
+                ("wave-upstream-2026-04-14", "INV_STRUCTURAL_FORWARD_MOTION"),
+            ),
+            (
+                "- `unblocks_wave_id: wave-upstream-2026-04-14`\n"
+                "- `unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION`\n",
+                ("wave-upstream-2026-04-14", "INV_STRUCTURAL_FORWARD_MOTION"),
+            ),
+        ],
+    )
+    def test_extract_maintenance_bypass_fields_normalizes_tokens(self, plan_content, expected):
+        """Fallback bypass extraction must accept canonical and markdown forms."""
+        assert pb_mod._extract_maintenance_bypass_fields(plan_content) == expected
+
 
 class TestBlockerDiscovery:
     """Phase B executor discovers active blocking packets for supervisor package."""

@@ -110,8 +110,6 @@ BRIDGE_REVIEW_STALE_TIMEOUT = 120.0
 BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT = 60.0
 DEFAULT_PYTEST_GATE_TIMEOUT_S = 300
 MAX_PYTEST_GATE_TIMEOUT_S = 900
-_PLAN_UNBLOCKS_WAVE_RE = re.compile(r"unblocks_wave_id:\s*([A-Za-z0-9_-]+)")
-_PLAN_UNBLOCKS_BLOCKER_RE = re.compile(r"unblocks_runtime_blocker:\s*([^\n]+)")
 _MAINTENANCE_FORBIDDEN_PREFIXES = (
     "mu/host/",
     "mu/substrate/",
@@ -933,19 +931,23 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
 
     for line in content.splitlines():
         clean = _normalize_plan_metadata_line(line)
-        if clean.startswith("Phase-A-Lock:"):
+        if clean.startswith("Phase-A-Lock:") and "phase_a_lock" not in result:
             result["phase_a_lock"] = clean.split(":", 1)[1].strip()
-        if clean.startswith("Status:"):
+        if clean.startswith("Status:") and "status" not in result:
             result["status"] = clean.split(":", 1)[1].strip()
-        if clean.startswith("Task:"):
+        if clean.startswith("Task:") and "task_id" not in result:
             result["task_id"] = clean.split(":", 1)[1].strip()
-        if clean.startswith("FOUNDER_OVERRIDE:"):
+        if clean.startswith("FOUNDER_OVERRIDE:") and "founder_override" not in result:
             founder_override = clean.split(":", 1)[1].strip()
             if founder_override:
                 result["founder_override"] = founder_override.split()[0].strip().rstrip("`.,;")
-        if clean.startswith("Unblocks wave id:") or clean.startswith("unblocks_wave_id:"):
+        if (
+            clean.startswith("Unblocks wave id:") or clean.startswith("unblocks_wave_id:")
+        ) and "unblocks_wave_id" not in result:
             result["unblocks_wave_id"] = clean.split(":", 1)[1].strip()
-        if clean.startswith("Unblocks runtime blocker:") or clean.startswith("unblocks_runtime_blocker:"):
+        if (
+            clean.startswith("Unblocks runtime blocker:") or clean.startswith("unblocks_runtime_blocker:")
+        ) and "unblocks_runtime_blocker" not in result:
             result["unblocks_runtime_blocker"] = clean.split(":", 1)[1].strip()
 
     return result
@@ -969,14 +971,22 @@ def _extract_maintenance_bypass_fields(plan_content: str) -> tuple[str, str]:
     """Read optional consecutive-maintenance bypass fields from the plan text."""
     if not plan_content:
         return "", ""
-    unblocks_wave_match = _PLAN_UNBLOCKS_WAVE_RE.search(plan_content)
-    unblocks_blocker_match = _PLAN_UNBLOCKS_BLOCKER_RE.search(plan_content)
-    if not unblocks_wave_match or not unblocks_blocker_match:
-        return "", ""
-    return (
-        unblocks_wave_match.group(1).strip().strip("`"),
-        unblocks_blocker_match.group(1).strip().strip("`"),
-    )
+    unblocks_wave_id = ""
+    unblocks_runtime_blocker = ""
+    for line in plan_content.splitlines():
+        clean = _normalize_plan_metadata_line(line)
+        if (
+            clean.startswith("Unblocks wave id:") or clean.startswith("unblocks_wave_id:")
+        ) and not unblocks_wave_id:
+            unblocks_wave_id = clean.split(":", 1)[1].strip().strip("`")
+        if (
+            clean.startswith("Unblocks runtime blocker:")
+            or clean.startswith("unblocks_runtime_blocker:")
+        ) and not unblocks_runtime_blocker:
+            unblocks_runtime_blocker = clean.split(":", 1)[1].strip().strip("`")
+        if unblocks_wave_id and unblocks_runtime_blocker:
+            return unblocks_wave_id, unblocks_runtime_blocker
+    return "", ""
 
 
 def validate_inputs(

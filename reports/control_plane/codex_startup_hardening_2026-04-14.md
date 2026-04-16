@@ -278,12 +278,13 @@ governance truth did not match the current package: this packet still
 advertised `Status: ACTIVE (post-review cleanup pending rerun)` / `Phase: A`,
 its prior re-entry note still told the pipeline to stop and rerun Phase B, and
 `TASKS.md` underreported bridge convergence. Those were staged governance-drift
-defects, not new code-surface blockers. The current staged package at
-`.scratch/phase_b_supervisor_package.json` reports `current_judgment:
-COMMIT_GO`, `bridge_status.rounds: 3`, `bridge_status.reentry: true`, and 5
-changed files. This packet revision syncs the staged control-plane truth to
-that package so the next bounded meta review can mint a fresh handoff/receipt
-from the synchronized staged state and proceed to commit executor.
+defects, not new code-surface blockers. The current staged follow-up package at
+`.scratch/manual_followup_supervisor_package.json` carries this packet alongside
+the parser/test fix slice, so it reports `current_judgment: COMMIT_GO`,
+`bridge_status.rounds: 3`, `bridge_status.reentry: true`, and 3 changed files.
+This packet revision syncs the staged control-plane truth to that follow-up
+package so the next bounded meta review can mint a fresh handoff/receipt from
+the synchronized staged state and proceed to commit executor.
 
 ## Learning Context
 
