@@ -19,6 +19,11 @@ web_mod = load_module("pipeline_dashboard_web_observability", _OBSERVABILITY_DIR
 FailureClass = rg_mod.FailureClass
 
 
+def _shell_quote(text: str) -> str:
+    import shlex as _shlex
+    return _shlex.quote(text)
+
+
 def make_empty_store():
     # Local test helper: returns an empty learning-store dict identical in
     # shape to the recovery_gate module's private empty-store factory,
@@ -3321,7 +3326,7 @@ esac
                 "-lc",
                 "watcher=$(mktemp); "
                 + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
-                + shlex.quote(str(script))
+                + _shell_quote(str(script))
                 + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
                 + "source \"$watcher\"; "
                 + "find_newest_log; "
@@ -3364,7 +3369,7 @@ esac
                 "-lc",
                 "watcher=$(mktemp); "
                 + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
-                + shlex.quote(str(script))
+                + _shell_quote(str(script))
                 + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
                 + "source \"$watcher\"; "
                 + "find_newest_log; "
@@ -3405,7 +3410,7 @@ esac
                 "-lc",
                 "watcher=$(mktemp); "
                 + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
-                + shlex.quote(str(script))
+                + _shell_quote(str(script))
                 + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
                 + "source \"$watcher\"; "
                 + "find_newest_log; "
@@ -3446,7 +3451,7 @@ esac
                 "-lc",
                 "watcher=$(mktemp); "
                 + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
-                + shlex.quote(str(script))
+                + _shell_quote(str(script))
                 + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
                 + "source \"$watcher\"; "
                 + "find_newest_log; "
@@ -8417,3 +8422,52 @@ class TestLoadRelevantLearnings:
         # Same-date entries should come before older
         assert a_pos < older_pos
         assert b_pos < older_pos
+
+
+def test_prompt_via_stdin_uses_communicate_input_without_closed_pipe_error(tmp_path):
+    result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
+    agent_response = json.dumps({
+        "action": "skip",
+        "commands": [],
+        "explanation": "manual follow-up required",
+    })
+
+    class ClosedPipeSensitivePopen(FakePopen):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            import io as _io
+            self.stdin = _io.StringIO()
+
+        def communicate(self, input=None, timeout=None):
+            if input is None and getattr(self.stdin, "closed", False):
+                raise ValueError("I/O operation on closed file.")
+            return super().communicate(input=input, timeout=timeout)
+
+    fake = ClosedPipeSensitivePopen(stdout=agent_response, pid=7777)
+
+    invocation = {
+        "bridge_adapters": SimpleNamespace(
+            _normalize_stdout_for_adapter=lambda _spec, _cmd, text: text
+        ),
+        "spec": SimpleNamespace(name="codex", prompt_via_stdin=True, timeout_s=1200),
+        "cmd": ["codex", "exec", "-", "--json"],
+        "env": {},
+        "command_label": "codex exec - --json",
+        "prompt_input": "PROMPT_PAYLOAD",
+        "prompt_path": Path("recovery_prompt.txt"),
+    }
+
+    with patch.object(rg_mod, "subprocess") as mock_sp:
+        mock_sp.run = lambda *args, **kwargs: MagicMock(returncode=0, stdout="", stderr="")
+        mock_sp.Popen = lambda *args, **kwargs: fake
+        mock_sp.PIPE = subprocess.PIPE
+        mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+        with patch.object(rg_mod, "_resolve_recovery_agent_invocation", return_value=invocation):
+            r = rg_mod.run_recovery_loop(tmp_path, result, "w1", max_iterations=1)
+
+    assert r["recovered"] is False
+    assert r["iterations"] == 1
+    assert fake.received_input == "PROMPT_PAYLOAD"
+    status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+    assert status["state"] == "tier3_skipped"
+    assert status["outcome"] == "skipped"

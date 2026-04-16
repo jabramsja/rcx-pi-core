@@ -952,8 +952,8 @@ def _extract_maintenance_bypass_fields(plan_content: str) -> tuple[str, str]:
     if not unblocks_wave_match or not unblocks_blocker_match:
         return "", ""
     return (
-        unblocks_wave_match.group(1).strip(),
-        unblocks_blocker_match.group(1).strip(),
+        unblocks_wave_match.group(1).strip().strip("`"),
+        unblocks_blocker_match.group(1).strip().strip("`"),
     )
 
 
@@ -2005,6 +2005,10 @@ def _build_phase_b_tracker_note(
     receipt_path: str,
     bridge_rounds: int,
     reentry: bool,
+    post_gate_contract_sweep: str = "",
+    founder_override: str = "",
+    unblocks_wave_id: str = "",
+    unblocks_runtime_blocker: str = "",
 ) -> str:
     """Render an L4-compliant tracker note for a Phase B commit handoff."""
     display_task = (task_id or "").strip() or wave_id
@@ -2052,6 +2056,13 @@ def _build_phase_b_tracker_note(
         "progress_proof_before": progress_before,
         "progress_proof_after": progress_after,
     }
+    if founder_override:
+        tracker_kwargs["founder_override"] = founder_override
+    if wave_class == "L4_STRUCTURAL":
+        tracker_kwargs["post_gate_contract_sweep"] = (
+            post_gate_contract_sweep
+            or "python3 tools/checks/enforce_l4_execution_contract.py --staged"
+        )
     if wave_class == "MAINTENANCE":
         runtime_like = [
             path for path in changed_files
@@ -2072,14 +2083,17 @@ def _build_phase_b_tracker_note(
             ),
             "defer_reason_code": "PIPELINE_HARDENING",
         })
-        unblocks_wave_id, unblocks_runtime_blocker = _extract_maintenance_bypass_fields(
-            plan_content,
-        )
-        if unblocks_wave_id and unblocks_runtime_blocker:
-            tracker_kwargs.update({
-                "unblocks_wave_id": unblocks_wave_id,
-                "unblocks_runtime_blocker": unblocks_runtime_blocker,
-            })
+        if not (unblocks_wave_id and unblocks_runtime_blocker):
+            extracted_wave_id, extracted_runtime_blocker = _extract_maintenance_bypass_fields(
+                plan_content,
+            )
+            if extracted_wave_id and extracted_runtime_blocker:
+                unblocks_wave_id = unblocks_wave_id or extracted_wave_id
+                unblocks_runtime_blocker = unblocks_runtime_blocker or extracted_runtime_blocker
+        if unblocks_wave_id:
+            tracker_kwargs["unblocks_wave_id"] = unblocks_wave_id
+        if unblocks_runtime_blocker:
+            tracker_kwargs["unblocks_runtime_blocker"] = unblocks_runtime_blocker
 
     fields = TrackerSyncNoteFields(
         wave_id=wave_id,
