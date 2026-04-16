@@ -19,8 +19,8 @@ BASELINE_TOOL_SCRIPTS = 68  # .py + .sh in mu/tools/ (67 + sync_native_agents.sh
 BASELINE_CORE_DOCS = 48  # .md in mu/docs/ (all subdirs) — bumped for P6 TypedNumericEnvelopes.v0.md
 
 # Per-wave caps from DocGovernance.v0.md
-CAP_TEST_FILES = 108  # +1 for test_executor_config_alignment.py (timeout-budget enforcement)
-CAP_TOOL_SCRIPTS = 38  # +1 for _resolve_live_root.sh (tmux worktree resolution)
+CAP_TEST_FILES = 109  # +1 for test_executor_config_alignment.py; +1 for test_codex_startup_state.py (startup hardening, founder sign-off 2026-04-15)
+CAP_TOOL_SCRIPTS = 40  # +1 for _resolve_live_root.sh; +2 for startup-hardening session tools (founder_learning_snapshot.py, check_codex_startup_state.py; founder sign-off 2026-04-15)
 CAP_CORE_DOCS = 12  # +1 for L3SubstrateArchitecture.v0.md (extracted from STATUS.md)
 
 

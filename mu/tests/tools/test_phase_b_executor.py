@@ -520,6 +520,11 @@ class TestPrepareCommitHandoff:
             wave_class="MAINTENANCE",
             target_gate_id="G8",
             plan_path="reports/control_plane/pipeline_control_surface_split_2026-04-14.md",
+            plan_content=(
+                "## Consecutive Maintenance Bypass\n"
+                "unblocks_wave_id: wave-codex-startup-hardening-2026-04-14\n"
+                "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION\n"
+            ),
             changed_files=[
                 "mu/tools/executors/recovery_gate.py",
                 "mu/tests/tools/test_recovery_gate.py",
@@ -533,7 +538,38 @@ class TestPrepareCommitHandoff:
         assert "Class: MAINTENANCE" in note
         assert "no_op_proof:" in note
         assert "defer_reason_code: PIPELINE_HARDENING" in note
+        assert "unblocks_wave_id: wave-codex-startup-hardening-2026-04-14" in note
+        assert "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION" in note
         assert "evidence_command:" in note
+
+    def test_build_phase_b_tracker_note_enabler_threads_founder_override(self):
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            wave_id="codex-startup-hardening-2026-04-14",
+            task_id="[CODEX-STARTUP-HARDENING]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/codex_startup_hardening_2026-04-14.md",
+            plan_content=(
+                "## Wave Class Justification\n"
+                "FOUNDER_OVERRIDE:codex-startup-hardening-2026-04-16-followup "
+                "(founder authorized this non-structural pipeline-hardening follow-up)\n"
+            ),
+            changed_files=[
+                "mu/tools/executors/phase_b_executor.py",
+                "mu/tests/tools/test_phase_b_executor.py",
+                "reports/control_plane/codex_startup_hardening_2026-04-14.md",
+            ],
+            test_files=[
+                "mu/tests/tools/test_phase_b_executor.py",
+                "mu/tests/tools/test_recovery_gate.py",
+            ],
+            receipt_path=".agent_bus/meta/pre_commit_receipts/receipt_test.json",
+            bridge_rounds=3,
+            reentry=True,
+        )
+        assert "Class: L4_ENABLER" in note
+        assert "FOUNDER_OVERRIDE:codex-startup-hardening-2026-04-16-followup" in note
+        assert "progress_proof_after: Phase B emitted a commit-ready handoff for codex-startup-hardening-2026-04-14 with 3 wave-owned file(s)" in note
 
     def test_build_phase_b_tracker_note_maintenance_includes_plan_bypass_fields(self):
         note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing plan-driven maintenance bypass fields
@@ -633,10 +669,107 @@ class TestLoadPlanPacketPathTraversal:
         plan_dir = repo / "reports"
         plan_dir.mkdir(parents=True)
         plan_file = plan_dir / "plan.md"
-        plan_file.write_text("Phase-A-Lock: LOCKED\nStatus: ACTIVE\nTask: [TEST-PLAN]\n")
+        plan_file.write_text(
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [TEST-PLAN]\n"
+            "Unblocks wave id: wave-upstream-2026-04-14\n"
+            "Unblocks runtime blocker: INV_STRUCTURAL_FORWARD_MOTION\n"
+        )
         result = pb_mod.load_plan_packet(repo, "reports/plan.md")
         assert result["phase_a_lock"] == "LOCKED"
         assert result["task_id"] == "[TEST-PLAN]"
+        assert result["unblocks_wave_id"] == "wave-upstream-2026-04-14"
+        assert result["unblocks_runtime_blocker"] == "INV_STRUCTURAL_FORWARD_MOTION"
+
+    def test_markdown_bypass_lines_parse(self, tmp_path):
+        """Markdown-bulleted bypass tokens must parse without quote residue."""
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "# Plan\n"
+            "Status: ACTIVE\n"
+            "Task: [TEST-PLAN]\n"
+            "1. `Phase-A-Lock: LOCKED`\n"
+            "- `unblocks_wave_id: wave-upstream-2026-04-14`\n"
+            "- `unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION`\n"
+        )
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+        assert result["phase_a_lock"] == "LOCKED"
+        assert result["task_id"] == "[TEST-PLAN]"
+        assert result["unblocks_wave_id"] == "wave-upstream-2026-04-14"
+        assert result["unblocks_runtime_blocker"] == "INV_STRUCTURAL_FORWARD_MOTION"
+
+    def test_late_markdown_bypass_lines_parse(self, tmp_path):
+        """Live packets may place bypass metadata well past the first 20 lines."""
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        filler = "".join(f"intro line {i}\n" for i in range(30))
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "# Plan\n"
+            "Status: ACTIVE\n"
+            "Task: [TEST-PLAN]\n"
+            "Phase-A-Lock: LOCKED\n"
+            + filler
+            + "- `FOUNDER_OVERRIDE:plan-override-2026-04-16 (founder authorized packet follow-up)`\n"
+            + "- `unblocks_wave_id: wave-upstream-2026-04-14`\n"
+            + "- `unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION`\n"
+        )
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+        assert result["phase_a_lock"] == "LOCKED"
+        assert result["task_id"] == "[TEST-PLAN]"
+        assert result["founder_override"] == "plan-override-2026-04-16"
+        assert result["unblocks_wave_id"] == "wave-upstream-2026-04-14"
+        assert result["unblocks_runtime_blocker"] == "INV_STRUCTURAL_FORWARD_MOTION"
+
+    def test_header_metadata_wins_over_later_narrative_bullets(self, tmp_path):
+        """Canonical header metadata must not be overwritten by later bullets."""
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "# Plan\n"
+            "Status: Phase A (design - bridge-converged)\n"
+            "Task: [TEST-PLAN]\n"
+            "Phase-A-Lock: LOCKED\n"
+            "intro line\n"
+            "- Status: ACTIVE (unparked 2026-03-28)\n"
+            "- Phase-A-Lock: UNLOCKED\n"
+            "- `FOUNDER_OVERRIDE:plan-override-2026-04-16 (founder authorized packet follow-up)`\n"
+            "- `unblocks_wave_id: wave-upstream-2026-04-14`\n"
+            "- `unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION`\n"
+        )
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+        assert result["status"] == "Phase A (design - bridge-converged)"
+        assert result["task_id"] == "[TEST-PLAN]"
+        assert result["phase_a_lock"] == "LOCKED"
+        assert result["founder_override"] == "plan-override-2026-04-16"
+        assert result["unblocks_wave_id"] == "wave-upstream-2026-04-14"
+        assert result["unblocks_runtime_blocker"] == "INV_STRUCTURAL_FORWARD_MOTION"
+
+    @pytest.mark.parametrize(
+        ("plan_content", "expected"),
+        [
+            (
+                "Unblocks wave id: wave-upstream-2026-04-14\n"
+                "Unblocks runtime blocker: INV_STRUCTURAL_FORWARD_MOTION\n",
+                ("wave-upstream-2026-04-14", "INV_STRUCTURAL_FORWARD_MOTION"),
+            ),
+            (
+                "- `unblocks_wave_id: wave-upstream-2026-04-14`\n"
+                "- `unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION`\n",
+                ("wave-upstream-2026-04-14", "INV_STRUCTURAL_FORWARD_MOTION"),
+            ),
+        ],
+    )
+    def test_extract_maintenance_bypass_fields_normalizes_tokens(self, plan_content, expected):
+        """Fallback bypass extraction must accept canonical and markdown forms."""
+        assert pb_mod._extract_maintenance_bypass_fields(plan_content) == expected  # ANTICHEAT_OK: testing maintenance bypass fallback normalization
 
 
 class TestBlockerDiscovery:
@@ -689,6 +822,115 @@ class TestBlockerDiscovery:
                 if p.is_file() and p.suffix == ".md" and p.name != "README.md"
             )
         assert blocker_paths == []
+
+
+class TestMaintenanceTrackerMetadataPropagation:
+    """Phase B must propagate maintenance unblock metadata through the live handoff path."""
+
+    def test_run_phase_b_threads_plan_unblocks_metadata_into_handoff(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        plan = repo / "reports" / "control_plane" / "plan.md"
+        plan.write_text(
+            "# Plan\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "- `unblocks_wave_id: wave-codex-startup-hardening-2026-04-14`\n"
+            "- `unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION`\n",
+            encoding="utf-8",
+        )
+
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_class": "MAINTENANCE",
+            "target_gate_id": "G8",
+        }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["TASKS.md"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0, "stdout": "GO\n", "stderr": "",
+                 "decision": "GO", "job_id": "j1",
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json") as mock_handoff:
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        tracker_note_text = mock_handoff.call_args.kwargs["tracker_note_text"]
+        assert "Class: MAINTENANCE" in tracker_note_text
+        assert "unblocks_wave_id: wave-codex-startup-hardening-2026-04-14" in tracker_note_text
+        assert "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION" in tracker_note_text
+
+    def test_run_phase_b_threads_founder_override_into_enabler_handoff(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        plan = repo / "reports" / "control_plane" / "plan.md"
+        plan.write_text(
+            "# Plan\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [CODEX-STARTUP-HARDENING]\n"
+            "- `FOUNDER_OVERRIDE:codex-startup-hardening-2026-04-16-followup "
+            "(founder authorized this non-structural pipeline-hardening follow-up)`\n",
+            encoding="utf-8",
+        )
+
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[CODEX-STARTUP-HARDENING]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+        }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tools/executors/phase_b_executor.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=[
+                 "mu/tools/executors/phase_b_executor.py",
+                 "mu/tests/tools/test_phase_b_executor.py",
+                 "reports/control_plane/plan.md",
+             ]), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0,
+                 "passed": True,
+                 "stdout": "",
+                 "stderr": "",
+             }), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0, "stdout": "GO\n", "stderr": "",
+                 "decision": "GO", "job_id": "j1",
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json") as mock_handoff:
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        tracker_note_text = mock_handoff.call_args.kwargs["tracker_note_text"]
+        assert "Class: L4_ENABLER" in tracker_note_text
+        assert "FOUNDER_OVERRIDE:codex-startup-hardening-2026-04-16-followup" in tracker_note_text
 
 
 @pytest.mark.usefixtures("mock_routing_record")

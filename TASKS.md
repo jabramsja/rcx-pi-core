@@ -128,6 +128,8 @@ If a task is not listed here, it is NOT to be implemented.
 *FOUNDER_OVERRIDE entries for session 2026-04-12 waves are embedded in their respective tracker notes above (lines 108-116). Duplicates from multi-commit cycles cleaned 2026-04-12.*
 Items here are implemented and verified under current invariants. Changes require explicit promotion through VECTOR and new tests. Completed NOW/NEXT items are archived here.
 
+- Tracker sync note (2026-04-16, codex-startup-hardening-2026-04-14): **CODEX-STARTUP-HARDENING — commit-ready Phase B handoff.**. Class: L4_ENABLER. target_gate_id: G8. evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_recovery_gate.py`. evidence_delta: (1) Phase B converged on the locked plan at reports/control_plane/codex_startup_hardening_2026-04-14.md. (2) Final pytest gate covered 2 test file(s) from the wave-owned diff. (3) Commit handoff carries explicit receipt authority at .agent_bus/meta/pre_commit_receipts/receipt_2026-04-15T18-51-54p00-00_5d7aec33.json.. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact.. progress_proof_after: Phase B emitted a commit-ready handoff for codex-startup-hardening-2026-04-14 with 3 wave-owned file(s), bridge rounds=3, reentry=true, explicit receipt authority, and an L4-compliant tracker note.. FOUNDER_OVERRIDE:codex-startup-hardening-2026-04-16-followup. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/codex-startup-hardening-2026-04-14.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id codex-startup-hardening-2026-04-14 --output reports/l4_wave_indicators/codex-startup-hardening-2026-04-14.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
+
 - **[META-BRIDGE-S1] CLOSED** (2026-03-28). Pre-commit meta-bridge supervisor implemented and proven. PRs #641-#644 (impl), #653 (routing fix). Seeded-package verification complete. All follow-on items spawned as separate tasks and completed: [PRE-COMMIT-SUPERVISOR-STANDING], [META-BRIDGE-S2], [EXECUTOR-SURFACES].
 
 - **[META-BRIDGE-S2] CLOSED** (2026-03-28). Post-merge routing supervisor implemented and merged (PR #657). Routing-only deliberation authority. Proven through 9 PRs in pipeline sprint.
@@ -176,6 +178,11 @@ See `archive/docs/MinimalNativeExecutionPrimitive.v0.md` for invariants and non-
   **Session 2026-04-12:** PRs #757-765 (9 PRs). PRs #757 (agent-review-as-warning + staging split), #758 (agent_review_enabled), #759 (fetch fix + hook regex), #760 (auto-defer + CI poll + recovery), #761 (force-mcp-sqlite + dirty files), #762 (7 followup fixes), #763 (final 4 fixes), #764 (bot sweep), #765 (block-protected-branch tokenizer).
   **Lane:** control-surface (enforcement hardening).
   **Remaining:** open bot comments on PRs #757-765 (post-merge findings, tracked in `reports/deferred/non_blocking/`). Pipeline auto-defer + bot remediation handles new findings mechanically.
+
+- **[CODEX-STARTUP-HARDENING]** **IN PROGRESS** (2026-04-14, founder-authorized).
+  Harden Codex-local startup parity with founder preflight: shared-learning snapshot, Codex startup drift audit, tmux/web observability enforcement, binary-vs-text-surface documentation for checksum / re-sign behavior, and bounded commit_executor bot-remediation backend parity so recovery follows Codex config instead of a hardcoded Claude adapter.
+  **Tracked packet:** `reports/control_plane/codex_startup_hardening_2026-04-14.md`
+  **Lane:** control-surface (Codex session hardening).
 
 - ~~**[META-BRIDGE-BOUNDED-REVIEW-FIX]**~~ **CLOSED** (2026-04-08, PR #749). Task-ID path safety, startup-flow suppression, zero-match envelope, lock_plan regex, stale-timeout alignment. Moved to Ra.
 

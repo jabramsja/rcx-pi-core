@@ -17,6 +17,8 @@ Notes:
   - It does NOT auto-invoke Codex skills. It prints the required skill names so
     the operator/session can apply them deliberately.
   - Default behavior is dry-run: print required docs, skills, and commands.
+  - Dry-run stays print-only for the learning snapshot and startup-state audit;
+    any tmux/dashboard recovery remains behind `--run`.
   - Pass --run to execute the command set and return non-zero if any command fails.
   - For proof-class / active-doc attestation after startup, run
     ./tools/session/founder_session_attest.sh <mode>
@@ -75,6 +77,8 @@ COMMON_COMMANDS=(
     "python3 mu/tools/checks/check_host_semantics_ratchet.py --json"
     "python3 tools/checks/check_host_authority_inventory_ratchet.py"
     "./tools/checks/check_docs_consistency.sh"
+    "python3 tools/session/founder_learning_snapshot.py"
+    "python3 tools/session/check_codex_startup_state.py"
 )
 
 SKILLS=()

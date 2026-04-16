@@ -110,8 +110,6 @@ BRIDGE_REVIEW_STALE_TIMEOUT = 120.0
 BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT = 60.0
 DEFAULT_PYTEST_GATE_TIMEOUT_S = 300
 MAX_PYTEST_GATE_TIMEOUT_S = 900
-_PLAN_UNBLOCKS_WAVE_RE = re.compile(r"unblocks_wave_id:\s*([A-Za-z0-9_-]+)")
-_PLAN_UNBLOCKS_BLOCKER_RE = re.compile(r"unblocks_runtime_blocker:\s*([^\n]+)")
 _MAINTENANCE_FORBIDDEN_PREFIXES = (
     "mu/host/",
     "mu/substrate/",
@@ -908,6 +906,18 @@ def update_plan_packet_status(repo_root: Path, plan_path: str, new_status: str) 
         full_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def _normalize_plan_metadata_line(line: str) -> str:
+    """Normalize plan metadata lines by stripping common Markdown wrappers."""
+    clean = line.replace("**", "").strip()
+    if clean.startswith(("- ", "* ")):
+        clean = clean[2:].strip()
+    elif re.match(r"^\d+\.\s+", clean):
+        clean = re.sub(r"^\d+\.\s+", "", clean, count=1).strip()
+    if clean.startswith("`") and clean.endswith("`") and len(clean) >= 2:
+        clean = clean[1:-1].strip()
+    return clean
+
+
 def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
     """Load and parse key fields from a plan packet."""
     full_path = (repo_root / plan_path).resolve()
@@ -919,31 +929,64 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
     content = full_path.read_text(encoding="utf-8")
     result = {"path": plan_path, "content": content}
 
-    for line in content.splitlines()[:20]:
-        # Handle both plain and markdown-bold formats
-        clean = line.replace("**", "").strip()
-        if clean.startswith("Phase-A-Lock:"):
+    for line in content.splitlines():
+        clean = _normalize_plan_metadata_line(line)
+        if clean.startswith("Phase-A-Lock:") and "phase_a_lock" not in result:
             result["phase_a_lock"] = clean.split(":", 1)[1].strip()
-        if clean.startswith("Status:"):
+        if clean.startswith("Status:") and "status" not in result:
             result["status"] = clean.split(":", 1)[1].strip()
-        if clean.startswith("Task:"):
+        if clean.startswith("Task:") and "task_id" not in result:
             result["task_id"] = clean.split(":", 1)[1].strip()
+        if clean.startswith("FOUNDER_OVERRIDE:") and "founder_override" not in result:
+            founder_override = clean.split(":", 1)[1].strip()
+            if founder_override:
+                result["founder_override"] = founder_override.split()[0].strip().rstrip("`.,;")
+        if (
+            clean.startswith("Unblocks wave id:") or clean.startswith("unblocks_wave_id:")
+        ) and "unblocks_wave_id" not in result:
+            result["unblocks_wave_id"] = clean.split(":", 1)[1].strip()
+        if (
+            clean.startswith("Unblocks runtime blocker:") or clean.startswith("unblocks_runtime_blocker:")
+        ) and "unblocks_runtime_blocker" not in result:
+            result["unblocks_runtime_blocker"] = clean.split(":", 1)[1].strip()
 
     return result
+
+
+def _extract_founder_override(plan_content: str) -> str:
+    """Read an optional canonical founder override token from the plan text."""
+    if not plan_content:
+        return ""
+    for line in plan_content.splitlines():
+        clean = _normalize_plan_metadata_line(line)
+        if not clean.startswith("FOUNDER_OVERRIDE:"):
+            continue
+        founder_override = clean.split(":", 1)[1].strip()
+        if founder_override:
+            return founder_override.split()[0].strip().rstrip("`.,;")
+    return ""
 
 
 def _extract_maintenance_bypass_fields(plan_content: str) -> tuple[str, str]:
     """Read optional consecutive-maintenance bypass fields from the plan text."""
     if not plan_content:
         return "", ""
-    unblocks_wave_match = _PLAN_UNBLOCKS_WAVE_RE.search(plan_content)
-    unblocks_blocker_match = _PLAN_UNBLOCKS_BLOCKER_RE.search(plan_content)
-    if not unblocks_wave_match or not unblocks_blocker_match:
-        return "", ""
-    return (
-        unblocks_wave_match.group(1).strip(),
-        unblocks_blocker_match.group(1).strip(),
-    )
+    unblocks_wave_id = ""
+    unblocks_runtime_blocker = ""
+    for line in plan_content.splitlines():
+        clean = _normalize_plan_metadata_line(line)
+        if (
+            clean.startswith("Unblocks wave id:") or clean.startswith("unblocks_wave_id:")
+        ) and not unblocks_wave_id:
+            unblocks_wave_id = clean.split(":", 1)[1].strip().strip("`")
+        if (
+            clean.startswith("Unblocks runtime blocker:")
+            or clean.startswith("unblocks_runtime_blocker:")
+        ) and not unblocks_runtime_blocker:
+            unblocks_runtime_blocker = clean.split(":", 1)[1].strip().strip("`")
+        if unblocks_wave_id and unblocks_runtime_blocker:
+            return unblocks_wave_id, unblocks_runtime_blocker
+    return "", ""
 
 
 def validate_inputs(
@@ -1994,6 +2037,10 @@ def _build_phase_b_tracker_note(
     receipt_path: str,
     bridge_rounds: int,
     reentry: bool,
+    post_gate_contract_sweep: str = "",
+    founder_override: str = "",
+    unblocks_wave_id: str = "",
+    unblocks_runtime_blocker: str = "",
 ) -> str:
     """Render an L4-compliant tracker note for a Phase B commit handoff."""
     display_task = (task_id or "").strip() or wave_id
@@ -2034,6 +2081,7 @@ def _build_phase_b_tracker_note(
     if reentry:
         progress_after += ", reentry=true"
     progress_after += ", explicit receipt authority, and an L4-compliant tracker note."
+    founder_override = founder_override or _extract_founder_override(plan_content)
 
     tracker_kwargs: dict[str, str] = {
         "evidence_command": evidence_command,
@@ -2041,6 +2089,11 @@ def _build_phase_b_tracker_note(
         "progress_proof_before": progress_before,
         "progress_proof_after": progress_after,
     }
+    if wave_class == "L4_STRUCTURAL":
+        tracker_kwargs["post_gate_contract_sweep"] = (
+            post_gate_contract_sweep
+            or "python3 tools/checks/enforce_l4_execution_contract.py --staged"
+        )
     if wave_class == "MAINTENANCE":
         runtime_like = [
             path for path in changed_files
@@ -2061,14 +2114,17 @@ def _build_phase_b_tracker_note(
             ),
             "defer_reason_code": "PIPELINE_HARDENING",
         })
-        unblocks_wave_id, unblocks_runtime_blocker = _extract_maintenance_bypass_fields(
-            plan_content,
-        )
-        if unblocks_wave_id and unblocks_runtime_blocker:
-            tracker_kwargs.update({
-                "unblocks_wave_id": unblocks_wave_id,
-                "unblocks_runtime_blocker": unblocks_runtime_blocker,
-            })
+        if not (unblocks_wave_id and unblocks_runtime_blocker):
+            extracted_wave_id, extracted_runtime_blocker = _extract_maintenance_bypass_fields(
+                plan_content,
+            )
+            if extracted_wave_id and extracted_runtime_blocker:
+                unblocks_wave_id = unblocks_wave_id or extracted_wave_id
+                unblocks_runtime_blocker = unblocks_runtime_blocker or extracted_runtime_blocker
+        if unblocks_wave_id:
+            tracker_kwargs["unblocks_wave_id"] = unblocks_wave_id
+        if unblocks_runtime_blocker:
+            tracker_kwargs["unblocks_runtime_blocker"] = unblocks_runtime_blocker
 
     fields = TrackerSyncNoteFields(
         wave_id=wave_id,
@@ -2082,6 +2138,7 @@ def _build_phase_b_tracker_note(
             f"python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} "
             f"--output {indicator_path}"
         ),
+        founder_override=founder_override,
         **tracker_kwargs,
     )
     return render_tracker_sync_note(fields)
@@ -3784,6 +3841,9 @@ def run_phase_b(
         receipt_path=receipt_path,
         bridge_rounds=result.get("bridge_rounds", 0),
         reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
+        founder_override=plan.get("founder_override", ""),
+        unblocks_wave_id=plan.get("unblocks_wave_id", ""),
+        unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
     )
     log(f"Preparing commit handoff ({len(wave_owned_files)} wave-owned files)...")
     handoff_path = prepare_commit_handoff(
