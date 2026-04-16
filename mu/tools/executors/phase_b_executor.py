@@ -2130,6 +2130,7 @@ def _build_phase_b_tracker_note(
             f"python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} "
             f"--output {indicator_path}"
         ),
+        founder_override=founder_override,
         **tracker_kwargs,
     )
     return render_tracker_sync_note(fields)
