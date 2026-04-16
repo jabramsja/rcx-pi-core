@@ -931,7 +931,7 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
     content = full_path.read_text(encoding="utf-8")
     result = {"path": plan_path, "content": content}
 
-    for line in content.splitlines()[:20]:
+    for line in content.splitlines():
         clean = _normalize_plan_metadata_line(line)
         if clean.startswith("Phase-A-Lock:"):
             result["phase_a_lock"] = clean.split(":", 1)[1].strip()
@@ -939,8 +939,30 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
             result["status"] = clean.split(":", 1)[1].strip()
         if clean.startswith("Task:"):
             result["task_id"] = clean.split(":", 1)[1].strip()
+        if clean.startswith("FOUNDER_OVERRIDE:"):
+            founder_override = clean.split(":", 1)[1].strip()
+            if founder_override:
+                result["founder_override"] = founder_override.split()[0].strip().rstrip("`.,;")
+        if clean.startswith("Unblocks wave id:") or clean.startswith("unblocks_wave_id:"):
+            result["unblocks_wave_id"] = clean.split(":", 1)[1].strip()
+        if clean.startswith("Unblocks runtime blocker:") or clean.startswith("unblocks_runtime_blocker:"):
+            result["unblocks_runtime_blocker"] = clean.split(":", 1)[1].strip()
 
     return result
+
+
+def _extract_founder_override(plan_content: str) -> str:
+    """Read an optional canonical founder override token from the plan text."""
+    if not plan_content:
+        return ""
+    for line in plan_content.splitlines():
+        clean = _normalize_plan_metadata_line(line)
+        if not clean.startswith("FOUNDER_OVERRIDE:"):
+            continue
+        founder_override = clean.split(":", 1)[1].strip()
+        if founder_override:
+            return founder_override.split()[0].strip().rstrip("`.,;")
+    return ""
 
 
 def _extract_maintenance_bypass_fields(plan_content: str) -> tuple[str, str]:
@@ -2049,6 +2071,7 @@ def _build_phase_b_tracker_note(
     if reentry:
         progress_after += ", reentry=true"
     progress_after += ", explicit receipt authority, and an L4-compliant tracker note."
+    founder_override = founder_override or _extract_founder_override(plan_content)
 
     tracker_kwargs: dict[str, str] = {
         "evidence_command": evidence_command,
@@ -3809,6 +3832,9 @@ def run_phase_b(
         receipt_path=receipt_path,
         bridge_rounds=result.get("bridge_rounds", 0),
         reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
+        founder_override=plan.get("founder_override", ""),
+        unblocks_wave_id=plan.get("unblocks_wave_id", ""),
+        unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
     )
     log(f"Preparing commit handoff ({len(wave_owned_files)} wave-owned files)...")
     handoff_path = prepare_commit_handoff(

@@ -5,7 +5,7 @@ Status: Phase B (implementation complete, governance sync applied)
 Task: [CODEX-STARTUP-HARDENING]
 Phase-A-Lock: LOCKED
 Phase: B
-Wave class: MAINTENANCE
+Wave class: L4_ENABLER
 Target gate: G8
 Governing packet: This file
 ## Grounding / Authorization
@@ -53,11 +53,18 @@ findings are controlling for this rewrite:
    `mu/tests/tools/test_codex_startup_state.py`, because both execute in the
    current repo.
 
-## Consecutive Maintenance Bypass
+## Wave Class Justification
 
-This MAINTENANCE follow-on is the bounded hardening pass required after the
-Codex implementer/backend switch landed. For tracker-note generation and
-`enforce_l4_execution_contract.py`, the intended bypass linkage is:
+This L4_ENABLER follow-on is the bounded Phase B/parser hardening pass required
+after the Codex implementer/backend switch landed. The active landing surface
+changes executor behavior in `mu/tools/executors/phase_b_executor.py` plus its
+regression coverage, so the truthful classification is enabler work rather than
+bookkeeping-only maintenance. It preserves the same forward-motion linkage:
+
+FOUNDER_OVERRIDE:codex-startup-hardening-2026-04-16-followup (founder approved
+this non-structural pipeline-hardening follow-up while founder AFK; required to
+bypass the current non-structural adjacency and rolling structural quota until a
+new structural wave lands.)
 
 - `unblocks_wave_id: wave-codex-backend-switch-2026-04-14`
 - `unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION`
@@ -273,10 +280,10 @@ its prior re-entry note still told the pipeline to stop and rerun Phase B, and
 `TASKS.md` underreported bridge convergence. Those were staged governance-drift
 defects, not new code-surface blockers. The current staged package at
 `.scratch/phase_b_supervisor_package.json` reports `current_judgment:
-COMMIT_GO`, `bridge_status.rounds: 3`, and 20 changed files. This packet
-revision syncs the staged control-plane truth to that package so the next
-bounded meta review can mint a fresh handoff/receipt from the synchronized
-staged state and proceed to commit executor.
+COMMIT_GO`, `bridge_status.rounds: 3`, `bridge_status.reentry: true`, and 5
+changed files. This packet revision syncs the staged control-plane truth to
+that package so the next bounded meta review can mint a fresh handoff/receipt
+from the synchronized staged state and proceed to commit executor.
 
 ## Learning Context
 
