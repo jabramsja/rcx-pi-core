@@ -2079,8 +2079,6 @@ def _build_phase_b_tracker_note(
         "progress_proof_before": progress_before,
         "progress_proof_after": progress_after,
     }
-    if founder_override:
-        tracker_kwargs["founder_override"] = founder_override
     if wave_class == "L4_STRUCTURAL":
         tracker_kwargs["post_gate_contract_sweep"] = (
             post_gate_contract_sweep
