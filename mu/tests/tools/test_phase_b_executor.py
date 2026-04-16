@@ -769,7 +769,7 @@ class TestLoadPlanPacketPathTraversal:
     )
     def test_extract_maintenance_bypass_fields_normalizes_tokens(self, plan_content, expected):
         """Fallback bypass extraction must accept canonical and markdown forms."""
-        assert pb_mod._extract_maintenance_bypass_fields(plan_content) == expected
+        assert pb_mod._extract_maintenance_bypass_fields(plan_content) == expected  # ANTICHEAT_OK: testing maintenance bypass fallback normalization
 
 
 class TestBlockerDiscovery:
