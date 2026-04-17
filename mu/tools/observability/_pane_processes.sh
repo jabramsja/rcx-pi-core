@@ -175,6 +175,45 @@ pid_matches_repo_root() {
   [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ]
 }
 
+pid_ppid() {
+  local pid="$1"
+  ps -p "$pid" -o ppid= 2>/dev/null | xargs
+}
+
+pid_command() {
+  local pid="$1"
+  ps -p "$pid" -o command= 2>/dev/null || true
+}
+
+pid_has_ancestor_matching() {
+  local pid="$1" pattern="$2" depth=0 parent="" cmd=""
+  while [ "$depth" -lt 8 ]; do
+    parent="$(pid_ppid "$pid")"
+    [ -n "$parent" ] || return 1
+    [ "$parent" = "1" ] && return 1
+    cmd="$(pid_command "$parent")"
+    if echo "$cmd" | grep -E -q "$pattern"; then
+      return 0
+    fi
+    pid="$parent"
+    depth=$((depth + 1))
+  done
+  return 1
+}
+
+codex_role_for_pid() {
+  local pid="$1"
+  if pid_has_ancestor_matching "$pid" 'bridge_supervisor\.py review|meta_bridge_supervisor'; then
+    printf '%s\n' "review"
+    return 0
+  fi
+  if pid_has_ancestor_matching "$pid" 'phase_b_executor\.py|phase_a_executor\.py|commit_executor\.py'; then
+    printf '%s\n' "implement"
+    return 0
+  fi
+  printf '%s\n' "unknown"
+}
+
 while true; do
   refresh_context
   # Build output to temp file, only redraw if content changed
@@ -222,10 +261,17 @@ while true; do
 
   worker_lines=0
 
-  # Check for Codex (reviewer)
-  codex_pids=""
-  codex_count=0
-  codex_start=""
+  # Check for Codex workers. Codex can be either reviewer or implementer, so
+  # infer role from the live parent chain instead of hard-coding "reviewer".
+  codex_review_pids=""
+  codex_review_count=0
+  codex_review_start=""
+  codex_impl_pids=""
+  codex_impl_count=0
+  codex_impl_start=""
+  codex_unknown_pids=""
+  codex_unknown_count=0
+  codex_unknown_start=""
   if [ "$FAST_ONESHOT" != "1" ]; then
     while IFS= read -r pid; do
       [ -z "$pid" ] && continue
@@ -234,15 +280,29 @@ while true; do
         "bash -c "*|*/bash\ -c\ *|"tee "*) continue ;;
       esac
       pid_matches_repo_root "$pid" || continue
-      codex_pids="${codex_pids}${pid} "
-      codex_count=$((codex_count + 1))
-      if [ -z "$codex_start" ]; then
-        s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
-        codex_start=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
-      fi
+      role="$(codex_role_for_pid "$pid")"
+      s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
+      started_ts=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
+      case "$role" in
+        review)
+          codex_review_pids="${codex_review_pids}${pid} "
+          codex_review_count=$((codex_review_count + 1))
+          [ -z "$codex_review_start" ] && codex_review_start="$started_ts"
+          ;;
+        implement)
+          codex_impl_pids="${codex_impl_pids}${pid} "
+          codex_impl_count=$((codex_impl_count + 1))
+          [ -z "$codex_impl_start" ] && codex_impl_start="$started_ts"
+          ;;
+        *)
+          codex_unknown_pids="${codex_unknown_pids}${pid} "
+          codex_unknown_count=$((codex_unknown_count + 1))
+          [ -z "$codex_unknown_start" ] && codex_unknown_start="$started_ts"
+          ;;
+      esac
   done < <(pgrep -f "codex.*exec.*gpt" 2>/dev/null | head -5 || true)
   fi
-  if [ "$codex_count" -gt 0 ]; then
+  if [ "$codex_review_count" -gt 0 ]; then
     if [ "$worker_lines" -eq 0 ]; then
       echo -e "${BOLD}WHO'S WORKING${RESET}"
       echo "─────────────────────────────────────"
@@ -250,9 +310,31 @@ while true; do
     worker_lines=$((worker_lines + 1))
     echo -e ""
     echo -e "  ${YELLOW}REVIEWING${RESET}  Codex GPT-5.4 xhigh"
-    echo -e "  ${DIM}$codex_count process(es)$([ -n "$codex_start" ] && echo " · $(elapsed_str "$codex_start")") | PIDs: ${codex_pids%% }${RESET}"
+    echo -e "  ${DIM}$codex_review_count process(es)$([ -n "$codex_review_start" ] && echo " · $(elapsed_str "$codex_review_start")") | PIDs: ${codex_review_pids%% }${RESET}"
     echo -e "  ${DIM}Checking implementation for bugs, security issues,${RESET}"
     echo -e "  ${DIM}protocol violations, and code quality.${RESET}"
+  fi
+  if [ "$codex_impl_count" -gt 0 ]; then
+    if [ "$worker_lines" -eq 0 ]; then
+      echo -e "${BOLD}WHO'S WORKING${RESET}"
+      echo "─────────────────────────────────────"
+    fi
+    worker_lines=$((worker_lines + 1))
+    echo -e ""
+    echo -e "  ${PURPLE}IMPLEMENTING${RESET}  Codex GPT-5.4 xhigh"
+    echo -e "  ${DIM}$codex_impl_count process(es)$([ -n "$codex_impl_start" ] && echo " · $(elapsed_str "$codex_impl_start")") | PIDs: ${codex_impl_pids%% }${RESET}"
+    echo -e "  ${DIM}Writing code changes based on the current fix plan.${RESET}"
+  fi
+  if [ "$codex_unknown_count" -gt 0 ]; then
+    if [ "$worker_lines" -eq 0 ]; then
+      echo -e "${BOLD}WHO'S WORKING${RESET}"
+      echo "─────────────────────────────────────"
+    fi
+    worker_lines=$((worker_lines + 1))
+    echo -e ""
+    echo -e "  ${CYAN}WORKING${RESET}  Codex GPT-5.4 xhigh"
+    echo -e "  ${DIM}$codex_unknown_count process(es)$([ -n "$codex_unknown_start" ] && echo " · $(elapsed_str "$codex_unknown_start")") | PIDs: ${codex_unknown_pids%% }${RESET}"
+    echo -e "  ${DIM}Role could not be inferred from the current parent chain.${RESET}"
   fi
 
   # Check for Claude (implementer — must have --print flag, not interactive sessions)
@@ -334,7 +416,7 @@ else:
     echo -e "  ${DIM}Running parallel security and correctness checks.${RESET}"
   fi
 
-  if [ "$codex_count" -eq 0 ] && [ "$claude_count" -eq 0 ] && [ -z "$agent_pid" ] && [ "$phase" != "idle" ]; then
+  if [ "$codex_review_count" -eq 0 ] && [ "$codex_impl_count" -eq 0 ] && [ "$codex_unknown_count" -eq 0 ] && [ "$claude_count" -eq 0 ] && [ -z "$agent_pid" ] && [ "$phase" != "idle" ]; then
     if [ "$worker_lines" -eq 0 ]; then
       echo -e "${BOLD}WHO'S WORKING${RESET}"
       echo "─────────────────────────────────────"

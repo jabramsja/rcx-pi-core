@@ -556,9 +556,30 @@ _show_lock_status() {
 _show_lock_status "$LOCK" "meta" || _show_lock_status "$LOCK2" "bridge" || \
   echo -e "${CYAN}Bridge:${RESET} idle (no lock)"
 
+collect_active_pipeline_pids() {
+  local keyword pid seen=""
+  for keyword in \
+    executor_dispatch \
+    commit_executor \
+    phase_b_executor \
+    phase_a_executor \
+    meta_bridge_supervisor \
+    bridge_supervisor
+  do
+    while IFS= read -r pid; do
+      [ -z "$pid" ] && continue
+      case " $seen " in
+        *" $pid "*) continue ;;
+      esac
+      seen="${seen}${pid} "
+      printf '%s\n' "$pid"
+    done < <(pgrep -f "$keyword" 2>/dev/null || true)
+  done
+}
+
 # ── Active Processes ──
 echo ""
-EXEC_PIDS=$(pgrep -f "executor_dispatch\|commit_executor\|phase_b_executor\|phase_a_executor\|meta_bridge_supervisor" 2>/dev/null || true)
+EXEC_PIDS="$(collect_active_pipeline_pids)"
 printed_process=false
 if [ -n "$EXEC_PIDS" ]; then
   for pid in $EXEC_PIDS; do
