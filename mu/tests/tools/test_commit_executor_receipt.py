@@ -150,6 +150,61 @@ class TestSupervisorReceiptIsAuthority:
             f"Step 7 should succeed reading supervisor receipt. Got: {result}"
         )
 
+    def test_step7_emits_commit_ready_pager_event(self, tmp_path):
+        from collections import namedtuple
+
+        repo = _setup_repo(tmp_path)
+        sup_receipt_dir = repo / ".agent_bus" / "meta" / "pre_commit_receipts"
+        sup_receipt_dir.mkdir(parents=True, exist_ok=True)
+        sup_receipt_path = ".agent_bus/meta/pre_commit_receipts/receipt_step6.json"
+        (repo / sup_receipt_path).write_text(json.dumps({
+            "decision": "COMMIT_GO", "staged_sha": "abc",
+            "timestamp_utc": "2026-03-24T00:00:00+00:00",
+        }))
+
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+        fake_result = SupervisorResult(
+            decision="COMMIT_GO", summary="test", receipt_path=sup_receipt_path,
+        )
+        pager_calls = []
+
+        handoff = _make_new_schema_handoff(scope_items=["reports/control_plane/test_wave.md"])
+        import types
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = lambda *a, **kw: fake_result
+        mock_client.MetaBridgeClientError = Exception
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": "evt-commit-ready",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), \
+             patch.object(commit_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
+             patch.object(
+                 commit_mod,
+                 "_run_post_commit_pipeline",
+                 side_effect=lambda **kwargs: {
+                     "status": "success",
+                     "steps_completed": kwargs["result"]["steps_completed"],
+                 },
+             ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "success"
+        assert pager_calls
+        event = pager_calls[0]
+        assert event["event_type"] == "commit_ready"
+        assert event["task_id"] == "[TEST]"
+        assert event["plan_path"] == "reports/control_plane/test_wave.md"
+        assert event["phase"] == "commit_executor"
+        assert event["state"] == "commit_ready"
+        assert event["transition_key"] == sup_receipt_path
+
     def test_missing_supervisor_receipt_fails_closed(self, tmp_path):
         """If the supervisor's receipt doesn't exist on disk, step 7 fails closed."""
         from collections import namedtuple

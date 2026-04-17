@@ -945,6 +945,353 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert "Class: L4_ENABLER" in tracker_note_text
         assert "FOUNDER_OVERRIDE:codex-startup-hardening-2026-04-16-followup" in tracker_note_text
 
+    def test_run_phase_b_handoff_bridge_status_total_rounds_matches_current_wave(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        plan = repo / "reports" / "control_plane" / "plan.md"
+        plan.write_text(
+            "# Plan\n"
+            "Wave ID: wave-pager-bridge-status\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-AGENT-PAGER]\n",
+            encoding="utf-8",
+        )
+
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_class": "MAINTENANCE",
+            "target_gate_id": "G8",
+        }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(
+                 pb_mod,
+                 "_collect_changed_files",
+                 return_value=["mu/tools/executors/phase_b_executor.py"],
+             ), \
+             patch.object(
+                 pb_mod,
+                 "_collect_wave_owned_files",
+                 return_value=[
+                     "mu/tools/executors/phase_b_executor.py",
+                     "mu/tests/tools/test_phase_b_executor.py",
+                     "reports/control_plane/plan.md",
+                 ],
+             ), \
+             patch.object(
+                 pb_mod,
+                 "_run_pytest_on_files",
+                 return_value={
+                     "exit_code": 0,
+                     "passed": True,
+                     "stdout": "",
+                     "stderr": "",
+                 },
+             ), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(
+                 pb_mod,
+                 "run_bridge_review",
+                 return_value={
+                     "exit_code": 0,
+                     "stdout": "GO\n",
+                     "stderr": "",
+                     "decision": "GO",
+                     "job_id": "j1",
+                 },
+             ), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(
+                 pb_mod,
+                 "run_pre_commit_supervisor",
+                 return_value={
+                     "exit_code": 0,
+                     "parsed": {
+                         "decision": "COMMIT_GO",
+                         "summary": "",
+                         "status": "success",
+                         "findings": [],
+                     },
+                     "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+                 },
+             ), \
+             patch.object(
+                 pb_mod,
+                 "prepare_commit_handoff",
+                 return_value=repo / ".agent_bus" / "handoff.json",
+             ) as mock_handoff:
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert mock_handoff.call_args.kwargs["bridge_status"] == {
+            "rounds": 1,
+            "total_rounds": 1,
+        }
+
+    def test_run_phase_b_emits_reviewer_started_event_from_authoritative_bridge_round(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        plan = repo / "reports" / "control_plane" / "plan.md"
+        plan.write_text(
+            "# Plan\n"
+            "Wave ID: wave-phase-b-pager\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-AGENT-PAGER]\n",
+            encoding="utf-8",
+        )
+
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_class": "MAINTENANCE",
+            "target_gate_id": "G8",
+        }
+        pager_calls = []
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": "evt-phase-b",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        def fake_bridge_review(*args, **kwargs):
+            kwargs["on_started"]()
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": "j1",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="deadbeefcafebabe"))), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["TASKS.md"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=fake_bridge_review), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert pager_calls
+        event = pager_calls[0]
+        assert event["event_type"] == "phase_b_reviewer_started"
+        assert event["task_id"] == "[PIPELINE-AGENT-PAGER]"
+        assert event["plan_path"] == "reports/control_plane/plan.md"
+        assert event["phase"] == "phase_b"
+        assert event["state"] == "reviewer_started"
+        assert event["transition_key"] == "phase-b-r1"
+
+    def test_run_phase_b_reviewer_transition_key_stays_stable_across_retry(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        plan = repo / "reports" / "control_plane" / "plan.md"
+        plan.write_text(
+            "# Plan\n"
+            "Wave ID: wave-phase-b-pager\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-AGENT-PAGER]\n",
+            encoding="utf-8",
+        )
+
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_class": "MAINTENANCE",
+            "target_gate_id": "G8",
+        }
+        pager_calls = []
+        uuid_values = iter(["deadbeefcafebabe", "feedfacecafed00d"])
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": "evt-phase-b",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        def fake_bridge_review(*args, **kwargs):
+            kwargs["on_started"]()
+            return {
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": "timed out",
+                "decision": "",
+                "job_id": "j1",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex=next(uuid_values)))), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["TASKS.md"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=fake_bridge_review), \
+             patch.object(pb_mod, "_stage_files", return_value=True):
+            first = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+            second = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert first["status"] == "error"
+        assert second["status"] == "error"
+        assert [call["transition_key"] for call in pager_calls] == ["phase-b-r1", "phase-b-r1"]
+
+    def test_run_phase_b_does_not_emit_reviewer_started_before_bridge_launch(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        plan = repo / "reports" / "control_plane" / "plan.md"
+        plan.write_text(
+            "# Plan\n"
+            "Wave ID: wave-phase-b-pager\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-AGENT-PAGER]\n",
+            encoding="utf-8",
+        )
+
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_class": "MAINTENANCE",
+            "target_gate_id": "G8",
+        }
+        pager_calls = []
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": "evt-phase-b",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["TASKS.md"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": -1,
+                 "stdout": "",
+                 "stderr": "timed out before launch",
+                 "decision": "",
+                 "job_id": "j1",
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert pager_calls == []
+
+    def test_run_phase_b_emits_reviewer_started_event_during_needs_phase_b_reentry(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        plan = repo / "reports" / "control_plane" / "plan.md"
+        plan.write_text(
+            "# Plan\n"
+            "Wave ID: wave-phase-b-pager\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-AGENT-PAGER]\n",
+            encoding="utf-8",
+        )
+
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_class": "MAINTENANCE",
+            "target_gate_id": "G8",
+        }
+        pager_calls = []
+        supervisor_results = iter([
+            {
+                "exit_code": 0,
+                "parsed": {"decision": "NEEDS_PHASE_B", "summary": "fix more", "status": "ok", "findings": []},
+                "receipt_path": "",
+            },
+            {
+                "exit_code": 0,
+                "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            },
+        ])
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": f"evt-{kwargs['transition_key']}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        bridge_job_ids = iter(["init", "reentry"])
+
+        def fake_bridge_review(*args, **kwargs):
+            kwargs["on_started"]()
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": next(bridge_job_ids),
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["TASKS.md"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=fake_bridge_review), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=lambda *args, **kwargs: next(supervisor_results)), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert [call["event_type"] for call in pager_calls] == [
+            "phase_b_reviewer_started",
+            "phase_b_reviewer_started",
+        ]
+        assert [call["transition_key"] for call in pager_calls] == ["phase-b-r1", "phase-b-r2"]
+
 
 @pytest.mark.usefixtures("mock_routing_record")
 class TestReentryRestageFailClosed:

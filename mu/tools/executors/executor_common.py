@@ -44,6 +44,11 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
         "phase_b_executor": None,
     },
     "hybrid_recovery_enabled": False,
+    "pipeline_agent_pager": {
+        "enabled": False,
+        "route": "notify-only",
+        "claude_continue": False,
+    },
     "review_depths": {
         "phase_a": "quick",
         "phase_b": "quick",
@@ -57,6 +62,9 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
         "pre_push_fast": 900,
         "bot_remediation": 600,
         "agent_review": 900,
+        "pipeline_agent_pager_trigger": 30,
+        "pipeline_agent_pager_codex_ack": 20,
+        "pipeline_agent_pager_claude_ack": 20,
     },
     "bridge_loop_limits": {
         "phase_a": 15,
@@ -199,6 +207,24 @@ def load_executor_config(repo_root: Path) -> dict[str, Any]:
             if config["backends"][key] and config["backends"][key] != "claude":
                 config["backends"][key] = reviewer_override
     return config
+
+
+def emit_pipeline_agent_event(repo_root: Path, **kwargs: Any) -> dict[str, Any]:
+    """Emit a pipeline pager event through the shared observability entrypoint."""
+    try:
+        from pipeline_agent_pager import emit_transition_event
+    except ImportError:
+        import importlib.util as _ilu
+
+        pager_path = (
+            Path(__file__).resolve().parent.parent / "observability" / "pipeline_agent_pager.py"
+        )
+        spec = _ilu.spec_from_file_location("pipeline_agent_pager", str(pager_path))
+        module = _ilu.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        emit_transition_event = module.emit_transition_event
+    return emit_transition_event(repo_root, **kwargs)
 
 
 def normalize_wave_id(raw: str) -> str:
