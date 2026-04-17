@@ -1,0 +1,75 @@
+---
+DOC_STATUS: tracked_packet
+wave_id: preflight-session-staleness-detection-2026-04-17
+wave_class: L4_ENABLER
+target_gate_id: G8
+created: 2026-04-17
+status: Phase A (plan under review)
+---
+
+# Preflight — Session-Binary Staleness Detection + P40-P66 Verification Extension
+
+## Motivation
+
+Two gaps in the current preflight protocol identified during session 2026-04-17:
+
+**Gap 1 — Session-binary staleness (founder observation):**
+The preflight step 19 verifies binary patches are present on DISK. It does NOT verify that the CURRENT session's in-memory binary matches the on-disk state. Node.js loads the CC bundle once at `exec()` time and caches it in the v8 compiled-code cache; there is no `fs.watch()` or hot-reload mechanism on the bundle path. Any session started BEFORE a patch was applied continues to run the unpatched binary in memory indefinitely — the patched disk bytes take effect only on the NEXT fresh session launch.
+
+Concrete evidence from session 2026-04-17:
+- Binary mtime `/Users/jeffabrams/.local/share/claude/versions/2.1.112` = `Apr 17 01:23`
+- My session PID 54534 `lstart` = `Fri Apr 17 01:28:18 2026` → started after patches → running patched
+- Older session PID 74618 `lstart` = `Fri Apr 17 00:06:40 2026` → started 1h17m before patches → running unpatched in memory
+
+Without a mechanical check, the preflight cannot tell the user which live `claude` processes have stale in-memory binaries. Founder observation: "System-reminder contradictions still injecting in current session (because patches affect on-disk binary; current session has the v2.1.112 unpatched binary loaded in memory)."
+
+**Gap 2 — P40-P66 not mechanically verified (prior preflight finding):**
+The current step 19 verification script only checks patches P1-P39. MEMORY.md (`reference_tweakcc_repatch.md`) documents 65 active patches in v2.1.112 (P_OjH + P2-P5 + P7 + P8-P29 + P31-P66). Patches P40-P66 (anti-bias extensions, memory-subagent safeguards, claude-api skill corrections) are documented but not mechanically re-verified in preflight. A session cannot mechanically prove from preflight output alone that those 27 patches are in the binary.
+
+Separately verified this session: all P40-P66 positive-check fragments are present in the v2.1.112 binary, and all negative-check fragments are absent.
+
+## Scope
+
+Edits to `.claude/skills/preflight/SKILL.md` only. No runtime code changes. No `.claude/hooks/` changes. No test changes.
+
+### Addition 1 — Step 17b (session-binary staleness detection)
+
+New step inserted between step 17 (CC version detect) and step 18 (deep-read). Compares:
+- Binary mtime (`stat -f "%m" "$(readlink ~/.local/bin/claude)"`)
+- Every live `claude` CLI process's `lstart` (converted to epoch)
+
+For each live process whose start epoch is LESS than the binary mtime, emit a WARN line naming the PID and indicating that process's in-memory binary is pre-patch. Flag SELF if the current session's claude PID falls into this set.
+
+### Addition 2 — Step 19 P40-P66 verification
+
+Add 27 positive checks (one per patch P40 through P66) and 27 negative checks to the existing patch-verification script. Use robust substring fragments verified-in-binary 2026-04-17 this session. The existing P1-P39 checks remain unchanged.
+
+Update `Verify and auto-repatch ALL 32 active binary patches` header text to reflect the true count (62 active in v2.1.112 — with P1, P27, P29b, P30 retired/merged and P_OjH + P2-P5 + P7 + P8-P29 + P31-P66 active per MEMORY.md v2.1.112 notation).
+
+Note: P27 retirement discovered during this verification session (both original and replacement text surfaces absent in v2.1.112). Mention in changelog/tracker note; do NOT bundle retirement into this wave's scope.
+
+## Non-Scope
+
+- P27 patch retirement (separate follow-up wave needed: remove the obsolete `grep -c 'proactive review'` check from step 19 + retire P27 in `reference_tweakcc_repatch.md`).
+- Structural fix for Node.js cache (cannot fix — upstream Node.js behavior by design).
+- Auto-restart mechanism for stale in-memory sessions (policy decision, requires founder direction — warn only for now).
+
+## Evidence Plan
+
+- `grep -c '17b.' .claude/skills/preflight/SKILL.md` returns `>=1` after edit (step 17b present).
+- `grep -c 'P40 MISSING\|P41 MISSING\|P66 MISSING' .claude/skills/preflight/SKILL.md` returns `>= 27` (all P40-P66 mechanical checks present).
+- Smoke test: run the extended step 19 script against current v2.1.112 binary → `NEEDS_REPATCH=0` (no false positives under extended check set).
+- File-count delta: SKILL.md grows from 310 lines to ~370 lines (approximate; measured after edit).
+
+## Files Changed
+
+- `.claude/skills/preflight/SKILL.md` — add step 17b, extend step 19, update patch-count headers.
+- `reports/control_plane/preflight_session_staleness_detection_2026-04-17.md` — this packet.
+
+## Phase-A-Lock
+
+Locked to the files listed above only. No implementer may touch files outside this list.
+
+## Tracker Note (for commit_executor)
+
+Generated by `build_commit_handoff(auto-generated)` with the FOUNDER_OVERRIDE marker. Wave class L4_ENABLER, target gate G8, non-structural adjacency bypass authorized by founder this session.
