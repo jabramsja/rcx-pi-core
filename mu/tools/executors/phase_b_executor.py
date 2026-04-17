@@ -32,14 +32,13 @@ import json
 import os
 import re
 import signal
-import sqlite3
 import subprocess
 import sys
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -58,6 +57,7 @@ try:
         terminate_process_tree,
         ensure_not_agent_review_mode,
         run_bridge_subprocess,
+        emit_pipeline_agent_event,
     )
 except ImportError:
     # Fallback for direct execution
@@ -81,6 +81,7 @@ except ImportError:
     terminate_process_tree = _mod.terminate_process_tree
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     run_bridge_subprocess = _mod.run_bridge_subprocess
+    emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
 
 try:
     from tracker_sync_note import TrackerSyncNoteFields, render_tracker_sync_note
@@ -953,6 +954,45 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
     return result
 
 
+def _phase_b_task_id(routing_record: dict[str, Any], plan: dict[str, Any]) -> str:
+    return str(
+        routing_record.get("task_id")
+        or plan.get("task_id")
+        or "[PIPELINE-AGENT-PAGER]"
+    ).strip()
+
+
+def _emit_phase_b_event(
+    repo_root: Path,
+    *,
+    routing_record: dict[str, Any],
+    plan: dict[str, Any],
+    plan_path: str,
+    event_type: str,
+    state: str,
+    transition_key: str,
+    summary: str,
+    artifact_paths: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    return emit_pipeline_agent_event(
+        repo_root,
+        event_type=event_type,
+        wave_id=str(plan.get("wave_id") or routing_record.get("wave_name") or "").strip(),
+        task_id=_phase_b_task_id(routing_record, plan),
+        plan_path=plan_path,
+        phase="phase_b",
+        state=state,
+        transition_key=transition_key,
+        summary=summary,
+        reason=summary,
+        artifact_paths=artifact_paths,
+    )
+
+
+def _phase_b_review_transition_key(round_num: int) -> str:
+    return f"phase-b-r{round_num}"
+
+
 def _extract_founder_override(plan_content: str) -> str:
     """Read an optional canonical founder override token from the plan text."""
     if not plan_content:
@@ -1186,6 +1226,7 @@ def _run_bridge_review_subprocess(
     timeout: int,
     verbose: bool,
     env: dict[str, str] | None = None,
+    on_started: Callable[[], None] | None = None,
     poll_interval: float = BRIDGE_REVIEW_POLL_INTERVAL,
     stale_timeout: float = BRIDGE_REVIEW_STALE_TIMEOUT,
     aggregation_hang_timeout: float = BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT,
@@ -1209,6 +1250,12 @@ def _run_bridge_review_subprocess(
             env=env,
             start_new_session=True,
         )
+        if on_started is not None:
+            try:
+                on_started()
+            except Exception:
+                _terminate_bridge_subprocess(proc)
+                raise
 
         def _read_logs() -> tuple[str, str]:
             stdout_handle.flush()
@@ -1313,6 +1360,7 @@ def run_bridge_review(
     job_id: str | None = None,
     verbose: bool = False,
     timeout: int = 1200,
+    on_started: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Run bridge_supervisor.py review and return the result.
 
@@ -1349,6 +1397,7 @@ def run_bridge_review(
         job_id=job_id or "",
         timeout=timeout,
         verbose=verbose,
+        on_started=on_started,
         stale_timeout=max(BRIDGE_REVIEW_STALE_TIMEOUT, bridge_turn_timeout),
         env={
             **os.environ,
@@ -1627,20 +1676,24 @@ def _select_sdk_review_files(files: list[str]) -> list[str]:
     return implementation
 
 
-def _total_bridge_rounds(repo_root: Path) -> int:
-    """Count total completed Phase B bridge rounds from bridge.db."""
-    db_path = repo_root / ".agent_bus" / "bridge.db"
-    if not db_path.exists():
-        return 0
+def _build_bridge_status(rounds: Any, *, reentry: bool = False) -> dict[str, Any]:
+    """Render wave-scoped bridge status from the current convergence result.
+
+    ``result["bridge_rounds"]`` is the authoritative count for the wave being
+    packaged. Global bridge.db history is not wave-scoped and can drift from the
+    current staged convergence evidence.
+    """
     try:
-        conn = sqlite3.connect(str(db_path), timeout=5)
-        row = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE job_id LIKE 'phase-b-%' AND status = 'DONE'"
-        ).fetchone()
-        conn.close()
-        return row[0] if row else 0
-    except Exception:
-        return 0
+        normalized_rounds = max(int(rounds or 0), 0)
+    except (TypeError, ValueError):
+        normalized_rounds = 0
+    bridge_status: dict[str, Any] = {
+        "rounds": normalized_rounds,
+        "total_rounds": normalized_rounds,
+    }
+    if reentry:
+        bridge_status["reentry"] = True
+    return bridge_status
 
 
 def _collect_changed_files(
@@ -2948,6 +3001,7 @@ def run_phase_b(
         if round_num <= _resume_bridge_round:
             continue  # Skip already-completed rounds on resume
         bridge_job_id = f"phase-b-r{round_num}-{uuid.uuid4().hex[:8]}"
+        transition_key = _phase_b_review_transition_key(round_num)
         log(f"Bridge review round {round_num}/{max_bridge_rounds} (job={bridge_job_id})...")
         result["bridge_rounds"] = round_num
 
@@ -2984,13 +3038,34 @@ def run_phase_b(
                 "not automatic current-step blockers by themselves."
             )
 
-        bridge_result = run_bridge_review(
-            repo_root,
-            task_summary,
-            job_id=bridge_job_id,
-            verbose=verbose,
-            timeout=timeout,
-        )
+        try:
+            bridge_result = run_bridge_review(
+                repo_root,
+                task_summary,
+                job_id=bridge_job_id,
+                verbose=verbose,
+                timeout=timeout,
+                on_started=lambda: _emit_phase_b_event(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan=plan,
+                    plan_path=plan_path,
+                    event_type="phase_b_reviewer_started",
+                    state="reviewer_started",
+                    transition_key=transition_key,
+                    summary=f"Phase B reviewer started for round {round_num}",
+                    artifact_paths={
+                        "agent_review_report": str(result.get("agent_review_report_path") or ""),
+                        "agent_review_status": str(result.get("agent_review_status_path") or ""),
+                    },
+                ),
+            )
+        except Exception as exc:
+            result["status"] = "error"
+            result["step"] = "phase_b_pager"
+            result["errors"] = [f"Phase B pager emission failed after reviewer launch: {exc}"]
+            _clear_state(repo_root)
+            return result
 
         # Parse decision from bridge result
         bridge_decision = bridge_result.get("decision", "")
@@ -3279,7 +3354,10 @@ def run_phase_b(
             "scope_items": [plan_path],
             "fixes_implemented": ["Phase B implementation per locked plan (resumed from NEEDS_PHASE_B)"],
             "deferred_items": deferred_items,
-            "bridge_status": {"rounds": result.get("bridge_rounds", 0), "total_rounds": _total_bridge_rounds(repo_root), "reentry": True},
+            "bridge_status": _build_bridge_status(
+                result.get("bridge_rounds", 0),
+                reentry=True,
+            ),
             "evidence_handles": _collect_supervisor_evidence_handles(repo_root, wave_id),
             "blocker_report_paths": blocker_paths,
             "current_judgment": "COMMIT_GO",
@@ -3374,7 +3452,7 @@ def run_phase_b(
             "scope_items": [plan_path],
             "fixes_implemented": ["Phase B implementation per locked plan"],
             "deferred_items": deferred_items,
-            "bridge_status": {"rounds": result.get("bridge_rounds", 0), "total_rounds": _total_bridge_rounds(repo_root)},
+            "bridge_status": _build_bridge_status(result.get("bridge_rounds", 0)),
             "evidence_handles": _collect_supervisor_evidence_handles(repo_root, wave_id),
             "blocker_report_paths": blocker_paths,
             "current_judgment": "COMMIT_GO",
@@ -3464,13 +3542,36 @@ def run_phase_b(
 
             # Bridge reviews the fix (bound to exact job_id)
             bridge_job_id = f"phase-b-reentry-r{reentry_round}-{uuid.uuid4().hex[:8]}"
-            bridge_result = run_bridge_review(
-                repo_root,
-                f"Phase B re-entry R{reentry_round} after NEEDS_PHASE_B for {plan_path}",
-                job_id=bridge_job_id,
-                verbose=verbose,
-                timeout=timeout,
-            )
+            transition_key = _phase_b_review_transition_key(reentry_round)
+            try:
+                bridge_result = run_bridge_review(
+                    repo_root,
+                    f"Phase B re-entry R{reentry_round} after NEEDS_PHASE_B for {plan_path}",
+                    job_id=bridge_job_id,
+                    verbose=verbose,
+                    timeout=timeout,
+                    on_started=lambda: _emit_phase_b_event(
+                        repo_root,
+                        routing_record=routing_record,
+                        plan=plan,
+                        plan_path=plan_path,
+                        event_type="phase_b_reviewer_started",
+                        state="reviewer_started",
+                        transition_key=transition_key,
+                        summary=f"Phase B reviewer started for round {reentry_round}",
+                        artifact_paths={
+                            "agent_review_report": str(result.get("agent_review_report_path") or ""),
+                            "agent_review_status": str(result.get("agent_review_status_path") or ""),
+                        },
+                    ),
+                )
+            except Exception as exc:
+                _clear_state(repo_root)
+                return {
+                    "status": "error",
+                    "step": "phase_b_pager",
+                    "errors": [f"Phase B pager emission failed after re-entry reviewer launch: {exc}"],
+                }
             bridge_decision = bridge_result.get("decision", "")
             log(f"Reentry bridge decision: {bridge_decision!r}")
 
@@ -3740,7 +3841,10 @@ def run_phase_b(
             changed_files,
             deferred_packet_path,
         )
-        supervisor_package["bridge_status"] = {"rounds": result.get("bridge_rounds", 0), "total_rounds": _total_bridge_rounds(repo_root), "reentry": True}
+        supervisor_package["bridge_status"] = _build_bridge_status(
+            result.get("bridge_rounds", 0),
+            reentry=True,
+        )
         # Refresh blocker acknowledgment (may have changed during re-entry)
         blocking_dir = repo_root / "reports" / "deferred" / "blocking"
         if blocking_dir.is_dir():
@@ -3822,12 +3926,10 @@ def run_phase_b(
     handoff_deferred_items = _collect_supervisor_deferred_items(
         wave_owned_files, deferred_packet_path,
     )
-    handoff_bridge_status: dict[str, Any] = {
-        "rounds": result.get("bridge_rounds", 0),
-        "total_rounds": _total_bridge_rounds(repo_root),
-    }
-    if "reentry_converged" in locals() and locals()["reentry_converged"]:
-        handoff_bridge_status["reentry"] = True
+    handoff_bridge_status = _build_bridge_status(
+        result.get("bridge_rounds", 0),
+        reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
+    )
     handoff_test_files = locals().get("reentry_test_files") or locals().get("final_test_files") or []
     tracker_note_text = _build_phase_b_tracker_note(
         wave_id=wave_id,

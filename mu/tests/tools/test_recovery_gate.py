@@ -1959,6 +1959,143 @@ class TestRecoveryLoop:
         assert status["last_action"] == "exhausted"
 
 
+class TestRecoveryPagerEvents:
+    def test_status_helpers_emit_started_state_changed_failure_and_hard_fail(self, tmp_path):
+        calls = []
+        result = {
+            "status": "failed",
+            "step": "phase_b_executor",
+            "stderr": "FAILED test_x",
+            "stdout": "",
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "plan_path": "reports/control_plane/plan.md",
+        }
+
+        def fake_emit(repo_root, **kwargs):
+            calls.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": f"evt-{len(calls)}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        with patch.object(rg_mod, "emit_pipeline_agent_event", side_effect=fake_emit):
+            rg_mod._begin_recovery_status(  # ANTICHEAT_OK: authoritative recovery-status edge
+                tmp_path,
+                attempts=[],
+                result=result,
+                wave_id="wave-recovery-pager",
+                step="phase_b_executor",
+                failure_class=FailureClass.TEST_FAILURE,
+                tier=3,
+                prior_attempts=0,
+                invocation_id="invoke-1234",
+            )
+            rg_mod._update_recovery_status(  # ANTICHEAT_OK: recovery state-transition edge
+                tmp_path,
+                state="tier3_waiting_on_agent",
+                current_iteration=1,
+                detail="waiting on recovery agent",
+            )
+            rg_mod._finish_recovery_status(  # ANTICHEAT_OK: terminal recovery edge
+                tmp_path,
+                recovered=False,
+                exhausted=True,
+                outcome="exhausted",
+                action="exhausted",
+                detail="still failing after recovery",
+                state="tier3_exhausted",
+            )
+
+        event_types = [call["event_type"] for call in calls]
+        assert event_types[0] == "recovery_started"
+        assert "recovery_state_changed" in event_types
+        assert "recovery_failed" in event_types
+        assert "pipeline_hard_fail" in event_types
+
+    def test_begin_recovery_status_rolls_back_and_raises_when_pager_emit_fails(self, tmp_path):
+        result = {
+            "status": "failed",
+            "step": "phase_b_executor",
+            "stderr": "FAILED test_x",
+            "stdout": "",
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "plan_path": "reports/control_plane/plan.md",
+        }
+
+        with patch.object(
+            rg_mod,
+            "emit_pipeline_agent_event",
+            side_effect=RuntimeError("pager down"),
+        ):
+            with pytest.raises(RuntimeError, match="pager down"):
+                rg_mod._begin_recovery_status(  # ANTICHEAT_OK: fail-closed recovery-status edge
+                    tmp_path,
+                    attempts=[],
+                    result=result,
+                    wave_id="wave-recovery-pager",
+                    step="phase_b_executor",
+                    failure_class=FailureClass.TEST_FAILURE,
+                    tier=3,
+                    prior_attempts=0,
+                    invocation_id="invoke-rollback",
+                )
+
+        assert not (tmp_path / rg_mod.RECOVERY_STATUS_FILE).exists()
+
+    def test_update_recovery_status_rolls_back_and_raises_when_state_change_emit_fails(self, tmp_path):
+        initial = {
+            "active": True,
+            "invocation_id": "invoke-rollback",
+            "wave_id": "wave-recovery-pager",
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "plan_path": "reports/control_plane/plan.md",
+            "step": "phase_b_executor",
+            "failure_class": FailureClass.TEST_FAILURE.value,
+            "tier": 3,
+            "tuple_attempt_index": 1,
+            "wave_invocation_count": 1,
+            "started_at": "2026-04-17T00:00:00+00:00",
+            "updated_at": "2026-04-17T00:00:00+00:00",
+            "finished_at": "",
+            "owner_pid": 1,
+            "child_pid": 0,
+            "child_role": "",
+            "state": "tier3_starting",
+            "reason": "FAILED test_x",
+            "retry_target": "phase_b_executor",
+            "current_iteration": 0,
+            "max_iterations": 3,
+            "last_action": "",
+            "current_command": "",
+            "explanation": "",
+            "detail": "",
+            "recovered": False,
+            "exhausted": False,
+            "outcome": "",
+        }
+        rg_mod._save_recovery_status(tmp_path, initial)  # ANTICHEAT_OK: seed prior state for rollback proof
+
+        with patch.object(
+            rg_mod,
+            "emit_pipeline_agent_event",
+            side_effect=RuntimeError("pager down"),
+        ):
+            with pytest.raises(RuntimeError, match="pager down"):
+                rg_mod._update_recovery_status(  # ANTICHEAT_OK: fail-closed recovery state-change edge
+                    tmp_path,
+                    state="tier3_waiting_on_agent",
+                    current_iteration=1,
+                    detail="waiting on recovery agent",
+                )
+
+        restored = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK: rollback proof on persisted status
+        assert restored["state"] == "tier3_starting"
+        assert restored["current_iteration"] == 0
+        assert restored["detail"] == ""
+
+
 class TestHybridDelegatePayload:
     def test_valid_payload_accepts_exact_runtime_scope(self):
         ok, payload, detail = rg_mod._validate_delegate_implementer_payload(  # ANTICHEAT_OK: validates closed hybrid payload schema
@@ -2126,6 +2263,41 @@ class TestHybridDelegateRuntime:
         assert out["log"][0]["action"] == "delegate_implementer"
         assert out["log"][0]["pre_validation_drift"] == ["mu/tools/executors/recovery_gate.py"]
         assert out["log"][0]["final_drift"] == ["mu/tools/executors/recovery_gate.py"]
+
+    def test_delegate_implementer_timeout_result_is_structured_not_raised(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        config_dir = tmp_path / "mu" / "tools" / "executors"
+        (config_dir / "executor_config.json").write_text(
+            json.dumps({"hybrid_recovery_enabled": True}),
+            encoding="utf-8",
+        )
+        fake_module = FakeHybridImplementerModule()
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        monkeypatch.setattr(
+            rg_mod,
+            "_run_hybrid_validation_spec",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                subprocess.TimeoutExpired(cmd=[sys.executable, "-m", "pytest"], timeout=90)
+            ),
+        )
+
+        with patch.object(rg_mod, "_load_phase_b_implementer_module", return_value=fake_module):
+            result = rg_mod._run_delegate_implementer_action(  # ANTICHEAT_OK: folded timeout contract
+                tmp_path,
+                result={"status": "failed", "step": "phase_b_executor", "stderr": "FAILED test_x", "stdout": ""},
+                wave_id="wave-validator-timeout",
+                step="phase_b_executor",
+                response=make_delegate_response(),
+                explanation="validator timed out",
+                recovery_prompt_path=".scratch/recovery_agent_wave-validator-timeout-phase-b-executor-1.txt",
+            )
+
+        assert result["ok"] is False
+        validator_result = result["validator_result"]
+        assert validator_result["passed"] is False
+        assert validator_result["timed_out"] is True
+        assert validator_result["exit_code"] == 124
+        assert "timed out" in validator_result["stderr"]
 
     def test_validation_failure_is_fed_into_next_iteration(self, tmp_path, monkeypatch):
         init_hybrid_delegate_tree(tmp_path)
@@ -2311,6 +2483,66 @@ class TestHybridScopeAudit:
         )
         assert ok is False
         assert "unexpected .scratch descendant" in audit["detail"]
+
+    def test_prior_same_lineage_recovery_prompt_artifacts_are_allowed_but_unrelated_prompt_is_not(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        scratch = tmp_path / ".scratch"
+        scratch.mkdir(exist_ok=True)
+        (scratch / "recovery_agent_wave-step-1.txt").write_text("prompt one\n", encoding="utf-8")
+        (scratch / "recovery_agent_wave-step-2.txt").write_text("prompt two\n", encoding="utf-8")
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+                "impl-1234abcd",
+                recovery_prompt_relpath=".scratch/recovery_agent_wave-step-2.txt",
+            ),
+        )
+        assert ok is True
+
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+                "impl-1234abcd",
+                recovery_prompt_relpath=".scratch/recovery_agent_wave-step-2.txt",
+            ),
+        )
+        assert ok is True
+        assert audit["observed_drift"] == []
+
+        (scratch / "recovery_agent_wave-step-999.txt").write_text("new prompt\n", encoding="utf-8")
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+                recovery_prompt_relpath=".scratch/recovery_agent_wave-step-2.txt",
+            ),
+        )
+        assert ok is False
+        assert audit["detail"] == (
+            "hybrid observed drift escaped declared scope: "
+            ".scratch/recovery_agent_wave-step-999.txt"
+        )
+        assert audit["observed_drift"] == [".scratch/recovery_agent_wave-step-999.txt"]
+
+        (scratch / "recovery_agent_wave-step-999.txt").unlink()
+        (scratch / "recovery_agent_other-step-1.txt").write_text("foreign prompt\n", encoding="utf-8")
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+                "impl-1234abcd",
+                recovery_prompt_relpath=".scratch/recovery_agent_wave-step-2.txt",
+            ),
+        )
+        assert ok is False
+        assert ".scratch/recovery_agent_other-step-1.txt" in audit["detail"]
 
     def test_git_control_drift_fails_closed(self, tmp_path, monkeypatch):
         init_hybrid_delegate_tree(tmp_path)

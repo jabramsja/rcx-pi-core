@@ -27,12 +27,17 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any, NamedTuple, Optional
+from typing import Any, Callable, NamedTuple, Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 try:
-    from executor_common import load_executor_config, normalize_wave_id
+    from executor_common import (
+        emit_pipeline_agent_event,
+        load_executor_config,
+        load_routing_record,
+        normalize_wave_id,
+    )
 except ImportError:
     import importlib.util as _ilu
     _common_path = SCRIPT_DIR / "executor_common.py"
@@ -40,7 +45,9 @@ except ImportError:
     _mod = _ilu.module_from_spec(_spec)
     assert _spec.loader is not None
     _spec.loader.exec_module(_mod)
+    emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
     load_executor_config = _mod.load_executor_config
+    load_routing_record = _mod.load_routing_record
     normalize_wave_id = _mod.normalize_wave_id
 
 # ---------------------------------------------------------------------------
@@ -2244,6 +2251,42 @@ def _normalize_recovery_prompt_exception_path(raw_path: Any) -> str | None:
     return normalized
 
 
+def _recovery_prompt_lineage_token(raw_path: Any) -> str | None:
+    normalized = _normalize_recovery_prompt_exception_path(raw_path)
+    if normalized is None:
+        return None
+    token = PurePosixPath(normalized).stem[len("recovery_agent_"):]
+    prefix, sep, suffix = token.rpartition("-")
+    if sep and suffix.isdigit():
+        return prefix
+    return token
+
+
+def _allowed_recovery_prompt_lineages(
+    exception_paths: frozenset[str],
+) -> frozenset[str]:
+    prefixes = {
+        prefix
+        for item in exception_paths
+        for prefix in [_recovery_prompt_lineage_token(item)]
+        if prefix
+    }
+    return frozenset(prefixes)
+
+
+def _is_allowed_hybrid_exception_path(
+    rel_path: str,
+    *,
+    exception_paths: frozenset[str],
+) -> bool:
+    if rel_path in exception_paths:
+        return True
+    lineage = _recovery_prompt_lineage_token(rel_path)
+    if lineage is None:
+        return False
+    return lineage in _allowed_recovery_prompt_lineages(exception_paths)
+
+
 def _hybrid_exception_paths(
     job_id: str | None = None,
     *,
@@ -2365,7 +2408,10 @@ def _collect_hybrid_manifest(
     manifest: dict[str, dict[str, Any]] = {}
     inventory = _collect_hybrid_inventory(repo_root)
     for rel_path, meta in inventory.items():
-        if rel_path in exception_paths:
+        if _is_allowed_hybrid_exception_path(
+            rel_path,
+            exception_paths=exception_paths,
+        ):
             continue
         if meta["type"] == "directory":
             continue
@@ -2419,14 +2465,33 @@ def _validate_hybrid_scratch_state(
 
 
 def _ensure_hybrid_scratch_inventory_allowed(
+    repo_root: Path,
     inventory: dict[str, dict[str, Any]],
     *,
     exception_paths: frozenset[str],
 ) -> tuple[bool, str]:
+    for rel_path in sorted(inventory):
+        if not rel_path.startswith(".scratch/"):
+            continue
+        if not _is_allowed_hybrid_exception_path(
+            rel_path,
+            exception_paths=exception_paths,
+        ):
+            continue
+        path = repo_root / rel_path
+        snapshot = _absolute_path_snapshot(path)
+        expected_realpath = str(path.resolve(strict=False))
+        if snapshot["exists"] and snapshot["type"] != "file":
+            return False, f"hybrid .scratch exception must remain a regular file: {rel_path}"
+        if snapshot["exists"] and snapshot["realpath"] != expected_realpath:
+            return False, f"hybrid .scratch exception escaped its stable realpath: {rel_path}"
     extra_paths = sorted(
         path for path in inventory
         if path.startswith(".scratch/")
-        and path not in exception_paths
+        and not _is_allowed_hybrid_exception_path(
+            path,
+            exception_paths=exception_paths,
+        )
     )
     if extra_paths:
         return False, f"unexpected .scratch descendant outside exact exception set: {extra_paths[0]}"
@@ -2515,10 +2580,18 @@ def _diff_hybrid_inventory(
 ) -> dict[str, str]:
     reasons: dict[str, str] = {}
     for rel_path in sorted(set(baseline) | set(current)):
-        if rel_path in exception_paths:
-            continue
         before = baseline.get(rel_path)
         after = current.get(rel_path)
+        # Same-lineage recovery prompt siblings are tolerated only when they
+        # were already present at checkpoint time. Newly created siblings must
+        # still fail closed unless they are an exact admitted exception path.
+        if rel_path in exception_paths:
+            continue
+        if before is not None and _is_allowed_hybrid_exception_path(
+            rel_path,
+            exception_paths=exception_paths,
+        ):
+            continue
         if before is None:
             reasons[rel_path] = "inventory_created"
             continue
@@ -2551,6 +2624,7 @@ def _capture_hybrid_checkpoint(
         return False, {"detail": detail}
     inventory = _collect_hybrid_inventory(repo_root)
     ok, detail = _ensure_hybrid_scratch_inventory_allowed(
+        repo_root,
         inventory,
         exception_paths=exception_paths,
     )
@@ -2979,11 +3053,24 @@ def _run_delegate_implementer_action(
         for item in delegate_payload["validation_spec"]
         for target in item["targets"]
     ]
-    validator_result = _run_hybrid_validation_spec(
-        repo_root,
-        validation_spec=delegate_payload["validation_spec"],
-        timeout=validator_timeout,
-    )
+    try:
+        validator_result = _run_hybrid_validation_spec(
+            repo_root,
+            validation_spec=delegate_payload["validation_spec"],
+            timeout=validator_timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        command = exc.cmd if isinstance(exc.cmd, list) else [str(exc.cmd)]
+        validator_result = {
+            "validator": "pytest_targeted",
+            "command": command,
+            "targets": validator_targets,
+            "stdout": "",
+            "stderr": f"hybrid validator timed out after {validator_timeout}s",
+            "exit_code": 124,
+            "passed": False,
+            "timed_out": True,
+        }
     final_ok, final_audit = _audit_hybrid_checkpoint(
         repo_root,
         baseline=baseline,
@@ -5080,10 +5167,61 @@ def _load_recovery_status(repo_root: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
 def _save_recovery_status(repo_root: Path, status: dict[str, Any]) -> None:
     status_path = repo_root / RECOVERY_STATUS_FILE
-    status_path.parent.mkdir(parents=True, exist_ok=True)
-    status_path.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
+    _atomic_write_text(status_path, json.dumps(status, indent=2) + "\n")
+
+
+def _snapshot_recovery_status(repo_root: Path) -> tuple[bool, str]:
+    status_path = repo_root / RECOVERY_STATUS_FILE
+    if not status_path.exists():
+        return False, ""
+    return True, status_path.read_text(encoding="utf-8")
+
+
+def _restore_recovery_status(repo_root: Path, *, existed: bool, raw_text: str) -> None:
+    status_path = repo_root / RECOVERY_STATUS_FILE
+    if existed:
+        _atomic_write_text(status_path, raw_text)
+        return
+    try:
+        status_path.unlink()
+    except FileNotFoundError:
+        return
+
+
+def _commit_recovery_status(
+    repo_root: Path,
+    status: dict[str, Any],
+    *,
+    event_actions: list[Callable[[], Any]] | None = None,
+) -> dict[str, Any]:
+    existed, raw_text = _snapshot_recovery_status(repo_root)
+    _save_recovery_status(repo_root, status)
+    try:
+        for action in event_actions or []:
+            action()
+    except Exception:
+        _restore_recovery_status(repo_root, existed=existed, raw_text=raw_text)
+        raise
+    return status
 
 
 def _count_wave_invocations(attempts: list[dict[str, Any]], wave_id: str) -> int:
@@ -5112,6 +5250,76 @@ def _retry_target(result: dict[str, Any], step: str) -> str:
     return str(target).strip()
 
 
+def _routing_plan_path(record: dict[str, Any]) -> str:
+    plan_path = str(record.get("plan_path") or "").strip()
+    if plan_path:
+        return plan_path
+    scope_items = record.get("scope_items")
+    if isinstance(scope_items, list):
+        for item in scope_items:
+            text = str(item or "").strip()
+            if text.endswith(".md"):
+                return text
+    return ""
+
+
+def _recovery_event_context(
+    repo_root: Path,
+    *,
+    result: dict[str, Any] | None = None,
+    status: dict[str, Any] | None = None,
+) -> tuple[str, str | None]:
+    result = result or {}
+    status = status or {}
+    task_id = str(
+        result.get("task_id")
+        or status.get("task_id")
+        or ""
+    ).strip()
+    plan_path = str(
+        result.get("plan_path")
+        or status.get("plan_path")
+        or ""
+    ).strip()
+    if not task_id or not plan_path:
+        try:
+            routing_record = load_routing_record(repo_root)
+        except Exception:
+            routing_record = {}
+        if not task_id:
+            task_id = str(routing_record.get("task_id") or "").strip()
+        if not plan_path:
+            plan_path = _routing_plan_path(routing_record)
+    return task_id or "[PIPELINE-RECOVERY]", plan_path or None
+
+
+def _emit_recovery_event(
+    repo_root: Path,
+    *,
+    status: dict[str, Any],
+    event_type: str,
+    state: str,
+    transition_key: str,
+    summary: str,
+    reason: str,
+    artifact_paths: dict[str, str] | None = None,
+) -> None:
+    task_id, plan_path = _recovery_event_context(repo_root, status=status)
+    emit_pipeline_agent_event(
+        repo_root,
+        event_type=event_type,
+        wave_id=str(status.get("wave_id") or "").strip(),
+        task_id=task_id,
+        plan_path=plan_path,
+        phase="recovery_gate",
+        state=state,
+        transition_key=transition_key,
+        summary=summary,
+        reason=reason,
+        artifact_paths=artifact_paths,
+    )
+
+
 def _begin_recovery_status(
     repo_root: Path,
     *,
@@ -5125,10 +5333,13 @@ def _begin_recovery_status(
     invocation_id: str,
 ) -> dict[str, Any]:
     now = _now_iso()
+    task_id, plan_path = _recovery_event_context(repo_root, result=result)
     status = {
         "active": True,
         "invocation_id": invocation_id,
         "wave_id": wave_id,
+        "task_id": task_id,
+        "plan_path": plan_path or "",
         "step": step,
         "failure_class": failure_class.value,
         "tier": tier,
@@ -5153,16 +5364,49 @@ def _begin_recovery_status(
         "exhausted": False,
         "outcome": "",
     }
-    _save_recovery_status(repo_root, status)
-    return status
+    return _commit_recovery_status(
+        repo_root,
+        status,
+        event_actions=[
+            lambda status=status, invocation_id=invocation_id, wave_id=wave_id: _emit_recovery_event(
+                repo_root,
+                status=status,
+                event_type="recovery_started",
+                state=str(status.get("state") or "recovery_started"),
+                transition_key=f"{invocation_id}:recovery_started",
+                summary=f"Recovery started for {wave_id}",
+                reason=str(status.get("reason") or "recovery started"),
+                artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+            )
+        ],
+    )
 
 
 def _update_recovery_status(repo_root: Path, **updates: Any) -> dict[str, Any]:
     status = _load_recovery_status(repo_root)
+    prior_state = str(status.get("state") or "")
     status.update(updates)
     status["updated_at"] = _now_iso()
-    _save_recovery_status(repo_root, status)
-    return status
+    new_state = str(status.get("state") or "")
+    event_actions: list[Callable[[], Any]] = []
+    if new_state and new_state != prior_state:
+        transition_key = (
+            f"{status.get('invocation_id', 'recovery')}:"
+            f"{new_state}:{status.get('current_iteration', 0)}"
+        )
+        event_actions.append(
+            lambda status=status, new_state=new_state, transition_key=transition_key: _emit_recovery_event(
+                repo_root,
+                status=status,
+                event_type="recovery_state_changed",
+                state=new_state,
+                transition_key=transition_key,
+                summary=f"Recovery state changed to {new_state}",
+                reason=str(status.get("detail") or status.get("reason") or new_state),
+                artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+            )
+        )
+    return _commit_recovery_status(repo_root, status, event_actions=event_actions)
 
 
 def _finish_recovery_status(
@@ -5175,8 +5419,9 @@ def _finish_recovery_status(
     detail: str,
     state: str,
 ) -> dict[str, Any]:
-    return _update_recovery_status(
-        repo_root,
+    status = _load_recovery_status(repo_root)
+    prior_state = str(status.get("state") or "")
+    status.update(
         active=False,
         recovered=recovered,
         exhausted=exhausted,
@@ -5189,6 +5434,60 @@ def _finish_recovery_status(
         current_command="",
         finished_at=_now_iso(),
     )
+    status["updated_at"] = _now_iso()
+    new_state = str(status.get("state") or "")
+    event_actions: list[Callable[[], Any]] = []
+    if new_state and new_state != prior_state:
+        transition_key = (
+            f"{status.get('invocation_id', 'recovery')}:"
+            f"{new_state}:{status.get('current_iteration', 0)}"
+        )
+        event_actions.append(
+            lambda status=status, new_state=new_state, transition_key=transition_key: _emit_recovery_event(
+                repo_root,
+                status=status,
+                event_type="recovery_state_changed",
+                state=new_state,
+                transition_key=transition_key,
+                summary=f"Recovery state changed to {new_state}",
+                reason=str(status.get("detail") or status.get("reason") or new_state),
+                artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+            )
+        )
+    if not recovered:
+        transition_key = (
+            f"{status.get('invocation_id', 'recovery')}:"
+            f"recovery_failed:{outcome or state}"
+        )
+        event_actions.append(
+            lambda status=status, state=state, outcome=outcome, detail=detail, transition_key=transition_key: _emit_recovery_event(
+                repo_root,
+                status=status,
+                event_type="recovery_failed",
+                state=str(status.get("state") or state),
+                transition_key=transition_key,
+                summary=f"Recovery failed with outcome {outcome or state}",
+                reason=_excerpt(detail),
+                artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+            )
+        )
+        if exhausted:
+            event_actions.append(
+                lambda status=status, state=state, outcome=outcome, detail=detail: _emit_recovery_event(
+                    repo_root,
+                    status=status,
+                    event_type="pipeline_hard_fail",
+                    state="hard_fail",
+                    transition_key=(
+                        f"{status.get('invocation_id', 'recovery')}:"
+                        f"pipeline_hard_fail:{outcome or state}"
+                    ),
+                    summary=f"Pipeline hard-failed after recovery {outcome or state}",
+                    reason=_excerpt(detail),
+                    artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+                )
+            )
+    return _commit_recovery_status(repo_root, status, event_actions=event_actions)
 
 
 def _human_recovery_target_label(target: str) -> str:

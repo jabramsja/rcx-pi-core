@@ -19,6 +19,11 @@
     "phase_b_executor": null
   },
   "hybrid_recovery_enabled": false,
+  "pipeline_agent_pager": {
+    "enabled": false,
+    "route": "notify-only",
+    "claude_continue": false
+  },
   "agent_review_enabled": false,
   "review_depths": {
     "phase_a": "quick",
@@ -32,7 +37,10 @@
     "commit_executor": 3600,
     "pre_push_fast": 900,
     "bot_remediation": 600,
-    "agent_review": 900
+    "agent_review": 900,
+    "pipeline_agent_pager_trigger": 30,
+    "pipeline_agent_pager_codex_ack": 20,
+    "pipeline_agent_pager_claude_ack": 20
   },
   "bridge_loop_limits": {
     "phase_a": 15,

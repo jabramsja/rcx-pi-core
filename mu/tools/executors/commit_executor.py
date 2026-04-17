@@ -54,6 +54,7 @@ try:
         normalize_wave_id,
         ensure_not_agent_review_mode,
         ExecutorCommonError,
+        emit_pipeline_agent_event,
     )
 except ImportError:
     import importlib.util as _ilu
@@ -69,6 +70,7 @@ except ImportError:
     normalize_wave_id = _mod.normalize_wave_id
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
+    emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
 
 _bridge_adapters = None
 _bridge_import_error = None
@@ -200,6 +202,43 @@ for _sub_name, _sub_val in [
             f"commit_executor sub-timeout {_sub_name}={_sub_val}s exceeds "
             f"outer budget commit_executor={COMMIT_EXECUTOR_OUTER_BUDGET_S}s"
         )
+
+
+def _handoff_plan_path(handoff: dict[str, Any]) -> str | None:
+    scope_items = handoff.get("scope_items")
+    if not isinstance(scope_items, list):
+        return None
+    for item in scope_items:
+        text = str(item or "").strip()
+        if text.endswith(".md"):
+            return text
+    return None
+
+
+def _emit_commit_ready_event(
+    repo_root: Path,
+    *,
+    handoff: dict[str, Any],
+    receipt_path_from_supervisor: str,
+    receipt_decision: str,
+    handoff_receipt_rel: str,
+) -> dict[str, Any]:
+    return emit_pipeline_agent_event(
+        repo_root,
+        event_type="commit_ready",
+        wave_id=str(handoff.get("wave_id") or "").strip(),
+        task_id=str(handoff.get("task_id") or "[COMMIT-EXECUTOR]").strip(),
+        plan_path=_handoff_plan_path(handoff),
+        phase="commit_executor",
+        state="commit_ready",
+        transition_key=receipt_path_from_supervisor,
+        summary=f"Commit path reached {receipt_decision}",
+        reason=f"Commit-ready receipt validated at {receipt_path_from_supervisor}",
+        artifact_paths={
+            "supervisor_receipt": receipt_path_from_supervisor,
+            "handoff_receipt": handoff_receipt_rel,
+        },
+    )
 
 
 def _run(
@@ -3535,6 +3574,21 @@ def run_commit_pipeline(
         result["receipt_decision"] = receipt_decision
         result["handoff_sha"] = handoff_sha
         result["steps_completed"].append("validate_receipt")
+        try:
+            _emit_commit_ready_event(
+                repo_root,
+                handoff=handoff,
+                receipt_path_from_supervisor=receipt_path_from_supervisor,
+                receipt_decision=receipt_decision,
+                handoff_receipt_rel=handoff_receipt_rel,
+            )
+        except Exception as exc:
+            return {
+                "status": "error",
+                "step": "commit_ready_pager",
+                "errors": [f"Commit-ready pager emission failed: {exc}"],
+                "steps_completed": result["steps_completed"],
+            }
         log(
             "Step 7: receipt chain verified "
             f"(handoff={handoff_receipt_decision}, supervisor={receipt_decision})"
