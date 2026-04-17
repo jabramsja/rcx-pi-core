@@ -77,6 +77,10 @@ def _setup_repo(tmp_path):
     }
     subprocess.run(["git", "init"], cwd=repo, capture_output=True)
     subprocess.run(["git", "checkout", "-b", "dev"], cwd=repo, capture_output=True)
+    # Make later commit-path assertions hermetic instead of depending on the
+    # runner's ambient git identity.
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, capture_output=True)
     subprocess.run(["git", "commit", "--allow-empty", "-m", "init"], cwd=repo, capture_output=True, env=env)
     (repo / "TASKS.md").write_text("## Ra\n\n- Tracker sync note (seed): init\n\n---\n")
     (repo / "file.py").write_text("# test")
@@ -195,7 +199,7 @@ class TestSupervisorReceiptIsAuthority:
              ):
             result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
 
-        assert result["status"] == "success"
+        assert result["status"] == "success", f"Unexpected commit pipeline result: {result}"
         assert pager_calls
         event = pager_calls[0]
         assert event["event_type"] == "commit_ready"
