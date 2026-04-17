@@ -109,7 +109,7 @@ human_phase_b_step() {
   local step="$1"
   case "$step" in
     agent_review) printf '%s\n' "native SDK agents are auditing the code" ;;
-    implementer) printf '%s\n' "Claude is writing the fix" ;;
+    implementer) printf '%s\n' "the implementer is writing the fix" ;;
     bridge_review) printf '%s\n' "Codex is reviewing the fix" ;;
     needs_phase_b_reentry) printf '%s\n' "waiting to restart Phase B" ;;
     *)
@@ -464,10 +464,10 @@ else:
     if [ -n "$agent_pid" ]; then
       step="agent_review"
       phase_b_is_live=1
-    elif [ "$claude_count" -gt 0 ]; then
+    elif [ "$claude_count" -gt 0 ] || [ "$codex_impl_count" -gt 0 ]; then
       step="implementer"
       phase_b_is_live=1
-    elif [ "$codex_count" -gt 0 ]; then
+    elif [ "$codex_review_count" -gt 0 ] || [ "$codex_unknown_count" -gt 0 ]; then
       step="bridge_review"
       phase_b_is_live=1
     fi
