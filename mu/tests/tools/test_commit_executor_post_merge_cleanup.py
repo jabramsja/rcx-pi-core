@@ -221,6 +221,43 @@ def test_worktree_remove_runs_before_branch_delete_so_order_unlocks_branch(tmp_p
     assert not any("checked out" in w for w in outcome["warnings"]), outcome
 
 
+def test_main_worktree_is_refused_when_distinct_from_cleanup_root(tmp_path):
+    """Bot P2 finding (PR #782): if `_resolve_post_merge_verify_root` points
+    cleanup_root at a linked worktree while repo_root IS the primary worktree,
+    the helper must NOT attempt `git worktree remove <main>` — git refuses,
+    then `branch -D` would fail because the branch is still checked out in
+    main. Guard: only run worktree remove when repo_root/.git is a FILE
+    (linked-worktree pointer), never a DIRECTORY (primary worktree).
+    """
+    main_repo = _init_repo(tmp_path)  # main_repo/.git is a directory, on dev
+    wave_id = "test-wave-main-guard-2026-04-17"
+    target_branch = f"jabramsja/{wave_id}"
+    # Create target_branch + another branch on main so we can move main off dev.
+    _git(["branch", target_branch, "dev"], cwd=main_repo)
+    _git(["checkout", "-b", "other"], cwd=main_repo)  # main now on 'other'
+    # Now dev is free; create a linked worktree on dev to serve as cleanup_root.
+    linked = tmp_path / "linked_cleanup"
+    _git(["worktree", "add", str(linked), "dev"], cwd=main_repo)
+
+    outcome = commit_mod._post_merge_cleanup(  # ANTICHEAT_OK: testing private helper
+        cleanup_root=linked,
+        repo_root=main_repo,  # primary worktree — helper MUST refuse to remove it
+        target_branch=target_branch,
+        base_branch="dev",
+        wave_id=wave_id,
+        log=_noop_log,
+    )
+
+    # Worktree step must be skipped (main repo .git is a directory, not a linked file)
+    assert outcome["worktree_removed"] is False, outcome
+    # Main repo still exists on disk
+    assert main_repo.exists()
+    assert (main_repo / ".git").is_dir(), "main repo .git must remain a directory"
+    # Branch delete from linked cleanup_root succeeds — target_branch exists
+    # as a ref but is NOT checked out in any worktree (main is on 'other').
+    assert outcome["branch_deleted"] is True, outcome
+
+
 def test_empty_wave_id_skips_stash_step_without_warning(tmp_path):
     repo = _init_repo(tmp_path)
     target_branch = "jabramsja/some-branch"

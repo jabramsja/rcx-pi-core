@@ -2676,7 +2676,19 @@ def _post_merge_cleanup(
         cleanup_root_real = cleanup_root.resolve()
     except OSError:
         cleanup_root_real = cleanup_root
-    if repo_root_real != cleanup_root_real and repo_root_real.exists():
+    # Refuse to touch the main worktree. Git refuses `worktree remove` on the
+    # primary worktree, and attempting it would leave the branch checked out
+    # so the subsequent `branch -D` also fails. Main worktree's `.git` is a
+    # DIRECTORY; a linked worktree's `.git` is a FILE pointing at
+    # `<main>/.git/worktrees/<name>/`. Only attempt removal when the path is
+    # a linked worktree AND distinct from cleanup_root.
+    repo_git_path = repo_root_real / ".git"
+    is_linked_worktree = repo_git_path.is_file()
+    if (
+        repo_root_real != cleanup_root_real
+        and repo_root_real.exists()
+        and is_linked_worktree
+    ):
         try:
             _run(
                 ["git", "worktree", "remove", "--force", str(repo_root_real)],
