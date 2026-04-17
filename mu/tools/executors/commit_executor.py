@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -1737,6 +1738,31 @@ def _attempt_bot_finding_remediation(
         }
 
     config_path = repo_root / ".agent_bus" / "bridge_config.json"
+    # Auto-heal: fresh worktrees created by `git worktree add` lack `.agent_bus/`
+    # because .gitignore excludes the whole tree. When the config is missing,
+    # locate the main worktree via `git worktree list --porcelain` (first entry)
+    # and copy its bridge_config.json here. Preserves load_bridge_config's
+    # fail-closed contract: if main also lacks the file, load_bridge_config
+    # raises BridgeAdapterError unchanged.
+    if not config_path.exists():
+        try:
+            wt_out = subprocess.check_output(
+                ["git", "worktree", "list", "--porcelain"],
+                cwd=str(repo_root), text=True, timeout=10,
+            )
+            main_path: Path | None = None
+            for line in wt_out.splitlines():
+                if line.startswith("worktree "):
+                    main_path = Path(line[len("worktree "):].strip())
+                    break
+            if main_path is not None and main_path.resolve() != repo_root.resolve():
+                src = main_path / ".agent_bus" / "bridge_config.json"
+                if src.exists():
+                    config_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, config_path)
+                    log(f"Step 15: auto-copied bridge_config.json from main worktree ({main_path})")
+        except Exception as heal_exc:
+            log(f"Step 15: bridge_config.json auto-heal failed: {heal_exc}")
     try:
         config = _bridge_adapters.load_bridge_config(config_path)
         adapter = _bridge_adapters.get_adapter(config, BOT_REMEDIATION_ADAPTER)

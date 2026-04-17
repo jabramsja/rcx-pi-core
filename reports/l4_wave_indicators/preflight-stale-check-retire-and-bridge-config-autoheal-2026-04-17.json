@@ -1,0 +1,24 @@
+{
+  "wave_id": "preflight-stale-check-retire-and-bridge-config-autoheal-2026-04-17",
+  "repeat_run_speedup_ratio": 1.899485,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.223877,
+  "repeat_run_raw_seconds": [
+    0.425251,
+    0.223877
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.425251
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.649128
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-04-17T06:24:23Z",
+  "collector_version": "2.2.0"
+}
