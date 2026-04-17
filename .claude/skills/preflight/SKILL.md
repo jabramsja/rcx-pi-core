@@ -190,11 +190,50 @@ echo "$ACTIVE_VERSION" > "$LAST_SEEN_FILE"
 ```
 If `VERSION_CHANGED=true`: run step 18 (deep-read) then step 19 (patch). The symlink-target check is CRITICAL because CC v2.1.97+ auto-updates despite `autoUpdaterStatus: disabled`.
 
+17b. **Session-binary staleness detection.** Step 19 verifies on-disk patch state. It does NOT verify that a live `claude` session's in-memory binary matches disk. Node.js loads the bundle once at `exec()` time into the v8 compiled-code cache; no `fs.watch()` or hot-reload exists. Any session started BEFORE a patch was applied runs the unpatched JS in memory indefinitely — disk patches take effect only on the NEXT fresh session launch. Run:
+```bash
+CC_BIN_PATH=$(readlink ~/.local/bin/claude 2>/dev/null)
+[ -z "$CC_BIN_PATH" ] && CC_BIN_PATH=$(which claude 2>/dev/null)
+CC_BIN_MTIME=$(stat -f "%m" "$CC_BIN_PATH" 2>/dev/null || stat -c "%Y" "$CC_BIN_PATH" 2>/dev/null)
+[ -z "$CC_BIN_MTIME" ] && { echo "Session staleness: cannot stat binary at $CC_BIN_PATH — skipping"; CC_BIN_MTIME=0; }
+SELF_CC_PID=""
+P=$PPID
+while [ -n "$P" ] && [ "$P" != "1" ] && [ "$P" != "0" ]; do
+  CMD=$(ps -p "$P" -o command= 2>/dev/null)
+  echo "$CMD" | grep -qE '(^|/)claude( |$|--)' && { SELF_CC_PID=$P; break; }
+  P=$(ps -p "$P" -o ppid= 2>/dev/null | tr -d ' ')
+done
+STALE_COUNT=0
+SELF_STALE=false
+if [ -n "$CC_BIN_MTIME" ] && [ "$CC_BIN_MTIME" -gt 0 ]; then
+  for PID in $(pgrep -f '(^|/)claude( |$)' 2>/dev/null); do
+    LSTART=$(ps -p "$PID" -o lstart= 2>/dev/null)
+    [ -z "$LSTART" ] && continue
+    PROC_EPOCH=$(date -jf "%a %b %e %H:%M:%S %Y" "$LSTART" +%s 2>/dev/null || date -d "$LSTART" +%s 2>/dev/null)
+    [ -z "$PROC_EPOCH" ] && continue
+    if [ "$PROC_EPOCH" -lt "$CC_BIN_MTIME" ]; then
+      MARK=""
+      [ "$PID" = "$SELF_CC_PID" ] && { MARK=" <-- THIS SESSION"; SELF_STALE=true; }
+      echo "WARN: claude PID $PID started $(date -r "$PROC_EPOCH" '+%Y-%m-%d %H:%M:%S') before binary patch $(date -r "$CC_BIN_MTIME" '+%Y-%m-%d %H:%M:%S') — in-memory binary is pre-patch${MARK}"
+      STALE_COUNT=$((STALE_COUNT+1))
+    fi
+  done
+fi
+if [ "$STALE_COUNT" -eq 0 ]; then
+  echo "Session-binary staleness: clean ($(pgrep -f '(^|/)claude( |$)' 2>/dev/null | wc -l | tr -d ' ') live claude processes, all post-patch)"
+elif [ "$SELF_STALE" = "true" ]; then
+  echo "Session-binary staleness: $STALE_COUNT live processes running pre-patch binary, INCLUDING this session (PID $SELF_CC_PID). Patches applied this session affect NEXT exec only — current contradictions may still inject from in-memory v2.1.x."
+else
+  echo "Session-binary staleness: $STALE_COUNT other live processes running pre-patch binary (not this session). They will pick up patches on their next exec."
+fi
+```
+Warn only — do not kill or restart processes. Structural cause is Node.js v8 compiled-code caching, not a CC defect. Action: let pre-patch processes exit on their natural lifecycle; founder decides per-session if early termination is warranted.
+
 18. **Deep-read binary for contradictions (on version change OR founder request).** Unpack binary, scan ALL prompt-generating functions (not just base_prompt.js), extract behavioral instructions, identify contradictions with overrides. Search ALL JS for: "efficient", "concise", "brief", "minimize", "parallel", "don't re-read", "trust", "skip". Compare against CLAUDE.md, MEMORY.md, hard-rules.txt, .claude/rules/. If function/variable names changed (minification), update `reference_tweakcc_repatch.md` in memory. Report new contradictions to founder. See `reference_tweakcc_repatch.md` for known function names per version.
 
 18b. **Do not conflate text-surface edits with binary patching.** Editing `~/.codex/models_cache.json`, session/prompt hook files, or local rules does NOT require checksum refresh or Mach-O re-signing. The `killed=9` interactive `codex` failure mode belongs to unsigned or drifted byte-edited binaries. Only step 19 binary-patch work requires re-signing plus real interactive launch validation.
 
-19. Verify and auto-repatch ALL 32 active binary patches (P1 removed, P_OjH + P2-P5 + P7-P32 active). Run:
+19. Verify and auto-repatch ALL 62 active binary patches in v2.1.112 (P1/P29b/P30 retired or merged; P_OjH + P2-P5 + P7 + P8-P29 + P31-P66 active; P27 under retirement review — surface removed in v2.1.112). Run:
 ```bash
 npx tweakcc unpack /tmp/ppc.js 2>&1 | tail -1
 F=/tmp/ppc.js; N=0
@@ -263,10 +302,67 @@ F=/tmp/ppc.js; N=0
 [ "$(grep -c 'Start implementing right away' $F)" -gt 0 ] && echo "P37-old PRESENT (nLf)" && N=$((N+1))
 [ "$(grep -c 'Prefer making reasonable assumptions over asking' $F)" -gt 0 ] && echo "P38-old PRESENT (nLf)" && N=$((N+1))
 [ "$(grep -c 'Do not enter plan mode unless the user explicitly' $F)" -gt 0 ] && echo "P39-old PRESENT (nLf)" && N=$((N+1))
+# P40-P51 (2026-04-12 deep scan — gold-plate/concise/avoid-re-reading suppression)
+[ "$(grep -cF 'Complete the task with thoroughness and verification' $F)" -eq 0 ] && echo "P40 MISSING (gold-plate)" && N=$((N+1))
+[ "$(grep -cF \"don't gold-plate\" $F)" -gt 0 ] && echo "P40-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'Be thorough and complete' $F)" -eq 0 ] && echo "P41 MISSING (session notes be-concise)" && N=$((N+1))
+[ "$(grep -cF 'Be concise but complete' $F)" -gt 0 ] && echo "P41-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'Focus on outcomes, key actions, and verification steps' $F)" -eq 0 ] && echo "P42 MISSING (planning schema)" && N=$((N+1))
+[ "$(grep -cF 'Be concise - aim for 3-7 items' $F)" -gt 0 ] && echo "P42-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'include all diagnostic reasoning' $F)" -eq 0 ] && echo "P43 MISSING (subagent prompt)" && N=$((N+1))
+[ "$(grep -cF 'as short as the answer allows' $F)" -gt 0 ] && echo "P43-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'accurately describe the choice' $F)" -eq 0 ] && echo "P44 MISSING (UI label schema)" && N=$((N+1))
+[ "$(grep -cF 'Should be concise (1-5 words)' $F)" -gt 0 ] && echo "P44-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'Be specific, descriptive, and thorough' $F)" -eq 0 ] && echo "P45 MISSING (github issue)" && N=$((N+1))
+[ "$(grep -cF 'Be concise, specific and descriptive' $F)" -gt 0 ] && echo "P45-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'it must be focused' $F)" -eq 0 ] && echo "P46 MISSING (claude.md setup)" && N=$((N+1))
+[ "$(grep -cF 'so it must be concise' $F)" -gt 0 ] && echo "P46-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'Be thorough and constructive' $F)" -eq 0 ] && echo "P47 MISSING (rule review)" && N=$((N+1))
+[ "$(grep -cF 'Be concise and constructive' $F)" -gt 0 ] && echo "P47-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'Re-read files when your protocol requires verification' $F)" -eq 0 ] && echo "P48 MISSING (avoid-re-reading)" && N=$((N+1))
+[ "$(grep -cF 'Avoid re-reading entire files' $F)" -gt 0 ] && echo "P48-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'after explaining the sandbox restriction' $F)" -eq 0 ] && echo "P49 MISSING (just do it)" && N=$((N+1))
+[ "$(grep -cF \"don't ask, just do it\" $F)" -gt 0 ] && echo "P49-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'respond with a thorough report' $F)" -eq 0 ] && echo "P50 MISSING (subagent completion)" && N=$((N+1))
+[ "$(grep -cF 'respond with a concise report' $F)" -gt 0 ] && echo "P50-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'keep it short (5-10 words)' $F)" -eq 0 ] && echo "P51 MISSING (bash tool guidance)" && N=$((N+1))
+[ "$(grep -cF 'keep it brief (5-10 words)' $F)" -gt 0 ] && echo "P51-old PRESENT" && N=$((N+1))
+# P52-P58 (2026-04-17 v2.1.112 memory subagent / compaction / ultrathink MAX)
+[ "$(grep -cF 'verify with re-reads when your protocol requires verification' $F)" -eq 0 ] && echo "P52 MISSING (no read-then-edit)" && N=$((N+1))
+[ "$(grep -cF 'no read-then-edit dance' $F)" -gt 0 ] && echo "P52-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'Take the time you need. Issue' $F)" -eq 0 ] && echo "P53 MISSING (memory subagent K?)" && N=$((N+1))
+[ "$(grep -cF 'Issue all ${m7} and rm calls in parallel' $F)" -gt 0 ] && echo "P53-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'Read first, verify what you read' $F)" -eq 0 ] && echo "P54 MISSING (memory subagent efficient-strategy)" && N=$((N+1))
+[ "$(grep -cF 'Do not interleave reads and writes' $F)" -gt 0 ] && echo "P54-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'Investigate and verify content as your protocol requires' $F)" -eq 0 ] && echo "P55 MISSING (memory subagent no-verify)" && N=$((N+1))
+[ "$(grep -cF 'Do not waste any turns attempting to investigate' $F)" -gt 0 ] && echo "P55-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'Briefly verify the compacted state by re-reading' $F)" -eq 0 ] && echo "P56 MISSING (post-compaction)" && N=$((N+1))
+[ "$(grep -cF 'do not acknowledge the summary' $F)" -gt 0 ] && echo "P56-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'ultrathink_effort",level:"max"' $F)" -eq 0 ] && echo "P57 MISSING (ultrathink->MAX)" && N=$((N+1))
+[ "$(grep -cF 'ultrathink_effort",level:"high"' $F)" -gt 0 ] && echo "P57-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'is the default for correctness-critical work' $F)" -eq 0 ] && echo "P58 MISSING (claude-api MAX default)" && N=$((N+1))
+[ "$(grep -cF 'often the sweet spot balancing quality' $F)" -gt 0 ] && echo "P58-old PRESENT" && N=$((N+1))
+# P59-P66 (2026-04-17 v2.1.112 claude-api skill efficiency-over-depth elimination)
+[ "$(grep -cF 'correctness-critical work, ensure the model has full context' $F)" -eq 0 ] && echo "P59 MISSING (claude-api interactive coding)" && N=$((N+1))
+[ "$(grep -cF 'autonomous features (like an auto mode)' $F)" -gt 0 ] && echo "P59-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'for production correctness-critical work prefer' $F)" -eq 0 ] && echo "P60 MISSING (effort param default)" && N=$((N+1))
+[ "$(grep -cF 'and the default in Claude Code; use a minimum of' $F)" -gt 0 ] && echo "P60-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'EXPLICITLY trade off model intelligence' $F)" -eq 0 ] && echo "P61 MISSING (token efficiency opus 4.7)" && N=$((N+1))
+[ "$(grep -cF 'these controls may trade off model intelligence' $F)" -gt 0 ] && echo "P61-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'When you have explicit evidence that lower depth is acceptable' $F)" -eq 0 ] && echo "P62 MISSING (effort tradeoff)" && N=$((N+1))
+[ "$(grep -cF 'is often a favorable balance' $F)" -gt 0 ] && echo "P62-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'WARNING: imposing a task_budget biases' $F)" -eq 0 ] && echo "P63 MISSING (task budgets warning)" && N=$((N+1))
+[ "$(grep -cF 'it sees a running countdown and self-moderates' $F)" -gt 0 ] && echo "P63-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'for correctness-critical work; ensure the model has full context' $F)" -eq 0 ] && echo "P64 MISSING ([TUNE] interactive coding)" && N=$((N+1))
+[ "$(grep -cF 'autonomous features (e.g. an auto mode)' $F)" -gt 0 ] && echo "P64-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'AVOID \`task_budget\` for correctness-critical work' $F)" -eq 0 ] && echo "P65 MISSING (task_budget avoidance)" && N=$((N+1))
+[ "$(grep -cF 'Use \`task_budget\` when you want the model to self-moderate' $F)" -gt 0 ] && echo "P65-old PRESENT" && N=$((N+1))
+[ "$(grep -cF 'AVOID Task Budgets for correctness-critical work' $F)" -eq 0 ] && echo "P66 MISSING (model migration task budgets)" && N=$((N+1))
+[ "$(grep -cF 'adopt the API-native Task Budgets' $F)" -gt 0 ] && echo "P66-old PRESENT" && N=$((N+1))
 rm -f $F
 echo "NEEDS_REPATCH=$N"
 ```
-If `NEEDS_REPATCH` > 0: Read `reference_tweakcc_repatch.md` from memory. If step 18 found changed names, update memory first. Re-apply ALL 39 active patches (P1 removed, P_OjH + P2-P5 + P7-P32 + P33-P39), re-verify, create backup.
+If `NEEDS_REPATCH` > 0: Read `reference_tweakcc_repatch.md` from memory. If step 18 found changed names, update memory first. Re-apply ALL 62 active patches (P1/P29b/P30 retired or merged; P_OjH + P2-P5 + P7 + P8-P29 + P31-P66), re-verify, create backup. Reminder: per step 17b, applied patches affect only NEXT session launch.
 
 20. Verify auto-updates are disabled. Check `~/.claude/settings.json` for `autoUpdaterStatus: "disabled"` and `autoUpdates: false`. If not set, set them.
 
