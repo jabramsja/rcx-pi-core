@@ -102,6 +102,45 @@ Optional repo-local launcher:
 ```
 
 Use this when you want the founder bootstrap docs, named-skill reminders, and required startup commands rendered from one repo-local entrypoint. It operationalizes the protocol; it does not auto-invoke skills.
+Without `--run`, the guard remains render-only and must not execute the
+learning snapshot, startup-state audit, or tmux/dashboard recovery steps.
+
+Optional Codex-local convenience launcher:
+
+```bash
+codex-rcx-preflight docs
+```
+
+Use this on machines where the Codex-local wrapper is installed. It wraps the
+repo-local founder startup flow for Codex sessions. The canonical portable
+protocol remains `founder_session_guard.sh` plus `founder_session_attest.sh`.
+On machines where the local Codex startup hook is installed, this wrapper
+should already run automatically on session start or resume in `docs` mode; rerun
+it manually only if you need a narrower mode, want a stricter attestation flow,
+or need to recover from a startup-hook failure.
+On machines where local Codex persona hardening is installed, this wrapper also
+audits Codex-local startup state and should surface binary drift or
+contradiction re-audit guidance at session start. Keep the contradiction map and
+re-patch procedure in Codex-local files, not in this repo bootstrap.
+The repo-native startup flow should also fail closed on Codex-local surface
+drift that affects startup behavior or persona carry-over, including the
+session-start hook, prompt-hook status, local approval rules, and cached model
+instruction canaries.
+Text-surface edits to `~/.codex/models_cache.json`, hooks, or local rules do
+not require Mach-O re-signing. Re-sign only after byte-level Codex binary
+patches; if `codex` later dies with `killed=9`, treat that as a binary
+signature or binary-drift problem, not a models-cache edit issue.
+If Codex has been reinstalled or updated, treat the local binary patch surface
+as drifted even when the version string is unchanged: re-audit the active binary
+SHA and expect moved/renamed contradiction strings or new patch IDs. Local
+Codex binary patches must be re-signed after byte edits before trusting the
+interactive `codex` launch path; `codex --version` alone is not sufficient.
+For shared mechanical recall, treat `.claude/hooks/capture-learning.sh` and
+`.agent_bus/recovery/learned_patterns.json`, plus
+`.claude/rules/learning.md` when that shared file is present, as the shared
+learning surfaces that carry between Claude, the pipeline, and Codex. Codex
+preflight should inspect those shared files rather than creating a second
+repo-local learning store.
 
 After startup, run the session attestation when the task is a rigorous audit or
 closeout:
@@ -120,6 +159,9 @@ Optional reminder loop for long sessions:
 ```
 
 Use this in a second terminal when you want a recurring founder-protocol reminder without manually re-checking the bootstrap every few minutes.
+Claude's old `/preflight` uses a 5-minute in-session cron in a Claude-specific
+surface. Codex does not have that exact repo-native session cron primitive
+here; the closest portable analog is the founder heartbeat script above.
 
 ## 3) Required Reporting Format (Any GO/NO-GO)
 Always include:
@@ -149,13 +191,32 @@ Any full prompt should include:
 
 ## 5) First 5 Minutes Playbook For New Session
 1. Read `mu/docs/agents/AgentRunbook.v0.md` for repo agent/review tooling norms when the task touches runners, reviews, or orchestration.
-2. If using Codex, apply installed skill triggers instead of improvising the workflow. Prefer `rcx-redteam-runtime` for runtime audits, `rcx-doc-truth-sync` for doc/report cleanup, `rcx-parity-authority-audit` for Python/JS or authority review, and `rcx-wave-closeout` for validations and report closeout.
-3. Read `reports/README.md` before moving, archiving, or creating report artifacts.
-4. Re-ground on RCX doctrine in `CLAUDE.md`, `mu/docs/core/Why_RCX_PI_VM_EXISTS.md`, `mu/docs/core/SelfHosting.v0.md`, `mu/docs/core/MetaCircularKernel.v0.md`, and `mu/docs/core/StructuralPurity.v0.md` before giving runtime/substrate advice.
-5. Run `git status --short`.
-6. Run L4 contract check on actual candidate diff.
-7. Decide if wave must be split by class.
-8. Run targeted validations and issue GO/NO-GO.
+2. If using Codex and `codex-rcx-preflight` is installed, run it at session start with the best-fit mode (`docs` by default, `redteam`, `parity`, or `closeout` as needed). Otherwise use `founder_session_guard.sh <mode> --run`.
+   Guard dry-run is render-only. The learning snapshot and startup-state audit
+   execute only under `--run`, and any tmux/dashboard recovery must remain
+   behind that executed path.
+   If the local wrapper reports Codex binary drift or contradiction status, treat
+   that as a startup action item and re-audit the Codex-local hardening layer
+   before trusting prior local patches. Reinstalls and updates can overwrite the
+   vendor binary without changing the reported version, may require new patch
+   entries for moved or renamed contradictions, and require re-signing after any
+   byte-level patch before the interactive `codex` path is trusted again.
+   Text-surface fixes to `~/.codex/models_cache.json`, hooks, or rules do not
+   require binary re-signing; only Mach-O edits do.
+   The repo-native preflight should also inspect the active shared learning
+   surfaces (`.claude/hooks/capture-learning.sh`,
+   `.agent_bus/recovery/learned_patterns.json`, and
+   `.claude/rules/learning.md` when present) so Codex inherits pipeline and
+   Claude learnings without a second repo-local setup path, and should ensure
+   the tmux monitor plus web dashboard are live so pipeline observability
+   matches the old Claude `/preflight` baseline.
+3. If using Codex, apply installed skill triggers instead of improvising the workflow. Prefer `rcx-redteam-runtime` for runtime audits, `rcx-doc-truth-sync` for doc/report cleanup, `rcx-parity-authority-audit` for Python/JS or authority review, and `rcx-wave-closeout` for validations and report closeout.
+4. Read `reports/README.md` before moving, archiving, or creating report artifacts.
+5. Re-ground on RCX doctrine in `CLAUDE.md`, `mu/docs/core/Why_RCX_PI_VM_EXISTS.md`, `mu/docs/core/SelfHosting.v0.md`, `mu/docs/core/MetaCircularKernel.v0.md`, and `mu/docs/core/StructuralPurity.v0.md` before giving runtime/substrate advice.
+6. Run `git status --short`.
+7. Run L4 contract check on actual candidate diff.
+8. Decide if wave must be split by class.
+9. Run targeted validations and issue GO/NO-GO.
 
 ## 6) Canonical Paths
 - Repo root: `/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX`

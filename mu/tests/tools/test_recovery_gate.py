@@ -1,7 +1,7 @@
 """Tests for recovery_gate: failure classifier and Tier 1–3 recovery."""
 from __future__ import annotations
 
-import fcntl, json, os, re, sqlite3, subprocess, sys, threading, time
+import fcntl, io, json, os, re, shlex, sqlite3, subprocess, sys, threading, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +17,11 @@ rg_mod = load_module("recovery_gate", _EXECUTORS_DIR / "recovery_gate.py")
 dash_mod = load_module("pipeline_dashboard_observability", _OBSERVABILITY_DIR / "pipeline_dashboard.py")
 web_mod = load_module("pipeline_dashboard_web_observability", _OBSERVABILITY_DIR / "pipeline_dashboard_web.py")
 FailureClass = rg_mod.FailureClass
+
+
+def _shell_quote(text: str) -> str:
+    import shlex as _shlex
+    return _shlex.quote(text)
 
 
 def make_empty_store():
@@ -3765,6 +3770,177 @@ esac
         assert "unset RCX_OBS_REPO_ROOT" in log_text
         assert "RCX_OBS_STATUS_SCRIPT=" in log_text
         assert "RCX_OBS_REPO_ROOT=" not in log_text
+
+    def test_pipeline_monitor_find_newest_log_ignores_blank_bridge_stderr_and_uses_raw_reviewer(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        blank_stderr = repo_root / ".scratch" / "phase_b_bridge_phase-b-r4-test.stderr.log"
+        blank_stderr.parent.mkdir(parents=True, exist_ok=True)
+        blank_stderr.write_text("", encoding="utf-8")
+        reviewer = (
+            repo_root
+            / ".agent_bus"
+            / "raw"
+            / "phase-b-r4-test"
+            / "phase-b-r4-test--r1-reviewer-abc123.txt"
+        )
+        reviewer.parent.mkdir(parents=True, exist_ok=True)
+        reviewer.write_text(
+            "BEGIN_META_ENVELOPE\n"
+            "{\"decision\": \"NO_GO\", \"summary\": \"live reviewer output\"}\n",
+            encoding="utf-8",
+        )
+        self._set_age_seconds(blank_stderr, age_seconds=5)
+        self._set_age_seconds(reviewer, age_seconds=20)
+        script = repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+        env = os.environ | {"RCX_OBS_REPO_ROOT": str(repo_root)}
+
+        result = subprocess.run(
+            [
+                "bash",
+                "-lc",
+                "watcher=$(mktemp); "
+                + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
+                + _shell_quote(str(script))
+                + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
+                + "source \"$watcher\"; "
+                + "find_newest_log; "
+                + "rm -f \"$watcher\"",
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == str(reviewer)
+
+    def test_pipeline_monitor_find_newest_log_ignores_newer_reader_transcript(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        raw_dir = repo_root / ".agent_bus" / "raw" / "phase-b-r4-test"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        reviewer = raw_dir / "phase-b-r4-test--r1-reviewer-abc123.txt"
+        reviewer.write_text(
+            "BEGIN_META_ENVELOPE\n"
+            "{\"decision\": \"NO_GO\", \"summary\": \"live reviewer output\"}\n",
+            encoding="utf-8",
+        )
+        reader = raw_dir / "phase-b-r4-test--r1-reader-def456.txt"
+        reader.write_text(
+            "synthetic reader turn that should not drive pane 1\n",
+            encoding="utf-8",
+        )
+        self._set_age_seconds(reviewer, age_seconds=20)
+        self._set_age_seconds(reader, age_seconds=5)
+        script = repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+        env = os.environ | {"RCX_OBS_REPO_ROOT": str(repo_root)}
+
+        result = subprocess.run(
+            [
+                "bash",
+                "-lc",
+                "watcher=$(mktemp); "
+                + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
+                + _shell_quote(str(script))
+                + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
+                + "source \"$watcher\"; "
+                + "find_newest_log; "
+                + "rm -f \"$watcher\"",
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == str(reviewer)
+
+    def test_pipeline_monitor_prefers_newer_executor_live_log_over_older_reviewer_transcript(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        raw_dir = repo_root / ".agent_bus" / "raw" / "phase-b-r4-test"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        reviewer = raw_dir / "phase-b-r4-test--r1-reviewer-abc123.txt"
+        reviewer.write_text(
+            "BEGIN_META_ENVELOPE\n"
+            "{\"decision\": \"NO_GO\", \"summary\": \"older reviewer output\"}\n",
+            encoding="utf-8",
+        )
+        executor_live = repo_root / ".scratch" / "phase_b_executor_live.log"
+        executor_live.parent.mkdir(parents=True, exist_ok=True)
+        executor_live.write_text("[phase-b-executor] fresher live output\n", encoding="utf-8")
+        self._set_age_seconds(reviewer, age_seconds=20)
+        self._set_age_seconds(executor_live, age_seconds=5)
+        script = repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+        env = os.environ | {"RCX_OBS_REPO_ROOT": str(repo_root)}
+
+        result = subprocess.run(
+            [
+                "bash",
+                "-lc",
+                "watcher=$(mktemp); "
+                + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
+                + _shell_quote(str(script))
+                + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
+                + "source \"$watcher\"; "
+                + "find_newest_log; "
+                + "rm -f \"$watcher\"",
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == str(executor_live)
+
+    def test_pipeline_monitor_prefers_reviewer_transcript_over_newer_bridge_stderr(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        raw_dir = repo_root / ".agent_bus" / "raw" / "phase-b-r4-test"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        reviewer = raw_dir / "phase-b-r4-test--r1-reviewer-abc123.txt"
+        reviewer.write_text(
+            "BEGIN_META_ENVELOPE\n"
+            "{\"decision\": \"NO_GO\", \"summary\": \"live reviewer output\"}\n",
+            encoding="utf-8",
+        )
+        bridge_stderr = repo_root / ".scratch" / "phase_b_bridge_phase-b-r4-test.stderr.log"
+        bridge_stderr.parent.mkdir(parents=True, exist_ok=True)
+        bridge_stderr.write_text("bridge placeholder but non-empty\n", encoding="utf-8")
+        self._set_age_seconds(reviewer, age_seconds=20)
+        self._set_age_seconds(bridge_stderr, age_seconds=5)
+        script = repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+        env = os.environ | {"RCX_OBS_REPO_ROOT": str(repo_root)}
+
+        result = subprocess.run(
+            [
+                "bash",
+                "-lc",
+                "watcher=$(mktemp); "
+                + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
+                + _shell_quote(str(script))
+                + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
+                + "source \"$watcher\"; "
+                + "find_newest_log; "
+                + "rm -f \"$watcher\"",
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == str(reviewer)
 
     def test_pane_findings_renders_fallback_when_no_bridge_rounds_exist(self, tmp_path):
         repo_root = tmp_path / "repo"
@@ -8735,3 +8911,52 @@ class TestLoadRelevantLearnings:
         # Same-date entries should come before older
         assert a_pos < older_pos
         assert b_pos < older_pos
+
+
+def test_prompt_via_stdin_uses_communicate_input_without_closed_pipe_error(tmp_path):
+    result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
+    agent_response = json.dumps({
+        "action": "skip",
+        "commands": [],
+        "explanation": "manual follow-up required",
+    })
+
+    class ClosedPipeSensitivePopen(FakePopen):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            import io as _io
+            self.stdin = _io.StringIO()
+
+        def communicate(self, input=None, timeout=None):
+            if input is None and getattr(self.stdin, "closed", False):
+                raise ValueError("I/O operation on closed file.")
+            return super().communicate(input=input, timeout=timeout)
+
+    fake = ClosedPipeSensitivePopen(stdout=agent_response, pid=7777)
+
+    invocation = {
+        "bridge_adapters": SimpleNamespace(
+            _normalize_stdout_for_adapter=lambda _spec, _cmd, text: text
+        ),
+        "spec": SimpleNamespace(name="codex", prompt_via_stdin=True, timeout_s=1200),
+        "cmd": ["codex", "exec", "-", "--json"],
+        "env": {},
+        "command_label": "codex exec - --json",
+        "prompt_input": "PROMPT_PAYLOAD",
+        "prompt_path": Path("recovery_prompt.txt"),
+    }
+
+    with patch.object(rg_mod, "subprocess") as mock_sp:
+        mock_sp.run = lambda *args, **kwargs: MagicMock(returncode=0, stdout="", stderr="")
+        mock_sp.Popen = lambda *args, **kwargs: fake
+        mock_sp.PIPE = subprocess.PIPE
+        mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+        with patch.object(rg_mod, "_resolve_recovery_agent_invocation", return_value=invocation):
+            r = rg_mod.run_recovery_loop(tmp_path, result, "w1", max_iterations=1)
+
+    assert r["recovered"] is False
+    assert r["iterations"] == 1
+    assert fake.received_input == "PROMPT_PAYLOAD"
+    status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+    assert status["state"] == "tier3_skipped"
+    assert status["outcome"] == "skipped"

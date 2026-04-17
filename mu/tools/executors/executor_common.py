@@ -29,6 +29,7 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
         "dialectic_executor": "codex",
         "phase_a_executor": "codex",
         "phase_b_executor": "codex",
+        "bot_remediation": "codex",
         "commit_executor": None,
     },
     "bridge_reviewers": {

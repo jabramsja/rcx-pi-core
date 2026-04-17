@@ -25,11 +25,10 @@ DISPATCH_PY_PATH = EXECUTORS_DIR / "executor_dispatch.py"
 COMMIT_PY_PATH = EXECUTORS_DIR / "commit_executor.py"
 
 
-def _load_default_executor_config_timeouts() -> dict[str, int]:
-    """Extract DEFAULT_EXECUTOR_CONFIG["timeouts"] by AST parse of executor_common.py."""
+def _load_default_executor_config() -> dict:
+    """Extract DEFAULT_EXECUTOR_CONFIG by AST parse of executor_common.py."""
     tree = ast.parse(COMMON_PY_PATH.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
-        # Handle both plain assignment and annotated assignment (: dict[str, Any] = ...)
         name = None
         value = None
         if isinstance(node, ast.Assign):
@@ -43,13 +42,25 @@ def _load_default_executor_config_timeouts() -> dict[str, int]:
                 value = node.value
         if name and value:
             compiled = compile(ast.Expression(body=value), "<ast>", "eval")
-            config = eval(compiled)  # noqa: S307 — literal dict only
-            return config["timeouts"]
+            return eval(compiled)  # noqa: S307 — literal dict only
     raise AssertionError("DEFAULT_EXECUTOR_CONFIG not found in executor_common.py")
+
+
+def _load_default_executor_config_timeouts() -> dict[str, int]:
+    """Extract DEFAULT_EXECUTOR_CONFIG["timeouts"] by AST parse of executor_common.py."""
+    return _load_default_executor_config()["timeouts"]
 
 
 def _load_json_config_timeouts() -> dict[str, int]:
     return json.loads(CONFIG_JSON_PATH.read_text(encoding="utf-8"))["timeouts"]
+
+
+def _load_default_executor_config_backends() -> dict[str, str | None]:
+    return _load_default_executor_config()["backends"]
+
+
+def _load_json_config_backends() -> dict[str, str | None]:
+    return json.loads(CONFIG_JSON_PATH.read_text(encoding="utf-8"))["backends"]
 
 
 class TestExecutorConfigJsonValid:
@@ -142,7 +153,8 @@ class TestDispatchFallbacksReferenceDefault:
 
 class TestCommitExecutorConfigBinding:
     """commit_executor.py must derive PRE_PUSH_FAST_TIMEOUT_S and
-    BOT_REMEDIATION_TIMEOUT_S from config lookups, not hardcoded int literals."""
+    BOT_REMEDIATION_TIMEOUT_S and BOT_REMEDIATION_ADAPTER from config lookups,
+    not hardcoded literals."""
 
     def _find_constant_assignment(self, tree: ast.Module, name: str) -> ast.AST | None:
         """Find the top-level assignment to *name* and return its value node."""
@@ -172,9 +184,32 @@ class TestCommitExecutorConfigBinding:
     def test_bot_remediation_timeout_from_config(self):
         self._assert_config_derived("BOT_REMEDIATION_TIMEOUT_S")
 
+    def test_bot_remediation_adapter_from_config(self):
+        source = COMMIT_PY_PATH.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        value_node = self._find_constant_assignment(tree, "BOT_REMEDIATION_ADAPTER")
+        assert value_node is not None, (
+            "BOT_REMEDIATION_ADAPTER assignment not found at module level "
+            "in commit_executor.py"
+        )
+        assert not (
+            isinstance(value_node, ast.Constant) and isinstance(value_node.value, str)
+        ), (
+            "BOT_REMEDIATION_ADAPTER is hardcoded in commit_executor.py — "
+            "it must be derived from executor config"
+        )
+
     def test_imports_load_executor_config(self):
         """commit_executor.py must import load_executor_config."""
         source = COMMIT_PY_PATH.read_text(encoding="utf-8")
         assert "load_executor_config" in source, (
             "commit_executor.py does not import load_executor_config"
         )
+
+
+class TestBackendConfigAlignment:
+    def test_bot_remediation_backend_present_in_default_and_live_config(self):
+        defaults = _load_default_executor_config_backends()
+        live = _load_json_config_backends()
+        assert defaults.get("bot_remediation") == "codex"
+        assert live.get("bot_remediation") == "codex"
