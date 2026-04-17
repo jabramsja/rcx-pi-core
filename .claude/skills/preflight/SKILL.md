@@ -254,11 +254,12 @@ F=/tmp/ppc.js; N=0
 [ "$(grep -c 'through the project pipeline' $F)" -eq 0 ] && echo "P15 MISSING" && N=$((N+1))
 [ "$(grep -c 'verification is encouraged' $F)" -eq 0 ] && echo "P16 MISSING" && N=$((N+1))
 [ "$(grep -c 'file updated successfully' $F)" -eq 0 ] && echo "P17 MISSING" && N=$((N+1))
-[ "$(grep -c 'proactive review' $F)" -eq 0 ] && echo "P27 MISSING" && N=$((N+1))
+# P27 retired 2026-04-17: v2.1.112 reworded the anti-redteam surface; neither the
+# original CX4 text nor the P27 replacement 'proactive review' exists in-binary.
 [ "$(grep -c 'Consider edge cases at system boundaries' $F)" -eq 0 ] && echo "P28 MISSING" && N=$((N+1))
 [ "$(grep -c 'structural fix rather than a workaround' $F)" -eq 0 ] && echo "P29 MISSING" && N=$((N+1))
 # v2.1.101 new patches
-[ "$(grep -c 'function OjH(H){return!1' $F)" -eq 0 ] && echo "P_OjH MISSING (feature-flag gate not nullified)" && N=$((N+1))
+[ "$(grep -c 'function _Y8(H){return!1' $F)" -eq 0 ] && echo "P_OjH MISSING (feature-flag gate not nullified; v2.1.112 renamed OjH->_Y8)" && N=$((N+1))
 [ "$(grep -c 'Create planning, decision, or analysis documents when' $F)" -eq 0 ] && echo "P31 MISSING" && N=$((N+1))
 [ "$(grep -c 'Reasoning chain: show full' $F)" -eq 0 ] && echo "P32 MISSING" && N=$((N+1))
 # P33-P39 (added 2026-04-10 after deep-read pass 2: yvf text + iLf/nLf auto-mode)
