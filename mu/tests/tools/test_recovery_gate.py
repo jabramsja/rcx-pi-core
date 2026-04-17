@@ -50,17 +50,29 @@ def install_mock_recovery_agent(
         "env": {},
         "command_label": " ".join(cmd),
         "prompt_input": "",
-        "prompt_path": Path("recovery_prompt.txt"),
+        "prompt_path": Path(".scratch/recovery_agent_test-prompt.txt"),
     }
     monkeypatch.setattr(
         rg_mod,
         "_resolve_recovery_agent_invocation",
-        lambda *args, **kwargs: {
+        lambda repo_root, *args, **kwargs: {
             **invocation,
             "prompt_input": kwargs.get("prompt", ""),
+            "prompt_path": _write_mock_recovery_prompt(
+                repo_root,
+                invocation["prompt_path"],
+                kwargs.get("prompt", ""),
+            ),
         },
     )
     return invocation
+
+
+def _write_mock_recovery_prompt(repo_root: Path, rel_path: Path, prompt: str) -> Path:
+    path = repo_root / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(prompt, encoding="utf-8")
+    return path
 
 
 def make_delegate_response(
@@ -2267,13 +2279,17 @@ class TestHybridScopeAudit:
 
         scratch = tmp_path / ".scratch"
         scratch.mkdir(exist_ok=True)
+        (scratch / "recovery_agent_wave-step-1.txt").write_text("prompt\n", encoding="utf-8")
         (scratch / "phase_b_implementer_prompt.md").write_text("prompt\n", encoding="utf-8")
         (scratch / "phase_b_implementer_output_impl-1234abcd.txt").write_text("output\n", encoding="utf-8")
         ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
             tmp_path,
             baseline=baseline,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths("impl-1234abcd"),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+                "impl-1234abcd",
+                recovery_prompt_relpath=".scratch/recovery_agent_wave-step-1.txt",
+            ),
         )
         assert ok is True
         assert audit["observed_drift"] == []
@@ -2283,7 +2299,10 @@ class TestHybridScopeAudit:
             tmp_path,
             baseline=baseline,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths("impl-1234abcd"),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+                "impl-1234abcd",
+                recovery_prompt_relpath=".scratch/recovery_agent_wave-step-1.txt",
+            ),
         )
         assert ok is False
         assert "unexpected .scratch descendant" in audit["detail"]

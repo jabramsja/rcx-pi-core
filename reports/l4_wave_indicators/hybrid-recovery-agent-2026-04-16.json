@@ -1,24 +1,24 @@
 {
   "wave_id": "hybrid-recovery-agent-2026-04-16",
-  "repeat_run_speedup_ratio": 1.183659,
+  "repeat_run_speedup_ratio": 0.986099,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.369898,
+  "step_growth_slope": 0.432274,
   "repeat_run_raw_seconds": [
-    0.437833,
-    0.369898
+    0.426265,
+    0.432274
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.437833
+      "elapsed_seconds": 0.426265
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.807731
+      "elapsed_seconds": 0.858539
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-17T04:16:53Z",
+  "collection_timestamp_utc": "2026-04-17T04:46:56Z",
   "collector_version": "2.2.0"
 }

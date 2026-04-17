@@ -2231,12 +2231,34 @@ def _normalize_hybrid_repo_relative(raw_path: Any) -> str | None:
     return PurePosixPath(*parts).as_posix()
 
 
-def _hybrid_exception_paths(job_id: str | None = None) -> frozenset[str]:
+def _normalize_recovery_prompt_exception_path(raw_path: Any) -> str | None:
+    """Normalize the active recovery-agent prompt path for hybrid checkpoints."""
+    normalized = _normalize_hybrid_repo_relative(raw_path)
+    if normalized is None:
+        return None
+    path = PurePosixPath(normalized)
+    if path.parent.as_posix() != ".scratch":
+        return None
+    if not path.name.startswith("recovery_agent_") or not path.name.endswith(".txt"):
+        return None
+    return normalized
+
+
+def _hybrid_exception_paths(
+    job_id: str | None = None,
+    *,
+    recovery_prompt_relpath: str | None = None,
+) -> frozenset[str]:
     """Return the exact admitted .scratch nodes for the hybrid branch."""
     paths = {
         ".scratch",
         ".scratch/phase_b_implementer_prompt.md",
     }
+    recovery_prompt = _normalize_recovery_prompt_exception_path(
+        recovery_prompt_relpath
+    )
+    if recovery_prompt:
+        paths.add(recovery_prompt)
     if job_id:
         paths.add(f".scratch/phase_b_implementer_output_{job_id}.txt")
     return frozenset(paths)
@@ -2255,6 +2277,7 @@ def _hybrid_scope_contract(files_in_scope: list[str], validation_spec: list[dict
         *[f"- {path}" for path in files_in_scope],
         "Allowed transient executor byproducts:",
         "- .scratch/",
+        "- .scratch/recovery_agent_<token>.txt",
         "- .scratch/phase_b_implementer_prompt.md",
         "- .scratch/phase_b_implementer_output_<job>.txt",
         "Do not modify validator modules, executor config, bridge config, implementer bootstrap files, .git state, or any other path.",
@@ -2847,6 +2870,7 @@ def _run_delegate_implementer_action(
     step: str,
     response: dict[str, Any],
     explanation: str,
+    recovery_prompt_path: Any = None,
     verbose: bool = False,
 ) -> dict[str, Any]:
     config = load_executor_config(repo_root)
@@ -2868,10 +2892,23 @@ def _run_delegate_implementer_action(
         current_command="delegate_implementer scope validation",
         detail=_excerpt(explanation),
     )
+    recovery_prompt_relpath = None
+    if recovery_prompt_path is not None:
+        prompt_path = Path(recovery_prompt_path)
+        if prompt_path.is_absolute():
+            try:
+                prompt_path = prompt_path.relative_to(repo_root)
+            except ValueError:
+                prompt_path = Path()
+        recovery_prompt_relpath = _normalize_hybrid_repo_relative(
+            prompt_path.as_posix()
+        )
     baseline_ok, baseline = _capture_hybrid_checkpoint(
         repo_root,
         files_in_scope=delegate_payload["files_in_scope"],
-        exception_paths=_hybrid_exception_paths(),
+        exception_paths=_hybrid_exception_paths(
+            recovery_prompt_relpath=recovery_prompt_relpath,
+        ),
     )
     if not baseline_ok:
         return {"ok": False, "detail": baseline["detail"], "result_update": None}
@@ -2905,7 +2942,10 @@ def _run_delegate_implementer_action(
         timeout=implementer_timeout,
         verbose=verbose,
     )
-    exception_paths = _hybrid_exception_paths(implementer_result.get("job_id") or None)
+    exception_paths = _hybrid_exception_paths(
+        implementer_result.get("job_id") or None,
+        recovery_prompt_relpath=recovery_prompt_relpath,
+    )
     pre_validation_ok, pre_validation_audit = _audit_hybrid_checkpoint(
         repo_root,
         baseline=baseline,
@@ -3288,6 +3328,7 @@ def run_recovery_loop(
                 step=step,
                 response=response,
                 explanation=explanation,
+                recovery_prompt_path=agent_invocation.get("prompt_path"),
             )
             dur = round(time.monotonic() - iteration_t0, 3)
             loop_log.append({
