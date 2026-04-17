@@ -1,0 +1,24 @@
+{
+  "wave_id": "post-wave-housekeeping-2026-04-17",
+  "repeat_run_speedup_ratio": 1.519055,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.25851,
+  "repeat_run_raw_seconds": [
+    0.392691,
+    0.25851
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.392691
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.651201
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-04-17T22:52:47Z",
+  "collector_version": "2.2.0"
+}
