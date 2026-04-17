@@ -2,9 +2,9 @@
   "backends": {
     "post_merge_supervisor": "codex",
     "dialectic_executor": "codex",
-    "phase_a_executor": "codex",
-    "phase_b_executor": "codex",
-    "bot_remediation": "codex",
+    "phase_a_executor": "claude",
+    "phase_b_executor": "claude",
+    "bot_remediation": "claude",
     "commit_executor": null
   },
   "bridge_reviewers": {
@@ -18,9 +18,9 @@
   "model_overrides": {
     "phase_b_executor": null
   },
-  "hybrid_recovery_enabled": false,
+  "hybrid_recovery_enabled": true,
   "pipeline_agent_pager": {
-    "enabled": false,
+    "enabled": true,
     "route": "notify-only",
     "claude_continue": false
   },
