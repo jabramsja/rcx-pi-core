@@ -2621,6 +2621,146 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
     return len(errors) == 0, errors
 
 
+_STASH_REF_RE = re.compile(r"^stash@\{(\d+)\}")
+
+
+def _post_merge_cleanup(
+    *,
+    cleanup_root: Path,
+    repo_root: Path,
+    target_branch: str,
+    base_branch: str,
+    wave_id: str,
+    log: Any,
+) -> dict[str, Any]:
+    """Best-effort cleanup after a PR merge succeeds.
+
+    Runs from *cleanup_root* (main repo after ff-only to origin/base_branch).
+    Deletes the merged local branch, removes the wave worktree if distinct,
+    and drops any stashes whose description references *wave_id*.
+
+    All failures are logged and swallowed; the merge has already succeeded
+    and cleanup must never regress the pipeline.
+
+    Returns a dict with the per-substep outcomes (for test assertions).
+    """
+    outcome: dict[str, Any] = {
+        "branch_deleted": False,
+        "worktree_removed": False,
+        "stashes_dropped": 0,
+        "warnings": [],
+    }
+
+    try:
+        cleanup_branch = _run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=cleanup_root
+        ).stdout.strip()
+    except subprocess.CalledProcessError as exc:
+        outcome["warnings"].append(f"cannot resolve cleanup_root HEAD: {exc}")
+        return outcome
+
+    if cleanup_branch != base_branch:
+        outcome["warnings"].append(
+            f"cleanup_root {cleanup_root} is on '{cleanup_branch}', expected "
+            f"'{base_branch}'; skipping cleanup to avoid deleting the wrong branch"
+        )
+        return outcome
+
+    # 16b: remove worktree FIRST so the branch it holds is unlocked for 16a.
+    # git rejects `branch -D` on a branch checked out by any linked worktree.
+    try:
+        repo_root_real = repo_root.resolve()
+    except OSError:
+        repo_root_real = repo_root
+    try:
+        cleanup_root_real = cleanup_root.resolve()
+    except OSError:
+        cleanup_root_real = cleanup_root
+    # Refuse to touch the main worktree. Git refuses `worktree remove` on the
+    # primary worktree, and attempting it would leave the branch checked out
+    # so the subsequent `branch -D` also fails. Main worktree's `.git` is a
+    # DIRECTORY; a linked worktree's `.git` is a FILE pointing at
+    # `<main>/.git/worktrees/<name>/`. Only attempt removal when the path is
+    # a linked worktree AND distinct from cleanup_root.
+    repo_git_path = repo_root_real / ".git"
+    is_linked_worktree = repo_git_path.is_file()
+    if (
+        repo_root_real != cleanup_root_real
+        and repo_root_real.exists()
+        and is_linked_worktree
+    ):
+        try:
+            _run(
+                ["git", "worktree", "remove", "--force", str(repo_root_real)],
+                cwd=cleanup_root, timeout=30,
+            )
+            outcome["worktree_removed"] = True
+            log(f"Step 16b: removed worktree {repo_root_real}")
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or exc.stdout or str(exc)).strip()
+            outcome["warnings"].append(f"worktree remove: {detail[:200]}")
+            log(f"Step 16b worktree remove warning: {detail[:200]}")
+        except subprocess.TimeoutExpired:
+            outcome["warnings"].append("worktree remove timed out")
+            log("Step 16b worktree remove timed out")
+
+    # 16a: delete the merged local branch (now unlocked if step 16b ran)
+    try:
+        _run(["git", "branch", "-D", target_branch], cwd=cleanup_root, timeout=30)
+        outcome["branch_deleted"] = True
+        log(f"Step 16a: deleted local branch {target_branch}")
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        outcome["warnings"].append(f"branch delete: {detail[:200]}")
+        log(f"Step 16a branch delete warning: {detail[:200]}")
+    except subprocess.TimeoutExpired:
+        outcome["warnings"].append("branch delete timed out")
+        log("Step 16a branch delete timed out")
+
+    # 16c: drop any stashes whose description references the wave_id.
+    # Drop highest-index first so remaining refs stay stable during loop.
+    if wave_id:
+        try:
+            stash_out = _run(
+                ["git", "stash", "list"], cwd=cleanup_root, timeout=30
+            ).stdout
+            refs_to_drop: list[tuple[int, str]] = []
+            for line in stash_out.splitlines():
+                if wave_id not in line:
+                    continue
+                ref = line.split(":", 1)[0]
+                m = _STASH_REF_RE.match(ref)
+                if m is None:
+                    continue
+                refs_to_drop.append((int(m.group(1)), ref))
+            refs_to_drop.sort(reverse=True)
+            for _idx, ref in refs_to_drop:
+                try:
+                    _run(["git", "stash", "drop", ref], cwd=cleanup_root, timeout=30)
+                    outcome["stashes_dropped"] += 1
+                except subprocess.CalledProcessError as exc:
+                    detail = (exc.stderr or exc.stdout or str(exc)).strip()
+                    outcome["warnings"].append(f"stash drop {ref}: {detail[:200]}")
+                    log(f"Step 16c stash drop {ref} warning: {detail[:200]}")
+                except subprocess.TimeoutExpired:
+                    outcome["warnings"].append(f"stash drop {ref} timed out")
+                    log(f"Step 16c stash drop {ref} timed out")
+            if outcome["stashes_dropped"]:
+                log(
+                    f"Step 16c: dropped {outcome['stashes_dropped']} stash(es) "
+                    f"referencing {wave_id}"
+                )
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or exc.stdout or str(exc)).strip()
+            outcome["warnings"].append(f"stash list: {detail[:200]}")
+            log(f"Step 16c stash list warning: {detail[:200]}")
+        except subprocess.TimeoutExpired:
+            outcome["warnings"].append("stash list timed out")
+            log("Step 16c stash list timed out")
+
+    return outcome
+
+
 def _run_post_commit_pipeline(
     *,
     handoff: dict[str, Any],
@@ -2971,6 +3111,22 @@ def _run_post_commit_pipeline(
                 "errors": [f"Post-merge verify failed: {exc.stderr.strip()}"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
+
+    # ── Step 16: post_merge_cleanup ────────────────────────────────────
+    # Best-effort cleanup of wave-local state that would otherwise
+    # accumulate: local branch ref, linked worktree, wave-scoped stashes.
+    # Failures are logged and swallowed — the merge already succeeded and
+    # this step MUST NOT regress the pipeline.
+    cleanup_outcome = _post_merge_cleanup(
+        cleanup_root=verify_root,
+        repo_root=repo_root,
+        target_branch=target_branch,
+        base_branch=base_branch,
+        wave_id=str(handoff.get("wave_id") or ""),
+        log=log,
+    )
+    result["post_merge_cleanup"] = cleanup_outcome
+    result["steps_completed"].append("post_merge_cleanup")
 
     return result
 

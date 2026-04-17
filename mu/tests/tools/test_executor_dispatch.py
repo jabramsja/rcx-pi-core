@@ -3956,6 +3956,17 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd)
             if cmd[:3] == ["git", "merge", "--ff-only"]:
                 return completed(cmd)
+            # Step 16 post_merge_cleanup commands (best-effort; mocks succeed)
+            if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return completed(cmd, stdout="dev")
+            if cmd[:3] == ["git", "worktree", "remove"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "branch"] and "-D" in cmd:
+                return completed(cmd)
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(cmd, stdout="")
+            if cmd[:3] == ["git", "stash", "drop"]:
+                return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
         monkeypatch.setattr(commit_mod, "_run", fake_run)
@@ -4139,6 +4150,17 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:2] == ["git", "fetch"]:
                 return completed(cmd)
             if cmd[:3] == ["git", "merge", "--ff-only"]:
+                return completed(cmd)
+            # Step 16 post_merge_cleanup commands (best-effort; mocks succeed)
+            if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return completed(cmd, stdout="dev")
+            if cmd[:3] == ["git", "worktree", "remove"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "branch"] and "-D" in cmd:
+                return completed(cmd)
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(cmd, stdout="")
+            if cmd[:3] == ["git", "stash", "drop"]:
                 return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -4482,6 +4504,17 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd)
             if cmd[:3] == ["git", "merge", "--ff-only"]:
                 return completed(cmd)
+            # Step 16 post_merge_cleanup commands (best-effort; mocks succeed)
+            if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return completed(cmd, stdout="dev")
+            if cmd[:3] == ["git", "worktree", "remove"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "branch"] and "-D" in cmd:
+                return completed(cmd)
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(cmd, stdout="")
+            if cmd[:3] == ["git", "stash", "drop"]:
+                return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
         monkeypatch.setattr(commit_mod, "_run", fake_run)
@@ -4607,6 +4640,17 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd)
             if cmd[:3] == ["git", "merge", "--ff-only"]:
                 return completed(cmd)
+            # Step 16 post_merge_cleanup commands (best-effort; mocks succeed)
+            if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return completed(cmd, stdout="dev")
+            if cmd[:3] == ["git", "worktree", "remove"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "branch"] and "-D" in cmd:
+                return completed(cmd)
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(cmd, stdout="")
+            if cmd[:3] == ["git", "stash", "drop"]:
+                return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
         monkeypatch.setattr(commit_mod, "_run", fake_run)
@@ -4715,6 +4759,17 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:2] == ["git", "fetch"]:
                 return completed(cmd)
             if cmd[:3] == ["git", "merge", "--ff-only"]:
+                return completed(cmd)
+            # Step 16 post_merge_cleanup commands (best-effort; mocks succeed)
+            if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return completed(cmd, stdout="dev")
+            if cmd[:3] == ["git", "worktree", "remove"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "branch"] and "-D" in cmd:
+                return completed(cmd)
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(cmd, stdout="")
+            if cmd[:3] == ["git", "stash", "drop"]:
                 return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -4862,6 +4917,17 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd)
             if cmd[:3] == ["git", "merge", "--ff-only"]:
                 return completed(cmd)
+            # Step 16 post_merge_cleanup commands (best-effort; mocks succeed)
+            if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return completed(cmd, stdout="dev")
+            if cmd[:3] == ["git", "worktree", "remove"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "branch"] and "-D" in cmd:
+                return completed(cmd)
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(cmd, stdout="")
+            if cmd[:3] == ["git", "stash", "drop"]:
+                return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
         monkeypatch.setattr(commit_mod, "_run", fake_run)
@@ -4974,6 +5040,17 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:2] == ["git", "fetch"]:
                 return completed(cmd)
             if cmd[:3] == ["git", "merge", "--ff-only"]:
+                return completed(cmd)
+            # Step 16 post_merge_cleanup commands (best-effort; mocks succeed)
+            if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return completed(cmd, stdout="dev")
+            if cmd[:3] == ["git", "worktree", "remove"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "branch"] and "-D" in cmd:
+                return completed(cmd)
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(cmd, stdout="")
+            if cmd[:3] == ["git", "stash", "drop"]:
                 return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
@@ -5170,6 +5247,17 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:2] == ["git", "fetch"]:
                 return completed(cmd)
             if cmd[:3] == ["git", "merge", "--ff-only"]:
+                return completed(cmd)
+            # Step 16 post_merge_cleanup commands (best-effort; mocks succeed)
+            if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return completed(cmd, stdout="dev")
+            if cmd[:3] == ["git", "worktree", "remove"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "branch"] and "-D" in cmd:
+                return completed(cmd)
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(cmd, stdout="")
+            if cmd[:3] == ["git", "stash", "drop"]:
                 return completed(cmd)
             raise AssertionError(f"unexpected command: {cmd}")
 
