@@ -2359,8 +2359,16 @@ class TestGovernanceDowngrade:
         assert "reports/deferred/README.md" in reason
 
     @pytest.mark.parametrize("severity", ["high", "critical"])
-    def test_governance_path_downgrades_even_high_severity(self, severity):
-        """DOC_ACCURACY/POLICY_BOUND on governance paths are editorial — downgraded regardless of severity."""
+    def test_high_critical_governance_findings_stay_blocking(self, severity):
+        """Severity floor overrides governance downgrade.
+
+        Closes deferred_consolidation_phaseb_fail_closed_hardening_2026-04-02 defect 1:
+        prior behavior downgraded critical/high POLICY_BOUND/DOC_ACCURACY on
+        governance paths to non-blocking, which let real policy violations
+        slip through. Contract is now: critical/high severity always blocks
+        regardless of class or path; governance downgrade only applies at
+        medium/low severity.
+        """
         findings = [{
             "title": "Critical governance downgrade",
             "class": "POLICY_BOUND",
@@ -2368,8 +2376,11 @@ class TestGovernanceDowngrade:
             "file": "reports/control_plane/example.md",
         }]
         blocking, non_blocking = pb_mod._classify_findings(findings)  # ANTICHEAT_OK: testing internal executor functions
-        assert len(blocking) == 0
-        assert len(non_blocking) == 1
+        assert len(blocking) == 1, (
+            f"{severity} POLICY_BOUND must block regardless of governance path "
+            "(severity floor applies before governance downgrade)"
+        )
+        assert len(non_blocking) == 0
 
     @pytest.mark.parametrize("severity", ["high", "critical"])
     def test_defect_on_governance_path_stays_blocking(self, severity):

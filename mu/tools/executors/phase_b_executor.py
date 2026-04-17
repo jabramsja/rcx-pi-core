@@ -143,9 +143,26 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
     disposition = finding.get("disposition")
     finding_class = str(finding.get("class") or "").upper()
 
+    # Fail-closed severity floor FIRST — critical/high always blocking regardless
+    # of class or path. Governance/doc downgrades only apply at medium/low below.
+    # Closes deferred_consolidation_phaseb_fail_closed_hardening_2026-04-02 defect 1:
+    # the prior order put the governance downgrade BEFORE the severity floor,
+    # letting a critical POLICY_BOUND on reports/ evade blocking. Docstring above
+    # (lines 135-140) already documented "Severity critical/high — always blocking"
+    # as priority 1; this now matches implementation.
+    if severity == "critical":
+        if disposition == "non_blocking":
+            return "blocking", "critical severity overrides explicit non_blocking disposition"
+        return "blocking", "critical severity (always blocking)"
+
+    if severity == "high":
+        if disposition == "non_blocking":
+            return "blocking", "high severity overrides explicit non_blocking disposition"
+        return "blocking", "high severity (always blocking)"
+
     # Governance/doc-only findings: DOC_ACCURACY or POLICY_BOUND on governance
-    # paths are editorial, not runtime risks. Downgrade to non-blocking regardless
-    # of severity. Critical DEFECT findings on code still block.
+    # paths are editorial, not runtime risks. Downgrade to non-blocking for
+    # medium/low severity only — critical/high already handled above as blocking.
     _GOV_CLASSES = {"POLICY_BOUND", "DOC_ACCURACY"}
     _GOV_PATH_PREFIXES = ("reports/", "TASKS.md", ".claude/", "CHANGELOG.md", "STATUS.md")
     finding_file = str(finding.get("file") or "")
@@ -156,18 +173,6 @@ def _disposition_for_finding(finding: dict[str, Any]) -> tuple[str, str]:
             f"{severity} {finding_class} on governance/doc path — "
             f"downgraded to non-blocking (file: {finding_file})"
         )
-
-    # Critical/high findings on non-governance paths stay blocking even if an
-    # explicit disposition tries to soften them. Fail-closed severity floor.
-    if severity == "critical":
-        if disposition == "non_blocking":
-            return "blocking", "critical severity overrides explicit non_blocking disposition"
-        return "blocking", "critical severity (always blocking)"
-
-    if severity == "high":
-        if disposition == "non_blocking":
-            return "blocking", "high severity overrides explicit non_blocking disposition"
-        return "blocking", "high severity (always blocking)"
 
     if disposition is not None:
         if disposition in ALLOWED_FINDING_DISPOSITIONS:
