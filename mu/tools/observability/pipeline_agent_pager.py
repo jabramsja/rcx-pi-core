@@ -311,6 +311,15 @@ def _resolve_route(config: dict[str, Any], explicit_route: str | None) -> str:
     return route_text
 
 
+def _configured_route_text(config: dict[str, Any], explicit_route: str | None) -> str:
+    route = explicit_route if explicit_route is not None else config.get(
+        "pipeline_agent_pager",
+        {},
+    ).get("route", NOTIFY_ONLY_TARGET)
+    route_text = str(route or "").strip()
+    return route_text or NOTIFY_ONLY_TARGET
+
+
 def _pager_enabled(config: dict[str, Any]) -> bool:
     return bool(config.get("pipeline_agent_pager", {}).get("enabled", False))
 
@@ -383,13 +392,10 @@ def _ensure_event_state(state: dict[str, Any], event: dict[str, Any]) -> dict[st
         }
         events[event["event_id"]] = entry
     else:
-        merged_targets: list[str] = []
-        for source in (entry.get("requested_targets", []), event.get("requested_targets", [])):
-            for target in source:
-                target_text = str(target or "").strip()
-                if not target_text or target_text in merged_targets:
-                    continue
-                merged_targets.append(target_text)
+        merged_targets = _merge_requested_targets(
+            entry.get("requested_targets", []),
+            event.get("requested_targets", []),
+        )
         entry["route"] = event["route"]
         entry["requested_targets"] = merged_targets
         entry.setdefault("delivered_targets", {})
@@ -408,13 +414,50 @@ def _refresh_pending_targets(entry: dict[str, Any]) -> None:
     entry["updated_at"] = _utcnow()
 
 
+def _merge_requested_targets(*sources: Any) -> list[str]:
+    merged_targets: list[str] = []
+    for source in sources:
+        if not isinstance(source, list):
+            continue
+        for target in source:
+            target_text = str(target or "").strip()
+            if not target_text or target_text in merged_targets:
+                continue
+            merged_targets.append(target_text)
+    return merged_targets
+
+
+def _coalesced_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ordered_event_ids: list[str] = []
+    coalesced_by_id: dict[str, dict[str, Any]] = {}
+    for event in events:
+        event_id = str(event.get("event_id") or "").strip()
+        if not event_id:
+            continue
+        prior = coalesced_by_id.get(event_id)
+        if prior is None:
+            merged = dict(event)
+            merged["requested_targets"] = _merge_requested_targets(event.get("requested_targets", []))
+            coalesced_by_id[event_id] = merged
+            ordered_event_ids.append(event_id)
+            continue
+        merged = dict(prior)
+        merged.update(event)
+        merged["requested_targets"] = _merge_requested_targets(
+            prior.get("requested_targets", []),
+            event.get("requested_targets", []),
+        )
+        coalesced_by_id[event_id] = merged
+    return [coalesced_by_id[event_id] for event_id in ordered_event_ids]
+
+
 def _reconcile_delivery_state(
     repo_root: Path,
     state: dict[str, Any],
     events: list[dict[str, Any]],
 ) -> None:
     event_map: dict[str, dict[str, Any]] = {}
-    for event in _ordered_unique_events(events):
+    for event in _coalesced_events(events):
         event_id = str(event.get("event_id") or "").strip()
         if not event_id:
             continue
@@ -703,16 +746,13 @@ def _target_timeout(config: dict[str, Any], target: str, remaining_s: float) -> 
     return min(bounded, remaining)
 
 
-def _ordered_unique_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    seen: set[str] = set()
-    ordered: list[dict[str, Any]] = []
-    for event in events:
-        event_id = str(event.get("event_id") or "").strip()
-        if not event_id or event_id in seen:
-            continue
-        seen.add(event_id)
-        ordered.append(event)
-    return ordered
+def _should_append_event_record(state: dict[str, Any], event: dict[str, Any]) -> bool:
+    entry = state.get("events", {}).get(event["event_id"])
+    if not isinstance(entry, dict):
+        return True
+    existing_targets = _merge_requested_targets(entry.get("requested_targets", []))
+    next_targets = _merge_requested_targets(existing_targets, event.get("requested_targets", []))
+    return next_targets != existing_targets
 
 
 def _dispatch_pending_locked(
@@ -733,7 +773,7 @@ def _dispatch_pending_locked(
         "attempted": [],
         "budget_exhausted": False,
     }
-    for event in _ordered_unique_events(events):
+    for event in _coalesced_events(events):
         entry = _ensure_event_state(state, event)
         pending_targets = list(entry.get("pending_targets", []))
         if not pending_targets:
@@ -847,15 +887,15 @@ def emit_transition_event(
 ) -> dict[str, Any]:
     repo_root = repo_root.resolve()
     config = load_executor_config(repo_root)
-    resolved_route = _resolve_route(config, route)
     if not _pager_enabled(config):
         return {
             "enabled": False,
-            "route": resolved_route,
+            "route": _configured_route_text(config, route),
             "event_id": None,
             "attempted": [],
             "budget_exhausted": False,
         }
+    resolved_route = _resolve_route(config, route)
     event = _build_event_record(
         event_type=event_type,
         wave_id=wave_id,
@@ -874,7 +914,7 @@ def emit_transition_event(
         state = _load_state(repo_root)
         events = _load_events_from_log(repo_root)
         _reconcile_delivery_state(repo_root, state, events)
-        if event["event_id"] not in {record.get("event_id") for record in events}:
+        if _should_append_event_record(state, event):
             _append_event_record(repo_root, event)
             events.append(event)
         _ensure_event_state(state, event)

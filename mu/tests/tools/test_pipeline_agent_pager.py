@@ -91,6 +91,24 @@ def test_event_id_uses_canonical_identity_tuple_and_log_appends_once(tmp_path):
     assert entry["pending_targets"] == []
 
 
+def test_disabled_pager_skips_route_validation(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, enabled=False, route="notify-only")
+
+    result = pager_mod.emit_transition_event(repo, route="definitely-invalid", **_event_kwargs())
+
+    assert result == {
+        "enabled": False,
+        "route": "definitely-invalid",
+        "event_id": None,
+        "attempted": [],
+        "budget_exhausted": False,
+    }
+    assert not (repo / pager_mod.EVENT_LOG_PATH).exists()
+    assert not (repo / pager_mod.STATE_PATH).exists()
+
+
 def test_truncated_event_log_tail_is_quarantined_and_does_not_brick_dispatch(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -176,10 +194,61 @@ def test_re_emitting_same_event_under_broader_route_adds_new_pending_target(tmp_
     second = pager_mod.emit_transition_event(repo, **_event_kwargs(summary="reroute to codex"))
     assert second["event_id"] == first["event_id"]
     assert dispatch_calls == ["codex"]
+    log_entries = _load_log(repo)
+    assert len(log_entries) == 2
+    assert [entry["route"] for entry in log_entries] == [pager_mod.NOTIFY_ONLY_TARGET, "codex"]
     state = _load_state(repo)
     entry = state["events"][first["event_id"]]
     assert entry["requested_targets"] == [pager_mod.NOTIFY_ONLY_TARGET, "codex"]
     assert entry["pending_targets"] == ["codex"]
+
+
+def test_broader_route_replay_rebuilds_pending_targets_from_append_only_log(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="notify-only")
+
+    first = pager_mod.emit_transition_event(repo, **_event_kwargs())
+    _write_config(repo, route="codex")
+
+    monkeypatch.setattr(
+        pager_mod,
+        "_dispatch_target",
+        lambda *args, **kwargs: {"acknowledged": False, "error": "codex unavailable"},
+    )
+    second = pager_mod.emit_transition_event(repo, **_event_kwargs(summary="reroute to codex"))
+    assert second["event_id"] == first["event_id"]
+    assert len(_load_log(repo)) == 2
+
+    (repo / pager_mod.STATE_PATH).unlink()
+
+    dispatch_calls: list[str] = []
+
+    def ack_codex(repo_root, target, event, state, config, *, timeout_s):
+        dispatch_calls.append(target)
+        return {
+            "acknowledged": True,
+            "ack": {
+                "acknowledged_at": "2026-04-17T00:00:00+00:00",
+                "thread_id": "thread-1",
+                "turn_id": "turn-1",
+                "target": "codex",
+            },
+            "codex_thread_id": "thread-1",
+        }
+
+    monkeypatch.setattr(pager_mod, "_dispatch_target", ack_codex)
+
+    replay = pager_mod.dispatch_pending_events(repo)
+
+    assert replay["enabled"] is True
+    assert dispatch_calls == ["codex"]
+    state = _load_state(repo)
+    entry = state["events"][first["event_id"]]
+    assert entry["requested_targets"] == [pager_mod.NOTIFY_ONLY_TARGET, "codex"]
+    assert set(entry["delivered_targets"]) == {pager_mod.NOTIFY_ONLY_TARGET, "codex"}
+    assert entry["pending_targets"] == []
+    assert len(_load_delivery_log(repo)) == 2
 
 
 def test_trigger_budget_exhaustion_leaves_pending_target_durable_for_replay(tmp_path, monkeypatch):
