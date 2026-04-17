@@ -214,7 +214,9 @@ if [ -n "$CC_BIN_MTIME" ] && [ "$CC_BIN_MTIME" -gt 0 ]; then
     if [ "$PROC_EPOCH" -lt "$CC_BIN_MTIME" ]; then
       MARK=""
       [ "$PID" = "$SELF_CC_PID" ] && { MARK=" <-- THIS SESSION"; SELF_STALE=true; }
-      echo "WARN: claude PID $PID started $(date -r "$PROC_EPOCH" '+%Y-%m-%d %H:%M:%S') before binary patch $(date -r "$CC_BIN_MTIME" '+%Y-%m-%d %H:%M:%S') — in-memory binary is pre-patch${MARK}"
+      PROC_FMT=$(date -jf "%s" "$PROC_EPOCH" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -d "@$PROC_EPOCH" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "epoch=$PROC_EPOCH")
+      BIN_FMT=$(date -jf "%s" "$CC_BIN_MTIME" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -d "@$CC_BIN_MTIME" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "epoch=$CC_BIN_MTIME")
+      echo "WARN: claude PID $PID started $PROC_FMT before binary patch $BIN_FMT — in-memory binary is pre-patch${MARK}"
       STALE_COUNT=$((STALE_COUNT+1))
     fi
   done
