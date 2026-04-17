@@ -43,6 +43,7 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "model_overrides": {
         "phase_b_executor": None,
     },
+    "hybrid_recovery_enabled": False,
     "review_depths": {
         "phase_a": "quick",
         "phase_b": "quick",

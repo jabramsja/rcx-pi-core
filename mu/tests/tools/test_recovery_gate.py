@@ -55,17 +55,106 @@ def install_mock_recovery_agent(
         "env": {},
         "command_label": " ".join(cmd),
         "prompt_input": "",
-        "prompt_path": Path("recovery_prompt.txt"),
+        "prompt_path": Path(".scratch/recovery_agent_test-prompt.txt"),
     }
     monkeypatch.setattr(
         rg_mod,
         "_resolve_recovery_agent_invocation",
-        lambda *args, **kwargs: {
+        lambda repo_root, *args, **kwargs: {
             **invocation,
             "prompt_input": kwargs.get("prompt", ""),
+            "prompt_path": _write_mock_recovery_prompt(
+                repo_root,
+                invocation["prompt_path"],
+                kwargs.get("prompt", ""),
+            ),
         },
     )
     return invocation
+
+
+def _write_mock_recovery_prompt(repo_root: Path, rel_path: Path, prompt: str) -> Path:
+    path = repo_root / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(prompt, encoding="utf-8")
+    return path
+
+
+def make_delegate_response(
+    *,
+    files_in_scope=None,
+    validation_spec=None,
+    explanation="needs coordinated code change",
+    **command_overrides,
+):
+    command = {
+        "summary": "repair control-surface code",
+        "files_in_scope": files_in_scope or ["mu/tools/executors/recovery_gate.py"],
+        "validation_spec": validation_spec or [{
+            "validator": "pytest_targeted",
+            "targets": ["mu/tests/tools/test_recovery_gate.py"],
+        }],
+        "why_not_shell_edit": "requires coordinated code change",
+    }
+    command.update(command_overrides)
+    return {
+        "action": "delegate_implementer",
+        "commands": [command],
+        "explanation": explanation,
+    }
+
+
+def init_hybrid_delegate_tree(repo_root: Path) -> None:
+    (repo_root / "mu" / "tools" / "executors").mkdir(parents=True, exist_ok=True)
+    (repo_root / "mu" / "tests" / "tools").mkdir(parents=True, exist_ok=True)
+    (repo_root / "mu" / "tools" / "executors" / "recovery_gate.py").write_text(
+        "before recovery\n",
+        encoding="utf-8",
+    )
+    (repo_root / "mu" / "tools" / "executors" / "executor_common.py").write_text(
+        "before common\n",
+        encoding="utf-8",
+    )
+    (repo_root / "mu" / "tests" / "tools" / "test_recovery_gate.py").write_text(
+        "def test_placeholder():\n    assert True\n",
+        encoding="utf-8",
+    )
+    (repo_root / "mu" / "tests" / "tools" / "test_phase_b_executor.py").write_text(
+        "def test_placeholder_phase_b():\n    assert True\n",
+        encoding="utf-8",
+    )
+
+
+class FakeHybridImplementerModule:
+    def __init__(self, *, mutate_path: str = "mu/tools/executors/recovery_gate.py"):
+        self.mutate_path = mutate_path
+        self.prompt_calls: list[dict[str, object]] = []
+        self.invoke_calls: list[dict[str, object]] = []
+
+    def build_implementation_prompt(self, plan_content, **kwargs):
+        self.prompt_calls.append({"plan_content": plan_content, **kwargs})
+        return "HYBRID_IMPLEMENTER_PROMPT"
+
+    def invoke_implementer(self, repo_root, prompt, **kwargs):
+        self.invoke_calls.append({"repo_root": repo_root, "prompt": prompt, **kwargs})
+        scratch = repo_root / ".scratch"
+        scratch.mkdir(exist_ok=True)
+        (scratch / "phase_b_implementer_prompt.md").write_text(prompt, encoding="utf-8")
+        job_id = "impl-1234abcd"
+        (scratch / f"phase_b_implementer_output_{job_id}.txt").write_text(
+            "implementer output\n",
+            encoding="utf-8",
+        )
+        target = repo_root / self.mutate_path
+        target.write_text("after recovery\n", encoding="utf-8")
+        return {
+            "status": "success",
+            "output": "done",
+            "stderr": "",
+            "exit_code": 0,
+            "job_id": job_id,
+            "model_override_applied": False,
+        }
 
 
 @pytest.fixture(autouse=True)
@@ -1868,6 +1957,393 @@ class TestRecoveryLoop:
         status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
         assert status["outcome"] == "exhausted"
         assert status["last_action"] == "exhausted"
+
+
+class TestHybridDelegatePayload:
+    def test_valid_payload_accepts_exact_runtime_scope(self):
+        ok, payload, detail = rg_mod._validate_delegate_implementer_payload(  # ANTICHEAT_OK: validates closed hybrid payload schema
+            make_delegate_response(
+                files_in_scope=["mu/tools/executors/recovery_gate.py"],
+                validation_spec=[{
+                    "validator": "pytest_targeted",
+                    "targets": ["mu/tests/tools/test_recovery_gate.py"],
+                }],
+            )
+        )
+        assert ok is True
+        assert detail == ""
+        assert payload["files_in_scope"] == ["mu/tools/executors/recovery_gate.py"]
+
+    @pytest.mark.parametrize(
+        "files_in_scope",
+        [
+            ["mu/tools/executors/executor_config.json"],
+            ["mu/tests/tools/test_recovery_gate.py"],
+            ["mu/tools/executors/phase_b_implementer.py"],
+            ["mu/host/python/x.py"],
+            [".git/index"],
+            [".claude/rules/test.md"],
+            ["../escape.py"],
+        ],
+    )
+    def test_invalid_files_in_scope_rejected(self, files_in_scope):
+        ok, payload, detail = rg_mod._validate_delegate_implementer_payload(  # ANTICHEAT_OK: validates hybrid files_in_scope exact allowlist
+            make_delegate_response(files_in_scope=files_in_scope)
+        )
+        assert ok is False
+        assert payload is None
+        assert detail
+
+    def test_validation_spec_rejects_args_unknown_fields_and_duplicate_targets(self):
+        response = make_delegate_response(
+            validation_spec=[{
+                "validator": "pytest_targeted",
+                "targets": [
+                    "mu/tests/tools/test_recovery_gate.py",
+                    "mu/tests/tools/test_recovery_gate.py",
+                ],
+                "args": ["-q"],
+            }]
+        )
+        ok, payload, detail = rg_mod._validate_delegate_implementer_payload(  # ANTICHEAT_OK
+            response
+        )
+        assert ok is False
+        assert payload is None
+        assert "unsupported fields" in detail or "unique" in detail
+
+    def test_multiple_commands_and_repo_global_validator_rejected(self):
+        response = {
+            "action": "delegate_implementer",
+            "commands": [
+                make_delegate_response()["commands"][0],
+                make_delegate_response()["commands"][0],
+            ],
+            "explanation": "bad payload",
+        }
+        ok, payload, detail = rg_mod._validate_delegate_implementer_payload(  # ANTICHEAT_OK
+            response
+        )
+        assert ok is False
+        assert payload is None
+        assert "exactly one object" in detail
+
+        bad_validator = make_delegate_response(
+            validation_spec=[{
+                "validator": "docs_consistency",
+                "targets": ["mu/tests/tools/test_recovery_gate.py"],
+            }]
+        )
+        ok, payload, detail = rg_mod._validate_delegate_implementer_payload(  # ANTICHEAT_OK
+            bad_validator
+        )
+        assert ok is False
+        assert payload is None
+        assert "unsupported hybrid validator" in detail
+
+
+class TestHybridDelegateRuntime:
+    @pytest.fixture(autouse=True)
+    def _mock_recovery_agent(self, monkeypatch):
+        install_mock_recovery_agent(monkeypatch)
+
+    def test_gate_defaults_false_and_delegate_does_not_launch_when_absent(self, tmp_path):
+        assert rg_mod.load_executor_config(tmp_path)["hybrid_recovery_enabled"] is False
+        response = json.dumps(make_delegate_response())
+        fake = FakePopen(stdout=response, pid=6001)
+
+        with patch.object(
+            rg_mod.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(["git", "status", "--short"], 1, "", ""),
+        ), \
+             patch.object(rg_mod.subprocess, "Popen", return_value=fake), \
+             patch.object(rg_mod, "_load_phase_b_implementer_module", side_effect=AssertionError("implementer must stay blocked")):
+            out = rg_mod.run_recovery_loop(
+                tmp_path,
+                {"status": "failed", "step": "phase_b_executor", "stderr": "FAILED test_x", "stdout": ""},
+                "wave-disabled",
+                max_iterations=1,
+            )
+        assert out["recovered"] is False
+        assert out["exhausted"] is True
+        assert "disabled" in out["log"][0]["detail"]
+
+    def test_delegate_implementer_success_path_invokes_reused_implementer(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        config_dir = tmp_path / "mu" / "tools" / "executors"
+        (config_dir / "executor_config.json").write_text(
+            json.dumps({"hybrid_recovery_enabled": True}),
+            encoding="utf-8",
+        )
+        response = json.dumps(
+            make_delegate_response(
+                files_in_scope=["mu/tools/executors/recovery_gate.py"],
+                validation_spec=[{
+                    "validator": "pytest_targeted",
+                    "targets": ["mu/tests/tools/test_recovery_gate.py"],
+                }],
+            )
+        )
+        fake = FakePopen(stdout=response, pid=6002)
+        fake_module = FakeHybridImplementerModule()
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        monkeypatch.setattr(rg_mod, "load_relevant_learnings", lambda *args, **kwargs: "## Learning Context\n\n- prior fix")
+        monkeypatch.setattr(
+            rg_mod,
+            "_run_hybrid_validation_spec",
+            lambda *args, **kwargs: {
+                "validator": "pytest_targeted",
+                "command": [sys.executable, "-m", "pytest"],
+                "targets": ["mu/tests/tools/test_recovery_gate.py"],
+                "stdout": "",
+                "stderr": "",
+                "exit_code": 0,
+                "passed": True,
+            },
+        )
+
+        with patch.object(
+            rg_mod.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(["git", "status", "--short"], 1, "", ""),
+        ), \
+             patch.object(rg_mod.subprocess, "Popen", return_value=fake), \
+             patch.object(rg_mod, "_load_phase_b_implementer_module", return_value=fake_module):
+            out = rg_mod.run_recovery_loop(
+                tmp_path,
+                {"status": "failed", "step": "phase_b_executor", "stderr": "FAILED test_x", "stdout": ""},
+                "wave-hybrid",
+                max_iterations=1,
+            )
+
+        assert out["recovered"] is True
+        assert fake_module.invoke_calls
+        assert fake_module.prompt_calls
+        prompt_call = fake_module.prompt_calls[0]
+        assert "Learning Context" in prompt_call["learning_context"]
+        assert "mu/tools/executors/recovery_gate.py" in prompt_call["scope_contract"]
+        assert out["log"][0]["action"] == "delegate_implementer"
+        assert out["log"][0]["pre_validation_drift"] == ["mu/tools/executors/recovery_gate.py"]
+        assert out["log"][0]["final_drift"] == ["mu/tools/executors/recovery_gate.py"]
+
+    def test_validation_failure_is_fed_into_next_iteration(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        config_dir = tmp_path / "mu" / "tools" / "executors"
+        (config_dir / "executor_config.json").write_text(
+            json.dumps({"hybrid_recovery_enabled": True}),
+            encoding="utf-8",
+        )
+        responses = [
+            FakePopen(stdout=json.dumps(make_delegate_response()), pid=6003),
+            FakePopen(stdout=json.dumps({
+                "action": "skip",
+                "commands": [],
+                "explanation": "stop after validator failure",
+            }), pid=6004),
+        ]
+        fake_module = FakeHybridImplementerModule()
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        validator_fail = {
+            "validator": "pytest_targeted",
+            "command": [sys.executable, "-m", "pytest"],
+            "targets": ["mu/tests/tools/test_recovery_gate.py"],
+            "stdout": "collected 1 item",
+            "stderr": "FAILED validator regression",
+            "exit_code": 1,
+            "passed": False,
+        }
+        monkeypatch.setattr(rg_mod, "_run_hybrid_validation_spec", lambda *args, **kwargs: validator_fail)
+
+        with patch.object(
+            rg_mod.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(["git", "status", "--short"], 1, "", ""),
+        ), \
+             patch.object(rg_mod.subprocess, "Popen", side_effect=responses), \
+             patch.object(rg_mod, "_load_phase_b_implementer_module", return_value=fake_module):
+            out = rg_mod.run_recovery_loop(
+                tmp_path,
+                {"status": "failed", "step": "phase_b_executor", "stderr": "FAILED test_x", "stdout": ""},
+                "wave-validator-fail",
+                max_iterations=2,
+            )
+
+        assert out["recovered"] is False
+        assert out["iterations"] == 2
+        assert "FAILED validator regression" in responses[1].received_input
+
+
+class TestHybridValidatorContract:
+    def test_pytest_targeted_uses_executor_owned_argv_and_repo_write_suppressed_env(self, tmp_path):
+        captured = {}
+
+        def fake_run(args, **kwargs):
+            captured["args"] = list(args)
+            captured["kwargs"] = kwargs
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with patch.object(rg_mod.subprocess, "run", side_effect=fake_run):
+            result = rg_mod._run_pytest_targeted_validator(  # ANTICHEAT_OK: validator builder contract
+                tmp_path,
+                targets=["mu/tests/tools/test_recovery_gate.py"],
+                timeout=45,
+            )
+
+        assert result["passed"] is True
+        assert captured["args"][:7] == [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-x",
+            "--tb=short",
+            "-p",
+            "no:cacheprovider",
+        ]
+        assert captured["args"][-1] == "mu/tests/tools/test_recovery_gate.py"
+        env = captured["kwargs"]["env"]
+        assert env["PYTHONHASHSEED"] == "0"
+        assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+        assert not env["TMPDIR"].startswith(str(tmp_path))
+        assert not env["XDG_CACHE_HOME"].startswith(str(tmp_path))
+
+
+class TestHybridScopeAudit:
+    def test_lazy_import_does_not_create_pycache_drift(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        for rel in (
+            "phase_b_implementer.py",
+            "executor_common.py",
+            "executor_config.json",
+        ):
+            (tmp_path / "mu" / "tools" / "executors" / rel).write_text(
+                (_EXECUTORS_DIR / rel).read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: exercise live lazy-import scope checkpoint
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        saved_phase_b = sys.modules.pop("phase_b_implementer", None)
+        saved_executor_common = sys.modules.pop("executor_common", None)
+        try:
+            module = rg_mod._load_phase_b_implementer_module(tmp_path)  # ANTICHEAT_OK: live lazy loader regression
+            assert module is not None
+        finally:
+            sys.modules.pop("phase_b_implementer", None)
+            sys.modules.pop("executor_common", None)
+            if saved_phase_b is not None:
+                sys.modules["phase_b_implementer"] = saved_phase_b
+            if saved_executor_common is not None:
+                sys.modules["executor_common"] = saved_executor_common
+
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK: prove lazy import stays out of observed drift
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+        assert audit["observed_drift"] == []
+
+    def test_detects_out_of_scope_mutation_even_when_file_preexisted(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        out_of_scope = tmp_path / "notes.txt"
+        out_of_scope.write_text("baseline\n", encoding="utf-8")
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: capture hybrid baseline directly
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        out_of_scope.write_text("mutated\n", encoding="utf-8")
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK: exercise out-of-scope drift audit
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is False
+        assert "escaped declared scope" in audit["detail"]
+
+    def test_exact_scratch_nodes_allowed_but_other_descendants_fail_closed(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        scratch = tmp_path / ".scratch"
+        scratch.mkdir(exist_ok=True)
+        (scratch / "recovery_agent_wave-step-1.txt").write_text("prompt\n", encoding="utf-8")
+        (scratch / "phase_b_implementer_prompt.md").write_text("prompt\n", encoding="utf-8")
+        (scratch / "phase_b_implementer_output_impl-1234abcd.txt").write_text("output\n", encoding="utf-8")
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+                "impl-1234abcd",
+                recovery_prompt_relpath=".scratch/recovery_agent_wave-step-1.txt",
+            ),
+        )
+        assert ok is True
+        assert audit["observed_drift"] == []
+
+        (scratch / "unexpected.txt").write_text("nope\n", encoding="utf-8")
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+                "impl-1234abcd",
+                recovery_prompt_relpath=".scratch/recovery_agent_wave-step-1.txt",
+            ),
+        )
+        assert ok is False
+        assert "unexpected .scratch descendant" in audit["detail"]
+
+    def test_git_control_drift_fails_closed(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        tuples = iter([{"stable": True}, {"stable": False}])
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: next(tuples))
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is False
+        assert "git-control tuple drifted" in audit["detail"]
+
+    def test_bootstrap_adapter_fault_detected(self):
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: bootstrap fault guard
+            {
+                "status": "failed",
+                "step": "phase_b_executor",
+                "stderr": "Bridge adapter config error: missing adapter",
+                "stdout": "",
+            },
+            ["mu/tools/executors/recovery_gate.py"],
+        )
+        assert blocked is True
+        assert "bootstrap/adapter fault" in detail
 
 
 class TestDangerousCommandDetection:
@@ -4067,6 +4543,19 @@ class TestNeedsPhaseB_Tier3:
         inner = json.dumps({"status": "needs_phase_b"})
         fc = rg_mod.classify_failure(
             {"status": "failed", "stdout": inner, "stderr": ""})
+        assert fc == FailureClass.NEEDS_PHASE_B
+
+    def test_commit_executor_supervisor_needs_phase_b_error_is_tier3(self):
+        payload = json.dumps({
+            "status": "error",
+            "step": "build_and_run_supervisor",
+            "errors": [
+                "Supervisor returned NEEDS_PHASE_B: changed_files matches the staged index exactly"
+            ],
+        }, indent=2)
+        fc = rg_mod.classify_failure(
+            {"status": "failed", "executor": "commit_executor", "stdout": payload}
+        )
         assert fc == FailureClass.NEEDS_PHASE_B
 
     def test_needs_phase_b_not_terminal(self):

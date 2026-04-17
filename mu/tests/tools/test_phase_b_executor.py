@@ -152,6 +152,16 @@ class TestBuildImplementationPrompt:
         )
         assert "## Learning Context" not in prompt
 
+    def test_prompt_includes_scope_contract_when_provided(self, tmp_path):
+        prompt = impl_mod.build_implementation_prompt(
+            "plan content",
+            repo_root=tmp_path,
+            wave_id="test-wave",
+            scope_contract="Allowed product writes:\n- mu/tools/executors/recovery_gate.py",
+        )
+        assert "## Scope Contract" in prompt
+        assert "Allowed product writes" in prompt
+
 
 class TestPhaseBExecutorLearningContextWiring:
     """Verify phase_b_executor passes learning_context to build_implementation_prompt."""
@@ -396,6 +406,7 @@ class TestLoadExecutorConfig:
     def test_missing_config_returns_defaults(self, tmp_path):
         config = impl_mod.load_executor_config(tmp_path)
         assert config["backends"]["phase_b_executor"] == "codex"
+        assert config["hybrid_recovery_enabled"] is False
 
     def test_existing_config_loaded(self, tmp_path):
         config_dir = tmp_path / "mu" / "tools" / "executors"
@@ -405,11 +416,13 @@ class TestLoadExecutorConfig:
             "backends": {"phase_b_executor": "claude"},
             "model_overrides": {"phase_b_executor": "sonnet"},
             "timeouts": {"phase_b_executor": 600},
+            "hybrid_recovery_enabled": True,
         }))
         config = impl_mod.load_executor_config(tmp_path)
         assert config["backends"]["phase_b_executor"] == "claude"
         assert config["model_overrides"]["phase_b_executor"] == "sonnet"
         assert config["timeouts"]["phase_b_executor"] == 600
+        assert config["hybrid_recovery_enabled"] is True
 
 
 class TestPrepareCommitHandoff:

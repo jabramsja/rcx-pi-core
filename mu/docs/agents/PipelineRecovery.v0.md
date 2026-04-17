@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
-TYPE: REFERENCE
-LAST_VERIFIED: 2026-03-31
+TYPE: IMPLEMENTATION
+LAST_VERIFIED: 2026-04-16
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -16,20 +16,26 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 -->
 
 ---
-DOC_STATUS: DRAFT
+DOC_STATUS: IMPLEMENTATION
 ---
 
 # Pipeline Recovery System — Design v0
 
-**Date:** 2026-03-31
-**Status:** DRAFT — design only, not implemented
+**Date:** 2026-04-16
+**Status:** IMPLEMENTED behind `hybrid_recovery_enabled: false` rollout gate
 **Author:** Claude Opus 4.6 / Jeff Abrams
 
 ---
 
 ## Architecture Overview
 
-The recovery system sits between `executor_dispatch.py` and the individual executors. It intercepts failure results and classifies them into four tiers.
+`recovery_gate.py` still sits between `executor_dispatch.py` and the individual
+executors, but Tier 3 is now split into two branches:
+
+1. deterministic `shell` / literal `edit` actions for the existing bounded path
+2. a gated `delegate_implementer` branch that reuses `phase_b_implementer`
+   only for a narrow control-surface repair and only after recovery captures its
+   own scope / inventory / git-control baseline
 
 ```
                      executor_dispatch.py
@@ -45,12 +51,26 @@ The recovery system sits between `executor_dispatch.py` and the individual execu
  Tier 1  Tier 2  Tier 3  Tier 4
  (fix)   (retry) (diag)  (esc)
    |      |      |      |
- cleanup retry  claude   STOP
- + retry        haiku    + report
+ cleanup retry  shell/edit or  STOP
+ + retry        delegate_implementer
                 + retry
 ```
 
-**Key constraint:** `recovery_gate.py` is a single-file module importing only stdlib + `executor_common.py`. It never imports `bridge_supervisor`, `bridge_adapters`, or any agent module. Tier 3 diagnosis calls `claude --print` directly via subprocess — no bridge loop, no SDK agents.
+**Current implementation truth**
+
+- Tier 1 and Tier 2 remain deterministic.
+- Tier 4 remains a hard escalation boundary.
+- Tier 3 diagnosis still runs through the configured recovery-agent path and
+  returns JSON only; diagnosis does not get tool-use rights.
+- The hybrid branch is disabled by default behind
+  `hybrid_recovery_enabled: false`.
+- `recovery_gate.py` remains stdlib + `executor_common` at module import time.
+  The hybrid branch lazy-loads `phase_b_implementer` only after payload
+  validation and baseline capture, with bytecode writes suppressed so the
+  loader itself does not create repo-local `__pycache__` drift outside the
+  admitted scope contract.
+- The learning store remains routing + warming only. It may warm the
+  implementer prompt, but it does not expand write or validator authority.
 
 ---
 
@@ -111,35 +131,87 @@ After fix: retry the failed step via `dispatch()` with same routing.
 
 Timeout adjustments passed via `RCX_RECOVERY_TIMEOUT_OVERRIDE` env var.
 
-### Tier 3: LLM Diagnosis (one focused API call)
+### Tier 3: LLM Diagnosis + Hybrid Delegate
 
 | Failure Signal | Detection | Recovery |
 |---|---|---|
-| Git staging conflict | `git add` failure in commit_executor | Claude reads git status + error, emits shell commands |
-| Test failure in pre-commit | supervisor_rejected with test output | Claude reads test output (last 100 lines), emits diagnosis |
-| Agent review crash | partial status JSON, no report | Claude reads partial status + agent log, decides retry/skip/escalate |
-| Unknown executor error | `status == "error"` with no Tier 1/2 match | Claude reads error JSON + log tail, emits recovery plan |
+| Git staging conflict | `git add` failure in commit_executor | diagnosis may still emit bounded `shell` |
+| Test failure in pre-commit | supervisor_rejected with test output | diagnosis may emit bounded `shell`, `edit`, or `delegate_implementer` |
+| Agent review crash | partial status JSON, no report | diagnosis may retry/skip/escalate; bootstrap/adapter faults are not hybrid-eligible |
+| Unknown executor error | `status == "error"` with no Tier 1/2 match | diagnosis may choose `delegate_implementer` only when the bounded contract below is satisfiable |
 
-**Tier 3 uses a Recovery Loop (not one-shot):**
+**Recovery loop**
 
 ```
-Recovery Loop:  Diagnose → Implement Fix → Verify → ─(pass)─→ Re-enter Pipeline
-                  ↑                          |
-                  └───────(fail, max 3)──────┘
-                              |
-                         (exhausted)
-                              ↓
-                    Escalate + Learning Store
+Recover: Diagnose → Apply bounded action → Audit → Validate → Audit → Retry
+                         ↑                                      |
+                         └────────────── (fail / max 3) ────────┘
 ```
 
-- **Diagnose**: Claude reads error + logs (~2K token focused prompt)
-- **Implement Fix**: Claude emits shell commands OR small code edits (NOT a full Phase B pass)
-- **Verify**: Run the specific check that failed (one gate, not full audit_fast)
-- **Max 3 iterations**, then escalate to Tier 4
-- Invocation: `subprocess.run(["claude", "--print", "-p", prompt_text], timeout=60)` — NOT through bridge adapter stack (bootstrap paradox)
-- Token budget: ~2000 input, ~200 output per iteration
+**Structured `delegate_implementer` contract**
 
-**Key constraint:** Recovery does NOT invoke Phase B, bridge review, or SDK agents. The recovery loop is lighter than the main pipeline — it diagnoses, applies a bounded fix, and verifies the specific gate that failed. If the fix works, re-enter the main pipeline at the failed step.
+- `action` must be `delegate_implementer`.
+- `commands` must be a singleton array containing exactly one object.
+- `files_in_scope` may resolve only to:
+  - `mu/tools/executors/recovery_gate.py`
+  - `mu/tools/executors/executor_common.py`
+- landing-surface-only files remain outside runtime delegation:
+  - `mu/tools/executors/executor_config.json`
+  - `mu/tests/tools/test_recovery_gate.py`
+  - `mu/tests/tools/test_phase_b_executor.py`
+  - `mu/docs/agents/PipelineRecovery.v0.md`
+- bootstrap / adapter / implementer surfaces remain ineligible:
+  - `mu/tools/executors/phase_b_implementer.py`
+  - `.agent_bus/bridge_config.json`
+  - bridge adapter loading / selection / invocation bootstrap faults
+- `validation_spec` is a closed schema:
+  - only `pytest_targeted`
+  - only targets from `mu/tests/tools/test_recovery_gate.py` and
+    `mu/tests/tools/test_phase_b_executor.py`
+  - no raw `validation_commands`
+  - no `args`
+  - no unsupported validator ids or fields
+
+**Observed-drift and validator contract**
+
+- recovery captures a pre-run manifest for every pre-existing non-directory path
+  outside `.git/`, plus a repo-root inventory that still descends into
+  `.scratch/`
+- the exact `.scratch` exception set is:
+  - repo-root `.scratch/` directory node
+  - `.scratch/phase_b_implementer_prompt.md`
+  - `.scratch/phase_b_implementer_output_<job>.txt`
+- any other `.scratch/*` descendant, symlink, `readlink` target change, or
+  file/link/directory type transition fails closed
+- hybrid success requires two audits against the same pre-launch baseline:
+  - immediately after implementer return and before validator execution
+  - again after validator execution and before any retry/success outcome
+- these audits prove only surviving-drift evidence at the checkpoints. They do
+  **not** prove the absence of transient out-of-scope create-delete or
+  modify-restore touches that leave no trace by the time the snapshot is taken
+- hybrid success also requires exact equality of the repo-local git-control
+  tuple across both checkpoints:
+  - `.git/index`
+  - `HEAD`
+  - every ref returned by `git for-each-ref`, including tags and remote refs
+  - remote config
+
+**Executor-owned verification**
+
+- recovery builds validator argv/env itself; diagnosis does not hand recovery
+  shell text
+- `pytest_targeted` runs with:
+  - `[sys.executable, "-m", "pytest", "-x", "--tb=short", "-p", "no:cacheprovider", *targets]`
+  - `PYTHONHASHSEED=0`
+  - `PYTHONDONTWRITEBYTECODE=1`
+  - isolated `TMPDIR` / `XDG_CACHE_HOME` outside repo root
+
+**Governance proof limit**
+
+- this packet proves repo-local git-control immutability and bounded
+  surviving-drift at the checkpoints above
+- it does **not** claim a broader preventive sandbox over adapter-side remote,
+  PR, or network activity beyond the local tuple it can actually measure
 
 ### Tier 4: Escalate
 
@@ -155,7 +227,10 @@ Recovery Loop:  Diagnose → Implement Fix → Verify → ─(pass)─→ Re-ent
 
 ## Learning Store
 
-The learning store turns recovery_log.json into an adaptive system. It sits on top of the existing logging infrastructure and adds three capabilities: pattern promotion, cross-session persistence, and subagent learning injection.
+The learning store turns recovery_log.json into an adaptive system. It sits on
+top of the existing logging infrastructure and adds pattern promotion,
+cross-session persistence, and prompt warming. It does **not** expand write,
+validator, or governance authority.
 
 ### Architecture: Two-Tier Storage
 
@@ -400,9 +475,9 @@ The recovery gate hooks into the dispatch retry loop between `_is_terminal_execu
 
 ## Anti-Patterns
 
-1. **Bootstrap paradox** — Never import bridge_supervisor/bridge_adapters in recovery. Use `claude --print` directly for Tier 3.
+1. **Bootstrap paradox** — Tier 3 diagnosis still stays outside the full bridge/meta-review loop. The hybrid branch may lazy-load `phase_b_implementer` only after payload validation and recovery-owned baseline capture, and it may not target bridge / adapter / implementer bootstrap surfaces.
 2. **Infinite loops** — 2-attempt bound per (wave, step, class). Never retry terminal policy outcomes.
-3. **Masking real bugs** — Recovery doesn't modify source code or skip tests. Tier 3 can diagnose but only emit cleanup commands.
+3. **Masking real bugs** — Recovery may modify source code only through bounded `edit` or the gated `delegate_implementer` branch. It may not skip validation or treat prompt text as proof of scope control.
 4. **Accidental kills** — Never use `pkill -f`. Use `terminate_process_tree()` with specific PIDs.
 5. **Expensive Tier 3** — Cap at 2000 input tokens, 200 output. Not a code review task.
 6. **Recovering policy decisions** — `question_for_founder`, `supervisor_rejected`, etc. are the pipeline working correctly.

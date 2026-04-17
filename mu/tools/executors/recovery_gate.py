@@ -2,7 +2,8 @@
 """Pipeline recovery gate: failure classification and Tier 1–3 recovery.
 
 Design doc: mu/docs/agents/PipelineRecovery.v0.md
-Import constraints: only stdlib + executor_common.
+Import constraints: stdlib + executor_common at module import time.
+The hybrid Tier 3 implementer path lazy-loads phase_b_implementer at runtime.
 """
 from __future__ import annotations
 
@@ -16,14 +17,16 @@ import shutil
 import unicodedata
 import signal
 import sqlite3
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, NamedTuple, Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -152,7 +155,16 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.TERMINAL_POLICY
 
     # Tier 3: needs_phase_b is recoverable (retry Phase B)
-    if status == "needs_phase_b" or embedded_status == "needs_phase_b":
+    # Commit executor currently wraps a supervisor NEEDS_PHASE_B return as a
+    # generic error payload whose reason begins with "Supervisor returned
+    # NEEDS_PHASE_B". Recognize that structured reason so commit-side re-entry
+    # routes back through Phase B instead of falling into stale-state recovery.
+    if (
+        status == "needs_phase_b"
+        or embedded_status == "needs_phase_b"
+        or (status_failed and "supervisor returned needs_phase_b" in reason_lower)
+        or (status_failed and "supervisor returned needs_phase_b" in combined_lower)
+    ):
         return FailureClass.NEEDS_PHASE_B
 
     # Tier 3: bot_findings_pending with P1 unresolved → re-invoke implementer
@@ -1418,6 +1430,42 @@ _DANGEROUS_COPY_MOVE_KILL_COMMANDS: frozenset[str] = frozenset({
 MAX_RECOVERY_ITERATIONS = 3
 _SHELL_TIMEOUT = 30
 _TRIVIAL_EXCERPTS = frozenset({"{", "}", "[", "]", ",", '"', '",', "{}", "[]"})
+_HYBRID_RUNTIME_SCOPE: frozenset[str] = frozenset({
+    "mu/tools/executors/recovery_gate.py",
+    "mu/tools/executors/executor_common.py",
+})
+_HYBRID_SCOPE_PREFIXES: tuple[str, ...] = ("mu/tools/executors/",)
+_HYBRID_HARD_DENY_PREFIXES: tuple[str, ...] = (
+    "mu/host/",
+    "rcx_pi/",
+    ".git/",
+    ".agent_bus/",
+    ".claude/",
+    "archive/",
+)
+_HYBRID_BOOTSTRAP_SURFACES: frozenset[str] = frozenset({
+    "mu/tools/executors/phase_b_implementer.py",
+    ".agent_bus/bridge_config.json",
+})
+_HYBRID_VALIDATOR_TARGETS: frozenset[str] = frozenset({
+    "mu/tests/tools/test_recovery_gate.py",
+    "mu/tests/tools/test_phase_b_executor.py",
+})
+_HYBRID_TOP_LEVEL_KEYS: frozenset[str] = frozenset({
+    "action",
+    "commands",
+    "explanation",
+})
+_HYBRID_COMMAND_KEYS: frozenset[str] = frozenset({
+    "summary",
+    "files_in_scope",
+    "validation_spec",
+    "why_not_shell_edit",
+})
+_HYBRID_VALIDATION_KEYS: frozenset[str] = frozenset({
+    "validator",
+    "targets",
+})
 
 
 def _strip_shell_quotes(text: str) -> str:
@@ -2070,12 +2118,36 @@ Use only the evidence above, decide the smallest honest next action, and
 return the JSON plan immediately.
 
 Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
-{{"action": "shell"|"edit"|"skip"|"escalate", "commands": ["cmd1", "cmd2"], "explanation": "why"}}
+{{"action": "shell"|"edit"|"delegate_implementer"|"skip"|"escalate", "commands": [...], "explanation": "why"}}
 
 - "shell": run shell commands to fix the issue
 - "edit": apply file edits (commands = [{{"file_path": "...", "old_text": "...", "new_text": "..."}}])
+- "delegate_implementer": request the existing phase_b_implementer code-writing actor for a bounded control-surface repair
 - "skip": cannot fix, return failure
 - "escalate": need human intervention
+
+For "delegate_implementer", "commands" must contain exactly one object:
+{{
+  "summary": "...",
+  "files_in_scope": ["mu/tools/executors/recovery_gate.py"],
+  "validation_spec": [
+    {{
+      "validator": "pytest_targeted",
+      "targets": ["mu/tests/tools/test_recovery_gate.py"]
+    }}
+  ],
+  "why_not_shell_edit": "requires coordinated code change"
+}}
+
+delegate_implementer rules:
+- files_in_scope may include ONLY:
+  - mu/tools/executors/recovery_gate.py
+  - mu/tools/executors/executor_common.py
+- Do NOT target bridge / adapter / implementer bootstrap surfaces.
+- Do NOT return raw validation shell, validation_commands, args, or unsupported fields.
+- validation_spec may use ONLY pytest_targeted with targets drawn from:
+  - mu/tests/tools/test_recovery_gate.py
+  - mu/tests/tools/test_phase_b_executor.py
 
 Safety: no rm -rf, no git push, no git reset --hard. Max 30s per command."""
 
@@ -2134,6 +2206,820 @@ def _apply_edit(edit: dict[str, Any], repo_root: Path) -> tuple[bool, str]:
         return True, f"edited {file_path}"
     except OSError as exc:
         return False, f"edit failed: {exc}"
+
+
+def _normalize_hybrid_repo_relative(raw_path: Any) -> str | None:
+    """Normalize a repo-relative path token for the hybrid recovery contract."""
+    if not isinstance(raw_path, str):
+        return None
+    candidate = raw_path.strip().replace("\\", "/")
+    if not candidate:
+        return None
+    if candidate.startswith("./"):
+        candidate = candidate[2:]
+    if candidate.startswith("/"):
+        return None
+    parts = []
+    for part in PurePosixPath(candidate).parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            return None
+        parts.append(part)
+    if not parts:
+        return None
+    return PurePosixPath(*parts).as_posix()
+
+
+def _normalize_recovery_prompt_exception_path(raw_path: Any) -> str | None:
+    """Normalize the active recovery-agent prompt path for hybrid checkpoints."""
+    normalized = _normalize_hybrid_repo_relative(raw_path)
+    if normalized is None:
+        return None
+    path = PurePosixPath(normalized)
+    if path.parent.as_posix() != ".scratch":
+        return None
+    if not path.name.startswith("recovery_agent_") or not path.name.endswith(".txt"):
+        return None
+    return normalized
+
+
+def _hybrid_exception_paths(
+    job_id: str | None = None,
+    *,
+    recovery_prompt_relpath: str | None = None,
+) -> frozenset[str]:
+    """Return the exact admitted .scratch nodes for the hybrid branch."""
+    paths = {
+        ".scratch",
+        ".scratch/phase_b_implementer_prompt.md",
+    }
+    recovery_prompt = _normalize_recovery_prompt_exception_path(
+        recovery_prompt_relpath
+    )
+    if recovery_prompt:
+        paths.add(recovery_prompt)
+    if job_id:
+        paths.add(f".scratch/phase_b_implementer_output_{job_id}.txt")
+    return frozenset(paths)
+
+
+def _hybrid_scope_contract(files_in_scope: list[str], validation_spec: list[dict[str, Any]]) -> str:
+    """Render the advisory scope contract passed to the implementer prompt."""
+    validation_lines = [
+        f"- {item['validator']}: {', '.join(item['targets'])}"
+        for item in validation_spec
+    ]
+    return "\n".join([
+        "This is the bounded hybrid Tier 3 recovery branch.",
+        "Prompt-level scope is advisory only; recovery will audit surviving drift and local git-control state after the run.",
+        "Allowed product writes:",
+        *[f"- {path}" for path in files_in_scope],
+        "Allowed transient executor byproducts:",
+        "- .scratch/",
+        "- .scratch/recovery_agent_<token>.txt",
+        "- .scratch/phase_b_implementer_prompt.md",
+        "- .scratch/phase_b_implementer_output_<job>.txt",
+        "Do not modify validator modules, executor config, bridge config, implementer bootstrap files, .git state, or any other path.",
+        "Validators recovery will run after your change:",
+        *validation_lines,
+    ])
+
+
+def _fingerprint_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _fingerprint_file(path: Path) -> str | None:
+    try:
+        return _fingerprint_bytes(path.read_bytes())
+    except OSError:
+        return None
+
+
+def _absolute_path_snapshot(path: Path) -> dict[str, Any]:
+    """Capture existence, type, link target, realpath, and content fingerprint."""
+    snapshot: dict[str, Any] = {
+        "exists": False,
+        "type": "missing",
+        "realpath": str(path.resolve(strict=False)),
+        "readlink": None,
+        "fingerprint": None,
+    }
+    try:
+        st = path.lstat()
+    except FileNotFoundError:
+        return snapshot
+    snapshot["exists"] = True
+    mode = st.st_mode
+    if stat.S_ISLNK(mode):
+        snapshot["type"] = "symlink"
+        snapshot["readlink"] = os.readlink(path)
+    elif stat.S_ISDIR(mode):
+        snapshot["type"] = "directory"
+    elif stat.S_ISREG(mode):
+        snapshot["type"] = "file"
+        snapshot["fingerprint"] = _fingerprint_file(path)
+    else:
+        snapshot["type"] = "other"
+    try:
+        snapshot["realpath"] = str(path.resolve(strict=True))
+    except FileNotFoundError:
+        snapshot["realpath"] = str(path.resolve(strict=False))
+    return snapshot
+
+
+def _collect_hybrid_inventory(repo_root: Path) -> dict[str, dict[str, Any]]:
+    """Inventory every path in the worktree except .git, descending into .scratch."""
+    inventory: dict[str, dict[str, Any]] = {}
+
+    def walk(directory: Path, rel_prefix: str = "") -> None:
+        try:
+            entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
+        except FileNotFoundError:
+            return
+        for entry in entries:
+            rel_path = f"{rel_prefix}/{entry.name}" if rel_prefix else entry.name
+            if rel_path == ".git" or rel_path.startswith(".git/"):
+                continue
+            path = Path(entry.path)
+            snapshot = _absolute_path_snapshot(path)
+            inventory[rel_path] = {
+                "exists": snapshot["exists"],
+                "type": snapshot["type"],
+                "readlink": snapshot["readlink"],
+            }
+            if snapshot["type"] == "directory":
+                walk(path, rel_path)
+
+    walk(repo_root)
+    return inventory
+
+
+def _collect_hybrid_manifest(
+    repo_root: Path,
+    *,
+    exception_paths: frozenset[str],
+) -> dict[str, dict[str, Any]]:
+    """Capture every pre-existing non-directory path outside .git and exact exceptions."""
+    manifest: dict[str, dict[str, Any]] = {}
+    inventory = _collect_hybrid_inventory(repo_root)
+    for rel_path, meta in inventory.items():
+        if rel_path in exception_paths:
+            continue
+        if meta["type"] == "directory":
+            continue
+        path = repo_root / rel_path
+        snapshot = _absolute_path_snapshot(path)
+        if not snapshot["exists"]:
+            continue
+        manifest[rel_path] = snapshot
+    return manifest
+
+
+def _validate_hybrid_scope_file(repo_root: Path, rel_path: str) -> tuple[bool, str]:
+    path = repo_root / rel_path
+    snapshot = _absolute_path_snapshot(path)
+    expected_realpath = str((repo_root / rel_path).resolve(strict=False))
+    if not snapshot["exists"]:
+        return False, f"declared scope path missing: {rel_path}"
+    if snapshot["type"] != "file":
+        return False, f"declared scope path must stay a regular file: {rel_path}"
+    if snapshot["realpath"] != expected_realpath:
+        return False, f"declared scope path escaped stable realpath: {rel_path}"
+    return True, ""
+
+
+def _validate_hybrid_scratch_state(
+    repo_root: Path,
+    *,
+    exception_paths: frozenset[str],
+) -> tuple[bool, str]:
+    scratch_path = repo_root / ".scratch"
+    scratch_snapshot = _absolute_path_snapshot(scratch_path)
+    expected_scratch_realpath = str(scratch_path.resolve(strict=False))
+    if scratch_snapshot["exists"]:
+        if scratch_snapshot["type"] != "directory":
+            return False, ".scratch must remain a directory at repo root"
+        if scratch_snapshot["realpath"] != expected_scratch_realpath:
+            return False, ".scratch escaped its stable repo-root realpath"
+    for rel_path in sorted(exception_paths):
+        if rel_path == ".scratch":
+            continue
+        path = repo_root / rel_path
+        snapshot = _absolute_path_snapshot(path)
+        expected_realpath = str(path.resolve(strict=False))
+        if not snapshot["exists"]:
+            continue
+        if snapshot["type"] != "file":
+            return False, f"hybrid .scratch exception must remain a regular file: {rel_path}"
+        if snapshot["realpath"] != expected_realpath:
+            return False, f"hybrid .scratch exception escaped its stable realpath: {rel_path}"
+    return True, ""
+
+
+def _ensure_hybrid_scratch_inventory_allowed(
+    inventory: dict[str, dict[str, Any]],
+    *,
+    exception_paths: frozenset[str],
+) -> tuple[bool, str]:
+    extra_paths = sorted(
+        path for path in inventory
+        if path.startswith(".scratch/")
+        and path not in exception_paths
+    )
+    if extra_paths:
+        return False, f"unexpected .scratch descendant outside exact exception set: {extra_paths[0]}"
+    return True, ""
+
+
+def _capture_hybrid_git_control_tuple(repo_root: Path) -> dict[str, Any]:
+    """Capture repo-local git-control state for fail-closed equality checks."""
+    def git_output(args: list[str], *, allow_nonzero: bool = False) -> tuple[int, str, str]:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if proc.returncode != 0 and not allow_nonzero:
+            raise RuntimeError(proc.stderr.strip() or f"git {' '.join(args)} failed")
+        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+    def git_path(name: str) -> Path:
+        _, stdout, _ = git_output(["rev-parse", "--git-path", name])
+        path = Path(stdout)
+        if not path.is_absolute():
+            path = repo_root / path
+        return path
+
+    head_code, head_oid, head_err = git_output(["rev-parse", "HEAD"], allow_nonzero=True)
+    symref_code, symref, symref_err = git_output(["symbolic-ref", "-q", "HEAD"], allow_nonzero=True)
+    _, refs_stdout, _ = git_output(
+        ["for-each-ref", "--format=%(refname)%00%(objectname)%00%(symref)"],
+        allow_nonzero=True,
+    )
+    _, remote_stdout, _ = git_output(
+        ["config", "--get-regexp", "^remote\\."],
+        allow_nonzero=True,
+    )
+    index_snapshot = _absolute_path_snapshot(git_path("index"))
+    head_snapshot = _absolute_path_snapshot(git_path("HEAD"))
+    config_snapshot = _absolute_path_snapshot(git_path("config"))
+    refs_lines = refs_stdout.splitlines()
+    remote_fingerprint = _fingerprint_bytes(remote_stdout.encode("utf-8"))
+    return {
+        "head": {
+            "oid": head_oid,
+            "oid_returncode": head_code,
+            "oid_stderr": head_err,
+            "symref": symref,
+            "symref_returncode": symref_code,
+            "symref_stderr": symref_err,
+            "path_snapshot": head_snapshot,
+        },
+        "index": index_snapshot,
+        "refs": {
+            "lines": refs_lines,
+            "fingerprint": _fingerprint_bytes("\n".join(refs_lines).encode("utf-8")),
+        },
+        "remote_config": {
+            "lines": remote_stdout.splitlines(),
+            "fingerprint": remote_fingerprint,
+            "path_snapshot": config_snapshot,
+        },
+    }
+
+
+def _diff_hybrid_manifest(
+    baseline: dict[str, dict[str, Any]],
+    current: dict[str, dict[str, Any]],
+) -> dict[str, str]:
+    reasons: dict[str, str] = {}
+    for rel_path, before in baseline.items():
+        after = current.get(rel_path, {"exists": False, "type": "missing", "realpath": before["realpath"], "readlink": None, "fingerprint": None})
+        for field in ("exists", "type", "realpath", "readlink", "fingerprint"):
+            if before.get(field) != after.get(field):
+                reasons[rel_path] = f"manifest_{field}_changed"
+                break
+    return reasons
+
+
+def _diff_hybrid_inventory(
+    baseline: dict[str, dict[str, Any]],
+    current: dict[str, dict[str, Any]],
+    *,
+    exception_paths: frozenset[str],
+) -> dict[str, str]:
+    reasons: dict[str, str] = {}
+    for rel_path in sorted(set(baseline) | set(current)):
+        if rel_path in exception_paths:
+            continue
+        before = baseline.get(rel_path)
+        after = current.get(rel_path)
+        if before is None:
+            reasons[rel_path] = "inventory_created"
+            continue
+        if after is None:
+            reasons[rel_path] = "inventory_deleted"
+            continue
+        if before.get("type") != after.get("type"):
+            reasons[rel_path] = "inventory_type_changed"
+            continue
+        if before.get("readlink") != after.get("readlink"):
+            reasons[rel_path] = "inventory_readlink_changed"
+    return reasons
+
+
+def _capture_hybrid_checkpoint(
+    repo_root: Path,
+    *,
+    files_in_scope: list[str],
+    exception_paths: frozenset[str],
+) -> tuple[bool, dict[str, Any]]:
+    for rel_path in files_in_scope:
+        ok, detail = _validate_hybrid_scope_file(repo_root, rel_path)
+        if not ok:
+            return False, {"detail": detail}
+    ok, detail = _validate_hybrid_scratch_state(
+        repo_root,
+        exception_paths=exception_paths,
+    )
+    if not ok:
+        return False, {"detail": detail}
+    inventory = _collect_hybrid_inventory(repo_root)
+    ok, detail = _ensure_hybrid_scratch_inventory_allowed(
+        inventory,
+        exception_paths=exception_paths,
+    )
+    if not ok:
+        return False, {"detail": detail}
+    try:
+        git_control = _capture_hybrid_git_control_tuple(repo_root)
+    except Exception as exc:
+        return False, {"detail": f"hybrid git-control baseline failed: {exc}"}
+    manifest = _collect_hybrid_manifest(
+        repo_root,
+        exception_paths=exception_paths,
+    )
+    return True, {
+        "manifest": manifest,
+        "inventory": inventory,
+        "git_control": git_control,
+        "exception_paths": exception_paths,
+    }
+
+
+def _audit_hybrid_checkpoint(
+    repo_root: Path,
+    *,
+    baseline: dict[str, Any],
+    files_in_scope: list[str],
+    exception_paths: frozenset[str],
+) -> tuple[bool, dict[str, Any]]:
+    ok, current = _capture_hybrid_checkpoint(
+        repo_root,
+        files_in_scope=files_in_scope,
+        exception_paths=exception_paths,
+    )
+    if not ok:
+        return False, current
+    if current["git_control"] != baseline["git_control"]:
+        return False, {"detail": "hybrid git-control tuple drifted from baseline"}
+    manifest_reasons = _diff_hybrid_manifest(baseline["manifest"], current["manifest"])
+    inventory_reasons = _diff_hybrid_inventory(
+        baseline["inventory"],
+        current["inventory"],
+        exception_paths=exception_paths,
+    )
+    observed_drift = sorted(set(manifest_reasons) | set(inventory_reasons))
+    out_of_scope = sorted(path for path in observed_drift if path not in files_in_scope)
+    if out_of_scope:
+        return False, {
+            "detail": f"hybrid observed drift escaped declared scope: {out_of_scope[0]}",
+            "observed_drift": observed_drift,
+            "manifest_reasons": manifest_reasons,
+            "inventory_reasons": inventory_reasons,
+        }
+    return True, {
+        "observed_drift": observed_drift,
+        "manifest_reasons": manifest_reasons,
+        "inventory_reasons": inventory_reasons,
+        "git_control": current["git_control"],
+    }
+
+
+def _load_phase_b_implementer_module(repo_root: Path) -> Any:
+    executors_dir = repo_root / "mu" / "tools" / "executors"
+    if str(executors_dir) not in sys.path:
+        sys.path.insert(0, str(executors_dir))
+    # Keep the lazy import outside the observed-drift contract by suppressing
+    # repo-local .pyc writes during module load.
+    prior_dont_write_bytecode = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        try:
+            import importlib
+            return importlib.import_module("phase_b_implementer")
+        except ImportError:
+            import importlib.util as _ilu
+            module_path = executors_dir / "phase_b_implementer.py"
+            spec = _ilu.spec_from_file_location("phase_b_implementer", str(module_path))
+            module = _ilu.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(module)
+            return module
+    finally:
+        sys.dont_write_bytecode = prior_dont_write_bytecode
+
+
+def _hybrid_bootstrap_fault_detected(
+    result: dict[str, Any],
+    files_in_scope: list[str],
+) -> tuple[bool, str]:
+    for rel_path in files_in_scope:
+        if rel_path in _HYBRID_BOOTSTRAP_SURFACES:
+            return True, f"hybrid delegation may not target bootstrap surface: {rel_path}"
+    haystack = " ".join(
+        str(result.get(key, "") or "")
+        for key in ("step", "stderr", "stdout", "executor")
+    ).lower()
+    blocked_fragments = (
+        "mu/tools/executors/phase_b_implementer.py",
+        ".agent_bus/bridge_config.json",
+        "bridge adapter config error",
+        "cannot import bridge_adapters",
+        "adapter invocation/bootstrap",
+        "adapter selection",
+    )
+    for fragment in blocked_fragments:
+        if fragment in haystack:
+            return True, f"hybrid delegation blocked for bootstrap/adapter fault: {fragment}"
+    return False, ""
+
+
+def _validate_hybrid_validation_spec(spec: Any) -> tuple[bool, list[dict[str, Any]] | None, str]:
+    if not isinstance(spec, list) or not spec:
+        return False, None, "delegate_implementer validation_spec must be a non-empty list"
+    validated: list[dict[str, Any]] = []
+    for item in spec:
+        if not isinstance(item, dict):
+            return False, None, "delegate_implementer validation_spec items must be objects"
+        extra = sorted(set(item) - _HYBRID_VALIDATION_KEYS)
+        if extra:
+            return False, None, f"delegate_implementer validation_spec has unsupported fields: {extra}"
+        if item.get("validator") != "pytest_targeted":
+            return False, None, f"unsupported hybrid validator: {item.get('validator')!r}"
+        targets = item.get("targets")
+        if not isinstance(targets, list) or not targets:
+            return False, None, "pytest_targeted requires a non-empty targets list"
+        normalized_targets: list[str] = []
+        for raw_target in targets:
+            normalized = _normalize_hybrid_repo_relative(raw_target)
+            if normalized is None:
+                return False, None, f"invalid validator target: {raw_target!r}"
+            if normalized not in _HYBRID_VALIDATOR_TARGETS:
+                return False, None, f"validator target outside hybrid allowlist: {normalized}"
+            normalized_targets.append(normalized)
+        if len(set(normalized_targets)) != len(normalized_targets):
+            return False, None, "pytest_targeted targets must be unique"
+        validated.append({
+            "validator": "pytest_targeted",
+            "targets": normalized_targets,
+        })
+    return True, validated, ""
+
+
+def _validate_delegate_implementer_payload(
+    response: dict[str, Any],
+) -> tuple[bool, dict[str, Any] | None, str]:
+    extra_top_level = sorted(set(response) - _HYBRID_TOP_LEVEL_KEYS)
+    if extra_top_level:
+        return False, None, f"delegate_implementer response has unsupported top-level fields: {extra_top_level}"
+    if "validation_commands" in response:
+        return False, None, "delegate_implementer rejects raw validation_commands"
+    commands = response.get("commands")
+    if not isinstance(commands, list):
+        return False, None, "delegate_implementer commands must be a singleton list"
+    if len(commands) != 1:
+        return False, None, "delegate_implementer commands must contain exactly one object"
+    command = commands[0]
+    if not isinstance(command, dict):
+        return False, None, "delegate_implementer command entry must be an object"
+    extra_command_fields = sorted(set(command) - _HYBRID_COMMAND_KEYS)
+    if extra_command_fields:
+        return False, None, f"delegate_implementer command has unsupported fields: {extra_command_fields}"
+    if "args" in command:
+        return False, None, "delegate_implementer rejects args"
+    files_in_scope_raw = command.get("files_in_scope")
+    if not isinstance(files_in_scope_raw, list) or not files_in_scope_raw:
+        return False, None, "delegate_implementer files_in_scope must be a non-empty list"
+    files_in_scope: list[str] = []
+    for raw_path in files_in_scope_raw:
+        normalized = _normalize_hybrid_repo_relative(raw_path)
+        if normalized is None:
+            return False, None, f"invalid files_in_scope entry: {raw_path!r}"
+        if any(normalized.startswith(prefix) for prefix in _HYBRID_HARD_DENY_PREFIXES):
+            return False, None, f"hybrid files_in_scope targets denied prefix: {normalized}"
+        if normalized in _HYBRID_BOOTSTRAP_SURFACES:
+            return False, None, f"hybrid files_in_scope targets bootstrap surface: {normalized}"
+        if normalized not in _HYBRID_RUNTIME_SCOPE:
+            return False, None, f"hybrid files_in_scope is outside the exact runtime allowlist: {normalized}"
+        if not any(normalized.startswith(prefix) for prefix in _HYBRID_SCOPE_PREFIXES):
+            return False, None, f"hybrid files_in_scope is outside the control-surface prefix allowlist: {normalized}"
+        files_in_scope.append(normalized)
+    if len(set(files_in_scope)) != len(files_in_scope):
+        return False, None, "delegate_implementer files_in_scope entries must be unique"
+    ok, validation_spec, detail = _validate_hybrid_validation_spec(command.get("validation_spec"))
+    if not ok:
+        return False, None, detail
+    return True, {
+        "summary": str(command.get("summary", "") or "").strip(),
+        "why_not_shell_edit": str(command.get("why_not_shell_edit", "") or "").strip(),
+        "files_in_scope": files_in_scope,
+        "validation_spec": validation_spec,
+    }, ""
+
+
+def _run_pytest_targeted_validator(
+    repo_root: Path,
+    *,
+    targets: list[str],
+    timeout: int,
+) -> dict[str, Any]:
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-x",
+        "--tb=short",
+        "-p",
+        "no:cacheprovider",
+        *targets,
+    ]
+    with tempfile.TemporaryDirectory(prefix="rcx-recovery-tmp-") as tmp_root, tempfile.TemporaryDirectory(prefix="rcx-recovery-cache-") as cache_root:
+        env = {
+            **os.environ,
+            "PYTHONHASHSEED": "0",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": tmp_root,
+            "TMP": tmp_root,
+            "TEMP": tmp_root,
+            "XDG_CACHE_HOME": cache_root,
+        }
+        proc = subprocess.run(
+            command,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+            check=False,
+        )
+    return {
+        "validator": "pytest_targeted",
+        "command": command,
+        "targets": list(targets),
+        "stdout": proc.stdout,
+        "stderr": proc.stderr,
+        "exit_code": proc.returncode,
+        "passed": proc.returncode == 0,
+    }
+
+
+def _run_hybrid_validation_spec(
+    repo_root: Path,
+    *,
+    validation_spec: list[dict[str, Any]],
+    timeout: int,
+) -> dict[str, Any]:
+    last_result: dict[str, Any] | None = None
+    for item in validation_spec:
+        last_result = _run_pytest_targeted_validator(
+            repo_root,
+            targets=item["targets"],
+            timeout=timeout,
+        )
+        if not last_result["passed"]:
+            return last_result
+    return last_result or {
+        "validator": "",
+        "command": [],
+        "targets": [],
+        "stdout": "",
+        "stderr": "",
+        "exit_code": 0,
+        "passed": True,
+    }
+
+
+def _build_delegate_implementer_prompt(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    step: str,
+    explanation: str,
+    delegate_payload: dict[str, Any],
+    module: Any,
+) -> str:
+    files_in_scope = delegate_payload["files_in_scope"]
+    validation_spec = delegate_payload["validation_spec"]
+    learning_context = load_relevant_learnings(
+        "implementer",
+        files_in_scope,
+        repo_root,
+    )
+    locked_plan = "\n".join([
+        "# Hybrid Recovery Repair",
+        "",
+        f"- Failure step: {step}",
+        f"- Recovery explanation: {explanation or '(none provided)'}",
+        f"- Delegate summary: {delegate_payload.get('summary') or '(none provided)'}",
+        f"- Why not shell/edit: {delegate_payload.get('why_not_shell_edit') or '(not provided)'}",
+        "",
+        "## Writable Scope",
+        *[f"- {path}" for path in files_in_scope],
+        "",
+        "## Recovery-Owned Verification",
+        *[
+            f"- {item['validator']}: {', '.join(item['targets'])}"
+            for item in validation_spec
+        ],
+        "",
+        "Do not modify any file outside the writable scope above.",
+        "Do not modify validator modules, executor config, bridge config, or .git state.",
+        "Recovery will audit surviving drift and local git-control immutability after your run.",
+    ])
+    return module.build_implementation_prompt(
+        locked_plan,
+        repo_root=repo_root,
+        wave_id=wave_id,
+        scope_hint=f"Hybrid recovery delegate for {step}",
+        scope_contract=_hybrid_scope_contract(files_in_scope, validation_spec),
+        learning_context=learning_context,
+    )
+
+
+def _run_delegate_implementer_action(
+    repo_root: Path,
+    *,
+    result: dict[str, Any],
+    wave_id: str,
+    step: str,
+    response: dict[str, Any],
+    explanation: str,
+    recovery_prompt_path: Any = None,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    config = load_executor_config(repo_root)
+    if not bool(config.get("hybrid_recovery_enabled", False)):
+        return {
+            "ok": False,
+            "detail": "hybrid_recovery_enabled is false; delegate_implementer is disabled",
+            "result_update": None,
+        }
+    ok, delegate_payload, detail = _validate_delegate_implementer_payload(response)
+    if not ok or delegate_payload is None:
+        return {"ok": False, "detail": detail, "result_update": None}
+    blocked, blocked_detail = _hybrid_bootstrap_fault_detected(result, delegate_payload["files_in_scope"])
+    if blocked:
+        return {"ok": False, "detail": blocked_detail, "result_update": None}
+    _update_recovery_status(
+        repo_root,
+        state="tier3_delegate_scope_validation",
+        current_command="delegate_implementer scope validation",
+        detail=_excerpt(explanation),
+    )
+    recovery_prompt_relpath = None
+    if recovery_prompt_path is not None:
+        prompt_path = Path(recovery_prompt_path)
+        if prompt_path.is_absolute():
+            try:
+                prompt_path = prompt_path.relative_to(repo_root)
+            except ValueError:
+                prompt_path = Path()
+        recovery_prompt_relpath = _normalize_hybrid_repo_relative(
+            prompt_path.as_posix()
+        )
+    baseline_ok, baseline = _capture_hybrid_checkpoint(
+        repo_root,
+        files_in_scope=delegate_payload["files_in_scope"],
+        exception_paths=_hybrid_exception_paths(
+            recovery_prompt_relpath=recovery_prompt_relpath,
+        ),
+    )
+    if not baseline_ok:
+        return {"ok": False, "detail": baseline["detail"], "result_update": None}
+    try:
+        module = _load_phase_b_implementer_module(repo_root)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "detail": f"could not load phase_b_implementer for hybrid recovery: {exc}",
+            "result_update": None,
+        }
+    prompt = _build_delegate_implementer_prompt(
+        repo_root,
+        wave_id=wave_id,
+        step=step,
+        explanation=explanation,
+        delegate_payload=delegate_payload,
+        module=module,
+    )
+    implementer_timeout = int(
+        config.get("timeouts", {}).get("recovery_implementer")
+        or config.get("timeouts", {}).get("phase_b_executor", 1200)
+    )
+    implementer_result = module.invoke_implementer(
+        repo_root,
+        prompt,
+        backend=str(
+            config.get("backends", {}).get("phase_b_executor") or "codex"
+        ),
+        model_override=config.get("model_overrides", {}).get("phase_b_executor"),
+        timeout=implementer_timeout,
+        verbose=verbose,
+    )
+    exception_paths = _hybrid_exception_paths(
+        implementer_result.get("job_id") or None,
+        recovery_prompt_relpath=recovery_prompt_relpath,
+    )
+    pre_validation_ok, pre_validation_audit = _audit_hybrid_checkpoint(
+        repo_root,
+        baseline=baseline,
+        files_in_scope=delegate_payload["files_in_scope"],
+        exception_paths=exception_paths,
+    )
+    if not pre_validation_ok:
+        return {
+            "ok": False,
+            "detail": pre_validation_audit["detail"],
+            "result_update": None,
+            "implementer_result": implementer_result,
+        }
+    if implementer_result.get("status") != "success":
+        return {
+            "ok": False,
+            "detail": (
+                "delegate_implementer returned "
+                f"{implementer_result.get('status')} (exit={implementer_result.get('exit_code')})"
+            ),
+            "result_update": {
+                "stdout": implementer_result.get("output", ""),
+                "stderr": implementer_result.get("stderr", ""),
+            },
+            "implementer_result": implementer_result,
+            "pre_validation_audit": pre_validation_audit,
+        }
+    validator_timeout = min(max(60, implementer_timeout), 300)
+    validator_targets = [
+        target
+        for item in delegate_payload["validation_spec"]
+        for target in item["targets"]
+    ]
+    validator_result = _run_hybrid_validation_spec(
+        repo_root,
+        validation_spec=delegate_payload["validation_spec"],
+        timeout=validator_timeout,
+    )
+    final_ok, final_audit = _audit_hybrid_checkpoint(
+        repo_root,
+        baseline=baseline,
+        files_in_scope=delegate_payload["files_in_scope"],
+        exception_paths=exception_paths,
+    )
+    if not final_ok:
+        return {
+            "ok": False,
+            "detail": final_audit["detail"],
+            "result_update": None,
+            "implementer_result": implementer_result,
+            "validator_result": validator_result,
+            "pre_validation_audit": pre_validation_audit,
+        }
+    if not validator_result["passed"]:
+        return {
+            "ok": False,
+            "detail": "hybrid validator failed",
+            "result_update": {
+                "stdout": validator_result["stdout"],
+                "stderr": validator_result["stderr"],
+            },
+            "implementer_result": implementer_result,
+            "validator_result": validator_result,
+            "pre_validation_audit": pre_validation_audit,
+            "final_audit": final_audit,
+        }
+    return {
+        "ok": True,
+        "detail": explanation or f"delegate_implementer applied; retrying {_retry_target(result, step)}",
+        "implementer_result": implementer_result,
+        "validator_result": validator_result,
+        "pre_validation_audit": pre_validation_audit,
+        "final_audit": final_audit,
+    }
 
 
 def _log_tier3_attempt(
@@ -2356,6 +3242,30 @@ def run_recovery_loop(
                 detail=_excerpt(raw_response[:200]),
             )
             continue
+        if not isinstance(response, dict):
+            dur = round(time.monotonic() - iteration_t0, 3)
+            detail = "recovery agent response must be a JSON object"
+            loop_log.append({
+                "iteration": i + 1,
+                "action": "parse_error",
+                "detail": detail,
+                "duration_s": dur,
+            })
+            _log_tier3_attempt(
+                repo_root, wave_id, step, fc, i + 1,
+                "parse_error", "failed", dur, detail,
+                invocation_id=invocation_id,
+            )
+            _update_recovery_status(
+                repo_root,
+                state="tier3_parse_error",
+                child_pid=0,
+                child_role="",
+                current_command="",
+                last_action="parse_error",
+                detail=detail,
+            )
+            continue
 
         action = response.get("action", "skip")
         commands = response.get("commands", [])
@@ -2409,6 +3319,80 @@ def run_recovery_loop(
             )
             return {"recovered": False, "exhausted": False,
                     "iterations": i + 1, "log": loop_log}
+
+        if action == "delegate_implementer":
+            delegate_result = _run_delegate_implementer_action(
+                repo_root,
+                result=result,
+                wave_id=wave_id,
+                step=step,
+                response=response,
+                explanation=explanation,
+                recovery_prompt_path=agent_invocation.get("prompt_path"),
+            )
+            dur = round(time.monotonic() - iteration_t0, 3)
+            loop_log.append({
+                "iteration": i + 1,
+                "action": "delegate_implementer",
+                "detail": delegate_result["detail"],
+                "duration_s": dur,
+                "implementer_status": (
+                    delegate_result.get("implementer_result", {}) or {}
+                ).get("status"),
+                "pre_validation_drift": (
+                    delegate_result.get("pre_validation_audit", {}) or {}
+                ).get("observed_drift", []),
+                "final_drift": (
+                    delegate_result.get("final_audit", {}) or {}
+                ).get("observed_drift", []),
+            })
+            if delegate_result.get("ok"):
+                retry_target = _retry_target(result, step)
+                detail = delegate_result["detail"] or f"delegate_implementer applied; retrying {retry_target}"
+                _log_tier3_attempt(
+                    repo_root, wave_id, step, fc, i + 1,
+                    "delegate_implementer", "retry_requested", dur, detail,
+                    invocation_id=invocation_id,
+                )
+                _finish_recovery_status(
+                    repo_root,
+                    recovered=True,
+                    exhausted=False,
+                    outcome="retry_requested",
+                    action="delegate_implementer",
+                    detail=detail,
+                    state="tier3_retry_requested",
+                )
+                return {
+                    "recovered": True,
+                    "exhausted": False,
+                    "iterations": i + 1,
+                    "log": loop_log,
+                }
+            result_update = delegate_result.get("result_update")
+            if isinstance(result_update, dict):
+                result = dict(result)
+                if "stderr" in result_update:
+                    result["stderr"] = result_update["stderr"]
+                if "stdout" in result_update:
+                    result["stdout"] = result_update["stdout"]
+                _update_recovery_status(
+                    repo_root,
+                    state="tier3_verify_failed",
+                    detail=_excerpt(_summarize_result_reason(result)),
+                )
+            else:
+                _update_recovery_status(
+                    repo_root,
+                    state="tier3_delegate_failed",
+                    detail=_excerpt(delegate_result["detail"]),
+                )
+            _log_tier3_attempt(
+                repo_root, wave_id, step, fc, i + 1,
+                "delegate_implementer", "failed", dur, delegate_result["detail"],
+                invocation_id=invocation_id,
+            )
+            continue
 
         if action == "shell":
             cmd_results = []

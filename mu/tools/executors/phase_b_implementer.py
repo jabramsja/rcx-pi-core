@@ -68,6 +68,7 @@ def build_implementation_prompt(
     repo_root: Path,
     wave_id: str,
     scope_hint: str = "",
+    scope_contract: str = "",
     learning_context: str = "",
 ) -> str:
     """Build a structured implementation prompt from a locked plan.
@@ -83,6 +84,10 @@ def build_implementation_prompt(
             load_relevant_learnings(). Injected as-is when non-empty.
     """
     learning_section = f"\n{learning_context}\n" if learning_context else ""
+    scope_contract_section = (
+        f"\n## Scope Contract\n\n{scope_contract}\n"
+        if scope_contract else ""
+    )
     return f"""You are a code implementation agent. Your job is to implement
 the changes described in the locked plan below. You are NOT a reviewer —
 you write code.
@@ -91,6 +96,7 @@ you write code.
 
 {plan_content}
 {learning_section}
+{scope_contract_section}
 ## Instructions
 
 1. Read the plan carefully.
