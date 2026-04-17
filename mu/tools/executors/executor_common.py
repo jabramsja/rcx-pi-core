@@ -27,9 +27,9 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "backends": {
         "post_merge_supervisor": "codex",
         "dialectic_executor": "codex",
-        "phase_a_executor": "codex",
-        "phase_b_executor": "codex",
-        "bot_remediation": "codex",
+        "phase_a_executor": "claude",
+        "phase_b_executor": "claude",
+        "bot_remediation": "claude",
         "commit_executor": None,
     },
     "bridge_reviewers": {
@@ -43,7 +43,7 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "model_overrides": {
         "phase_b_executor": None,
     },
-    "hybrid_recovery_enabled": False,
+    "hybrid_recovery_enabled": True,
     "pipeline_agent_pager": {
         "enabled": False,
         "route": "notify-only",

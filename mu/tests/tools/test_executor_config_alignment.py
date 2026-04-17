@@ -211,5 +211,5 @@ class TestBackendConfigAlignment:
     def test_bot_remediation_backend_present_in_default_and_live_config(self):
         defaults = _load_default_executor_config_backends()
         live = _load_json_config_backends()
-        assert defaults.get("bot_remediation") == "codex"
-        assert live.get("bot_remediation") == "codex"
+        assert defaults.get("bot_remediation") == "claude"
+        assert live.get("bot_remediation") == "claude"
