@@ -2207,7 +2207,7 @@ class TestHybridScopeAudit:
         ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: exercise live lazy-import scope checkpoint
             tmp_path,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths(),
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
         )
         assert ok is True
 
@@ -2228,7 +2228,7 @@ class TestHybridScopeAudit:
             tmp_path,
             baseline=baseline,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths(),
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
         )
         assert ok is True
         assert audit["observed_drift"] == []
@@ -2241,7 +2241,7 @@ class TestHybridScopeAudit:
         ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: capture hybrid baseline directly
             tmp_path,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths(),
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
         )
         assert ok is True
 
@@ -2250,7 +2250,7 @@ class TestHybridScopeAudit:
             tmp_path,
             baseline=baseline,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths(),
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
         )
         assert ok is False
         assert "escaped declared scope" in audit["detail"]
@@ -2261,7 +2261,7 @@ class TestHybridScopeAudit:
         ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK
             tmp_path,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths(),
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
         )
         assert ok is True
 
@@ -2273,7 +2273,7 @@ class TestHybridScopeAudit:
             tmp_path,
             baseline=baseline,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths("impl-1234abcd"),
+            exception_paths=rg_mod._hybrid_exception_paths("impl-1234abcd"),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
         )
         assert ok is True
         assert audit["observed_drift"] == []
@@ -2283,7 +2283,7 @@ class TestHybridScopeAudit:
             tmp_path,
             baseline=baseline,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths("impl-1234abcd"),
+            exception_paths=rg_mod._hybrid_exception_paths("impl-1234abcd"),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
         )
         assert ok is False
         assert "unexpected .scratch descendant" in audit["detail"]
@@ -2295,7 +2295,7 @@ class TestHybridScopeAudit:
         ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK
             tmp_path,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths(),
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
         )
         assert ok is True
 
@@ -2303,7 +2303,7 @@ class TestHybridScopeAudit:
             tmp_path,
             baseline=baseline,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths(),
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
         )
         assert ok is False
         assert "git-control tuple drifted" in audit["detail"]
