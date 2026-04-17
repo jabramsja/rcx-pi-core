@@ -17,6 +17,7 @@
   "model_overrides": {
     "phase_b_executor": null
   },
+  "hybrid_recovery_enabled": false,
   "agent_review_enabled": false,
   "review_depths": {
     "phase_a": "quick",

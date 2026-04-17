@@ -230,6 +230,16 @@ def _load_routing_record_payload(
     return json_value
 
 
+def _canonicalize_surface_task_id(task_id: str) -> str:
+    """Normalize surface CLI task IDs into bracketed TASKS.md token form."""
+    clean = str(task_id or "").strip()
+    if not clean:
+        return ""
+    if clean.startswith("[") and clean.endswith("]"):
+        return clean
+    return f"[{clean}]"
+
+
 def build_surface_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Modular control-plane entrypoint for executors and supervisors",
@@ -238,14 +248,22 @@ def build_surface_parser() -> argparse.ArgumentParser:
 
     phase_a = sub.add_parser("phase-a", help="Run Phase A executor")
     phase_a.add_argument("--plan-name", required=True, help="Plan packet slug")
-    phase_a.add_argument("--task-id", default="", help="TASKS.md task ID (e.g. PIPELINE-RECOVERY). Propagated to Phase B and commit handoff.")
+    phase_a.add_argument(
+        "--task-id",
+        default="",
+        help="TASKS.md task ID (e.g. [PIPELINE-RECOVERY] or PIPELINE-RECOVERY). Propagated to Phase B and commit handoff.",
+    )
     phase_a.add_argument("--max-rounds", type=int, default=15)
     phase_a.add_argument("-v", "--verbose", action="store_true")
     phase_a.add_argument("--json", action="store_true")
 
     phase_b = sub.add_parser("phase-b", help="Run Phase B executor")
     phase_b.add_argument("--plan", default=None, help="Locked plan packet path")
-    phase_b.add_argument("--task-id", default="", help="TASKS.md task ID (e.g. PIPELINE-RECOVERY). Used in commit handoff.")
+    phase_b.add_argument(
+        "--task-id",
+        default="",
+        help="TASKS.md task ID (e.g. [PIPELINE-RECOVERY] or PIPELINE-RECOVERY). Used in commit handoff.",
+    )
     phase_b.add_argument("--routing-record-path", type=Path, help="Path to routing record JSON")
     phase_b.add_argument("--routing-record-json", help="Routing record JSON string")
     phase_b.add_argument("--max-rounds", type=int, default=10)
@@ -275,6 +293,7 @@ def build_surface_parser() -> argparse.ArgumentParser:
 
 
 def build_surface_command(args: argparse.Namespace) -> list[str]:
+    canonical_task_id = _canonicalize_surface_task_id(getattr(args, "task_id", ""))
     if args.surface == "phase-a":
         cmd = [
             sys.executable,
@@ -301,8 +320,8 @@ def build_surface_command(args: argparse.Namespace) -> list[str]:
             cmd.extend(["--routing-record", routing_payload])
         if args.bootstrap_exception:
             cmd.append("--bootstrap-exception")
-        if getattr(args, "task_id", ""):
-            cmd.extend(["--task-id", args.task_id])
+        if canonical_task_id:
+            cmd.extend(["--task-id", canonical_task_id])
     elif args.surface == "pre-commit-supervisor":
         cmd = [
             sys.executable,
@@ -449,7 +468,7 @@ def run_recoverable_surface_command(
     surface_record = {
         "decision": decision,
         "wave_name": wave_id,
-        "task_id": getattr(args, "task_id", "") or "",
+        "task_id": _canonicalize_surface_task_id(getattr(args, "task_id", "")),
     }
     result: dict[str, Any] | None = None
 
