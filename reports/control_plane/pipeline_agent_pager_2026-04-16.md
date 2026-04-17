@@ -26,6 +26,13 @@ Depends on: merge of the active [PIPELINE-RECOVERY] wave tracked at `reports/con
   pager tool exceed the repo growth-cap gate: update
   `mu/tests/docs/test_growth_caps.py` only far enough to acknowledge those two
   wave-owned additions before rerunning the blocked commit path.
+- Founder explicitly authorized in-session on 2026-04-17 the bounded
+  governance override now recorded in `TASKS.md:178-184`: use
+  `FOUNDER_OVERRIDE:pipeline-agent-pager-2026-04-17-followup` to bypass the
+  non-structural adjacency and rolling-window caps for this MAINTENANCE
+  landing. The justification is limited to this pager slice: authoritative
+  transition paging is required before unattended recovery and later structural
+  follow-up waves can be observed mechanically.
 - Governing packet authority for Phase A is this file. The locked sections below
   define the admitted scope, work items, constraints, stop conditions, and
   acceptance contract for the wave.

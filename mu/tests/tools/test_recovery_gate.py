@@ -2495,7 +2495,7 @@ class TestHybridScopeAudit:
         ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK
             tmp_path,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths(
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
                 "impl-1234abcd",
                 recovery_prompt_relpath=".scratch/recovery_agent_wave-step-2.txt",
             ),
@@ -2506,7 +2506,7 @@ class TestHybridScopeAudit:
             tmp_path,
             baseline=baseline,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths(
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
                 "impl-1234abcd",
                 recovery_prompt_relpath=".scratch/recovery_agent_wave-step-2.txt",
             ),
@@ -2519,7 +2519,7 @@ class TestHybridScopeAudit:
             tmp_path,
             baseline=baseline,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths(
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
                 recovery_prompt_relpath=".scratch/recovery_agent_wave-step-2.txt",
             ),
         )
@@ -2536,7 +2536,7 @@ class TestHybridScopeAudit:
             tmp_path,
             baseline=baseline,
             files_in_scope=["mu/tools/executors/recovery_gate.py"],
-            exception_paths=rg_mod._hybrid_exception_paths(
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
                 "impl-1234abcd",
                 recovery_prompt_relpath=".scratch/recovery_agent_wave-step-2.txt",
             ),
