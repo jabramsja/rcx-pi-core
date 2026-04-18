@@ -2184,7 +2184,14 @@ class TestHybridDelegateRuntime:
     def _mock_recovery_agent(self, monkeypatch):
         install_mock_recovery_agent(monkeypatch)
 
-    def test_gate_defaults_false_and_delegate_does_not_launch_when_absent(self, tmp_path):
+    def test_gate_disabled_via_explicit_config_and_delegate_does_not_launch(self, tmp_path):
+        # Default is True; write explicit disabled config to test opt-out path.
+        config_dir = tmp_path / "mu" / "tools" / "executors"
+        config_dir.mkdir(parents=True)
+        (config_dir / "executor_config.json").write_text(
+            json.dumps({"hybrid_recovery_enabled": False}),
+            encoding="utf-8",
+        )
         assert rg_mod.load_executor_config(tmp_path)["hybrid_recovery_enabled"] is False
         response = json.dumps(make_delegate_response())
         fake = FakePopen(stdout=response, pid=6001)

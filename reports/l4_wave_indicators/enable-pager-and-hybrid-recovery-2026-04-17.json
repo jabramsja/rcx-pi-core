@@ -1,0 +1,24 @@
+{
+  "wave_id": "enable-pager-and-hybrid-recovery-2026-04-17",
+  "repeat_run_speedup_ratio": 1.243538,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.2411,
+  "repeat_run_raw_seconds": [
+    0.299817,
+    0.2411
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.299817
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.540917
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-04-17T23:55:25Z",
+  "collector_version": "2.2.0"
+}

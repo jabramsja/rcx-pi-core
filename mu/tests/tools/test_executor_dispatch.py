@@ -128,7 +128,7 @@ class TestDispatcherConfig:
         assert "bridge_turn_timeouts" in config
         assert "timeouts" in config
         assert "bridge_loop_limits" in config
-        assert config["backends"]["phase_b_executor"] == "codex"
+        assert config["backends"]["phase_b_executor"] == "claude"
         # bridge_reviewers may be overridden by RCX_BRIDGE_REVIEWER_OVERRIDE env var
         expected_reviewer = os.environ.get("RCX_BRIDGE_REVIEWER_OVERRIDE", "codex")
         assert config["bridge_reviewers"]["phase_a"] == expected_reviewer
