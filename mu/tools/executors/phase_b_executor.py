@@ -986,12 +986,18 @@ def _emit_phase_b_event(
     # routing_record.wave_name → plan filename stem → "phase_b_unknown_wave".
     # The pager still requires a non-empty wave_id, so the final fallback
     # guarantees emit never raises on missing identity.
+    # Bot P2 fix (2026-04-17, PR #791 follow-up): coerce each fallback
+    # source to str() BEFORE calling .strip(). plan.get("wave_id") and
+    # routing_record.get("wave_name") come from untyped JSON and may be
+    # int / float / bool / None. Calling .strip() on a non-str raises
+    # AttributeError and crashes phase_b's pager emit, defeating the
+    # entire purpose of this fallback chain.
     derived_wave_id = (
-        (plan.get("wave_id") or "").strip()
-        or (routing_record.get("wave_name") or "").strip()
+        str(plan.get("wave_id") or "").strip()
+        or str(routing_record.get("wave_name") or "").strip()
     )
     if not derived_wave_id and plan_path:
-        derived_wave_id = Path(plan_path).stem.strip()
+        derived_wave_id = Path(str(plan_path)).stem.strip()
     if not derived_wave_id:
         derived_wave_id = "phase_b_unknown_wave"
     return emit_pipeline_agent_event(

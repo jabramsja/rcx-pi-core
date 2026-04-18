@@ -3451,6 +3451,18 @@ def run_recovery_loop(
         # non-actionable action (skip/escalate) while more iterations remain,
         # subsequent iterations would burn equivalent codex invocations for the
         # same conclusion. Collapse to a single terminal record instead.
+        #
+        # Bot P1 fix (2026-04-17, PR #791 follow-up): exhausted must stay
+        # False on deliberate non-actionable skip. `_finish_recovery_status`
+        # emits `pipeline_hard_fail` pager events when exhausted=True, which
+        # is INCORRECT operational severity for a deliberate agent skip.
+        # Match the semantics of the existing non-short-circuit `skip` path
+        # (line ~3510 in this file) which is explicitly non-exhausted.
+        # An `escalate` action implies human-intervention-needed (matches
+        # the existing `escalate` return path below which also keeps
+        # exhausted=False). Setting exhausted=True here would trigger false
+        # hard_fail alerts for cases the agent intentionally chose not to
+        # auto-remediate.
         if action in {"skip", "escalate"} and i < max_iterations - 1:
             dur = round(time.monotonic() - iteration_t0, 3)
             detail = (
@@ -3473,7 +3485,7 @@ def run_recovery_loop(
             _finish_recovery_status(
                 repo_root,
                 recovered=False,
-                exhausted=True,
+                exhausted=False,  # non-exhausted: deliberate skip, not budget-exhaustion
                 outcome="short_circuited_non_actionable",
                 action=action,
                 detail=detail,
@@ -3481,7 +3493,7 @@ def run_recovery_loop(
             )
             return {
                 "recovered": False,
-                "exhausted": True,
+                "exhausted": False,  # non-exhausted: no pipeline_hard_fail pager event
                 "iterations": i + 1,
                 "log": loop_log,
             }

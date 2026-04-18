@@ -2072,7 +2072,11 @@ class TestTier3ShortCircuit:
 
         assert popen_call_count[0] == 1
         assert r["recovered"] is False
-        assert r["exhausted"] is True
+        # Bot P1 fix (PR #791 follow-up): short-circuit on non-actionable
+        # skip/escalate must NOT mark exhausted=True. Exhausted flag
+        # triggers pipeline_hard_fail pager event; a deliberate skip is
+        # not hard-fail severity.
+        assert r["exhausted"] is False
         assert r["iterations"] == 1
         assert len(r["log"]) == 1
         assert r["log"][0]["short_circuited"] is True
@@ -2082,6 +2086,9 @@ class TestTier3ShortCircuit:
         assert status["outcome"] == "short_circuited_non_actionable"
         assert status["state"] == "tier3_short_circuited"
         assert status["last_action"] == "skip"
+        # Status must also reflect exhausted=False so pager emit does not
+        # escalate to pipeline_hard_fail.
+        assert status["exhausted"] is False
         entries = rg_mod._load_recovery_log(tmp_path)  # ANTICHEAT_OK
         assert len(entries) == 1
         assert entries[0]["action"] == "tier3_iter1_skip"
