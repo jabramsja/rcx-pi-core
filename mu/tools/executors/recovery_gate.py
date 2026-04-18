@@ -490,7 +490,20 @@ def fix_missing_bridge_config(repo_root: Path) -> dict[str, Any]:
                 False, "error",
                 f"unexpected .git file content (no 'gitdir:' prefix): {content[:80]}",
             )
-        gitdir = Path(content.split("gitdir:", 1)[1].strip())
+        gitdir_str = content.split("gitdir:", 1)[1].strip()
+        if not gitdir_str:
+            return _fix_result(
+                False, "error",
+                "empty gitdir value in .git pointer file",
+            )
+        gitdir = Path(gitdir_str)
+        # Per gitfile(5), gitdir may be absolute or relative; relative paths
+        # are resolved against the gitfile's parent (the worktree root), not
+        # the process CWD. Normalize before taking parents so any '..'
+        # segments collapse into a clean absolute path.
+        if not gitdir.is_absolute():
+            gitdir = repo_root / gitdir
+        gitdir = gitdir.resolve()
         # gitdir = <main_repo>/.git/worktrees/<name>
         # main_repo = gitdir.parent.parent.parent
         main_repo = gitdir.parent.parent.parent
