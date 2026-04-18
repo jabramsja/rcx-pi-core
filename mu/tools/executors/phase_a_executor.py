@@ -1303,6 +1303,29 @@ def run_phase_a(
                         result["non_blocking_count"] = len(non_blocking)
                         return True
 
+                    # Bridge convergence budget: auto-abort if REQUEST_CHANGES persists
+                    # past budget to prevent divergent convergence (per
+                    # .claude/rules/learning.md 2026-04-18 PIPELINE entry —
+                    # fresh-Codex-per-round finds new findings every round, plan
+                    # grows without converging, eventually reviewer times out or
+                    # emits malformed envelope). Default 3 rounds total (i.e.
+                    # 2 REQUEST_CHANGES rounds allowed before the 3rd aborts).
+                    if round_num >= 3 and blocking:
+                        log(
+                            f"Bridge: REQUEST_CHANGES at round {round_num} with "
+                            f"{len(blocking)} blocking findings — convergence budget "
+                            f"(3 rounds) exceeded, aborting"
+                        )
+                        result["status"] = "error"
+                        result["error"] = (
+                            f"Bridge convergence budget (3 rounds) exceeded: "
+                            f"REQUEST_CHANGES at round {round_num} without GO. "
+                            f"Redesign plan narrower or investigate reviewer "
+                            f"behavior. Blocking count: {len(blocking)}."
+                        )
+                        result["rendered_path"] = str(rendered_path)
+                        return False
+
                     if _invoke_implementer is not None and blocking:
                         current_plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
                         plan_hash_before = hash(current_plan_content)
