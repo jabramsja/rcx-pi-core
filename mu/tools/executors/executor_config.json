@@ -21,8 +21,7 @@
   "hybrid_recovery_enabled": true,
   "pipeline_agent_pager": {
     "enabled": true,
-    "route": "claude",
-    "claude_continue": true
+    "route": "claude"
   },
   "agent_review_enabled": false,
   "review_depths": {

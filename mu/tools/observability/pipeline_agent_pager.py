@@ -43,6 +43,12 @@ EVENT_LOG_PATH = OBSERVABILITY_DIR / "pipeline_agent_events.jsonl"
 DELIVERY_LOG_PATH = OBSERVABILITY_DIR / "pipeline_agent_delivery_receipts.jsonl"
 STATE_PATH = OBSERVABILITY_DIR / "pipeline_agent_pager_state.json"
 LOCK_PATH = OBSERVABILITY_DIR / "pipeline_agent_pager.lock"
+# Single source of truth for the orchestrator-session-id file path.
+# The pager is read-only here; a follow-on wave authors the writer. When the
+# file is absent (current repo state) the pager dispatches plain ``claude -p``
+# rather than ``claude --continue``, keeping dispatch deterministic even while
+# other Claude subprocesses run concurrently in this repo.
+ORCHESTRATOR_SESSION_ID_PATH = OBSERVABILITY_DIR / "orchestrator_session_id"
 STATE_VERSION = 1
 NOTIFY_ONLY_TARGET = "notify-only"
 ALLOWED_EVENT_TYPES = frozenset({
@@ -647,6 +653,46 @@ def _dispatch_codex(
     }
 
 
+def _read_orchestrator_session_id(repo_root: Path) -> str | None:
+    """Return the orchestrator session id for pager ``--resume`` dispatch.
+
+    The file at ``ORCHESTRATOR_SESSION_ID_PATH`` is authored by a follow-on
+    orchestrator-side writer and is absent in the current repo state. The
+    pager is read-only here and tolerates every absent/malformed case so
+    that a missing or corrupt file never crashes the orchestrator: missing
+    file, empty file, whitespace-only file, and a single trailing newline
+    all yield ``None``. A session id containing internal whitespace or
+    newlines — or a file whose bytes are not valid UTF-8 — is treated as
+    malformed: a single fallback note is emitted to stderr and ``None`` is
+    returned so the caller falls back to plain ``claude -p`` dispatch.
+    """
+    session_path = repo_root / ORCHESTRATOR_SESSION_ID_PATH
+    try:
+        raw = session_path.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return None
+    except UnicodeDecodeError:
+        print(
+            f"[pipeline_agent_pager] orchestrator_session_id at {session_path} "
+            "is not valid UTF-8; falling back to plain -p dispatch",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+    candidate = raw.strip()
+    if not candidate:
+        return None
+    if any(ch.isspace() for ch in candidate):
+        print(
+            f"[pipeline_agent_pager] orchestrator_session_id at {session_path} "
+            "contains internal whitespace; falling back to plain -p dispatch",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+    return candidate
+
+
 def _dispatch_claude(
     repo_root: Path,
     event: dict[str, Any],
@@ -655,11 +701,11 @@ def _dispatch_claude(
     timeout_s: float,
 ) -> dict[str, Any]:
     claude_bin = os.environ.get("RCX_PIPELINE_AGENT_PAGER_CLAUDE_BIN", "claude")
-    continue_flag = bool(config.get("pipeline_agent_pager", {}).get("claude_continue", False))
-    command = [claude_bin]
-    if continue_flag:
-        command.append("-c")
-    command.extend(["-p", _event_prompt(event)])
+    session_id = _read_orchestrator_session_id(repo_root)
+    if session_id:
+        command = [claude_bin, "--resume", session_id, "-p", _event_prompt(event)]
+    else:
+        command = [claude_bin, "-p", _event_prompt(event)]
     try:
         proc = subprocess.run(
             command,
