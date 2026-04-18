@@ -47,7 +47,6 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "pipeline_agent_pager": {
         "enabled": False,
         "route": "notify-only",
-        "claude_continue": False,
     },
     "review_depths": {
         "phase_a": "quick",

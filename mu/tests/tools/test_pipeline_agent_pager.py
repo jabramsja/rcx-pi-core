@@ -21,7 +21,6 @@ def _write_config(
     *,
     enabled: bool = True,
     route: str = "notify-only",
-    claude_continue: bool = False,
     timeouts: dict[str, int] | None = None,
 ) -> None:
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
@@ -30,7 +29,6 @@ def _write_config(
         "pipeline_agent_pager": {
             "enabled": enabled,
             "route": route,
-            "claude_continue": claude_continue,
         },
     }
     if timeouts:
@@ -553,7 +551,7 @@ def test_claude_ack_requires_zero_exit(tmp_path):
         metadata=None,
         **_event_kwargs(),
     )
-    config = {"pipeline_agent_pager": {"claude_continue": False}}
+    config: dict = {}
 
     with patch.object(
         pager_mod.subprocess,
@@ -572,3 +570,203 @@ def test_claude_ack_requires_zero_exit(tmp_path):
         succeeded = pager_mod._dispatch_claude(tmp_path, event, config, timeout_s=5)  # ANTICHEAT_OK
     assert succeeded["acknowledged"] is True
     assert succeeded["ack"]["target"] == "claude"
+
+
+def test_dispatch_claude_argv_uses_resume_when_session_id_present(tmp_path):
+    repo = tmp_path / "repo"
+    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    session_path.write_text("sess-deterministic-01", encoding="utf-8")
+
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="claude",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    with patch.object(
+        pager_mod.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
+    ) as run_mock:
+        result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is True
+    argv = run_mock.call_args.args[0]
+    expected_prompt = pager_mod._event_prompt(event)  # ANTICHEAT_OK: argv expectation
+    assert argv == [
+        "claude",
+        "--resume",
+        "sess-deterministic-01",
+        "-p",
+        expected_prompt,
+    ]
+    assert "-c" not in argv
+    assert "--continue" not in argv
+
+
+def test_dispatch_claude_argv_is_plain_p_when_session_id_absent(tmp_path):
+    repo = tmp_path / "repo"
+    # Deliberately do not create the session-id file — current repo state.
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="claude",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    with patch.object(
+        pager_mod.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
+    ) as run_mock:
+        result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is True
+    argv = run_mock.call_args.args[0]
+    expected_prompt = pager_mod._event_prompt(event)  # ANTICHEAT_OK: argv expectation
+    # Pins PR #794 bot P1 remediation: argv is deterministic plain `-p`, no -c / --continue / --resume.
+    assert argv == ["claude", "-p", expected_prompt]
+    assert "-c" not in argv
+    assert "--continue" not in argv
+    assert "--resume" not in argv
+
+
+def test_dispatch_claude_argv_falls_back_when_session_id_empty(tmp_path):
+    repo = tmp_path / "repo"
+    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    session_path.write_text("", encoding="utf-8")
+
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="claude",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    with patch.object(
+        pager_mod.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
+    ) as run_mock:
+        result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is True
+    argv = run_mock.call_args.args[0]
+    expected_prompt = pager_mod._event_prompt(event)  # ANTICHEAT_OK: argv expectation
+    assert argv == ["claude", "-p", expected_prompt]
+    assert "--resume" not in argv
+    assert "-c" not in argv
+    assert "--continue" not in argv
+
+
+def test_dispatch_claude_argv_falls_back_when_session_id_whitespace_only(tmp_path):
+    repo = tmp_path / "repo"
+    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    session_path.write_text("  \n\t \n", encoding="utf-8")
+
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="claude",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    with patch.object(
+        pager_mod.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
+    ) as run_mock:
+        result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is True
+    argv = run_mock.call_args.args[0]
+    expected_prompt = pager_mod._event_prompt(event)  # ANTICHEAT_OK: argv expectation
+    assert argv == ["claude", "-p", expected_prompt]
+    assert "--resume" not in argv
+
+
+def test_dispatch_claude_argv_falls_back_when_session_id_has_internal_whitespace(tmp_path):
+    repo = tmp_path / "repo"
+    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    session_path.write_text("sess abc\n", encoding="utf-8")
+
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="claude",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    with patch.object(
+        pager_mod.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
+    ) as run_mock:
+        result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is True
+    argv = run_mock.call_args.args[0]
+    expected_prompt = pager_mod._event_prompt(event)  # ANTICHEAT_OK: argv expectation
+    assert argv == ["claude", "-p", expected_prompt]
+    assert "--resume" not in argv
+
+
+def test_dispatch_claude_argv_strips_trailing_newline_on_session_id(tmp_path):
+    repo = tmp_path / "repo"
+    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    session_path.write_text("sess-trailing-nl\n", encoding="utf-8")
+
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="claude",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    with patch.object(
+        pager_mod.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
+    ) as run_mock:
+        result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is True
+    argv = run_mock.call_args.args[0]
+    expected_prompt = pager_mod._event_prompt(event)  # ANTICHEAT_OK: argv expectation
+    assert argv == [
+        "claude",
+        "--resume",
+        "sess-trailing-nl",
+        "-p",
+        expected_prompt,
+    ]
+
+
+def test_dispatch_claude_argv_falls_back_when_session_id_file_is_not_utf8(tmp_path):
+    repo = tmp_path / "repo"
+    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    # Non-UTF-8 bytes: Path.read_text(encoding='utf-8') raises UnicodeDecodeError,
+    # which is NOT an OSError subclass. Pins bridge-round-1 BLOCKING finding.
+    session_path.write_bytes(b"\xff\xfe")
+
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="claude",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    with patch.object(
+        pager_mod.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
+    ) as run_mock:
+        result = pager_mod._dispatch_claude(repo, event, {}, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is True
+    argv = run_mock.call_args.args[0]
+    expected_prompt = pager_mod._event_prompt(event)  # ANTICHEAT_OK: argv expectation
+    assert argv == ["claude", "-p", expected_prompt]
+    assert "--resume" not in argv
+    assert "-c" not in argv
+    assert "--continue" not in argv
