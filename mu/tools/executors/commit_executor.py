@@ -1613,7 +1613,7 @@ def _poll_ci_checks_fallback(
     repo_root: Path,
     pr_number: str,
     *,
-    timeout: int = 300,
+    timeout: int = 900,
     poll_interval: int = 15,
     log: Any = None,
 ) -> bool:
@@ -2074,7 +2074,7 @@ def _attempt_bot_finding_remediation(
             # gh pr checks --watch exits 1 on pending checks (not failed).
             # Fallback to polling before giving up.
             log(f"Step 15: gh pr checks exited ({exc.__class__.__name__}), polling CI as fallback")
-            if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=300, log=log):
+            if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=900, log=log):
                 log(f"Step 15: CI failed after remediation round {round_num}")
                 return {
                     "status": "bot_findings_pending",
@@ -2920,7 +2920,7 @@ def _run_post_commit_pipeline(
             # gh pr checks --watch exits 1 on pending checks (not failed).
             # Fallback to polling before giving up.
             log(f"Step 14: gh pr checks exited ({exc.__class__.__name__}), polling CI as fallback")
-            if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=300, log=log):
+            if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=900, log=log):
                 return {"status": "error", "step": "wait_ci",
                         "errors": [f"CI checks failed (confirmed by polling): {exc}"],
                         "steps_completed": result["steps_completed"],

@@ -882,3 +882,98 @@ class TestCommitExecutorPytestGate:
 
         assert result["passed"] is True
         assert mock_run.call_args.kwargs["timeout"] == 180
+
+
+class TestCIPollFallbackTimeout:
+    """Regression: _poll_ci_checks_fallback 900s budget tolerates observed green-gate wall time.
+
+    PR #783 (2026-04-17) demonstrated green-gate can take 5m7s (307s) after a
+    bot-remediation push, which exceeded the former 300s fallback budget. The
+    executor false-positive classified CI as failed and cascaded into tier-3
+    recovery exhaustion despite all checks green.
+    """
+
+    def _run_fallback_with_simulated_clock(self, *, ci_transitions_to_success_at, runtime_cap):
+        """Drive _poll_ci_checks_fallback with a controllable fake monotonic clock.
+
+        Returns (result, final_clock_seconds).
+        - ci_transitions_to_success_at: simulated wall-time seconds after which the
+          mocked gh output flips from pending to SUCCESS. Pass None to mean
+          "CI never completes" (stays pending for the entire run).
+        - runtime_cap: timeout argument passed into the fallback.
+        """
+        from types import SimpleNamespace
+
+        clock = [0.0]
+
+        def fake_monotonic():
+            return clock[0]
+
+        def fake_sleep(seconds):
+            clock[0] += seconds
+
+        def fake_subprocess_run(*args, **kwargs):
+            if ci_transitions_to_success_at is None or clock[0] < ci_transitions_to_success_at:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps({"statusCheckRollup": [
+                        {"name": "ci_check", "conclusion": None},
+                    ]}),
+                    stderr="",
+                )
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({"statusCheckRollup": [
+                    {"name": "ci_check", "conclusion": "SUCCESS"},
+                ]}),
+                stderr="",
+            )
+
+        with patch.object(commit_mod.time, "monotonic", fake_monotonic), \
+             patch.object(commit_mod.time, "sleep", fake_sleep), \
+             patch.object(commit_mod.subprocess, "run", side_effect=fake_subprocess_run):
+            result = commit_mod._poll_ci_checks_fallback(  # ANTICHEAT_OK: testing CI-poll fallback timeout budget under simulated clock
+                Path("/tmp/ci_poll_budget_test_repo"),
+                "783",
+                timeout=runtime_cap,
+                poll_interval=15,
+            )
+
+        return result, clock[0]
+
+    def test_ci_poll_fallback_tolerates_green_gate_wall_time_over_5_minutes(self):
+        """With the 900s budget, CI completing at t=350s must return True.
+
+        The former 300s budget would have false-positive timed out before this
+        transition. The bumped 900s budget must survive with 2.5x headroom.
+        """
+        result, final_clock = self._run_fallback_with_simulated_clock(
+            ci_transitions_to_success_at=350,
+            runtime_cap=900,
+        )
+        assert result is True, (
+            f"Expected True (CI passed at t=350s under 900s budget), got {result}"
+        )
+        assert final_clock >= 350, (
+            f"Simulated clock should have advanced past 350s, got {final_clock}s"
+        )
+        assert final_clock < 900, (
+            f"Simulated clock should not have hit the 900s cap, got {final_clock}s"
+        )
+
+    def test_ci_poll_fallback_still_times_out_at_new_budget(self):
+        """With the 900s budget, genuinely stalled CI must still return False.
+
+        Guards against the bump making the timeout unconditionally permissive —
+        a CI that never completes must still hit the budget ceiling.
+        """
+        result, final_clock = self._run_fallback_with_simulated_clock(
+            ci_transitions_to_success_at=None,
+            runtime_cap=900,
+        )
+        assert result is False, (
+            f"Expected False (timed out at 900s budget), got {result}"
+        )
+        assert final_clock >= 900, (
+            f"Simulated clock should have exhausted the 900s budget, got {final_clock}s"
+        )
