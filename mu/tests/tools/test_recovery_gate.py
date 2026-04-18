@@ -1950,7 +1950,13 @@ class TestRecoveryLoop:
         assert status["current_iteration"] == 3
 
     def test_escalate_action(self, tmp_path):
-        """Verify escalate action returns exhausted=True."""
+        """Verify escalate action returns exhausted=True on the final iteration.
+
+        Uses max_iterations=1 so the iteration is already terminal; the
+        tier-3 non-actionable short-circuit (TestTier3ShortCircuit) does
+        not fire, and the canonical escalate outcome is the observed
+        result.
+        """
         result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
         claude_response = json.dumps({
             "action": "escalate", "commands": [], "explanation": "need human"
@@ -1961,7 +1967,7 @@ class TestRecoveryLoop:
             mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response)
             mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
-            r = rg_mod.run_recovery_loop(tmp_path, result, "w1")
+            r = rg_mod.run_recovery_loop(tmp_path, result, "w1", max_iterations=1)
         assert r["recovered"] is False
         assert r["exhausted"] is True
         assert r["iterations"] == 1
@@ -2027,6 +2033,102 @@ class TestRecoveryLoop:
         status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
         assert status["outcome"] == "exhausted"
         assert status["last_action"] == "exhausted"
+
+
+class TestTier3ShortCircuit:
+    """Tier-3 short-circuit: when the recovery agent returns a non-actionable
+    action (skip/escalate) and remaining iterations exist, collapse the loop
+    to a single terminal record instead of burning equivalent codex
+    invocations on identical diagnoses.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _mock_recovery_agent(self, monkeypatch):
+        install_mock_recovery_agent(monkeypatch)
+
+    def test_skip_action_on_iter_1_short_circuits(self, tmp_path):
+        """action='skip' on iter 1 with max_iterations=3 must spawn only
+        one agent invocation and record the short-circuit terminal state.
+        """
+        result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
+        claude_response = json.dumps({
+            "action": "skip",
+            "commands": [],
+            "explanation": "no reproducible fix available",
+        })
+        popen_call_count = [0]
+
+        def popen_factory(*args, **kwargs):
+            popen_call_count[0] += 1
+            return FakePopen(stdout=claude_response, pid=6100 + popen_call_count[0])
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *a, **kw: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = popen_factory
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, result, "w-short-skip", max_iterations=3)
+
+        assert popen_call_count[0] == 1
+        assert r["recovered"] is False
+        assert r["exhausted"] is True
+        assert r["iterations"] == 1
+        assert len(r["log"]) == 1
+        assert r["log"][0]["short_circuited"] is True
+        assert r["log"][0]["action"] == "skip"
+        assert "short-circuit" in r["log"][0]["detail"]
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "short_circuited_non_actionable"
+        assert status["state"] == "tier3_short_circuited"
+        assert status["last_action"] == "skip"
+        entries = rg_mod._load_recovery_log(tmp_path)  # ANTICHEAT_OK
+        assert len(entries) == 1
+        assert entries[0]["action"] == "tier3_iter1_skip"
+        assert entries[0]["outcome"] == "short_circuited"
+
+    def test_shell_action_on_iter_1_continues_to_iter_2(self, tmp_path):
+        """A genuine shell-fix attempt that fails verification on iter 1
+        must NOT short-circuit: iter 2 must run so recovery still gets a
+        real second chance before exhaustion.
+        """
+        result = {"status": "failed", "step": "test",
+                  "stderr": "test_x failed", "stdout": ""}
+        claude_response = json.dumps({
+            "action": "shell",
+            "commands": ["echo try"],
+            "explanation": "applying fix",
+        })
+        verify_fail = MagicMock(returncode=1, stdout="", stderr="still fails")
+        popen_call_count = [0]
+
+        def popen_factory(*args, **kwargs):
+            popen_call_count[0] += 1
+            return FakePopen(stdout=claude_response, pid=7100 + popen_call_count[0])
+
+        def mock_run(cmd, **kw):
+            if isinstance(cmd, list):  # verify command branch
+                return verify_fail
+            return MagicMock(stdout="ok", stderr="", returncode=0)
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = mock_run
+            mock_sp.Popen = popen_factory
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, result, "w-no-short-shell",
+                max_iterations=2,
+                verify_command=["echo", "verify"])
+
+        assert popen_call_count[0] == 2
+        assert r["recovered"] is False
+        assert r["exhausted"] is True
+        assert r["iterations"] == 2
+        assert not any(entry.get("short_circuited") for entry in r["log"])
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "exhausted"
+        assert status["state"] == "tier3_exhausted"
 
 
 class TestRecoveryPagerEvents:
@@ -2742,7 +2844,12 @@ class TestRecoveryLoopDurableLogging:
         assert entries[0]["invocation_id"] == entries[1]["invocation_id"]
 
     def test_escalate_persisted(self, tmp_path):
-        """Escalate action is durably logged."""
+        """Escalate action is durably logged on the final iteration.
+
+        Uses max_iterations=1 so the iteration is already terminal; the
+        tier-3 non-actionable short-circuit does not fire and the
+        canonical escalate log entry is produced.
+        """
         result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
         claude_response = json.dumps({
             "action": "escalate", "commands": [], "explanation": "need human"
@@ -2753,7 +2860,7 @@ class TestRecoveryLoopDurableLogging:
             mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response)
             mock_sp.PIPE = subprocess.PIPE
             mock_sp.TimeoutExpired = subprocess.TimeoutExpired
-            rg_mod.run_recovery_loop(tmp_path, result, "w-esc")
+            rg_mod.run_recovery_loop(tmp_path, result, "w-esc", max_iterations=1)
 
         entries = rg_mod._load_recovery_log(tmp_path)  # ANTICHEAT_OK
         assert len(entries) == 1

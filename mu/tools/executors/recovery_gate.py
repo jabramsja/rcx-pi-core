@@ -3447,6 +3447,45 @@ def run_recovery_loop(
             detail=_excerpt(explanation),
         )
 
+        # Tier-3 short-circuit: if the recovery agent explicitly returns a
+        # non-actionable action (skip/escalate) while more iterations remain,
+        # subsequent iterations would burn equivalent codex invocations for the
+        # same conclusion. Collapse to a single terminal record instead.
+        if action in {"skip", "escalate"} and i < max_iterations - 1:
+            dur = round(time.monotonic() - iteration_t0, 3)
+            detail = (
+                f"tier-3 iter {i + 1} returned non-actionable action={action}; "
+                f"short-circuiting remaining iterations"
+            )
+            loop_log.append({
+                "iteration": i + 1,
+                "action": action,
+                "detail": detail,
+                "explanation": explanation,
+                "duration_s": dur,
+                "short_circuited": True,
+            })
+            _log_tier3_attempt(
+                repo_root, wave_id, step, fc, i + 1,
+                action, "short_circuited", dur, detail,
+                invocation_id=invocation_id,
+            )
+            _finish_recovery_status(
+                repo_root,
+                recovered=False,
+                exhausted=True,
+                outcome="short_circuited_non_actionable",
+                action=action,
+                detail=detail,
+                state="tier3_short_circuited",
+            )
+            return {
+                "recovered": False,
+                "exhausted": True,
+                "iterations": i + 1,
+                "log": loop_log,
+            }
+
         if action == "escalate":
             dur = round(time.monotonic() - iteration_t0, 3)
             loop_log.append({
