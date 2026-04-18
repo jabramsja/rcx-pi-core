@@ -979,10 +979,25 @@ def _emit_phase_b_event(
     summary: str,
     artifact_paths: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    # Derive wave_id with a 3-tier fallback so a missing routing_record
+    # (e.g. BOOTSTRAP_PHASE_B_EXCEPTION synthetic routing) or a packet
+    # without an explicit `wave_id:` field does not crash phase_b's pager
+    # emit at pipeline_agent_pager.py:347. Priority: plan.wave_id →
+    # routing_record.wave_name → plan filename stem → "phase_b_unknown_wave".
+    # The pager still requires a non-empty wave_id, so the final fallback
+    # guarantees emit never raises on missing identity.
+    derived_wave_id = (
+        (plan.get("wave_id") or "").strip()
+        or (routing_record.get("wave_name") or "").strip()
+    )
+    if not derived_wave_id and plan_path:
+        derived_wave_id = Path(plan_path).stem.strip()
+    if not derived_wave_id:
+        derived_wave_id = "phase_b_unknown_wave"
     return emit_pipeline_agent_event(
         repo_root,
         event_type=event_type,
-        wave_id=str(plan.get("wave_id") or routing_record.get("wave_name") or "").strip(),
+        wave_id=derived_wave_id,
         task_id=_phase_b_task_id(routing_record, plan),
         plan_path=plan_path,
         phase="phase_b",
@@ -2385,6 +2400,18 @@ def run_phase_b(
             # Preserve task_id from override if provided (e.g., via --task-id CLI)
             if routing_record_override and routing_record_override.get("task_id"):
                 routing_record["task_id"] = routing_record_override["task_id"]
+            # ALSO preserve task_id from _merge_task_id sentinel (CLI --task-id
+            # path when there is no full override). merge_task_id is popped at
+            # line 2371 before load_routing_record runs; if load raises, the
+            # exception path lands here with routing_record_override=None but
+            # merge_task_id still holds the user-supplied task_id. Without this
+            # block the synthetic routing_record gets no task_id, and the
+            # downstream default at _phase_b_task_id / handoff construction
+            # falls back to the hardcoded "[EXECUTOR-SURFACES]" — which the
+            # supervisor then rejects because that task is CLOSED in TASKS.md.
+            # Observed 2026-04-17 on tier3-short-circuit-2026-04-17 wave.
+            if merge_task_id:
+                routing_record["task_id"] = merge_task_id
             result["bootstrap_exception"] = True
         else:
             return {"status": "error", "step": "load_routing_record",
