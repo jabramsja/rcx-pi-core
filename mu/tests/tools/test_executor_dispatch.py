@@ -3318,6 +3318,46 @@ class TestPRAndReview:
         source = _commit_post_commit_source()
         assert "bot_findings_pending" in source
 
+    def test_35b_non_timeout_exceptions_still_bail_safely(self):
+        """Test 35b: non-TimeoutError exceptions from
+        _wait_for_bot_review_freshness (CalledProcessError/TimeoutExpired/
+        JSONDecodeError/ValueError) must NOT auto-defer — they indicate
+        state uncertainty and should bail to bot_findings_pending. This is
+        the hotfix for the P1 safety regression landed in PR #789
+        (auto-defer-on-all-exceptions).
+        """
+        source = _commit_post_commit_source()
+        assert "except TimeoutError as exc:" in source, (
+            "auto-defer path must be guarded by TimeoutError ONLY; catching "
+            "multiple exception types in the same branch risks auto-merging "
+            "after gh API failures or PR-head changes (bot P1 on PR #789)"
+        )
+        assert "non-timeout exception" in source, (
+            "separate except branch must exist for CalledProcessError / "
+            "TimeoutExpired / JSONDecodeError / ValueError that bails to "
+            "bot_findings_pending without auto-defer"
+        )
+        assert "review_wait_failure_class" in source, (
+            "bail-out response should tag the failure class so downstream "
+            "recovery can distinguish gh-API-failure vs PR-head-moved etc."
+        )
+        import re
+        non_timeout_block_match = re.search(
+            r"except \(\s*subprocess\.CalledProcessError,\s*subprocess\.TimeoutExpired,"
+            r"\s*json\.JSONDecodeError,\s*ValueError,\s*\) as exc:[\s\S]+?return \{",
+            source,
+        )
+        assert non_timeout_block_match is not None, (
+            "non-timeout except block should catch exactly "
+            "CalledProcessError/TimeoutExpired/JSONDecodeError/ValueError "
+            "(NOT TimeoutError) and return bot_findings_pending"
+        )
+        non_timeout_block_text = non_timeout_block_match.group(0)
+        assert "_auto_defer_bot_findings" not in non_timeout_block_text, (
+            "non-timeout except branch MUST NOT call _auto_defer_bot_findings "
+            "(the P1 regression that this hotfix closes)"
+        )
+
     def test_35a_review_wait_timeout_triggers_auto_defer_before_bot_findings_pending(self):
         """Test 35a: bot-review-timeout post-remediation auto-defers instead
         of bailing to bot_findings_pending.
