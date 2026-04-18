@@ -2100,14 +2100,7 @@ def _attempt_bot_finding_remediation(
                     repo_name=repo_name, pr_data=pd),
                 log=log,
             )
-        except (
-            subprocess.CalledProcessError,
-            subprocess.TimeoutExpired,
-            json.JSONDecodeError,
-            ValueError,
-            TimeoutError,
-        ) as exc:
-            log(f"Step 15: review wait failed after round {round_num}: {exc}")
+        except TimeoutError as exc:
             # The remediation commit at current_head is already pushed and CI
             # passed at step 14 before we got here. The bot simply did not post
             # a fresh review/clearance within the wait window. Treat this as
@@ -2117,6 +2110,17 @@ def _attempt_bot_finding_remediation(
             # "Bot comments are signal, not gates. Auto-defer, don't block
             # next wave." Closes
             # reports/deferred/blocking/commit_executor_bot_findings_false_positive_2026-04-17.md.
+            #
+            # SAFETY NOTE (hotfix 2026-04-17, closes bot P1 on PR #789):
+            # ONLY TimeoutError is safe to auto-defer. Other exception types
+            # (CalledProcessError, TimeoutExpired, JSONDecodeError,
+            # ValueError from _assert_expected_pr_head) indicate genuine
+            # state uncertainty (PR head changed, gh API failed, malformed
+            # JSON, etc.) where auto-merging could land unreviewed code or
+            # new commits pushed during remediation. Those fall through to
+            # the catch-all below which preserves the prior safe bail-out to
+            # bot_findings_pending.
+            log(f"Step 15: review wait failed after round {round_num}: {exc}")
             log(
                 f"Step 15: remediation commit {current_head[:8]} already pushed + "
                 f"CI green at step 14; bot review timeout treated as false-positive, "
@@ -2151,6 +2155,31 @@ def _attempt_bot_finding_remediation(
                 f"threads resolved. Proceeding to merge."
             )
             return None
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            json.JSONDecodeError,
+            ValueError,
+        ) as exc:
+            # Non-timeout failures (gh API error, subprocess hang, bad JSON,
+            # PR head moved) indicate state uncertainty — bail safely to
+            # bot_findings_pending so a human can verify the PR state before
+            # merge. Do NOT auto-defer these; doing so risks merging
+            # unreviewed/new code. Preserves the pre-hotfix bail-out shape.
+            log(
+                f"Step 15: review wait failed after round {round_num} with "
+                f"non-timeout exception {type(exc).__name__}: {exc} — "
+                f"bailing to bot_findings_pending (do not auto-defer on "
+                f"state-uncertainty failures)"
+            )
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": current_findings,
+                "pr_number": pr_number,
+                "steps_completed": result["steps_completed"],
+                "remediation_rounds_attempted": round_num,
+                "review_wait_failure_class": type(exc).__name__,
+            }
 
         # Re-check findings
         findings_result = _extract_review_findings(
