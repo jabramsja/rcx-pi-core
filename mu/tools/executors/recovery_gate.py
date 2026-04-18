@@ -64,6 +64,7 @@ class FailureClass(Enum):
     MIXED_STAGING = "mixed_staging"
     TRACKER_NOTE_CONTRACT = "tracker_note_contract"
     FEATURE_BRANCH_MISMATCH = "feature_branch_mismatch"
+    MISSING_BRIDGE_CONFIG = "missing_bridge_config"
     # Tier 2 -- auto-retry with adjustment (zero tokens)
     PROCESS_TIMEOUT = "process_timeout"
     TRANSIENT_KILL = "transient_kill"
@@ -86,6 +87,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.STALE_EXECUTOR_STATE: 1, FailureClass.STALE_CONTINUATION: 1,
     FailureClass.MIXED_STAGING: 1, FailureClass.TRACKER_NOTE_CONTRACT: 1,
     FailureClass.FEATURE_BRANCH_MISMATCH: 1,
+    FailureClass.MISSING_BRIDGE_CONFIG: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
     FailureClass.AGGREGATION_HANG: 2, FailureClass.IMPLEMENTER_STALE: 2,
     FailureClass.PR_MERGE_CONFLICT: 2,
@@ -186,6 +188,8 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.PR_MERGE_CONFLICT
 
     # Tier 1: deterministic lock/state issues
+    if "bridge config not found" in reason_lower or "bridge config not found" in combined_lower:
+        return FailureClass.MISSING_BRIDGE_CONFIG
     if "bridge.lock" in reason_lower or "bridge.lock" in combined_lower:
         return FailureClass.STALE_BRIDGE_LOCK
     if "index.lock" in reason_lower or "index.lock" in combined_lower:
@@ -448,6 +452,81 @@ def fix_stale_git_index_lock(repo_root: Path) -> dict[str, Any]:
     return _fix_result(False, "demoted_to_tier2",
                        "index.lock exists but Tier 1 auto-fix disabled — "
                        "no sound ownership check to prove lock is stale")
+
+
+def fix_missing_bridge_config(repo_root: Path) -> dict[str, Any]:
+    """Self-heal missing .agent_bus/bridge_config.json in a linked worktree.
+
+    Phase B, recovery_gate, and bot_remediation all invoke LLM adapters via
+    bridge_adapters.load_bridge_config, which raises if the config file is
+    missing. commit_executor step-15 has an auto-heal for the same file, but
+    phase_b and recovery_gate don't — leaving a chicken-and-egg where
+    recovery can't fix the very infrastructure it needs to run an LLM.
+
+    This Tier 1 fixer is deterministic (no LLM) and mirrors the commit_executor
+    auto-heal: locate the main repo via the worktree's .git file pointer and
+    copy its bridge_config.json into the worktree's .agent_bus/ directory.
+
+    Returns a noop result if the file already exists, or an error if the main
+    repo can't be located / its copy is missing.
+    """
+    import shutil
+
+    dst = repo_root / ".agent_bus" / "bridge_config.json"
+    if dst.exists():
+        return _fix_result(False, "noop", f"bridge_config.json already present at {dst}")
+
+    git_pointer = repo_root / ".git"
+    if not git_pointer.is_file():
+        return _fix_result(
+            False, "noop",
+            f"{repo_root}/.git is not a worktree pointer file; cannot derive main repo",
+        )
+
+    try:
+        content = git_pointer.read_text(encoding="utf-8").strip()
+        if not content.startswith("gitdir:"):
+            return _fix_result(
+                False, "error",
+                f"unexpected .git file content (no 'gitdir:' prefix): {content[:80]}",
+            )
+        gitdir_str = content.split("gitdir:", 1)[1].strip()
+        if not gitdir_str:
+            return _fix_result(
+                False, "error",
+                "empty gitdir value in .git pointer file",
+            )
+        gitdir = Path(gitdir_str)
+        # Per gitfile(5), gitdir may be absolute or relative; relative paths
+        # are resolved against the gitfile's parent (the worktree root), not
+        # the process CWD. Normalize before taking parents so any '..'
+        # segments collapse into a clean absolute path.
+        if not gitdir.is_absolute():
+            gitdir = repo_root / gitdir
+        gitdir = gitdir.resolve()
+        # gitdir = <main_repo>/.git/worktrees/<name>
+        # main_repo = gitdir.parent.parent.parent
+        main_repo = gitdir.parent.parent.parent
+    except Exception as exc:
+        return _fix_result(False, "error", f"failed to resolve main repo from .git pointer: {exc}")
+
+    src = main_repo / ".agent_bus" / "bridge_config.json"
+    if not src.exists():
+        return _fix_result(
+            False, "error",
+            f"main repo at {main_repo} has no .agent_bus/bridge_config.json to copy",
+        )
+
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src, dst)
+    except Exception as exc:
+        return _fix_result(False, "error", f"copy from {src} to {dst} failed: {exc}")
+
+    return _fix_result(
+        True, "copy_bridge_config_from_main_repo",
+        f"copied bridge_config.json from {src} to {dst}",
+    )
 
 
 def fix_stale_executor_state(repo_root: Path, wave_id: str = "") -> dict[str, Any]:
@@ -735,6 +814,7 @@ _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.MIXED_STAGING: lambda root, **kw: fix_mixed_staging(root),
     FailureClass.TRACKER_NOTE_CONTRACT: fix_tracker_note_contract,
     FailureClass.FEATURE_BRANCH_MISMATCH: fix_feature_branch_mismatch,
+    FailureClass.MISSING_BRIDGE_CONFIG: lambda root, **kw: fix_missing_bridge_config(root),
 }
 
 

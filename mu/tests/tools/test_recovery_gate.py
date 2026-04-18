@@ -212,6 +212,21 @@ class TestClassifyFailure:
             {"status": "error", "stderr": "cannot acquire bridge.lock",
              "step": "bridge_loop"}) == FailureClass.STALE_BRIDGE_LOCK
 
+    def test_missing_bridge_config_in_stderr(self):
+        assert rg_mod.classify_failure(
+            {"status": "error",
+             "stderr": "Bridge config not found at '/path/.agent_bus/bridge_config.json'",
+             "step": "implementer"}) == FailureClass.MISSING_BRIDGE_CONFIG
+
+    def test_missing_bridge_config_in_error_field(self):
+        assert rg_mod.classify_failure(
+            {"status": "failed",
+             "error": "Bridge adapter config error: Bridge config not found at X",
+             "step": "phase_b"}) == FailureClass.MISSING_BRIDGE_CONFIG
+
+    def test_missing_bridge_config_tier1(self):
+        assert rg_mod.tier_for(FailureClass.MISSING_BRIDGE_CONFIG) == 1
+
     def test_stale_bridge_lock_in_stdout(self):
         assert rg_mod.classify_failure(
             {"status": "error", "stdout": "bridge.lock held", "stderr": "",
@@ -472,7 +487,8 @@ class TestTierMapping:
         assert tier1 == {FailureClass.STALE_BRIDGE_LOCK,
                          FailureClass.STALE_EXECUTOR_STATE, FailureClass.STALE_CONTINUATION,
                          FailureClass.MIXED_STAGING, FailureClass.TRACKER_NOTE_CONTRACT,
-                         FailureClass.FEATURE_BRANCH_MISMATCH}
+                         FailureClass.FEATURE_BRANCH_MISMATCH,
+                         FailureClass.MISSING_BRIDGE_CONFIG}
         # STALE_GIT_INDEX_LOCK demoted to Tier 2 (no sound ownership check)
         assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
         tier4 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 4}
@@ -722,6 +738,60 @@ class TestFixFeatureBranchMismatch:
             text=True,
         ).stdout.strip()
         assert head_subject == "stale target branch commit"
+
+
+class TestFixMissingBridgeConfig:
+    """Tier-1 deterministic fixer: copy bridge_config.json from main repo
+    into a linked worktree that lacks it.  Breaks the chicken-and-egg where
+    recovery_gate needs bridge_config.json to invoke its own LLM agent.
+    """
+
+    def test_noop_when_config_already_present(self, tmp_path):
+        bus = tmp_path / ".agent_bus"
+        bus.mkdir()
+        (bus / "bridge_config.json").write_text("{}", encoding="utf-8")
+        r = rg_mod.fix_missing_bridge_config(tmp_path)
+        assert r["fixed"] is False
+        assert r["action"] == "noop"
+
+    def test_noop_when_not_a_linked_worktree(self, tmp_path):
+        # No .git file => not a linked worktree; fixer should not attempt recovery.
+        r = rg_mod.fix_missing_bridge_config(tmp_path)
+        assert r["fixed"] is False
+        assert r["action"] == "noop"
+
+    def test_copies_from_main_repo_when_worktree_missing(self, tmp_path):
+        # Simulate a main repo with a bridge_config.json
+        main_repo = tmp_path / "main_repo"
+        (main_repo / ".agent_bus").mkdir(parents=True)
+        (main_repo / ".agent_bus" / "bridge_config.json").write_text(
+            '{"agents": {}}', encoding="utf-8",
+        )
+        # Simulate a worktree with a .git pointer file
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        gitdir = main_repo / ".git" / "worktrees" / "worktree"
+        gitdir.mkdir(parents=True)
+        (worktree / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
+
+        r = rg_mod.fix_missing_bridge_config(worktree)
+        assert r["fixed"] is True
+        assert r["action"] == "copy_bridge_config_from_main_repo"
+        assert (worktree / ".agent_bus" / "bridge_config.json").exists()
+        assert (worktree / ".agent_bus" / "bridge_config.json").read_text() == '{"agents": {}}'
+
+    def test_errors_when_main_repo_has_no_bridge_config(self, tmp_path):
+        main_repo = tmp_path / "main_repo"
+        (main_repo / ".git" / "worktrees" / "wt").mkdir(parents=True)
+        worktree = tmp_path / "wt"
+        worktree.mkdir()
+        (worktree / ".git").write_text(
+            f"gitdir: {main_repo}/.git/worktrees/wt\n", encoding="utf-8",
+        )
+        r = rg_mod.fix_missing_bridge_config(worktree)
+        assert r["fixed"] is False
+        assert r["action"] == "error"
+        assert "no .agent_bus/bridge_config.json" in r["detail"]
 
 
 class TestFixStaleBridgeLock:
