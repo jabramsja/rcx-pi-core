@@ -3407,6 +3407,41 @@ class TestPRAndReview:
         source = _commit_post_commit_source()
         assert "merge_pr.sh failed" in source
 
+    def test_37a_post_merge_dirty_verify_is_warn_not_fail(self):
+        """Test 37a: step-15 post-merge dirty verify must SOFT-WARN and
+        continue to step 16 cleanup, not fail-close the pipeline.
+
+        Closes reports/deferred/blocking/commit_executor_step16_cascade_block_2026-04-17.md.
+        Before this fix, `Post-merge working tree is dirty at X` returned
+        error from step 15 and step 16 cleanup (wave-scoped worktree +
+        branch + stash removal) never ran — observed 2026-04-17 on
+        Wave B (PR #784) when Wave A's uncommitted shadow files in main
+        repo blocked Wave B's cleanup.
+        """
+        source = _commit_post_commit_source()
+        # Fail-close path must be gone — step 15 no longer returns
+        # "Post-merge working tree is dirty" error.
+        assert "Post-merge working tree is dirty at " not in source, (
+            "step-15 dirty verify should NOT fail-close the pipeline "
+            "(cascade-block regression)"
+        )
+        # Soft-warn path must be present with a distinguishing log line.
+        assert "WARN post-merge verify found dirty tree" in source, (
+            "step-15 soft-warn log line must be emitted when verify finds "
+            "dirty tree"
+        )
+        # The flow must record the warning in result for downstream visibility.
+        assert "post_merge_verify_warning" in source, (
+            "result dict should carry post_merge_verify_warning for ops "
+            "signal preservation"
+        )
+        # Cleanup (step 16) must still execute when verify is dirty —
+        # i.e. the code path continues past the warning instead of
+        # returning error.
+        assert "verify dirty, continuing to step 16" in source, (
+            "flow must log continuing to step 16 after soft-warn"
+        )
+
 
 # --- Tests 38-40: Integration scenarios ---
 
