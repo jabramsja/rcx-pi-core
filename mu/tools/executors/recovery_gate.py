@@ -3451,6 +3451,18 @@ def run_recovery_loop(
         # non-actionable action (skip/escalate) while more iterations remain,
         # subsequent iterations would burn equivalent codex invocations for the
         # same conclusion. Collapse to a single terminal record instead.
+        #
+        # Bot P1 fix (2026-04-17, PR #791 follow-up): exhausted must stay
+        # False on deliberate non-actionable skip. `_finish_recovery_status`
+        # emits `pipeline_hard_fail` pager events when exhausted=True, which
+        # is INCORRECT operational severity for a deliberate agent skip.
+        # Match the semantics of the existing non-short-circuit `skip` path
+        # (line ~3510 in this file) which is explicitly non-exhausted.
+        # An `escalate` action implies human-intervention-needed (matches
+        # the existing `escalate` return path below which also keeps
+        # exhausted=False). Setting exhausted=True here would trigger false
+        # hard_fail alerts for cases the agent intentionally chose not to
+        # auto-remediate.
         if action in {"skip", "escalate"} and i < max_iterations - 1:
             dur = round(time.monotonic() - iteration_t0, 3)
             detail = (
@@ -3470,10 +3482,23 @@ def run_recovery_loop(
                 action, "short_circuited", dur, detail,
                 invocation_id=invocation_id,
             )
+            # Bot P1 fix (PR #792 2nd-round finding): differentiate skip vs
+            # escalate severity on short-circuit.
+            #   - action="skip"     → agent can't fix but issue isn't
+            #                         critical. NOT exhausted. No hard_fail
+            #                         pager event.
+            #   - action="escalate" → agent believes human intervention is
+            #                         required. Genuine exhausted terminal
+            #                         state. pipeline_hard_fail pager event
+            #                         is the CORRECT severity.
+            # Collapsing both into exhausted=False (Wave G initial fix)
+            # hid legitimate escalate-hard-fail signal. Restore it.
+            is_skip = (action == "skip")
+            exhausted_flag = not is_skip  # False for skip, True for escalate
             _finish_recovery_status(
                 repo_root,
                 recovered=False,
-                exhausted=True,
+                exhausted=exhausted_flag,
                 outcome="short_circuited_non_actionable",
                 action=action,
                 detail=detail,
@@ -3481,7 +3506,7 @@ def run_recovery_loop(
             )
             return {
                 "recovered": False,
-                "exhausted": True,
+                "exhausted": exhausted_flag,
                 "iterations": i + 1,
                 "log": loop_log,
             }
