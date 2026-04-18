@@ -3161,16 +3161,31 @@ def _run_post_commit_pipeline(
         _run(["git", "merge", "--ff-only", f"origin/{base_branch}"], cwd=verify_root, timeout=60)
         head_sha = _run(["git", "rev-parse", "HEAD"], cwd=verify_root).stdout.strip()
         status_output = _run(["git", "status", "--short"], cwd=verify_root).stdout.strip()
-        if status_output:
-            return {"status": "error", "step": "ensure_review_clear_and_merge",
-                    "errors": [f"Post-merge working tree is dirty at {verify_root}:\n{status_output}"],
-                    "steps_completed": result["steps_completed"],
-                    "pr_number": pr_number}
         result["merge_sha"] = head_sha
         if "ensure_review_clear_and_merge" not in result["steps_completed"]:
             result["steps_completed"].append("ensure_review_clear_and_merge")
         _clear_continuation_record(continuation_path)
-        log(f"Step 15: merged, HEAD={head_sha[:8]}, clean tree verified at {verify_root}")
+        if status_output:
+            # Soft-warn on dirty verify instead of fail-closing the pipeline.
+            # Step 16 cleanup is wave-scoped (worktree + branch + wave-named
+            # stash) and does NOT depend on main-repo dirty state. Fail-closing
+            # here previously blocked step 16 cleanup in parallel multi-wave
+            # sessions when the main repo held transient dirt from an in-flight
+            # sibling wave (observed 2026-04-17 PR #784 Wave B: step 16
+            # prevented from running because PR #783 Wave A shadow files were
+            # uncommitted in main repo). Closes
+            # reports/deferred/blocking/commit_executor_step16_cascade_block_2026-04-17.md
+            # (candidate #2: skip-cleanup-on-verify-fail — preserve signal via
+            # warning, don't block wave-scoped cleanup).
+            log(
+                f"Step 15: WARN post-merge verify found dirty tree at "
+                f"{verify_root} (not wave-owned; cleanup will still proceed):\n"
+                f"{status_output}"
+            )
+            result["post_merge_verify_warning"] = status_output
+            log(f"Step 15: merged, HEAD={head_sha[:8]} (verify dirty, continuing to step 16)")
+        else:
+            log(f"Step 15: merged, HEAD={head_sha[:8]}, clean tree verified at {verify_root}")
     except subprocess.CalledProcessError as exc:
         return {"status": "error", "step": "ensure_review_clear_and_merge",
                 "errors": [f"Post-merge verify failed: {exc.stderr.strip()}"],
