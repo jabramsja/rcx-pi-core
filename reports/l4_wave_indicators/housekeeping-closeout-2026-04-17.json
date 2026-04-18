@@ -1,24 +1,24 @@
 {
   "wave_id": "housekeeping-closeout-2026-04-17",
-  "repeat_run_speedup_ratio": 1.54327,
+  "repeat_run_speedup_ratio": 1.357417,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.257292,
+  "step_growth_slope": 0.247406,
   "repeat_run_raw_seconds": [
-    0.397071,
-    0.257292
+    0.335833,
+    0.247406
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.397071
+      "elapsed_seconds": 0.335833
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.654363
+      "elapsed_seconds": 0.583239
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-18T02:33:53Z",
+  "collection_timestamp_utc": "2026-04-18T02:50:46Z",
   "collector_version": "2.2.0"
 }

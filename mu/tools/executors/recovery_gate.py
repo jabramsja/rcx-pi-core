@@ -3482,10 +3482,23 @@ def run_recovery_loop(
                 action, "short_circuited", dur, detail,
                 invocation_id=invocation_id,
             )
+            # Bot P1 fix (PR #792 2nd-round finding): differentiate skip vs
+            # escalate severity on short-circuit.
+            #   - action="skip"     → agent can't fix but issue isn't
+            #                         critical. NOT exhausted. No hard_fail
+            #                         pager event.
+            #   - action="escalate" → agent believes human intervention is
+            #                         required. Genuine exhausted terminal
+            #                         state. pipeline_hard_fail pager event
+            #                         is the CORRECT severity.
+            # Collapsing both into exhausted=False (Wave G initial fix)
+            # hid legitimate escalate-hard-fail signal. Restore it.
+            is_skip = (action == "skip")
+            exhausted_flag = not is_skip  # False for skip, True for escalate
             _finish_recovery_status(
                 repo_root,
                 recovered=False,
-                exhausted=False,  # non-exhausted: deliberate skip, not budget-exhaustion
+                exhausted=exhausted_flag,
                 outcome="short_circuited_non_actionable",
                 action=action,
                 detail=detail,
@@ -3493,7 +3506,7 @@ def run_recovery_loop(
             )
             return {
                 "recovered": False,
-                "exhausted": False,  # non-exhausted: no pipeline_hard_fail pager event
+                "exhausted": exhausted_flag,
                 "iterations": i + 1,
                 "log": loop_log,
             }

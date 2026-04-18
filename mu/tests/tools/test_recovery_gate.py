@@ -2094,6 +2094,49 @@ class TestTier3ShortCircuit:
         assert entries[0]["action"] == "tier3_iter1_skip"
         assert entries[0]["outcome"] == "short_circuited"
 
+    def test_escalate_action_on_iter_1_short_circuits_but_stays_exhausted(self, tmp_path):
+        """Bot P1 fix (PR #792 2nd-round finding): action='escalate' on
+        iter 1 must short-circuit remaining iterations (no further codex
+        invocations) but KEEP exhausted=True so pipeline_hard_fail pager
+        event fires. Escalate means 'human intervention required' —
+        legitimate hard-fail severity. Contrast with 'skip' (agent can't
+        fix but not critical) which uses exhausted=False.
+        """
+        result = {"status": "failed", "step": "test", "stderr": "x", "stdout": ""}
+        claude_response = json.dumps({
+            "action": "escalate",
+            "commands": [],
+            "explanation": "human intervention required",
+        })
+        popen_call_count = [0]
+
+        def popen_factory(*args, **kwargs):
+            popen_call_count[0] += 1
+            return FakePopen(stdout=claude_response, pid=6500 + popen_call_count[0])
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *a, **kw: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = popen_factory
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(
+                tmp_path, result, "w-short-escalate", max_iterations=3)
+
+        assert popen_call_count[0] == 1
+        assert r["recovered"] is False
+        # Escalate short-circuits but MUST stay exhausted (hard_fail severity).
+        assert r["exhausted"] is True
+        assert r["iterations"] == 1
+        assert len(r["log"]) == 1
+        assert r["log"][0]["short_circuited"] is True
+        assert r["log"][0]["action"] == "escalate"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["outcome"] == "short_circuited_non_actionable"
+        assert status["state"] == "tier3_short_circuited"
+        assert status["last_action"] == "escalate"
+        # Status exhausted=True so pipeline_hard_fail pager event fires.
+        assert status["exhausted"] is True
+
     def test_shell_action_on_iter_1_continues_to_iter_2(self, tmp_path):
         """A genuine shell-fix attempt that fails verification on iter 1
         must NOT short-circuit: iter 2 must run so recovery still gets a
