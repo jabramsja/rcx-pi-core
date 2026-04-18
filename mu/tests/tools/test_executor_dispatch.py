@@ -3318,6 +3318,42 @@ class TestPRAndReview:
         source = _commit_post_commit_source()
         assert "bot_findings_pending" in source
 
+    def test_35a_review_wait_timeout_triggers_auto_defer_before_bot_findings_pending(self):
+        """Test 35a: bot-review-timeout post-remediation auto-defers instead
+        of bailing to bot_findings_pending.
+
+        Closes reports/deferred/blocking/commit_executor_bot_findings_false_positive_2026-04-17.md.
+        Before this fix, `_wait_for_bot_review_freshness` raising TimeoutError
+        (bot didn't post fresh review within 58s after remediation push)
+        caused commit_executor to exit `bot_findings_pending` even though the
+        remediation commit passed CI — forcing human `merge_pr.sh` unblock.
+        Post-fix: the except block calls `_auto_defer_bot_findings` first and
+        only falls back to bot_findings_pending if the auto-defer itself
+        fails.
+        """
+        source = _commit_post_commit_source()
+        # Verify the new auto-defer call site exists in the review-wait except block.
+        assert "review wait failed after round" in source, (
+            "review-wait-timeout log line should remain for diagnostics"
+        )
+        assert "auto-deferring current findings" in source, (
+            "auto-defer log line should signal that the except branch attempts "
+            "_auto_defer_bot_findings"
+        )
+        assert "bot review timeout treated as false-positive" in source, (
+            "policy-referencing log line should remain so operators understand "
+            "the semantics"
+        )
+        # Fall-back: if _auto_defer_bot_findings itself raises, we still
+        # return bot_findings_pending so nothing is silently swallowed.
+        assert "auto-defer after review-wait-timeout failed" in source, (
+            "fall-back path must remain for defer-failure case"
+        )
+        assert "review_wait_timeout" in source, (
+            "fall-back response should tag review_wait_timeout so recovery_gate "
+            "can distinguish this sub-class"
+        )
+
     def test_36_resolved_bot_threads_clear(self):
         """Test 36: Resolved bot threads only → clear, merge proceeds.
 
