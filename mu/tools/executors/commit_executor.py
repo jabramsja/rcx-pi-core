@@ -2108,13 +2108,49 @@ def _attempt_bot_finding_remediation(
             TimeoutError,
         ) as exc:
             log(f"Step 15: review wait failed after round {round_num}: {exc}")
-            return {
-                "status": "bot_findings_pending",
-                "bot_findings": current_findings,
-                "pr_number": pr_number,
-                "steps_completed": result["steps_completed"],
-                "remediation_rounds_attempted": round_num,
-            }
+            # The remediation commit at current_head is already pushed and CI
+            # passed at step 14 before we got here. The bot simply did not post
+            # a fresh review/clearance within the wait window. Treat this as
+            # the false-positive case: the finding WAS addressed by the
+            # pushed remediation, bot didn't confirm, so auto-defer instead
+            # of blocking merge. Per feedback_bot_comments_not_gates.md:
+            # "Bot comments are signal, not gates. Auto-defer, don't block
+            # next wave." Closes
+            # reports/deferred/blocking/commit_executor_bot_findings_false_positive_2026-04-17.md.
+            log(
+                f"Step 15: remediation commit {current_head[:8]} already pushed + "
+                f"CI green at step 14; bot review timeout treated as false-positive, "
+                f"auto-deferring current findings"
+            )
+            try:
+                _auto_defer_bot_findings(
+                    repo_root=repo_root,
+                    findings=current_findings,
+                    wave_id=wave_id,
+                    pr_number=pr_number,
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    log=log,
+                )
+            except Exception as defer_exc:
+                log(
+                    f"Step 15: auto-defer after review-wait-timeout failed "
+                    f"({defer_exc}); falling back to bot_findings_pending"
+                )
+                return {
+                    "status": "bot_findings_pending",
+                    "bot_findings": current_findings,
+                    "pr_number": pr_number,
+                    "steps_completed": result["steps_completed"],
+                    "remediation_rounds_attempted": round_num,
+                    "review_wait_timeout": True,
+                }
+            log(
+                f"Step 15: auto-defer succeeded after review-wait-timeout; "
+                f"findings written to reports/deferred/non_blocking/ and bot "
+                f"threads resolved. Proceeding to merge."
+            )
+            return None
 
         # Re-check findings
         findings_result = _extract_review_findings(
