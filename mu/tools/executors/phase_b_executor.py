@@ -935,10 +935,18 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
     content = full_path.read_text(encoding="utf-8")
     result = {"path": plan_path, "content": content}
 
+    # Collect ALL Phase-A-Lock: values to handle packets with duplicate
+    # lock lines (e.g. a malformed stub PLACEHOLDER on one line plus an
+    # implementer-added LOCKED on another). A naive first-match reader
+    # would pick PLACEHOLDER and reject the packet at validate_inputs even
+    # though a LOCKED line exists. We prefer LOCKED if any Phase-A-Lock
+    # line carries it, else ROUTING_RECORD_AUTHORITY, else the first value.
+    phase_a_lock_values: list[str] = []
+
     for line in content.splitlines():
         clean = _normalize_plan_metadata_line(line)
-        if clean.startswith("Phase-A-Lock:") and "phase_a_lock" not in result:
-            result["phase_a_lock"] = clean.split(":", 1)[1].strip()
+        if clean.startswith("Phase-A-Lock:"):
+            phase_a_lock_values.append(clean.split(":", 1)[1].strip())
         if clean.startswith("Status:") and "status" not in result:
             result["status"] = clean.split(":", 1)[1].strip()
         if clean.startswith("Task:") and "task_id" not in result:
@@ -955,6 +963,16 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
             clean.startswith("Unblocks runtime blocker:") or clean.startswith("unblocks_runtime_blocker:")
         ) and "unblocks_runtime_blocker" not in result:
             result["unblocks_runtime_blocker"] = clean.split(":", 1)[1].strip()
+
+    # Resolve phase_a_lock preference: LOCKED wins over any other value,
+    # then ROUTING_RECORD_AUTHORITY, then the first observed value.
+    if phase_a_lock_values:
+        if "LOCKED" in phase_a_lock_values:
+            result["phase_a_lock"] = "LOCKED"
+        elif "ROUTING_RECORD_AUTHORITY" in phase_a_lock_values:
+            result["phase_a_lock"] = "ROUTING_RECORD_AUTHORITY"
+        else:
+            result["phase_a_lock"] = phase_a_lock_values[0]
 
     return result
 
