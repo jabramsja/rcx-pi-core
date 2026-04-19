@@ -1199,14 +1199,6 @@ def run_phase_a(
         return True, ""
 
     def _run_bridge_convergence(*, start_round: int, agent_review_context: str) -> bool:
-        # Per-pass convergence budget: counted by blocking REQUEST_CHANGES
-        # rounds observed WITHIN this pass, not by absolute round_num. A
-        # second pass after deferred SDK review starts at
-        # result["bridge_rounds"] + 1 (often >= 3), so a global-index budget
-        # would abort on its first blocking round; the per-pass counter
-        # gives each pass a fair budget.
-        convergence_budget = 3
-        blocking_rounds_in_pass = 0
         for round_num in range(start_round, max_bridge_rounds + 1):
             bridge_job_id = f"phase-a-r{round_num}-{uuid.uuid4().hex[:8]}"
             log(f"Bridge design review round {round_num}/{max_bridge_rounds} (job={bridge_job_id})...")
@@ -1310,36 +1302,6 @@ def run_phase_a(
                         result["status"] = "converged"
                         result["non_blocking_count"] = len(non_blocking)
                         return True
-
-                    # Bridge convergence budget: auto-abort if REQUEST_CHANGES
-                    # persists past budget to prevent divergent convergence (per
-                    # .claude/rules/learning.md 2026-04-18 PIPELINE entry —
-                    # fresh-Codex-per-round finds new findings every round, plan
-                    # grows without converging, eventually reviewer times out or
-                    # emits malformed envelope). Budget is measured by count of
-                    # blocking REQUEST_CHANGES rounds WITHIN this convergence
-                    # pass (not by absolute round_num), so 2 blocking rounds are
-                    # allowed and the 3rd aborts — regardless of start_round.
-                    if blocking:
-                        blocking_rounds_in_pass += 1
-                        if blocking_rounds_in_pass >= convergence_budget:
-                            log(
-                                f"Bridge: REQUEST_CHANGES at round {round_num} with "
-                                f"{len(blocking)} blocking findings — convergence budget "
-                                f"({convergence_budget} blocking rounds in pass) "
-                                f"exceeded, aborting"
-                            )
-                            result["status"] = "error"
-                            result["error"] = (
-                                f"Bridge convergence budget "
-                                f"({convergence_budget} blocking rounds in pass) "
-                                f"exceeded: {blocking_rounds_in_pass} blocking "
-                                f"REQUEST_CHANGES rounds at round {round_num} "
-                                f"without GO. Redesign plan narrower or investigate "
-                                f"reviewer behavior. Blocking count: {len(blocking)}."
-                            )
-                            result["rendered_path"] = str(rendered_path)
-                            return False
 
                     if _invoke_implementer is not None and blocking:
                         current_plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
