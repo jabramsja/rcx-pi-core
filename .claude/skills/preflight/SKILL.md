@@ -235,7 +235,7 @@ Warn only — do not kill or restart processes. Structural cause is Node.js v8 c
 
 18b. **Do not conflate text-surface edits with binary patching.** Editing `~/.codex/models_cache.json`, session/prompt hook files, or local rules does NOT require checksum refresh or Mach-O re-signing. The `killed=9` interactive `codex` failure mode belongs to unsigned or drifted byte-edited binaries. Only step 19 binary-patch work requires re-signing plus real interactive launch validation.
 
-19. Verify and auto-repatch ALL 62 active binary patches in v2.1.112 (P1/P29b/P30 retired or merged; P_OjH + P2-P5 + P7 + P8-P29 + P31-P66 active; P27 under retirement review — surface removed in v2.1.112). Run:
+19. Verify and auto-repatch ALL 67 active binary patches in v2.1.114 (P1/P10/P27/P29b/P30/P57/P65 retired or merged; P_OjH + P2-P5 + P7 + P8-P9 + P10a-P10c + P11-P26 + P28-P29 + P31-P56 + P58-P64 + P66-P69 active). v2.1.114 renames: _Y8→yf8, sK→_4, US5→Zb5, Svf→jb5, iLf→Bz5, nLf→pz5, ${xK}→${CK}, ${u8}→${m8}, memory vars ${m7}→${B7}, ${mq}→${Bq}, ${j9}→${D9}. P67: security statement rewrite. P68: agentId transparency. P69: no-silent-skip failure reporting. Run:
 ```bash
 npx tweakcc unpack /tmp/ppc.js 2>&1 | tail -1
 F=/tmp/ppc.js; N=0
@@ -275,6 +275,11 @@ F=/tmp/ppc.js; N=0
 [ "$(grep -c 'may or may not be relevant to your tasks' $F)" -gt 0 ] && echo "P3-old PRESENT" && N=$((N+1))
 [ "$(grep -c 'gentle reminder' $F)" -gt 0 ] && echo "P4a-old PRESENT" && N=$((N+1))
 [ "$(grep -c 'NEVER mention this reminder' $F)" -gt 0 ] && echo "P4b-old PRESENT" && N=$((N+1))
+# P68 / P69 (2026-04-18 anti-mention / silent-failure suppression class)
+[ "$(grep -cF 'share with user when useful' $F)" -eq 0 ] && echo "P68 MISSING (agentId transparency)" && N=$((N+1))
+[ "$(grep -cF 'do not mention to user' $F)" -gt 0 ] && echo "P68-old PRESENT (agentId secrecy)" && N=$((N+1))
+[ "$(grep -cF 'report the failure with diagnostic context' $F)" -eq 0 ] && echo "P69 MISSING (no-silent-skip)" && N=$((N+1))
+[ "$(grep -cF 'skip this step silently' $F)" -gt 0 ] && echo "P69-old PRESENT (silent-failure suppression)" && N=$((N+1))
 [ "$(grep -c 'may or may not be related' $F)" -gt 0 ] && echo "P5-old PRESENT" && N=$((N+1))
 [ "$(grep -c 'Maximize use of parallel' $F)" -gt 0 ] && echo "P8-old PRESENT" && N=$((N+1))
 [ "$(grep -c 'Task tools available:' $F)" -eq 0 ] && echo "P12 MISSING" && N=$((N+1))
@@ -362,10 +367,39 @@ F=/tmp/ppc.js; N=0
 [ "$(grep -cF 'Use \`task_budget\` when you want the model to self-moderate' $F)" -gt 0 ] && echo "P65-old PRESENT" && N=$((N+1))
 [ "$(grep -cF 'AVOID Task Budgets for correctness-critical work' $F)" -eq 0 ] && echo "P66 MISSING (model migration task budgets)" && N=$((N+1))
 [ "$(grep -cF 'adopt the API-native Task Budgets' $F)" -gt 0 ] && echo "P66-old PRESENT" && N=$((N+1))
+# P70 (2026-04-18 PM): iB6() runtime default-effort-max — every model defaults to max effort
+[ "$(grep -cF 'function iB6(H){return"max"}' $F)" -eq 0 ] && echo "P70 MISSING (iB6 default-effort-max)" && N=$((N+1))
+[ "$(grep -cF 'function iB6(H){let _=_4(H);if(_.includes(\"opus-4-7\"))return\"xhigh\"' $F)" -gt 0 ] && echo "P70-old PRESENT (iB6 still has xhigh default)" && N=$((N+1))
 rm -f $F
 echo "NEEDS_REPATCH=$N"
 ```
-If `NEEDS_REPATCH` > 0: Read `reference_tweakcc_repatch.md` from memory. If step 18 found changed names, update memory first. Re-apply ALL 62 active patches (P1/P29b/P30 retired or merged; P_OjH + P2-P5 + P7 + P8-P29 + P31-P66), re-verify, create backup. Reminder: per step 17b, applied patches affect only NEXT session launch.
+
+**Authoritative verifier (2026-04-18 fix):** The bash check above has fewer checks than the comprehensive 114-check Python verifier. Morning 2026-04-18 repatch session reported "76/76 pass" via bash but afternoon Python verifier found 5 real failures (P60 quote-escape, P62/P63/P66 hybrid text). **ALWAYS also run the Python verifier before declaring patches clean:**
+```bash
+npx tweakcc unpack /tmp/ppc.js 2>&1 | tail -1
+# Use /tmp/verify_v114_full.py if present, else regenerate from reference_tweakcc_repatch.md.
+# The Python verifier tests BOTH "new text present" AND "old text absent" for every patch;
+# byte-exact counts via content.count(pattern) avoid bash tokenizer tokenizer-parse blocks.
+python3 /tmp/verify_v114_full.py
+# Expected: NEEDS_REPATCH=0, PASS=114/114
+```
+
+If `NEEDS_REPATCH` > 0 (from EITHER verifier): Read `reference_tweakcc_repatch.md` from memory. If step 18 found changed names, update memory first. Re-apply the failing patches, re-verify with Python script, create backup. Reminder: per step 17b, applied patches affect only NEXT session launch.
+
+**Encoding rules** (single-quoted bash `--string` content):
+- em-dash `—` → pass literal `\u2014` (6 chars), NOT unicode (3 UTF-8 bytes)
+- `≤` → pass literal `\u2264`
+- `"` inside `\"..."` pairs in binary JS source → pass `\"` (2 bytes with literal backslash)
+- backticks in template literals → pass `\`` (2 bytes with literal backslash)
+
+**Before patching a text with non-ASCII characters or embedded quotes, ALWAYS inspect binary context via Python:**
+```python
+from pathlib import Path
+c = Path("/tmp/ppc.js").read_bytes()
+idx = c.find(b"<anchor_phrase>")
+print(repr(c[max(0,idx-200):idx+300]))
+```
+If Anthropic natively modified surrounding text between binary versions, the reference file's `--string old` may no longer match — craft a fresh one from the repr output.
 
 20. Verify auto-updates are disabled. Check `~/.claude/settings.json` for `autoUpdaterStatus: "disabled"` and `autoUpdates: false`. If not set, set them.
 

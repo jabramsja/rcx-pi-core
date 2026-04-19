@@ -25,12 +25,6 @@
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/force-mcp-sqlite.sh",
             "timeout": 3,
             "statusMessage": "Checking bridge.db access policy..."
-          },
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/require-deep-thinking.sh",
-            "timeout": 3,
-            "statusMessage": "Checking if deep thinking required..."
           }
         ]
       },
@@ -113,6 +107,12 @@
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/check-reasoning-depth.sh",
             "timeout": 3,
             "statusMessage": "Checking reasoning depth..."
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/require-deep-thinking-stop.sh",
+            "timeout": 3,
+            "statusMessage": "Checking deep thinking on pipeline/commit commands..."
           }
         ]
       }
