@@ -1,0 +1,24 @@
+{
+  "wave_id": "pager-ping-delivery-2026-04-18",
+  "repeat_run_speedup_ratio": 1.520843,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.246698,
+  "repeat_run_raw_seconds": [
+    0.375189,
+    0.246698
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.375189
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.621887
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-04-19T02:05:45Z",
+  "collector_version": "2.2.0"
+}
