@@ -935,18 +935,34 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
     content = full_path.read_text(encoding="utf-8")
     result = {"path": plan_path, "content": content}
 
-    # Collect ALL Phase-A-Lock: values to handle packets with duplicate
-    # lock lines (e.g. a malformed stub PLACEHOLDER on one line plus an
-    # implementer-added LOCKED on another). A naive first-match reader
-    # would pick PLACEHOLDER and reject the packet at validate_inputs even
-    # though a LOCKED line exists. We prefer LOCKED if any Phase-A-Lock
-    # line carries it, else ROUTING_RECORD_AUTHORITY, else the first value.
-    phase_a_lock_values: list[str] = []
+    # Phase-A-Lock resolution: packets may contain both a malformed stub
+    # (e.g. "Phase-A-Lock: PLACEHOLDER" on line 1) and an implementer-added
+    # canonical line (e.g. "Phase-A-Lock: LOCKED" on line 6). A naive
+    # first-match reader returns PLACEHOLDER, breaking validate_inputs.
+    #
+    # To resolve safely, we distinguish CANONICAL lock lines (literal
+    # "Phase-A-Lock:" at column 0 after optional whitespace trim) from
+    # NARRATIVE lock lines (bullet/backtick/numbered forms that
+    # _normalize_plan_metadata_line rewrites into canonical-looking text).
+    # Narrative forms like "- `Phase-A-Lock: LOCKED`" or "1. `Phase-A-Lock:
+    # LOCKED`" MUST NOT upgrade a canonical-UNLOCKED header to LOCKED, or
+    # the Phase-B lock gate is weakened — any prose mentioning LOCKED in
+    # the body would falsely satisfy validate_inputs.
+    #
+    # Rule: prefer-LOCKED applies only within canonical values. Narrative
+    # values are used only as a fallback when no canonical value exists
+    # (preserving the legacy markdown-bypass path tested by
+    # test_markdown_bypass_lines_parse / test_late_markdown_bypass_lines_parse).
+    canonical_lock_values: list[str] = []
+    narrative_lock_values: list[str] = []
 
     for line in content.splitlines():
         clean = _normalize_plan_metadata_line(line)
-        if clean.startswith("Phase-A-Lock:"):
-            phase_a_lock_values.append(clean.split(":", 1)[1].strip())
+        stripped = line.strip()
+        if stripped.startswith("Phase-A-Lock:"):
+            canonical_lock_values.append(stripped.split(":", 1)[1].strip())
+        elif clean.startswith("Phase-A-Lock:"):
+            narrative_lock_values.append(clean.split(":", 1)[1].strip())
         if clean.startswith("Status:") and "status" not in result:
             result["status"] = clean.split(":", 1)[1].strip()
         if clean.startswith("Task:") and "task_id" not in result:
@@ -964,15 +980,17 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
         ) and "unblocks_runtime_blocker" not in result:
             result["unblocks_runtime_blocker"] = clean.split(":", 1)[1].strip()
 
-    # Resolve phase_a_lock preference: LOCKED wins over any other value,
-    # then ROUTING_RECORD_AUTHORITY, then the first observed value.
-    if phase_a_lock_values:
-        if "LOCKED" in phase_a_lock_values:
+    # Resolve phase_a_lock: prefer canonical values over narrative values.
+    # Within the chosen set, prefer LOCKED then ROUTING_RECORD_AUTHORITY,
+    # falling back to first-match when neither is present.
+    chosen_values = canonical_lock_values if canonical_lock_values else narrative_lock_values
+    if chosen_values:
+        if "LOCKED" in chosen_values:
             result["phase_a_lock"] = "LOCKED"
-        elif "ROUTING_RECORD_AUTHORITY" in phase_a_lock_values:
+        elif "ROUTING_RECORD_AUTHORITY" in chosen_values:
             result["phase_a_lock"] = "ROUTING_RECORD_AUTHORITY"
         else:
-            result["phase_a_lock"] = phase_a_lock_values[0]
+            result["phase_a_lock"] = chosen_values[0]
 
     return result
 

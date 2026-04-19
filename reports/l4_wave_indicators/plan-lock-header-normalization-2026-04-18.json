@@ -1,24 +1,24 @@
 {
   "wave_id": "plan-lock-header-normalization-2026-04-18",
-  "repeat_run_speedup_ratio": 1.266393,
+  "repeat_run_speedup_ratio": 1.758508,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.266272,
+  "step_growth_slope": 0.248994,
   "repeat_run_raw_seconds": [
-    0.337205,
-    0.266272
+    0.437858,
+    0.248994
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.337205
+      "elapsed_seconds": 0.437858
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.603477
+      "elapsed_seconds": 0.686852
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-19T01:14:22Z",
+  "collection_timestamp_utc": "2026-04-19T01:31:39Z",
   "collector_version": "2.2.0"
 }

@@ -839,6 +839,34 @@ class TestLoadPlanPacketPathTraversal:
         result = pb_mod.load_plan_packet(repo, "reports/plan.md")
         assert result["phase_a_lock"] == "PLACEHOLDER"
 
+    def test_narrative_lock_does_not_upgrade_canonical_unlocked(self, tmp_path):
+        """Bullet/backtick narrative LOCKED mentions must NOT upgrade canonical UNLOCKED.
+
+        Regression guard (PR #797 P1): without this test, the prefer-LOCKED
+        rule could weaken the Phase-B lock gate by accepting packets whose
+        actual canonical header is UNLOCKED but whose body contains prose
+        like "- `Phase-A-Lock: LOCKED`" (legitimately documenting the LOCKED
+        state as an example). Narrative text must not cross the canonical
+        boundary.
+        """
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "# Plan\n"
+            "Status: Phase A (design)\n"
+            "Task: [TEST-PLAN]\n"
+            "Phase-A-Lock: UNLOCKED\n"
+            "\n"
+            "## Notes\n"
+            "The header will become `Phase-A-Lock: LOCKED` after Phase A locks the plan.\n"
+            "- `Phase-A-Lock: LOCKED`\n"
+            "1. `Phase-A-Lock: LOCKED`\n"
+        )
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+        assert result["phase_a_lock"] == "UNLOCKED"
+
 
 class TestBlockerDiscovery:
     """Phase B executor discovers active blocking packets for supervisor package."""
