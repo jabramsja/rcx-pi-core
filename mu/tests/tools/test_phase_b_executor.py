@@ -784,6 +784,89 @@ class TestLoadPlanPacketPathTraversal:
         """Fallback bypass extraction must accept canonical and markdown forms."""
         assert pb_mod._extract_maintenance_bypass_fields(plan_content) == expected  # ANTICHEAT_OK: testing maintenance bypass fallback normalization
 
+    def test_duplicate_phase_a_lock_prefers_locked(self, tmp_path):
+        """Packets with both a PLACEHOLDER stub and a LOCKED line resolve to LOCKED.
+
+        Regression for pager-ping-delivery-2026-04-18 Wave K-1 failure mode:
+        a malformed stub "Phase-A-Lock: PLACEHOLDER" on line 1 plus an
+        implementer-added "Phase-A-Lock: LOCKED" on line 6 caused
+        load_plan_packet's first-match reader to return "PLACEHOLDER",
+        breaking validate_inputs even though a LOCKED line existed.
+        """
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "Phase-A-Lock: PLACEHOLDER\n"
+            "# Plan\n"
+            "wave_id: test-wave-2026-04-18\n"
+            "Task: [TEST-PLAN]\n"
+            "Phase-A-Lock: LOCKED\n"
+            "## Status\n"
+        )
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+        assert result["phase_a_lock"] == "LOCKED"
+
+    def test_duplicate_phase_a_lock_prefers_routing_record_authority(self, tmp_path):
+        """When no LOCKED line exists but ROUTING_RECORD_AUTHORITY does, that wins."""
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "Phase-A-Lock: PLACEHOLDER\n"
+            "# Plan\n"
+            "Task: [TEST-PLAN]\n"
+            "Phase-A-Lock: ROUTING_RECORD_AUTHORITY\n"
+            "## Status\n"
+        )
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+        assert result["phase_a_lock"] == "ROUTING_RECORD_AUTHORITY"
+
+    def test_single_non_canonical_phase_a_lock_preserved(self, tmp_path):
+        """Single non-canonical values (no LOCKED/ROUTING present) fall back to first-match."""
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "# Plan\n"
+            "Task: [TEST-PLAN]\n"
+            "Phase-A-Lock: PLACEHOLDER\n"
+            "## Status\n"
+        )
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+        assert result["phase_a_lock"] == "PLACEHOLDER"
+
+    def test_narrative_lock_does_not_upgrade_canonical_unlocked(self, tmp_path):
+        """Bullet/backtick narrative LOCKED mentions must NOT upgrade canonical UNLOCKED.
+
+        Regression guard (PR #797 P1): without this test, the prefer-LOCKED
+        rule could weaken the Phase-B lock gate by accepting packets whose
+        actual canonical header is UNLOCKED but whose body contains prose
+        like "- `Phase-A-Lock: LOCKED`" (legitimately documenting the LOCKED
+        state as an example). Narrative text must not cross the canonical
+        boundary.
+        """
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "# Plan\n"
+            "Status: Phase A (design)\n"
+            "Task: [TEST-PLAN]\n"
+            "Phase-A-Lock: UNLOCKED\n"
+            "\n"
+            "## Notes\n"
+            "The header will become `Phase-A-Lock: LOCKED` after Phase A locks the plan.\n"
+            "- `Phase-A-Lock: LOCKED`\n"
+            "1. `Phase-A-Lock: LOCKED`\n"
+        )
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+        assert result["phase_a_lock"] == "UNLOCKED"
+
 
 class TestBlockerDiscovery:
     """Phase B executor discovers active blocking packets for supervisor package."""
