@@ -770,3 +770,44 @@ def test_dispatch_claude_argv_falls_back_when_session_id_file_is_not_utf8(tmp_pa
     assert "--resume" not in argv
     assert "-c" not in argv
     assert "--continue" not in argv
+
+
+def test_emit_transition_event_routes_claude_through_real_dispatch_target(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="claude")
+
+    session_path = repo / pager_mod.ORCHESTRATOR_SESSION_ID_PATH
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    session_path.write_text("sess-integration-claude-01", encoding="utf-8")
+
+    with patch.object(
+        pager_mod.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess(["claude"], 0, "ok", ""),
+    ) as run_mock:
+        result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+
+    assert result["enabled"] is True
+    assert result["route"] == "claude"
+    assert len(result["attempted"]) == 1
+    assert result["attempted"][0]["target"] == "claude"
+    assert result["attempted"][0]["acknowledged"] is True
+
+    state = _load_state(repo)
+    entry = state["events"][result["event_id"]]
+    assert "claude" in entry["delivered_targets"]
+    assert entry["delivered_targets"]["claude"]["target"] == "claude"
+    assert entry["pending_targets"] == []
+
+    log_events = _load_log(repo)
+    assert len(log_events) == 1
+    expected_prompt = pager_mod._event_prompt(log_events[0])  # ANTICHEAT_OK: argv expectation
+    argv = run_mock.call_args.args[0]
+    assert argv == [
+        "claude",
+        "--resume",
+        "sess-integration-claude-01",
+        "-p",
+        expected_prompt,
+    ]
