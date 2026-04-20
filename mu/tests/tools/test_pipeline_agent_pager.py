@@ -811,3 +811,74 @@ def test_emit_transition_event_routes_claude_through_real_dispatch_target(tmp_pa
         "-p",
         expected_prompt,
     ]
+
+
+def test_session_start_hook_writes_orchestrator_session_id_for_pager_read(tmp_path):
+    """K-2 pager-session-id-autowrite regression: the new
+    .claude/hooks/session-start.sh SessionStart hook writes the active
+    session id to <repo_root>/.agent_bus/observability/orchestrator_session_id
+    so the pager's reader at pipeline_agent_pager.py:656 resolves it for
+    `claude --resume <id>` dispatch. This integration test exercises the
+    hook AND the pager's reader end-to-end (no mocks).
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    hook_path = repo_root / ".claude" / "hooks" / "session-start.sh"
+    assert hook_path.exists(), f"hook script missing at {hook_path}"
+
+    session_id = "1e9c6188-11d3-4cbb-87eb-399699e72bcc"
+    payload = json.dumps({
+        "session_id": session_id,
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+    })
+
+    env = {
+        "PATH": "/usr/bin:/bin:/usr/local/bin",
+        "HOME": str(tmp_path),
+        "CLAUDE_PROJECT_DIR": str(tmp_path),
+    }
+    result = subprocess.run(
+        ["bash", str(hook_path)],
+        input=payload,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0, (
+        f"hook exit={result.returncode} stderr={result.stderr!r}"
+    )
+
+    target = tmp_path / ".agent_bus" / "observability" / "orchestrator_session_id"
+    assert target.exists(), f"hook did not write {target}"
+    assert target.read_text().strip() == session_id
+
+    resolved = pager_mod._read_orchestrator_session_id(tmp_path)  # ANTICHEAT_OK: integration read
+    assert resolved == session_id
+
+    malformed_cases = [
+        '{"not_session_id":"x"}',
+        '{"session_id":""}',
+        '{"session_id":"has space"}',
+        'not valid json',
+    ]
+    for payload_bad in malformed_cases:
+        clean_root = tmp_path / f"clean_{abs(hash(payload_bad))}"
+        clean_root.mkdir(parents=True, exist_ok=True)
+        env_clean = {**env, "CLAUDE_PROJECT_DIR": str(clean_root)}
+        r = subprocess.run(
+            ["bash", str(hook_path)],
+            input=payload_bad,
+            env=env_clean,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        assert r.returncode == 0, f"hook should fail-open on {payload_bad!r}, got exit={r.returncode}"
+        bad_target = clean_root / ".agent_bus" / "observability" / "orchestrator_session_id"
+        assert not bad_target.exists(), (
+            f"hook wrote file for malformed payload {payload_bad!r}: "
+            f"{bad_target.read_text() if bad_target.exists() else '<missing>'}"
+        )

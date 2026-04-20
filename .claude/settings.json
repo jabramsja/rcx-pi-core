@@ -170,6 +170,11 @@
             "type": "command",
             "command": "cat ~/.claude/hard-rules.txt && echo \"\" && echo \"--- MEMORY.md ---\" && cat ~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/MEMORY.md",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh",
+            "timeout": 3
           }
         ]
       }
@@ -179,7 +184,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SubagentStart\",\"additionalContext\":\"MANDATORY BEHAVIORAL OVERRIDES FOR ALL SUBAGENTS: (1) Read code BEFORE implementing. (2) Lead with reasoning BEFORE acting. (3) Verify every assumption — grep locates, Read verifies. (4) Diagnosis first — trace path, reproduce, THEN fix. (5) Sequential investigation. (6) Never claim exists/absent based on grep counts alone. (7) CLAUDE.md and MEMORY.md are MANDATORY — Read them before starting review. Paths: CLAUDE.md in repo root, MEMORY.md at ~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/MEMORY.md\"}}'",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SubagentStart\",\"additionalContext\":\"MANDATORY BEHAVIORAL OVERRIDES FOR ALL SUBAGENTS: (1) Read code BEFORE implementing. (2) Lead with reasoning BEFORE acting. (3) Verify every assumption \u2014 grep locates, Read verifies. (4) Diagnosis first \u2014 trace path, reproduce, THEN fix. (5) Sequential investigation. (6) Never claim exists/absent based on grep counts alone. (7) CLAUDE.md and MEMORY.md are MANDATORY \u2014 Read them before starting review. Paths: CLAUDE.md in repo root, MEMORY.md at ~/.claude/projects/-Users-jeffabrams-Desktop-RCX-X-RCXStack-RCXStackminimal-WorkingRCX/memory/MEMORY.md\"}}'",
             "timeout": 2
           }
         ]
