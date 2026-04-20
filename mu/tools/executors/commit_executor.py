@@ -1645,6 +1645,62 @@ def _build_bot_remediation_prompt(
     return "\n".join(lines)
 
 
+def _check_pr_conflict_state(
+    repo_root: Path,
+    *,
+    pr_number: str,
+    log: Any = None,
+) -> str | None:
+    """Return a human-readable conflict indicator if PR is CONFLICTING/DIRTY.
+
+    2026-04-17 learning: when a PR has ``mergeable: CONFLICTING`` or
+    ``mergeStateStatus: DIRTY``, GitHub Actions silently skips
+    ``pull_request``-triggered workflows (no merge-ref computable), so the
+    required-checks list is permanently incomplete. Polling such a PR
+    wastes the full CI timeout without a chance of success.
+
+    Returns a short conflict-state string (``"CONFLICTING"`` or
+    ``"mergeStateStatus=DIRTY"``) when the PR cannot complete CI until
+    dev is merged in; returns ``None`` when the PR is either mergeable or
+    in a transient state that should be polled normally. Fails open on
+    any ``gh`` error so that the normal Step 14 path still runs: the
+    pre-check is a performance optimization, not a correctness guard.
+    """
+    try:
+        proc = subprocess.run(
+            ["gh", "pr", "view", pr_number, "--json", "mergeable,mergeStateStatus"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        if log is not None:
+            log(f"Step 14 pre-check: gh pr view error ({exc}); skipping")
+        return None
+    if proc.returncode != 0:
+        if log is not None:
+            log(
+                f"Step 14 pre-check: gh pr view exit={proc.returncode}; "
+                "skipping"
+            )
+        return None
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        if log is not None:
+            log("Step 14 pre-check: malformed gh pr view JSON; skipping")
+        return None
+    mergeable = data.get("mergeable")
+    merge_state = data.get("mergeStateStatus")
+    if mergeable == "CONFLICTING":
+        return "mergeable=CONFLICTING"
+    if merge_state == "DIRTY":
+        return "mergeStateStatus=DIRTY"
+    return None
+
+
 def _poll_ci_checks_fallback(
     repo_root: Path,
     pr_number: str,
@@ -3001,6 +3057,32 @@ def _run_post_commit_pipeline(
 
     # ── Step 14: wait_ci ──────────────────────────────────────────────
     if "wait_ci" not in result["steps_completed"]:
+        # Pre-check: CONFLICTING/DIRTY PRs silently skip pull_request workflows
+        # (2026-04-17 learning entry). Polling CI on such a PR wastes the full
+        # 900s timeout because green-gate never fires. Detect and fail-fast
+        # with a structured error pointing to the manual merge-dev recovery
+        # recipe (2026-04-20 learning entry).
+        conflict_state = _check_pr_conflict_state(
+            repo_root, pr_number=pr_number, log=log
+        )
+        if conflict_state is not None:
+            return {
+                "status": "error",
+                "step": "wait_ci",
+                "errors": [
+                    f"PR #{pr_number} is {conflict_state} — CI cannot run "
+                    f"pull_request-triggered workflows until the conflict is "
+                    f"resolved. Run the 2026-04-17 recovery recipe: "
+                    f"`git fetch origin <base>` + `git merge origin/<base> "
+                    f"--no-edit` (resolve TASKS.md tracker-note conflict "
+                    f"chronologically if any) + `RCX_SKIP_RECEIPT_CHECK=1 "
+                    f"git commit --no-edit` + `git push`. Then relaunch "
+                    f"commit_executor to resume at Step 14."
+                ],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number,
+                "failure_class": "pr_conflicting",
+            }
         log(f"Step 14: waiting for CI on PR #{pr_number}...")
         try:
             _wait_for_required_checks_to_register(
