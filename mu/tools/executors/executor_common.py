@@ -15,6 +15,7 @@ import re
 import signal
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -347,6 +348,245 @@ def load_routing_record(repo_root: Path) -> dict[str, Any]:
         raise ExecutorCommonError(f"Routing record missing keys: {sorted(missing)}")
 
     return record
+
+
+def _load_meta_bridge_symbol(symbol_name: str) -> Any:
+    """Lazy-load a symbol from meta_bridge_supervisor without a module-scope import.
+
+    meta_bridge_supervisor.py imports executor_common at module scope
+    (meta_bridge_supervisor.py:38), so the reverse direction must remain
+    function-local to avoid a circular import at module load time. Mirrors
+    the pattern used by executor_dispatch.py:73-83.
+    """
+    try:
+        import meta_bridge_supervisor as _meta_mod  # type: ignore[import-not-found]
+    except ImportError:
+        import importlib.util as _ilu
+        import sys as _sys
+        _repo_root = Path(__file__).resolve().parents[3]
+        _meta_path = _repo_root / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py"
+        _spec = _ilu.spec_from_file_location("meta_bridge_supervisor", str(_meta_path))
+        assert _spec is not None and _spec.loader is not None
+        _meta_mod = _ilu.module_from_spec(_spec)
+        _sys.modules["meta_bridge_supervisor"] = _meta_mod
+        _spec.loader.exec_module(_meta_mod)
+    return getattr(_meta_mod, symbol_name)
+
+
+_CONTROL_PLANE_PREFIX = "reports/control_plane/"
+
+
+def _validate_tracked_packet_for_builder(
+    tracked_packet: str, repo_root: Path
+) -> str | None:
+    """Validate tracked_packet for the routing-record builder.
+
+    Returns an error message on rejection, or None on success.
+    Four-leg validation (see plan Work Item 1):
+      (i)   not absolute
+      (ii)  no ``..`` components
+      (iii) starts with reports/control_plane/ AND resolved path is inside
+            repo_root/reports/control_plane/
+      (iv)  file exists on disk
+
+    Deliberately weaker than meta_bridge_supervisor._check_control_plane_path:
+    NO git ls-files tracked-file proof, so newly-drafted untracked control-plane
+    packets (common on fresh Phase A launches) are admitted.
+    """
+    if not isinstance(tracked_packet, str) or not tracked_packet.strip():
+        return "tracked_packet must be a non-empty string"
+    if os.path.isabs(tracked_packet) or ".." in tracked_packet.split("/"):
+        return (
+            f"tracked_packet must not be absolute or contain '..': {tracked_packet}"
+        )
+    if not tracked_packet.startswith(_CONTROL_PLANE_PREFIX):
+        return (
+            f"tracked_packet must start with {_CONTROL_PLANE_PREFIX}: {tracked_packet}"
+        )
+    full_path = (repo_root / tracked_packet).resolve()
+    control_plane_dir = (repo_root / _CONTROL_PLANE_PREFIX).resolve()
+    try:
+        full_path.relative_to(control_plane_dir)
+    except ValueError:
+        return (
+            f"tracked_packet resolves outside {_CONTROL_PLANE_PREFIX}: "
+            f"{tracked_packet} -> {full_path}"
+        )
+    if not full_path.exists():
+        return f"tracked_packet does not exist on disk: {tracked_packet}"
+    if not full_path.is_file():
+        return f"tracked_packet must be a file, not a directory: {tracked_packet}"
+    return None
+
+
+def build_post_merge_routing_record(
+    *,
+    wave_name: str,
+    task_id: str,
+    tracked_packet: str,
+    request_for_claude: str,
+    summary: str,
+    decision: str = "ROUTE_PHASE_A",
+    merged_pr: int | None = None,
+    merge_sha: str | None = None,
+    repo_root: Path | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Build a validated post-merge routing record from kwargs.
+
+    Canonical builder for .agent_bus/meta/post_merge_routing.json. Mirrors
+    commit_executor.build_commit_handoff's shape: returns (record, errors);
+    callers MUST check that ``errors`` is empty before trusting the record.
+
+    Auto-populated fields (require repo_root):
+      - state_sha: via lazy-imported compute_repo_state (cycle-break)
+      - blocker_report_paths: sorted glob of reports/deferred/blocking/*.md
+      - head_sha: git rev-parse HEAD
+      - merge_sha: head_sha fallback when merge_sha kwarg omitted
+      - timestamp_utc: ISO 8601 UTC now
+      - next_candidates: single-entry list built from wave_name + tracked_packet
+
+    Validation:
+      - required non-empty strings: wave_name, task_id, tracked_packet,
+        request_for_claude, summary
+      - decision in POST_MERGE_AUTHORIZED_DECISIONS (lazy-imported)
+      - tracked_packet passes _validate_tracked_packet_for_builder
+    """
+    errors: list[str] = []
+
+    if not isinstance(wave_name, str) or not wave_name.strip():
+        errors.append("wave_name is required (non-empty string)")
+    if not isinstance(task_id, str) or not task_id.strip():
+        errors.append("task_id is required (non-empty string)")
+    if not isinstance(request_for_claude, str) or not request_for_claude.strip():
+        errors.append("request_for_claude is required (non-empty string)")
+    if not isinstance(summary, str) or not summary.strip():
+        errors.append("summary is required (non-empty string)")
+
+    try:
+        authorized_decisions = _load_meta_bridge_symbol(
+            "POST_MERGE_AUTHORIZED_DECISIONS"
+        )
+    except Exception as exc:
+        errors.append(f"Could not load POST_MERGE_AUTHORIZED_DECISIONS: {exc}")
+        return {}, errors
+    if decision not in authorized_decisions:
+        errors.append(
+            f"decision must be one of {sorted(authorized_decisions)}; got: {decision!r}"
+        )
+
+    effective_repo_root = (
+        repo_root if repo_root is not None else Path(__file__).resolve().parents[3]
+    )
+    if not isinstance(effective_repo_root, Path):
+        effective_repo_root = Path(effective_repo_root)
+
+    packet_err = _validate_tracked_packet_for_builder(
+        tracked_packet if isinstance(tracked_packet, str) else "",
+        effective_repo_root,
+    )
+    if packet_err:
+        errors.append(packet_err)
+
+    if errors:
+        return {}, errors
+
+    try:
+        compute_repo_state = _load_meta_bridge_symbol("compute_repo_state")
+    except Exception as exc:
+        return {}, [f"Could not load compute_repo_state: {exc}"]
+
+    try:
+        repo_state = compute_repo_state(effective_repo_root)
+    except Exception as exc:
+        return {}, [f"compute_repo_state failed: {exc}"]
+
+    head_sha = repo_state.head_sha
+    effective_merge_sha = merge_sha if merge_sha else head_sha
+
+    blocker_dir = effective_repo_root / "reports" / "deferred" / "blocking"
+    blocker_report_paths: list[str] = []
+    if blocker_dir.is_dir():
+        for p in sorted(blocker_dir.glob("*.md")):
+            if p.name == "README.md":
+                continue
+            blocker_report_paths.append(
+                p.relative_to(effective_repo_root).as_posix()
+            )
+
+    timestamp_utc = (
+        datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    )
+
+    record: dict[str, Any] = {
+        "decision": decision,
+        "summary": summary,
+        "request_for_claude": request_for_claude,
+        "wave_name": wave_name,
+        "task_id": task_id,
+        "merged_pr": merged_pr,
+        "merge_sha": effective_merge_sha,
+        "head_sha": head_sha,
+        "state_sha": repo_state.state_sha,
+        "timestamp_utc": timestamp_utc,
+        "blocker_report_paths": blocker_report_paths,
+        "next_candidates": [
+            {
+                "candidate": wave_name,
+                "bounded": True,
+                "tracked_packet": tracked_packet,
+            }
+        ],
+    }
+    return record, []
+
+
+def build_and_write_routing_record(
+    *,
+    wave_name: str,
+    task_id: str,
+    tracked_packet: str,
+    request_for_claude: str,
+    summary: str,
+    decision: str = "ROUTE_PHASE_A",
+    merged_pr: int | None = None,
+    merge_sha: str | None = None,
+    repo_root: Path | None = None,
+    output_path: Path | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Build + persist a routing record. Returns (record, errors).
+
+    Writes to repo_root/.agent_bus/meta/post_merge_routing.json unless
+    output_path is provided. On build errors, returns ({}, errors) WITHOUT
+    writing. On success, writes pretty-printed JSON and returns (record, []).
+    """
+    effective_repo_root = (
+        repo_root if repo_root is not None else Path(__file__).resolve().parents[3]
+    )
+    if not isinstance(effective_repo_root, Path):
+        effective_repo_root = Path(effective_repo_root)
+
+    record, errors = build_post_merge_routing_record(
+        wave_name=wave_name,
+        task_id=task_id,
+        tracked_packet=tracked_packet,
+        request_for_claude=request_for_claude,
+        summary=summary,
+        decision=decision,
+        merged_pr=merged_pr,
+        merge_sha=merge_sha,
+        repo_root=effective_repo_root,
+    )
+    if errors:
+        return {}, errors
+
+    target_path = (
+        output_path
+        if output_path is not None
+        else effective_repo_root / ROUTING_RECORD_PATH
+    )
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    return record, []
 
 
 def run_bridge_subprocess(

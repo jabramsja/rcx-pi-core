@@ -8171,3 +8171,383 @@ class TestRecoveryGateWiring:
         assert "Commit" in result.get("message", "")
         assert "--json" in calls[0]
         assert "--json" in calls[1]
+
+
+# ===========================================================================
+# Routing-record builder API tests
+# (build_post_merge_routing_record / build_and_write_routing_record)
+# Plan: reports/control_plane/routing_api_plus_write_gate_2026-04-20.md
+# ===========================================================================
+
+
+def _init_builder_repo(tmp_path):
+    """Minimal git repo for routing-record builder tests.
+
+    Creates a committed control-plane packet so compute_repo_state has a HEAD
+    to hash. Returns the repo Path.
+    """
+    repo = tmp_path / "builder_repo"
+    repo.mkdir()
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
+    subprocess.run(
+        ["git", "init"], cwd=repo, capture_output=True, env=env, check=True
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=repo, capture_output=True, check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "t@t"],
+        cwd=repo, capture_output=True, check=True,
+    )
+    cp_dir = repo / "reports" / "control_plane"
+    cp_dir.mkdir(parents=True, exist_ok=True)
+    seed_packet = cp_dir / "seed_packet.md"
+    seed_packet.write_text("# seed packet\n")
+    subprocess.run(
+        ["git", "add", "reports/control_plane/seed_packet.md"],
+        cwd=repo, capture_output=True, env=env, check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=repo, capture_output=True, env=env, check=True,
+    )
+    return repo, env
+
+
+_BUILDER_VALID_KWARGS = {
+    "wave_name": "builder-wave-2026-04-20",
+    "task_id": "FOUNDER_OVERRIDE:builder-wave-2026-04-20",
+    "tracked_packet": "reports/control_plane/seed_packet.md",
+    "request_for_claude": "implement the builder smoke wave",
+    "summary": "routing-record builder test",
+}
+
+
+def _valid_kwargs(repo, **overrides):
+    kw = dict(_BUILDER_VALID_KWARGS)
+    kw["repo_root"] = repo
+    kw.update(overrides)
+    return kw
+
+
+class TestRoutingRecordBuilderDecisionSetParity:
+    """Builder accepts every canonical POST_MERGE_AUTHORIZED_DECISIONS member
+    and rejects unknown decisions. (Plan test 2a; Finding #1 fix.)
+    """
+
+    @pytest.mark.parametrize(
+        "decision",
+        sorted(
+            {
+                "CONTINUE_DIALECTIC",
+                "ROUTE_PHASE_A",
+                "ROUTE_PHASE_B",
+                "UPDATE_TRACKER_ONLY",
+                "STOP_FOR_FOUNDER",
+                "STOP_FOR_TRIAGE_DISCUSSION",
+            }
+        ),
+    )
+    def test_accepts_each_canonical_decision(self, tmp_path, decision):
+        repo, _ = _init_builder_repo(tmp_path)
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo, decision=decision)
+        )
+        assert errors == [], f"decision {decision} rejected: {errors}"
+        assert record["decision"] == decision
+
+    def test_rejects_unknown_decision(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo, decision="ROUTE_NOWHERE")
+        )
+        assert errors, "unknown decision must be rejected"
+        assert any("ROUTE_NOWHERE" in e for e in errors)
+        assert record == {}
+
+    def test_rejects_decision_matches_canonical_set(self, tmp_path):
+        """Sanity check: builder's authorized set == meta_bridge_supervisor's."""
+        meta_mod = load_module(
+            "meta_bridge_supervisor",
+            REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py",
+        )
+        canonical = set(meta_mod.POST_MERGE_AUTHORIZED_DECISIONS)
+
+        repo, _ = _init_builder_repo(tmp_path)
+        for decision in canonical:
+            _, errors = common_mod.build_post_merge_routing_record(
+                **_valid_kwargs(repo, decision=decision)
+            )
+            assert errors == [], (
+                f"canonical decision {decision} rejected by builder: {errors}"
+            )
+
+
+class TestRoutingRecordBuilderRequiredFields:
+    """Builder rejects missing required fields + invalid tracked_packet shapes.
+    (Plan test 2b.)
+    """
+
+    @pytest.mark.parametrize(
+        "field",
+        ["wave_name", "task_id", "tracked_packet", "request_for_claude", "summary"],
+    )
+    def test_rejects_missing_required_field(self, tmp_path, field):
+        repo, _ = _init_builder_repo(tmp_path)
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo, **{field: ""})
+        )
+        assert errors, f"empty {field} must be rejected"
+        assert any(field in e for e in errors)
+        assert record == {}
+
+    def test_rejects_absolute_tracked_packet(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        _, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo, tracked_packet="/absolute/path/packet.md")
+        )
+        assert errors
+        assert any("absolute" in e.lower() or "'..'" in e for e in errors)
+
+    def test_rejects_dotdot_tracked_packet(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        _, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(
+                repo, tracked_packet="reports/control_plane/../etc/passwd"
+            )
+        )
+        assert errors
+        assert any(".." in e for e in errors)
+
+    def test_rejects_tracked_packet_outside_control_plane(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        _, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo, tracked_packet="docs/notes/foo.md")
+        )
+        assert errors
+        assert any("reports/control_plane/" in e for e in errors)
+
+
+class TestRoutingRecordBuilderTypoRejection:
+    """Builder REJECTS a tracked_packet under reports/control_plane/ whose
+    file does not exist on disk. (Plan test 2b2; REQUEST_CHANGES typo-hole fix.)
+    """
+
+    def test_rejects_nonexistent_control_plane_packet(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        missing = "reports/control_plane/definitely_missing_packet_2026-04-20.md"
+        assert not (repo / missing).exists(), (
+            "fixture contamination: missing packet must not exist"
+        )
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo, tracked_packet=missing)
+        )
+        assert errors, "nonexistent tracked_packet must be rejected"
+        assert any(
+            "does not exist" in e or "not found" in e.lower() for e in errors
+        )
+        assert record == {}
+
+
+class TestRoutingRecordBuilderDirectoryRejection:
+    """Builder REJECTS a tracked_packet that resolves to a directory (not a file).
+    (Supervisor finding 2026-04-20: `.exists()` alone passes directories; must
+    check `.is_file()` too so callers cannot point tracked_packet at a dir
+    under reports/control_plane/.)
+    """
+
+    def test_rejects_directory_tracked_packet(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        subdir_rel = "reports/control_plane/subdir_2026-04-20"
+        subdir = repo / subdir_rel
+        subdir.mkdir(parents=True, exist_ok=True)
+        assert subdir.is_dir(), "fixture contamination: subdir must exist as a dir"
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo, tracked_packet=subdir_rel)
+        )
+        assert errors, "directory tracked_packet must be rejected"
+        assert any("file, not a directory" in e or "directory" in e.lower() for e in errors)
+        assert record == {}
+
+
+class TestRoutingRecordBuilderBlockerReadmeExclusion:
+    """Auto-detected `blocker_report_paths` glob MUST exclude README.md so it
+    matches the convention of hand-authored packages (which exclude README).
+    (Supervisor finding 2026-04-20: raw `*.md` glob would include README and
+    diverge from the reviewed package shape on this repo layout.)
+    """
+
+    def test_blocker_glob_excludes_readme(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        blocker_dir = repo / "reports" / "deferred" / "blocking"
+        blocker_dir.mkdir(parents=True, exist_ok=True)
+        (blocker_dir / "README.md").write_text("# blocker dir readme\n", encoding="utf-8")
+        (blocker_dir / "real_blocker_2026-04-20.md").write_text(
+            "# real blocker\n", encoding="utf-8"
+        )
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo)
+        )
+        assert not errors, errors
+        blocker_paths = record.get("blocker_report_paths", [])
+        assert "reports/deferred/blocking/real_blocker_2026-04-20.md" in blocker_paths
+        assert not any(p.endswith("/README.md") for p in blocker_paths), (
+            f"README.md leaked into auto-detected blocker list: {blocker_paths}"
+        )
+
+
+class TestRoutingRecordBuilderFreshDraftFlow:
+    """Builder ACCEPTS a tracked_packet that exists on disk under
+    reports/control_plane/ but is NOT yet git ls-files-tracked.
+    (Plan test 2b3; documents the deliberate divergence from the
+    meta-bridge supervisor tracked-file proof helper at
+    meta_bridge_supervisor.py:1665-1690 which DOES require git ls-files
+    tracking.)
+    """
+
+    def test_accepts_untracked_existing_control_plane_packet(self, tmp_path):
+        repo, env = _init_builder_repo(tmp_path)
+        fresh_rel = "reports/control_plane/fresh_untracked_2026-04-20.md"
+        fresh = repo / fresh_rel
+        fresh.write_text("# fresh untracked\n")
+        # Confirm the file is NOT git-tracked (mirrors real Phase A launches).
+        ls = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", fresh_rel],
+            cwd=repo, capture_output=True, env=env,
+        )
+        assert ls.returncode != 0, (
+            "fixture contamination: file must be untracked to prove the "
+            "fresh-draft admission path"
+        )
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo, tracked_packet=fresh_rel)
+        )
+        assert errors == [], (
+            f"untracked-but-on-disk packet rejected: {errors}"
+        )
+        assert record["next_candidates"][0]["tracked_packet"] == fresh_rel
+
+
+class TestRoutingRecordBuilderStateSha:
+    """Auto-populated state_sha equals compute_repo_state(repo_root).state_sha.
+    (Plan test 2c.)
+    """
+
+    def test_state_sha_matches_compute_repo_state(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        meta_mod = load_module(
+            "meta_bridge_supervisor",
+            REPO_ROOT / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py",
+        )
+        expected_state_sha = meta_mod.compute_repo_state(repo).state_sha
+
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo)
+        )
+        assert errors == []
+        assert record["state_sha"] == expected_state_sha
+        assert record["head_sha"] == meta_mod.compute_repo_state(repo).head_sha
+
+
+class TestRoutingRecordBuilderCycleSafety:
+    """Importing executor_common does NOT transitively load
+    meta_bridge_supervisor. (Plan test 2c2; Finding #3 fix — lazy import.)
+    """
+
+    def test_no_module_scope_meta_bridge_import(self):
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys;"
+                    " import mu.tools.executors.executor_common;"
+                    " assert 'meta_bridge_supervisor' not in sys.modules,"
+                    " 'cycle-break violated: meta_bridge_supervisor loaded"
+                    " at module scope'"
+                ),
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, (
+            f"cycle-safety subprocess failed: stdout={proc.stdout!r} "
+            f"stderr={proc.stderr!r}"
+        )
+
+
+class TestRoutingRecordBuilderFreshnessGateProof:
+    """build_and_write_routing_record produces a record that passes both
+    executor_common.load_routing_record AND executor_dispatch's
+    validate_routing_record_freshness gate. (Plan test 2d; Finding #2 fix —
+    the actual stale-state gate the builder API was created to eliminate.)
+    """
+
+    def test_built_record_passes_freshness_gate(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        output_path = repo / ".agent_bus" / "meta" / "post_merge_routing.json"
+        record, errors = common_mod.build_and_write_routing_record(
+            **_valid_kwargs(repo), output_path=output_path
+        )
+        assert errors == []
+        assert output_path.exists()
+
+        # (i) Parses via executor_common.load_routing_record without errors.
+        loaded = common_mod.load_routing_record(repo)
+        assert loaded["decision"] == record["decision"]
+        assert loaded["summary"] == record["summary"]
+
+        # (ii) Passes the actual stale-state freshness gate that originally
+        # tripped the manually-authored record this session.
+        fresh_ok, msg = dispatch_mod.validate_routing_record_freshness(
+            loaded, repo
+        )
+        assert fresh_ok, (
+            f"built record failed freshness gate: {msg} "
+            f"(record.state_sha={loaded.get('state_sha', '')[:8]})"
+        )
+        assert msg == "fresh"
+
+
+class TestRoutingRecordBuilderBlockerPaths:
+    """blocker_report_paths auto-derived from reports/deferred/blocking/*.md.
+    (Plan test 2e.)
+    """
+
+    def test_blocker_paths_auto_detected(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        blocking = repo / "reports" / "deferred" / "blocking"
+        blocking.mkdir(parents=True, exist_ok=True)
+        # Write unsorted to prove the builder sorts them.
+        (blocking / "zeta.md").write_text("# z\n")
+        (blocking / "alpha.md").write_text("# a\n")
+        (blocking / "mid.md").write_text("# m\n")
+        # Non-.md siblings must be ignored by the glob.
+        (blocking / "README.txt").write_text("not a blocker\n")
+
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo)
+        )
+        assert errors == []
+        assert record["blocker_report_paths"] == [
+            "reports/deferred/blocking/alpha.md",
+            "reports/deferred/blocking/mid.md",
+            "reports/deferred/blocking/zeta.md",
+        ]
+
+    def test_blocker_paths_empty_when_dir_missing(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        # No reports/deferred/blocking/ at all.
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo)
+        )
+        assert errors == []
+        assert record["blocker_report_paths"] == []
