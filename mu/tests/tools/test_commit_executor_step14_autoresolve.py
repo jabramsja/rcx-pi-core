@@ -222,6 +222,7 @@ class TestTryAutoResolvePrConflict:
         assert push_cmds and push_cmds[0] == [
             "git",
             "push",
+            "--no-verify",
             "origin",
             "feature/bar",
         ]
