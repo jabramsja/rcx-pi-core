@@ -154,18 +154,13 @@ TIME_SECURITY=$((SECONDS - PHASE_START))
 
 PHASE_START=$SECONDS
 echo "== 5) Anti-cheat scans =="
-echo "-- no private attr access in tests/"
-# Exclude:
-#   - self._method (private methods in test classes - Python convention)
-#   - Lines testing that contraband catches _getframe patterns (grounding tests)
-#   - Lines marked with # ANTICHEAT_OK
-! grep -RInE '\._[a-zA-Z0-9]+' tests/ | \
-    grep -v 'self\._' | \
-    grep -v '_getframe.*CONTRABAND_OK' | \
-    grep -v '# ANTICHEAT_OK' | \
-    grep -v 'sys\._getframe\|sys\._current_frames' | \
-    grep -v 'test_contraband_detection.py.*"""' | \
-    grep -v '__pycache__' || { echo "Found private attr access"; exit 1; }
+echo "-- no private attr access in tests/ (AST-based)"
+# AST-based check — walks ast.Attribute nodes only, so docstring
+# contents are inherently invisible. Allowlist parity preserved for
+# self._, sys._getframe, sys._current_frames, # ANTICHEAT_OK,
+# CONTRABAND_OK lines, test_contraband_detection.py, and __pycache__.
+# Replaces the former grep-based scan which was docstring-blind.
+python3 tools/checks/linters/check_private_attr_access.py || exit 1
 
 echo "-- no underscored imports from rcx_pi in tests/ (AST-based)"
 python3 tools/checks/linters/check_underscore_imports.py || exit 1

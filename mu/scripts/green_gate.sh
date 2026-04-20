@@ -70,18 +70,9 @@ run_python() {
   echo
 
   echo "[PY 8/17] Anti-cheat scans (test integrity)"
-  # No private attr access in tests/
-  echo "-- no private attr access in tests/"
-  if grep -RInE '\._[a-zA-Z0-9]+' tests/ 2>/dev/null | \
-      grep -v 'self\._' | \
-      grep -v '_getframe.*CONTRABAND_OK' | \
-      grep -v '# ANTICHEAT_OK' | \
-      grep -v 'sys\._getframe\|sys\._current_frames' | \
-      grep -v 'test_contraband_detection.py.*"""' | \
-      grep -v '__pycache__'; then
-    echo "ERROR: Found private attr access"
-    exit 1
-  fi
+  # No private attr access in tests/ (AST-based; docstring-aware)
+  echo "-- no private attr access in tests/ (AST-based)"
+  python3 tools/checks/linters/check_private_attr_access.py || exit 1
   echo "OK"
 
   # No underscored imports from rcx_pi in tests/ (AST-based)
