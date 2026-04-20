@@ -1701,6 +1701,286 @@ def _check_pr_conflict_state(
     return None
 
 
+def _resolve_tasks_md_tracker_note_conflict(path: Path) -> bool:
+    """Resolve a TASKS.md merge conflict IFF every conflict block contains
+    only tracker-note lines on both sides.
+
+    Returns ``True`` if the file was successfully resolved (all conflict
+    markers removed; both sides' tracker-note lines preserved in
+    chronological order: origin block first, HEAD block second — matches
+    the 2026-04-17 learning recipe "keeping both notes in chronological
+    merge order; merged-first wave's note first, then this wave's").
+
+    Returns ``False`` WITHOUT modifying the file if any conflict block
+    contains non-tracker-note content or if conflict markers are
+    malformed (nested / dangling). Caller must abort the merge in that
+    case.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    if "<<<<<<<" not in text:
+        return True  # no conflict to resolve
+    lines = text.splitlines(keepends=True)
+    new_lines: list[str] = []
+    head_buf: list[str] = []
+    origin_buf: list[str] = []
+    state = "normal"  # 'normal' | 'head' | 'origin'
+    for line in lines:
+        if line.startswith("<<<<<<<"):
+            if state != "normal":
+                return False  # nested / malformed
+            head_buf = []
+            origin_buf = []
+            state = "head"
+            continue
+        if line.startswith("=======") and state == "head":
+            state = "origin"
+            continue
+        if line.startswith(">>>>>>>"):
+            if state != "origin":
+                return False
+            if not _is_tracker_note_only(head_buf) or not _is_tracker_note_only(
+                origin_buf
+            ):
+                return False
+            new_lines.extend(origin_buf)
+            new_lines.extend(head_buf)
+            state = "normal"
+            continue
+        if state == "head":
+            head_buf.append(line)
+        elif state == "origin":
+            origin_buf.append(line)
+        else:
+            new_lines.append(line)
+    if state != "normal":
+        return False  # dangling conflict marker
+    path.write_text("".join(new_lines), encoding="utf-8")
+    return True
+
+
+def _is_tracker_note_only(buf: list[str]) -> bool:
+    """Every non-blank line in *buf* must be a tracker-sync-note line.
+
+    Tracker-sync-note lines start with ``- Tracker sync note (`` or
+    ``- ~~Tracker sync note (`` (strike-through closed notes). Leading
+    whitespace is allowed (indented continuation lines inside a note).
+    """
+    for raw in buf:
+        stripped = raw.rstrip("\n").strip()
+        if not stripped:
+            continue
+        if not (
+            stripped.startswith("- Tracker sync note (")
+            or stripped.startswith("- ~~Tracker sync note (")
+        ):
+            return False
+    return True
+
+
+def _try_auto_resolve_pr_conflict(
+    repo_root: Path,
+    *,
+    pr_number: str,
+    base_branch: str,
+    branch_name: str,
+    log: Any = None,
+) -> dict[str, Any]:
+    """Attempt automatic merge-base resolution for a CONFLICTING/DIRTY PR.
+
+    2026-04-17 learning recipe mechanized: on detection of a conflicting
+    PR, fetch the base branch, merge it in, resolve a TASKS.md tracker-
+    note conflict chronologically if that is the only conflict, commit
+    via ``RCX_SKIP_RECEIPT_CHECK=1``, and push. Any non-TASKS.md
+    conflict, non-tracker-note TASKS.md conflict, or subprocess error
+    aborts the merge and returns an error for the caller to surface.
+
+    Returns a dict:
+      resolved: bool — True if no conflict OR auto-resolve succeeded + pushed
+      action: str — 'no_action' | 'clean_merge' | 'tasks_md_resolved' | 'aborted'
+      detail: str — human-readable explanation
+    """
+    conflict_state = _check_pr_conflict_state(
+        repo_root, pr_number=pr_number, log=log
+    )
+    if conflict_state is None:
+        return {
+            "resolved": True,
+            "action": "no_action",
+            "detail": "PR not in CONFLICTING/DIRTY state",
+        }
+    if log is not None:
+        log(
+            f"Step 14 auto-resolve: PR #{pr_number} {conflict_state}; "
+            f"attempting merge of origin/{base_branch} into {branch_name}"
+        )
+    try:
+        subprocess.run(
+            ["git", "fetch", "origin", base_branch],
+            cwd=repo_root,
+            check=True,
+            timeout=60,
+            capture_output=True,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return {
+            "resolved": False,
+            "action": "aborted",
+            "detail": f"git fetch origin {base_branch} failed: {exc}",
+        }
+    try:
+        merge_proc = subprocess.run(
+            ["git", "merge", f"origin/{base_branch}", "--no-edit"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return {
+            "resolved": False,
+            "action": "aborted",
+            "detail": f"git merge origin/{base_branch} subprocess error: {exc}",
+        }
+    if merge_proc.returncode == 0:
+        push_ok, push_err = _push_branch(repo_root, branch_name)
+        if push_ok:
+            if log is not None:
+                log(
+                    f"Step 14 auto-resolve: clean merge of origin/{base_branch} + pushed"
+                )
+            return {
+                "resolved": True,
+                "action": "clean_merge",
+                "detail": f"merged origin/{base_branch} cleanly and pushed",
+            }
+        return {
+            "resolved": False,
+            "action": "aborted",
+            "detail": f"clean merge but push failed: {push_err}",
+        }
+    try:
+        diff_proc = subprocess.run(
+            ["git", "diff", "--name-only", "--diff-filter=U"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=True,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        _abort_merge(repo_root, log=log)
+        return {
+            "resolved": False,
+            "action": "aborted",
+            "detail": f"git diff failed after merge conflict: {exc}",
+        }
+    conflicted = [
+        line.strip() for line in diff_proc.stdout.splitlines() if line.strip()
+    ]
+    if conflicted != ["TASKS.md"]:
+        _abort_merge(repo_root, log=log)
+        return {
+            "resolved": False,
+            "action": "aborted",
+            "detail": (
+                f"conflict in non-TASKS.md files: {conflicted}; "
+                "manual recovery required"
+            ),
+        }
+    if not _resolve_tasks_md_tracker_note_conflict(repo_root / "TASKS.md"):
+        _abort_merge(repo_root, log=log)
+        return {
+            "resolved": False,
+            "action": "aborted",
+            "detail": (
+                "TASKS.md conflict includes non-tracker-note content; "
+                "manual recovery required"
+            ),
+        }
+    try:
+        subprocess.run(
+            ["git", "add", "TASKS.md"],
+            cwd=repo_root,
+            check=True,
+            timeout=20,
+            capture_output=True,
+        )
+        commit_env = {**os.environ, "RCX_SKIP_RECEIPT_CHECK": "1"}
+        subprocess.run(
+            ["git", "commit", "--no-edit"],
+            cwd=repo_root,
+            check=True,
+            timeout=60,
+            capture_output=True,
+            env=commit_env,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        _abort_merge(repo_root, log=log)
+        return {
+            "resolved": False,
+            "action": "aborted",
+            "detail": f"TASKS.md resolved but commit failed: {exc}",
+        }
+    push_ok, push_err = _push_branch(repo_root, branch_name)
+    if not push_ok:
+        return {
+            "resolved": False,
+            "action": "aborted",
+            "detail": f"merge + resolve succeeded but push failed: {push_err}",
+        }
+    if log is not None:
+        log(
+            "Step 14 auto-resolve: merged origin/"
+            + base_branch
+            + " + resolved TASKS.md tracker-note conflict chronologically + pushed"
+        )
+    return {
+        "resolved": True,
+        "action": "tasks_md_resolved",
+        "detail": (
+            f"merged origin/{base_branch}, resolved TASKS.md chronologically, "
+            "committed with RCX_SKIP_RECEIPT_CHECK, pushed"
+        ),
+    }
+
+
+def _abort_merge(repo_root: Path, *, log: Any = None) -> None:
+    """Best-effort `git merge --abort` — swallows errors."""
+    try:
+        subprocess.run(
+            ["git", "merge", "--abort"],
+            cwd=repo_root,
+            timeout=20,
+            capture_output=True,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        pass
+    if log is not None:
+        log("Step 14 auto-resolve: merge aborted")
+
+
+def _push_branch(repo_root: Path, branch_name: str) -> tuple[bool, str]:
+    """`git push origin <branch>` with error capture."""
+    try:
+        subprocess.run(
+            ["git", "push", "origin", branch_name],
+            cwd=repo_root,
+            check=True,
+            timeout=120,
+            capture_output=True,
+        )
+        return True, ""
+    except subprocess.CalledProcessError as exc:
+        return False, f"exit={exc.returncode}: {exc.stderr.decode('utf-8', errors='replace') if exc.stderr else ''}"
+    except (subprocess.SubprocessError, OSError) as exc:
+        return False, str(exc)
+
+
 def _poll_ci_checks_fallback(
     repo_root: Path,
     pr_number: str,
@@ -3057,31 +3337,39 @@ def _run_post_commit_pipeline(
 
     # ── Step 14: wait_ci ──────────────────────────────────────────────
     if "wait_ci" not in result["steps_completed"]:
-        # Pre-check: CONFLICTING/DIRTY PRs silently skip pull_request workflows
-        # (2026-04-17 learning entry). Polling CI on such a PR wastes the full
-        # 900s timeout because green-gate never fires. Detect and fail-fast
-        # with a structured error pointing to the manual merge-dev recovery
-        # recipe (2026-04-20 learning entry).
-        conflict_state = _check_pr_conflict_state(
-            repo_root, pr_number=pr_number, log=log
+        # Auto-resolve CONFLICTING/DIRTY PRs before polling CI (2026-04-17
+        # learning mechanized). On clean merge: fetch base + merge + push.
+        # On TASKS.md-only tracker-note conflict: fetch + merge + resolve
+        # chronologically + commit (RCX_SKIP_RECEIPT_CHECK=1) + push. Any
+        # other conflict OR non-tracker-note TASKS.md conflict aborts the
+        # merge and returns a structured fail-fast error pointing to the
+        # manual recovery recipe.
+        resolve_result = _try_auto_resolve_pr_conflict(
+            repo_root,
+            pr_number=pr_number,
+            base_branch=base_branch,
+            branch_name=target_branch,
+            log=log,
         )
-        if conflict_state is not None:
+        if not resolve_result.get("resolved"):
+            action = resolve_result.get("action", "aborted")
+            detail = resolve_result.get("detail", "unknown")
             return {
                 "status": "error",
                 "step": "wait_ci",
                 "errors": [
-                    f"PR #{pr_number} is {conflict_state} — CI cannot run "
-                    f"pull_request-triggered workflows until the conflict is "
-                    f"resolved. Run the 2026-04-17 recovery recipe: "
-                    f"`git fetch origin <base>` + `git merge origin/<base> "
-                    f"--no-edit` (resolve TASKS.md tracker-note conflict "
-                    f"chronologically if any) + `RCX_SKIP_RECEIPT_CHECK=1 "
-                    f"git commit --no-edit` + `git push`. Then relaunch "
-                    f"commit_executor to resume at Step 14."
+                    f"PR #{pr_number} CONFLICTING/DIRTY and auto-resolve "
+                    f"action={action}: {detail}. Manual recovery required: "
+                    f"`cd <worktree> && git fetch origin {base_branch} && "
+                    f"git merge origin/{base_branch} --no-edit` (resolve "
+                    f"conflicts manually if any) + "
+                    f"`RCX_SKIP_RECEIPT_CHECK=1 git commit --no-edit` + "
+                    f"`git push origin {target_branch}` + relaunch commit_executor."
                 ],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number,
                 "failure_class": "pr_conflicting",
+                "auto_resolve_action": action,
             }
         log(f"Step 14: waiting for CI on PR #{pr_number}...")
         try:
