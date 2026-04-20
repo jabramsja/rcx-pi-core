@@ -504,7 +504,7 @@ def validate_package_schema(package: Any) -> tuple[bool, list[str]]:
 
     # Validate field types for all 11 required fields
     errors = []
-    _OPTIONAL_PACKAGE_FIELDS = {"fenced_files"}
+    _OPTIONAL_PACKAGE_FIELDS = {"fenced_files", "founder_override_token", "wave_class"}
     unexpected = sorted(set(package.keys()) - REQUIRED_PACKAGE_FIELDS - _OPTIONAL_PACKAGE_FIELDS)
     if unexpected:
         errors.append(f"Unexpected field(s): {unexpected}")
@@ -515,6 +515,40 @@ def validate_package_schema(package: Any) -> tuple[bool, list[str]]:
         val = package.get(field)
         if not isinstance(val, str) or not val.strip():
             errors.append(f"{field} must be a non-empty string")
+
+    if "founder_override_token" in package:
+        tok = package.get("founder_override_token")
+        if not isinstance(tok, str):
+            errors.append("founder_override_token must be a string")
+        elif tok and not tok.startswith("FOUNDER_OVERRIDE:"):
+            errors.append("founder_override_token must start with 'FOUNDER_OVERRIDE:' when non-empty")
+
+    if "wave_class" in package:
+        wc = package.get("wave_class")
+        if not isinstance(wc, str):
+            errors.append("wave_class must be a string")
+        elif wc and wc not in {"L4_STRUCTURAL", "L4_ENABLER", "MAINTENANCE"}:
+            errors.append(
+                f"wave_class '{wc}' not in "
+                "{L4_STRUCTURAL, L4_ENABLER, MAINTENANCE}"
+            )
+
+    # Cross-field: a non-empty `founder_override_token` is only authorized
+    # when `wave_class` is explicitly one of the non-structural values. This
+    # makes the L4_STRUCTURAL carve-out (and the empty/missing/unknown
+    # wave_class path) mechanically fail-closed at schema level, before
+    # Gate 8 runs. Without this check, a package could smuggle a valid
+    # override token alongside an omitted or structural wave_class and
+    # rely on Gate 8 alone for refusal — two layers > one layer.
+    tok_val = package.get("founder_override_token")
+    if isinstance(tok_val, str) and tok_val.startswith("FOUNDER_OVERRIDE:"):
+        wc_val = package.get("wave_class")
+        if not isinstance(wc_val, str) or wc_val not in ("L4_ENABLER", "MAINTENANCE"):
+            errors.append(
+                "founder_override_token requires wave_class to be explicitly "
+                f"'L4_ENABLER' or 'MAINTENANCE' (got: {wc_val!r}); "
+                "L4_STRUCTURAL, empty, and missing values are not authorized"
+            )
 
     # fixes_implemented can be string OR list (seeded corpus uses list)
     fixes = package.get("fixes_implemented")
@@ -556,8 +590,46 @@ def validate_package_schema(package: Any) -> tuple[bool, list[str]]:
     return len(errors) == 0, errors
 
 
-def check_tasks_authorization(repo_root: Path, task_id: str) -> ValidationResult:
-    """Gate 8: Check task_id is in active NOW or NEXT section of TASKS.md."""
+def _run_external_override_validator(repo_root: Path, wave_name: str) -> tuple[int, str]:
+    """Invoke tools/checks/enforce_l4_execution_contract.py --staged --wave-id <wave_name>.
+
+    The supervisor consumes the external validator's exit code — it does NOT
+    re-derive replay protection, wave-binding, or runtime-diff constraints.
+    Any invocation failure is reported as a non-zero exit so Gate 8 falls
+    through to the strict-match body (fail-closed safety net).
+    """
+    try:
+        proc = subprocess.run(
+            ["python3", "tools/checks/enforce_l4_execution_contract.py", "--staged", "--wave-id", wave_name],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (subprocess.TimeoutExpired, OSError, FileNotFoundError) as exc:
+        return 1, f"validator invocation failed: {exc}"
+    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+def check_tasks_authorization(
+    repo_root: Path,
+    task_id: str,
+    founder_override_token: str = "",
+    wave_name: str = "",
+    wave_class: str = "",
+) -> ValidationResult:
+    """Gate 8: Check task_id is in active NOW or NEXT section of TASKS.md.
+
+    Override branch (commit-executor supervisor invocation only): when the
+    staged package carries a `founder_override_token` exactly equal to
+    `FOUNDER_OVERRIDE:<wave_name>` AND `wave_class` is NOT `L4_STRUCTURAL`
+    AND `tools/checks/enforce_l4_execution_contract.py --staged --wave-id
+    <wave_name>` exits 0, Gate 8 auto-passes. On any other outcome the
+    branch falls through to the existing strict-match body. The
+    bracket-format guard runs first and still fail-fasts on malformed
+    task_id values even when a valid override token + wave_name are
+    present.
+    """
     active_section, error = _extract_now_next_text(repo_root)
     if error:
         return ValidationResult("TASKS.md auth", False, error)
@@ -584,6 +656,34 @@ def check_tasks_authorization(repo_root: Path, task_id: str) -> ValidationResult
             False,
             f"task_id must be bracketed (e.g., [TASK-ID]), got: {task_id}"
         )
+
+    # Override branch: fires ONLY on the commit-executor supervisor invocation
+    # (Phase B builders do not emit these fields because the tracker note is
+    # not persisted to TASKS.md on that path).
+    #
+    # Fail-closed allow-list semantics on `wave_class`. The structural carve-out
+    # is enforced by requiring `wave_class` to be explicitly one of the
+    # authorized non-structural values; any other value — empty string,
+    # missing key (arrives here as ""), `L4_STRUCTURAL`, or unknown — falls
+    # through to the strict-match body. This closes the bypass where an
+    # omitted `wave_class` could reach the override branch.
+    if wave_class == "L4_STRUCTURAL":
+        # Explicit structural carve-out: enforce_l4_execution_contract.py does
+        # not verify NOW/NEXT anchoring — external validation alone is not
+        # proof of a live structural anchor. Fall through to strict match.
+        pass
+    elif (
+        wave_class in ("L4_ENABLER", "MAINTENANCE")
+        and isinstance(founder_override_token, str)
+        and isinstance(wave_name, str)
+        and founder_override_token
+        and wave_name
+        and founder_override_token == f"FOUNDER_OVERRIDE:{wave_name}"
+    ):
+        exit_code, _validator_output = _run_external_override_validator(repo_root, wave_name)
+        if exit_code == 0:
+            print(f"[meta-bridge] Gate 8 passed via externally-validated FOUNDER_OVERRIDE:{wave_name}")
+            return ValidationResult("TASKS.md auth (FOUNDER_OVERRIDE)", True)
 
     # Match task_id with optional bold markers (e.g., **[META-BRIDGE-S1]**)
     # Only match the exact bracketed token, not prose containing similar text
@@ -932,7 +1032,13 @@ def run_validation_gates(
     # Gate 8: TASKS.md authorization
     if verbose:
         print("[meta-bridge] Gate 8: TASKS.md authorization...")
-    r8 = check_tasks_authorization(repo_root, package.get("task_id", ""))
+    r8 = check_tasks_authorization(
+        repo_root,
+        package.get("task_id", ""),
+        package.get("founder_override_token", ""),
+        package.get("wave_name", ""),
+        package.get("wave_class", ""),
+    )
     results.append(r8)
 
     # Gate 9: Control-surface invariants (only when control-surface files touched)

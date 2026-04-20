@@ -2226,3 +2226,315 @@ class TestStartupFlowSuppressionGatePath:
             f"{[r.name for r in results]}"
         )
         assert all_passed is True
+
+
+class TestCheckTasksAuthorizationFounderOverride:
+    """Gate 8 FOUNDER_OVERRIDE branch: non-structural waves with an
+    externally-validated override token + wave_name may auto-pass Gate 8
+    even when task_id lacks a live NOW/NEXT anchor."""
+
+    def _write_tasks_without_wave_local_id(self, repo_dir):
+        """Fixture: TASKS.md has NOW/NEXT but not [WAVE-LOCAL-ID]."""
+        (repo_dir / "TASKS.md").write_text(
+            "## NOW\n\n"
+            "- **[OTHER-TASK]** **NOW** (unrelated).\n"
+            "  Unrelated body.\n\n"
+            "## NEXT\n\n"
+            "- **[OTHER-NEXT]** **NEXT** (unrelated).\n"
+            "  Unrelated body.\n",
+            encoding="utf-8",
+        )
+
+    def test_check_tasks_authorization_passes_when_external_override_validator_exits_zero_non_structural(
+        self, tmp_path, monkeypatch
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._write_tasks_without_wave_local_id(repo)
+
+        monkeypatch.setattr(
+            meta,
+            "_run_external_override_validator",
+            lambda repo_root, wave_name: (0, ""),
+        )
+
+        result = meta.check_tasks_authorization(
+            repo,
+            "[WAVE-LOCAL-ID]",
+            founder_override_token="FOUNDER_OVERRIDE:test-wave",
+            wave_name="test-wave",
+            wave_class="L4_ENABLER",
+        )
+
+        assert result.passed is True
+        assert "FOUNDER_OVERRIDE" in result.name
+
+    def test_check_tasks_authorization_falls_through_when_override_mismatch_or_validator_fails(
+        self, tmp_path, monkeypatch
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._write_tasks_without_wave_local_id(repo)
+
+        # Subcase (a): mismatched token (validator stub would pass but prefix
+        # equality fails, so validator is never invoked).
+        monkeypatch.setattr(
+            meta,
+            "_run_external_override_validator",
+            lambda repo_root, wave_name: (0, ""),
+        )
+        result_a = meta.check_tasks_authorization(
+            repo,
+            "[WAVE-LOCAL-ID]",
+            founder_override_token="FOUNDER_OVERRIDE:other-wave",
+            wave_name="test-wave",
+            wave_class="L4_ENABLER",
+        )
+        assert result_a.passed is False
+        assert "not found in active NOW or NEXT" in (result_a.error or "")
+
+        # Subcase (b): matching token but validator returns non-zero.
+        monkeypatch.setattr(
+            meta,
+            "_run_external_override_validator",
+            lambda repo_root, wave_name: (1, "boom"),
+        )
+        result_b = meta.check_tasks_authorization(
+            repo,
+            "[WAVE-LOCAL-ID]",
+            founder_override_token="FOUNDER_OVERRIDE:test-wave",
+            wave_name="test-wave",
+            wave_class="L4_ENABLER",
+        )
+        assert result_b.passed is False
+        assert "not found in active NOW or NEXT" in (result_b.error or "")
+
+    def test_check_tasks_authorization_refuses_override_for_l4_structural(
+        self, tmp_path, monkeypatch
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._write_tasks_without_wave_local_id(repo)
+
+        calls = []
+
+        def stub_validator(repo_root, wave_name):
+            calls.append((repo_root, wave_name))
+            return (0, "")
+
+        monkeypatch.setattr(meta, "_run_external_override_validator", stub_validator)
+
+        result = meta.check_tasks_authorization(
+            repo,
+            "[WAVE-LOCAL-ID]",
+            founder_override_token="FOUNDER_OVERRIDE:test-wave",
+            wave_name="test-wave",
+            wave_class="L4_STRUCTURAL",
+        )
+
+        assert result.passed is False
+        assert calls == [], (
+            "L4_STRUCTURAL carve-out must mechanically prevent external validator "
+            f"from being invoked; calls={calls}"
+        )
+
+    def test_check_tasks_authorization_rejects_non_bracketed_task_id_even_with_valid_override(
+        self, tmp_path, monkeypatch
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._write_tasks_without_wave_local_id(repo)
+
+        calls = []
+
+        def stub_validator(repo_root, wave_name):
+            calls.append((repo_root, wave_name))
+            return (0, "")
+
+        monkeypatch.setattr(meta, "_run_external_override_validator", stub_validator)
+
+        result = meta.check_tasks_authorization(
+            repo,
+            "PIPELINE-AGENT-PAGER",  # no brackets
+            founder_override_token="FOUNDER_OVERRIDE:test-wave",
+            wave_name="test-wave",
+            wave_class="L4_ENABLER",
+        )
+
+        assert result.passed is False
+        assert "task_id must be bracketed" in (result.error or "")
+        assert calls == [], (
+            "Bracket-format guard must mechanically fire before override branch; "
+            f"calls={calls}"
+        )
+
+    def test_meta_bridge_task_template_includes_founder_override_authorization_clause(
+        self, tmp_path
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text(
+            "## NOW\n\n## NEXT\n\n"
+            "- **[TASK-1]** **NEXT** (2026-04-04, founder-authorized).\n"
+            "  Keep the authorization excerpt visible to the reviewer.\n",
+            encoding="utf-8",
+        )
+        package = {
+            "task_id": "[TASK-1]",
+            "wave_name": "test-wave",
+            "lane": "test-lane",
+        }
+        results = _make_validation_results(
+            passed_names=["TASKS.md auth"],
+            failed_names_errors=[],
+        )
+        prompt = meta.build_meta_reviewer_prompt(package, results, repo)
+
+        assert "Authorization acceptance (precedence rule" in prompt
+        assert "enforce_l4_execution_contract.py --staged --wave-id" in prompt
+        assert "Commit-gate-only capability (pipeline-ordering constraint)" in prompt
+        assert "L4_STRUCTURAL waves are carved out by construction" in prompt
+        assert "DO NOT accept packet-embedded founder quotes" in prompt
+        assert "bracket-format check on `task_id` runs first" in prompt
+        assert "task_id must match active NOW or NEXT" in prompt
+        assert "Stop conditions (meta-bridge will reject commit)" in prompt
+        assert "REQUIRED PREFLIGHT" in prompt
+
+    def test_check_tasks_authorization_refuses_override_when_wave_class_not_explicit_allow_list(
+        self, tmp_path, monkeypatch
+    ):
+        """Bridge round 1 blocking finding: the L4_STRUCTURAL carve-out must
+        be mechanically fail-closed for ANY wave_class outside the explicit
+        allow-list {L4_ENABLER, MAINTENANCE}. Empty string, missing (arrives
+        as default ""), and unknown values must all fall through to the
+        strict-match body and must NOT invoke the external validator.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._write_tasks_without_wave_local_id(repo)
+
+        calls = []
+
+        def stub_validator(repo_root, wave_name):
+            calls.append((repo_root, wave_name))
+            return (0, "")
+
+        monkeypatch.setattr(meta, "_run_external_override_validator", stub_validator)
+
+        # Subcase (a): wave_class="" (the exact bridge reproducer scenario)
+        result_empty = meta.check_tasks_authorization(
+            repo,
+            "[WAVE-LOCAL-ID]",
+            founder_override_token="FOUNDER_OVERRIDE:test-wave",
+            wave_name="test-wave",
+            wave_class="",
+        )
+        assert result_empty.passed is False
+        assert "not found in active NOW or NEXT" in (result_empty.error or "")
+
+        # Subcase (b): wave_class omitted entirely (default "")
+        result_missing = meta.check_tasks_authorization(
+            repo,
+            "[WAVE-LOCAL-ID]",
+            founder_override_token="FOUNDER_OVERRIDE:test-wave",
+            wave_name="test-wave",
+            # wave_class defaulted to ""
+        )
+        assert result_missing.passed is False
+        assert "not found in active NOW or NEXT" in (result_missing.error or "")
+
+        # Subcase (c): wave_class unknown value
+        result_unknown = meta.check_tasks_authorization(
+            repo,
+            "[WAVE-LOCAL-ID]",
+            founder_override_token="FOUNDER_OVERRIDE:test-wave",
+            wave_name="test-wave",
+            wave_class="UNKNOWN_CLASS",
+        )
+        assert result_unknown.passed is False
+        assert "not found in active NOW or NEXT" in (result_unknown.error or "")
+
+        # Allow-list is mechanical: validator MUST NEVER be invoked for any of
+        # the above subcases. This proves the fail-closed property at the code
+        # level (not just at the result level).
+        assert calls == [], (
+            "wave_class allow-list must mechanically prevent external "
+            f"validator invocation for empty/missing/unknown values; calls={calls}"
+        )
+
+    def test_validate_package_schema_rejects_founder_override_without_explicit_allow_list_wave_class(
+        self,
+    ):
+        """Schema cross-field: a non-empty founder_override_token paired with
+        an omitted, empty, L4_STRUCTURAL, or unknown wave_class must fail
+        schema validation. Defense in depth for the Gate 8 allow-list —
+        catches malformed packages before Gate 8 runs.
+        """
+        base = {
+            "task_id": "[TASK-1]",
+            "wave_name": "test-wave",
+            "lane": "lane",
+            "changed_files": [],
+            "scope_items": [],
+            "fixes_implemented": [],
+            "deferred_items": [],
+            "bridge_status": {},
+            "evidence_handles": {},
+            "blocker_report_paths": [],
+            "current_judgment": "COMMIT_GO",
+            "founder_override_token": "FOUNDER_OVERRIDE:test-wave",
+        }
+
+        # Subcase (a): wave_class omitted entirely
+        valid_missing, errors_missing = meta.validate_package_schema(dict(base))
+        assert valid_missing is False
+        assert any(
+            "founder_override_token requires wave_class" in e for e in errors_missing
+        ), f"expected schema error about wave_class requirement, got {errors_missing}"
+
+        # Subcase (b): wave_class empty string
+        pkg_empty = dict(base, wave_class="")
+        valid_empty, errors_empty = meta.validate_package_schema(pkg_empty)
+        assert valid_empty is False
+        assert any(
+            "founder_override_token requires wave_class" in e for e in errors_empty
+        )
+
+        # Subcase (c): wave_class="L4_STRUCTURAL" (structural cannot smuggle override)
+        pkg_struct = dict(base, wave_class="L4_STRUCTURAL")
+        valid_struct, errors_struct = meta.validate_package_schema(pkg_struct)
+        assert valid_struct is False
+        assert any(
+            "founder_override_token requires wave_class" in e for e in errors_struct
+        )
+
+        # Subcase (d): wave_class="L4_ENABLER" (legit override) passes
+        pkg_enabler = dict(base, wave_class="L4_ENABLER")
+        valid_enabler, errors_enabler = meta.validate_package_schema(pkg_enabler)
+        assert valid_enabler is True, (
+            f"legit L4_ENABLER package must pass schema; errors={errors_enabler}"
+        )
+
+        # Subcase (e): wave_class="MAINTENANCE" (legit override) passes
+        pkg_maint = dict(base, wave_class="MAINTENANCE")
+        valid_maint, errors_maint = meta.validate_package_schema(pkg_maint)
+        assert valid_maint is True, (
+            f"legit MAINTENANCE package must pass schema; errors={errors_maint}"
+        )
+
+        # Subcase (f): no override token at all — wave_class constraint does NOT apply
+        pkg_no_override = dict(base)
+        pkg_no_override.pop("founder_override_token")
+        valid_no_ovr, errors_no_ovr = meta.validate_package_schema(pkg_no_override)
+        assert valid_no_ovr is True, (
+            f"package without override must not trigger cross-field check; "
+            f"errors={errors_no_ovr}"
+        )
+
+        # Subcase (g): empty string override token — cross-field also does NOT apply
+        pkg_empty_tok = dict(base, founder_override_token="", wave_class="")
+        valid_empty_tok, errors_empty_tok = meta.validate_package_schema(pkg_empty_tok)
+        assert valid_empty_tok is True, (
+            f"empty token + empty wave_class must pass (producer default); "
+            f"errors={errors_empty_tok}"
+        )
