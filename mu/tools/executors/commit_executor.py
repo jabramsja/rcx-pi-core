@@ -1965,10 +1965,11 @@ def _abort_merge(repo_root: Path, *, log: Any = None) -> None:
 
 
 def _push_branch(repo_root: Path, branch_name: str) -> tuple[bool, str]:
-    """`git push origin <branch>` with error capture."""
+    """`git push --no-verify origin <branch>` with error capture."""
+    # --no-verify: same rationale as step 12 — pre-push gate already ran in step 11.
     try:
         subprocess.run(
-            ["git", "push", "origin", branch_name],
+            ["git", "push", "--no-verify", "origin", branch_name],
             cwd=repo_root,
             check=True,
             timeout=120,
