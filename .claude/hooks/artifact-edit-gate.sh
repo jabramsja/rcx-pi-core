@@ -1,5 +1,5 @@
 #!/bin/bash
-# artifact-edit-gate.sh — PreToolUse:Edit
+# artifact-edit-gate.sh — PreToolUse:Edit, PreToolUse:Write
 #
 # BLOCKS edits to pipeline artifacts until root-cause investigation has occurred.
 #
