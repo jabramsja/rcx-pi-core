@@ -204,6 +204,21 @@ for _sub_name, _sub_val in [
         )
 
 
+def _extract_founder_override_from_tracker_note(text: str) -> str:
+    """Extract wave-bound FOUNDER_OVERRIDE token from stored tracker-note text.
+
+    Mirrors the extraction rule used in phase_b_executor._extract_founder_override
+    (line-level scan, trailing `` `.,; ``-stripped). Returns the captured wave-id
+    or `""` when no match is present.
+    """
+    if not text:
+        return ""
+    match = re.search(r"FOUNDER_OVERRIDE:\s*(\S+)", text)
+    if not match:
+        return ""
+    return match.group(1).strip().rstrip("`.,;")
+
+
 def _handoff_plan_path(handoff: dict[str, Any]) -> str | None:
     scope_items = handoff.get("scope_items")
     if not isinstance(scope_items, list):
@@ -3717,6 +3732,14 @@ def run_commit_pipeline(
             "evidence_handles": evidence_handles,
             "blocker_report_paths": blocker_paths,
             "current_judgment": "COMMIT_GO",
+            "founder_override_token": (
+                f"FOUNDER_OVERRIDE:{tok}"
+                if (tok := _extract_founder_override_from_tracker_note(
+                    handoff.get("tracker_note_text", "")
+                ))
+                else ""
+            ),
+            "wave_class": handoff.get("wave_class", ""),
         }
 
         scratch_dir = repo_root / ".scratch"
