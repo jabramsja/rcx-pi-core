@@ -22,10 +22,28 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+
+def _caps_disabled() -> bool:
+    """Founder directive 2026-04-20: `RCX_L4_CAPS_ENABLED=0` disables L4 cadence caps.
+
+    Disables: consecutive-MAINTENANCE cap, FOUNDER_OVERRIDE replay check,
+    non-structural adjacency cap. Enum validation, invariant validation,
+    indicator-artifact checks, and required-metadata checks stay ACTIVE.
+
+    Default is "1" (caps enabled) to preserve existing test expectations
+    that exercise cap-firing behavior. Founder disables in practice by
+    setting RCX_L4_CAPS_ENABLED=0 in the shell / ~/.claude/settings.json
+    env scope. CI inherits the default and runs strict enforcement;
+    founder's Claude Code subprocesses pick up the override and skip caps.
+    Matching is case-insensitive.
+    """
+    return os.environ.get("RCX_L4_CAPS_ENABLED", "1").strip().lower() in ("0", "false", "off", "no")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1079,6 +1097,8 @@ def check_consecutive_maintenance(notes: list[dict]) -> tuple[bool, list[str]]:
 
     Returns (passed, errors).
     """
+    if _caps_disabled():
+        return True, []
     if len(notes) < 2:
         return True, []
     if not (notes[0]["wave_class"] == "MAINTENANCE" and notes[1]["wave_class"] == "MAINTENANCE"):
@@ -1216,6 +1236,8 @@ def check_noop_throttle(notes: list[dict]) -> tuple[bool, list[str]]:
 
 def check_founder_override_replay(notes: list[dict]) -> tuple[bool, list[str]]:
     """Founder override replay protection: duplicate IDs in window must fail."""
+    if _caps_disabled():
+        return True, []
     window = notes[:ROLLING_WINDOW]
     seen: dict[str, int] = {}
     for n in window:
@@ -1238,6 +1260,8 @@ def check_non_structural_adjacency(notes: list[dict]) -> tuple[bool, list[str]]:
 
     Founder override on current wave grants bypass.
     """
+    if _caps_disabled():
+        return True, []
     if len(notes) < 2:
         return True, []
     if notes[0]["wave_class"] != "L4_STRUCTURAL" and notes[1]["wave_class"] != "L4_STRUCTURAL":
