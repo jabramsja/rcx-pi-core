@@ -153,21 +153,12 @@ echo "== 1m) L4 execution contract check =="
 # Supports codex/* and jabramsja/* branch naming conventions.
 # Follow-up CI/tooling commits that don't change TASKS.md skip wave-class enforcement.
 L4_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-# Extract wave-id suffix from known branch prefixes
-_l4_extract_wave_id() {
-    local branch="$1"
-    if [[ "$branch" == codex/* ]]; then
-        echo "${branch#codex/}"
-    elif [[ "$branch" == jabramsja/* ]]; then
-        echo "${branch#jabramsja/}"
-    fi
-}
-L4_WAVE_ID_SUFFIX="$(_l4_extract_wave_id "$L4_BRANCH")"
 if git diff --cached --name-only | grep -q .; then
-    L4_WAVE_ID_FLAG=""
-    if [ -n "$L4_WAVE_ID_SUFFIX" ] && git diff --cached --name-only | grep -qx "TASKS.md"; then
-        L4_WAVE_ID_FLAG="--wave-id $L4_WAVE_ID_SUFFIX"
-    fi
+    # Shared exact-match derivation prevents restart branches from forcing a
+    # bogus wave id into the L4 checker when TASKS.md carries the canonical
+    # tracked wave instead.
+    # shellcheck source=/dev/null
+    source tools/checks/derive_wave_id.sh "$L4_BRANCH" --staged
     python3 tools/checks/enforce_l4_execution_contract.py --staged $L4_WAVE_ID_FLAG
 else
     # No staged files — use committed range.
@@ -185,10 +176,8 @@ else
         L4_RANGE_FILES="$(git diff --name-only "$L4_RANGE" 2>/dev/null || true)"
         if [ -n "$L4_RANGE_FILES" ]; then
             echo "No staged files — using committed range $L4_RANGE"
-            L4_WAVE_ID_FLAG=""
-            if [ -n "$L4_WAVE_ID_SUFFIX" ] && echo "$L4_RANGE_FILES" | grep -qx "TASKS.md"; then
-                L4_WAVE_ID_FLAG="--wave-id $L4_WAVE_ID_SUFFIX"
-            fi
+            # shellcheck source=/dev/null
+            source tools/checks/derive_wave_id.sh "$L4_BRANCH" --range "$L4_RANGE"
             python3 tools/checks/enforce_l4_execution_contract.py --range "$L4_RANGE" $L4_WAVE_ID_FLAG
         else
             echo "No staged files, no committed changes in $L4_RANGE — skipping L4 check"
@@ -198,10 +187,8 @@ else
         L4_DIRTY_FILES="$(git diff --name-only | sort -u)"
         if [ -n "$L4_DIRTY_FILES" ]; then
             echo "No staged files, no upstream — checking dirty tracked files only"
-            L4_WAVE_ID_FLAG=""
-            if [ -n "$L4_WAVE_ID_SUFFIX" ] && echo "$L4_DIRTY_FILES" | grep -qx "TASKS.md"; then
-                L4_WAVE_ID_FLAG="--wave-id $L4_WAVE_ID_SUFFIX"
-            fi
+            # shellcheck source=/dev/null
+            source tools/checks/derive_wave_id.sh "$L4_BRANCH" --files "$L4_DIRTY_FILES"
             # shellcheck disable=SC2086
             python3 tools/checks/enforce_l4_execution_contract.py --files $L4_DIRTY_FILES $L4_WAVE_ID_FLAG
         else
