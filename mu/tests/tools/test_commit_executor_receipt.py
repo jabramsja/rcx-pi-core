@@ -264,6 +264,50 @@ class TestSupervisorReceiptIsAuthority:
         assert result["step"] == "validate_receipt"
         assert any("handoff receipt" in e.lower() for e in result["errors"])
 
+    def test_standalone_empty_handoff_receipt_skips_provenance_check(self, tmp_path):
+        """Standalone commit continuations intentionally omit stale handoff receipts."""
+        from collections import namedtuple
+        repo = _setup_repo(tmp_path)
+        (repo / ".agent_bus" / "meta" / "pre_commit_receipt.json").unlink()
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(json.dumps({
+            "decision": "COMMIT_GO",
+            "staged_sha": "fresh",
+            "timestamp_utc": "2026-03-24T00:00:00+00:00",
+        }))
+
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+        fake_result = SupervisorResult(
+            decision="COMMIT_GO", summary="test", receipt_path=sup_receipt_path,
+        )
+
+        handoff = _make_new_schema_handoff(
+            caller="standalone",
+            pre_commit_receipt_path="",
+        )
+        import types
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = lambda *a, **kw: fake_result
+        mock_client.MetaBridgeClientError = Exception
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), \
+             patch.object(
+                 commit_mod,
+                 "_run_post_commit_pipeline",
+                 side_effect=lambda **kwargs: {
+                     **kwargs["result"],
+                     "status": "success",
+                 },
+             ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert "validate_receipt" in result.get("steps_completed", []), (
+            f"Standalone continuation should skip stale handoff receipt provenance. Got: {result}"
+        )
+        assert result.get("handoff_receipt_path") == ""
+        assert result.get("handoff_receipt_decision") == "STANDALONE_SKIP"
+
     def test_supervisor_receipt_decision_still_wins_after_handoff_verification(self, tmp_path):
         """Even with a valid handoff receipt, the fresh supervisor receipt sets the final decision."""
         from collections import namedtuple
@@ -441,6 +485,58 @@ class TestReceiptChainEndToEnd:
         assert "Tracker sync follow-up" in tasks_text
         assert "mu/tools/agents/meta_bridge_supervisor.py" in tasks_text
 
+    def test_mocked_supervisor_import_does_not_leak_temp_agents_path(self, tmp_path):
+        from collections import namedtuple
+        import types
+
+        repo = _setup_repo(tmp_path)
+        stub_agents_dir = repo / "mu" / "tools" / "agents"
+        stub_agents_dir.mkdir(parents=True, exist_ok=True)
+        (stub_agents_dir / "meta_bridge_supervisor.py").write_text(
+            "# temp stub should not leak onto global sys.path\n",
+            encoding="utf-8",
+        )
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        scratch_dir = repo / ".scratch"
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(
+            json.dumps(
+                {
+                    "decision": "COMMIT_GO",
+                    "staged_sha": "fresh_sha_from_step6",
+                    "timestamp_utc": "2026-03-24T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+        fake_result = SupervisorResult(
+            decision="COMMIT_GO",
+            summary="test",
+            receipt_path=sup_receipt_path,
+        )
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = lambda *a, **kw: fake_result
+        mock_client.MetaBridgeClientError = Exception
+        leaked_agents_dir = str(stub_agents_dir)
+        assert leaked_agents_dir not in sys.path
+
+        handoff = _make_new_schema_handoff()
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_run_post_commit_pipeline",
+            side_effect=lambda **kwargs: {
+                "status": "success",
+                "steps_completed": kwargs["result"]["steps_completed"],
+            },
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "success", f"Unexpected commit pipeline result: {result}"
+        assert leaked_agents_dir not in sys.path
+
 
 class TestWaveIdBounds:
     def test_validate_handoff_rejects_overlong_wave_id(self):
@@ -500,6 +596,113 @@ class TestWaveIdBounds:
         assert errors == []
         assert handoff is not None
         assert handoff["commit_message"] == "123"
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
+    def test_build_commit_handoff_allows_standalone_empty_receipt_path(self, tmp_path):
+        repo = _setup_repo(tmp_path)
+        handoff, errors = commit_mod.build_commit_handoff(
+            wave_id="standalone-wave",
+            task_id="[PIPELINE-RECOVERY]",
+            files_to_stage=["file.py"],
+            commit_message="chore: continue standalone-wave staged diff",
+            fixes_implemented=[
+                "Resume standalone continuation for current staged diff: file.py."
+            ],
+            caller="standalone",
+            pre_commit_receipt_path="",
+            repo_root=repo,
+        )
+        assert errors == []
+        assert handoff["caller"] == "standalone"
+        assert handoff["pre_commit_receipt_path"] == ""
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
+    def test_prepare_handoff_from_routing_record_standalone_narrows_to_staged_diff(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        packet_dir = repo / "reports" / "control_plane"
+        packet_dir.mkdir(parents=True, exist_ok=True)
+        (packet_dir / "resume.md").write_text(
+            "# Resume\n"
+            "FOUNDER_OVERRIDE:pipeline-recovery-2026-04-21 "
+            "(founder authorized resumed continuation narrowing)\n",
+            encoding="utf-8",
+        )
+        (repo / "file.py").write_text("# staged now\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "--", "file.py"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+
+        record = {
+            "wave_name": "pipeline-recovery-2026-04-21",
+            "summary": "stale earlier same-wave fixes",
+            "decision": "COMMIT_GO",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "next_candidates": [
+                {
+                    "candidate": "resume",
+                    "tracked_packet": "reports/control_plane/resume.md",
+                }
+            ],
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert errors == []
+        assert handoff is not None
+        assert handoff["caller"] == "standalone"
+        assert handoff["pre_commit_receipt_path"] == ""
+        assert handoff["files_to_stage"] == ["file.py"]
+        assert "stale earlier same-wave fixes" not in handoff["fixes_implemented"][0]
+        assert "FOUNDER_OVERRIDE:pipeline-recovery-2026-04-21" in handoff["tracker_note_text"]
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
+    def test_prepare_handoff_from_routing_record_standalone_regenerates_embedded_handoff(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        (repo / "file.py").write_text("# staged now\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "--", "file.py"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+        embedded = _make_new_schema_handoff(
+            wave_id="pipeline-recovery-2026-04-21",
+            files_to_stage=["old.py"],
+            fixes_implemented=["old stale claim"],
+        )
+        record = {
+            "wave_name": "pipeline-recovery-2026-04-21",
+            "summary": "stale earlier same-wave fixes",
+            "decision": "COMMIT_GO",
+            "handoff": embedded,
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert errors == []
+        assert handoff is not None
+        assert handoff["caller"] == "standalone"
+        assert handoff["pre_commit_receipt_path"] == ""
+        assert handoff["files_to_stage"] == ["file.py"]
+        assert handoff["fixes_implemented"] != ["old stale claim"]
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
@@ -943,7 +1146,7 @@ class TestCommitExecutorPytestGate:
             )
 
         assert result["passed"] is True
-        assert mock_run.call_args.kwargs["timeout"] == 450
+        assert mock_run.call_args.kwargs["timeout"] == 660
 
     def test_run_pytest_on_files_gives_single_large_file_real_slack(self, tmp_path):
         from types import SimpleNamespace
@@ -963,6 +1166,28 @@ class TestCommitExecutorPytestGate:
 
         assert result["passed"] is True
         assert mock_run.call_args.kwargs["timeout"] == 180
+
+    def test_run_pytest_on_files_gives_two_heavy_files_real_slack(self, tmp_path):
+        from types import SimpleNamespace
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        with patch.object(
+            commit_mod.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ) as mock_run:
+            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing 2-file timeout floor after observed 198.857s gate
+                repo,
+                [
+                    "mu/tests/tools/test_phase_b_executor.py",
+                    "mu/tests/tools/test_recovery_gate.py",
+                ],
+            )
+
+        assert result["passed"] is True
+        assert mock_run.call_args.kwargs["timeout"] == 300
 
 
 class TestCIPollFallbackTimeout:

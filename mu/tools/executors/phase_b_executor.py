@@ -2104,33 +2104,45 @@ def prepare_commit_handoff(
 
     Produces the 15-field handoff required by the commit executor state machine.
     """
-    handoff: dict[str, Any] = {
-        "wave_id": wave_id,
-        "task_id": task_id,
-        "wave_class": wave_class,
-        "target_gate_id": target_gate_id,
-        "caller": caller,
-        "branch_prefix": branch_prefix,
-        "tracker_note_text": tracker_note_text,
-        "fixes_implemented": fixes_implemented or [],
-        "files_to_stage": files_to_stage or [],
-        "force_add_files": force_add_files or [],
-        "commit_message": commit_message,
-        "pr_title": pr_title,
-        "pr_body": pr_body,
-        "base_branch": "dev",
-        "pre_commit_receipt_path": pre_commit_receipt_path,
-    }
-    if supervisor_lane is not None:
-        handoff["supervisor_lane"] = supervisor_lane
-    if deferred_items is not None:
-        handoff["deferred_items"] = deferred_items
-    if bridge_status is not None:
-        handoff["bridge_status"] = bridge_status
-    if scope_items is not None:
-        handoff["scope_items"] = scope_items
-    if evidence_handles is not None:
-        handoff["evidence_handles"] = evidence_handles
+    try:
+        from commit_executor import build_commit_handoff
+    except ImportError:
+        import importlib.util as _ilu
+        _commit_path = SCRIPT_DIR / "commit_executor.py"
+        _commit_spec = _ilu.spec_from_file_location("commit_executor", str(_commit_path))
+        _commit_mod = _ilu.module_from_spec(_commit_spec)
+        assert _commit_spec.loader is not None
+        _commit_spec.loader.exec_module(_commit_mod)
+        build_commit_handoff = _commit_mod.build_commit_handoff
+
+    handoff, errors = build_commit_handoff(
+        wave_id=wave_id,
+        task_id=task_id,
+        files_to_stage=list(files_to_stage or []),
+        commit_message=commit_message,
+        fixes_implemented=list(fixes_implemented or []),
+        wave_class=wave_class,
+        target_gate_id=target_gate_id,
+        caller=caller,
+        base_branch="dev",
+        branch_prefix=branch_prefix,
+        force_add_files=list(force_add_files or []),
+        pr_title=pr_title,
+        pr_body=pr_body,
+        tracker_note_text=tracker_note_text or None,
+        supervisor_lane=supervisor_lane,
+        deferred_items=deferred_items,
+        bridge_status=bridge_status,
+        scope_items=scope_items,
+        evidence_handles=evidence_handles,
+        pre_commit_receipt_path=pre_commit_receipt_path,
+        repo_root=repo_root,
+    )
+    if errors:
+        raise PhaseBExecutorError(
+            "Cannot prepare commit handoff via build_commit_handoff: "
+            + "; ".join(errors)
+        )
 
     handoff_dir = repo_root / ".agent_bus" / "executors"
     handoff_dir.mkdir(parents=True, exist_ok=True)
