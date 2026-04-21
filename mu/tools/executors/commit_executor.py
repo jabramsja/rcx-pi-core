@@ -570,6 +570,56 @@ def _collect_wave_test_files(paths: list[str]) -> list[str]:
     return test_files
 
 
+def _normalize_repo_relpath(path: str) -> str:
+    return str(path or "").replace("\\", "/").strip()
+
+
+def _is_tracker_relevant_path(path: str) -> bool:
+    normalized = _normalize_repo_relpath(path)
+    if not normalized or normalized in {"STATUS.md", "TASKS.md"}:
+        return False
+    if normalized.startswith("mu/tools/agents/"):
+        return True
+    if normalized.startswith("rcx_pi/selfhost/"):
+        return True
+    if normalized.startswith("mu/"):
+        return not normalized.startswith(
+            ("mu/docs/", "mu/tools/", "mu/scripts/", "mu/tests/")
+        )
+    return False
+
+
+def _tracker_relevant_paths_for_handoff(
+    files_to_stage: list[str],
+    force_add_files: list[str] | None = None,
+) -> list[str]:
+    seen: set[str] = set()
+    tracker_paths: list[str] = []
+    for raw_path in [*(files_to_stage or []), *((force_add_files or []))]:
+        if not isinstance(raw_path, str):
+            continue
+        normalized = _normalize_repo_relpath(raw_path)
+        if not _is_tracker_relevant_path(normalized):
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        tracker_paths.append(normalized)
+    return tracker_paths
+
+
+def _build_tracker_followup_note(*, wave_id: str, tracker_paths: list[str]) -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    preview = ", ".join(tracker_paths[:3])
+    remainder = len(tracker_paths) - min(len(tracker_paths), 3)
+    if remainder > 0:
+        preview = f"{preview}, +{remainder} more"
+    return (
+        f"- Tracker sync follow-up ({stamp}, {wave_id}): same-wave follow-up commit touched "
+        f"tracker-relevant file(s) without phase/task-state change: {preview}.\n"
+    )
+
+
 def _build_default_tracker_note_text(
     *,
     wave_id: str,
@@ -1007,6 +1057,13 @@ def _is_canonical_tracker_note_line(line: str, wave_id: str) -> bool:
     ))
 
 
+def _is_tracker_followup_note_line(line: str, wave_id: str) -> bool:
+    return bool(re.match(
+        rf"^- Tracker sync follow-up \(([^,]+),\s*{re.escape(wave_id)}\):",
+        line,
+    ))
+
+
 def _matching_tracker_note_indices(lines: list[str], wave_id: str) -> list[int]:
     """Return line indices for tracker-note-shaped lines that reference *wave_id*."""
     pattern = re.compile(rf"(?<![a-z0-9-]){re.escape(wave_id)}(?![a-z0-9-])")
@@ -1030,6 +1087,20 @@ def _matching_tracker_note_indices_in_range(
     return [
         idx for idx in _matching_tracker_note_indices(lines, wave_id)
         if start_idx <= idx < end_idx
+    ]
+
+
+def _matching_tracker_followup_indices_in_range(
+    lines: list[str],
+    wave_id: str,
+    *,
+    start_idx: int,
+    end_idx: int,
+) -> list[int]:
+    return [
+        idx
+        for idx in range(start_idx, end_idx)
+        if _is_tracker_followup_note_line(lines[idx].rstrip("\n"), wave_id)
     ]
 
 
@@ -3884,6 +3955,16 @@ def run_commit_pipeline(
         idx for idx in matching_tracker_indices
         if _is_canonical_tracker_note_line(lines[idx].rstrip("\n"), wave_id)
     ]
+    tracker_followup_indices = _matching_tracker_followup_indices_in_range(
+        lines,
+        wave_id,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+    tracker_relevant_paths = _tracker_relevant_paths_for_handoff(
+        list(handoff["files_to_stage"]),
+        list(handoff.get("force_add_files", [])),
+    )
     note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
 
     if ra_wave_id_count > 1 and not matching_tracker_indices:
@@ -3905,6 +3986,37 @@ def run_commit_pipeline(
             log(f"Step 3: tracker note updated for {wave_id}")
         else:
             log(f"Step 3: tracker note for {wave_id} already present, skipping")
+            tracker_file_staged = any(
+                path in {"TASKS.md", "STATUS.md"}
+                for path in [*handoff["files_to_stage"], *handoff.get("force_add_files", [])]
+                if isinstance(path, str)
+            )
+            if tracker_relevant_paths and not tracker_file_staged:
+                followup_line = _build_tracker_followup_note(
+                    wave_id=wave_id,
+                    tracker_paths=tracker_relevant_paths,
+                )
+                if len(tracker_followup_indices) > 1:
+                    return {
+                        "status": "error",
+                        "step": "ensure_tracker_note",
+                        "errors": [
+                            f"wave_id '{wave_id}' has {len(tracker_followup_indices)} tracker follow-up notes in TASKS.md (duplicate)"
+                        ],
+                        "steps_completed": result["steps_completed"],
+                    }
+                if tracker_followup_indices:
+                    followup_idx = tracker_followup_indices[0]
+                    if lines[followup_idx] != followup_line:
+                        lines[followup_idx] = followup_line
+                        tasks_modified = True
+                        log(f"Step 3: tracker follow-up refreshed for {wave_id}")
+                else:
+                    lines.insert(canonical_idx + 1, followup_line)
+                    tasks_modified = True
+                    log(f"Step 3: tracker follow-up inserted for {wave_id}")
+                if tasks_modified:
+                    tasks_path.write_text("".join(lines), encoding="utf-8")
     elif matching_tracker_indices:
         # Insert after the last tracker note in Ra, or repair a single malformed
         # tracker-note-shaped line for this wave in place.

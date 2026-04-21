@@ -127,7 +127,7 @@ def _filesystem_safe_token(value: Any) -> str:
     return text or "unknown"
 
 
-def _load_bridge_config_with_worktree_heal(repo_root: Path) -> dict[str, Any]:
+def load_bridge_config_with_worktree_heal(repo_root: Path) -> dict[str, Any]:
     """Load bridge config, auto-copying it into linked worktrees when missing."""
     config_path = repo_root / ".agent_bus" / "bridge_config.json"
     if not config_path.exists():
@@ -2447,7 +2447,7 @@ def run_post_merge_review(
     )
 
     try:
-        config = _load_bridge_config_with_worktree_heal(paths.repo_root)
+        config = load_bridge_config_with_worktree_heal(paths.repo_root)
     except Exception as exc:
         raise MetaBridgeError(f"Bridge config load failed: {exc}") from exc
     adapter_name = resolve_role_agent(
@@ -2735,7 +2735,7 @@ def run_meta_review(
     prompt = build_meta_reviewer_prompt(package, validation_results, paths.repo_root)
 
     # Load adapter config
-    config = _load_bridge_config_with_worktree_heal(paths.repo_root)
+    config = load_bridge_config_with_worktree_heal(paths.repo_root)
     adapter_name = resolve_role_agent(
         load_executor_config(paths.repo_root),
         "reviewer",

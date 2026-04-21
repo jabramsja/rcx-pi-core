@@ -920,7 +920,7 @@ def test_load_bridge_config_with_worktree_heal_copies_from_main_repo(tmp_path):
     gitdir.mkdir(parents=True)
     (worktree / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
 
-    config = meta._load_bridge_config_with_worktree_heal(worktree)
+    config = meta.load_bridge_config_with_worktree_heal(worktree)
 
     assert config == {"agents": {}}
     healed = worktree / ".agent_bus" / "bridge_config.json"

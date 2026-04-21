@@ -23,7 +23,59 @@ if REPO_ROOT.name == "mu":
 EXECUTORS_DIR = REPO_ROOT / "mu" / "tools" / "executors"
 if str(EXECUTORS_DIR) not in sys.path:
     sys.path.insert(0, str(EXECUTORS_DIR))
-from executor_common import configured_role_agents, bridge_agent_display_name
+DEFAULT_AGENT_DISPLAY_NAMES = {
+    "claude": "Claude Opus 4.7 max",
+    "codex": "Codex 5.4 xhigh",
+}
+
+
+def _fallback_bridge_agent_display_name(repo_root: Path, agent_name: str) -> str:
+    config_path = repo_root / ".agent_bus" / "bridge_config.json"
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        display_name = (
+            payload.get("agents", {})
+            .get(agent_name, {})
+            .get("display_name", "")
+            .strip()
+        )
+        if display_name:
+            return display_name
+    except Exception:
+        pass
+    return DEFAULT_AGENT_DISPLAY_NAMES.get(agent_name, agent_name.replace("_", " ").title())
+
+
+def _fallback_configured_role_agents(repo_root: Path):
+    role_agents = {"implementer": "codex", "reviewer": "codex"}
+    config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        configured = payload.get("role_agents", {})
+        if isinstance(configured, dict):
+            for role in ("implementer", "reviewer"):
+                raw = configured.get(role)
+                if isinstance(raw, str) and raw.strip():
+                    role_agents[role] = raw.strip()
+    except Exception:
+        pass
+    resolved = {}
+    for role, agent in role_agents.items():
+        display_name = _fallback_bridge_agent_display_name(repo_root, agent)
+        status_name = display_name.split()[0] if display_name.split() else role.title()
+        resolved[role] = {
+            "agent": agent,
+            "display_name": display_name,
+            "status_name": status_name,
+        }
+    return resolved
+
+
+try:
+    from executor_common import configured_role_agents, bridge_agent_display_name
+except Exception:
+    configured_role_agents = _fallback_configured_role_agents
+    bridge_agent_display_name = _fallback_bridge_agent_display_name
 
 PORT = 8099
 

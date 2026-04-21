@@ -18,7 +18,29 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 EXECUTORS_DIR = REPO_ROOT / "mu" / "tools" / "executors"
 if str(EXECUTORS_DIR) not in sys.path:
     sys.path.insert(0, str(EXECUTORS_DIR))
-from executor_common import bridge_agent_display_name
+DEFAULT_AGENT_DISPLAY_NAMES = {
+    "claude": "Claude Opus 4.7 max",
+    "codex": "Codex 5.4 xhigh",
+}
+
+try:
+    from executor_common import bridge_agent_display_name
+except Exception:
+    def bridge_agent_display_name(repo_root: Path, agent_name: str) -> str:
+        config_path = repo_root / ".agent_bus" / "bridge_config.json"
+        try:
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+            display_name = (
+                payload.get("agents", {})
+                .get(agent_name, {})
+                .get("display_name", "")
+                .strip()
+            )
+            if display_name:
+                return display_name
+        except Exception:
+            pass
+        return DEFAULT_AGENT_DISPLAY_NAMES.get(agent_name, agent_name.replace("_", " ").title())
 REFRESH_INTERVAL = 5
 RECOVERY_LOG_REL = Path(".agent_bus") / "recovery" / "recovery_log.json"
 RECOVERY_STATUS_REL = Path(".agent_bus") / "recovery" / "recovery_status.json"

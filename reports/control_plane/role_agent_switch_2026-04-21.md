@@ -56,7 +56,9 @@ Only these files are in scope:
 10. `mu/tests/tools/test_executor_config_alignment.py`
 11. `mu/tests/tools/test_phase_b_executor.py`
 12. `mu/tests/tools/test_meta_bridge_supervisor.py`
-13. `reports/control_plane/role_agent_switch_2026-04-21.md`
+13. `mu/tools/executors/commit_executor.py`
+14. `mu/tests/tools/test_commit_executor_receipt.py`
+15. `reports/control_plane/role_agent_switch_2026-04-21.md`
 
 ## Work Items
 
@@ -101,6 +103,20 @@ Only these files are in scope:
   checkout when available
 - Lock that catch-22 path with a meta-bridge regression so manual worktree
   bridge-config copying stops being required for clean control-plane waves
+
+**F. Pre-push anti-cheat compatibility**
+
+- Keep the regression on a public supervisor helper so `pre-push-fast` does not
+  fail on direct private-attribute access from tests
+- Keep dashboard label lookups fail-open when observability tests stage only the
+  dashboard files into an isolated temp repo without `executor_common.py`
+
+**G. Same-wave tracker follow-up sync**
+
+- When a follow-up commit in the same wave touches tracker-relevant files after
+  the canonical tracker note already exists, have `commit_executor` write a
+  short tracker follow-up note instead of skipping `TASKS.md` and failing later
+  in `pre-commit-doc-check`
 
 ## Constraints
 
