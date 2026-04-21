@@ -159,7 +159,7 @@ if git diff --cached --name-only | grep -q .; then
     # tracked wave instead.
     # shellcheck source=/dev/null
     source tools/checks/derive_wave_id.sh "$L4_BRANCH" --staged
-    python3 tools/checks/enforce_l4_execution_contract.py --staged $L4_WAVE_ID_FLAG
+    python3 tools/checks/enforce_l4_execution_contract.py --staged $WAVE_ID_FLAG
 else
     # No staged files — use committed range.
     # L4 contract must evaluate the FULL wave diff from dev, not per-push
@@ -178,7 +178,7 @@ else
             echo "No staged files — using committed range $L4_RANGE"
             # shellcheck source=/dev/null
             source tools/checks/derive_wave_id.sh "$L4_BRANCH" --range "$L4_RANGE"
-            python3 tools/checks/enforce_l4_execution_contract.py --range "$L4_RANGE" $L4_WAVE_ID_FLAG
+            python3 tools/checks/enforce_l4_execution_contract.py --range "$L4_RANGE" $WAVE_ID_FLAG
         else
             echo "No staged files, no committed changes in $L4_RANGE — skipping L4 check"
         fi
@@ -190,7 +190,7 @@ else
             # shellcheck source=/dev/null
             source tools/checks/derive_wave_id.sh "$L4_BRANCH" --files "$L4_DIRTY_FILES"
             # shellcheck disable=SC2086
-            python3 tools/checks/enforce_l4_execution_contract.py --files $L4_DIRTY_FILES $L4_WAVE_ID_FLAG
+            python3 tools/checks/enforce_l4_execution_contract.py --files $L4_DIRTY_FILES $WAVE_ID_FLAG
         else
             echo "No staged or dirty tracked files — skipping L4 check"
         fi
