@@ -470,7 +470,7 @@ class TestPrepareCommitHandoff:
         assert handoff["pre_commit_receipt_path"] == ".agent_bus/meta/pre_commit_receipts/receipt_2026-03-23.json"
 
     def test_tracker_note_text_in_handoff(self, tmp_path):
-        tracker_note_text = pb_mod._build_phase_b_tracker_note(
+        tracker_note_text = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
             wave_id="test",
             task_id="[T]",
             wave_class="MAINTENANCE",

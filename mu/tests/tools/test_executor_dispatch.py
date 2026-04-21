@@ -685,6 +685,7 @@ class TestPhaseBCommitHandoff:
             task_id="[TEST]",
             wave_class="MAINTENANCE",
             target_gate_id="G8",
+            fixes_implemented=["test handoff"],
             files_to_stage=["a.py"],
             commit_message="feat: test",
             pr_title="feat: test",
@@ -6313,13 +6314,17 @@ class TestPhaseBNewSchemaHandoff:
 
     def test_handoff_includes_tracker_note_text(self, tmp_path):
         """Handoff includes tracker_note_text for commit executor."""
+        tracker_note_text = _make_new_handoff(
+            wave_id="test-wave",
+            target_gate_id="G8",
+        )["tracker_note_text"]
         path = phase_b_mod.prepare_commit_handoff(
             tmp_path,
             wave_id="test-wave",
             task_id="[TEST]",
             wave_class="L4_ENABLER",
             target_gate_id="G8",
-            tracker_note_text="- Tracker sync note (test): test.",
+            tracker_note_text=tracker_note_text,
             fixes_implemented=["fix1"],
             files_to_stage=["a.py"],
             commit_message="feat: test",
@@ -6327,7 +6332,7 @@ class TestPhaseBNewSchemaHandoff:
             pr_body="## Summary\ntest",
         )
         handoff = json.loads(path.read_text())
-        assert handoff["tracker_note_text"] == "- Tracker sync note (test): test."
+        assert handoff["tracker_note_text"] == tracker_note_text
         assert handoff["fixes_implemented"] == ["fix1"]
         assert handoff["force_add_files"] == []
         assert "wave_id" in handoff

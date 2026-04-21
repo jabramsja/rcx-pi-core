@@ -1,24 +1,24 @@
 {
   "wave_id": "pipeline-recovery-2026-04-21",
-  "repeat_run_speedup_ratio": 1.173583,
+  "repeat_run_speedup_ratio": 1.236478,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.444818,
+  "step_growth_slope": 0.406325,
   "repeat_run_raw_seconds": [
-    0.522031,
-    0.444818
+    0.502412,
+    0.406325
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.522031
+      "elapsed_seconds": 0.502412
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.966849
+      "elapsed_seconds": 0.908737
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-21T21:40:44Z",
+  "collection_timestamp_utc": "2026-04-21T22:03:56Z",
   "collector_version": "2.2.0"
 }
