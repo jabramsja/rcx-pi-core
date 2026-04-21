@@ -1771,8 +1771,8 @@ class TestFixImplementerStale:
 
 
 class TestTier2FixesMap:
-    def test_all_six_registered(self):
-        """All 6 Tier 2 failure classes have registered fix functions."""
+    def test_all_seven_registered(self):
+        """All 7 Tier 2 failure classes have registered fix functions."""
         expected = {
             rg_mod.FailureClass.STALE_GIT_INDEX_LOCK,
             rg_mod.FailureClass.PROCESS_TIMEOUT,
@@ -1780,6 +1780,7 @@ class TestTier2FixesMap:
             rg_mod.FailureClass.AGGREGATION_HANG,
             rg_mod.FailureClass.IMPLEMENTER_STALE,
             rg_mod.FailureClass.PR_MERGE_CONFLICT,
+            rg_mod.FailureClass.PR_CONFLICTING,
         }
         assert set(rg_mod._TIER2_FIXES.keys()) == expected  # ANTICHEAT_OK
 
@@ -9426,3 +9427,899 @@ def test_prompt_via_stdin_uses_communicate_input_without_closed_pipe_error(tmp_p
     status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
     assert status["state"] == "tier3_skipped"
     assert status["outcome"] == "skipped"
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for FailureClass.PR_CONFLICTING + fix_pr_conflicting
+# (Work Item E in the Phase A plan for recovery-gate-pr-conflicting-2026-04-20)
+# ---------------------------------------------------------------------------
+
+
+_STEP14_INNER_PAYLOAD = {
+    "status": "error",
+    "step": "wait_ci",
+    "errors": [
+        "PR #999 CONFLICTING/DIRTY and auto-resolve action=aborted: "
+        "conflict in non-TASKS.md files: ['foo.py']; manual recovery required. "
+        "Manual recovery required: `cd <worktree> && git fetch origin dev && "
+        "git merge origin/dev --no-edit` (resolve conflicts manually if any) + "
+        "`RCX_SKIP_RECEIPT_CHECK=1 git commit --no-edit` + "
+        "`git push origin jabramsja/wave-foo` + relaunch commit_executor."
+    ],
+    "steps_completed": ["validate_inputs", "ensure_feature_branch"],
+    "pr_number": "999",
+    "failure_class": "pr_conflicting",
+    "auto_resolve_action": "aborted",
+}
+
+
+class TestClassifyPrConflicting:
+    """Work Item E.1: classifier hits for all 3 signatures (4 sub-shapes)."""
+
+    def test_signature1_unwrapped_top_level(self):
+        """Signature 1 unwrapped: Step 14 payload at top level."""
+        assert rg_mod.classify_failure(dict(_STEP14_INNER_PAYLOAD)) == \
+            FailureClass.PR_CONFLICTING
+
+    def test_signature1_wrapped_on_stdout(self):
+        """Signature 1 wrapped: Step 14 inner payload JSON-stringified on stdout."""
+        wrapped = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        assert rg_mod.classify_failure(wrapped) == FailureClass.PR_CONFLICTING
+
+    def test_signature1_wrapped_on_stderr(self):
+        """Signature 1 wrapped: Step 14 inner payload JSON-stringified on stderr."""
+        wrapped = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stderr": json.dumps(_STEP14_INNER_PAYLOAD),
+            "stdout": "",
+        }
+        assert rg_mod.classify_failure(wrapped) == FailureClass.PR_CONFLICTING
+
+    def test_signature2_mergeable_conflicting_stdout(self):
+        """Signature 2: mergeable=CONFLICTING in stdout (case-insensitive)."""
+        payload = {
+            "status": "error",
+            "stdout": "checking state: mergeable=CONFLICTING right now",
+            "step": "some_step",
+        }
+        assert rg_mod.classify_failure(payload) == FailureClass.PR_CONFLICTING
+
+    def test_signature2_mergeable_conflicting_stderr(self):
+        """Signature 2 variant: mergeable=CONFLICTING in stderr."""
+        payload = {
+            "status": "error",
+            "stderr": "gh output: mergeable=CONFLICTING",
+            "step": "some_step",
+        }
+        assert rg_mod.classify_failure(payload) == FailureClass.PR_CONFLICTING
+
+    def test_signature3_mergestatestatus_dirty_stdout(self):
+        """Signature 3: mergeStateStatus=DIRTY in stdout (case-insensitive)."""
+        payload = {
+            "status": "error",
+            "stdout": "pr state: mergeStateStatus=DIRTY detected",
+            "step": "some_step",
+        }
+        assert rg_mod.classify_failure(payload) == FailureClass.PR_CONFLICTING
+
+    def test_signature3_mergestatestatus_dirty_stderr(self):
+        """Signature 3 variant: mergeStateStatus=DIRTY in stderr."""
+        payload = {
+            "status": "error",
+            "stderr": "gh output: mergeStateStatus=DIRTY",
+            "step": "some_step",
+        }
+        assert rg_mod.classify_failure(payload) == FailureClass.PR_CONFLICTING
+
+    def test_pr_conflicting_is_tier2(self):
+        """FailureClass.PR_CONFLICTING maps to recovery tier 2."""
+        assert rg_mod.tier_for(FailureClass.PR_CONFLICTING) == 2
+
+
+class TestClassifyPrConflictingNegatives:
+    """Work Item E.2: classifier does NOT hit PR_CONFLICTING for unrelated cases."""
+
+    def test_pytest_failure_not_pr_conflicting(self):
+        """A pytest failure envelope must not classify as PR_CONFLICTING."""
+        payload = {
+            "status": "failed",
+            "stdout": "test_foo failed: assertion error",
+            "step": "run_pre_push_script",
+        }
+        assert rg_mod.classify_failure(payload) != FailureClass.PR_CONFLICTING
+
+    def test_shell_nonzero_without_merge_signature_not_pr_conflicting(self):
+        """A generic shell non-zero exit without merge signatures must not classify as PR_CONFLICTING."""
+        payload = {
+            "status": "failed",
+            "exit_code": 1,
+            "stderr": "some random thing happened",
+            "step": "pre_push",
+        }
+        assert rg_mod.classify_failure(payload) != FailureClass.PR_CONFLICTING
+
+    def test_terminal_escalate_not_pr_conflicting(self):
+        """A Tier 4 terminal-status payload must classify as TERMINAL_POLICY, not PR_CONFLICTING."""
+        payload = {
+            "status": "question_for_founder",
+            "stderr": "something happened",
+            "step": "x",
+        }
+        assert rg_mod.classify_failure(payload) == FailureClass.TERMINAL_POLICY
+
+    def test_adjacent_pr_merge_conflict_still_classifies_as_pr_merge_conflict(self):
+        """The adjacent PR_MERGE_CONFLICT signature must NOT be re-routed to PR_CONFLICTING."""
+        inner = {
+            "status": "error",
+            "step": "ensure_review_clear_and_merge",
+            "errors": [
+                "merge_pr.sh failed: X Pull request repo#723 is not mergeable: "
+                "the merge commit cannot be cleanly created."
+            ],
+            "pr_number": "723",
+        }
+        wrapped = {
+            "status": "failed",
+            "step": "commit",
+            "stdout": json.dumps(inner),
+        }
+        assert rg_mod.classify_failure(wrapped) == FailureClass.PR_MERGE_CONFLICT
+
+
+class TestFixPrConflicting:
+    """Work Item E.3-E.10: fixer delegation, preconditions, and return translation."""
+
+    def _install_helper_spy(self, monkeypatch, helper_return):
+        """Patch _load_executor_module_from_repo to return a stub module with a helper spy.
+
+        Returns (spy_calls, spy_fn). The spy records each invocation so tests
+        can assert the helper was called (or not called) and with what args.
+        """
+        spy_calls: list[dict] = []
+
+        def helper_spy(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            spy_calls.append({
+                "repo_root": repo_root,
+                "pr_number": pr_number,
+                "base_branch": base_branch,
+                "branch_name": branch_name,
+                "log": log,
+            })
+            return helper_return
+
+        class _StubModule:
+            _try_auto_resolve_pr_conflict = staticmethod(helper_spy)
+
+        def fake_loader(repo_root, module_name):
+            assert module_name == "commit_executor", \
+                f"fixer must lazy-load 'commit_executor', got {module_name!r}"
+            return _StubModule
+
+        monkeypatch.setattr(rg_mod, "_load_executor_module_from_repo", fake_loader)
+        return spy_calls
+
+    def _install_gh_and_git_stubs(
+        self,
+        monkeypatch,
+        *,
+        status_short_stdout: str = "",
+        status_short_returncode: int = 0,
+        status_short_raises: Exception | None = None,
+        pr_view_stdout: str | None = None,
+        pr_view_returncode: int = 0,
+        pr_view_raises: Exception | None = None,
+        current_branch_stdout: str = "jabramsja/wave-foo",
+        current_branch_returncode: int = 0,
+        current_branch_raises: Exception | None = None,
+    ):
+        """Patch rg_mod.subprocess.run to deterministic stubs for git status +
+        gh pr view + git rev-parse HEAD.
+
+        Returns list of recorded argv calls so tests can assert each spy was
+        (or was not) called. ``current_branch_stdout`` defaults to the
+        ``headRefName`` in the default ``pr_view_stdout`` so the HEAD-matches-
+        branch_name guard passes for the happy path.
+        """
+        if pr_view_stdout is None:
+            pr_view_stdout = json.dumps(
+                {"baseRefName": "dev", "headRefName": "jabramsja/wave-foo"}
+            )
+        calls: list[list[str]] = []
+
+        def fake_run(args, cwd=None, capture_output=False, text=False, timeout=None, **kwargs):
+            calls.append(list(args))
+            if list(args[:3]) == ["git", "status", "--short"]:
+                if status_short_raises is not None:
+                    raise status_short_raises
+                return subprocess.CompletedProcess(
+                    args, status_short_returncode, status_short_stdout, ""
+                )
+            if list(args[:3]) == ["gh", "pr", "view"] and "--json" in args:
+                if pr_view_raises is not None:
+                    raise pr_view_raises
+                return subprocess.CompletedProcess(
+                    args, pr_view_returncode, pr_view_stdout, ""
+                )
+            if list(args[:4]) == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                if current_branch_raises is not None:
+                    raise current_branch_raises
+                return subprocess.CompletedProcess(
+                    args, current_branch_returncode, current_branch_stdout, ""
+                )
+            raise AssertionError(f"unexpected subprocess.run call: {args}")
+
+        monkeypatch.setattr(rg_mod.subprocess, "run", fake_run)
+        return calls
+
+    # ---- E.3: fixer lazy-loads commit_executor + invokes helper with expected args ----
+
+    def test_fixer_invokes_helper_with_expected_args_via_lazy_load(
+        self, tmp_path, monkeypatch
+    ):
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "ok"},
+        )
+        self._install_gh_and_git_stubs(monkeypatch)
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+
+        assert len(spy_calls) == 1
+        call = spy_calls[0]
+        assert call["pr_number"] == "999"
+        assert call["base_branch"] == "dev"
+        assert call["branch_name"] == "jabramsja/wave-foo"
+        assert call["repo_root"] == tmp_path
+        assert out["fixed"] is True
+        assert out["action"] == "clean_merge"
+
+    def test_fixer_uses_structured_base_and_branch_when_present(
+        self, tmp_path, monkeypatch
+    ):
+        """C.3(a): structured base_branch + branch_name bypass gh pr view."""
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "ok"},
+        )
+        # No gh pr view should be issued; enforce via stub assertion.
+        calls: list[list[str]] = []
+
+        def fake_run(args, cwd=None, capture_output=False, text=False, timeout=None, **kwargs):
+            calls.append(list(args))
+            if list(args[:3]) == ["git", "status", "--short"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if list(args[:4]) == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    args, 0, "jabramsja/structured-branch", ""
+                )
+            raise AssertionError(f"unexpected subprocess.run call: {args}")
+
+        monkeypatch.setattr(rg_mod.subprocess, "run", fake_run)
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "pr_number": "777",
+            "base_branch": "dev",
+            "branch_name": "jabramsja/structured-branch",
+            "failure_class": "pr_conflicting",
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is True
+        assert spy_calls[0]["base_branch"] == "dev"
+        assert spy_calls[0]["branch_name"] == "jabramsja/structured-branch"
+        assert not any(call[:3] == ["gh", "pr", "view"] for call in calls)
+
+    # ---- E.4: helper-success translation ----
+
+    def test_fixer_translates_helper_success_to_fixed_true(
+        self, tmp_path, monkeypatch
+    ):
+        self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge",
+             "detail": "merged origin/dev cleanly and pushed"},
+        )
+        self._install_gh_and_git_stubs(monkeypatch)
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out == {
+            "fixed": True,
+            "action": "clean_merge",
+            "detail": "merged origin/dev cleanly and pushed",
+        }
+
+    def test_dispatcher_reports_recovered_true_for_helper_success(
+        self, tmp_path, monkeypatch
+    ):
+        self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "tasks_md_resolved",
+             "detail": "merged + resolved + pushed"},
+        )
+        self._install_gh_and_git_stubs(monkeypatch)
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        r = rg_mod.attempt_recovery(tmp_path, result, "w1")
+        assert r["recovered"] is True
+        assert r["tier"] == 2
+        assert r["failure_class"] == "pr_conflicting"
+        assert r["action"] == "tasks_md_resolved"
+
+    # ---- E.5: helper-failure propagation ----
+
+    def test_fixer_translates_helper_failure_to_fixed_false(
+        self, tmp_path, monkeypatch
+    ):
+        self._install_helper_spy(
+            monkeypatch,
+            {"resolved": False, "action": "aborted",
+             "detail": "conflict in non-TASKS.md files"},
+        )
+        self._install_gh_and_git_stubs(monkeypatch)
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out == {
+            "fixed": False,
+            "action": "aborted",
+            "detail": "conflict in non-TASKS.md files",
+        }
+
+    def test_dispatcher_reports_recovered_false_for_helper_failure(
+        self, tmp_path, monkeypatch
+    ):
+        self._install_helper_spy(
+            monkeypatch,
+            {"resolved": False, "action": "aborted", "detail": "push failed"},
+        )
+        self._install_gh_and_git_stubs(monkeypatch)
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        r = rg_mod.attempt_recovery(tmp_path, result, "w1")
+        assert r["recovered"] is False
+        assert r["tier"] == 2
+        assert r["failure_class"] == "pr_conflicting"
+        assert r["action"] == "aborted"
+
+    # ---- E.6: dirty-worktree fail-closed precondition ----
+
+    def test_fixer_dirty_worktree_returns_fix_result_and_skips_helper(
+        self, tmp_path, monkeypatch
+    ):
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "should not be reached"},
+        )
+        calls = self._install_gh_and_git_stubs(
+            monkeypatch,
+            status_short_stdout=" M foo.py\n?? bar.txt\n",
+        )
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is False
+        assert out["action"] == "dirty_worktree"
+        assert spy_calls == []
+        # gh pr view must NEVER be issued after dirty-worktree guard trips.
+        assert not any(call[:3] == ["gh", "pr", "view"] for call in calls)
+
+    def test_dispatcher_reports_recovered_false_for_dirty_worktree(
+        self, tmp_path, monkeypatch
+    ):
+        self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        self._install_gh_and_git_stubs(
+            monkeypatch,
+            status_short_stdout=" M foo.py\n",
+        )
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        r = rg_mod.attempt_recovery(tmp_path, result, "w1")
+        assert r["recovered"] is False
+        assert r["failure_class"] == "pr_conflicting"
+        assert r["action"] == "dirty_worktree"
+
+    # ---- E.7: missing-branch-context fail-closed preconditions ----
+
+    def test_fixer_missing_headref_in_pr_view_returns_fix_result(
+        self, tmp_path, monkeypatch
+    ):
+        """C.3(d) branch (a) sub-case: gh pr view returns no headRefName."""
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        self._install_gh_and_git_stubs(
+            monkeypatch,
+            pr_view_stdout=json.dumps({"baseRefName": "dev"}),
+        )
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is False
+        assert out["action"] == "missing_branch_context"
+        assert spy_calls == []
+
+    def test_fixer_missing_baseref_in_pr_view_returns_fix_result(
+        self, tmp_path, monkeypatch
+    ):
+        """C.3(d) branch (a) sub-case: gh pr view returns no baseRefName."""
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        self._install_gh_and_git_stubs(
+            monkeypatch,
+            pr_view_stdout=json.dumps({"headRefName": "jabramsja/wave-foo"}),
+        )
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is False
+        assert out["action"] == "missing_branch_context"
+        assert spy_calls == []
+
+    def test_fixer_structured_branch_empty_string_falls_back_to_gh(
+        self, tmp_path, monkeypatch
+    ):
+        """C.3 branch (b) sub-case: structured base_branch non-empty but branch_name is empty → gh pr view fills in."""
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "ok"},
+        )
+        # gh pr view must be issued because structured branch_name is "".
+        self._install_gh_and_git_stubs(monkeypatch)
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "pr_number": "999",
+            "base_branch": "dev",
+            "branch_name": "",
+            "failure_class": "pr_conflicting",
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is True
+        assert spy_calls[0]["base_branch"] == "dev"
+        assert spy_calls[0]["branch_name"] == "jabramsja/wave-foo"
+
+    # ---- E.9: git status failure ----
+
+    def test_fixer_status_failed_raise_returns_fix_result_and_skips_helper(
+        self, tmp_path, monkeypatch
+    ):
+        """C.2 first bullet: subprocess raise → status_failed, no helper, no gh pr view."""
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        calls = self._install_gh_and_git_stubs(
+            monkeypatch,
+            status_short_raises=subprocess.CalledProcessError(1, ["git", "status", "--short"]),
+        )
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is False
+        assert out["action"] == "status_failed"
+        assert spy_calls == []
+        assert not any(call[:3] == ["gh", "pr", "view"] for call in calls)
+
+    def test_fixer_status_failed_nonzero_returns_fix_result_and_skips_helper(
+        self, tmp_path, monkeypatch
+    ):
+        """C.2 first bullet: subprocess non-zero exit → status_failed, no helper, no gh pr view."""
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        calls = self._install_gh_and_git_stubs(
+            monkeypatch,
+            status_short_returncode=128,
+        )
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is False
+        assert out["action"] == "status_failed"
+        assert spy_calls == []
+        assert not any(call[:3] == ["gh", "pr", "view"] for call in calls)
+
+    def test_dispatcher_reports_recovered_false_for_status_failed(
+        self, tmp_path, monkeypatch
+    ):
+        self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        self._install_gh_and_git_stubs(
+            monkeypatch,
+            status_short_returncode=128,
+        )
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        r = rg_mod.attempt_recovery(tmp_path, result, "w1")
+        assert r["recovered"] is False
+        assert r["failure_class"] == "pr_conflicting"
+        assert r["action"] == "status_failed"
+
+    # ---- E.10: gh pr view failure ----
+
+    @pytest.mark.parametrize("kwargs", [
+        {"pr_view_raises": subprocess.CalledProcessError(1, ["gh", "pr", "view"])},
+        {"pr_view_returncode": 1},
+        {"pr_view_stdout": "not valid json"},
+    ])
+    def test_fixer_pr_view_failed_returns_fix_result_and_skips_helper(
+        self, tmp_path, monkeypatch, kwargs
+    ):
+        """C.3(c): raise, non-zero exit, or unparseable JSON → pr_view_failed, no helper."""
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        self._install_gh_and_git_stubs(monkeypatch, **kwargs)
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is False
+        assert out["action"] == "pr_view_failed"
+        assert spy_calls == []
+
+    @pytest.mark.parametrize("kwargs", [
+        {"pr_view_raises": subprocess.CalledProcessError(1, ["gh", "pr", "view"])},
+        {"pr_view_returncode": 1},
+        {"pr_view_stdout": "not valid json"},
+    ])
+    def test_dispatcher_reports_recovered_false_for_pr_view_failed(
+        self, tmp_path, monkeypatch, kwargs
+    ):
+        self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        self._install_gh_and_git_stubs(monkeypatch, **kwargs)
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        r = rg_mod.attempt_recovery(tmp_path, result, "w1")
+        assert r["recovered"] is False
+        assert r["failure_class"] == "pr_conflicting"
+        assert r["action"] == "pr_view_failed"
+
+    # ---- E.5(a) missing pr_number ----
+
+    def test_fixer_missing_pr_number_returns_fix_result_and_skips_helper(
+        self, tmp_path, monkeypatch
+    ):
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        # gh pr view must NEVER be issued because pr_number is missing.
+
+        def fake_run(args, cwd=None, capture_output=False, text=False, timeout=None, **kwargs):
+            raise AssertionError(f"subprocess.run must not be called: {args}")
+
+        monkeypatch.setattr(rg_mod.subprocess, "run", fake_run)
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": "",
+            "failure_class": "pr_conflicting",
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is False
+        assert out["action"] == "missing_pr_number"
+        assert spy_calls == []
+
+    # ---- HEAD-matches-branch_name guard (Bridge Round 1 blocking finding) ----
+    #
+    # The helper commit_executor._try_auto_resolve_pr_conflict merges
+    # origin/<base_branch> into implicit HEAD, then pushes `branch_name`
+    # explicitly. If HEAD is on a different branch than branch_name, the
+    # merge mutates the wrong branch while the push reports success on the
+    # unchanged branch_name — a wrong-branch mutation with success-reporting.
+    # The fixer must prove HEAD == branch_name before delegating.
+
+    def test_fixer_branch_mismatch_returns_fix_result_and_skips_helper(
+        self, tmp_path, monkeypatch
+    ):
+        """HEAD on a different branch than the PR head → branch_mismatch, no helper, no mutation."""
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge",
+             "detail": "should never reach helper"},
+        )
+        self._install_gh_and_git_stubs(
+            monkeypatch,
+            current_branch_stdout="wrong-branch",
+        )
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is False
+        assert out["action"] == "branch_mismatch"
+        assert "wrong-branch" in out["detail"]
+        assert "jabramsja/wave-foo" in out["detail"]
+        assert spy_calls == []
+
+    def test_fixer_detached_head_returns_branch_mismatch(
+        self, tmp_path, monkeypatch
+    ):
+        """Detached HEAD (git rev-parse --abbrev-ref HEAD returns 'HEAD') must not delegate."""
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        self._install_gh_and_git_stubs(
+            monkeypatch,
+            current_branch_stdout="HEAD",
+        )
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is False
+        assert out["action"] == "branch_mismatch"
+        assert spy_calls == []
+
+    def test_dispatcher_reports_recovered_false_for_branch_mismatch(
+        self, tmp_path, monkeypatch
+    ):
+        """Tier-2 dispatcher must report recovered=False on branch_mismatch."""
+        self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        self._install_gh_and_git_stubs(
+            monkeypatch,
+            current_branch_stdout="some-other-branch",
+        )
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        r = rg_mod.attempt_recovery(tmp_path, result, "w1")
+        assert r["recovered"] is False
+        assert r["failure_class"] == "pr_conflicting"
+        assert r["action"] == "branch_mismatch"
+
+    def test_fixer_current_branch_failed_when_rev_parse_raises(
+        self, tmp_path, monkeypatch
+    ):
+        """git rev-parse HEAD subprocess raise → current_branch_failed, no helper."""
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        self._install_gh_and_git_stubs(
+            monkeypatch,
+            current_branch_raises=subprocess.CalledProcessError(
+                1, ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+            ),
+        )
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is False
+        assert out["action"] == "current_branch_failed"
+        assert spy_calls == []
+
+    def test_fixer_current_branch_failed_when_rev_parse_nonzero(
+        self, tmp_path, monkeypatch
+    ):
+        """git rev-parse HEAD non-zero exit → current_branch_failed, no helper."""
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        self._install_gh_and_git_stubs(
+            monkeypatch,
+            current_branch_returncode=128,
+        )
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stdout": json.dumps(_STEP14_INNER_PAYLOAD),
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is False
+        assert out["action"] == "current_branch_failed"
+        assert spy_calls == []
+
+    def test_fixer_branch_mismatch_via_structured_fields(
+        self, tmp_path, monkeypatch
+    ):
+        """Branch-guard also trips on the structured-fields precedence branch."""
+        spy_calls = self._install_helper_spy(
+            monkeypatch,
+            {"resolved": True, "action": "clean_merge", "detail": "x"},
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(args, cwd=None, capture_output=False, text=False, timeout=None, **kwargs):
+            calls.append(list(args))
+            if list(args[:3]) == ["git", "status", "--short"]:
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if list(args[:4]) == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return subprocess.CompletedProcess(args, 0, "dev", "")
+            raise AssertionError(f"unexpected subprocess.run call: {args}")
+
+        monkeypatch.setattr(rg_mod.subprocess, "run", fake_run)
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "pr_number": "777",
+            "base_branch": "dev",
+            "branch_name": "jabramsja/structured-branch",
+            "failure_class": "pr_conflicting",
+        }
+        out = rg_mod.fix_pr_conflicting(tmp_path, result=result)
+        assert out["fixed"] is False
+        assert out["action"] == "branch_mismatch"
+        assert spy_calls == []
+        assert not any(call[:3] == ["gh", "pr", "view"] for call in calls)
+
+
+class TestPrConflictingImportBoundary:
+    """Work Item E.11: module-scope boundary regression tests.
+
+    Acceptance Criterion 7.b requires BOTH an ast-based static check and a
+    subprocess behavioral check to prove commit_executor is not loaded at
+    recovery_gate import time.
+    """
+
+    def test_no_module_scope_load_of_commit_executor(self):
+        """(a) AST-based: every _load_executor_module_from_repo(..., 'commit_executor') call sits inside a FunctionDef."""
+        import ast as _ast
+
+        src_path = _EXECUTORS_DIR / "recovery_gate.py"
+        tree = _ast.parse(src_path.read_text(encoding="utf-8"))
+
+        parent_map: dict[int, _ast.AST] = {}
+        for parent in _ast.walk(tree):
+            for child in _ast.iter_child_nodes(parent):
+                parent_map[id(child)] = parent
+
+        def has_enclosing_function_def(node: _ast.AST) -> bool:
+            current = parent_map.get(id(node))
+            while current is not None:
+                if isinstance(current, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                    return True
+                current = parent_map.get(id(current))
+            return False
+
+        def is_commit_executor_load(call: _ast.Call) -> bool:
+            func = call.func
+            name = None
+            if isinstance(func, _ast.Name):
+                name = func.id
+            elif isinstance(func, _ast.Attribute):
+                name = func.attr
+            if name != "_load_executor_module_from_repo":
+                return False
+            for arg in call.args:
+                if isinstance(arg, _ast.Constant) and arg.value == "commit_executor":
+                    return True
+            for kw in call.keywords:
+                if (
+                    kw.arg == "module_name"
+                    and isinstance(kw.value, _ast.Constant)
+                    and kw.value.value == "commit_executor"
+                ):
+                    return True
+            return False
+
+        offending: list[int] = []
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.Call) and is_commit_executor_load(node):
+                if not has_enclosing_function_def(node):
+                    offending.append(node.lineno)
+
+        assert not offending, (
+            "_load_executor_module_from_repo(..., 'commit_executor') must be "
+            f"called only from inside function bodies; found at module-scope "
+            f"lines: {offending}"
+        )
+
+    def test_import_time_closure_does_not_pull_in_commit_executor(self):
+        """(b) Behavioral: import recovery_gate in a fresh interpreter; sys.modules must not contain commit_executor."""
+        script = (
+            "import sys; "
+            "import mu.tools.executors.recovery_gate as _; "
+            "bare = 'commit_executor' in sys.modules; "
+            "qualified = 'mu.tools.executors.commit_executor' in sys.modules; "
+            "sys.exit(0 if (not bare and not qualified) else 1)"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=_REPO_ROOT,
+            env={**os.environ, "PYTHONHASHSEED": "0"},
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert proc.returncode == 0, (
+            "importing mu.tools.executors.recovery_gate must NOT transitively "
+            "import commit_executor (bare or fully-qualified). "
+            f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+        )
+
+
+class TestPrConflictingModuleImports:
+    """Work Item E.11 grep-style: no module-level commit_executor import."""
+
+    def test_no_module_level_commit_executor_import_in_recovery_gate(self):
+        """Acceptance Criterion 7.a: grep-style import-line check."""
+        src_path = _EXECUTORS_DIR / "recovery_gate.py"
+        lines = src_path.read_text(encoding="utf-8").splitlines()
+        offending: list[tuple[int, str]] = []
+        for idx, line in enumerate(lines, start=1):
+            stripped = line.lstrip()
+            if stripped.startswith(("import ", "from ")):
+                if "commit_executor" in stripped:
+                    offending.append((idx, line))
+        assert not offending, (
+            "recovery_gate.py must not have any top-level import of "
+            f"commit_executor; found: {offending}"
+        )
