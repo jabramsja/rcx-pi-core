@@ -12,9 +12,11 @@ Purpose: Rewrite the subordinate `[PIPELINE-RECOVERY]` Phase A packet so it no l
 - `mu/tools/executors/phase_b_executor.py`
 - `mu/tools/executors/commit_executor.py`
 - `mu/tools/executors/recovery_gate.py`
+- `mu/tools/agents/meta_bridge_supervisor.py`
 - `mu/tests/tools/test_executor_dispatch.py`
 - `mu/tests/tools/test_phase_b_executor.py`
 - `mu/tests/tools/test_recovery_gate.py`
+- `mu/tests/tools/test_meta_bridge_supervisor.py`
 - `reports/control_plane/phase_b_validate_inputs_task_id_leniency_2026_04_20_2026-04-21.md` for Phase A packet authority only
 
 No directory-wide scope is authorized. Commit/recovery discussion is in scope only for the explicit restart-branch handoff truth path: `phase_b_executor.py::prepare_commit_handoff()` / `run_phase_b()`, `commit_executor.py::run_commit_pipeline()` Step 2 `ensure_feature_branch`, and `recovery_gate.py::fix_feature_branch_mismatch()`.
@@ -27,6 +29,7 @@ No directory-wide scope is authorized. Commit/recovery discussion is in scope on
 - If Phase B implements a `validate_inputs` exception, bind it to explicit same-wave metadata available inside `phase_b_executor.py` and the locked packet/routing record path; do not infer allowance from `NOW`, `NEXT`, `bucket`, `anchor`, or any other alias vocabulary that is not itself an authoritative field.
 - Add or adjust adjacent `mu/tests/tools/test_phase_b_executor.py` coverage only for the new explicitly authorized exception path and, if the implementation touches handoff behavior, for the unchanged contract that `task_id` stays the routing anchor while `wave_id` carries wave specificity.
 - Carry explicit restart-branch truth through the commit handoff when this wave is resumed from a restart worktree: if Phase B is already on a safe `jabramsja/...` feature branch that differs from the canonical `jabramsja/{wave_id}` branch, the handoff may carry that exact `target_branch`, and commit/recovery must honor that explicit branch instead of reconstructing only `branch_prefix/wave_id`.
+- If this same restart-branch continuation also carries a bounded single-use `FOUNDER_OVERRIDE:<id>` token, the commit-side Gate 8 supervisor wrapper must pass that token through mechanically to the existing external L4 validator path instead of re-imposing a stricter local `FOUNDER_OVERRIDE:<wave_id>` equality rule that current validator truth does not require.
 
 ## Constraints
 
@@ -35,6 +38,7 @@ No directory-wide scope is authorized. Commit/recovery discussion is in scope on
 - Do not overload commit handoff's single `task_id` field with both lane and wave identity. Keep the routing anchor in `task_id`; keep wave specificity in `wave_id`.
 - Do not widen beyond the `phase_b_executor.py` validation path, its same-file handoff path, and adjacent `phase_b_executor` tests.
 - Do not reopen the broader `[PIPELINE-RECOVERY]` hybrid recovery design, `phase_b_implementer.py`, bridge/meta-review flow, or runtime-delegable scope. `recovery_gate.py` is in scope only for restart-branch handoff truth alignment with the commit surface.
+- Do not widen founder override authority beyond the existing non-structural allow-list plus external `enforce_l4_execution_contract.py --staged --wave-id <wave_id>` validation path. This packet authorizes only removal of the extra local exact-match choke point in `meta_bridge_supervisor.py`.
 - Do not permit arbitrary branch overrides. Any explicit `target_branch` must stay under the existing `branch_prefix` contract and must only preserve the already-active restart/resume feature branch.
 - Do not treat this Phase A rewrite as implementation or closeout.
 
@@ -44,6 +48,7 @@ No directory-wide scope is authorized. Commit/recovery discussion is in scope on
 - Stop if implementing the required proof source or downstream propagation requires changes outside the in-scope executor, recovery, test, and packet files listed above.
 - Stop if the only viable path requires replacing `routing_record.task_id` as the canonical downstream `task_id` or adding a broader multi-file handoff schema change.
 - Stop if the restart-branch fix requires widening PR/cleanup semantics beyond the explicit handoff `target_branch` field, commit Step 2 branch selection, or Tier 1 feature-branch recovery alignment.
+- Stop if continuation override support would require inventing a second authority surface beyond the staged tracker note / package token and the existing external L4 validator.
 - Stop if current code truth already implements and proves the explicit same-wave exception; narrow or close the packet instead of re-listing landed work.
 
 ## Acceptance Criteria
@@ -53,6 +58,7 @@ No directory-wide scope is authorized. Commit/recovery discussion is in scope on
 - The packet authorizes at most one fail-closed `validate_inputs` exception class: an explicit same-wave exception proved from in-scope metadata, not generic `NOW`/`NEXT` or bucket aliasing.
 - Pending test work is limited to the new explicitly authorized exception path and any touched handoff behavior; existing unrelated-mismatch rejection is baseline current-code coverage, not a new unresolved work item.
 - If a resumed wave is already operating on a safe restart branch, the commit handoff may carry explicit `target_branch` truth and the commit/recovery surfaces must honor that branch instead of failing closed on a reconstructed canonical branch collision.
+- If a resumed wave carries an explicit bounded `FOUNDER_OVERRIDE:<id>` token, the commit-side Gate 8 wrapper must accept that same token format when the external L4 validator passes; the wrapper may not fail closed solely because the override ID includes bounded continuation wording beyond bare `wave_id`.
 - No additional implementation file enters scope without an explicit packet update.
 
 ## Grounding / Authorization
@@ -63,3 +69,5 @@ No directory-wide scope is authorized. Commit/recovery discussion is in scope on
 - `mu/tools/executors/phase_b_executor.py` keeps the downstream routing anchor in `prepare_commit_handoff()` and `run_phase_b()`: `task_id` stays on `routing_record.task_id` while `wave_id` carries the specific wave.
 - `mu/tests/tools/test_phase_b_executor.py` already proves both the unrelated-mismatch fail-closed baseline and the tracked same-wave exception path, so this packet does not authorize any broader aliasing rule.
 - Live repo evidence from this same wave showed the follow-on branch-truth gap: `.agent_bus/recovery/recovery_status.json` recorded `failure_class: feature_branch_mismatch` at `step: ensure_feature_branch` because the restart worktree was on `jabramsja/phase-b-validate-inputs-task-id-leniency-restart-2026-04-21` while `.agent_bus/executors/phase_b_handoff.json` still implied the canonical `jabramsja/phase-b-validate-inputs-task-id-leniency-2026-04-20` target branch. That observed stop authorizes the narrow commit/recovery branch-truth alignment in this packet.
+- Founder authorization for this same in-flight wave also permits a single-use governance bypass token `FOUNDER_OVERRIDE:phase-b-validate-inputs-task-id-leniency-2026-04-20-restart-branch-continuation` to clear the non-structural adjacency / rolling-window gate if this restart-branch continuation hardening otherwise blocks at pre-push. This override is bounded to this wave’s commit continuation only and does not widen structural scope.
+- Live supervisor failure on this same wave proved an additional narrow choke point: `.scratch/auto_supervisor_package.json` carried `founder_override_token: FOUNDER_OVERRIDE:phase-b-validate-inputs-task-id-leniency-2026-04-20-restart-branch-continuation`, while `mu/tools/agents/meta_bridge_supervisor.py` Gate 8 still hard-required `founder_override_token == FOUNDER_OVERRIDE:<wave_name>`. The external L4 validator path did not require that equality, so this packet now authorizes removing only that local exact-match mismatch.

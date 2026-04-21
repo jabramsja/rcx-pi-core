@@ -1,24 +1,24 @@
 {
   "wave_id": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
-  "repeat_run_speedup_ratio": 1.178222,
+  "repeat_run_speedup_ratio": 1.03243,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.451758,
+  "step_growth_slope": 0.429416,
   "repeat_run_raw_seconds": [
-    0.532271,
-    0.451758
+    0.443342,
+    0.429416
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.532271
+      "elapsed_seconds": 0.443342
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.984029
+      "elapsed_seconds": 0.872758
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-21T16:07:42Z",
+  "collection_timestamp_utc": "2026-04-21T16:41:49Z",
   "collector_version": "2.2.0"
 }
