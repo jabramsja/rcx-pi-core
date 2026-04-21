@@ -63,6 +63,14 @@ def _load_json_config_backends() -> dict[str, str | None]:
     return json.loads(CONFIG_JSON_PATH.read_text(encoding="utf-8"))["backends"]
 
 
+def _load_default_executor_config_role_agents() -> dict[str, str]:
+    return _load_default_executor_config()["role_agents"]
+
+
+def _load_json_config_role_agents() -> dict[str, str]:
+    return json.loads(CONFIG_JSON_PATH.read_text(encoding="utf-8"))["role_agents"]
+
+
 class TestExecutorConfigJsonValid:
     def test_config_json_exists_and_valid(self):
         assert CONFIG_JSON_PATH.exists(), "executor_config.json missing"
@@ -211,5 +219,18 @@ class TestBackendConfigAlignment:
     def test_bot_remediation_backend_present_in_default_and_live_config(self):
         defaults = _load_default_executor_config_backends()
         live = _load_json_config_backends()
-        assert defaults.get("bot_remediation") == "claude"
-        assert live.get("bot_remediation") == "claude"
+        assert defaults.get("bot_remediation") == "codex"
+        assert live.get("bot_remediation") == "codex"
+
+
+class TestRoleAgentConfigAlignment:
+    def test_role_agents_present_in_default_and_live_config(self):
+        defaults = _load_default_executor_config_role_agents()
+        live = _load_json_config_role_agents()
+        assert defaults == {"implementer": "codex", "reviewer": "codex"}
+        assert live == {"implementer": "codex", "reviewer": "codex"}
+
+    def test_role_agent_keys_match_between_default_and_live_config(self):
+        defaults = _load_default_executor_config_role_agents()
+        live = _load_json_config_role_agents()
+        assert set(defaults) == set(live) == {"implementer", "reviewer"}

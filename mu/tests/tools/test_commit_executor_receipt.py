@@ -360,6 +360,87 @@ class TestReceiptChainEndToEnd:
             f"Step 7 should succeed reading supervisor receipt. Got: {result}"
         )
 
+    def test_same_wave_followup_touches_tasks_when_tracker_relevant_files_change(self, tmp_path):
+        from collections import namedtuple
+
+        repo = _setup_repo(tmp_path)
+        tracker_file = repo / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py"
+        tracker_file.parent.mkdir(parents=True, exist_ok=True)
+        tracker_file.write_text("# tracker relevant change\n", encoding="utf-8")
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        scratch_dir = repo / ".scratch"
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(
+            json.dumps(
+                {
+                    "decision": "COMMIT_GO",
+                    "staged_sha": "fresh_sha_from_step6",
+                    "timestamp_utc": "2026-03-24T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+
+        def mock_supervisor(*a, **kw):
+            return SupervisorResult(
+                decision="COMMIT_GO",
+                summary="test",
+                receipt_path=sup_receipt_path,
+            )
+
+        wave_id = "same-wave-followup"
+        target_gate_id = "G8"
+        tracker_note_text = (
+            f"- Tracker sync note (2026-04-03, {wave_id}): **TEST — receipt handoff note.** "
+            f"Class: L4_ENABLER. target_gate_id: {target_gate_id}. "
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py`. "
+            "evidence_delta: (1) Receipt tests scope the commit handoff. (2) Validation exercises the receipt test module. "
+            "(3) Indicator artifact binds the wave. "
+            "progress_proof_before: Receipt handoff had no validated tracker note. "
+            "progress_proof_after: Receipt handoff now carries a canonical tracker note. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: reports/l4_wave_indicators/{wave_id}.json. "
+            f"indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} --output reports/l4_wave_indicators/{wave_id}.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        )
+        (repo / "TASKS.md").write_text(
+            "## Ra\n\n"
+            f"{tracker_note_text}\n"
+            "\n---\n",
+            encoding="utf-8",
+        )
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            target_gate_id=target_gate_id,
+            files_to_stage=["mu/tools/agents/meta_bridge_supervisor.py"],
+            tracker_note_text=tracker_note_text,
+        )
+        import types
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = mock_supervisor
+        mock_client.MetaBridgeClientError = Exception
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_run_post_commit_pipeline",
+            side_effect=lambda **kwargs: {
+                "status": "success",
+                "steps_completed": kwargs["result"]["steps_completed"],
+            },
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "success", f"Unexpected commit pipeline result: {result}"
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        assert "Tracker sync follow-up" in tasks_text
+        assert "mu/tools/agents/meta_bridge_supervisor.py" in tasks_text
+
 
 class TestWaveIdBounds:
     def test_validate_handoff_rejects_overlong_wave_id(self):

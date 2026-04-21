@@ -29,10 +29,15 @@ refresh_context() {
   REPO_ROOT="$next_root"
   BUS="$REPO_ROOT/.agent_bus"
   BRANCH_NAME="$next_branch"
+  load_role_agent_labels "$REPO_ROOT"
 }
 REPO_ROOT=""
 BUS=""
 BRANCH_NAME=""
+REVIEWER_DISPLAY="Reviewer"
+REVIEWER_SHORT="Reviewer"
+IMPLEMENTER_DISPLAY="Implementer"
+IMPLEMENTER_SHORT="Implementer"
 BOLD="\033[1m" DIM="\033[2m" GREEN="\033[32m" YELLOW="\033[33m"
 RED="\033[31m" CYAN="\033[36m" PURPLE="\033[35m" RESET="\033[0m"
 LAST_HASH=""
@@ -40,6 +45,40 @@ TMPOUT="/tmp/rcx_pane_processes_$$.txt"
 ONESHOT="${RCX_PANE_ONESHOT:-0}"
 FAST_ONESHOT=0
 [ "$ONESHOT" = "1" ] && FAST_ONESHOT=1
+
+load_role_agent_labels() {
+  local root="${1:-$REPO_ROOT}" output="" key="" value=""
+  [ -n "$root" ] || return 0
+  output="$(python3 - "$root" <<'PY' 2>/dev/null
+from pathlib import Path
+import sys
+
+repo_root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(repo_root / "mu" / "tools" / "executors"))
+try:
+    from executor_common import configured_role_agents
+    roles = configured_role_agents(repo_root)
+except Exception:
+    roles = {
+        "reviewer": {"display_name": "Reviewer", "status_name": "Reviewer"},
+        "implementer": {"display_name": "Implementer", "status_name": "Implementer"},
+    }
+
+for role in ("reviewer", "implementer"):
+    data = roles.get(role, {})
+    print(f"{role.upper()}_DISPLAY\t{data.get('display_name', role.title())}")
+    print(f"{role.upper()}_SHORT\t{data.get('status_name', role.title())}")
+PY
+)"
+  while IFS=$'\t' read -r key value; do
+    case "$key" in
+      REVIEWER_DISPLAY) REVIEWER_DISPLAY="$value" ;;
+      REVIEWER_SHORT) REVIEWER_SHORT="$value" ;;
+      IMPLEMENTER_DISPLAY) IMPLEMENTER_DISPLAY="$value" ;;
+      IMPLEMENTER_SHORT) IMPLEMENTER_SHORT="$value" ;;
+    esac
+  done <<< "$output"
+}
 
 pane_max_lines() {
   local lines="${RCX_PANE_MAX_LINES:-}"
@@ -110,7 +149,7 @@ human_phase_b_step() {
   case "$step" in
     agent_review) printf '%s\n' "native SDK agents are auditing the code" ;;
     implementer) printf '%s\n' "the implementer is writing the fix" ;;
-    bridge_review) printf '%s\n' "Codex is reviewing the fix" ;;
+    bridge_review) printf '%s\n' "$REVIEWER_DISPLAY is reviewing the fix" ;;
     needs_phase_b_reentry) printf '%s\n' "waiting to restart Phase B" ;;
     *)
       printf '%s\n' "${step//_/ }"
@@ -185,6 +224,19 @@ pid_command() {
   ps -p "$pid" -o command= 2>/dev/null || true
 }
 
+bridge_agent_name_for_command() {
+  local cmd="$1"
+  if echo "$cmd" | grep -E -i -q '(^|[ /])codex([[:space:]]|$).*(^|[[:space:]])exec([[:space:]]|$)'; then
+    printf '%s\n' "codex"
+    return 0
+  fi
+  if echo "$cmd" | grep -E -i -q '(^|[ /])claude([[:space:]]|$).*--print'; then
+    printf '%s\n' "claude"
+    return 0
+  fi
+  return 1
+}
+
 pid_has_ancestor_matching() {
   local pid="$1" pattern="$2" depth=0 parent="" cmd=""
   while [ "$depth" -lt 8 ]; do
@@ -201,7 +253,7 @@ pid_has_ancestor_matching() {
   return 1
 }
 
-codex_role_for_pid() {
+bridge_role_for_pid() {
   local pid="$1"
   if pid_has_ancestor_matching "$pid" 'bridge_supervisor\.py review|meta_bridge_supervisor'; then
     printf '%s\n' "review"
@@ -261,8 +313,8 @@ while true; do
 
   worker_lines=0
 
-  # Check for Codex workers. Codex can be either reviewer or implementer, so
-  # infer role from the live parent chain instead of hard-coding "reviewer".
+  # Check for bridge-agent workers. The configured reviewer/implementer may be
+  # Codex or Claude, so infer role from the live parent chain.
   codex_review_pids=""
   codex_review_count=0
   codex_review_start=""
@@ -279,8 +331,9 @@ while true; do
       case "$cmd" in
         "bash -c "*|*/bash\ -c\ *|"tee "*) continue ;;
       esac
+      bridge_agent_name_for_command "$cmd" >/dev/null || continue
       pid_matches_repo_root "$pid" || continue
-      role="$(codex_role_for_pid "$pid")"
+      role="$(bridge_role_for_pid "$pid")"
       s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
       started_ts=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
       case "$role" in
@@ -300,7 +353,7 @@ while true; do
           [ -z "$codex_unknown_start" ] && codex_unknown_start="$started_ts"
           ;;
       esac
-  done < <(pgrep -f "codex.*exec.*gpt" 2>/dev/null | head -5 || true)
+    done < <(pgrep -f "codex.*exec|claude.*--print" 2>/dev/null | head -5 || true)
   fi
   if [ "$codex_review_count" -gt 0 ]; then
     if [ "$worker_lines" -eq 0 ]; then
@@ -309,7 +362,7 @@ while true; do
     fi
     worker_lines=$((worker_lines + 1))
     echo -e ""
-    echo -e "  ${YELLOW}REVIEWING${RESET}  Codex GPT-5.4 xhigh"
+    echo -e "  ${YELLOW}REVIEWING${RESET}  $REVIEWER_DISPLAY"
     echo -e "  ${DIM}$codex_review_count process(es)$([ -n "$codex_review_start" ] && echo " · $(elapsed_str "$codex_review_start")") | PIDs: ${codex_review_pids%% }${RESET}"
     echo -e "  ${DIM}Checking implementation for bugs, security issues,${RESET}"
     echo -e "  ${DIM}protocol violations, and code quality.${RESET}"
@@ -321,7 +374,7 @@ while true; do
     fi
     worker_lines=$((worker_lines + 1))
     echo -e ""
-    echo -e "  ${PURPLE}IMPLEMENTING${RESET}  Codex GPT-5.4 xhigh"
+    echo -e "  ${PURPLE}IMPLEMENTING${RESET}  $IMPLEMENTER_DISPLAY"
     echo -e "  ${DIM}$codex_impl_count process(es)$([ -n "$codex_impl_start" ] && echo " · $(elapsed_str "$codex_impl_start")") | PIDs: ${codex_impl_pids%% }${RESET}"
     echo -e "  ${DIM}Writing code changes based on the current fix plan.${RESET}"
   fi
@@ -332,47 +385,9 @@ while true; do
     fi
     worker_lines=$((worker_lines + 1))
     echo -e ""
-    echo -e "  ${CYAN}WORKING${RESET}  Codex GPT-5.4 xhigh"
+    echo -e "  ${CYAN}WORKING${RESET}  Bridge agent subprocess"
     echo -e "  ${DIM}$codex_unknown_count process(es)$([ -n "$codex_unknown_start" ] && echo " · $(elapsed_str "$codex_unknown_start")") | PIDs: ${codex_unknown_pids%% }${RESET}"
     echo -e "  ${DIM}Role could not be inferred from the current parent chain.${RESET}"
-  fi
-
-  # Check for Claude (implementer — must have --print flag, not interactive sessions)
-  claude_pids=""
-  claude_count=0
-  claude_start=""
-  if [ "$FAST_ONESHOT" != "1" ]; then
-    while IFS= read -r pid; do
-      [ -z "$pid" ] && continue
-      pid_matches_repo_root "$pid" || continue
-      cmd=$(ps -p "$pid" -o command= 2>/dev/null) || continue
-      # Skip shell wrappers — they contain --print in embedded eval strings
-      case "$cmd" in
-        "bash -c "*|*/bash\ -c\ *|"tee "*) continue ;;
-      esac
-      # Only count implementer processes (have --print), skip interactive sessions
-      if echo "$cmd" | grep -q "\-\-print"; then
-        claude_pids="${claude_pids}${pid} "
-        claude_count=$((claude_count + 1))
-        if [ -z "$claude_start" ]; then
-          s=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs)
-          claude_start=$(date -j -f "%c" "$s" +%s 2>/dev/null || echo "")
-        fi
-      fi
-  done < <(pgrep -f "claude.*--print" 2>/dev/null | head -3 || true)
-  fi
-  if [ "$claude_count" -gt 0 ]; then
-    if [ "$worker_lines" -eq 0 ]; then
-      echo -e "${BOLD}WHO'S WORKING${RESET}"
-      echo "─────────────────────────────────────"
-    fi
-    worker_lines=$((worker_lines + 1))
-    # Collect PIDs into a comma-separated string
-    claude_pid_list=$(echo "${claude_pids%% }" | tr ' ' ',')
-    echo -e ""
-    echo -e "  ${PURPLE}IMPLEMENTING${RESET}  Claude Opus 4.6 max"
-    echo -e "  ${DIM}$claude_count process(es)$([ -n "$claude_start" ] && echo " · $(elapsed_str "$claude_start")") | PIDs: $claude_pid_list${RESET}"
-    echo -e "  ${DIM}Writing code changes based on the fix plan.${RESET}"
   fi
 
   # Check for SDK agents
@@ -416,7 +431,7 @@ else:
     echo -e "  ${DIM}Running parallel security and correctness checks.${RESET}"
   fi
 
-  if [ "$codex_review_count" -eq 0 ] && [ "$codex_impl_count" -eq 0 ] && [ "$codex_unknown_count" -eq 0 ] && [ "$claude_count" -eq 0 ] && [ -z "$agent_pid" ] && [ "$phase" != "idle" ]; then
+  if [ "$codex_review_count" -eq 0 ] && [ "$codex_impl_count" -eq 0 ] && [ "$codex_unknown_count" -eq 0 ] && [ -z "$agent_pid" ] && [ "$phase" != "idle" ]; then
     if [ "$worker_lines" -eq 0 ]; then
       echo -e "${BOLD}WHO'S WORKING${RESET}"
       echo "─────────────────────────────────────"
@@ -464,7 +479,7 @@ else:
     if [ -n "$agent_pid" ]; then
       step="agent_review"
       phase_b_is_live=1
-    elif [ "$claude_count" -gt 0 ] || [ "$codex_impl_count" -gt 0 ]; then
+    elif [ "$codex_impl_count" -gt 0 ]; then
       step="implementer"
       phase_b_is_live=1
     elif [ "$codex_review_count" -gt 0 ] || [ "$codex_unknown_count" -gt 0 ]; then
@@ -588,26 +603,42 @@ else:
     echo "─────────────────────────────────────" >> "$TMPOUT"
 
     if echo "$activity_source" | grep -q "implementer"; then
-      # Claude stream-json: parse tool calls and thinking
-      tail -20 "$activity_source" 2>/dev/null | python3 -c "
+      # Parse the current structured implementer transcript with a text fallback.
+      tail -30 "$activity_source" 2>/dev/null | python3 -c "
 import json, sys
-for line in sys.stdin:
+
+raw_lines = sys.stdin.read().splitlines()
+events = []
+for line in raw_lines:
+    stripped = line.strip()
+    if not stripped:
+        continue
     try:
-        evt = json.loads(line.strip())
-        if evt.get('type') != 'assistant': continue
-        for b in evt.get('message',{}).get('content',[]):
-            bt = b.get('type','')
-            if bt == 'tool_use':
-                name = b.get('name','?')
-                inp = b.get('input',{})
-                d = inp.get('file_path','') or inp.get('command','')[:70] or inp.get('pattern','')[:50] or ''
-                d = d.split('WorkingRCX/')[-1] if 'WorkingRCX/' in d else d
-                print(f'  \033[36m{name}\033[0m {d}')
-            elif bt == 'text':
-                t = b.get('text','').strip().split(chr(10))[0][:90]
-                if t: print(f'  \033[2m{t}\033[0m')
-    except: pass
-" 2>/dev/null | tail -6 >> "$TMPOUT"
+        evt = json.loads(stripped)
+    except Exception:
+        continue
+    if evt.get('type') == 'item.completed':
+        item = evt.get('item', {})
+        if item.get('type') == 'agent_message':
+            text = item.get('text', '').strip()
+            if text:
+                events.append(text.split(chr(10))[0][:90])
+        continue
+    if evt.get('type') == 'assistant':
+        for block in evt.get('message', {}).get('content', []):
+            if block.get('type') == 'text':
+                text = block.get('text', '').strip()
+                if text:
+                    events.append(text.split(chr(10))[0][:90])
+if events:
+    for item in events[-6:]:
+        print(f'  \033[2m{item}\033[0m')
+else:
+    for line in raw_lines[-6:]:
+        text = line.strip()
+        if text:
+            print(f'  \033[2m{text[:90]}\033[0m')
+" 2>/dev/null >> "$TMPOUT"
 
     elif echo "$activity_source" | grep -q "rollout\|codex/sessions"; then
       # Codex JSONL: parse tool calls and token counts

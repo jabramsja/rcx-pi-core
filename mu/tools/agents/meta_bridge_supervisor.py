@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -35,7 +36,13 @@ if str(EXECUTORS_DIR) not in sys.path:
     sys.path.insert(0, str(EXECUTORS_DIR))
 
 from bridge_adapters import BridgeAdapterError, get_adapter, load_bridge_config, run_adapter
-from executor_common import ensure_not_agent_review_mode, ExecutorCommonError
+from executor_common import (
+    ensure_not_agent_review_mode,
+    ExecutorCommonError,
+    bridge_agent_display_name,
+    load_executor_config,
+    resolve_role_agent,
+)
 
 # Namespace isolation: meta-bridge uses .agent_bus/meta/ subdirectory
 META_BUS_DIR_NAME = ".agent_bus/meta"
@@ -118,6 +125,31 @@ def _filesystem_safe_token(value: Any) -> str:
     text = re.sub(r"[^A-Za-z0-9._\-\[\]]+", "-", text)
     text = text.strip("-.")
     return text or "unknown"
+
+
+def load_bridge_config_with_worktree_heal(repo_root: Path) -> dict[str, Any]:
+    """Load bridge config, auto-copying it into linked worktrees when missing."""
+    config_path = repo_root / ".agent_bus" / "bridge_config.json"
+    if not config_path.exists():
+        git_pointer = repo_root / ".git"
+        try:
+            if git_pointer.is_file():
+                content = git_pointer.read_text(encoding="utf-8").strip()
+                if content.startswith("gitdir:"):
+                    gitdir_str = content.split("gitdir:", 1)[1].strip()
+                    if gitdir_str:
+                        gitdir = Path(gitdir_str)
+                        if not gitdir.is_absolute():
+                            gitdir = repo_root / gitdir
+                        gitdir = gitdir.resolve()
+                        main_repo = gitdir.parent.parent.parent
+                        src = main_repo / ".agent_bus" / "bridge_config.json"
+                        if src.exists():
+                            config_path.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(src, config_path)
+        except Exception:
+            pass
+    return load_bridge_config(config_path)
 
 
 class MetaBridgeState(Enum):
@@ -1498,9 +1530,9 @@ def _recover_adapter_envelope(
 
     if parse_errors:
         raise MetaBridgeError(
-            f"Codex adapter failed: {exc}. {label} recovery also failed: {'; '.join(parse_errors)}"
+            f"Bridge adapter failed: {exc}. {label} recovery also failed: {'; '.join(parse_errors)}"
         ) from exc
-    raise MetaBridgeError(f"Codex adapter failed: {exc}") from exc
+    raise MetaBridgeError(f"Bridge adapter failed: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -2408,20 +2440,24 @@ def run_post_merge_review(
     verbose: bool = False,
     timeout_s: int = 1200,
 ) -> dict[str, Any]:
-    """Run Codex post-merge reviewer and return parsed envelope."""
+    """Run the configured post-merge reviewer and return the parsed envelope."""
     import uuid
     prompt = build_post_merge_prompt(
         package, validation_results, paths.repo_root, derived_files, rollout_order
     )
 
     try:
-        config = load_bridge_config(paths.repo_root / ".agent_bus" / "bridge_config.json")
+        config = load_bridge_config_with_worktree_heal(paths.repo_root)
     except Exception as exc:
         raise MetaBridgeError(f"Bridge config load failed: {exc}") from exc
-    adapter_name = os.environ.get("RCX_BRIDGE_REVIEWER_OVERRIDE", "codex")
+    adapter_name = resolve_role_agent(
+        load_executor_config(paths.repo_root),
+        "reviewer",
+    )
+    reviewer_label = bridge_agent_display_name(paths.repo_root, adapter_name)
 
     if verbose:
-        print(f"[post-merge] Running Codex post-merge review (timeout: {timeout_s}s)...")
+        print(f"[post-merge] Running {reviewer_label} post-merge review (timeout: {timeout_s}s)...")
 
     task_token = _filesystem_safe_token(package.get("task_id", "unknown"))
     job_id = f"postmerge-{task_token}-{uuid.uuid4().hex[:8]}"
@@ -2460,7 +2496,7 @@ def run_post_merge_review(
             label="Post-merge review",
         )
     except Exception as exc:
-        raise MetaBridgeError(f"Codex adapter failed: {exc}") from exc
+        raise MetaBridgeError(f"{reviewer_label} adapter failed: {exc}") from exc
 
     try:
         return parse_post_merge_envelope(output)
@@ -2694,16 +2730,20 @@ def run_meta_review(
     verbose: bool = False,
     timeout_s: int = 1200,
 ) -> dict[str, Any]:
-    """Run Codex meta-reviewer and return parsed envelope."""
+    """Run the configured meta-reviewer and return the parsed envelope."""
     import uuid
     prompt = build_meta_reviewer_prompt(package, validation_results, paths.repo_root)
 
     # Load adapter config
-    config = load_bridge_config(paths.repo_root / ".agent_bus" / "bridge_config.json")
-    adapter_name = os.environ.get("RCX_BRIDGE_REVIEWER_OVERRIDE", "codex")
+    config = load_bridge_config_with_worktree_heal(paths.repo_root)
+    adapter_name = resolve_role_agent(
+        load_executor_config(paths.repo_root),
+        "reviewer",
+    )
+    reviewer_label = bridge_agent_display_name(paths.repo_root, adapter_name)
 
     if verbose:
-        print(f"[meta-bridge] Running Codex meta-review (timeout: {timeout_s}s)...")
+        print(f"[meta-bridge] Running {reviewer_label} meta-review (timeout: {timeout_s}s)...")
 
     # Generate job/turn IDs for this meta-review
     task_token = _filesystem_safe_token(package.get("task_id", "unknown"))
@@ -2746,7 +2786,7 @@ def run_meta_review(
             label="Meta-review",
         )
     except Exception as exc:
-        raise MetaBridgeError(f"Codex adapter failed: {exc}") from exc
+        raise MetaBridgeError(f"{reviewer_label} adapter failed: {exc}") from exc
 
     try:
         return parse_meta_envelope(output)

@@ -405,7 +405,7 @@ class TestLoadExecutorConfig:
 
     def test_missing_config_returns_defaults(self, tmp_path):
         config = impl_mod.load_executor_config(tmp_path)
-        assert config["backends"]["phase_b_executor"] == "claude"
+        assert config["backends"]["phase_b_executor"] == "codex"
         assert config["hybrid_recovery_enabled"] is True
 
     def test_existing_config_loaded(self, tmp_path):
@@ -413,13 +413,16 @@ class TestLoadExecutorConfig:
         config_dir.mkdir(parents=True)
         config_file = config_dir / "executor_config.json"
         config_file.write_text(json.dumps({
-            "backends": {"phase_b_executor": "claude"},
+            "role_agents": {"implementer": "claude"},
             "model_overrides": {"phase_b_executor": "sonnet"},
             "timeouts": {"phase_b_executor": 600},
             "hybrid_recovery_enabled": True,
         }))
         config = impl_mod.load_executor_config(tmp_path)
+        assert config["role_agents"]["implementer"] == "claude"
+        assert config["backends"]["phase_a_executor"] == "claude"
         assert config["backends"]["phase_b_executor"] == "claude"
+        assert config["backends"]["bot_remediation"] == "claude"
         assert config["model_overrides"]["phase_b_executor"] == "sonnet"
         assert config["timeouts"]["phase_b_executor"] == 600
         assert config["hybrid_recovery_enabled"] is True
@@ -1636,12 +1639,13 @@ class TestBridgeRenderAssociation:
     def test_run_bridge_review_uses_configured_reviewer(self, tmp_path, monkeypatch):
         """Phase B bridge review must honor executor-configured reviewer backend."""
         # Unset env override so the test exercises config-driven reviewer selection,
-        # not the global RCX_BRIDGE_REVIEWER_OVERRIDE env var.
+        # not the reviewer override environment vars.
+        monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
         config_dir = tmp_path / "mu" / "tools" / "executors"
         config_dir.mkdir(parents=True)
         (config_dir / "executor_config.json").write_text(
-            json.dumps({"bridge_reviewers": {"phase_b": "claude"}}),
+            json.dumps({"role_agents": {"reviewer": "claude"}}),
             encoding="utf-8",
         )
         with patch.object(pb_mod, "_run_bridge_review_subprocess") as mock_run:

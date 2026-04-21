@@ -20,6 +20,63 @@ _resolved = Path(__file__).resolve()
 REPO_ROOT = _resolved.parent.parent.parent
 if REPO_ROOT.name == "mu":
     REPO_ROOT = REPO_ROOT.parent
+EXECUTORS_DIR = REPO_ROOT / "mu" / "tools" / "executors"
+if str(EXECUTORS_DIR) not in sys.path:
+    sys.path.insert(0, str(EXECUTORS_DIR))
+DEFAULT_AGENT_DISPLAY_NAMES = {
+    "claude": "Claude Opus 4.7 max",
+    "codex": "Codex 5.4 xhigh",
+}
+
+
+def _fallback_bridge_agent_display_name(repo_root: Path, agent_name: str) -> str:
+    config_path = repo_root / ".agent_bus" / "bridge_config.json"
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        display_name = (
+            payload.get("agents", {})
+            .get(agent_name, {})
+            .get("display_name", "")
+            .strip()
+        )
+        if display_name:
+            return display_name
+    except Exception:
+        pass
+    return DEFAULT_AGENT_DISPLAY_NAMES.get(agent_name, agent_name.replace("_", " ").title())
+
+
+def _fallback_configured_role_agents(repo_root: Path):
+    role_agents = {"implementer": "codex", "reviewer": "codex"}
+    config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        configured = payload.get("role_agents", {})
+        if isinstance(configured, dict):
+            for role in ("implementer", "reviewer"):
+                raw = configured.get(role)
+                if isinstance(raw, str) and raw.strip():
+                    role_agents[role] = raw.strip()
+    except Exception:
+        pass
+    resolved = {}
+    for role, agent in role_agents.items():
+        display_name = _fallback_bridge_agent_display_name(repo_root, agent)
+        status_name = display_name.split()[0] if display_name.split() else role.title()
+        resolved[role] = {
+            "agent": agent,
+            "display_name": display_name,
+            "status_name": status_name,
+        }
+    return resolved
+
+
+try:
+    from executor_common import configured_role_agents, bridge_agent_display_name
+except Exception:
+    configured_role_agents = _fallback_configured_role_agents
+    bridge_agent_display_name = _fallback_bridge_agent_display_name
+
 PORT = 8099
 
 
@@ -37,6 +94,55 @@ def pid_start(pid):
             return datetime.strptime(r.stdout.strip(), "%c").timestamp()
     except Exception:
         return None
+
+
+def pid_ppid(pid):
+    try:
+        r = subprocess.run(["ps", "-p", str(pid), "-o", "ppid="], capture_output=True, text=True, timeout=3)
+        if r.returncode == 0 and r.stdout.strip():
+            return int(r.stdout.strip())
+    except Exception:
+        return None
+    return None
+
+
+def pid_command(pid):
+    try:
+        r = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=3)
+        if r.returncode == 0:
+            return r.stdout.strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def pid_has_ancestor_matching(pid, pattern, max_depth=8):
+    current = pid
+    for _ in range(max_depth):
+        parent = pid_ppid(current)
+        if not parent or parent == 1:
+            return False
+        if re.search(pattern, pid_command(parent) or ""):
+            return True
+        current = parent
+    return False
+
+
+def bridge_role_for_pid(pid):
+    if pid_has_ancestor_matching(pid, r"bridge_supervisor\.py review|meta_bridge_supervisor"):
+        return "reviewer"
+    if pid_has_ancestor_matching(pid, r"phase_b_executor\.py|phase_a_executor\.py|commit_executor\.py"):
+        return "implementer"
+    return "worker"
+
+
+def _bridge_agent_name_for_command(line):
+    lowered = line.lower()
+    if "codex" in lowered and " exec" in lowered and "codex.app" not in lowered and "codex helper" not in lowered:
+        return "codex"
+    if "claude" in lowered and "--print" in lowered:
+        return "claude"
+    return None
 
 
 def _is_observability_noise(line):
@@ -68,14 +174,16 @@ def detect_subs(lines):
     for l in lines:
         if "grep" in l or _is_observability_noise(l):
             continue
-        # Codex CLI reviewer: must have "codex exec" + "gpt" (not Codex.app desktop helpers)
-        if "codex" in l.lower() and "exec" in l and "gpt" in l and "Codex.app" not in l and "Codex Helper" not in l:
+        agent_name = _bridge_agent_name_for_command(l)
+        if agent_name:
             pid = int(l.split()[1])
-            subs.append({"name": "Codex 5.4 xhigh", "role": "reviewer", "pid": pid, "started": pid_start(pid)})
-        # Claude implementer: must have --print (not interactive sessions)
-        elif "claude" in l.lower() and "--print" in l:
-            pid = int(l.split()[1])
-            subs.append({"name": "Claude opus 4.6", "role": "implementer", "pid": pid, "started": pid_start(pid)})
+            subs.append({
+                "agent": agent_name,
+                "name": bridge_agent_display_name(REPO_ROOT, agent_name),
+                "role": bridge_role_for_pid(pid),
+                "pid": pid,
+                "started": pid_start(pid),
+            })
         # SDK agents
         elif "run_review.py" in l:
             pid = int(l.split()[1])
@@ -252,11 +360,15 @@ def model_activity():
     """Get real-time activity from all three model output streams."""
     now = time.time()
     feeds = []
+    role_agents = configured_role_agents(REPO_ROOT)
+    reviewer_agent = role_agents["reviewer"]["agent"]
+    reviewer_label = role_agents["reviewer"]["display_name"]
+    implementer_label = role_agents["implementer"]["display_name"]
 
-    # 1. Codex reviewer: session JSONL (structured events)
+    # 1. Reviewer session JSONL (Codex only; Claude has no equivalent local stream here)
     codex_sessions = Path.home() / ".codex" / "sessions"
     codex_jsonl = None
-    if codex_sessions.exists():
+    if reviewer_agent == "codex" and codex_sessions.exists():
         today = datetime.now().strftime("%Y/%m/%d")
         today_dir = codex_sessions / today
         if today_dir.exists():
@@ -337,7 +449,7 @@ def model_activity():
     if codex_events:
         age = round(now - codex_jsonl.stat().st_mtime)
         feeds.append({
-            "source": "Codex GPT-5.4 xhigh",
+            "source": reviewer_label,
             "role": "reviewer",
             "file": codex_jsonl.name,
             "age": age,
@@ -345,7 +457,7 @@ def model_activity():
             "status": "active" if age < 60 else "stale" if age < 300 else "idle",
         })
 
-    # 2. Raw reviewer output (plain text from Codex stdout)
+    # 2. Raw reviewer output from the configured reviewer backend
     raw_dir = REPO_ROOT / ".agent_bus" / "raw"
     if raw_dir.exists():
         reviewer_file, reviewer_mtime = _newest_file(
@@ -356,7 +468,7 @@ def model_activity():
         if reviewer_file and (now - reviewer_mtime) < 1800 and reviewer_file.stat().st_size > 0:
             lines = _tail_lines(reviewer_file, 20)
             feeds.append({
-                "source": "Codex Review Output",
+                "source": f"{reviewer_label} Review Output",
                 "role": "reviewer_raw",
                 "file": reviewer_file.name,
                 "age": round(now - reviewer_mtime),
@@ -365,13 +477,13 @@ def model_activity():
                 "status": "active" if (now - reviewer_mtime) < 60 else "stale" if (now - reviewer_mtime) < 300 else "done",
             })
 
-    # 3. Implementer output (Claude stream-JSON)
+    # 3. Implementer output (Codex JSONL, with legacy Claude stream-json fallback)
     scratch = REPO_ROOT / ".scratch"
     impl_file, impl_mtime = _newest_file(scratch.glob("phase_b_implementer_output_*.txt"))
     if impl_file and (now - impl_mtime) < 1800 and impl_file.stat().st_size > 0:
-        impl_events = _parse_claude_stream_json(impl_file)
+        impl_events = _parse_implementer_output(impl_file)
         feeds.append({
-            "source": "Claude Opus 4.6 max",
+            "source": implementer_label,
             "role": "implementer",
             "file": impl_file.name,
             "age": round(now - impl_mtime),
@@ -383,8 +495,12 @@ def model_activity():
     return feeds
 
 
-def _parse_claude_stream_json(path, tail=80):
-    """Parse Claude --output-format stream-json into human-readable events."""
+def _parse_implementer_output(path, tail=80):
+    """Parse implementer output into human-readable events.
+
+    Supports the current Codex JSONL adapter output and the older Claude
+    stream-json transcript format as a fallback for historical artifacts.
+    """
     events = []
     try:
         lines = path.read_text(errors="replace").splitlines()[-tail:]
@@ -393,6 +509,21 @@ def _parse_claude_stream_json(path, tail=80):
     for line in lines:
         try:
             evt = json.loads(line.strip())
+            if evt.get("type") == "item.completed":
+                item = evt.get("item", {})
+                if item.get("type") == "agent_message":
+                    text = item.get("text", "").strip()
+                    if not text:
+                        continue
+                    first_line = text.split("\n")[0][:120]
+                    if first_line:
+                        events.append({
+                            "time": "",
+                            "action": "thinking",
+                            "detail": first_line,
+                            "kind": "text",
+                        })
+                continue
             etype = evt.get("type", "")
             if etype == "assistant":
                 msg = evt.get("message", {})
@@ -472,6 +603,9 @@ def wave_context():
 
 def build_narrative(phase, subs, wave, lock, history):
     """Build a plain-English explanation of what the pipeline is doing right now."""
+    role_agents = configured_role_agents(REPO_ROOT)
+    reviewer_label = role_agents["reviewer"]["display_name"]
+    implementer_label = role_agents["implementer"]["display_name"]
     ph = (phase or {}).get("phase", "idle")
     started = (phase or {}).get("started")
     elapsed_s = (time.time() - started) if started else 0
@@ -498,30 +632,30 @@ def build_narrative(phase, subs, wave, lock, history):
     elif ph == "phase-a":
         lines.append({"text": "Phase A: Planning what to fix.", "style": "normal"})
         if reviewers:
-            lines.append({"text": f"Codex (GPT-5.4 xhigh) is analyzing the codebase to produce a fix plan.", "style": "detail"})
+            lines.append({"text": f"{reviewer_label} is analyzing the codebase to produce a fix plan.", "style": "detail"})
         lines.append({"text": f"Running for {elapsed_str}.", "style": "dim"})
     elif ph == "phase-b":
         if "bridge" in step or lock:
             # Bridge review is active
             if reviewers:
-                lines.append({"text": f"Codex (GPT-5.4 xhigh) is reviewing Claude's implementation.", "style": "reviewer"})
+                lines.append({"text": f"{reviewer_label} is reviewing the current implementation.", "style": "reviewer"})
                 lines.append({"text": f"Bridge review round {br} of {mr}.", "style": "detail"})
                 lines.append({"text": f"The reviewer checks for bugs, security issues, and protocol violations.", "style": "dim"})
             elif implementers:
-                lines.append({"text": f"Claude (Opus 4.6 max) is writing the code changes.", "style": "implementer"})
+                lines.append({"text": f"{implementer_label} is writing the code changes.", "style": "implementer"})
                 lines.append({"text": f"Implementing fixes based on the Phase A plan.", "style": "dim"})
             else:
                 lines.append({"text": f"Phase B: Implementation + review cycle.", "style": "normal"})
                 lines.append({"text": f"Bridge round {br} of {mr}.", "style": "detail"})
         else:
-            lines.append({"text": f"Phase B: Claude (Opus 4.6 max) is implementing fixes.", "style": "implementer"})
+            lines.append({"text": f"Phase B: {implementer_label} is implementing fixes.", "style": "implementer"})
             if step:
                 lines.append({"text": f"Current step: {step}", "style": "detail"})
         lines.append({"text": f"Running for {elapsed_str}.", "style": "dim"})
     elif ph == "bridge":
         lines.append({"text": f"Bridge supervisor is coordinating review round {br}.", "style": "normal"})
         if reviewers:
-            lines.append({"text": f"Codex (GPT-5.4 xhigh) is reviewing — {len(reviewers)} process(es) active.", "style": "reviewer"})
+            lines.append({"text": f"{reviewer_label} is reviewing — {len(reviewers)} process(es) active.", "style": "reviewer"})
         lines.append({"text": f"Running for {elapsed_str}.", "style": "dim"})
     elif ph == "commit":
         lines.append({"text": "Commit executor: pushing code through the 15-step gate.", "style": "normal"})
@@ -574,6 +708,9 @@ def implementer_changes():
 
 def session_timeline():
     """Build a chronological timeline of pipeline events."""
+    role_agents = configured_role_agents(REPO_ROOT)
+    reviewer_short = role_agents["reviewer"]["status_name"]
+    implementer_short = role_agents["implementer"]["status_name"]
     events = []
     now = time.time()
     cutoff = now - 6 * 3600  # last 6 hours
@@ -588,9 +725,9 @@ def session_timeline():
         ts = f.stat().st_mtime
         size = f.stat().st_size
         if size > 100000:
-            add(ts, f"Claude done — {size // 1024}KB output", "implementer")
+            add(ts, f"{implementer_short} done — {size // 1024}KB output", "implementer")
         else:
-            add(ts, "Claude implementing...", "implementer")
+            add(ts, f"{implementer_short} implementing...", "implementer")
 
     # Agent reviews
     for f in sorted(scratch.glob("phase_b_agent_review_*.status.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:5]:
@@ -624,7 +761,7 @@ def session_timeline():
                     content = rf.read_text(errors="replace")
                     matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", content, re.DOTALL))
                     if not matches:
-                        add(ts, "Codex reviewing...", "active")
+                        add(ts, f"{reviewer_short} reviewing...", "active")
                         continue
                     env = json.loads(matches[-1].group(1))
                     dec = env.get("decision", "?")
@@ -632,18 +769,18 @@ def session_timeline():
                     blk = sum(1 for f in findings if f.get("disposition") == "blocking")
                     nb = sum(1 for f in findings if f.get("disposition") != "blocking")
                     if dec in ("GO", "COMMIT_GO"):
-                        add(ts, f"Codex: GO ({nb} advisory)", "good")
+                        add(ts, f"{reviewer_short}: GO ({nb} advisory)", "good")
                     elif dec == "NO_GO":
-                        add(ts, f"Codex: NO_GO ({blk} blocker, {nb} advisory)", "bad")
+                        add(ts, f"{reviewer_short}: NO_GO ({blk} blocker, {nb} advisory)", "bad")
                     elif dec == "REQUEST_CHANGES":
-                        add(ts, f"Codex: REQUEST_CHANGES ({blk}B {nb}NB)", "warning")
+                        add(ts, f"{reviewer_short}: REQUEST_CHANGES ({blk}B {nb}NB)", "warning")
                     else:
-                        add(ts, f"Codex: {dec}", "normal")
+                        add(ts, f"{reviewer_short}: {dec}", "normal")
                 except Exception:
                     pass
             # Review start time from reader file
             for rf in d.glob("*reader*.txt"):
-                add(rf.stat().st_mtime, "Codex reviewing...", "active")
+                add(rf.stat().st_mtime, f"{reviewer_short} reviewing...", "active")
 
     # Git commits
     try:
@@ -664,9 +801,13 @@ def session_timeline():
     # Determine current activity for the marker
     marker = "idle"
     try:
-        subprocess.run(["pgrep", "-f", "codex.*exec.*gpt"], capture_output=True, timeout=3).returncode == 0 and (marker := "Codex reviewing now")
-        subprocess.run(["pgrep", "-f", "claude.*--print"], capture_output=True, timeout=3).returncode == 0 and (marker := "Claude implementing now")
-        subprocess.run(["pgrep", "-f", "run_review.py"], capture_output=True, timeout=3).returncode == 0 and (marker := "SDK agents running now")
+        subs = detect_subs(ps_lines())
+        if any(sub.get("role") == "reviewer" for sub in subs):
+            marker = f"{reviewer_short} reviewing now"
+        elif any(sub.get("role") == "implementer" for sub in subs):
+            marker = f"{implementer_short} implementing now"
+        elif any(sub.get("role") == "auditor" for sub in subs):
+            marker = "SDK agents running now"
     except Exception:
         pass
 
@@ -831,6 +972,7 @@ def get_state():
     psl = ps_lines()
     phase = detect_phase(psl)
     subs = detect_subs(psl)
+    role_agents = configured_role_agents(REPO_ROOT)
     agents = agent_status()
     jobs = db_latest_jobs()
     gs = git_status()
@@ -870,6 +1012,7 @@ def get_state():
     return {
         "timestamp": datetime.now().isoformat(),
         "phase": phase,
+        "role_agents": role_agents,
         "subprocesses": subs,
         "bridge_history": history[-12:],
         "agents": agents,
@@ -1084,6 +1227,23 @@ function elapsed(ts) {
 
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function decClass(d) { return 'dec-'+(d||'').toLowerCase().replace(/[^a-z_]/g,''); }
+function roleAgent(data, role) {
+  const fallbackName = role === 'reviewer' ? 'Reviewer' : 'Implementer';
+  return (data.role_agents && data.role_agents[role]) || {
+    display_name: fallbackName,
+    status_name: fallbackName,
+  };
+}
+function roleAvatar(data, role) {
+  const statusName = (roleAgent(data, role).status_name || '').trim();
+  const lower = statusName.toLowerCase();
+  if (lower === 'codex') return 'Cx';
+  if (lower === 'claude') return 'Cl';
+  const compact = statusName.replace(/[^A-Za-z0-9]/g, '');
+  if (!compact) return '?';
+  if (compact.length === 1) return compact.toUpperCase();
+  return compact[0].toUpperCase() + compact[1].toLowerCase();
+}
 
 function colorLogLine(line) {
   const l = line.toLowerCase();
@@ -1161,6 +1321,8 @@ function renderNarrative(data) {
 function renderSidebar(data) {
   const p = data.phase || {};
   const subs = data.subprocesses || [];
+  const reviewerAgent = roleAgent(data, 'reviewer');
+  const implementerAgent = roleAgent(data, 'implementer');
   const wave = data.wave;
   const recovery = data.recovery;
   const agents = data.agents;
@@ -1183,10 +1345,10 @@ function renderSidebar(data) {
   if (reviewerSubs.length) {
     const oldest = reviewerSubs.reduce((a,b) => (a.started||Infinity) < (b.started||Infinity) ? a : b);
     html += `<div class="model-card active">
-      <div class="model-avatar reviewer">Cx</div>
+      <div class="model-avatar reviewer">${esc(roleAvatar(data, 'reviewer'))}</div>
       <div class="model-info">
         <div class="model-role reviewing">REVIEWING</div>
-        <div class="model-name">Codex GPT-5.4 xhigh</div>
+        <div class="model-name">${esc(reviewerAgent.display_name)}</div>
         <div class="model-meta">${reviewerSubs.length} process${reviewerSubs.length>1?'es':''} &middot; ${elapsed(oldest.started)}</div>
       </div>
     </div>`;
@@ -1194,10 +1356,10 @@ function renderSidebar(data) {
   if (implSubs.length) {
     const oldest = implSubs.reduce((a,b) => (a.started||Infinity) < (b.started||Infinity) ? a : b);
     html += `<div class="model-card active">
-      <div class="model-avatar implementer">Cl</div>
+      <div class="model-avatar implementer">${esc(roleAvatar(data, 'implementer'))}</div>
       <div class="model-info">
         <div class="model-role implementing">IMPLEMENTING</div>
-        <div class="model-name">Claude Opus 4.6 max</div>
+        <div class="model-name">${esc(implementerAgent.display_name)}</div>
         <div class="model-meta">${implSubs.length} process${implSubs.length>1?'es':''} &middot; ${elapsed(oldest.started)}</div>
       </div>
     </div>`;
@@ -1372,6 +1534,8 @@ function renderMain(data) {
   const history = data.bridge_history || [];
   const log = data.log_tail || {};
   const activity = data.model_activity || [];
+  const reviewerAgent = roleAgent(data, 'reviewer');
+  const implementerAgent = roleAgent(data, 'implementer');
 
   let html = '';
 
@@ -1495,7 +1659,7 @@ function renderMain(data) {
   // Guidance
   html += `<div style="margin-top:12px;padding:10px;background:var(--bg-2);border-radius:6px;font-size:11px;color:var(--text-muted);line-height:1.7">
     <span style="font-weight:600">What's normal:</span>
-    Claude implements (5-15m) &rarr; SDK agents check (3-5m) &rarr; Codex reviews (10-20m) &rarr; repeat if needed.<br>
+    ${esc(implementerAgent.display_name)} implements (5-15m) &rarr; SDK agents check (3-5m) &rarr; ${esc(reviewerAgent.display_name)} reviews (10-20m) &rarr; repeat if needed.<br>
     NO_GO is normal &mdash; usually takes 2-3 rounds to converge. GO means ready to commit.
   </div>`;
 
