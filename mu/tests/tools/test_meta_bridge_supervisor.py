@@ -2253,12 +2253,29 @@ class TestStartupFlowSuppressionGatePath:
 
 class TestCheckTasksAuthorizationFounderOverride:
     """Gate 8 FOUNDER_OVERRIDE branch: non-structural waves with an
-    externally-validated override token + wave_name may auto-pass Gate 8
+    externally-validated override token may auto-pass Gate 8
     even when task_id lacks a live NOW/NEXT anchor."""
 
-    def _write_tasks_without_wave_local_id(self, repo_dir):
+    def _write_tasks_without_wave_local_id(self, repo_dir, *, founder_override: str | None = None):
         """Fixture: TASKS.md has NOW/NEXT but not [WAVE-LOCAL-ID]."""
+        tracker = ""
+        if founder_override:
+            tracker = (
+                "- Tracker sync note (2026-04-21, test-wave): "
+                "**TEST-WAVE — bounded override.** "
+                "Class: L4_ENABLER. "
+                "target_gate_id: G8. "
+                f"FOUNDER_OVERRIDE:{founder_override}. "
+                "primary_blocker_class: INTEGRATION. "
+                "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/test-wave.json. "
+                "indicator_collection_command: python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id test-wave. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+                "boot0_track_id: V1. "
+                "boot0_progress_state: HOLD.\n\n"
+            )
         (repo_dir / "TASKS.md").write_text(
+            tracker +
             "## NOW\n\n"
             "- **[OTHER-TASK]** **NOW** (unrelated).\n"
             "  Unrelated body.\n\n"
@@ -2273,7 +2290,10 @@ class TestCheckTasksAuthorizationFounderOverride:
     ):
         repo = tmp_path / "repo"
         repo.mkdir()
-        self._write_tasks_without_wave_local_id(repo)
+        self._write_tasks_without_wave_local_id(
+            repo,
+            founder_override="test-wave-restart-branch-continuation",
+        )
 
         monkeypatch.setattr(
             meta,
@@ -2284,7 +2304,7 @@ class TestCheckTasksAuthorizationFounderOverride:
         result = meta.check_tasks_authorization(
             repo,
             "[WAVE-LOCAL-ID]",
-            founder_override_token="FOUNDER_OVERRIDE:test-wave",
+            founder_override_token="FOUNDER_OVERRIDE:test-wave-restart-branch-continuation",
             wave_name="test-wave",
             wave_class="L4_ENABLER",
         )
@@ -2292,52 +2312,105 @@ class TestCheckTasksAuthorizationFounderOverride:
         assert result.passed is True
         assert "FOUNDER_OVERRIDE" in result.name
 
-    def test_check_tasks_authorization_falls_through_when_override_mismatch_or_validator_fails(
+    def test_check_tasks_authorization_accepts_continuation_specific_override_ids(
         self, tmp_path, monkeypatch
     ):
         repo = tmp_path / "repo"
         repo.mkdir()
-        self._write_tasks_without_wave_local_id(repo)
+        self._write_tasks_without_wave_local_id(
+            repo,
+            founder_override="test-wave-restart-branch-continuation",
+        )
 
-        # Subcase (a): mismatched token (validator stub would pass but prefix
-        # equality fails, so validator is never invoked).
+        calls = []
+
+        def stub_validator(repo_root, wave_name):
+            calls.append((repo_root, wave_name))
+            return (0, "")
+
         monkeypatch.setattr(
             meta,
             "_run_external_override_validator",
-            lambda repo_root, wave_name: (0, ""),
+            stub_validator,
         )
-        result_a = meta.check_tasks_authorization(
+
+        result = meta.check_tasks_authorization(
             repo,
             "[WAVE-LOCAL-ID]",
-            founder_override_token="FOUNDER_OVERRIDE:other-wave",
+            founder_override_token="FOUNDER_OVERRIDE:test-wave-restart-branch-continuation",
             wave_name="test-wave",
             wave_class="L4_ENABLER",
         )
-        assert result_a.passed is False
-        assert "not found in active NOW or NEXT" in (result_a.error or "")
+        assert result.passed is True
+        assert "FOUNDER_OVERRIDE" in result.name
+        assert calls == [(repo, "test-wave")]
 
-        # Subcase (b): matching token but validator returns non-zero.
+    def test_check_tasks_authorization_falls_through_when_package_token_mismatches_staged_tracker_token(
+        self, tmp_path, monkeypatch
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._write_tasks_without_wave_local_id(
+            repo,
+            founder_override="test-wave-tracker-token",
+        )
+
+        calls = []
+
+        def stub_validator(repo_root, wave_name):
+            calls.append((repo_root, wave_name))
+            return (0, "")
+
+        monkeypatch.setattr(
+            meta,
+            "_run_external_override_validator",
+            stub_validator,
+        )
+        result = meta.check_tasks_authorization(
+            repo,
+            "[WAVE-LOCAL-ID]",
+            founder_override_token="FOUNDER_OVERRIDE:test-wave-package-token",
+            wave_name="test-wave",
+            wave_class="L4_ENABLER",
+        )
+        assert result.passed is False
+        assert "not found in active NOW or NEXT" in (result.error or "")
+        assert calls == []
+
+    def test_check_tasks_authorization_falls_through_when_override_validator_fails(
+        self, tmp_path, monkeypatch
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._write_tasks_without_wave_local_id(
+            repo,
+            founder_override="test-wave-restart-branch-continuation",
+        )
+
         monkeypatch.setattr(
             meta,
             "_run_external_override_validator",
             lambda repo_root, wave_name: (1, "boom"),
         )
-        result_b = meta.check_tasks_authorization(
+        result = meta.check_tasks_authorization(
             repo,
             "[WAVE-LOCAL-ID]",
-            founder_override_token="FOUNDER_OVERRIDE:test-wave",
+            founder_override_token="FOUNDER_OVERRIDE:test-wave-restart-branch-continuation",
             wave_name="test-wave",
             wave_class="L4_ENABLER",
         )
-        assert result_b.passed is False
-        assert "not found in active NOW or NEXT" in (result_b.error or "")
+        assert result.passed is False
+        assert "not found in active NOW or NEXT" in (result.error or "")
 
     def test_check_tasks_authorization_refuses_override_for_l4_structural(
         self, tmp_path, monkeypatch
     ):
         repo = tmp_path / "repo"
         repo.mkdir()
-        self._write_tasks_without_wave_local_id(repo)
+        self._write_tasks_without_wave_local_id(
+            repo,
+            founder_override="test-wave",
+        )
 
         calls = []
 
@@ -2366,7 +2439,10 @@ class TestCheckTasksAuthorizationFounderOverride:
     ):
         repo = tmp_path / "repo"
         repo.mkdir()
-        self._write_tasks_without_wave_local_id(repo)
+        self._write_tasks_without_wave_local_id(
+            repo,
+            founder_override="test-wave",
+        )
 
         calls = []
 

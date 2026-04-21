@@ -2296,7 +2296,6 @@ class TestEnsureFeatureBranch:
             check=True,
         ).stdout.strip()
         assert current == "jabramsja/test-wave-id-restart-2026-04-21"
-
     def test_11_remote_collision_errors(self, tmp_path):
         """Test 11: Remote branch collision → error (mocked)."""
         repo, env = _init_git_repo(tmp_path)

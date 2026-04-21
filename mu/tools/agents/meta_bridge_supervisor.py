@@ -34,8 +34,12 @@ if str(SCRIPT_DIR) not in sys.path:
 EXECUTORS_DIR = SCRIPT_DIR.parent / "executors"
 if str(EXECUTORS_DIR) not in sys.path:
     sys.path.insert(0, str(EXECUTORS_DIR))
+CHECKS_DIR = SCRIPT_DIR.parent / "checks"
+if str(CHECKS_DIR) not in sys.path:
+    sys.path.insert(0, str(CHECKS_DIR))
 
 from bridge_adapters import BridgeAdapterError, get_adapter, load_bridge_config, run_adapter
+from enforce_l4_execution_contract import parse_tracker_notes
 from executor_common import (
     ensure_not_agent_review_mode,
     ExecutorCommonError,
@@ -342,6 +346,32 @@ def _extract_now_next_text(repo_root: Path) -> tuple[str, str]:
     if next_match:
         active += next_match.group(1)
     return active, ""
+
+
+def _staged_tracker_override_matches_wave(
+    repo_root: Path,
+    *,
+    wave_name: str,
+    founder_override_token: str,
+) -> bool:
+    """Return True when TASKS.md binds *wave_name* to the exact override token."""
+    if not wave_name or not founder_override_token:
+        return False
+    tasks_path = repo_root / "TASKS.md"
+    if not tasks_path.exists():
+        return False
+    try:
+        content = tasks_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    for note in parse_tracker_notes(content):
+        if note.get("wave_id") != wave_name:
+            continue
+        override_id = note.get("founder_override")
+        if not isinstance(override_id, str) or not override_id:
+            continue
+        return founder_override_token == f"FOUNDER_OVERRIDE:{override_id}"
+    return False
 
 
 def _extract_task_authorization_context(repo_root: Path, task_id: str) -> str:
@@ -653,14 +683,16 @@ def check_tasks_authorization(
     """Gate 8: Check task_id is in active NOW or NEXT section of TASKS.md.
 
     Override branch (commit-executor supervisor invocation only): when the
-    staged package carries a `founder_override_token` exactly equal to
-    `FOUNDER_OVERRIDE:<wave_name>` AND `wave_class` is NOT `L4_STRUCTURAL`
-    AND `tools/checks/enforce_l4_execution_contract.py --staged --wave-id
-    <wave_name>` exits 0, Gate 8 auto-passes. On any other outcome the
-    branch falls through to the existing strict-match body. The
-    bracket-format guard runs first and still fail-fasts on malformed
-    task_id values even when a valid override token + wave_name are
-    present.
+    staged package carries a non-empty `founder_override_token` beginning
+    with `FOUNDER_OVERRIDE:`, that exact token matches the staged tracker-note
+    override for `wave_name`, `wave_class` is NOT `L4_STRUCTURAL`, and
+    `tools/checks/enforce_l4_execution_contract.py --staged --wave-id
+    <wave_name>` exits 0, Gate 8 auto-passes. This keeps the package token
+    bound to the same staged authority surface the external validator proves,
+    without re-imposing a fake `FOUNDER_OVERRIDE:<wave_name>` rule. On any
+    other outcome the branch falls through to the existing strict-match body.
+    The bracket-format guard runs first and still fail-fasts on malformed
+    task_id values even when a valid override token + wave_name are present.
     """
     active_section, error = _extract_now_next_text(repo_root)
     if error:
@@ -710,11 +742,19 @@ def check_tasks_authorization(
         and isinstance(wave_name, str)
         and founder_override_token
         and wave_name
-        and founder_override_token == f"FOUNDER_OVERRIDE:{wave_name}"
+        and founder_override_token.startswith("FOUNDER_OVERRIDE:")
+        and _staged_tracker_override_matches_wave(
+            repo_root,
+            wave_name=wave_name,
+            founder_override_token=founder_override_token,
+        )
     ):
         exit_code, _validator_output = _run_external_override_validator(repo_root, wave_name)
         if exit_code == 0:
-            print(f"[meta-bridge] Gate 8 passed via externally-validated FOUNDER_OVERRIDE:{wave_name}")
+            print(
+                "[meta-bridge] Gate 8 passed via staged-token-bound externally-validated "
+                f"{founder_override_token}"
+            )
             return ValidationResult("TASKS.md auth (FOUNDER_OVERRIDE)", True)
 
     # Match task_id with optional bold markers (e.g., **[META-BRIDGE-S1]**)

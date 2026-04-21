@@ -38,7 +38,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -924,6 +924,113 @@ def _normalize_plan_metadata_line(line: str) -> str:
     return clean
 
 
+def _extract_plan_metadata_value(
+    line: str,
+    prefixes: tuple[str, ...],
+) -> tuple[str | None, str | None]:
+    """Return canonical and narrative metadata values for one plan line.
+
+    Canonical Task/Wave identity must come from a real top-level packet header.
+    Indented prose is treated as narrative only so body text cannot authorize
+    the same-wave task_id exception.
+    """
+    if line.startswith(prefixes):
+        return line.split(":", 1)[1].strip(), None
+    clean = _normalize_plan_metadata_line(line)
+    if clean.startswith(prefixes):
+        return None, clean.split(":", 1)[1].strip()
+    return None, None
+
+
+def _iter_authoritative_plan_header_lines(plan_content: str) -> Iterator[str]:
+    """Yield only the packet header lines that can prove canonical identity.
+
+    For the same-wave task_id exception, authoritative Task/Wave identity must
+    come from the real top-level packet header: lines before the first section
+    heading and outside fenced code blocks. Body prose and fenced examples are
+    informational only and must not authorize routing leniency. The only
+    heading allowed inside the authoritative window is an optional top-of-file
+    document title; any later ATX or setext heading closes the header scan.
+    """
+    in_fence = False
+    saw_document_title = False
+    seen_nonblank_header_content = False
+    lines = plan_content.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            index += 1
+            continue
+        if in_fence:
+            index += 1
+            continue
+        next_stripped = lines[index + 1].strip() if index + 1 < len(lines) else ""
+        if re.match(r"^#{1,6}\s", stripped):
+            if saw_document_title or seen_nonblank_header_content:
+                break
+            saw_document_title = True
+            seen_nonblank_header_content = True
+            yield line
+            index += 1
+            continue
+        if stripped and re.match(r"^(=+|-+)$", next_stripped):
+            if saw_document_title or seen_nonblank_header_content:
+                break
+            saw_document_title = True
+            seen_nonblank_header_content = True
+            yield line
+            yield lines[index + 1]
+            index += 2
+            continue
+        yield line
+        if stripped:
+            seen_nonblank_header_content = True
+        index += 1
+
+
+def _extract_unique_canonical_plan_identity(plan_content: str) -> tuple[str, str] | None:
+    """Return the packet's sole canonical Task/Wave pair, or fail closed."""
+    if not plan_content:
+        return None
+
+    canonical_task_values: list[str] = []
+    canonical_wave_values: list[str] = []
+    for line in _iter_authoritative_plan_header_lines(plan_content):
+        task_value, _ = _extract_plan_metadata_value(line, ("Task:",))
+        if task_value is not None:
+            canonical_task_values.append(task_value)
+        wave_value, _ = _extract_plan_metadata_value(line, ("Wave ID:", "wave_id:"))
+        if wave_value is not None:
+            canonical_wave_values.append(wave_value)
+
+    if len(canonical_task_values) != 1 or len(canonical_wave_values) != 1:
+        return None
+    task_id = canonical_task_values[0]
+    wave_id = canonical_wave_values[0]
+    if not task_id or not wave_id:
+        return None
+    return task_id, wave_id
+
+
+def _extract_authoritative_plan_header_metadata(
+    plan_content: str,
+) -> tuple[list[str], list[str]]:
+    """Return authoritative Task/Wave headers from the packet header only."""
+    canonical_task_values: list[str] = []
+    canonical_wave_values: list[str] = []
+    for line in _iter_authoritative_plan_header_lines(plan_content):
+        task_value, _ = _extract_plan_metadata_value(line, ("Task:",))
+        if task_value is not None:
+            canonical_task_values.append(task_value)
+        wave_value, _ = _extract_plan_metadata_value(line, ("Wave ID:", "wave_id:"))
+        if wave_value is not None:
+            canonical_wave_values.append(wave_value)
+    return canonical_task_values, canonical_wave_values
+
+
 def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
     """Load and parse key fields from a plan packet."""
     full_path = (repo_root / plan_path).resolve()
@@ -955,6 +1062,9 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
     # test_markdown_bypass_lines_parse / test_late_markdown_bypass_lines_parse).
     canonical_lock_values: list[str] = []
     narrative_lock_values: list[str] = []
+    canonical_task_values, canonical_wave_values = _extract_authoritative_plan_header_metadata(
+        content
+    )
 
     for line in content.splitlines():
         clean = _normalize_plan_metadata_line(line)
@@ -965,8 +1075,6 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
             narrative_lock_values.append(clean.split(":", 1)[1].strip())
         if clean.startswith("Status:") and "status" not in result:
             result["status"] = clean.split(":", 1)[1].strip()
-        if clean.startswith("Task:") and "task_id" not in result:
-            result["task_id"] = clean.split(":", 1)[1].strip()
         if clean.startswith("FOUNDER_OVERRIDE:") and "founder_override" not in result:
             founder_override = clean.split(":", 1)[1].strip()
             if founder_override:
@@ -992,7 +1100,94 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
         else:
             result["phase_a_lock"] = chosen_values[0]
 
+    # Task/Wave identity is authoritative only when it appears in the real
+    # packet header, before the first section heading and outside fenced code.
+    # Later prose examples, grounding sections, or markdown bullets must not
+    # silently become the packet's routing identity.
+    if canonical_task_values:
+        result["task_id"] = canonical_task_values[0]
+
+    if canonical_wave_values:
+        result["wave_id"] = canonical_wave_values[0]
+
     return result
+
+
+def _matches_explicit_same_wave_task_id_exception(
+    routing_record: dict[str, Any],
+    plan: dict[str, str],
+) -> bool:
+    """Allow one explicit same-wave mismatch class for the recovery follow-up.
+
+    This remains fail-closed: the only admitted mismatch is the current
+    [PIPELINE-RECOVERY] routing anchor paired with a same-wave plan whose
+    `Task:` field mirrors that packet's explicit `Wave ID:` and whose path is
+    the tracked packet named in the routing record.
+    """
+    routing_task_id = str(routing_record.get("task_id", "")).strip()
+    if routing_task_id != "[PIPELINE-RECOVERY]":
+        return False
+
+    canonical_identity = _extract_unique_canonical_plan_identity(
+        str(plan.get("content", ""))
+    )
+    if canonical_identity is None:
+        return False
+    plan_task_id, plan_wave_id = canonical_identity
+    plan_path = str(plan.get("path", "")).strip()
+    routing_wave_id = str(
+        routing_record.get("wave_name") or routing_record.get("wave_id") or ""
+    ).strip()
+    if not (plan_task_id and plan_wave_id and plan_path and routing_wave_id):
+        return False
+    if plan_task_id != plan_wave_id:
+        return False
+    if normalize_wave_id(plan_wave_id) != normalize_wave_id(routing_wave_id):
+        return False
+
+    candidates = routing_record.get("next_candidates")
+    if not isinstance(candidates, list):
+        return False
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        if candidate.get("bounded") is not True:
+            continue
+        tracked_packet = str(candidate.get("tracked_packet", "")).strip()
+        candidate_wave_id = str(candidate.get("candidate", "")).strip()
+        if tracked_packet != plan_path:
+            continue
+        if candidate_wave_id and (
+            normalize_wave_id(candidate_wave_id) != normalize_wave_id(plan_wave_id)
+        ):
+            return False
+        return True
+    return False
+
+
+def _is_tracked_pipeline_recovery_packet(
+    routing_record: dict[str, Any],
+    plan: dict[str, str],
+) -> bool:
+    """Return True when the plan is the tracked [PIPELINE-RECOVERY] packet."""
+    routing_task_id = str(routing_record.get("task_id", "")).strip()
+    if routing_task_id != "[PIPELINE-RECOVERY]":
+        return False
+
+    plan_path = str(plan.get("path", "")).strip()
+    if not plan_path:
+        return False
+
+    candidates = routing_record.get("next_candidates")
+    if not isinstance(candidates, list):
+        return False
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        tracked_packet = str(candidate.get("tracked_packet", "")).strip()
+        if tracked_packet == plan_path:
+            return True
+    return False
 
 
 def _phase_b_task_id(routing_record: dict[str, Any], plan: dict[str, Any]) -> str:
@@ -1114,11 +1309,66 @@ def validate_inputs(
 
     plan_task_id = str(plan.get("task_id", "")).strip()
     routing_task_id = str(routing_record.get("task_id", "")).strip()
-    if plan_task_id and routing_task_id and plan_task_id != routing_task_id:
+    same_wave_exception = _matches_explicit_same_wave_task_id_exception(
+        routing_record, plan
+    )
+    canonical_task_values, canonical_wave_values = _extract_authoritative_plan_header_metadata(
+        str(plan.get("content", ""))
+    )
+    duplicate_authoritative_identity_fields: list[str] = []
+    if len(canonical_task_values) > 1:
+        duplicate_authoritative_identity_fields.append("Task")
+    if len(canonical_wave_values) > 1:
+        duplicate_authoritative_identity_fields.append("Wave ID")
+    tracked_pipeline_recovery_packet = _is_tracked_pipeline_recovery_packet(
+        routing_record, plan
+    )
+    tracked_pipeline_recovery_identity_error = ""
+    tracked_pipeline_recovery_identity_message = (
+        "Tracked [PIPELINE-RECOVERY] packet is missing authoritative "
+        "Task/Wave header identity required to prove any same-wave "
+        f"task_id exception against routing task_id {routing_task_id}"
+    )
+    duplicate_authoritative_identity_error = ""
+    if duplicate_authoritative_identity_fields:
+        duplicate_authoritative_identity_error = (
+            "Plan contains duplicate authoritative identity headers: "
+            f"{', '.join(duplicate_authoritative_identity_fields)}"
+        )
+    if tracked_pipeline_recovery_packet:
+        if duplicate_authoritative_identity_fields:
+            tracked_pipeline_recovery_identity_error = (
+                tracked_pipeline_recovery_identity_message
+            )
+    elif duplicate_authoritative_identity_error:
+        errors.append(duplicate_authoritative_identity_error)
+    if (
+        routing_task_id
+        and lock != "ROUTING_RECORD_AUTHORITY"
+        and not plan_task_id
+        and not same_wave_exception
+    ):
+        if tracked_pipeline_recovery_packet:
+            tracked_pipeline_recovery_identity_error = (
+                tracked_pipeline_recovery_identity_error
+                or tracked_pipeline_recovery_identity_message
+            )
+        else:
+            errors.append(
+                "Plan is missing authoritative Task header required to match "
+                f"routing task_id {routing_task_id}"
+            )
+    if tracked_pipeline_recovery_identity_error:
+        errors.append(tracked_pipeline_recovery_identity_error)
+    if (
+        plan_task_id
+        and routing_task_id
+        and plan_task_id != routing_task_id
+        and not same_wave_exception
+    ):
         errors.append(
             f"Plan task_id {plan_task_id} does not match routing task_id {routing_task_id}"
         )
-
     if errors:
         raise PhaseBExecutorError(
             f"validate_inputs fatal: {'; '.join(errors)}"
