@@ -61,28 +61,11 @@ if [ -n "$RANGE" ]; then
         # committed in earlier pushes, causing indicator delta mismatches
         # with CI (which always uses origin/dev...HEAD).
         L4_RANGE="origin/dev...HEAD"
-        L4_RANGE_FILES="$(git diff --name-only "$L4_RANGE" 2>/dev/null || true)"
-        # Derive wave-id from branch name when the full wave diff includes
-        # TASKS.md.  Supports codex/* and jabramsja/* naming conventions.
-        # This avoids forcing structural-wave validation on follow-up
-        # CI/tooling commits that don't carry tracker-note updates.
         BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-        WAVE_ID_FLAG=""
-        WAVE_ID_SUFFIX=""
-        if [[ "$BRANCH" == codex/* ]]; then
-            WAVE_ID_SUFFIX="${BRANCH#codex/}"
-        elif [[ "$BRANCH" == jabramsja/* ]]; then
-            WAVE_ID_SUFFIX="${BRANCH#jabramsja/}"
-        fi
-        if [ -n "$WAVE_ID_SUFFIX" ] && echo "$L4_RANGE_FILES" | grep -qx "TASKS.md"; then
-            # Check if the branch-derived wave_id actually exists in a tracker note.
-            # Format in TASKS.md: "Tracker sync note (YYYY-MM-DD, wave-id):"
-            if grep -qE "Tracker sync note \([^,]+, ${WAVE_ID_SUFFIX}\):" TASKS.md 2>/dev/null; then
-                WAVE_ID_FLAG="--wave-id $WAVE_ID_SUFFIX"
-            fi
-            # No fallback: if branch-derived wave_id doesn't match a tracker note
-            # exactly, run L4 checker without --wave-id (uses diff-based binding).
-        fi
+        # Shared exact-match derivation keeps pre-push and audit_fast aligned
+        # on restart branches and other follow-up continuation branch names.
+        # shellcheck source=/dev/null
+        source "$REPO_ROOT/tools/checks/derive_wave_id.sh" "$BRANCH" --range "$L4_RANGE"
         if ! python3 "$REPO_ROOT/tools/checks/enforce_l4_execution_contract.py" --range "$L4_RANGE" $WAVE_ID_FLAG; then
             echo ""
             echo "❌ L4 execution contract check failed."

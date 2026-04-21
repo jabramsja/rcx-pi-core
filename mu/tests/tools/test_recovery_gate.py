@@ -653,6 +653,50 @@ class TestFixFeatureBranchMismatch:
         ).stdout.splitlines()
         assert staged == ["tracked.txt"]
 
+    def test_uses_explicit_target_branch_when_already_on_restart_branch(self, tmp_path):
+        self._init_repo(tmp_path)
+        restart_branch = "jabramsja/pipeline-control-surface-split-restart-2026-04-21"
+        subprocess.run(
+            ["git", "checkout", "-b", restart_branch, "dev"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text(
+            json.dumps(
+                {
+                    "wave_id": "pipeline-control-surface-split-2026-04-14",
+                    "branch_prefix": "jabramsja",
+                    "target_branch": restart_branch,
+                    "base_branch": "dev",
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = {
+            "status": "failed",
+            "executor": "commit_executor",
+            "stdout": json.dumps(
+                {
+                    "status": "error",
+                    "step": "ensure_feature_branch",
+                    "errors": [
+                        f"On branch {restart_branch}, expected dev or {restart_branch}"
+                    ],
+                }
+            ),
+        }
+
+        repair = rg_mod.fix_feature_branch_mismatch(tmp_path, result=result)
+
+        assert repair["fixed"] is True, repair
+        assert repair["action"] == "already_on_target_branch"
+        assert restart_branch in repair["detail"]
+
     def test_fails_closed_when_target_branch_already_exists(self, tmp_path):
         self._init_repo(tmp_path)
         wave_id = "pipeline-control-surface-split-2026-04-14"
