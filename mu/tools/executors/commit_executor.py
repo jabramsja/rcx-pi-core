@@ -2177,6 +2177,85 @@ def _push_branch(repo_root: Path, branch_name: str) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _wait_for_pr_ci(
+    repo_root: Path,
+    *,
+    pr_number: str,
+    result: dict[str, Any],
+    continuation_path: Path,
+    target_branch: str,
+    log: Any = None,
+    step_label: str = "Step 14",
+) -> dict[str, Any] | None:
+    """Wait for required CI checks and checkpoint `wait_ci` once."""
+    if log is not None:
+        log(f"{step_label}: waiting for CI on PR #{pr_number}...")
+    try:
+        _wait_for_required_checks_to_register(
+            repo_root,
+            pr_number=pr_number,
+            log=log,
+        )
+        _run(
+            ["gh", "pr", "checks", pr_number, "--watch", "--required"],
+            cwd=repo_root, timeout=600,
+        )
+        if "wait_ci" not in result["steps_completed"]:
+            result["steps_completed"].append("wait_ci")
+            _checkpoint_post_commit_progress(
+                result,
+                continuation_path=continuation_path,
+                target_branch=target_branch,
+            )
+        if log is not None:
+            log(f"{step_label}: CI passed")
+        return None
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, TimeoutError) as exc:
+        if log is not None:
+            log(
+                f"{step_label}: gh pr checks exited ({exc.__class__.__name__}), "
+                "polling CI as fallback"
+            )
+        if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=900, log=log):
+            return {
+                "status": "error",
+                "step": "wait_ci",
+                "errors": [f"CI checks failed (confirmed by polling): {exc}"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number,
+            }
+        if "wait_ci" not in result["steps_completed"]:
+            result["steps_completed"].append("wait_ci")
+            _checkpoint_post_commit_progress(
+                result,
+                continuation_path=continuation_path,
+                target_branch=target_branch,
+            )
+        if log is not None:
+            log(f"{step_label}: CI passed (confirmed by polling fallback)")
+        return None
+
+
+def _prepare_result_for_late_conflict_retry(
+    repo_root: Path,
+    *,
+    result: dict[str, Any],
+    continuation_path: Path,
+    target_branch: str,
+) -> None:
+    """Refresh continuation state after a late auto-resolve push changes HEAD."""
+    result["commit_sha"] = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+    result["steps_completed"] = [
+        step for step in result["steps_completed"] if step != "wait_ci"
+    ]
+    result.pop("bot_review_request_sha", None)
+    _checkpoint_post_commit_progress(
+        result,
+        continuation_path=continuation_path,
+        target_branch=target_branch,
+    )
+
+
 def _poll_ci_checks_fallback(
     repo_root: Path,
     pr_number: str,
@@ -3463,6 +3542,7 @@ def _run_post_commit_pipeline(
     log: Any,
 ) -> dict[str, Any]:
     pr_number = str(result.get("pr_number") or "")
+    late_conflict_retry_used = bool(result.pop("_late_conflict_retry_used", False))
 
     # ── Step 11: run_pre_push_script ──────────────────────────────────
     if "run_pre_push_script" not in result["steps_completed"]:
@@ -3623,34 +3703,17 @@ def _run_post_commit_pipeline(
                 "failure_class": "pr_conflicting",
                 "auto_resolve_action": action,
             }
-        log(f"Step 14: waiting for CI on PR #{pr_number}...")
-        try:
-            _wait_for_required_checks_to_register(
-                repo_root,
-                pr_number=pr_number,
-                log=log,
-            )
-            _run(
-                ["gh", "pr", "checks", pr_number, "--watch", "--required"],
-                cwd=repo_root, timeout=600,
-            )
-            result["steps_completed"].append("wait_ci")
-            _checkpoint_post_commit_progress(
-                result,
-                continuation_path=continuation_path,
-                target_branch=target_branch,
-            )
-            log("Step 14: CI passed")
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, TimeoutError) as exc:
-            # gh pr checks --watch exits 1 on pending checks (not failed).
-            # Fallback to polling before giving up.
-            log(f"Step 14: gh pr checks exited ({exc.__class__.__name__}), polling CI as fallback")
-            if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=900, log=log):
-                return {"status": "error", "step": "wait_ci",
-                        "errors": [f"CI checks failed (confirmed by polling): {exc}"],
-                        "steps_completed": result["steps_completed"],
-                        "pr_number": pr_number}
-            log("Step 14: CI passed (confirmed by polling fallback)")
+        ci_response = _wait_for_pr_ci(
+            repo_root,
+            pr_number=pr_number,
+            result=result,
+            continuation_path=continuation_path,
+            target_branch=target_branch,
+            log=log,
+            step_label="Step 14",
+        )
+        if ci_response is not None:
+            return ci_response
     else:
         log(f"Step 14: required checks already passed for PR #{pr_number}, skipping")
 
@@ -3810,6 +3873,51 @@ def _run_post_commit_pipeline(
             cwd=repo_root.parent, timeout=120,
         )
     except subprocess.CalledProcessError as exc:
+        if not late_conflict_retry_used:
+            resolve_result = _try_auto_resolve_pr_conflict(
+                repo_root,
+                pr_number=pr_number,
+                base_branch=base_branch,
+                branch_name=target_branch,
+                log=log,
+            )
+            if resolve_result.get("resolved") and resolve_result.get("action") != "no_action":
+                result["_late_conflict_retry_used"] = True
+                try:
+                    _prepare_result_for_late_conflict_retry(
+                        repo_root,
+                        result=result,
+                        continuation_path=continuation_path,
+                        target_branch=target_branch,
+                    )
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as retry_exc:
+                    return {
+                        "status": "error",
+                        "step": "ensure_review_clear_and_merge",
+                        "errors": [f"Late auto-resolve refresh failed: {retry_exc}"],
+                        "steps_completed": result["steps_completed"],
+                        "pr_number": pr_number,
+                    }
+                ci_response = _wait_for_pr_ci(
+                    repo_root,
+                    pr_number=pr_number,
+                    result=result,
+                    continuation_path=continuation_path,
+                    target_branch=target_branch,
+                    log=log,
+                    step_label="Step 15 late auto-resolve",
+                )
+                if ci_response is not None:
+                    return ci_response
+                return _run_post_commit_pipeline(
+                    handoff=handoff,
+                    repo_root=repo_root,
+                    result=result,
+                    target_branch=target_branch,
+                    base_branch=base_branch,
+                    continuation_path=continuation_path,
+                    log=log,
+                )
         return {"status": "error", "step": "ensure_review_clear_and_merge",
                 "errors": [f"merge_pr.sh failed: {exc.stderr.strip()}"],
                 "steps_completed": result["steps_completed"],

@@ -5480,6 +5480,112 @@ class TestCommitContinuationAndBotFreshness:
         assert "timed out" in post_commit["errors"][0]
         assert "wait_ci" in post_commit["steps_completed"]
 
+    def test_post_commit_late_auto_resolve_retries_ci_and_merge(self, tmp_path, monkeypatch):
+        repo, _ = _init_git_repo(tmp_path)
+        handoff = _make_new_handoff()
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        result = {
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "git_commit",
+                "hold_check",
+                "run_pre_push_script",
+                "git_push",
+                "ensure_pr",
+                "wait_ci",
+            ],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+            "pr_number": "673",
+        }
+
+        merge_attempts = {"count": 0}
+        ci_watch_calls = []
+        auto_resolve_calls = []
+        head_reads = iter(["abc123\n", "def456\n", "def456\n", "merge789\n"])
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout=next(head_reads))
+            if cmd[:4] == ["gh", "pr", "checks", "673"]:
+                ci_watch_calls.append(cmd)
+                return completed(cmd)
+            if cmd[:2] == ["bash", str(merge_script)]:
+                merge_attempts["count"] += 1
+                if merge_attempts["count"] == 1:
+                    raise subprocess.CalledProcessError(
+                        1,
+                        cmd,
+                        stderr="X Pull request jabramsja/rcx-pi-core#673 is not mergeable: the merge commit cannot be cleanly created.",
+                    )
+                return completed(cmd)
+            if cmd[:2] == ["git", "fetch"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "merge", "--ff-only"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd, stdout="")
+            raise AssertionError(f"Unexpected command: {cmd} cwd={cwd}")
+
+        def fake_auto_resolve(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            auto_resolve_calls.append((repo_root, pr_number, base_branch, branch_name))
+            return {
+                "resolved": True,
+                "action": "tasks_md_resolved",
+                "detail": "merged origin/dev, resolved TASKS chronologically, pushed",
+            }
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod, "_parse_origin_owner_repo", lambda _: ("jabramsja", "rcx-pi-core"))
+        monkeypatch.setattr(commit_mod, "_query_pr_review_state", lambda *args, **kwargs: {"headRefOid": "ignored"})
+        monkeypatch.setattr(commit_mod, "_assert_expected_pr_head", lambda pr_data, head_sha: None)
+        monkeypatch.setattr(commit_mod, "_has_recorded_current_head_bot_request", lambda *args, **kwargs: False)
+        monkeypatch.setattr(commit_mod, "_has_fresh_connector_review", lambda pr_data, head_sha: True)
+        monkeypatch.setattr(
+            commit_mod,
+            "_extract_review_findings",
+            lambda pr_data, head_sha, *, result, pr_number: {"outcome": "clear"},
+        )
+        monkeypatch.setattr(commit_mod, "_try_auto_resolve_pr_conflict", fake_auto_resolve)
+        monkeypatch.setattr(commit_mod, "_wait_for_required_checks_to_register", lambda *args, **kwargs: None)
+        monkeypatch.setattr(commit_mod, "_resolve_post_merge_verify_root", lambda repo_root, base_branch, log=None: repo)
+        monkeypatch.setattr(
+            commit_mod,
+            "_post_merge_cleanup",
+            lambda *args, **kwargs: {
+                "worktree_removed": False,
+                "branch_deleted": False,
+                "stashes_dropped": 0,
+                "warnings": [],
+            },
+        )
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising late step-15 auto-resolve retry path
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert auto_resolve_calls == [(repo, "673", "dev", "jabramsja/test-wave-id")]
+        assert len(ci_watch_calls) == 1
+        assert merge_attempts["count"] == 2
+        assert post_commit["merge_sha"] == "merge789"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert continuation_path.exists() is False
+
     def test_post_commit_uses_linked_base_worktree_for_merge_verification(self, tmp_path, monkeypatch):
         repo = tmp_path / "feature-worktree"
         repo.mkdir()
