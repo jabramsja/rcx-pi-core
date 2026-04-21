@@ -3103,12 +3103,150 @@ class TestRecoveryStatusRendering:
             ),
             encoding="utf-8",
         )
-
         rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
         assert "Recent attempts:" in rendered
         assert "Try 1: the recovery agent answered in the wrong format -> failed" in rendered
         assert "Try 2: ran a shell fix -> asked the pipeline to retry" in rendered
         assert "old unrelated invocation" not in rendered
+
+
+class TestIdleNonGoPager:
+    def _write_routing_record(self, repo_root: Path, *, task_id: str = "[PIPELINE-AGENT-PAGER]", wave_name: str = "wave-alert") -> None:
+        meta_dir = repo_root / ".agent_bus" / "meta"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        packet = repo_root / "reports" / "control_plane" / "idle_non_go_alert.md"
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(f"Task: {task_id}\n", encoding="utf-8")
+        (meta_dir / "post_merge_routing.json").write_text(
+            json.dumps(
+                {
+                    "decision": "ROUTE_PHASE_B",
+                    "summary": "idle pager alert",
+                    "task_id": task_id,
+                    "wave_name": wave_name,
+                    "tracked_packet": "reports/control_plane/idle_non_go_alert.md",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def _capture_emit(self, monkeypatch):
+        calls: list[dict[str, Any]] = []
+
+        def fake_emit(repo_root: Path, **kwargs: Any) -> dict[str, Any]:
+            calls.append({"repo_root": str(repo_root), **kwargs})
+            return {
+                "enabled": True,
+                "event_id": "evt-idle-non-go",
+                "route": "codex",
+                "attempted": ["codex"],
+                "budget_exhausted": False,
+            }
+
+        monkeypatch.setattr(dash_mod, "emit_pipeline_agent_event", fake_emit)
+        return calls
+
+    def test_emit_idle_non_go_alert_for_request_changes(self, tmp_path, monkeypatch):
+        self._write_routing_record(tmp_path)
+        raw_dir = tmp_path / ".agent_bus" / "raw" / "phase-b-r3-alert"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "phase-b-r3-alert--r1-reviewer.txt").write_text(
+            "BEGIN_AGENT_ENVELOPE\n"
+            '{\n'
+            '  "decision": "REQUEST_CHANGES",\n'
+            '  "summary": "Replace the stub with the real fix plan.",\n'
+            '  "findings": [\n'
+            '    {"disposition": "blocking", "title": "Replace stub"}\n'
+            '  ]\n'
+            '}\n'
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+        calls = self._capture_emit(monkeypatch)
+
+        result = dash_mod.emit_idle_non_go_alert(tmp_path, phase="idle")
+
+        assert result["emitted"] is True
+        assert result["category"] == "bridge_request_changes"
+        assert calls[0]["event_type"] == "pipeline_hard_fail"
+        assert calls[0]["task_id"] == "[PIPELINE-AGENT-PAGER]"
+        assert calls[0]["wave_id"] == "wave-alert"
+        assert calls[0]["state"] == "idle_after_non_go"
+        assert calls[0]["metadata"]["category"] == "bridge_request_changes"
+        assert calls[0]["reason"] == "Replace the stub with the real fix plan."
+
+    def test_emit_idle_non_go_alert_for_meta_needs_phase_b(self, tmp_path, monkeypatch):
+        self._write_routing_record(tmp_path)
+        meta_dir = tmp_path / ".agent_bus" / "meta" / "raw"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        (meta_dir / "meta-wave-alert.txt").write_text(
+            "BEGIN_META_ENVELOPE\n"
+            '{\n'
+            '  "decision": "NEEDS_PHASE_B",\n'
+            '  "summary": "Commit package drifted from the staged diff.",\n'
+            '  "findings": [\n'
+            '    {"title": "changed_files claims stale paths"}\n'
+            '  ],\n'
+            '  "request_for_claude": "Regenerate the package from the staged diff."\n'
+            '}\n'
+            "END_META_ENVELOPE\n",
+            encoding="utf-8",
+        )
+        calls = self._capture_emit(monkeypatch)
+
+        result = dash_mod.emit_idle_non_go_alert(tmp_path, phase="idle")
+
+        assert result["emitted"] is True
+        assert result["category"] == "meta_needs_phase_b"
+        assert calls[0]["event_type"] == "pipeline_hard_fail"
+        assert calls[0]["metadata"]["decision"] == "NEEDS_PHASE_B"
+        assert calls[0]["artifact_paths"]["meta_review"] == ".agent_bus/meta/raw/meta-wave-alert.txt"
+        assert calls[0]["reason"] == "changed_files claims stale paths"
+
+    @pytest.mark.parametrize(
+        ("failure_class", "expected_reason"),
+        [
+            ("terminal_policy", "policy stopped automatic continuation"),
+            ("max_rounds_reached", "the bridge hit its maximum review rounds"),
+        ],
+    )
+    def test_emit_idle_non_go_alert_for_recovery_terminal_stop(
+        self,
+        tmp_path,
+        monkeypatch,
+        failure_class,
+        expected_reason,
+    ):
+        self._write_routing_record(tmp_path)
+        recovery_dir = tmp_path / ".agent_bus" / "recovery"
+        recovery_dir.mkdir(parents=True, exist_ok=True)
+        now = datetime(2026, 4, 21, 20, 0, tzinfo=timezone.utc)
+        (recovery_dir / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "wave_id": "wave-alert",
+                    "failure_class": failure_class,
+                    "tier": 4,
+                    "retry_target": "commit_executor",
+                    "state": "tier4_escalated",
+                    "reason": expected_reason,
+                    "updated_at": now.isoformat(),
+                    "finished_at": now.isoformat(),
+                    "invocation_id": f"wave-alert-commit-{failure_class}-01",
+                }
+            ),
+            encoding="utf-8",
+        )
+        calls = self._capture_emit(monkeypatch)
+
+        result = dash_mod.emit_idle_non_go_alert(tmp_path, phase="idle")
+
+        assert result["emitted"] is True
+        assert result["category"] == f"recovery_{failure_class}"
+        assert calls[0]["event_type"] == "pipeline_hard_fail"
+        assert calls[0]["metadata"]["failure_class"] == failure_class
+        assert calls[0]["reason"] == expected_reason
 
     def test_inactive_trivial_invocation_uses_detail_and_wave_history(self, tmp_path):
         status_path = tmp_path / ".agent_bus" / "recovery"

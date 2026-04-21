@@ -297,6 +297,13 @@ while true; do
     done
   fi
 
+  if [ "$FAST_ONESHOT" != "1" ]; then
+    DASHBOARD_PY="$SCRIPT_DIR/pipeline_dashboard.py"
+    if [ -f "$DASHBOARD_PY" ]; then
+      python3 "$DASHBOARD_PY" --emit-idle-non-go-alert --repo-root "$REPO_ROOT" >/dev/null 2>&1 || true
+    fi
+  fi
+
   if [ "$phase" = "idle" ]; then
     echo -e "  ${DIM}No pipeline step is running. Waiting for the next wave.${RESET}"
   else

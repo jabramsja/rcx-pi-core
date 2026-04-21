@@ -1055,6 +1055,46 @@ def _phase_b_review_transition_key(round_num: int) -> str:
     return f"phase-b-r{round_num}"
 
 
+def _phase_b_hard_fail_transition_key(
+    repo_root: Path,
+    *,
+    state: str,
+    changed_files: list[str],
+    reentry: bool = False,
+) -> str:
+    scope_fingerprint = _bridge_scope_fingerprint(repo_root, changed_files)
+    prefix = "phase-b-reentry" if reentry else "phase-b"
+    return f"{prefix}:{state}:{scope_fingerprint}"
+
+
+def _emit_phase_b_hard_fail(
+    repo_root: Path,
+    *,
+    routing_record: dict[str, Any],
+    plan: dict[str, Any],
+    plan_path: str,
+    state: str,
+    changed_files: list[str],
+    summary: str,
+    reentry: bool = False,
+) -> dict[str, Any]:
+    return _emit_phase_b_event(
+        repo_root,
+        routing_record=routing_record,
+        plan=plan,
+        plan_path=plan_path,
+        event_type="pipeline_hard_fail",
+        state=state,
+        transition_key=_phase_b_hard_fail_transition_key(
+            repo_root,
+            state=state,
+            changed_files=changed_files,
+            reentry=reentry,
+        ),
+        summary=summary,
+    )
+
+
 def _extract_founder_override(plan_content: str) -> str:
     """Read an optional canonical founder override token from the plan text."""
     if not plan_content:
@@ -3353,6 +3393,24 @@ def run_phase_b(
         if all_non_blocking:
             result["deferred_non_blocking_count"] = len(all_non_blocking)
         log(f"Max bridge rounds ({max_bridge_rounds}) reached without convergence")
+        try:
+            _emit_phase_b_hard_fail(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                state="max_rounds_reached",
+                changed_files=changed_files,
+                summary=result["errors"][0],
+            )
+        except Exception as exc:
+            result["status"] = "error"
+            result["step"] = "phase_b_pager"
+            result["errors"].append(
+                f"Phase B pager emission failed on max_rounds_reached: {exc}"
+            )
+            _clear_state(repo_root)
+            return result
         # Clear state to prevent stale resume — next invocation must start fresh
         _clear_state(repo_root)
         return result
@@ -3865,6 +3923,25 @@ def run_phase_b(
             ]
             if all_non_blocking:
                 result["deferred_non_blocking_count"] = len(all_non_blocking)
+            try:
+                _emit_phase_b_hard_fail(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan=plan,
+                    plan_path=plan_path,
+                    state="max_rounds_reached",
+                    changed_files=changed_files,
+                    summary=result["errors"][0],
+                    reentry=True,
+                )
+            except Exception as exc:
+                result["status"] = "error"
+                result["step"] = "phase_b_pager"
+                result["errors"].append(
+                    f"Phase B pager emission failed on re-entry max_rounds_reached: {exc}"
+                )
+                _clear_state(repo_root)
+                return result
             # Clear state to prevent stale resume — next invocation must start fresh
             _clear_state(repo_root)
             return result
@@ -3949,6 +4026,25 @@ def run_phase_b(
             if detail:
                 message += f" {detail}"
             result["errors"] = [message]
+            try:
+                _emit_phase_b_hard_fail(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan=plan,
+                    plan_path=plan_path,
+                    state="needs_phase_b",
+                    changed_files=changed_files,
+                    summary=message,
+                    reentry=True,
+                )
+            except Exception as exc:
+                result["status"] = "error"
+                result["step"] = "phase_b_pager"
+                result["errors"].append(
+                    f"Phase B pager emission failed on re-entry NEEDS_PHASE_B: {exc}"
+                )
+                _clear_state(repo_root)
+                return result
             _clear_state(repo_root)
             return result
         elif decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):

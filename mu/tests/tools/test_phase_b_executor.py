@@ -1380,6 +1380,239 @@ class TestMaintenanceTrackerMetadataPropagation:
 
 
 @pytest.mark.usefixtures("mock_routing_record")
+class TestPhaseBHardFailPagerEvents:
+    def test_run_phase_b_emits_hard_fail_when_initial_bridge_hits_max_rounds(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        (repo / "reports" / "control_plane" / "plan.md").write_text(
+            "# Plan\n"
+            "Wave ID: wave-phase-b-pager\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-AGENT-PAGER]\n",
+            encoding="utf-8",
+        )
+        (repo / "f.py").write_text("print('hello')\n", encoding="utf-8")
+
+        mock_impl = _make_mock_impl()
+        pager_calls = []
+        hard_fail_keys = []
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            if kwargs["event_type"] == "pipeline_hard_fail":
+                hard_fail_keys.append(
+                    pb_mod._phase_b_hard_fail_transition_key(  # ANTICHEAT_OK: testing internal executor functions
+                        repo_root,
+                        state=kwargs["state"],
+                        changed_files=["f.py"],
+                        reentry=False,
+                    )
+                )
+            return {
+                "enabled": True,
+                "event_id": f"evt-{len(pager_calls)}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        def bridge_request_changes(*args, **kwargs):
+            kwargs["on_started"]()
+            return {
+                "exit_code": 1,
+                "stdout": "REQUEST_CHANGES\n",
+                "stderr": "",
+                "decision": "REQUEST_CHANGES",
+                "job_id": "j1",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_request_changes), \
+             patch.object(pb_mod, "_read_bridge_render", return_value="bridge findings text"), \
+             patch.object(pb_mod, "_stage_files", return_value=True):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=1)
+
+        hard_fail_events = [call for call in pager_calls if call["event_type"] == "pipeline_hard_fail"]
+        assert result["status"] == "max_rounds_reached"
+        assert len(hard_fail_events) == 1
+        assert len(hard_fail_keys) == 1
+        assert hard_fail_events[0]["state"] == "max_rounds_reached"
+        assert hard_fail_events[0]["transition_key"] == hard_fail_keys[0]
+        assert "did not converge" in hard_fail_events[0]["summary"].lower()
+
+    def test_run_phase_b_emits_hard_fail_when_reentry_hits_max_rounds(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        (repo / "reports" / "control_plane" / "plan.md").write_text(
+            "# Plan\n"
+            "Wave ID: wave-phase-b-pager\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-AGENT-PAGER]\n",
+            encoding="utf-8",
+        )
+        (repo / "f.py").write_text("print('hello')\n", encoding="utf-8")
+
+        mock_impl = _make_mock_impl()
+        pager_calls = []
+        hard_fail_keys = []
+        supervisor_results = iter([
+            {
+                "exit_code": 0,
+                "parsed": {"decision": "NEEDS_PHASE_B", "summary": "fix more", "status": "ok", "findings": []},
+                "receipt_path": "",
+            },
+        ])
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            if kwargs["event_type"] == "pipeline_hard_fail":
+                hard_fail_keys.append(
+                    pb_mod._phase_b_hard_fail_transition_key(  # ANTICHEAT_OK: testing internal executor functions
+                        repo_root,
+                        state=kwargs["state"],
+                        changed_files=["f.py", "reports/control_plane/plan.md"],
+                        reentry=True,
+                    )
+                )
+            return {
+                "enabled": True,
+                "event_id": f"evt-{len(pager_calls)}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        bridge_calls = [0]
+
+        def bridge_side(*args, **kwargs):
+            bridge_calls[0] += 1
+            kwargs["on_started"]()
+            if bridge_calls[0] == 1:
+                return {
+                    "exit_code": 0,
+                    "stdout": "GO\n",
+                    "stderr": "",
+                    "decision": "GO",
+                    "job_id": "init",
+                }
+            return {
+                "exit_code": 1,
+                "stdout": "REQUEST_CHANGES\n",
+                "stderr": "",
+                "decision": "REQUEST_CHANGES",
+                "job_id": f"reentry-{bridge_calls[0]}",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_read_bridge_render", return_value="bridge findings text"), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=lambda *args, **kwargs: next(supervisor_results)):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=2)
+
+        hard_fail_events = [call for call in pager_calls if call["event_type"] == "pipeline_hard_fail"]
+        assert result["status"] == "max_rounds_reached"
+        assert len(hard_fail_events) == 1
+        assert len(hard_fail_keys) == 1
+        assert hard_fail_events[0]["state"] == "max_rounds_reached"
+        assert hard_fail_events[0]["transition_key"] == hard_fail_keys[0]
+        assert "re-entry path" in hard_fail_events[0]["summary"].lower()
+
+    def test_run_phase_b_emits_hard_fail_when_reentry_stops_on_needs_phase_b(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        (repo / "reports" / "control_plane" / "plan.md").write_text(
+            "# Plan\n"
+            "Wave ID: wave-phase-b-pager\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-AGENT-PAGER]\n",
+            encoding="utf-8",
+        )
+        (repo / "f.py").write_text("print('hello')\n", encoding="utf-8")
+
+        mock_impl = _make_mock_impl()
+        pager_calls = []
+        hard_fail_keys = []
+        supervisor_results = iter([
+            {
+                "exit_code": 0,
+                "parsed": {"decision": "NEEDS_PHASE_B", "summary": "fix more", "status": "ok", "findings": []},
+                "receipt_path": "",
+            },
+            {
+                "exit_code": 0,
+                "parsed": {"decision": "NEEDS_PHASE_B", "summary": "manual follow-up", "status": "ok", "findings": []},
+                "receipt_path": "",
+            },
+        ])
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            if kwargs["event_type"] == "pipeline_hard_fail":
+                hard_fail_keys.append(
+                    pb_mod._phase_b_hard_fail_transition_key(  # ANTICHEAT_OK: testing internal executor functions
+                        repo_root,
+                        state=kwargs["state"],
+                        changed_files=["f.py", "reports/control_plane/plan.md"],
+                        reentry=True,
+                    )
+                )
+            return {
+                "enabled": True,
+                "event_id": f"evt-{len(pager_calls)}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        bridge_calls = [0]
+
+        def bridge_side(*args, **kwargs):
+            bridge_calls[0] += 1
+            kwargs["on_started"]()
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": f"bridge-{bridge_calls[0]}",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_read_bridge_render", return_value="bridge findings text"), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=lambda *args, **kwargs: next(supervisor_results)):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=2)
+
+        hard_fail_events = [call for call in pager_calls if call["event_type"] == "pipeline_hard_fail"]
+        assert result["status"] == "needs_phase_b"
+        assert len(hard_fail_events) == 1
+        assert len(hard_fail_keys) == 1
+        assert hard_fail_events[0]["state"] == "needs_phase_b"
+        assert hard_fail_events[0]["transition_key"] == hard_fail_keys[0]
+        assert "manual intervention required" in hard_fail_events[0]["summary"].lower()
+
+
+@pytest.mark.usefixtures("mock_routing_record")
 class TestReentryRestageFailClosed:
     """Re-entry restage failure must stop the pipeline, not run supervisor on stale state."""
 

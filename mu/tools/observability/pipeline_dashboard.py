@@ -24,8 +24,16 @@ DEFAULT_AGENT_DISPLAY_NAMES = {
 }
 
 try:
-    from executor_common import bridge_agent_display_name
+    from executor_common import (
+        ExecutorCommonError,
+        bridge_agent_display_name,
+        emit_pipeline_agent_event,
+        load_routing_record,
+    )
 except Exception:
+    class ExecutorCommonError(RuntimeError):
+        pass
+
     def bridge_agent_display_name(repo_root: Path, agent_name: str) -> str:
         config_path = repo_root / ".agent_bus" / "bridge_config.json"
         try:
@@ -41,10 +49,19 @@ except Exception:
         except Exception:
             pass
         return DEFAULT_AGENT_DISPLAY_NAMES.get(agent_name, agent_name.replace("_", " ").title())
+
+    def load_routing_record(repo_root: Path) -> dict[str, Any]:
+        raise ExecutorCommonError(f"Routing record not available for {repo_root}")
+
+    def emit_pipeline_agent_event(repo_root: Path, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError(f"pipeline pager emit unavailable for {repo_root}: {kwargs.get('event_type')}")
 REFRESH_INTERVAL = 5
 RECOVERY_LOG_REL = Path(".agent_bus") / "recovery" / "recovery_log.json"
 RECOVERY_STATUS_REL = Path(".agent_bus") / "recovery" / "recovery_status.json"
 _HUNG_THRESHOLD_SECONDS = 90
+IDLE_NON_GO_BRIDGE_DECISIONS = frozenset({"REQUEST_CHANGES"})
+IDLE_NON_GO_META_DECISIONS = frozenset({"NEEDS_PHASE_B"})
+IDLE_NON_GO_FAILURE_CLASSES = frozenset({"needs_phase_b", "max_rounds_reached", "terminal_policy"})
 
 # Colors
 R = "\033[0m"    # reset
@@ -251,6 +268,9 @@ def _human_target(target: str) -> str:
 def _human_failure_class(value: str) -> str:
     cleaned = (value or "").strip()
     mapping = {
+        "needs_phase_b": "the supervisor sent work back to Phase B",
+        "max_rounds_reached": "the bridge hit its maximum review rounds",
+        "terminal_policy": "policy stopped automatic continuation",
         "process_timeout": "a step timed out",
         "agent_review_crash": "a review subprocess crashed",
         "test_failure": "a validation step failed",
@@ -712,6 +732,275 @@ def latest_bridge_summary():
         return None
 
 
+def _read_latest_envelope(path: Path, *, begin: str, end: str) -> dict[str, Any] | None:
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    pattern = re.compile(rf"{re.escape(begin)}\s*\n(.*?)\n{re.escape(end)}", re.DOTALL)
+    matches = list(pattern.finditer(content))
+    for match in reversed(matches):
+        try:
+            payload = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        decision = str(payload.get("decision", "")).strip()
+        if decision and "|" not in decision:
+            return payload
+    return None
+
+
+def _latest_bridge_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
+    raw_dir = repo_root / ".agent_bus" / "raw"
+    if not raw_dir.exists():
+        return None
+    latest_path: Path | None = None
+    latest_job_id = ""
+    latest_mtime = 0.0
+    for directory in raw_dir.iterdir():
+        if not directory.is_dir():
+            continue
+        for candidate in directory.iterdir():
+            if "reviewer" not in candidate.name:
+                continue
+            try:
+                mtime = candidate.stat().st_mtime
+            except OSError:
+                continue
+            if mtime <= latest_mtime:
+                continue
+            latest_path = candidate
+            latest_job_id = directory.name
+            latest_mtime = mtime
+    if latest_path is None:
+        return None
+
+    env = _read_latest_envelope(
+        latest_path,
+        begin="BEGIN_AGENT_ENVELOPE",
+        end="END_AGENT_ENVELOPE",
+    )
+    if env is None:
+        return None
+    decision = str(env.get("decision", "")).strip()
+    if decision not in IDLE_NON_GO_BRIDGE_DECISIONS:
+        return None
+
+    findings = env.get("findings", [])
+    if not isinstance(findings, list):
+        findings = []
+    blocking = [item for item in findings if isinstance(item, dict) and item.get("disposition") == "blocking"]
+    non_blocking = [item for item in findings if isinstance(item, dict) and item.get("disposition") != "blocking"]
+    summary = _excerpt(env.get("summary", ""))
+    reason = summary or f"{len(blocking)} blocking, {len(non_blocking)} advisory finding(s)"
+    return {
+        "category": "bridge_request_changes",
+        "decision": decision,
+        "timestamp": latest_mtime,
+        "summary": f"tmux idle after {decision}",
+        "reason": reason,
+        "artifact_paths": {
+            "bridge_review": str(latest_path.relative_to(repo_root)),
+        },
+        "transition_key": f"tmux-idle:{decision.lower()}:{latest_job_id}:{int(latest_mtime)}",
+    }
+
+
+def _latest_meta_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
+    raw_dir = repo_root / ".agent_bus" / "meta" / "raw"
+    if not raw_dir.exists():
+        return None
+    try:
+        latest_path = max(raw_dir.glob("meta-*.txt"), key=lambda path: path.stat().st_mtime)
+    except ValueError:
+        return None
+    except OSError:
+        return None
+
+    env = _read_latest_envelope(
+        latest_path,
+        begin="BEGIN_META_ENVELOPE",
+        end="END_META_ENVELOPE",
+    )
+    if env is None:
+        return None
+    decision = str(env.get("decision", "")).strip()
+    if decision not in IDLE_NON_GO_META_DECISIONS:
+        return None
+
+    findings = env.get("findings", [])
+    if not isinstance(findings, list):
+        findings = []
+    finding_title = ""
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        finding_title = _excerpt(finding.get("title", ""))
+        if finding_title:
+            break
+    reason = finding_title or _excerpt(env.get("request_for_claude", "")) or _excerpt(env.get("summary", ""))
+    try:
+        latest_mtime = latest_path.stat().st_mtime
+    except OSError:
+        latest_mtime = 0.0
+    return {
+        "category": "meta_needs_phase_b",
+        "decision": decision,
+        "timestamp": latest_mtime,
+        "summary": f"tmux idle after {decision}",
+        "reason": reason or _human_failure_class("needs_phase_b"),
+        "artifact_paths": {
+            "meta_review": str(latest_path.relative_to(repo_root)),
+        },
+        "transition_key": f"tmux-idle:{decision.lower()}:{latest_path.name}:{int(latest_mtime)}",
+    }
+
+
+def _recovery_idle_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
+    status = _read_recovery_status(repo_root)
+    if not status or bool(status.get("active")):
+        return None
+    failure_class = str(status.get("failure_class", "")).strip().lower()
+    if failure_class not in IDLE_NON_GO_FAILURE_CLASSES:
+        return None
+
+    wave_id = str(status.get("wave_id", "")).strip()
+    finished_at = str(status.get("finished_at", "")).strip() or str(status.get("updated_at", "")).strip()
+    timestamp = 0.0
+    parsed = _parse_iso(finished_at)
+    if parsed is not None:
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        timestamp = parsed.timestamp()
+    reason, _reason_source = _rendered_recovery_reason(status)
+    return {
+        "category": f"recovery_{failure_class}",
+        "failure_class": failure_class,
+        "timestamp": timestamp,
+        "wave_id": wave_id,
+        "summary": f"tmux idle after {_human_failure_class(failure_class)}",
+        "reason": reason or _human_failure_class(failure_class),
+        "artifact_paths": {
+            "recovery_status": str(RECOVERY_STATUS_REL),
+        },
+        "transition_key": (
+            "tmux-idle:"
+            f"{failure_class}:{wave_id}:{status.get('invocation_id') or finished_at or status.get('state', '')}"
+        ),
+    }
+
+
+def latest_idle_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
+    candidates = [
+        _latest_bridge_non_go_candidate(repo_root),
+        _latest_meta_non_go_candidate(repo_root),
+        _recovery_idle_non_go_candidate(repo_root),
+    ]
+    concrete = [candidate for candidate in candidates if candidate is not None]
+    if not concrete:
+        return None
+    return max(concrete, key=lambda candidate: float(candidate.get("timestamp") or 0.0))
+
+
+def _task_id_from_plan(repo_root: Path, plan_path: str) -> str:
+    if not plan_path:
+        return ""
+    try:
+        content = (repo_root / plan_path).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("Task:"):
+            continue
+        return line.split(":", 1)[1].strip().strip("`")
+    return ""
+
+
+def _routing_context(repo_root: Path, candidate: dict[str, Any]) -> tuple[str, str, str]:
+    task_id = ""
+    wave_id = ""
+    plan_path = ""
+    try:
+        routing = load_routing_record(repo_root)
+    except Exception:
+        routing = {}
+    if isinstance(routing, dict):
+        task_id = str(routing.get("task_id", "")).strip()
+        wave_id = str(routing.get("wave_name") or routing.get("wave_id") or "").strip()
+        plan_path = str(routing.get("tracked_packet") or routing.get("plan_path") or "").strip()
+
+    for state_rel in (
+        Path(".agent_bus/executors/phase_b_state.json"),
+        Path(".agent_bus/executors/phase_a_state.json"),
+    ):
+        if task_id and wave_id and plan_path:
+            break
+        state = read_json(repo_root / state_rel)
+        if not isinstance(state, dict):
+            continue
+        if not wave_id:
+            wave_id = str(state.get("wave_id", "")).strip()
+        if not plan_path:
+            plan_path = str(state.get("plan_path", "")).strip()
+
+    if not wave_id:
+        wave_id = str(candidate.get("wave_id", "")).strip()
+    if not task_id and plan_path:
+        task_id = _task_id_from_plan(repo_root, plan_path)
+    return task_id, wave_id, plan_path
+
+
+def emit_idle_non_go_alert(repo_root: Path, *, phase: str | None = None) -> dict[str, Any]:
+    repo_root = repo_root.resolve()
+    active_phase = phase or detect_phase(ps_lines())[0]
+    if active_phase != "idle":
+        return {"attempted": False, "reason": "phase_not_idle", "phase": active_phase}
+
+    candidate = latest_idle_non_go_candidate(repo_root)
+    if candidate is None:
+        return {"attempted": False, "reason": "no_non_go_candidate", "phase": active_phase}
+
+    task_id, wave_id, plan_path = _routing_context(repo_root, candidate)
+    if not task_id or not wave_id:
+        return {
+            "attempted": False,
+            "reason": "missing_routing_context",
+            "phase": active_phase,
+            "candidate": candidate.get("category", ""),
+        }
+
+    result = emit_pipeline_agent_event(
+        repo_root,
+        event_type="pipeline_hard_fail",
+        wave_id=wave_id,
+        task_id=task_id,
+        plan_path=plan_path or None,
+        phase="tmux_monitor",
+        state="idle_after_non_go",
+        transition_key=str(candidate["transition_key"]),
+        summary=str(candidate["summary"]),
+        reason=str(candidate["reason"]),
+        artifact_paths=candidate.get("artifact_paths", {}),
+        metadata={
+            "source": "tmux_idle_non_go",
+            "category": candidate.get("category", ""),
+            "decision": candidate.get("decision", ""),
+            "failure_class": candidate.get("failure_class", ""),
+            "observed_phase": active_phase,
+        },
+    )
+    report = {
+        "phase": active_phase,
+        "category": candidate.get("category", ""),
+        **result,
+    }
+    report["emitted"] = True
+    return report
+
+
 def agent_status():
     f = latest_file(REPO_ROOT / ".scratch" / "phase_b_agent_review_*.status.json")
     if not f:
@@ -931,12 +1220,21 @@ def main(argv: list[str] | None = None):
     parser.add_argument("interval", nargs="?", type=int, default=REFRESH_INTERVAL)
     parser.add_argument("--repo-root", default=str(REPO_ROOT), help="Repo root to inspect")
     parser.add_argument("--render-recovery", action="store_true", help="Print recovery lines once and exit")
+    parser.add_argument(
+        "--emit-idle-non-go-alert",
+        action="store_true",
+        help="Emit a deduped pager event when the observed pipeline is idle after a non-GO stop.",
+    )
     args = parser.parse_args(argv)
     REPO_ROOT = Path(args.repo_root).resolve()
 
     if args.render_recovery:
         for line in render_recovery_lines(REPO_ROOT):
             print(line)
+        return
+    if args.emit_idle_non_go_alert:
+        json.dump(emit_idle_non_go_alert(REPO_ROOT), sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
         return
 
     interval = args.interval
