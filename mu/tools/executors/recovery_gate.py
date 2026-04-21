@@ -71,6 +71,7 @@ class FailureClass(Enum):
     AGGREGATION_HANG = "aggregation_hang"
     IMPLEMENTER_STALE = "implementer_stale"
     PR_MERGE_CONFLICT = "pr_merge_conflict"
+    PR_CONFLICTING = "pr_conflicting"
     # Tier 3 -- LLM diagnosis (small focused prompt)
     GIT_STAGING_CONFLICT = "git_staging_conflict"
     TEST_FAILURE = "test_failure"
@@ -91,6 +92,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
     FailureClass.AGGREGATION_HANG: 2, FailureClass.IMPLEMENTER_STALE: 2,
     FailureClass.PR_MERGE_CONFLICT: 2,
+    FailureClass.PR_CONFLICTING: 2,
     FailureClass.GIT_STAGING_CONFLICT: 3, FailureClass.TEST_FAILURE: 3,
     FailureClass.AGENT_REVIEW_CRASH: 3, FailureClass.UNKNOWN_ERROR: 3,
     FailureClass.NEEDS_PHASE_B: 3,
@@ -179,6 +181,20 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     # Tier 3: bot_findings_pending with P1 unresolved → re-invoke implementer
     if status == "bot_findings_pending" or embedded_status == "bot_findings_pending":
         return FailureClass.BOT_FINDINGS_PENDING
+
+    stdout_lower = stdout.lower() if isinstance(stdout, str) else ""
+    if (
+        result.get("failure_class") == "pr_conflicting"
+        or embedded_stdout.get("failure_class") == "pr_conflicting"
+        or embedded_stderr.get("failure_class") == "pr_conflicting"
+        or "mergeable=conflicting" in reason_lower
+        or "mergeable=conflicting" in combined_lower
+        or "mergeable=conflicting" in stdout_lower
+        or "mergestatestatus=dirty" in reason_lower
+        or "mergestatestatus=dirty" in combined_lower
+        or "mergestatestatus=dirty" in stdout_lower
+    ):
+        return FailureClass.PR_CONFLICTING
 
     if status_failed and "merge_pr.sh failed" in reason_lower and (
         "not mergeable" in reason_lower
@@ -1200,6 +1216,141 @@ def fix_pr_merge_conflict(repo_root: Path, **kw: Any) -> dict[str, Any]:
     return _fix_result(True, "merge_base_branch_and_push", merge_detail)
 
 
+def _extract_branch_context_field(result: dict[str, Any], field: str) -> str:
+    for candidate in (
+        result,
+        _parse_json_object(result.get("stdout", "")),
+        _parse_json_object(result.get("stderr", "")),
+    ):
+        if not isinstance(candidate, dict):
+            continue
+        value = candidate.get(field)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                return stripped
+    return ""
+
+
+def fix_pr_conflicting(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Delegate to commit_executor._try_auto_resolve_pr_conflict on CONFLICTING/DIRTY PRs.
+
+    Widens the Step 14 auto-resolve recipe beyond its original call site so
+    any recovery-gate path can reach it. Preconditions (clean worktree +
+    resolved branch context) fail-close before the mutating helper runs.
+    """
+    result = kw.get("result", {})
+    pr_number = _extract_result_pr_number(result)
+    if not pr_number:
+        return _fix_result(False, "missing_pr_number", "could not determine PR number")
+
+    try:
+        status_proc = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return _fix_result(False, "status_failed", f"git status failed: {exc}")
+    if status_proc.returncode != 0:
+        return _fix_result(False, "status_failed", f"git status returned {status_proc.returncode}")
+    if status_proc.stdout.strip():
+        return _fix_result(
+            False, "dirty_worktree", "worktree is not clean enough for auto-resolve"
+        )
+
+    base_branch = _extract_branch_context_field(result, "base_branch")
+    branch_name = _extract_branch_context_field(result, "branch_name")
+    if not (base_branch and branch_name):
+        try:
+            pr_view = subprocess.run(
+                ["gh", "pr", "view", pr_number, "--json", "baseRefName,headRefName"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            return _fix_result(False, "pr_view_failed", f"gh pr view failed: {exc}")
+        if pr_view.returncode != 0:
+            detail = (pr_view.stderr or pr_view.stdout or "").strip()
+            return _fix_result(
+                False, "pr_view_failed",
+                detail or f"gh pr view returned {pr_view.returncode}",
+            )
+        try:
+            pr_payload = json.loads(pr_view.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            return _fix_result(False, "pr_view_failed", f"gh pr view returned invalid JSON: {exc}")
+        if not isinstance(pr_payload, dict):
+            return _fix_result(False, "pr_view_failed", "gh pr view payload was not an object")
+        if not base_branch:
+            base_branch = str(pr_payload.get("baseRefName", "")).strip()
+        if not branch_name:
+            branch_name = str(pr_payload.get("headRefName", "")).strip()
+
+    if not (base_branch and branch_name):
+        return _fix_result(
+            False, "missing_branch_context",
+            f"PR #{pr_number} missing baseRefName or headRefName",
+        )
+
+    # HEAD-matches-branch_name guard. The helper at
+    # commit_executor._try_auto_resolve_pr_conflict merges origin/<base_branch>
+    # into implicit HEAD, then pushes `branch_name` explicitly. If HEAD is on a
+    # different branch, the merge commit lands on the wrong branch while the
+    # push reports success on the unchanged branch_name — a wrong-branch
+    # mutation with success-reporting. The Step 14 call site is safe because
+    # the pipeline has just pushed the feature branch, so HEAD is implicitly
+    # aligned. Any widened recovery entrypoint must prove HEAD == branch_name
+    # before delegating.
+    try:
+        head_proc = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return _fix_result(
+            False, "current_branch_failed", f"git rev-parse HEAD failed: {exc}"
+        )
+    if head_proc.returncode != 0:
+        detail = (head_proc.stderr or head_proc.stdout or "").strip()
+        return _fix_result(
+            False, "current_branch_failed",
+            detail or f"git rev-parse HEAD returned {head_proc.returncode}",
+        )
+    current_branch = head_proc.stdout.strip()
+    if current_branch != branch_name:
+        return _fix_result(
+            False, "branch_mismatch",
+            f"HEAD on {current_branch!r}, expected PR head {branch_name!r}; "
+            "refusing to auto-resolve on the wrong branch",
+        )
+
+    try:
+        commit_mod = _load_executor_module_from_repo(repo_root, "commit_executor")
+    except Exception as exc:
+        return _fix_result(False, "module_load_failed", f"could not load commit_executor: {exc}")
+
+    helper = commit_mod._try_auto_resolve_pr_conflict(
+        repo_root,
+        pr_number=pr_number,
+        base_branch=base_branch,
+        branch_name=branch_name,
+        log=None,
+    )
+    return _fix_result(
+        fixed=bool(helper.get("resolved")),
+        action=str(helper.get("action", "unknown")),
+        detail=str(helper.get("detail", "")),
+    )
+
+
 _TIER2_FIXES: dict[FailureClass, Any] = {
     FailureClass.STALE_GIT_INDEX_LOCK: lambda root, **kw: fix_stale_git_index_lock(root),
     FailureClass.PROCESS_TIMEOUT: fix_process_timeout,
@@ -1207,6 +1358,7 @@ _TIER2_FIXES: dict[FailureClass, Any] = {
     FailureClass.AGGREGATION_HANG: fix_aggregation_hang,
     FailureClass.IMPLEMENTER_STALE: fix_implementer_stale,
     FailureClass.PR_MERGE_CONFLICT: fix_pr_merge_conflict,
+    FailureClass.PR_CONFLICTING: fix_pr_conflicting,
 }
 
 
