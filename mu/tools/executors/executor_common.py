@@ -249,6 +249,15 @@ def _legacy_role_agent_override(raw_overrides: dict[str, Any], role: str) -> str
     return None
 
 
+def _explicit_role_agent_override(raw_overrides: dict[str, Any], role: str) -> str | None:
+    if not isinstance(raw_overrides, dict):
+        return None
+    role_agents = raw_overrides.get("role_agents", {})
+    if not isinstance(role_agents, dict):
+        return None
+    return _nonempty_str(role_agents.get(role))
+
+
 def resolve_role_agent(
     config: dict[str, Any],
     role: str,
@@ -267,11 +276,20 @@ def resolve_role_agent(
     """
     default_role_agents = DEFAULT_EXECUTOR_CONFIG.get("role_agents", {})
     default_agent = _nonempty_str(default_role_agents.get(role)) or "codex"
+    raw_overrides = raw_overrides if isinstance(raw_overrides, dict) else {}
 
     for env_name in ROLE_AGENT_ENV_VARS.get(role, ()):
         candidate = _nonempty_str(os.environ.get(env_name))
         if candidate is not None:
             return candidate
+
+    explicit = _explicit_role_agent_override(raw_overrides, role)
+    if explicit is not None:
+        return explicit
+
+    legacy = _legacy_role_agent_override(raw_overrides, role)
+    if legacy is not None:
+        return legacy
 
     role_agents = config.get("role_agents", {})
     if isinstance(role_agents, dict):
@@ -279,9 +297,6 @@ def resolve_role_agent(
         if candidate is not None:
             return candidate
 
-    legacy = _legacy_role_agent_override(raw_overrides or {}, role)
-    if legacy is not None:
-        return legacy
     return default_agent
 
 
