@@ -43,6 +43,21 @@ PROMPT_HOOK_REQUIRED_CANARIES = (
     "repo-tracked docs",
     "pipeline path",
 )
+POST_TOOL_USE_REQUIRED_CANARIES = (
+    "hookSpecificOutput",
+    "PostToolUse",
+    "learned_patterns.json",
+    "learning.md",
+)
+POST_TOOL_USE_REQUIRED_MATCHER_TOKENS = (
+    "Bash",
+    "Read",
+    "Grep",
+    "Edit",
+    "Write",
+    "MultiEdit",
+)
+ALLOWED_POST_TOOL_USE_PRE_EMIT_ENV_VARS = frozenset({"CODEX_RCX_VERIFY_DISABLE"})
 
 ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 PYTHON_INTERPRETER_RE = re.compile(r"^python(?:\d+(?:\.\d+)*)?$")
@@ -715,7 +730,12 @@ def _statements_may_terminate_before_emit(statements: list[ast.stmt], emit_name:
     return False
 
 
-def _unapproved_pre_emit_env_gates(function: ast.FunctionDef, *, emit_name: str) -> set[str]:
+def _unapproved_pre_emit_env_gates(
+    function: ast.FunctionDef,
+    *,
+    emit_name: str,
+    allowed_env_vars: frozenset[str],
+) -> set[str]:
     blocked: set[str] = set()
 
     for statement in function.body:
@@ -730,7 +750,7 @@ def _unapproved_pre_emit_env_gates(function: ast.FunctionDef, *, emit_name: str)
                 _statements_may_terminate_before_emit(statement.body, emit_name)
                 or _statements_may_terminate_before_emit(statement.orelse, emit_name)
             ):
-                blocked |= env_names - ALLOWED_SESSION_START_PRE_EMIT_ENV_VARS
+                blocked |= env_names - allowed_env_vars
 
         child_blocks: list[list[ast.stmt]] = []
         if isinstance(statement, ast.Try):
@@ -752,7 +772,7 @@ def _unapproved_pre_emit_env_gates(function: ast.FunctionDef, *, emit_name: str)
                         _statements_may_terminate_before_emit(child.body, emit_name)
                         or _statements_may_terminate_before_emit(child.orelse, emit_name)
                     ):
-                        blocked |= env_names - ALLOWED_SESSION_START_PRE_EMIT_ENV_VARS
+                        blocked |= env_names - allowed_env_vars
 
         if _statement_may_terminate_before_emit(statement, emit_name):
             break
@@ -965,6 +985,23 @@ def _guard_statement_invokes_function(statement: ast.stmt, function_name: str) -
         return _is_named_function_call(statement.value.args[0] if statement.value.args else None, function_name)
     if isinstance(statement, ast.Return):
         return _is_named_function_call(statement.value, function_name)
+    child_blocks: list[list[ast.stmt]] = []
+    if isinstance(statement, ast.Try):
+        child_blocks.append(statement.body)
+        child_blocks.extend(handler.body for handler in statement.handlers)
+        child_blocks.extend([statement.orelse, statement.finalbody])
+    elif isinstance(statement, ast.If):
+        child_blocks.extend([statement.body, statement.orelse])
+    elif isinstance(statement, (ast.With, ast.AsyncWith)):
+        child_blocks.append(statement.body)
+    elif isinstance(statement, ast.Match):
+        child_blocks.extend(case.body for case in statement.cases)
+    if child_blocks:
+        return any(
+            _guard_statement_invokes_function(child, function_name)
+            for block in child_blocks
+            for child in block
+        )
     return False
 
 
@@ -1022,7 +1059,11 @@ def _module_bindings(text: str) -> tuple[dict[str, ast.AST], dict[str, ast.Funct
     return assignments, functions
 
 
-def _emit_additional_context_uses_parameter(emit_function: ast.FunctionDef) -> bool:
+def _emit_additional_context_uses_parameter(
+    emit_function: ast.FunctionDef,
+    *,
+    expected_event_name: str,
+) -> bool:
     if not emit_function.args.args:
         return False
 
@@ -1042,7 +1083,7 @@ def _emit_additional_context_uses_parameter(emit_function: ast.FunctionDef) -> b
             isinstance(additional_context, ast.Name)
             and additional_context.id == parameter_name
             and isinstance(hook_event_name, ast.Constant)
-            and hook_event_name.value == "SessionStart"
+            and hook_event_name.value == expected_event_name
         ):
             return True
     return False
@@ -1715,6 +1756,26 @@ def _extract_binary_contradictions(payload: dict) -> list[str]:
     return contradictions
 
 
+def _extract_binary_unacceptable_specs(payload: dict) -> list[str]:
+    unacceptable: list[str] = []
+    for item in payload.get("specs") or []:
+        status = str(item.get("status") or "")
+        if status in {"patched", "absent"}:
+            continue
+        patch_id = str(item.get("patch_id") or "<unknown>")
+        unacceptable.append(f"{patch_id}:{status or 'unknown'}")
+    return unacceptable
+
+
+def _extract_binary_absent_specs(payload: dict) -> list[str]:
+    absent: list[str] = []
+    for item in payload.get("specs") or []:
+        if str(item.get("status") or "") != "absent":
+            continue
+        absent.append(str(item.get("patch_id") or "<unknown>"))
+    return absent
+
+
 def _audit_binary_guard(codex_home: Path, repo_root: Path) -> CheckResult:
     binary_guard = codex_home / "bin" / "codex-binary-guard"
     if not binary_guard.exists():
@@ -1750,6 +1811,8 @@ def _audit_binary_guard(codex_home: Path, repo_root: Path) -> CheckResult:
 
     version = payload.get("version", "unknown")
     contradictions = _extract_binary_contradictions(payload)
+    unacceptable_specs = _extract_binary_unacceptable_specs(payload)
+    absent_specs = _extract_binary_absent_specs(payload)
     if payload.get("version_changed_since_patch"):
         last_patched = payload.get("last_patched") or {}
         last_version = last_patched.get("version", "unknown")
@@ -1758,22 +1821,39 @@ def _audit_binary_guard(codex_home: Path, repo_root: Path) -> CheckResult:
             "FAIL",
             f"version drift current=v{version} last_patched=v{last_version}",
         )
-    if payload.get("overall_status") != "patched":
-        return CheckResult(
-            "binary_guard",
-            "FAIL",
-            f"overall_status={payload.get('overall_status')} version=v{version}",
-        )
     if contradictions:
         return CheckResult(
             "binary_guard",
             "FAIL",
             "contradictions present: " + ", ".join(contradictions),
         )
+    overall_status = str(payload.get("overall_status") or "unknown")
+    if overall_status not in {"patched", "partially_patched"}:
+        return CheckResult(
+            "binary_guard",
+            "FAIL",
+            f"overall_status={overall_status} version=v{version}",
+        )
+    if unacceptable_specs:
+        return CheckResult(
+            "binary_guard",
+            "FAIL",
+            "unexpected spec statuses: " + ", ".join(unacceptable_specs),
+        )
+    if overall_status == "partially_patched" and not absent_specs:
+        return CheckResult(
+            "binary_guard",
+            "FAIL",
+            "overall_status=partially_patched requires at least one explicit absent spec",
+        )
     return CheckResult(
         "binary_guard",
         "OK",
-        f"patched version=v{version}",
+        (
+            f"patched version=v{version}"
+            if overall_status == "patched"
+            else f"patched version=v{version} with documented absent specs"
+        ),
     )
 
 
@@ -1844,7 +1924,10 @@ def _check_session_start_hook(codex_home: Path) -> CheckResult:
     emits_session_payload = _session_start_emits_to_stdout(text)
     if (
         missing_structure
-        or not _emit_additional_context_uses_parameter(emit_function)
+        or not _emit_additional_context_uses_parameter(
+            emit_function,
+            expected_event_name="SessionStart",
+        )
         or not emits_session_payload
         or not _module_has_guarded_function_entrypoint(text, "main")
         or not _function_returns_only_zero_or_none(main_function)
@@ -1868,7 +1951,13 @@ def _check_session_start_hook(codex_home: Path) -> CheckResult:
             "missing emitted payload canaries: " + ", ".join(missing_payload_canaries),
         )
 
-    blocked_env_gates = sorted(_unapproved_pre_emit_env_gates(main_function, emit_name="_emit"))
+    blocked_env_gates = sorted(
+        _unapproved_pre_emit_env_gates(
+            main_function,
+            emit_name="_emit",
+            allowed_env_vars=ALLOWED_SESSION_START_PRE_EMIT_ENV_VARS,
+        )
+    )
     if blocked_env_gates:
         return CheckResult(
             "session_start_hook",
@@ -1980,6 +2069,166 @@ def _check_prompt_hook(codex_home: Path) -> CheckResult:
         "prompt_hook",
         "OK",
         "active prompt hook statically anchors RCX protocol canaries",
+    )
+
+
+def _post_tool_use_hook_targets(hooks_payload: dict) -> list[tuple[str, str]]:
+    hooks = hooks_payload.get("hooks")
+    if not isinstance(hooks, dict):
+        return []
+    entries = hooks.get("PostToolUse")
+    if not isinstance(entries, list):
+        return []
+
+    targets: list[tuple[str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        matcher = str(entry.get("matcher") or "")
+        hook_defs = entry.get("hooks")
+        if not isinstance(hook_defs, list):
+            continue
+        for hook_def in hook_defs:
+            if not isinstance(hook_def, dict):
+                continue
+            if hook_def.get("type") != "command":
+                continue
+            command = str(hook_def.get("command") or "")
+            if not command:
+                continue
+            targets.append((matcher, command))
+    return targets
+
+
+def _check_post_tool_use_hook(codex_home: Path) -> CheckResult:
+    hook_path = codex_home / "hooks" / "post_tool_use_rcx_verify.py"
+    text = _read_text(hook_path)
+    if text is None:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            f"missing: {hook_path}",
+        )
+
+    hooks_json_path = codex_home / "hooks.json"
+    hooks_json_text = _read_text(hooks_json_path)
+    if hooks_json_text is None:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            f"missing hook config: {hooks_json_path}",
+        )
+    try:
+        hooks_payload = json.loads(hooks_json_text)
+    except json.JSONDecodeError as exc:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            f"invalid hooks.json: {exc}",
+        )
+
+    targets = _post_tool_use_hook_targets(hooks_payload)
+    expected_command = str(hook_path)
+    matching_targets = [
+        (matcher, command)
+        for matcher, command in targets
+        if expected_command in command
+    ]
+    if not matching_targets:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "hooks.json does not wire PostToolUse to post_tool_use_rcx_verify.py",
+        )
+
+    matcher_text = " ".join(matcher for matcher, _ in matching_targets)
+    missing_matchers = [
+        token
+        for token in POST_TOOL_USE_REQUIRED_MATCHER_TOKENS
+        if token not in matcher_text
+    ]
+    if missing_matchers:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "hooks.json matcher missing tool canaries: "
+            + ", ".join(missing_matchers),
+        )
+
+    literals = _python_string_literals(text)
+    if literals is None:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "hook source is not valid Python",
+        )
+
+    if _module_has_unsafe_top_level_execution(text):
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "unsafe top-level execution outside main guard",
+        )
+
+    main_function = _python_function_def(text, "main")
+    emit_function = _python_function_def(text, "_emit")
+    if main_function is None or emit_function is None:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "missing PostToolUse emission structure",
+        )
+
+    missing_literals = [
+        needle
+        for needle in POST_TOOL_USE_REQUIRED_CANARIES
+        if not any(needle in literal for literal in literals)
+    ]
+    if missing_literals:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "missing code-bound canaries: " + ", ".join(missing_literals),
+        )
+
+    required_structure = ("PostToolUse", "additionalContext", "hookSpecificOutput")
+    emit_source = _function_source(text, "_emit") or ""
+    missing_structure = [marker for marker in required_structure if marker not in emit_source]
+    if (
+        missing_structure
+        or not _emit_additional_context_uses_parameter(
+            emit_function,
+            expected_event_name="PostToolUse",
+        )
+        or not _module_has_guarded_function_entrypoint(text, "main")
+        or not _function_returns_only_zero_or_none(main_function)
+        or "json.dump" not in emit_source
+        or "sys.stdout" not in emit_source
+    ):
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "missing PostToolUse emission structure",
+        )
+
+    blocked_env_gates = sorted(
+        _unapproved_pre_emit_env_gates(
+            main_function,
+            emit_name="_emit",
+            allowed_env_vars=ALLOWED_POST_TOOL_USE_PRE_EMIT_ENV_VARS,
+        )
+    )
+    if blocked_env_gates:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "unapproved pre-emit environment gates: " + ", ".join(blocked_env_gates),
+        )
+
+    return CheckResult(
+        "post_tool_use_hook",
+        "OK",
+        "PostToolUse hook and matcher cover shell/read/search/edit reminders plus shared-learning capture",
     )
 
 
@@ -2339,6 +2588,7 @@ def gather_results(repo_root: Path, codex_home: Path) -> tuple[list[CheckResult]
             _audit_binary_guard(codex_home, repo_root),
             _check_session_start_hook(codex_home),
             _check_prompt_hook(codex_home),
+            _check_post_tool_use_hook(codex_home),
             _check_default_rules(codex_home),
             _check_models_cache(codex_home),
         ]

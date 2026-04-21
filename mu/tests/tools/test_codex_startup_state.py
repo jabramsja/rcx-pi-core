@@ -91,6 +91,85 @@ def test_binary_guard_version_drift_fails(monkeypatch, tmp_path):
     assert "version drift" in result.detail
 
 
+def test_binary_guard_accepts_absent_only_patch_surface(monkeypatch, tmp_path):
+    codex_home = tmp_path / ".codex"
+    bin_dir = codex_home / "bin"
+    bin_dir.mkdir(parents=True)
+    guard = bin_dir / "codex-binary-guard"
+    guard.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    monkeypatch.setattr(startup_mod.os, "access", lambda path, mode: path == guard)
+    monkeypatch.setattr(
+        startup_mod,
+        "_run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            0,
+            json.dumps(
+                {
+                    "version": "0.122.0",
+                    "version_changed_since_patch": False,
+                    "overall_status": "partially_patched",
+                    "specs": [
+                        {"patch_id": "reread_after_apply_patch", "status": "patched"},
+                        {"patch_id": "voice_friendly_intro", "status": "absent"},
+                        {"patch_id": "ack_every_response", "status": "absent"},
+                    ],
+                }
+            ),
+            "",
+        ),
+    )
+
+    result = startup_mod._audit_binary_guard(codex_home, tmp_path)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert "documented absent specs" in result.detail
+
+
+@pytest.mark.parametrize(
+    "specs",
+    [
+        [],
+        [{"patch_id": "reread_after_apply_patch", "status": "patched"}],
+    ],
+)
+def test_binary_guard_rejects_partially_patched_without_explicit_absent_specs(
+    monkeypatch,
+    tmp_path,
+    specs,
+):
+    codex_home = tmp_path / ".codex"
+    bin_dir = codex_home / "bin"
+    bin_dir.mkdir(parents=True)
+    guard = bin_dir / "codex-binary-guard"
+    guard.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    monkeypatch.setattr(startup_mod.os, "access", lambda path, mode: path == guard)
+    monkeypatch.setattr(
+        startup_mod,
+        "_run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            0,
+            json.dumps(
+                {
+                    "version": "0.122.0",
+                    "version_changed_since_patch": False,
+                    "overall_status": "partially_patched",
+                    "specs": specs,
+                }
+            ),
+            "",
+        ),
+    )
+
+    result = startup_mod._audit_binary_guard(codex_home, tmp_path)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "FAIL"
+    assert "requires at least one explicit absent spec" in result.detail
+
+
 def test_models_cache_canaries_fail(tmp_path):
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
@@ -846,6 +925,157 @@ def test_prompt_hook_disabled_top_level_side_effect_fails_without_execution(tmp_
     assert result.status == "FAIL"
     assert "unsafe top-level execution" in result.detail
     assert not marker.exists()
+
+
+def test_post_tool_use_hook_valid_source_and_matcher_are_accepted(tmp_path):
+    codex_home = tmp_path / ".codex"
+    hook_dir = codex_home / "hooks"
+    hook_dir.mkdir(parents=True)
+    hook_path = hook_dir / "post_tool_use_rcx_verify.py"
+    hook_path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "LEARNING_PATHS = '.agent_bus/recovery/learned_patterns.json .claude/rules/learning.md'\n"
+        "def _emit(additional_context):\n"
+        "    payload = {'hookSpecificOutput': {'hookEventName': 'PostToolUse', 'additionalContext': additional_context}}\n"
+        "    json.dump(payload, sys.stdout)\n"
+        "    sys.stdout.write('\\n')\n"
+        "def main():\n"
+        "    if os.environ.get('CODEX_RCX_VERIFY_DISABLE') == '1':\n"
+        "        return 0\n"
+        "    _ = LEARNING_PATHS\n"
+        "    return 0\n"
+        "if __name__ == '__main__':\n"
+        "    raise SystemExit(main())\n",
+        encoding="utf-8",
+    )
+    (codex_home / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PostToolUse": [
+                        {
+                            "matcher": "Bash|Read|Grep|Edit|Write|MultiEdit",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": f"/usr/bin/python3 {hook_path}",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = startup_mod._check_post_tool_use_hook(codex_home)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert "shared-learning capture" in result.detail
+
+
+def test_post_tool_use_hook_accepts_try_wrapped_main_guard(tmp_path):
+    codex_home = tmp_path / ".codex"
+    hook_dir = codex_home / "hooks"
+    hook_dir.mkdir(parents=True)
+    hook_path = hook_dir / "post_tool_use_rcx_verify.py"
+    hook_path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "LEARNING_PATHS = '.agent_bus/recovery/learned_patterns.json .claude/rules/learning.md'\n"
+        "def _emit(additional_context):\n"
+        "    payload = {'hookSpecificOutput': {'hookEventName': 'PostToolUse', 'additionalContext': additional_context}}\n"
+        "    json.dump(payload, sys.stdout)\n"
+        "    sys.stdout.write('\\n')\n"
+        "def main():\n"
+        "    if os.environ.get('CODEX_RCX_VERIFY_DISABLE') == '1':\n"
+        "        return 0\n"
+        "    _ = LEARNING_PATHS\n"
+        "    return 0\n"
+        "if __name__ == '__main__':\n"
+        "    try:\n"
+        "        raise SystemExit(main())\n"
+        "    except Exception:\n"
+        "        raise SystemExit(0)\n",
+        encoding="utf-8",
+    )
+    (codex_home / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PostToolUse": [
+                        {
+                            "matcher": "Bash|Read|Grep|Edit|Write|MultiEdit",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": f"/usr/bin/python3 {hook_path}",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = startup_mod._check_post_tool_use_hook(codex_home)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert "shared-learning capture" in result.detail
+
+
+def test_post_tool_use_hook_requires_broad_tool_matcher(tmp_path):
+    codex_home = tmp_path / ".codex"
+    hook_dir = codex_home / "hooks"
+    hook_dir.mkdir(parents=True)
+    hook_path = hook_dir / "post_tool_use_rcx_verify.py"
+    hook_path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "LEARNING_PATHS = '.agent_bus/recovery/learned_patterns.json .claude/rules/learning.md'\n"
+        "def _emit(additional_context):\n"
+        "    payload = {'hookSpecificOutput': {'hookEventName': 'PostToolUse', 'additionalContext': additional_context}}\n"
+        "    json.dump(payload, sys.stdout)\n"
+        "    sys.stdout.write('\\n')\n"
+        "def main():\n"
+        "    if os.environ.get('CODEX_RCX_VERIFY_DISABLE') == '1':\n"
+        "        return 0\n"
+        "    _ = LEARNING_PATHS\n"
+        "    return 0\n"
+        "if __name__ == '__main__':\n"
+        "    raise SystemExit(main())\n",
+        encoding="utf-8",
+    )
+    (codex_home / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PostToolUse": [
+                        {
+                            "matcher": "Bash|Read|Grep",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": f"/usr/bin/python3 {hook_path}",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = startup_mod._check_post_tool_use_hook(codex_home)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "FAIL"
+    assert "matcher missing tool canaries" in result.detail
+    assert "Edit" in result.detail
 
 
 @pytest.mark.parametrize(
