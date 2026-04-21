@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -445,6 +446,7 @@ class TestPrepareCommitHandoff:
         )
         handoff = json.loads(path.read_text())
         assert handoff["wave_id"] == "test-wave"
+        assert handoff["task_id"] == "[TEST]"
         assert handoff["wave_class"] == "L4_ENABLER"
         assert handoff["target_gate_id"] == "G8"
         assert handoff["branch_prefix"] == "jabramsja"
@@ -688,15 +690,73 @@ class TestLoadPlanPacketPathTraversal:
         plan_file.write_text(
             "Phase-A-Lock: LOCKED\n"
             "Status: ACTIVE\n"
+            "Wave ID: wave-test-2026-04-21\n"
             "Task: [TEST-PLAN]\n"
             "Unblocks wave id: wave-upstream-2026-04-14\n"
             "Unblocks runtime blocker: INV_STRUCTURAL_FORWARD_MOTION\n"
         )
         result = pb_mod.load_plan_packet(repo, "reports/plan.md")
         assert result["phase_a_lock"] == "LOCKED"
+        assert result["wave_id"] == "wave-test-2026-04-21"
         assert result["task_id"] == "[TEST-PLAN]"
         assert result["unblocks_wave_id"] == "wave-upstream-2026-04-14"
         assert result["unblocks_runtime_blocker"] == "INV_STRUCTURAL_FORWARD_MOTION"
+
+    def test_canonical_identity_fields_win_over_earlier_narrative_bullets(self, tmp_path):
+        """Task and Wave ID must come from canonical headers when both forms exist."""
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "# Plan\n"
+            "- Task: forged-wave\n"
+            "- Wave ID: forged-wave\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Wave ID: real-wave\n"
+            "Phase-A-Lock: LOCKED\n"
+        )
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+        assert result["task_id"] == "[PIPELINE-RECOVERY]"
+        assert result["wave_id"] == "real-wave"
+
+    def test_indented_identity_lines_do_not_count_as_canonical_headers(self, tmp_path):
+        """Indented Task/Wave prose must not outrank later top-level headers."""
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "# Plan\n"
+            "    Task: forged-wave\n"
+            "    Wave ID: forged-wave\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Wave ID: real-wave\n"
+            "Phase-A-Lock: LOCKED\n"
+        )
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+        assert result["task_id"] == "[PIPELINE-RECOVERY]"
+        assert result["wave_id"] == "real-wave"
+
+    def test_single_hash_section_body_task_line_does_not_populate_task_id(self, tmp_path):
+        """Later single-# section headings must close authoritative identity scanning."""
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "# Plan\n"
+            "Status: ACTIVE\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\n"
+            "# Grounding / Authorization\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+        )
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+        assert "task_id" not in result
+        assert "wave_id" not in result
 
     def test_markdown_bypass_lines_parse(self, tmp_path):
         """Markdown-bulleted bypass tokens must parse without quote residue."""
@@ -973,6 +1033,101 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert "Class: MAINTENANCE" in tracker_note_text
         assert "unblocks_wave_id: wave-codex-startup-hardening-2026-04-14" in tracker_note_text
         assert "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION" in tracker_note_text
+
+    def test_run_phase_b_same_wave_exception_keeps_handoff_task_id_on_routing_record(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        plan = repo / "reports" / "control_plane" / "plan.md"
+        plan.write_text(
+            "# Plan\n"
+            "Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n",
+            encoding="utf-8",
+        )
+
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+            "next_candidates": [
+                {
+                    "candidate": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": "reports/control_plane/plan.md",
+                }
+            ],
+        }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(
+                 pb_mod,
+                 "_collect_changed_files",
+                 return_value=["mu/tools/executors/phase_b_executor.py"],
+             ), \
+             patch.object(
+                 pb_mod,
+                 "_collect_wave_owned_files",
+                 return_value=[
+                     "mu/tools/executors/phase_b_executor.py",
+                     "mu/tests/tools/test_phase_b_executor.py",
+                     "reports/control_plane/plan.md",
+                 ],
+             ), \
+             patch.object(
+                 pb_mod,
+                 "_run_pytest_on_files",
+                 return_value={
+                     "exit_code": 0,
+                     "passed": True,
+                     "stdout": "",
+                     "stderr": "",
+                 },
+             ), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(
+                 pb_mod,
+                 "run_bridge_review",
+                 return_value={
+                     "exit_code": 0,
+                     "stdout": "GO\n",
+                     "stderr": "",
+                     "decision": "GO",
+                     "job_id": "j1",
+                 },
+             ), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(
+                 pb_mod,
+                 "run_pre_commit_supervisor",
+                 return_value={
+                     "exit_code": 0,
+                     "parsed": {
+                         "decision": "COMMIT_GO",
+                         "summary": "",
+                         "status": "success",
+                         "findings": [],
+                     },
+                     "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+                 },
+             ), \
+             patch.object(
+                 pb_mod,
+                 "prepare_commit_handoff",
+                 return_value=repo / ".agent_bus" / "handoff.json",
+             ) as mock_handoff:
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert mock_handoff.call_args.kwargs["task_id"] == "[PIPELINE-RECOVERY]"
+        assert mock_handoff.call_args.kwargs["wave_id"] == "phase-b-validate-inputs-task-id-leniency-2026-04-20"
 
     def test_run_phase_b_threads_founder_override_into_enabler_handoff(self, tmp_path):
         repo = tmp_path / "repo"
@@ -4878,6 +5033,603 @@ class TestRoutingValidationNotBypassed:
             "task_id": "[CODEX-STARTUP-HARDENING]",
         }
         with pytest.raises(pb_mod.PhaseBExecutorError, match="does not match routing task_id"):
+            pb_mod.validate_inputs(routing, plan)
+
+    def test_same_wave_task_id_exception_passes_for_tracked_pipeline_recovery_packet(self):
+        """One same-wave recovery packet may carry wave identity in Task without changing routing anchor."""
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "next_candidates": [
+                {
+                    "candidate": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": (
+                        "reports/control_plane/"
+                        "phase_b_validate_inputs_task_id_leniency_2026_04_20_2026-04-21.md"
+                    ),
+                }
+            ],
+        }
+        plan = {
+            "phase_a_lock": "LOCKED",
+            "path": (
+                "reports/control_plane/"
+                "phase_b_validate_inputs_task_id_leniency_2026_04_20_2026-04-21.md"
+            ),
+            "wave_id": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "task_id": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "content": (
+                "Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "Phase-A-Lock: LOCKED\n"
+            ),
+        }
+
+        pb_mod.validate_inputs(routing, plan)
+
+    def test_same_wave_task_id_exception_rejects_unbounded_candidate(self):
+        """The explicit exception must remain scoped to a bounded routing candidate."""
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "next_candidates": [
+                {
+                    "candidate": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+                    "bounded": False,
+                    "tracked_packet": (
+                        "reports/control_plane/"
+                        "phase_b_validate_inputs_task_id_leniency_2026_04_20_2026-04-21.md"
+                    ),
+                }
+            ],
+        }
+        plan = {
+            "phase_a_lock": "LOCKED",
+            "path": (
+                "reports/control_plane/"
+                "phase_b_validate_inputs_task_id_leniency_2026_04_20_2026-04-21.md"
+            ),
+            "wave_id": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "task_id": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "content": (
+                "Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "Phase-A-Lock: LOCKED\n"
+            ),
+        }
+
+        assert not pb_mod._matches_explicit_same_wave_task_id_exception(routing, plan)  # ANTICHEAT_OK: internal helper proves bounded routing remains mandatory
+        with pytest.raises(pb_mod.PhaseBExecutorError, match="does not match routing task_id"):
+            pb_mod.validate_inputs(routing, plan)
+
+    def test_same_wave_task_id_exception_ignores_narrative_only_identity_metadata(self, tmp_path):
+        """Narrative-only Task/Wave bullets must not populate authoritative identity."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plan_dir = repo / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(
+            "Status: ACTIVE\n"
+            "- Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+            "- Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+            "Phase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        plan = pb_mod.load_plan_packet(repo, plan_path)
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "next_candidates": [
+                {
+                    "candidate": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }
+            ],
+        }
+        assert "task_id" not in plan
+        assert "wave_id" not in plan
+        assert not pb_mod._matches_explicit_same_wave_task_id_exception(routing, plan)  # ANTICHEAT_OK: internal helper proves the exception remains header-only
+
+    def test_same_wave_task_id_exception_ignores_indented_only_identity_metadata(self, tmp_path):
+        """Indented Task/Wave prose must not populate authoritative identity."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plan_dir = repo / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(
+            "Status: ACTIVE\n"
+            "    Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+            "    Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+            "Phase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        plan = pb_mod.load_plan_packet(repo, plan_path)
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "next_candidates": [
+                {
+                    "candidate": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }
+            ],
+        }
+        assert "task_id" not in plan
+        assert "wave_id" not in plan
+        assert not pb_mod._matches_explicit_same_wave_task_id_exception(routing, plan)  # ANTICHEAT_OK: internal helper proves the exception remains header-only
+
+    def test_same_wave_task_id_exception_ignores_single_hash_section_body_identity_metadata(self, tmp_path):
+        """Later single-# section headings must not authorize the same-wave exception."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plan_dir = repo / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            "Status: ACTIVE\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\n"
+            "# Grounding / Authorization\n"
+            "Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+            "Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n",
+            encoding="utf-8",
+        )
+        plan = pb_mod.load_plan_packet(repo, plan_path)
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "next_candidates": [
+                {
+                    "candidate": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }
+            ],
+        }
+        assert "task_id" not in plan
+        assert "wave_id" not in plan
+        assert not pb_mod._matches_explicit_same_wave_task_id_exception(routing, plan)  # ANTICHEAT_OK: internal helper proves later single-# sections cannot authorize the exception
+
+    def test_same_wave_task_id_exception_ignores_section_body_identity_metadata(self, tmp_path):
+        """Section-body Task/Wave prose must not count as authoritative packet identity."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plan_dir = repo / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            "Status: ACTIVE\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\n"
+            "## Grounding / Authorization\n"
+            "Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+            "Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n",
+            encoding="utf-8",
+        )
+        plan = pb_mod.load_plan_packet(repo, plan_path)
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "next_candidates": [
+                {
+                    "candidate": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }
+            ],
+        }
+        assert "task_id" not in plan
+        assert "wave_id" not in plan
+        assert not pb_mod._matches_explicit_same_wave_task_id_exception(routing, plan)  # ANTICHEAT_OK: internal helper proves the exception remains header-only
+
+    def test_same_wave_task_id_exception_ignores_setext_section_body_identity_metadata(self, tmp_path):
+        """Setext section headings must stop authoritative identity scanning."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plan_dir = repo / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            "Status: ACTIVE\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\n"
+            "Grounding / Authorization\n"
+            "-------------------------\n"
+            "Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+            "Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n",
+            encoding="utf-8",
+        )
+        plan = pb_mod.load_plan_packet(repo, plan_path)
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "next_candidates": [
+                {
+                    "candidate": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }
+            ],
+        }
+        assert "task_id" not in plan
+        assert "wave_id" not in plan
+        assert not pb_mod._matches_explicit_same_wave_task_id_exception(routing, plan)  # ANTICHEAT_OK: internal helper proves setext section bodies cannot authorize the exception
+
+    def test_same_wave_task_id_exception_ignores_fenced_code_identity_metadata(self, tmp_path):
+        """Fenced-code Task/Wave examples must not populate authoritative identity."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plan_dir = repo / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            "Status: ACTIVE\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\n"
+            "## Grounding / Authorization\n"
+            "```text\n"
+            "Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+            "Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+            "```\n",
+            encoding="utf-8",
+        )
+        plan = pb_mod.load_plan_packet(repo, plan_path)
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "next_candidates": [
+                {
+                    "candidate": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }
+            ],
+        }
+        assert "task_id" not in plan
+        assert "wave_id" not in plan
+        assert not pb_mod._matches_explicit_same_wave_task_id_exception(routing, plan)  # ANTICHEAT_OK: internal helper proves the exception remains header-only
+
+    @pytest.mark.parametrize(
+        ("plan_text", "case_id"),
+        [
+            pytest.param(
+                "Status: ACTIVE\n"
+                "- Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "- Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "Phase-A-Lock: LOCKED\n",
+                "narrative-bullets",
+                id="narrative-bullets",
+            ),
+            pytest.param(
+                "Status: ACTIVE\n"
+                "    Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "    Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "Phase-A-Lock: LOCKED\n",
+                "indented-prose",
+                id="indented-prose",
+            ),
+            pytest.param(
+                "# Plan\n"
+                "Status: ACTIVE\n"
+                "Phase-A-Lock: LOCKED\n"
+                "\n"
+                "# Grounding / Authorization\n"
+                "Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n",
+                "single-hash-section-body",
+                id="single-hash-section-body",
+            ),
+            pytest.param(
+                "# Plan\n"
+                "Status: ACTIVE\n"
+                "Phase-A-Lock: LOCKED\n"
+                "\n"
+                "## Grounding / Authorization\n"
+                "Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n",
+                "section-body",
+                id="section-body",
+            ),
+            pytest.param(
+                "# Plan\n"
+                "Status: ACTIVE\n"
+                "Phase-A-Lock: LOCKED\n"
+                "\n"
+                "Grounding / Authorization\n"
+                "-------------------------\n"
+                "Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n",
+                "setext-section-body",
+                id="setext-section-body",
+            ),
+            pytest.param(
+                "# Plan\n"
+                "Status: ACTIVE\n"
+                "Phase-A-Lock: LOCKED\n"
+                "\n"
+                "## Grounding / Authorization\n"
+                "```text\n"
+                "Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "```\n",
+                "fenced-code",
+                id="fenced-code",
+            ),
+        ],
+    )
+    def test_same_wave_task_id_exception_missing_canonical_identity_fails_closed(
+        self,
+        tmp_path,
+        plan_text,
+        case_id,
+    ):
+        """Tracked recovery packets must reject malformed same-wave identity proofs."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plan_dir = repo / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(plan_text, encoding="utf-8")
+        plan = pb_mod.load_plan_packet(repo, plan_path)
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": case_id,
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "next_candidates": [
+                {
+                    "candidate": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }
+            ],
+        }
+
+        assert "task_id" not in plan
+        assert "wave_id" not in plan
+        with pytest.raises(
+            pb_mod.PhaseBExecutorError,
+            match="missing authoritative Task/Wave header identity",
+        ):
+            pb_mod.validate_inputs(routing, plan)
+
+    def test_non_recovery_packet_missing_authoritative_task_id_fails_closed(self, tmp_path):
+        """Non-recovery packets must not bypass task-id validation on body-only metadata."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plan_dir = repo / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            "Status: ACTIVE\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\n"
+            "## Grounding / Authorization\n"
+            "Task: wrong-wave\n"
+            "Wave ID: other-wave\n",
+            encoding="utf-8",
+        )
+        plan = pb_mod.load_plan_packet(repo, plan_path)
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[OTHER-WAVE]",
+            "wave_name": "other-wave",
+            "next_candidates": [
+                {
+                    "candidate": "other-wave",
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }
+            ],
+        }
+
+        assert "task_id" not in plan
+        assert "wave_id" not in plan
+        with pytest.raises(
+            pb_mod.PhaseBExecutorError,
+            match="missing authoritative Task header required to match routing task_id",
+        ):
+            pb_mod.validate_inputs(routing, plan)
+
+    @pytest.mark.parametrize(
+        ("plan_text", "duplicate_field"),
+        [
+            pytest.param(
+                "Status: ACTIVE\n"
+                "Task: [OTHER-WAVE]\n"
+                "Task: [OTHER-WAVE-ALT]\n"
+                "Wave ID: other-wave\n"
+                "Phase-A-Lock: LOCKED\n",
+                "Task",
+                id="duplicate-task-header",
+            ),
+            pytest.param(
+                "Status: ACTIVE\n"
+                "Task: [OTHER-WAVE]\n"
+                "Wave ID: other-wave\n"
+                "Wave ID: other-wave-alt\n"
+                "Phase-A-Lock: LOCKED\n",
+                "Wave ID",
+                id="duplicate-wave-id-header",
+            ),
+        ],
+    )
+    def test_non_recovery_duplicate_authoritative_identity_headers_fail_closed(
+        self,
+        tmp_path,
+        plan_text,
+        duplicate_field,
+    ):
+        """Duplicate authoritative Task/Wave headers must fail closed for any packet."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plan_dir = repo / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(plan_text, encoding="utf-8")
+        plan = pb_mod.load_plan_packet(repo, plan_path)
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[OTHER-WAVE]",
+            "wave_name": "other-wave",
+            "next_candidates": [
+                {
+                    "candidate": "other-wave",
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }
+            ],
+        }
+
+        assert plan["task_id"] == "[OTHER-WAVE]"
+        with pytest.raises(
+            pb_mod.PhaseBExecutorError,
+            match=(
+                "duplicate authoritative identity headers: "
+                f"{re.escape(duplicate_field)}"
+            ),
+        ):
+            pb_mod.validate_inputs(routing, plan)
+
+    def test_same_wave_task_id_exception_rejects_narrative_forged_wave_metadata(self, tmp_path):
+        """Narrative bullets must not supply the authoritative same-wave proof."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plan_dir = repo / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(
+            "Status: ACTIVE\n"
+            "- Task: forged-wave\n"
+            "- Wave ID: forged-wave\n"
+            "Task: real-wave\n"
+            "Wave ID: real-wave\n"
+            "Phase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        plan = pb_mod.load_plan_packet(repo, plan_path)
+        assert plan["task_id"] == "real-wave"
+        assert plan["wave_id"] == "real-wave"
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": "forged-wave",
+            "next_candidates": [
+                {
+                    "candidate": "forged-wave",
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }
+            ],
+        }
+
+        with pytest.raises(pb_mod.PhaseBExecutorError, match="does not match routing task_id"):
+            pb_mod.validate_inputs(routing, plan)
+
+    def test_same_wave_task_id_exception_rejects_duplicate_canonical_identity_pairs(self, tmp_path):
+        """Duplicate canonical Task/Wave headers keep the exception fail-closed."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plan_dir = repo / "reports" / "control_plane"
+        plan_dir.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(
+            "Status: ACTIVE\n"
+            "Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+            "Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Wave ID: different-wave\n"
+            "Phase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        plan = pb_mod.load_plan_packet(repo, plan_path)
+        assert plan["task_id"] == "phase-b-validate-inputs-task-id-leniency-2026-04-20"
+        assert plan["wave_id"] == "phase-b-validate-inputs-task-id-leniency-2026-04-20"
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "next_candidates": [
+                {
+                    "candidate": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": plan_path,
+                }
+            ],
+        }
+
+        with pytest.raises(pb_mod.PhaseBExecutorError, match="does not match routing task_id"):
+            pb_mod.validate_inputs(routing, plan)
+
+    def test_same_wave_task_id_exception_rejects_duplicate_task_headers_even_when_plan_task_matches_routing(self):
+        """Tracked recovery packets must reject dual task identities even on the routing anchor."""
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "next_candidates": [
+                {
+                    "candidate": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": (
+                        "reports/control_plane/"
+                        "phase_b_validate_inputs_task_id_leniency_2026_04_20_2026-04-21.md"
+                    ),
+                }
+            ],
+        }
+        plan = {
+            "phase_a_lock": "LOCKED",
+            "path": (
+                "reports/control_plane/"
+                "phase_b_validate_inputs_task_id_leniency_2026_04_20_2026-04-21.md"
+            ),
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_id": "phase-b-validate-inputs-task-id-leniency-2026-04-20",
+            "content": (
+                "Status: ACTIVE\n"
+                "Task: [PIPELINE-RECOVERY]\n"
+                "Task: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "Wave ID: phase-b-validate-inputs-task-id-leniency-2026-04-20\n"
+                "Phase-A-Lock: LOCKED\n"
+            ),
+        }
+
+        with pytest.raises(
+            pb_mod.PhaseBExecutorError,
+            match="missing authoritative Task/Wave header identity",
+        ):
             pb_mod.validate_inputs(routing, plan)
 
     def test_run_phase_b_fails_on_bad_routing_without_force(self, tmp_path):

@@ -93,6 +93,7 @@ except ImportError as _exc:
     _tracker_sync_import_error = _exc
 
 BRANCH_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+TARGET_BRANCH_SUFFIX_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,190}$")
 
 FORCE_ADD_DENYLIST = tuple(d.lower() for d in (".git/", ".env", ".agent_bus/"))
 
@@ -103,6 +104,7 @@ REQUIRED_HANDOFF_FIELDS = {
     "base_branch", "pre_commit_receipt_path", "task_id", "caller",
 }
 OPTIONAL_HANDOFF_FIELDS = {
+    "target_branch",
     "supervisor_lane",
     "deferred_items",
     "bridge_status",
@@ -3123,6 +3125,21 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
     branch_prefix = handoff.get("branch_prefix", "")
     if isinstance(branch_prefix, str) and branch_prefix and not BRANCH_PREFIX_RE.fullmatch(branch_prefix):
         errors.append(f"branch_prefix contains unsafe characters: {branch_prefix}")
+    target_branch = handoff.get("target_branch")
+    if target_branch is not None:
+        if not isinstance(target_branch, str) or not target_branch.strip():
+            errors.append("target_branch must be a non-empty string when provided")
+        else:
+            expected_prefix = f"{branch_prefix}/" if isinstance(branch_prefix, str) and branch_prefix else ""
+            normalized_target_branch = target_branch.strip()
+            if expected_prefix and not normalized_target_branch.startswith(expected_prefix):
+                errors.append(
+                    f"target_branch must start with '{expected_prefix}' when provided: {normalized_target_branch}"
+                )
+            else:
+                suffix = normalized_target_branch[len(expected_prefix):]
+                if not TARGET_BRANCH_SUFFIX_RE.fullmatch(suffix):
+                    errors.append(f"target_branch contains unsafe characters: {normalized_target_branch}")
 
     # Caller validation
     caller = handoff.get("caller", "")
@@ -3749,7 +3766,11 @@ def run_commit_pipeline(
 
     wave_id = handoff["wave_id"]
     branch_prefix = handoff["branch_prefix"]
-    target_branch = f"{branch_prefix}/{wave_id}"
+    explicit_target_branch = handoff.get("target_branch")
+    if isinstance(explicit_target_branch, str) and explicit_target_branch.strip():
+        target_branch = explicit_target_branch.strip()
+    else:
+        target_branch = f"{branch_prefix}/{wave_id}"
     base_branch = handoff["base_branch"]
     handoff_sha = _handoff_sha(handoff)
     result["handoff_sha"] = handoff_sha

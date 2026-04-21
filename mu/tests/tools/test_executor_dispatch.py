@@ -559,6 +559,13 @@ class TestCommitHandoffValidation:
         assert not valid
         assert any("branch_prefix" in e for e in errors)
 
+    def test_target_branch_must_match_branch_prefix(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_handoff(target_branch="other/restart-branch"),
+        )
+        assert not valid
+        assert any("target_branch must start with" in e for e in errors)
+
     def test_force_add_nested_env_path_fails(self):
         valid, errors = commit_mod.validate_handoff(
             _make_new_handoff(force_add_files=["reports/.env/secrets.txt"]),
@@ -2214,6 +2221,30 @@ class TestEnsureFeatureBranch:
         assert result["status"] == "error"
         assert result["step"] == "ensure_feature_branch"
         assert any("Refusing auto-rebind" in e for e in result["errors"])
+
+    def test_10c_explicit_target_branch_allows_restart_branch(self, tmp_path):
+        """An explicit restart target_branch bypasses canonical collision on Step 2."""
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id-restart-2026-04-21", "dev"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        handoff = _make_new_handoff(target_branch="jabramsja/test-wave-id-restart-2026-04-21")
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+        assert "ensure_feature_branch" in result.get("steps_completed", [])
+        current = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert current == "jabramsja/test-wave-id-restart-2026-04-21"
 
     def test_11_remote_collision_errors(self, tmp_path):
         """Test 11: Remote branch collision → error (mocked)."""
@@ -6319,6 +6350,7 @@ class TestPhaseBNewSchemaHandoff:
             task_id="[TEST]",
             wave_class="L4_ENABLER",
             target_gate_id="G8",
+            target_branch="jabramsja/test-wave-restart-2026-04-21",
             tracker_note_text="- Tracker sync note (test): test.",
             fixes_implemented=["fix1"],
             files_to_stage=["a.py"],
@@ -6332,6 +6364,7 @@ class TestPhaseBNewSchemaHandoff:
         assert handoff["force_add_files"] == []
         assert "wave_id" in handoff
         assert "branch_prefix" in handoff
+        assert handoff["target_branch"] == "jabramsja/test-wave-restart-2026-04-21"
 
 
 # ===========================================================================
