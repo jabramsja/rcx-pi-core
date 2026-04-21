@@ -1307,7 +1307,8 @@ Phase-A-Lock: UNLOCKED
         assert "do NOT try to solve the underlying implementation in this turn" in prompt
         assert "Reproduce with: nl -ba reports/control_plane/test_plan_2026-04-02.md" in prompt
         assert "Evidence result: The packet is still a stub" in prompt
-        assert captured["backend"] == os.environ.get("RCX_IMPLEMENTER_AGENT_OVERRIDE", "codex")
+        expected_implementer = phase_a_mod.load_executor_config(tmp_path)["backends"]["phase_a_executor"]
+        assert captured["backend"] == expected_implementer
 
     def test_deferred_agent_review_accepts_authorization_section_alias(self, tmp_path, monkeypatch):
         """Deferred Phase A review must treat Authorization as equivalent to Grounding."""
