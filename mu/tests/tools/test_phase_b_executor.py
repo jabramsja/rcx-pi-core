@@ -499,6 +499,23 @@ class TestPrepareCommitHandoff:
         assert "tracker_note_text" in handoff
         assert handoff["tracker_note_text"] == tracker_note_text
 
+    def test_blank_target_branch_omitted_from_handoff(self, tmp_path):
+        path = pb_mod.prepare_commit_handoff(
+            tmp_path,
+            wave_id="test",
+            task_id="[T]",
+            wave_class="MAINTENANCE",
+            target_gate_id="G8",
+            target_branch="",
+            files_to_stage=["file.py"],
+            commit_message="test",
+            fixes_implemented=["test handoff"],
+            pr_title="test",
+            pr_body="test",
+        )
+        handoff = json.loads(path.read_text())
+        assert "target_branch" not in handoff
+
     def test_optional_supervisor_context_in_handoff(self, tmp_path):
         path = pb_mod.prepare_commit_handoff(
             tmp_path,
@@ -519,6 +536,28 @@ class TestPrepareCommitHandoff:
         assert handoff["evidence_handles"] == {
             "receipt_chain": "direct receipt path preserved"
         }
+
+    def test_wave_bound_target_branch_accepts_restart_branch(self):
+        target_branch = pb_mod._wave_bound_target_branch(  # ANTICHEAT_OK: validating bounded restart-branch selection
+            "jabramsja/test-wave-restart-2026-04-21",
+            wave_id="test-wave",
+        )
+        assert target_branch == "jabramsja/test-wave-restart-2026-04-21"
+
+    def test_wave_bound_target_branch_rejects_unrelated_branch(self):
+        target_branch = pb_mod._wave_bound_target_branch(  # ANTICHEAT_OK: validating unrelated-branch rejection
+            "jabramsja/other-wave-restart-2026-04-21",
+            wave_id="test-wave",
+        )
+        assert target_branch == ""
+
+    def test_wave_bound_target_branch_accepts_non_default_prefix(self):
+        target_branch = pb_mod._wave_bound_target_branch(  # ANTICHEAT_OK: validating non-default branch-prefix preservation
+            "codex/test-wave-restart-2026-04-21",
+            wave_id="test-wave",
+            branch_prefix="codex",
+        )
+        assert target_branch == "codex/test-wave-restart-2026-04-21"
 
     def test_build_phase_b_tracker_note_is_l4_compliant(self):
         note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper

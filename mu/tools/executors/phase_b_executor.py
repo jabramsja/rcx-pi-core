@@ -2086,6 +2086,7 @@ def prepare_commit_handoff(
     target_gate_id: str,
     caller: str = "phase_b",
     branch_prefix: str = "jabramsja",
+    target_branch: str | None = None,
     tracker_note_text: str = "",
     fixes_implemented: list[str] | None = None,
     files_to_stage: list[str] | None = None,
@@ -2126,6 +2127,7 @@ def prepare_commit_handoff(
         caller=caller,
         base_branch="dev",
         branch_prefix=branch_prefix,
+        target_branch=target_branch,
         force_add_files=list(force_add_files or []),
         pr_title=pr_title,
         pr_body=pr_body,
@@ -2149,6 +2151,25 @@ def prepare_commit_handoff(
     handoff_path = handoff_dir / "phase_b_handoff.json"
     handoff_path.write_text(json.dumps(handoff, indent=2) + "\n", encoding="utf-8")
     return handoff_path
+
+
+def _wave_bound_target_branch(
+    observed_branch: str,
+    *,
+    wave_id: str,
+    branch_prefix: str = "jabramsja",
+) -> str:
+    """Return only a canonical wave branch or a restart branch for that wave."""
+    if not observed_branch or not wave_id or not branch_prefix:
+        return ""
+    canonical_branch = f"{branch_prefix}/{wave_id}"
+    if observed_branch == canonical_branch:
+        return observed_branch
+    if observed_branch == f"{canonical_branch}-restart":
+        return observed_branch
+    if observed_branch.startswith(f"{canonical_branch}-restart-"):
+        return observed_branch
+    return ""
 
 
 def _build_phase_b_tracker_note(
@@ -4034,12 +4055,34 @@ def run_phase_b(
         unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
     )
     log(f"Preparing commit handoff ({len(wave_owned_files)} wave-owned files)...")
+    commit_target_branch: str | None = None
+    commit_branch_prefix = "jabramsja"
+    branch_result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if branch_result.returncode == 0:
+        observed_branch = branch_result.stdout.strip()
+        if "/" in observed_branch and observed_branch not in ("dev", "main", "master", "HEAD"):
+            observed_branch_prefix = observed_branch.split("/", 1)[0].strip() or "jabramsja"
+            wave_bound_target_branch = _wave_bound_target_branch(
+                observed_branch,
+                wave_id=wave_id,
+                branch_prefix=observed_branch_prefix,
+            )
+            if wave_bound_target_branch:
+                commit_branch_prefix = observed_branch_prefix
+                commit_target_branch = wave_bound_target_branch
     handoff_path = prepare_commit_handoff(
         repo_root,
         wave_id=wave_id,
         task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
         wave_class=wave_class,
         target_gate_id=target_gate_id,
+        branch_prefix=commit_branch_prefix,
+        target_branch=commit_target_branch or None,
         tracker_note_text=tracker_note_text,
         fixes_implemented=["Phase B implementation per locked plan"],
         files_to_stage=wave_owned_files,

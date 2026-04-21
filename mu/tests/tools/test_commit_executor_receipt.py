@@ -706,6 +706,43 @@ class TestWaveIdBounds:
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
+    def test_prepare_handoff_from_routing_record_standalone_preserves_restart_target_branch(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        (repo / "file.py").write_text("# staged now\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "--", "file.py"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+        embedded = _make_new_schema_handoff(
+            wave_id="pipeline-recovery-2026-04-21",
+            files_to_stage=["old.py"],
+            fixes_implemented=["old stale claim"],
+            target_branch="jabramsja/pipeline-recovery-2026-04-21-restart-2026-04-21",
+        )
+        record = {
+            "wave_name": "pipeline-recovery-2026-04-21",
+            "summary": "restart continuation",
+            "decision": "COMMIT_GO",
+            "handoff": embedded,
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert errors == []
+        assert handoff is not None
+        assert handoff["caller"] == "standalone"
+        assert handoff["target_branch"] == "jabramsja/pipeline-recovery-2026-04-21-restart-2026-04-21"
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
     def test_has_path_traversal_decodes_percent_escapes(self):
         assert commit_mod._has_path_traversal("..%2F..%2Fetc%2Fpasswd") is True  # ANTICHEAT_OK: testing path traversal detection
         assert commit_mod._has_path_traversal("%2e%2e/foo") is True  # ANTICHEAT_OK: testing path traversal detection

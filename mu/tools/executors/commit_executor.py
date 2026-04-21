@@ -94,6 +94,7 @@ except ImportError as _exc:
     _tracker_sync_import_error = _exc
 
 BRANCH_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+TARGET_BRANCH_SUFFIX_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,190}$")
 
 FORCE_ADD_DENYLIST = tuple(d.lower() for d in (".git/", ".env", ".agent_bus/"))
 
@@ -104,6 +105,7 @@ REQUIRED_HANDOFF_FIELDS = {
     "base_branch", "pre_commit_receipt_path", "task_id", "caller",
 }
 OPTIONAL_HANDOFF_FIELDS = {
+    "target_branch",
     "supervisor_lane",
     "deferred_items",
     "bridge_status",
@@ -337,6 +339,28 @@ def _build_standalone_staged_diff_fixes(paths: list[str]) -> list[str]:
 
 def _build_standalone_commit_message(wave_id: str) -> str:
     return f"chore: continue {wave_id} staged diff"
+
+
+def _is_wave_bound_target_branch(
+    target_branch: str,
+    *,
+    branch_prefix: str,
+    wave_id: str,
+) -> bool:
+    """Allow only the canonical wave branch or its restart descendants."""
+    if not target_branch or not branch_prefix or not wave_id:
+        return False
+    prefix = f"{branch_prefix}/"
+    if not target_branch.startswith(prefix):
+        return False
+    suffix = target_branch[len(prefix):]
+    if not TARGET_BRANCH_SUFFIX_RE.fullmatch(suffix):
+        return False
+    return (
+        suffix == wave_id
+        or suffix == f"{wave_id}-restart"
+        or suffix.startswith(f"{wave_id}-restart-")
+    )
 
 
 def _handoff_plan_path(handoff: dict[str, Any]) -> str | None:
@@ -2981,6 +3005,9 @@ def prepare_handoff_from_routing_record(
             return None, [
                 "Standalone routing-record regeneration requires a non-empty staged diff"
             ]
+        standalone_target_branch = (embedded_copy or {}).get("target_branch")
+        if not isinstance(standalone_target_branch, str) or not standalone_target_branch.strip():
+            standalone_target_branch = record.get("target_branch")
         founder_override_token = _extract_founder_override_from_routing_record(
             record,
             repo_root,
@@ -3013,6 +3040,11 @@ def prepare_handoff_from_routing_record(
             scope_items=staged_files,
             evidence_handles=None,
             pre_commit_receipt_path="",
+            target_branch=(
+                standalone_target_branch.strip()
+                if isinstance(standalone_target_branch, str) and standalone_target_branch.strip()
+                else None
+            ),
             repo_root=repo_root,
             founder_override_token=founder_override_token,
         )
@@ -3066,6 +3098,7 @@ def build_commit_handoff(
     caller: str = "phase_b",
     base_branch: str = "dev",
     branch_prefix: str = "jabramsja",
+    target_branch: str | None = None,
     force_add_files: list[str] | None = None,
     pr_title: str | None = None,
     pr_body: str | None = None,
@@ -3197,6 +3230,8 @@ def build_commit_handoff(
         handoff["scope_items"] = scope_items
     if evidence_handles:
         handoff["evidence_handles"] = evidence_handles
+    if isinstance(target_branch, str) and target_branch.strip():
+        handoff["target_branch"] = target_branch.strip()
 
     # Validate against schema
     valid, validation_errors = validate_handoff(handoff)
@@ -3382,6 +3417,21 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
     branch_prefix = handoff.get("branch_prefix", "")
     if isinstance(branch_prefix, str) and branch_prefix and not BRANCH_PREFIX_RE.fullmatch(branch_prefix):
         errors.append(f"branch_prefix contains unsafe characters: {branch_prefix}")
+    target_branch = handoff.get("target_branch")
+    if target_branch is not None:
+        if not isinstance(target_branch, str) or not target_branch.strip():
+            errors.append("target_branch must be a non-empty string when provided")
+        else:
+            normalized_target_branch = target_branch.strip()
+            if not _is_wave_bound_target_branch(
+                normalized_target_branch,
+                branch_prefix=str(branch_prefix or ""),
+                wave_id=str(wave_id or ""),
+            ):
+                errors.append(
+                    "target_branch must equal the canonical wave branch or a "
+                    f"restart branch derived from wave_id '{wave_id}': {normalized_target_branch}"
+                )
 
     # Caller validation
     caller = handoff.get("caller", "")
@@ -4037,7 +4087,11 @@ def run_commit_pipeline(
 
     wave_id = handoff["wave_id"]
     branch_prefix = handoff["branch_prefix"]
-    target_branch = f"{branch_prefix}/{wave_id}"
+    explicit_target_branch = handoff.get("target_branch")
+    if isinstance(explicit_target_branch, str) and explicit_target_branch.strip():
+        target_branch = explicit_target_branch.strip()
+    else:
+        target_branch = f"{branch_prefix}/{wave_id}"
     base_branch = handoff["base_branch"]
     handoff_sha = _handoff_sha(handoff)
     result["handoff_sha"] = handoff_sha
