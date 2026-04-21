@@ -29,13 +29,52 @@ refresh_context() {
   fi
   REPO_ROOT="$next_root"
   BRANCH_NAME="$next_branch"
+  load_role_agent_labels "$REPO_ROOT"
 }
 REPO_ROOT=""
 BRANCH_NAME=""
+REVIEWER_DISPLAY="Reviewer"
+REVIEWER_SHORT="Reviewer"
+IMPLEMENTER_DISPLAY="Implementer"
+IMPLEMENTER_SHORT="Implementer"
 BOLD="\033[1m" DIM="\033[2m" GREEN="\033[32m" YELLOW="\033[33m"
 RED="\033[31m" CYAN="\033[36m" PURPLE="\033[35m" RESET="\033[0m"
 LAST_HASH=""
 TMPOUT="/tmp/rcx_pane_timeline_$$.txt"
+
+load_role_agent_labels() {
+  local root="${1:-$REPO_ROOT}" output="" key="" value=""
+  [ -n "$root" ] || return 0
+  output="$(python3 - "$root" <<'PY' 2>/dev/null
+from pathlib import Path
+import sys
+
+repo_root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(repo_root / "mu" / "tools" / "executors"))
+try:
+    from executor_common import configured_role_agents
+    roles = configured_role_agents(repo_root)
+except Exception:
+    roles = {
+        "reviewer": {"display_name": "Reviewer", "status_name": "Reviewer"},
+        "implementer": {"display_name": "Implementer", "status_name": "Implementer"},
+    }
+
+for role in ("reviewer", "implementer"):
+    data = roles.get(role, {})
+    print(f"{role.upper()}_DISPLAY\t{data.get('display_name', role.title())}")
+    print(f"{role.upper()}_SHORT\t{data.get('status_name', role.title())}")
+PY
+)"
+  while IFS=$'\t' read -r key value; do
+    case "$key" in
+      REVIEWER_DISPLAY) REVIEWER_DISPLAY="$value" ;;
+      REVIEWER_SHORT) REVIEWER_SHORT="$value" ;;
+      IMPLEMENTER_DISPLAY) IMPLEMENTER_DISPLAY="$value" ;;
+      IMPLEMENTER_SHORT) IMPLEMENTER_SHORT="$value" ;;
+    esac
+  done <<< "$output"
+}
 
 fmt_time() {
   # Convert epoch to HH:MM
@@ -79,6 +118,73 @@ repo_has_process() {
   return 1
 }
 
+pid_ppid() {
+  local pid="$1"
+  ps -p "$pid" -o ppid= 2>/dev/null | xargs
+}
+
+pid_command() {
+  local pid="$1"
+  ps -p "$pid" -o command= 2>/dev/null || true
+}
+
+bridge_agent_name_for_command() {
+  local cmd="$1"
+  if echo "$cmd" | grep -E -i -q '(^|[ /])codex([[:space:]]|$).*(^|[[:space:]])exec([[:space:]]|$)'; then
+    printf '%s\n' "codex"
+    return 0
+  fi
+  if echo "$cmd" | grep -E -i -q '(^|[ /])claude([[:space:]]|$).*--print'; then
+    printf '%s\n' "claude"
+    return 0
+  fi
+  return 1
+}
+
+pid_has_ancestor_matching() {
+  local pid="$1" pattern="$2" depth=0 parent="" cmd=""
+  while [ "$depth" -lt 8 ]; do
+    parent="$(pid_ppid "$pid")"
+    [ -n "$parent" ] || return 1
+    [ "$parent" = "1" ] && return 1
+    cmd="$(pid_command "$parent")"
+    if echo "$cmd" | grep -E -q "$pattern"; then
+      return 0
+    fi
+    pid="$parent"
+    depth=$((depth + 1))
+  done
+  return 1
+}
+
+repo_has_bridge_role() {
+  local wanted_role="$1" line="" pid="" cmd="" cwd=""
+  while IFS= read -r line; do
+    read -r pid cmd <<< "$line"
+    [ -z "$pid" ] && continue
+    case "$cmd" in
+      *"tail -f "*|*"rcx_log_watcher.sh"*|*"_pane_"*|*"pipeline_monitor.sh"*|"bash -c "*|*/bash\ -c\ *|"tee "*)
+        continue
+        ;;
+    esac
+    bridge_agent_name_for_command "$cmd" >/dev/null || continue
+    case "$cmd" in
+      *"$REPO_ROOT"*) ;;
+      *)
+        cwd="$(pid_cwd "$pid")"
+        [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ] || continue
+        ;;
+    esac
+    if [ "$wanted_role" = "review" ] && pid_has_ancestor_matching "$pid" 'bridge_supervisor\.py review|meta_bridge_supervisor'; then
+      return 0
+    fi
+    if [ "$wanted_role" = "implement" ] && pid_has_ancestor_matching "$pid" 'phase_b_executor\.py|phase_a_executor\.py|commit_executor\.py'; then
+      return 0
+    fi
+  done < <(ps -axo pid=,command= 2>/dev/null || true)
+  return 1
+}
+
 while true; do
   refresh_context
   {
@@ -103,9 +209,9 @@ while true; do
     size=$(wc -c < "$f" 2>/dev/null | xargs)
     # Check if this run produced changes
     if [ "$size" -gt 100000 ]; then
-      add_event "$ts" "${PURPLE}Claude done${RESET} — $(( size / 1024 ))KB output"
+      add_event "$ts" "${PURPLE}${IMPLEMENTER_SHORT} done${RESET} — $(( size / 1024 ))KB output"
     else
-      add_event "$ts" "${PURPLE}Claude implementing${RESET}..."
+      add_event "$ts" "${PURPLE}${IMPLEMENTER_SHORT} implementing${RESET}..."
     fi
   done
 
@@ -142,41 +248,45 @@ else:
       [ -z "$reviewer_file" ] || [ ! -s "$reviewer_file" ] && continue
       ts=$(file_time "$reviewer_file")
 
-      decision=$(python3 -c "
-import json, re
-content = open('$reviewer_file', errors='replace').read()
-matches = list(re.finditer(r'BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE', content, re.DOTALL))
-if not matches: exit()
-env = json.loads(matches[-1].group(1))
+      decision=$(python3 - "$reviewer_file" "$REVIEWER_SHORT" <<'PY' 2>/dev/null
+import json
+import re
+import sys
+
+reviewer_file = sys.argv[1]
+reviewer_short = sys.argv[2]
+content = open(reviewer_file, errors="replace").read()
+matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", content, re.DOTALL))
 env = None
-for m in reversed(matches):
-    candidate = json.loads(m.group(1))
-    dec = candidate.get('decision','')
-    if dec and '|' not in dec:
+for match in reversed(matches):
+    candidate = json.loads(match.group(1))
+    decision = candidate.get("decision", "")
+    if decision and "|" not in decision:
         env = candidate
         break
 if env is None:
-    exit()
-dec = env.get('decision','?')
-findings = env.get('findings',[])
-blk = sum(1 for f in findings if f.get('disposition') == 'blocking')
-nb = sum(1 for f in findings if f.get('disposition') != 'blocking')
-if dec in ('GO','COMMIT_GO'):
-    print(f'\033[32mCodex: GO\033[0m ({nb} advisory)')
-elif dec == 'REQUEST_CHANGES':
-    print(f'\033[33mCodex: REQUEST_CHANGES\033[0m ({blk}B {nb}NB)')
-elif dec == 'NO_GO':
-    print(f'\033[31mCodex: NO_GO\033[0m ({blk} blocker, {nb} advisory)')
+    raise SystemExit(0)
+decision = env.get("decision", "?")
+findings = env.get("findings", [])
+blocking = sum(1 for item in findings if item.get("disposition") == "blocking")
+non_blocking = sum(1 for item in findings if item.get("disposition") != "blocking")
+if decision in ("GO", "COMMIT_GO"):
+    print(f"\033[32m{reviewer_short}: GO\033[0m ({non_blocking} advisory)")
+elif decision == "REQUEST_CHANGES":
+    print(f"\033[33m{reviewer_short}: REQUEST_CHANGES\033[0m ({blocking}B {non_blocking}NB)")
+elif decision == "NO_GO":
+    print(f"\033[31m{reviewer_short}: NO_GO\033[0m ({blocking} blocker, {non_blocking} advisory)")
 else:
-    print(f'Codex: {dec} ({blk}B {nb}NB)')
-" 2>/dev/null)
+    print(f"{reviewer_short}: {decision} ({blocking}B {non_blocking}NB)")
+PY
+)
       [ -n "$decision" ] && add_event "$ts" "$decision"
 
       # Also add the start time (reader file = when review started)
       reader_file=$(ls -t "$dir"/*reader*.txt 2>/dev/null | head -1) || true
       if [ -n "$reader_file" ]; then
         start_ts=$(file_time "$reader_file")
-        add_event "$start_ts" "${YELLOW}Codex reviewing${RESET}..."
+        add_event "$start_ts" "${YELLOW}${REVIEWER_SHORT} reviewing${RESET}..."
       fi
     done
   fi
@@ -220,10 +330,10 @@ else:
   echo ""
   now=$(date '+%H:%M')
   # Figure out what's happening right now
-  if repo_has_process "codex.*exec.*gpt"; then
-    echo -e "  ${DIM}${now}${RESET}  ${YELLOW}← Codex reviewing now${RESET}"
-  elif repo_has_process "claude.*--print"; then
-    echo -e "  ${DIM}${now}${RESET}  ${PURPLE}← Claude implementing now${RESET}"
+  if repo_has_bridge_role "review"; then
+    echo -e "  ${DIM}${now}${RESET}  ${YELLOW}← ${REVIEWER_SHORT} reviewing now${RESET}"
+  elif repo_has_bridge_role "implement"; then
+    echo -e "  ${DIM}${now}${RESET}  ${PURPLE}← ${IMPLEMENTER_SHORT} implementing now${RESET}"
   elif repo_has_process "run_review.py"; then
     echo -e "  ${DIM}${now}${RESET}  ${CYAN}← SDK review agents checking this worktree now${RESET}"
   elif repo_has_process "phase_a_executor\|phase_b_executor\|commit_executor\|executor_dispatch"; then
@@ -235,7 +345,7 @@ else:
   # Helpful reference
   echo ""
   echo -e "${DIM}Typical durations:${RESET}"
-  echo -e "${DIM}  Claude: 5-15m | Agents: 3-5m | Codex: 10-20m${RESET}"
+  echo -e "${DIM}  ${IMPLEMENTER_SHORT} impl: 5-15m | Agents: 3-5m | ${REVIEWER_SHORT} review: 10-20m${RESET}"
   echo -e "${DIM}  NO_GO is normal — usually 2-3 rounds to converge${RESET}"
 
   } > "$TMPOUT" 2>/dev/null

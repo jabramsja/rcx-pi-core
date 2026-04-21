@@ -905,6 +905,29 @@ def test_run_meta_review_sanitizes_slash_task_ids_for_prompt_paths(pkg_in_repo):
     assert kwargs["raw_output_path"].parent.exists()
 
 
+def test_load_bridge_config_with_worktree_heal_copies_from_main_repo(tmp_path):
+    main_repo = tmp_path / "main"
+    main_repo.mkdir()
+    (main_repo / ".agent_bus").mkdir()
+    (main_repo / ".agent_bus" / "bridge_config.json").write_text(
+        '{"agents": {}}',
+        encoding="utf-8",
+    )
+
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    gitdir = main_repo / ".git" / "worktrees" / "worktree"
+    gitdir.mkdir(parents=True)
+    (worktree / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
+
+    config = meta._load_bridge_config_with_worktree_heal(worktree)
+
+    assert config == {"agents": {}}
+    healed = worktree / ".agent_bus" / "bridge_config.json"
+    assert healed.exists()
+    assert healed.read_text(encoding="utf-8") == '{"agents": {}}'
+
+
 def test_run_post_merge_review_recovers_authoritative_envelope_from_raw_output(tmp_path):
     bus_dir = tmp_path / "meta_bus"
     bus_dir.mkdir(parents=True, exist_ok=True)

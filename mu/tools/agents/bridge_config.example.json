@@ -2,6 +2,7 @@
   "agents": {
     "claude": {
       "mode": "live",
+      "display_name": "Claude Opus 4.7 max",
       "cmd": ["claude", "--print", "--dangerously-skip-permissions", "--model", "claude-opus-4-7", "--effort", "max", "--verbose", "--output-format", "stream-json", "--max-turns", "50"],
       "prompt_via_stdin": true,
       "timeout_s": 900,
@@ -9,6 +10,7 @@
     },
     "codex": {
       "mode": "live",
+      "display_name": "Codex 5.4 xhigh",
       "cmd": ["codex", "exec", "-", "--json", "-m", "gpt-5.4", "-c", "model_reasoning_effort=\"xhigh\"", "--sandbox", "danger-full-access"],
       "prompt_via_stdin": true,
       "timeout_s": 1200,

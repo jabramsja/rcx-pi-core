@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+EXECUTORS_DIR = REPO_ROOT / "mu" / "tools" / "executors"
+if str(EXECUTORS_DIR) not in sys.path:
+    sys.path.insert(0, str(EXECUTORS_DIR))
+from executor_common import bridge_agent_display_name
 REFRESH_INTERVAL = 5
 RECOVERY_LOG_REL = Path(".agent_bus") / "recovery" / "recovery_log.json"
 RECOVERY_STATUS_REL = Path(".agent_bus") / "recovery" / "recovery_status.json"
@@ -51,6 +55,55 @@ def elapsed(t):
     m, s = divmod(int(d), 60)
     h, m = divmod(m, 60)
     return f"{h}h{m:02d}m" if h else f"{m}m{s:02d}s"
+
+
+def pid_ppid(pid):
+    try:
+        r = subprocess.run(["ps", "-p", str(pid), "-o", "ppid="], capture_output=True, text=True, timeout=3)
+        if r.returncode == 0 and r.stdout.strip():
+            return int(r.stdout.strip())
+    except Exception:
+        return None
+    return None
+
+
+def pid_command(pid):
+    try:
+        r = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=3)
+        if r.returncode == 0:
+            return r.stdout.strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def pid_has_ancestor_matching(pid, pattern, max_depth=8):
+    current = pid
+    for _ in range(max_depth):
+        parent = pid_ppid(current)
+        if not parent or parent == 1:
+            return False
+        if re.search(pattern, pid_command(parent) or ""):
+            return True
+        current = parent
+    return False
+
+
+def bridge_role_for_pid(pid):
+    if pid_has_ancestor_matching(pid, r"bridge_supervisor\.py review|meta_bridge_supervisor"):
+        return "review"
+    if pid_has_ancestor_matching(pid, r"phase_b_executor\.py|phase_a_executor\.py|commit_executor\.py"):
+        return "implement"
+    return "unknown"
+
+
+def _bridge_agent_name_for_command(line: str) -> str | None:
+    lowered = line.lower()
+    if "codex" in lowered and " exec" in lowered and "codex.app" not in lowered and "codex helper" not in lowered:
+        return "codex"
+    if "claude" in lowered and "--print" in lowered:
+        return "claude"
+    return None
 
 
 def _read_recovery_status(repo_root: Path) -> dict[str, Any]:
@@ -540,12 +593,11 @@ def detect_subs(lines):
     for l in lines:
         if "grep" in l or _is_observability_noise(l):
             continue
-        if "codex exec" in l:
+        agent_name = _bridge_agent_name_for_command(l)
+        if agent_name:
             pid = int(l.split()[1])
-            subs.append(("codex-review", pid, pid_start(pid)))
-        elif "claude --print" in l:
-            pid = int(l.split()[1])
-            subs.append(("claude-impl", pid, pid_start(pid)))
+            role = bridge_role_for_pid(pid)
+            subs.append((f"{agent_name}-{role}", pid, pid_start(pid)))
         elif "run_review.py" in l:
             pid = int(l.split()[1])
             subs.append(("sdk-agents", pid, pid_start(pid)))
@@ -698,9 +750,17 @@ def render():
     # Subprocesses
     if subs:
         for name, spid, sstart in subs:
-            label = {"codex-review": f"{CYN}Codex 5.4 xhigh{R} reviewing",
-                     "claude-impl": f"{MAG}Claude opus max{R} implementing",
-                     "sdk-agents": f"{YEL}SDK agents{R} running"}.get(name, name)
+            if name == "sdk-agents":
+                label = f"{YEL}SDK agents{R} running"
+            else:
+                agent_name, _, role = name.partition("-")
+                display_name = bridge_agent_display_name(REPO_ROOT, agent_name)
+                color, activity = {
+                    "review": (CYN, "reviewing"),
+                    "implement": (MAG, "implementing"),
+                    "unknown": (CYN, "working"),
+                }.get(role, (CYN, role or "working"))
+                label = f"{color}{display_name}{R} {activity}"
             out.append(box_line(f"  {label}  PID {spid}  {elapsed(sstart)}"))
     else:
         out.append(box_line(f"  {GRY}(no active subprocess){R}"))

@@ -20,17 +20,41 @@ from pathlib import Path
 from typing import Any
 
 ROUTING_RECORD_PATH = Path(".agent_bus/meta/post_merge_routing.json")
+BRIDGE_CONFIG_PATH = Path(".agent_bus/bridge_config.json")
 MAX_WAVE_ID_LEN = 80
 WAVE_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$")
 REVIEW_MODE_ENV_VARS = ("RCX_AGENT_REVIEW_MODE", "RCX_REVIEW_MODE")
+ROLE_AGENT_ENV_VARS = {
+    "implementer": ("RCX_IMPLEMENTER_AGENT_OVERRIDE",),
+    "reviewer": (
+        "RCX_REVIEWER_AGENT_OVERRIDE",
+        "RCX_BRIDGE_REVIEWER_OVERRIDE",
+    ),
+}
+IMPLEMENTER_BACKEND_KEYS = frozenset(
+    {
+        "phase_a_executor",
+        "phase_b_executor",
+        "bot_remediation",
+    }
+)
+REVIEWER_BRIDGE_KEYS = frozenset({"phase_a", "phase_b"})
+DEFAULT_AGENT_DISPLAY_NAMES = {
+    "claude": "Claude Opus 4.7 max",
+    "codex": "Codex 5.4 xhigh",
+}
 
 DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
+    "role_agents": {
+        "implementer": "codex",
+        "reviewer": "codex",
+    },
     "backends": {
         "post_merge_supervisor": "codex",
         "dialectic_executor": "codex",
-        "phase_a_executor": "claude",
-        "phase_b_executor": "claude",
-        "bot_remediation": "claude",
+        "phase_a_executor": "codex",
+        "phase_b_executor": "codex",
+        "bot_remediation": "codex",
         "commit_executor": None,
     },
     "bridge_reviewers": {
@@ -72,6 +96,13 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
         "dialectic": 3,
     },
 }
+
+REVIEW_OVERRIDE_BACKEND_KEYS = frozenset(
+    {
+        "post_merge_supervisor",
+        "dialectic_executor",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Finding disposition classification contract
@@ -184,29 +215,178 @@ def merge_executor_config_overrides(overrides: dict[str, Any]) -> dict[str, Any]
     return _deep_merge(DEFAULT_EXECUTOR_CONFIG, overrides)
 
 
+def _nonempty_str(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _legacy_role_agent_override(raw_overrides: dict[str, Any], role: str) -> str | None:
+    if not isinstance(raw_overrides, dict):
+        return None
+    if role == "implementer":
+        backends = raw_overrides.get("backends", {})
+        if isinstance(backends, dict):
+            for key in ("phase_b_executor", "phase_a_executor", "bot_remediation"):
+                candidate = _nonempty_str(backends.get(key))
+                if candidate is not None:
+                    return candidate
+        return None
+    if role == "reviewer":
+        bridge_reviewers = raw_overrides.get("bridge_reviewers", {})
+        if isinstance(bridge_reviewers, dict):
+            for key in ("phase_a", "phase_b"):
+                candidate = _nonempty_str(bridge_reviewers.get(key))
+                if candidate is not None:
+                    return candidate
+        backends = raw_overrides.get("backends", {})
+        if isinstance(backends, dict):
+            for key in REVIEW_OVERRIDE_BACKEND_KEYS:
+                candidate = _nonempty_str(backends.get(key))
+                if candidate is not None:
+                    return candidate
+    return None
+
+
+def resolve_role_agent(
+    config: dict[str, Any],
+    role: str,
+    *,
+    raw_overrides: dict[str, Any] | None = None,
+) -> str:
+    """Resolve the configured bridge agent for a role family.
+
+    Roles are currently:
+    - implementer: Phase A, Phase B, bot remediation
+    - reviewer: bridge reviewers, post-merge supervisor, dialectic reviewer
+
+    Backward compatibility:
+    - Old configs that only set `backends` / `bridge_reviewers` still work.
+    - `RCX_BRIDGE_REVIEWER_OVERRIDE` remains an alias for reviewer override.
+    """
+    default_role_agents = DEFAULT_EXECUTOR_CONFIG.get("role_agents", {})
+    default_agent = _nonempty_str(default_role_agents.get(role)) or "codex"
+
+    for env_name in ROLE_AGENT_ENV_VARS.get(role, ()):
+        candidate = _nonempty_str(os.environ.get(env_name))
+        if candidate is not None:
+            return candidate
+
+    role_agents = config.get("role_agents", {})
+    if isinstance(role_agents, dict):
+        candidate = _nonempty_str(role_agents.get(role))
+        if candidate is not None:
+            return candidate
+
+    legacy = _legacy_role_agent_override(raw_overrides or {}, role)
+    if legacy is not None:
+        return legacy
+    return default_agent
+
+
+def _materialize_role_agents(
+    config: dict[str, Any],
+    *,
+    raw_overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    implementer_agent = resolve_role_agent(
+        config,
+        "implementer",
+        raw_overrides=raw_overrides,
+    )
+    reviewer_agent = resolve_role_agent(
+        config,
+        "reviewer",
+        raw_overrides=raw_overrides,
+    )
+
+    role_agents = config.setdefault("role_agents", {})
+    role_agents["implementer"] = implementer_agent
+    role_agents["reviewer"] = reviewer_agent
+
+    backends = config.setdefault("backends", {})
+    for key in IMPLEMENTER_BACKEND_KEYS:
+        backends[key] = implementer_agent
+    for key in REVIEW_OVERRIDE_BACKEND_KEYS:
+        backends[key] = reviewer_agent
+
+    bridge_reviewers = config.setdefault("bridge_reviewers", {})
+    for key in REVIEWER_BRIDGE_KEYS:
+        bridge_reviewers[key] = reviewer_agent
+
+    return config
+
+
+def load_bridge_agent_catalog(repo_root: Path) -> dict[str, dict[str, Any]]:
+    """Load optional display metadata for configured bridge agents."""
+    config_path = repo_root / BRIDGE_CONFIG_PATH
+    if not config_path.exists():
+        return {}
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    agents = payload.get("agents")
+    if not isinstance(agents, dict):
+        return {}
+    return {
+        name: data
+        for name, data in agents.items()
+        if isinstance(name, str) and isinstance(data, dict)
+    }
+
+
+def bridge_agent_display_name(repo_root: Path, agent_name: str) -> str:
+    catalog = load_bridge_agent_catalog(repo_root)
+    raw = catalog.get(agent_name, {})
+    display_name = _nonempty_str(raw.get("display_name"))
+    if display_name is not None:
+        return display_name
+    return DEFAULT_AGENT_DISPLAY_NAMES.get(agent_name, agent_name.replace("_", " ").title())
+
+
+def bridge_agent_status_name(repo_root: Path, agent_name: str) -> str:
+    display_name = bridge_agent_display_name(repo_root, agent_name)
+    head = display_name.split()
+    if head:
+        return head[0]
+    return agent_name.capitalize()
+
+
+def configured_role_agents(
+    repo_root: Path,
+    config: dict[str, Any] | None = None,
+) -> dict[str, dict[str, str]]:
+    config = config or load_executor_config(repo_root)
+    roles: dict[str, dict[str, str]] = {}
+    for role in ("implementer", "reviewer"):
+        agent = resolve_role_agent(config, role)
+        roles[role] = {
+            "agent": agent,
+            "display_name": bridge_agent_display_name(repo_root, agent),
+            "status_name": bridge_agent_status_name(repo_root, agent),
+        }
+    return roles
+
+
 def load_executor_config(repo_root: Path) -> dict[str, Any]:
     """Load executor config, preserving default nested keys when partially set.
 
-    Supports RCX_BRIDGE_REVIEWER_OVERRIDE env var to swap all reviewers
-    without modifying the committed config file. This avoids the
-    ``assume-unchanged`` workaround that breaks test_load_default_config.
-    Usage: export RCX_BRIDGE_REVIEWER_OVERRIDE=claude
+    Supports role-level agent switching via:
+    - `role_agents.implementer` / `role_agents.reviewer` in executor_config.json
+    - `RCX_IMPLEMENTER_AGENT_OVERRIDE`
+    - `RCX_REVIEWER_AGENT_OVERRIDE`
+    - legacy reviewer alias: `RCX_BRIDGE_REVIEWER_OVERRIDE`
     """
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
     if not config_path.exists():
+        raw_overrides: dict[str, Any] = {}
         config = copy.deepcopy(DEFAULT_EXECUTOR_CONFIG)
     else:
-        loaded = json.loads(config_path.read_text(encoding="utf-8"))
-        config = merge_executor_config_overrides(loaded)
-    # Apply reviewer override from environment if set
-    reviewer_override = os.environ.get("RCX_BRIDGE_REVIEWER_OVERRIDE", "").strip()
-    if reviewer_override:
-        for key in list(config.get("bridge_reviewers", {})):
-            config["bridge_reviewers"][key] = reviewer_override
-        for key in list(config.get("backends", {})):
-            if config["backends"][key] and config["backends"][key] != "claude":
-                config["backends"][key] = reviewer_override
-    return config
+        raw_overrides = json.loads(config_path.read_text(encoding="utf-8"))
+        config = merge_executor_config_overrides(raw_overrides)
+    return _materialize_role_agents(config, raw_overrides=raw_overrides)
 
 
 def emit_pipeline_agent_event(repo_root: Path, **kwargs: Any) -> dict[str, Any]:

@@ -123,20 +123,51 @@ class TestDispatcherConfig:
 
     def test_load_default_config(self):
         config = dispatch_mod.load_config()
+        expected_implementer = os.environ.get("RCX_IMPLEMENTER_AGENT_OVERRIDE", "codex")
+        expected_reviewer = os.environ.get(
+            "RCX_REVIEWER_AGENT_OVERRIDE",
+            os.environ.get("RCX_BRIDGE_REVIEWER_OVERRIDE", "codex"),
+        )
+        assert config["role_agents"]["implementer"] == expected_implementer
+        assert config["role_agents"]["reviewer"] == expected_reviewer
         assert "backends" in config
         assert "bridge_reviewers" in config
         assert "bridge_turn_timeouts" in config
         assert "timeouts" in config
         assert "bridge_loop_limits" in config
-        assert config["backends"]["phase_b_executor"] == "claude"
-        # bridge_reviewers may be overridden by RCX_BRIDGE_REVIEWER_OVERRIDE env var
-        expected_reviewer = os.environ.get("RCX_BRIDGE_REVIEWER_OVERRIDE", "codex")
+        assert config["backends"]["phase_a_executor"] == expected_implementer
+        assert config["backends"]["phase_b_executor"] == expected_implementer
+        assert config["backends"]["bot_remediation"] == expected_implementer
         assert config["bridge_reviewers"]["phase_a"] == expected_reviewer
         assert config["bridge_reviewers"]["phase_b"] == expected_reviewer
         assert config["bridge_turn_timeouts"]["phase_a"] == 600
         assert config["timeouts"]["phase_a_executor"] == 3600
         assert config["timeouts"]["phase_b_executor"] == 18000
         assert config["timeouts"]["commit_executor"] == 3600
+
+    def test_bridge_reviewer_override_does_not_retarget_implementers(self, monkeypatch):
+        monkeypatch.setenv("RCX_BRIDGE_REVIEWER_OVERRIDE", "claude")
+        config = dispatch_mod.load_config()
+        assert config["bridge_reviewers"]["phase_a"] == "claude"
+        assert config["bridge_reviewers"]["phase_b"] == "claude"
+        assert config["backends"]["post_merge_supervisor"] == "claude"
+        assert config["backends"]["dialectic_executor"] == "claude"
+        assert config["backends"]["phase_a_executor"] == "codex"
+        assert config["backends"]["phase_b_executor"] == "codex"
+        assert config["backends"]["bot_remediation"] == "codex"
+
+    def test_implementer_override_retargets_only_implementers(self, monkeypatch):
+        monkeypatch.setenv("RCX_IMPLEMENTER_AGENT_OVERRIDE", "claude")
+        config = dispatch_mod.load_config()
+        assert config["role_agents"]["implementer"] == "claude"
+        assert config["role_agents"]["reviewer"] == "codex"
+        assert config["backends"]["phase_a_executor"] == "claude"
+        assert config["backends"]["phase_b_executor"] == "claude"
+        assert config["backends"]["bot_remediation"] == "claude"
+        assert config["backends"]["post_merge_supervisor"] == "codex"
+        assert config["backends"]["dialectic_executor"] == "codex"
+        assert config["bridge_reviewers"]["phase_a"] == "codex"
+        assert config["bridge_reviewers"]["phase_b"] == "codex"
 
     def test_load_missing_config_returns_defaults(self, tmp_path):
         config = dispatch_mod.load_config(tmp_path / "nonexistent.json")
@@ -1276,7 +1307,7 @@ Phase-A-Lock: UNLOCKED
         assert "do NOT try to solve the underlying implementation in this turn" in prompt
         assert "Reproduce with: nl -ba reports/control_plane/test_plan_2026-04-02.md" in prompt
         assert "Evidence result: The packet is still a stub" in prompt
-        assert captured["backend"] == "claude"
+        assert captured["backend"] == os.environ.get("RCX_IMPLEMENTER_AGENT_OVERRIDE", "codex")
 
     def test_deferred_agent_review_accepts_authorization_section_alias(self, tmp_path, monkeypatch):
         """Deferred Phase A review must treat Authorization as equivalent to Grounding."""
@@ -1790,7 +1821,8 @@ END_AGENT_ENVELOPE"""
     def test_bridge_design_review_uses_configured_reviewer(self, tmp_path, monkeypatch):
         """Phase A bridge review must honor executor-configured reviewer backend."""
         # Unset env override so the test exercises config-driven reviewer selection,
-        # not the global RCX_BRIDGE_REVIEWER_OVERRIDE env var.
+        # not the reviewer override environment vars.
+        monkeypatch.delenv("RCX_REVIEWER_AGENT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_BRIDGE_REVIEWER_OVERRIDE", raising=False)
         tools_agents = tmp_path / "tools" / "agents"
         tools_agents.mkdir(parents=True)
@@ -1808,7 +1840,7 @@ END_AGENT_ENVELOPE"""
         config_path = tmp_path / "mu" / "tools" / "executors"
         config_path.mkdir(parents=True)
         (config_path / "executor_config.json").write_text(
-            json.dumps({"bridge_reviewers": {"phase_a": "claude"}}),
+            json.dumps({"role_agents": {"reviewer": "claude"}}),
             encoding="utf-8",
         )
 
