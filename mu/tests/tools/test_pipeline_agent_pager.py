@@ -388,9 +388,10 @@ def test_codex_ack_requires_accepted_turn_response_fields(tmp_path):
         "name": "pipeline_agent_pager",
         "version": "1.0",
     }
+    expected_prompt = getattr(pager_mod, "_event_prompt")(event)
     assert request_batches[0][2]["params"] == {
         "threadId": {"$from": "2.result.thread.id"},
-        "input": [{"type": "text", "text": pager_mod._event_prompt(event)}],
+        "input": [{"type": "text", "text": expected_prompt}],
     }
 
     with patch.object(
@@ -505,9 +506,10 @@ def test_codex_stale_thread_reseeds_on_explicit_error(tmp_path):
         "initialize",
         "turn/start",
     ]
+    expected_prompt = getattr(pager_mod, "_event_prompt")(event)
     assert request_batches[0][1]["params"] == {
         "threadId": "thread-stale",
-        "input": [{"type": "text", "text": pager_mod._event_prompt(event)}],
+        "input": [{"type": "text", "text": expected_prompt}],
     }
     assert [request["method"] for request in request_batches[1]] == [
         "initialize",
