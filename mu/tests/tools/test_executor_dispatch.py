@@ -544,6 +544,48 @@ class TestCommitHandoffValidation:
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
+    def test_build_commit_handoff_appends_founder_override_to_explicit_tracker_note(self, tmp_path):
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        test_file = repo / "mu" / "tests" / "tools" / "test_auto_note.py"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+        explicit_note = (
+            "- Tracker sync note (2026-04-22, test-wave-id): **fix: explicit tracker note.**. "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+            "mu/tests/tools/test_auto_note.py`. "
+            "evidence_delta: (1) explicit note provided. "
+            "progress_proof_before: tracker note lacked founder override metadata. "
+            "progress_proof_after: builder preserves explicit note text while appending the token. "
+            "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+            "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py "
+            "--wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        )
+        handoff, errors = commit_mod.build_commit_handoff(
+            wave_id="test-wave-id",
+            task_id="[PIPELINE-RECOVERY]",
+            files_to_stage=["mu/tests/tools/test_auto_note.py"],
+            commit_message="fix: explicit tracker note",
+            fixes_implemented=["preserve explicit tracker note founder override threading"],
+            tracker_note_text=explicit_note,
+            repo_root=repo,
+            founder_override_token="test-wave-id",
+        )
+        assert not errors, errors
+        note = handoff["tracker_note_text"]
+        assert "FOUNDER_OVERRIDE:test-wave-id" in note
+        assert note.count("FOUNDER_OVERRIDE:") == 1
+        assert "builder preserves explicit note text while appending the token" in note
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
     def test_missing_fields_fails(self):
         valid, errors = commit_mod.validate_handoff({"files_to_stage": ["x"]})
         assert not valid
@@ -2202,6 +2244,206 @@ class TestEnsureFeatureBranch:
         result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
         # Will fail at supervisor step (no supervisor available) but should pass step 2
         assert "ensure_feature_branch" in result.get("steps_completed", [])
+
+    def test_8b_on_stale_dev_with_wave_owned_dirty_files_branches_from_fetched_origin_tip(self, tmp_path):
+        """On stale dev, Step 2 should branch from fetched origin/dev and preserve wave-owned dirt."""
+        repo, env = _init_git_repo(tmp_path)
+        bare = tmp_path / "origin.git"
+        worker = tmp_path / "worker"
+
+        subprocess.run(
+            ["git", "clone", "--bare", str(repo), str(bare)],
+            cwd=tmp_path,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "remote", "add", "origin", str(bare)],
+            cwd=repo,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "push", "-u", "origin", "dev"],
+            cwd=repo,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "clone", str(bare), str(worker)],
+            cwd=tmp_path,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "checkout", "dev"],
+            cwd=worker,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        subprocess.run(["git", "config", "user.name", "t"], cwd=worker, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=worker, capture_output=True, check=True)
+        (worker / "upstream.txt").write_text("upstream\n", encoding="utf-8")
+        subprocess.run(["git", "add", "upstream.txt"], cwd=worker, capture_output=True, env=env, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "upstream change"],
+            cwd=worker,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        subprocess.run(["git", "push", "origin", "dev"], cwd=worker, capture_output=True, env=env, check=True)
+
+        (repo / "file1.py").write_text("wave-owned dirty\n", encoding="utf-8")
+        handoff = _make_new_handoff()
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert "ensure_feature_branch" in result.get("steps_completed", [])
+        current = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        local_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        origin_head = subprocess.run(
+            ["git", "rev-parse", "origin/dev"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        assert current == "jabramsja/test-wave-id"
+        assert local_head == origin_head
+        assert (repo / "file1.py").read_text(encoding="utf-8") == "wave-owned dirty\n"
+        assert (repo / "upstream.txt").read_text(encoding="utf-8") == "upstream\n"
+
+    def test_8c_on_remote_base_checkout_failure_restores_wave_owned_dirty_files(self, tmp_path, monkeypatch):
+        """If the fetched-base checkout fails after clearing scope, Step 2 must restore wave-owned dirt."""
+        repo, env = _init_git_repo(tmp_path)
+        bare = tmp_path / "origin.git"
+        worker = tmp_path / "worker"
+
+        subprocess.run(
+            ["git", "clone", "--bare", str(repo), str(bare)],
+            cwd=tmp_path,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "remote", "add", "origin", str(bare)],
+            cwd=repo,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "push", "-u", "origin", "dev"],
+            cwd=repo,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "clone", str(bare), str(worker)],
+            cwd=tmp_path,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "checkout", "dev"],
+            cwd=worker,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        subprocess.run(["git", "config", "user.name", "t"], cwd=worker, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=worker, capture_output=True, check=True)
+        (worker / "upstream.txt").write_text("upstream\n", encoding="utf-8")
+        subprocess.run(["git", "add", "upstream.txt"], cwd=worker, capture_output=True, env=env, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "upstream change"],
+            cwd=worker,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+        subprocess.run(["git", "push", "origin", "dev"], cwd=worker, capture_output=True, env=env, check=True)
+
+        (repo / "file1.py").write_text("wave-owned dirty\n", encoding="utf-8")
+        original_run = getattr(commit_mod, "_run")
+
+        def fail_remote_checkout(cmd, *args, **kwargs):
+            if cmd == ["git", "checkout", "-b", "jabramsja/test-wave-id", "origin/dev"]:
+                raise subprocess.CalledProcessError(
+                    1,
+                    cmd,
+                    stderr="synthetic checkout failure",
+                )
+            return original_run(cmd, *args, **kwargs)
+
+        monkeypatch.setattr(commit_mod, "_run", fail_remote_checkout)
+
+        handoff = _make_new_handoff()
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "ensure_feature_branch"
+        assert result["errors"] == ["git checkout -b failed: synthetic checkout failure"]
+        current = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        assert current == "dev"
+        assert (repo / "file1.py").read_text(encoding="utf-8") == "wave-owned dirty\n"
+        assert not (repo / "upstream.txt").exists()
+
+    def test_8d_on_fetch_timeout_falls_back_to_local_base_branch(self, tmp_path, monkeypatch):
+        """A timed-out fetched-base probe must fall back to the local base branch."""
+        repo, _env = _init_git_repo(tmp_path)
+        (repo / "file1.py").write_text("wave-owned dirty\n", encoding="utf-8")
+        original_run = getattr(commit_mod, "_run")
+
+        def timeout_fetch(cmd, *args, **kwargs):
+            if cmd == ["git", "fetch", "origin", "dev"]:
+                raise subprocess.TimeoutExpired(cmd=cmd, timeout=60)
+            return original_run(cmd, *args, **kwargs)
+
+        monkeypatch.setattr(commit_mod, "_run", timeout_fetch)
+
+        handoff = _make_new_handoff()
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert "ensure_feature_branch" in result.get("steps_completed", [])
+        current = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        assert current == "jabramsja/test-wave-id"
+        assert (repo / "file1.py").read_text(encoding="utf-8") == "wave-owned dirty\n"
 
     def test_9_already_on_target_continues(self, tmp_path):
         """Test 9: Already on target → continues."""

@@ -654,6 +654,68 @@ def _resolve_post_merge_verify_root(repo_root: Path, base_branch: str, *, log: A
     return repo_root
 
 
+def _preferred_branch_creation_base(repo_root: Path, base_branch: str) -> str:
+    """Prefer the fetched remote base for new feature branches when available."""
+    try:
+        fetch_proc = _run(
+            ["git", "fetch", "origin", base_branch],
+            cwd=repo_root,
+            check=False,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        return base_branch
+    if fetch_proc.returncode != 0:
+        return base_branch
+    remote_ref = f"refs/remotes/origin/{base_branch}"
+    remote_check = _run(
+        ["git", "rev-parse", "--verify", remote_ref],
+        cwd=repo_root,
+        check=False,
+    )
+    if remote_check.returncode == 0:
+        return f"origin/{base_branch}"
+    return base_branch
+
+
+def _collect_branch_rebind_dirty_scope(
+    repo_root: Path,
+    *,
+    handoff: dict[str, Any],
+) -> tuple[set[str], set[str], list[str]]:
+    """Return tracked, untracked, and out-of-scope dirty paths for branch rebinding."""
+    allowed_pathspecs = [
+        path for path in [
+            *handoff.get("files_to_stage", []),
+            *handoff.get("force_add_files", []),
+        ]
+        if isinstance(path, str) and path.strip()
+    ]
+    tracked_dirty = {
+        path for path in _tracked_dirty_paths(repo_root)
+        if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+    }
+    untracked_dirty = {
+        path for path in _untracked_worktree_paths(repo_root)
+        if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+    }
+    dirty_paths = tracked_dirty | untracked_dirty
+    # Handoff scope entries are Git pathspecs, not just literal file paths.
+    # Re-resolve dirty files through Git so `.` and directory pathspecs are
+    # treated as in-scope during branch rebinding the same way staging does.
+    scoped_dirty = set()
+    if allowed_pathspecs:
+        scoped_dirty = {
+            path for path in (
+                _tracked_dirty_paths(repo_root, pathspecs=allowed_pathspecs)
+                | _untracked_worktree_paths(repo_root, pathspecs=allowed_pathspecs)
+            )
+            if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+        }
+    outside_scope = sorted(dirty_paths - scoped_dirty)
+    return tracked_dirty, untracked_dirty, outside_scope
+
+
 def _probe_feature_branch_existence(repo_root: Path, target_branch: str) -> tuple[bool, bool]:
     """Return local/remote existence for the canonical target branch."""
     local_check = _run(
@@ -670,14 +732,13 @@ def _probe_feature_branch_existence(repo_root: Path, target_branch: str) -> tupl
     return local_check.returncode == 0, bool(remote_check.stdout.strip())
 
 
-def _tracked_dirty_paths(repo_root: Path) -> set[str]:
+def _tracked_dirty_paths(repo_root: Path, pathspecs: list[str] | None = None) -> set[str]:
     """Return tracked paths that differ from HEAD."""
     dirty: set[str] = set()
-    diff_proc = _run(
-        ["git", "diff", "--name-only", "HEAD"],
-        cwd=repo_root,
-        check=False,
-    )
+    cmd = ["git", "diff", "--name-only", "HEAD"]
+    if pathspecs:
+        cmd.extend(["--", *pathspecs])
+    diff_proc = _run(cmd, cwd=repo_root, check=False)
     if diff_proc.returncode == 0:
         dirty.update(
             path.strip()
@@ -687,14 +748,13 @@ def _tracked_dirty_paths(repo_root: Path) -> set[str]:
     return dirty
 
 
-def _untracked_worktree_paths(repo_root: Path) -> set[str]:
+def _untracked_worktree_paths(repo_root: Path, pathspecs: list[str] | None = None) -> set[str]:
     """Return untracked repo-relative paths."""
     dirty: set[str] = set()
-    untracked_proc = _run(
-        ["git", "ls-files", "--others", "--exclude-standard"],
-        cwd=repo_root,
-        check=False,
-    )
+    cmd = ["git", "ls-files", "--others", "--exclude-standard"]
+    if pathspecs:
+        cmd.extend(["--", *pathspecs])
+    untracked_proc = _run(cmd, cwd=repo_root, check=False)
     if untracked_proc.returncode == 0:
         dirty.update(
             path.strip()
@@ -757,6 +817,28 @@ def _restore_scope_snapshot(repo_root: Path, snapshot: dict[str, bytes | None]) 
             continue
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_bytes(payload)
+
+
+def _restore_scope_snapshot_on_branch_failure(
+    repo_root: Path,
+    *,
+    snapshot: dict[str, bytes | None],
+    expected_branch: str,
+) -> None:
+    """Restore a captured bounded scope when checkout failed before branch switch."""
+    if not snapshot:
+        return
+    current_after_failure = _run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=repo_root,
+        check=False,
+    ).stdout.strip()
+    if current_after_failure != expected_branch:
+        return
+    try:
+        _restore_scope_snapshot(repo_root, snapshot)
+    except subprocess.CalledProcessError:
+        pass
 
 
 def _handoff_sha(handoff: dict[str, Any]) -> str:
@@ -833,6 +915,22 @@ def _build_tracker_followup_note(*, wave_id: str, tracker_paths: list[str]) -> s
     )
 
 
+def _append_founder_override_to_tracker_note(
+    note: str,
+    founder_override_token: str | None,
+) -> str:
+    token = _normalize_founder_override_token(founder_override_token)
+    if not token:
+        return note
+    if _extract_founder_override_from_tracker_note(note):
+        return note
+    return note.rstrip() + (
+        f" FOUNDER_OVERRIDE:{token} (standing pipeline-bug-fix authorization "
+        "per memory feedback_autonomous_executor_fix.md; auto-appended by "
+        "build_commit_handoff for commit-gate + pre-push adjacency-cap clearance)"
+    )
+
+
 def _build_default_tracker_note_text(
     *,
     wave_id: str,
@@ -853,16 +951,6 @@ def _build_default_tracker_note_text(
     append. Mirrors the manual-append pattern used repeatedly during
     2026-04-20 standalone commit work; mechanizes the skip-pattern.
     """
-    def _maybe_append_override(note: str) -> str:
-        token = _normalize_founder_override_token(founder_override_token)
-        if not token:
-            return note
-        return note.rstrip() + (
-            f" FOUNDER_OVERRIDE:{token} (standing pipeline-bug-fix authorization "
-            "per memory feedback_autonomous_executor_fix.md; auto-appended by "
-            "_build_default_tracker_note_text for commit-gate + pre-push adjacency-cap clearance)"
-        )
-
     summary = (commit_message or "").splitlines()[0].strip() or f"update {wave_id}"
     indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
     indicator_cmd = (
@@ -891,7 +979,10 @@ def _build_default_tracker_note_text(
                 unblocks_wave_id=(unblocks_wave_id or "").strip(),
                 unblocks_runtime_blocker=(unblocks_runtime_blocker or "").strip(),
             )
-            return _maybe_append_override(_tracker_sync_note.render_tracker_sync_note(fields))
+            return _append_founder_override_to_tracker_note(
+                _tracker_sync_note.render_tracker_sync_note(fields),
+                founder_override_token,
+            )
         note = (
             f"- Tracker sync note ({datetime.now(timezone.utc).strftime('%Y-%m-%d')}, {wave_id}): "
             f"**{summary}.**. Class: {wave_class}. target_gate_id: {target_gate_id}. "
@@ -908,7 +999,7 @@ def _build_default_tracker_note_text(
             "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
             "boot0_track_id: V1. boot0_progress_state: HOLD."
         )
-        return _maybe_append_override(note)
+        return _append_founder_override_to_tracker_note(note, founder_override_token)
 
     if test_files:
         evidence_command = (
@@ -951,9 +1042,12 @@ def _build_default_tracker_note_text(
             indicator_artifact_ref=indicator_path,
             indicator_collection_command=indicator_cmd,
         )
-        return _maybe_append_override(_tracker_sync_note.render_tracker_sync_note(fields))
+        return _append_founder_override_to_tracker_note(
+            _tracker_sync_note.render_tracker_sync_note(fields),
+            founder_override_token,
+        )
 
-    return _maybe_append_override(
+    return _append_founder_override_to_tracker_note(
         f"- Tracker sync note ({datetime.now(timezone.utc).strftime('%Y-%m-%d')}, {wave_id}): "
         f"**{summary}.**. Class: {wave_class}. target_gate_id: {target_gate_id}. "
         f"evidence_command: `{evidence_command}`. evidence_delta: {evidence_delta}. "
@@ -961,7 +1055,8 @@ def _build_default_tracker_note_text(
         "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
         f"indicator_artifact_ref: {indicator_path}. indicator_collection_command: {indicator_cmd}. "
         "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
-        "boot0_track_id: V1. boot0_progress_state: HOLD."
+        "boot0_track_id: V1. boot0_progress_state: HOLD.",
+        founder_override_token,
     )
 
 
@@ -3285,6 +3380,21 @@ def build_commit_handoff(
     else:
         effective_receipt = pre_commit_receipt_path or ".agent_bus/meta/pre_commit_receipt.json"
 
+    effective_tracker_note = tracker_note_text or _build_default_tracker_note_text(
+        wave_id=wave_id,
+        wave_class=wave_class,
+        target_gate_id=target_gate_id,
+        commit_message=commit_message,
+        files_to_stage=effective_files + effective_force,
+        founder_override_token=founder_override_token,
+        unblocks_wave_id=unblocks_wave_id,
+        unblocks_runtime_blocker=unblocks_runtime_blocker,
+    )
+    effective_tracker_note = _append_founder_override_to_tracker_note(
+        effective_tracker_note,
+        founder_override_token,
+    )
+
     handoff = {
         "wave_id": wave_id,
         "task_id": task_id,
@@ -3292,16 +3402,7 @@ def build_commit_handoff(
         "target_gate_id": target_gate_id,
         "caller": caller,
         "branch_prefix": branch_prefix,
-        "tracker_note_text": tracker_note_text or _build_default_tracker_note_text(
-            wave_id=wave_id,
-            wave_class=wave_class,
-            target_gate_id=target_gate_id,
-            commit_message=commit_message,
-            files_to_stage=effective_files + effective_force,
-            founder_override_token=founder_override_token,
-            unblocks_wave_id=unblocks_wave_id,
-            unblocks_runtime_blocker=unblocks_runtime_blocker,
-        ),
+        "tracker_note_text": effective_tracker_note,
         "fixes_implemented": fixes_implemented,
         "files_to_stage": effective_files,
         "force_add_files": effective_force,
@@ -4254,6 +4355,8 @@ def run_commit_pipeline(
         return {"status": "error", "step": "ensure_feature_branch",
                 "errors": ["Timeout checking target branch collisions"],
                 "steps_completed": result["steps_completed"]}
+    branch_start_ref = _preferred_branch_creation_base(repo_root, base_branch)
+    start_from_remote_base = branch_start_ref != base_branch
 
     if current == base_branch:
         if local_target_exists:
@@ -4265,9 +4368,43 @@ def run_commit_pipeline(
                     "errors": [f"Remote branch {target_branch} already exists"],
                     "steps_completed": result["steps_completed"]}
         try:
-            _run(["git", "checkout", "-b", target_branch], cwd=repo_root)
-            log(f"Step 2: created branch {target_branch}")
+            if start_from_remote_base:
+                tracked_dirty, untracked_dirty, outside_scope = _collect_branch_rebind_dirty_scope(
+                    repo_root,
+                    handoff=handoff,
+                )
+                if outside_scope:
+                    preview = ", ".join(outside_scope[:10])
+                    if len(outside_scope) > 10:
+                        preview += ", ..."
+                    return {"status": "error", "step": "ensure_feature_branch",
+                            "errors": [
+                                "Refusing branch creation from fetched base because dirty paths outside "
+                                f"the wave scope are present: {preview}"
+                            ],
+                            "steps_completed": result["steps_completed"]}
+                scoped_dirty = sorted((tracked_dirty | untracked_dirty) - set(outside_scope))
+                snapshot: dict[str, bytes | None] = {}
+                if scoped_dirty:
+                    snapshot = _capture_scope_snapshot(repo_root, scoped_dirty)
+                    _clear_scope_for_branch_rebind(
+                        repo_root,
+                        tracked_paths=sorted(tracked_dirty),
+                        untracked_paths=sorted(untracked_dirty),
+                    )
+                _run(["git", "checkout", "-b", target_branch, branch_start_ref], cwd=repo_root)
+                if snapshot:
+                    _restore_scope_snapshot(repo_root, snapshot)
+                log(f"Step 2: created branch {target_branch} from {branch_start_ref}")
+            else:
+                _run(["git", "checkout", "-b", target_branch], cwd=repo_root)
+                log(f"Step 2: created branch {target_branch}")
         except subprocess.CalledProcessError as exc:
+            _restore_scope_snapshot_on_branch_failure(
+                repo_root,
+                snapshot=locals().get("snapshot", {}),
+                expected_branch=current,
+            )
             return {"status": "error", "step": "ensure_feature_branch",
                     "errors": [f"git checkout -b failed: {exc.stderr.strip()}"],
                     "steps_completed": result["steps_completed"]}
@@ -4287,23 +4424,10 @@ def run_commit_pipeline(
                         f"Refusing auto-rebind because {collision_text} already exists"
                     ],
                     "steps_completed": result["steps_completed"]}
-        allowed_paths = sorted({
-            path for path in [
-                *handoff.get("files_to_stage", []),
-                *handoff.get("force_add_files", []),
-            ]
-            if isinstance(path, str) and path.strip()
-        })
-        tracked_dirty = {
-            path for path in _tracked_dirty_paths(repo_root)
-            if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
-        }
-        untracked_dirty = {
-            path for path in _untracked_worktree_paths(repo_root)
-            if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
-        }
-        dirty_paths = tracked_dirty | untracked_dirty
-        outside_scope = sorted(set(dirty_paths) - set(allowed_paths))
+        tracked_dirty, untracked_dirty, outside_scope = _collect_branch_rebind_dirty_scope(
+            repo_root,
+            handoff=handoff,
+        )
         if outside_scope:
             preview = ", ".join(outside_scope[:10])
             if len(outside_scope) > 10:
@@ -4314,7 +4438,7 @@ def run_commit_pipeline(
                         f"{preview}"
                     ],
                     "steps_completed": result["steps_completed"]}
-        scoped_dirty = sorted(set(dirty_paths) & set(allowed_paths))
+        scoped_dirty = sorted((tracked_dirty | untracked_dirty) - set(outside_scope))
         snapshot: dict[str, bytes | None] = {}
         try:
             # When dev has diverged on wave-owned files, a raw checkout can fail
@@ -4328,28 +4452,22 @@ def run_commit_pipeline(
                 )
                 _clear_scope_for_branch_rebind(
                     repo_root,
-                    tracked_paths=sorted(set(tracked_dirty) & set(allowed_paths)),
-                    untracked_paths=sorted(set(untracked_dirty) & set(allowed_paths)),
+                    tracked_paths=sorted(tracked_dirty),
+                    untracked_paths=sorted(untracked_dirty),
                 )
-            _run(["git", "checkout", "-b", target_branch, base_branch], cwd=repo_root)
+            _run(["git", "checkout", "-b", target_branch, branch_start_ref], cwd=repo_root)
             if snapshot:
                 _restore_scope_snapshot(repo_root, snapshot)
             log(
                 "Step 2: rebound worktree from "
-                f"{current} to {target_branch} using {base_branch} as base"
+                f"{current} to {target_branch} using {branch_start_ref} as base"
             )
         except subprocess.CalledProcessError as exc:
-            if snapshot:
-                current_after_failure = _run(
-                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                    cwd=repo_root,
-                    check=False,
-                ).stdout.strip()
-                if current_after_failure == current:
-                    try:
-                        _restore_scope_snapshot(repo_root, snapshot)
-                    except subprocess.CalledProcessError:
-                        pass
+            _restore_scope_snapshot_on_branch_failure(
+                repo_root,
+                snapshot=snapshot,
+                expected_branch=current,
+            )
             failed_cmd = exc.cmd if isinstance(exc.cmd, list) else []
             detail = (exc.stderr or exc.stdout or "").strip()
             cmd_text = " ".join(str(part) for part in failed_cmd) or "step-2 rebind helper"
