@@ -262,6 +262,46 @@ def _extract_founder_override_from_tracker_note(text: str) -> str:
     return _extract_founder_override_token(text)
 
 
+def _normalize_founder_override_token(token: str | None) -> str:
+    """Canonicalize bare or prefixed override input to the bare token id."""
+    if not isinstance(token, str):
+        return ""
+    clean = token.strip()
+    if not clean:
+        return ""
+    extracted = _extract_founder_override_token(clean)
+    if extracted:
+        return extracted
+    return clean.split()[0].strip().rstrip("`.,;")
+
+
+def _extract_maintenance_bypass_fields_from_text(text: str) -> tuple[str, str]:
+    """Extract optional consecutive-maintenance bypass fields from text."""
+    if not text:
+        return "", ""
+    unblocks_wave_id = ""
+    unblocks_runtime_blocker = ""
+    unblocks_wave_pattern = re.compile(
+        r"(?<![A-Za-z0-9_])(?:Unblocks wave id:|unblocks_wave_id:)\s*([A-Za-z0-9_-]+)"
+    )
+    unblocks_runtime_blocker_pattern = re.compile(
+        r"(?<![A-Za-z0-9_])(?:Unblocks runtime blocker:|unblocks_runtime_blocker:)\s*(.+?)(?:\.\s|$)"
+    )
+    for raw_line in text.splitlines():
+        clean = str(raw_line or "").strip()
+        if not unblocks_wave_id:
+            match = unblocks_wave_pattern.search(clean)
+            if match:
+                unblocks_wave_id = match.group(1).strip().strip("`").rstrip(".,;")
+        if not unblocks_runtime_blocker:
+            match = unblocks_runtime_blocker_pattern.search(clean)
+            if match:
+                unblocks_runtime_blocker = match.group(1).strip().strip("`").rstrip(".,;")
+        if unblocks_wave_id and unblocks_runtime_blocker:
+            return unblocks_wave_id, unblocks_runtime_blocker
+    return unblocks_wave_id, unblocks_runtime_blocker
+
+
 def _dedupe_repo_paths(paths: list[str]) -> list[str]:
     seen: set[str] = set()
     deduped: list[str] = []
@@ -322,6 +362,31 @@ def _extract_founder_override_from_routing_record(
         if token:
             return token
     return ""
+
+
+def _extract_maintenance_bypass_from_routing_record(
+    record: dict[str, Any],
+    repo_root: Path,
+    *,
+    embedded_handoff: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    unblocks_wave_id = str(record.get("unblocks_wave_id") or "").strip().strip("`").rstrip(".,;")
+    unblocks_runtime_blocker = (
+        str(record.get("unblocks_runtime_blocker") or "").strip().strip("`").rstrip(".,;")
+    )
+    for text in [
+        str(record.get("tracker_note_text") or ""),
+        str((embedded_handoff or {}).get("tracker_note_text") or ""),
+        _tracked_packet_text_from_record(record, repo_root),
+    ]:
+        extracted_wave_id, extracted_runtime_blocker = _extract_maintenance_bypass_fields_from_text(text)
+        if extracted_wave_id and not unblocks_wave_id:
+            unblocks_wave_id = extracted_wave_id
+        if extracted_runtime_blocker and not unblocks_runtime_blocker:
+            unblocks_runtime_blocker = extracted_runtime_blocker
+        if unblocks_wave_id and unblocks_runtime_blocker:
+            break
+    return unblocks_wave_id, unblocks_runtime_blocker
 
 
 def _summarize_path_preview(paths: list[str]) -> str:
@@ -776,6 +841,8 @@ def _build_default_tracker_note_text(
     commit_message: str,
     files_to_stage: list[str],
     founder_override_token: str | None = None,
+    unblocks_wave_id: str = "",
+    unblocks_runtime_blocker: str = "",
 ) -> str:
     """Render a contract-complete tracker note for ad hoc commit handoffs.
 
@@ -787,9 +854,7 @@ def _build_default_tracker_note_text(
     2026-04-20 standalone commit work; mechanizes the skip-pattern.
     """
     def _maybe_append_override(note: str) -> str:
-        if not founder_override_token or not isinstance(founder_override_token, str):
-            return note
-        token = founder_override_token.strip()
+        token = _normalize_founder_override_token(founder_override_token)
         if not token:
             return note
         return note.rstrip() + (
@@ -823,18 +888,27 @@ def _build_default_tracker_note_text(
                 primary_invariant_id="INV_STRUCTURAL_FORWARD_MOTION",
                 indicator_artifact_ref=indicator_path,
                 indicator_collection_command=indicator_cmd,
+                unblocks_wave_id=(unblocks_wave_id or "").strip(),
+                unblocks_runtime_blocker=(unblocks_runtime_blocker or "").strip(),
             )
             return _maybe_append_override(_tracker_sync_note.render_tracker_sync_note(fields))
-        return _maybe_append_override(
+        note = (
             f"- Tracker sync note ({datetime.now(timezone.utc).strftime('%Y-%m-%d')}, {wave_id}): "
             f"**{summary}.**. Class: {wave_class}. target_gate_id: {target_gate_id}. "
             "no_op_proof: control-surface/docs/test-only wave-owned scope; no runtime/substrate files "
             "declared in this handoff. defer_reason_code: PIPELINE_HARDENING. "
+        )
+        if unblocks_wave_id:
+            note += f"unblocks_wave_id: {unblocks_wave_id}. "
+        if unblocks_runtime_blocker:
+            note += f"unblocks_runtime_blocker: {unblocks_runtime_blocker}. "
+        note += (
             "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
             f"indicator_artifact_ref: {indicator_path}. indicator_collection_command: {indicator_cmd}. "
             "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
             "boot0_track_id: V1. boot0_progress_state: HOLD."
         )
+        return _maybe_append_override(note)
 
     if test_files:
         evidence_command = (
@@ -3013,6 +3087,11 @@ def prepare_handoff_from_routing_record(
             repo_root,
             embedded_handoff=embedded_copy,
         )
+        unblocks_wave_id, unblocks_runtime_blocker = _extract_maintenance_bypass_from_routing_record(
+            record,
+            repo_root,
+            embedded_handoff=embedded_copy,
+        )
         wave_id = normalize_wave_id(
             str(
                 (embedded_copy or {}).get("wave_id")
@@ -3047,6 +3126,8 @@ def prepare_handoff_from_routing_record(
             ),
             repo_root=repo_root,
             founder_override_token=founder_override_token,
+            unblocks_wave_id=unblocks_wave_id,
+            unblocks_runtime_blocker=unblocks_runtime_blocker,
         )
         if build_errors:
             return None, build_errors
@@ -3056,8 +3137,14 @@ def prepare_handoff_from_routing_record(
     # case, synthesize the same contract-complete note shape that validate_handoff
     # now requires instead of the older one-line fallback.
     founder_override_token = ""
+    unblocks_wave_id = ""
+    unblocks_runtime_blocker = ""
     if decision == "UPDATE_TRACKER_ONLY" and not tracker_note:
         founder_override_token = _extract_founder_override_from_routing_record(
+            record,
+            repo_root,
+        )
+        unblocks_wave_id, unblocks_runtime_blocker = _extract_maintenance_bypass_from_routing_record(
             record,
             repo_root,
         )
@@ -3080,6 +3167,8 @@ def prepare_handoff_from_routing_record(
         pre_commit_receipt_path=".agent_bus/meta/pre_commit_receipt.json",
         repo_root=repo_root,
         founder_override_token=founder_override_token or None,
+        unblocks_wave_id=unblocks_wave_id,
+        unblocks_runtime_blocker=unblocks_runtime_blocker,
     )
     if build_errors:
         return None, build_errors
@@ -3111,6 +3200,8 @@ def build_commit_handoff(
     pre_commit_receipt_path: str | None = None,
     repo_root: Path | None = None,
     founder_override_token: str | None = None,
+    unblocks_wave_id: str = "",
+    unblocks_runtime_blocker: str = "",
 ) -> tuple[dict[str, Any], list[str]]:
     """Build a validated commit handoff from essential fields.
 
@@ -3208,6 +3299,8 @@ def build_commit_handoff(
             commit_message=commit_message,
             files_to_stage=effective_files + effective_force,
             founder_override_token=founder_override_token,
+            unblocks_wave_id=unblocks_wave_id,
+            unblocks_runtime_blocker=unblocks_runtime_blocker,
         ),
         "fixes_implemented": fixes_implemented,
         "files_to_stage": effective_files,
