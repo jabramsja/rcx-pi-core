@@ -1,0 +1,24 @@
+{
+  "wave_id": "pager-codex-app-server-transport-clean-2026-04-22",
+  "repeat_run_speedup_ratio": 1.015932,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.41338,
+  "repeat_run_raw_seconds": [
+    0.419966,
+    0.41338
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.419966
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.833346
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-04-22T08:35:04Z",
+  "collector_version": "2.2.0"
+}

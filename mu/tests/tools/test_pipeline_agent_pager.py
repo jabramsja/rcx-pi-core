@@ -71,6 +71,25 @@ def _load_delivery_log(repo_root: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def _codex_initialize_response(request_id: int = 1) -> dict:
+    return {"jsonrpc": "2.0", "id": request_id, "result": {"serverInfo": {"name": "codex"}}}
+
+
+def _codex_thread_response(request_id: int, thread_id: str) -> dict:
+    return {"jsonrpc": "2.0", "id": request_id, "result": {"thread": {"id": thread_id}}}
+
+
+def _codex_turn_response(request_id: int, *, thread_id: str, turn_id: str | None = None) -> dict:
+    payload = {"thread": {"id": thread_id}}
+    if turn_id is not None:
+        payload["turn"] = {"id": turn_id}
+    return {"jsonrpc": "2.0", "id": request_id, "result": payload}
+
+
+def _codex_error_response(request_id: int, message: str) -> dict:
+    return {"jsonrpc": "2.0", "id": request_id, "error": {"message": message}}
+
+
 def test_event_id_uses_canonical_identity_tuple_and_log_appends_once(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -346,31 +365,63 @@ def test_codex_ack_requires_accepted_turn_response_fields(tmp_path):
         metadata=None,
         **_event_kwargs(),
     )
+    request_batches: list[list[dict]] = []
 
-    with patch.object(
-        pager_mod,
-        "_http_json_post",
-        side_effect=[
-            {"thread_id": "thread-1"},
-            {"thread_id": "thread-1"},
-        ],
-    ):
+    def missing_turn_exchange(url, requests, timeout_s):
+        request_batches.append(requests)
+        return [
+            _codex_initialize_response(1),
+            _codex_thread_response(2, "thread-1"),
+            _codex_turn_response(3, thread_id="thread-1"),
+        ]
+
+    with patch.object(pager_mod, "_codex_app_server_exchange", side_effect=missing_turn_exchange):
         failed = pager_mod._dispatch_codex(tmp_path, event, state, timeout_s=5)  # ANTICHEAT_OK
     assert failed["acknowledged"] is False
     assert "missing" in failed["error"]
+    assert [request["method"] for request in request_batches[0]] == [
+        "initialize",
+        "thread/start",
+        "turn/start",
+    ]
+    assert request_batches[0][0]["params"]["clientInfo"] == {
+        "name": "pipeline_agent_pager",
+        "version": "1.0",
+    }
+    expected_prompt = getattr(pager_mod, "_event_prompt")(event)
+    assert request_batches[0][2]["params"] == {
+        "threadId": {"$from": "2.result.thread.id"},
+        "input": [{"type": "text", "text": expected_prompt}],
+    }
 
     with patch.object(
         pager_mod,
-        "_http_json_post",
-        side_effect=[
-            {"thread_id": "thread-1"},
-            {"thread_id": "thread-1", "turn_id": "turn-1"},
+        "_codex_app_server_exchange",
+        return_value=[
+            _codex_initialize_response(1),
+            _codex_thread_response(2, "thread-1"),
+            _codex_turn_response(3, thread_id="thread-1", turn_id="turn-1"),
         ],
     ):
         succeeded = pager_mod._dispatch_codex(tmp_path, event, state, timeout_s=5)  # ANTICHEAT_OK
     assert succeeded["acknowledged"] is True
     assert succeeded["codex_thread_id"] == "thread-1"
     assert succeeded["ack"]["turn_id"] == "turn-1"
+
+    with patch.object(
+        pager_mod,
+        "_codex_app_server_exchange",
+        return_value=[
+            _codex_initialize_response(1),
+            _codex_thread_response(2, "thread-1"),
+            {"jsonrpc": "2.0", "id": 3, "result": {"turn": {"id": "turn-1"}}},
+        ],
+    ):
+        turn_only = pager_mod._dispatch_codex(tmp_path, event, state, timeout_s=5)  # ANTICHEAT_OK
+    assert turn_only["acknowledged"] is True
+    assert turn_only["codex_thread_id"] == "thread-1"
+    assert turn_only["ack"]["thread_id"] == "thread-1"
+    assert turn_only["ack"]["turn_id"] == "turn-1"
 
 
 def test_codex_ack_rejects_mismatched_thread_id(tmp_path):
@@ -383,10 +434,11 @@ def test_codex_ack_rejects_mismatched_thread_id(tmp_path):
 
     with patch.object(
         pager_mod,
-        "_http_json_post",
-        side_effect=[
-            {"thread_id": "thread-expected"},
-            {"thread_id": "thread-other", "turn_id": "turn-1"},
+        "_codex_app_server_exchange",
+        return_value=[
+            _codex_initialize_response(1),
+            _codex_thread_response(2, "thread-expected"),
+            _codex_turn_response(3, thread_id="thread-other", turn_id="turn-1"),
         ],
     ):
         failed = pager_mod._dispatch_codex(tmp_path, event, state, timeout_s=5)  # ANTICHEAT_OK
@@ -394,6 +446,76 @@ def test_codex_ack_rejects_mismatched_thread_id(tmp_path):
     assert failed["acknowledged"] is False
     assert "did not match requested thread" in failed["error"]
     assert failed["codex_thread_id"] == "thread-expected"
+
+
+def test_codex_thread_start_requires_explicit_thread_id_field(tmp_path):
+    state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager adapter contract test
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    with patch.object(
+        pager_mod,
+        "_codex_app_server_exchange",
+        return_value=[
+            _codex_initialize_response(1),
+            {"jsonrpc": "2.0", "id": 2, "result": {"id": "not-a-thread-id"}},
+            _codex_turn_response(3, thread_id="thread-ignored", turn_id="turn-1"),
+        ],
+    ):
+        failed = pager_mod._dispatch_codex(tmp_path, event, state, timeout_s=5)  # ANTICHEAT_OK
+
+    assert failed["acknowledged"] is False
+    assert failed["error"] == "codex thread create missing thread_id"
+    assert failed["codex_thread_id"] is None
+
+
+def test_codex_stale_thread_reseeds_on_explicit_error(tmp_path):
+    state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager adapter contract test
+    state["codex_thread_id"] = "thread-stale"
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+    request_batches: list[list[dict]] = []
+
+    def fake_exchange(url, requests, timeout_s):
+        request_batches.append(requests)
+        if len(request_batches) == 1:
+            return [
+                _codex_initialize_response(1),
+                _codex_error_response(2, "thread not found: thread-stale"),
+            ]
+        return [
+            _codex_initialize_response(1),
+            _codex_thread_response(2, "thread-fresh"),
+            _codex_turn_response(3, thread_id="thread-fresh", turn_id="turn-1"),
+        ]
+
+    with patch.object(pager_mod, "_codex_app_server_exchange", side_effect=fake_exchange):
+        succeeded = pager_mod._dispatch_codex(tmp_path, event, state, timeout_s=5)  # ANTICHEAT_OK
+
+    assert succeeded["acknowledged"] is True
+    assert succeeded["codex_thread_id"] == "thread-fresh"
+    assert succeeded["ack"]["thread_id"] == "thread-fresh"
+    assert succeeded["ack"]["turn_id"] == "turn-1"
+    assert [request["method"] for request in request_batches[0]] == [
+        "initialize",
+        "turn/start",
+    ]
+    expected_prompt = getattr(pager_mod, "_event_prompt")(event)
+    assert request_batches[0][1]["params"] == {
+        "threadId": "thread-stale",
+        "input": [{"type": "text", "text": expected_prompt}],
+    }
+    assert [request["method"] for request in request_batches[1]] == [
+        "initialize",
+        "thread/start",
+        "turn/start",
+    ]
 
 
 def test_replay_uses_delivery_receipt_log_after_state_persist_crash(tmp_path, monkeypatch):
@@ -517,25 +639,31 @@ def test_receipt_log_failure_after_ack_does_not_redeliver_same_event(tmp_path, m
     assert dispatch_calls == ["codex"]
 
 
-def test_codex_ack_budget_is_shared_across_thread_create_and_turn_submit(tmp_path):
+def test_codex_ack_budget_is_shared_across_stale_thread_reseed(tmp_path):
     state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager adapter contract test
+    state["codex_thread_id"] = "thread-stale"
     event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
         route="codex",
         metadata=None,
         **_event_kwargs(),
     )
     calls: list[float] = []
+    request_batches: list[list[dict]] = []
 
-    def fake_post(url, payload, timeout_s):
+    def fake_exchange(url, requests, timeout_s):
+        request_batches.append(requests)
         calls.append(timeout_s)
         if len(calls) == 1:
             time.sleep(0.12)
-            return {"thread_id": "thread-1"}
+            return [
+                _codex_initialize_response(1),
+                _codex_error_response(2, "no rollout found for thread id thread-stale"),
+            ]
         raise pager_mod.PipelineAgentPagerError(
-            f"second codex call exceeded remaining budget ({timeout_s:.3f}s)"
+            f"second codex exchange exceeded remaining budget ({timeout_s:.3f}s)"
         )
 
-    with patch.object(pager_mod, "_http_json_post", side_effect=fake_post):
+    with patch.object(pager_mod, "_codex_app_server_exchange", side_effect=fake_exchange):
         failed = pager_mod._dispatch_codex(tmp_path, event, state, timeout_s=0.2)  # ANTICHEAT_OK
 
     assert failed["acknowledged"] is False
@@ -543,6 +671,53 @@ def test_codex_ack_budget_is_shared_across_thread_create_and_turn_submit(tmp_pat
     assert len(calls) == 2
     assert calls[0] <= 0.2
     assert calls[1] < calls[0]
+    assert [request["method"] for request in request_batches[0]] == [
+        "initialize",
+        "turn/start",
+    ]
+    assert [request["method"] for request in request_batches[1]] == [
+        "initialize",
+        "thread/start",
+        "turn/start",
+    ]
+
+
+def test_emit_transition_event_clears_stale_codex_thread_id_when_dispatch_requests_it(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="codex")
+    state = pager_mod._default_state()  # ANTICHEAT_OK: state persistence regression
+    state["codex_thread_id"] = "thread-dead"
+    pager_mod._save_state(repo, state)  # ANTICHEAT_OK: direct pager state setup
+
+    def stale_thread_failure(repo_root, target, event, state, config, *, timeout_s):
+        assert state["codex_thread_id"] == "thread-dead"
+        return {
+            "acknowledged": False,
+            "error": "thread not found: thread-dead",
+            "codex_thread_id": None,
+            "clear_codex_thread_id": True,
+        }
+
+    monkeypatch.setattr(pager_mod, "_dispatch_target", stale_thread_failure)
+
+    result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+
+    assert result["attempted"] == [
+        {
+            "event_id": result["event_id"],
+            "target": "codex",
+            "acknowledged": False,
+            "error": "thread not found: thread-dead",
+            "receipt_log_warning": "",
+        }
+    ]
+    state = _load_state(repo)
+    assert state["codex_thread_id"] is None
+    entry = state["events"][result["event_id"]]
+    assert entry["pending_targets"] == ["codex"]
 
 
 def test_claude_ack_requires_zero_exit(tmp_path):
