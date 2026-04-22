@@ -3130,6 +3130,30 @@ class TestIdleNonGoPager:
             encoding="utf-8",
         )
 
+    def _write_bridge_prompt(self, repo_root: Path, job_id: str, turn_name: str, *, plan_path: str = "reports/control_plane/idle_non_go_alert.md") -> None:
+        prompt_dir = repo_root / ".agent_bus" / "prompts" / job_id
+        prompt_dir.mkdir(parents=True, exist_ok=True)
+        (prompt_dir / turn_name).write_text(
+            f"Phase B implementation review for {plan_path}\n",
+            encoding="utf-8",
+        )
+
+    def _write_meta_prompt(
+        self,
+        repo_root: Path,
+        turn_name: str,
+        *,
+        task_id: str = "[PIPELINE-AGENT-PAGER]",
+        wave_name: str = "wave-alert",
+        plan_path: str = "reports/control_plane/idle_non_go_alert.md",
+    ) -> None:
+        prompt_dir = repo_root / ".agent_bus" / "meta" / "prompts"
+        prompt_dir.mkdir(parents=True, exist_ok=True)
+        (prompt_dir / turn_name).write_text(
+            f"task_id={task_id}\nwave_name={wave_name}\ntracked_packet={plan_path}\n",
+            encoding="utf-8",
+        )
+
     def _capture_emit(self, monkeypatch):
         calls: list[dict[str, Any]] = []
 
@@ -3162,6 +3186,7 @@ class TestIdleNonGoPager:
             "END_AGENT_ENVELOPE\n",
             encoding="utf-8",
         )
+        self._write_bridge_prompt(tmp_path, "phase-b-r3-alert", "phase-b-r3-alert--r1-reviewer.txt")
         calls = self._capture_emit(monkeypatch)
 
         result = dash_mod.emit_idle_non_go_alert(tmp_path, phase="idle")
@@ -3192,6 +3217,7 @@ class TestIdleNonGoPager:
             "END_META_ENVELOPE\n",
             encoding="utf-8",
         )
+        self._write_meta_prompt(tmp_path, "meta-wave-alert.txt")
         calls = self._capture_emit(monkeypatch)
 
         result = dash_mod.emit_idle_non_go_alert(tmp_path, phase="idle")
@@ -3247,6 +3273,69 @@ class TestIdleNonGoPager:
         assert calls[0]["event_type"] == "pipeline_hard_fail"
         assert calls[0]["metadata"]["failure_class"] == failure_class
         assert calls[0]["reason"] == expected_reason
+
+    def test_ignores_bridge_candidate_from_prior_wave_context(self, tmp_path, monkeypatch):
+        self._write_routing_record(tmp_path, wave_name="wave-current")
+        raw_dir = tmp_path / ".agent_bus" / "raw" / "phase-b-r7-stale"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        turn_name = "phase-b-r7-stale--r1-reviewer.txt"
+        (raw_dir / turn_name).write_text(
+            "BEGIN_AGENT_ENVELOPE\n"
+            '{\n'
+            '  "decision": "REQUEST_CHANGES",\n'
+            '  "summary": "Stale bridge findings from an earlier wave.",\n'
+            '  "findings": [\n'
+            '    {"disposition": "blocking", "title": "Do not reuse"}\n'
+            '  ]\n'
+            '}\n'
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+        self._write_bridge_prompt(
+            tmp_path,
+            "phase-b-r7-stale",
+            turn_name,
+            plan_path="reports/control_plane/old_idle_non_go_alert.md",
+        )
+        calls = self._capture_emit(monkeypatch)
+
+        result = dash_mod.emit_idle_non_go_alert(tmp_path, phase="idle")
+
+        assert result["attempted"] is False
+        assert result["reason"] == "no_non_go_candidate"
+        assert calls == []
+
+    def test_ignores_meta_candidate_from_prior_wave_context(self, tmp_path, monkeypatch):
+        self._write_routing_record(tmp_path, wave_name="wave-current")
+        meta_dir = tmp_path / ".agent_bus" / "meta" / "raw"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        turn_name = "meta-[PIPELINE-AGENT-PAGER]-stale.txt"
+        (meta_dir / turn_name).write_text(
+            "BEGIN_META_ENVELOPE\n"
+            '{\n'
+            '  "decision": "NEEDS_PHASE_B",\n'
+            '  "summary": "Stale meta findings from an earlier wave.",\n'
+            '  "findings": [\n'
+            '    {"title": "stale changed_files claims"}\n'
+            '  ],\n'
+            '  "request_for_claude": "Do not reuse this stale meta artifact."\n'
+            '}\n'
+            "END_META_ENVELOPE\n",
+            encoding="utf-8",
+        )
+        self._write_meta_prompt(
+            tmp_path,
+            turn_name,
+            wave_name="wave-old",
+            plan_path="reports/control_plane/old_idle_non_go_alert.md",
+        )
+        calls = self._capture_emit(monkeypatch)
+
+        result = dash_mod.emit_idle_non_go_alert(tmp_path, phase="idle")
+
+        assert result["attempted"] is False
+        assert result["reason"] == "no_non_go_candidate"
+        assert calls == []
 
     def test_inactive_trivial_invocation_uses_detail_and_wave_history(self, tmp_path):
         status_path = tmp_path / ".agent_bus" / "recovery"

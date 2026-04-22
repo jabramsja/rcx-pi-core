@@ -214,6 +214,29 @@ def _excerpt(value: Any, limit: int = 110) -> str:
     return excerpt[: limit - 3].rstrip() + "..."
 
 
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _routing_context_anchor_mtime(repo_root: Path) -> float:
+    mtimes: list[float] = []
+    for rel in (
+        Path(".agent_bus") / "meta" / "post_merge_routing.json",
+        Path(".agent_bus") / "executors" / "phase_b_state.json",
+        Path(".agent_bus") / "executors" / "phase_a_state.json",
+    ):
+        path = repo_root / rel
+        try:
+            if path.exists():
+                mtimes.append(path.stat().st_mtime)
+        except OSError:
+            continue
+    return max(mtimes, default=0.0)
+
+
 def _is_unhelpful_recovery_text(text: str) -> bool:
     cleaned = (text or "").strip()
     if not cleaned:
@@ -752,7 +775,20 @@ def _read_latest_envelope(path: Path, *, begin: str, end: str) -> dict[str, Any]
     return None
 
 
-def _latest_bridge_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
+def _bridge_turn_matches_plan(repo_root: Path, job_id: str, turn_name: str, plan_path: str) -> bool:
+    if not plan_path:
+        return False
+    prompt_path = repo_root / ".agent_bus" / "prompts" / job_id / turn_name
+    prompt_text = _read_text(prompt_path)
+    return bool(prompt_text) and plan_path in prompt_text
+
+
+def _latest_bridge_non_go_candidate(
+    repo_root: Path,
+    *,
+    plan_path: str = "",
+    not_before: float = 0.0,
+) -> dict[str, Any] | None:
     raw_dir = repo_root / ".agent_bus" / "raw"
     if not raw_dir.exists():
         return None
@@ -768,6 +804,10 @@ def _latest_bridge_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
             try:
                 mtime = candidate.stat().st_mtime
             except OSError:
+                continue
+            if mtime < not_before:
+                continue
+            if not _bridge_turn_matches_plan(repo_root, directory.name, candidate.name, plan_path):
                 continue
             if mtime <= latest_mtime:
                 continue
@@ -808,16 +848,58 @@ def _latest_bridge_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
     }
 
 
-def _latest_meta_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
+def _meta_turn_matches_context(
+    repo_root: Path,
+    turn_name: str,
+    *,
+    task_id: str = "",
+    wave_id: str = "",
+    plan_path: str = "",
+) -> bool:
+    prompt_path = repo_root / ".agent_bus" / "meta" / "prompts" / turn_name
+    prompt_text = _read_text(prompt_path)
+    if not prompt_text:
+        return False
+    if task_id and task_id not in prompt_text:
+        return False
+    if wave_id and wave_id not in prompt_text:
+        return False
+    if plan_path and plan_path not in prompt_text:
+        return False
+    return True
+
+
+def _latest_meta_non_go_candidate(
+    repo_root: Path,
+    *,
+    task_id: str = "",
+    wave_id: str = "",
+    plan_path: str = "",
+    not_before: float = 0.0,
+) -> dict[str, Any] | None:
     raw_dir = repo_root / ".agent_bus" / "meta" / "raw"
     if not raw_dir.exists():
         return None
-    try:
-        latest_path = max(raw_dir.glob("meta-*.txt"), key=lambda path: path.stat().st_mtime)
-    except ValueError:
+    candidates: list[tuple[float, Path]] = []
+    for path in raw_dir.glob("meta-*.txt"):
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if mtime < not_before:
+            continue
+        if not _meta_turn_matches_context(
+            repo_root,
+            path.name,
+            task_id=task_id,
+            wave_id=wave_id,
+            plan_path=plan_path,
+        ):
+            continue
+        candidates.append((mtime, path))
+    if not candidates:
         return None
-    except OSError:
-        return None
+    latest_mtime, latest_path = max(candidates, key=lambda item: item[0])
 
     env = _read_latest_envelope(
         latest_path,
@@ -841,10 +923,6 @@ def _latest_meta_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
         if finding_title:
             break
     reason = finding_title or _excerpt(env.get("request_for_claude", "")) or _excerpt(env.get("summary", ""))
-    try:
-        latest_mtime = latest_path.stat().st_mtime
-    except OSError:
-        latest_mtime = 0.0
     return {
         "category": "meta_needs_phase_b",
         "decision": decision,
@@ -858,7 +936,7 @@ def _latest_meta_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
     }
 
 
-def _recovery_idle_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
+def _recovery_idle_non_go_candidate(repo_root: Path, *, wave_id: str = "") -> dict[str, Any] | None:
     status = _read_recovery_status(repo_root)
     if not status or bool(status.get("active")):
         return None
@@ -866,7 +944,9 @@ def _recovery_idle_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
     if failure_class not in IDLE_NON_GO_FAILURE_CLASSES:
         return None
 
-    wave_id = str(status.get("wave_id", "")).strip()
+    status_wave_id = str(status.get("wave_id", "")).strip()
+    if wave_id and status_wave_id and status_wave_id != wave_id:
+        return None
     finished_at = str(status.get("finished_at", "")).strip() or str(status.get("updated_at", "")).strip()
     timestamp = 0.0
     parsed = _parse_iso(finished_at)
@@ -879,7 +959,7 @@ def _recovery_idle_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
         "category": f"recovery_{failure_class}",
         "failure_class": failure_class,
         "timestamp": timestamp,
-        "wave_id": wave_id,
+        "wave_id": status_wave_id,
         "summary": f"tmux idle after {_human_failure_class(failure_class)}",
         "reason": reason or _human_failure_class(failure_class),
         "artifact_paths": {
@@ -887,16 +967,29 @@ def _recovery_idle_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
         },
         "transition_key": (
             "tmux-idle:"
-            f"{failure_class}:{wave_id}:{status.get('invocation_id') or finished_at or status.get('state', '')}"
+            f"{failure_class}:{status_wave_id}:{status.get('invocation_id') or finished_at or status.get('state', '')}"
         ),
     }
 
 
-def latest_idle_non_go_candidate(repo_root: Path) -> dict[str, Any] | None:
+def latest_idle_non_go_candidate(
+    repo_root: Path,
+    *,
+    task_id: str = "",
+    wave_id: str = "",
+    plan_path: str = "",
+    not_before: float = 0.0,
+) -> dict[str, Any] | None:
     candidates = [
-        _latest_bridge_non_go_candidate(repo_root),
-        _latest_meta_non_go_candidate(repo_root),
-        _recovery_idle_non_go_candidate(repo_root),
+        _latest_bridge_non_go_candidate(repo_root, plan_path=plan_path, not_before=not_before),
+        _latest_meta_non_go_candidate(
+            repo_root,
+            task_id=task_id,
+            wave_id=wave_id,
+            plan_path=plan_path,
+            not_before=not_before,
+        ),
+        _recovery_idle_non_go_candidate(repo_root, wave_id=wave_id),
     ]
     concrete = [candidate for candidate in candidates if candidate is not None]
     if not concrete:
@@ -959,7 +1052,14 @@ def emit_idle_non_go_alert(repo_root: Path, *, phase: str | None = None) -> dict
     if active_phase != "idle":
         return {"attempted": False, "reason": "phase_not_idle", "phase": active_phase}
 
-    candidate = latest_idle_non_go_candidate(repo_root)
+    active_task_id, active_wave_id, active_plan_path = _routing_context(repo_root, {})
+    candidate = latest_idle_non_go_candidate(
+        repo_root,
+        task_id=active_task_id,
+        wave_id=active_wave_id,
+        plan_path=active_plan_path,
+        not_before=_routing_context_anchor_mtime(repo_root),
+    )
     if candidate is None:
         return {"attempted": False, "reason": "no_non_go_candidate", "phase": active_phase}
 
