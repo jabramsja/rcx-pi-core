@@ -227,6 +227,32 @@ class TestClassifyFailure:
     def test_missing_bridge_config_tier1(self):
         assert rg_mod.tier_for(FailureClass.MISSING_BRIDGE_CONFIG) == 1
 
+    def test_missing_phase_a_lock_validation_error(self):
+        payload = {
+            "status": "error",
+            "step": "validate_inputs",
+            "plan_path": "reports/control_plane/plan.md",
+            "errors": [
+                "validate_inputs fatal: Plan Phase-A-Lock must be LOCKED (or ROUTING_RECORD_AUTHORITY for planless), got "
+            ],
+        }
+        assert rg_mod.classify_failure(
+            {"status": "failed", "executor": "phase_b_executor", "stdout": json.dumps(payload)}
+        ) == FailureClass.MISSING_PHASE_A_LOCK
+
+    def test_unlocked_phase_a_lock_not_misclassified_as_missing(self):
+        payload = {
+            "status": "error",
+            "step": "validate_inputs",
+            "plan_path": "reports/control_plane/plan.md",
+            "errors": [
+                "validate_inputs fatal: Plan Phase-A-Lock must be LOCKED (or ROUTING_RECORD_AUTHORITY for planless), got UNLOCKED"
+            ],
+        }
+        assert rg_mod.classify_failure(
+            {"status": "failed", "executor": "phase_b_executor", "stdout": json.dumps(payload)}
+        ) == FailureClass.UNKNOWN_ERROR
+
     def test_stale_bridge_lock_in_stdout(self):
         assert rg_mod.classify_failure(
             {"status": "error", "stdout": "bridge.lock held", "stderr": "",
@@ -488,7 +514,8 @@ class TestTierMapping:
                          FailureClass.STALE_EXECUTOR_STATE, FailureClass.STALE_CONTINUATION,
                          FailureClass.MIXED_STAGING, FailureClass.TRACKER_NOTE_CONTRACT,
                          FailureClass.FEATURE_BRANCH_MISMATCH,
-                         FailureClass.MISSING_BRIDGE_CONFIG}
+                         FailureClass.MISSING_BRIDGE_CONFIG,
+                         FailureClass.MISSING_PHASE_A_LOCK}
         # STALE_GIT_INDEX_LOCK demoted to Tier 2 (no sound ownership check)
         assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
         tier4 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 4}
@@ -1582,6 +1609,55 @@ class TestFixProcessTimeout:
         assert "bridge.lock cleared" not in r["detail"]
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+
+
+class TestFixMissingPhaseALock:
+    def test_missing_phase_a_lock_repaired_and_stale_bridge_lock_cleared(self, tmp_path, monkeypatch):
+        reports = tmp_path / "reports" / "control_plane"
+        reports.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (tmp_path / plan_path).write_text(
+            "# Plan\n\nTask: [PIPELINE-AGENT-PAGER]\nWave ID: wave-x\nDate: 2026-04-22\nStatus: Phase B\n\n## Body\n",
+            encoding="utf-8",
+        )
+        lock_path = tmp_path / ".agent_bus" / "bridge.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text("999999\n", encoding="utf-8")
+
+        phase_a_mod = load_module("phase_a_executor_fix_missing_phase_a_lock", _EXECUTORS_DIR / "phase_a_executor.py")
+        phase_b_mod = load_module("phase_b_executor_fix_missing_phase_a_lock", _EXECUTORS_DIR / "phase_b_executor.py")
+
+        def fake_loader(repo_root, module_name):
+            assert repo_root == tmp_path
+            if module_name == "phase_a_executor":
+                return phase_a_mod
+            if module_name == "phase_b_executor":
+                return phase_b_mod
+            raise AssertionError(f"unexpected module load: {module_name}")
+
+        monkeypatch.setattr(rg_mod, "_load_executor_module_from_repo", fake_loader)
+
+        result = rg_mod.fix_missing_phase_a_lock(
+            tmp_path,
+            result={
+                "status": "error",
+                "step": "validate_inputs",
+                "plan_path": plan_path,
+                "errors": [
+                    "validate_inputs fatal: Plan Phase-A-Lock must be LOCKED (or ROUTING_RECORD_AUTHORITY for planless), got "
+                ],
+            },
+        )
+
+        assert result["fixed"] is True
+        assert result["action"] == "repair_missing_phase_a_lock"
+        assert "inserted and locked missing Phase-A-Lock" in result["detail"]
+        assert "cleared stale bridge.lock" in result["detail"]
+        assert not lock_path.exists()
+        plan_text = (tmp_path / plan_path).read_text(encoding="utf-8")
+        assert "Phase-A-Lock: LOCKED" in plan_text
+        parsed = phase_b_mod.load_plan_packet(tmp_path, plan_path)
+        assert parsed["phase_a_lock"] == "LOCKED"
 
     def test_bridge_lock_preserved_when_flock_held(self, tmp_path, monkeypatch):
         """bridge.lock must NOT be cleared when a live process holds the flock.

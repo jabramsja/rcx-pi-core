@@ -760,6 +760,23 @@ class TestLoadPlanPacketPathTraversal:
         assert result["unblocks_wave_id"] == "wave-upstream-2026-04-14"
         assert result["unblocks_runtime_blocker"] == "INV_STRUCTURAL_FORWARD_MOTION"
 
+    def test_canonical_identity_headers_strip_markdown_ticks(self, tmp_path):
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Wave ID: `wave-test-2026-04-21`\n"
+            "Task: `[TEST-PLAN]`\n"
+        )
+
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+
+        assert result["wave_id"] == "wave-test-2026-04-21"
+        assert result["task_id"] == "[TEST-PLAN]"
+
     def test_canonical_identity_fields_win_over_earlier_narrative_bullets(self, tmp_path):
         """Task and Wave ID must come from canonical headers when both forms exist."""
         repo = tmp_path / "repo"
@@ -5325,6 +5342,53 @@ class TestRoutingValidationNotBypassed:
         }
         with pytest.raises(pb_mod.PhaseBExecutorError, match="does not match routing task_id"):
             pb_mod.validate_inputs(routing, plan)
+
+    def test_markdown_wrapped_task_header_matches_plain_routing_task_id(self, tmp_path):
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Wave ID: `pager-codex-app-server-provisioning`\n"
+            "Task: `[PIPELINE-AGENT-PAGER]`\n"
+        )
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_name": "pager-codex-app-server-provisioning",
+        }
+
+        plan = pb_mod.load_plan_packet(repo, "reports/plan.md")
+
+        pb_mod.validate_inputs(routing, plan)
+
+
+class TestRunPhaseBValidationErrors:
+    def test_validate_inputs_error_carries_plan_path(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (repo / plan_path).write_text(
+            "# Plan\nTask: [PIPELINE-AGENT-PAGER]\nWave ID: wave-x\nDate: 2026-04-22\nStatus: Phase B\n",
+            encoding="utf-8",
+        )
+        routing = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_name": "wave-x",
+        }
+
+        result = pb_mod.run_phase_b(repo, plan_path, routing_record_override=routing)
+
+        assert result["status"] == "error"
+        assert result["step"] == "validate_inputs"
+        assert result["plan_path"] == plan_path
+        assert "Plan Phase-A-Lock must be LOCKED" in result["errors"][0]
 
     def test_same_wave_task_id_exception_passes_for_tracked_pipeline_recovery_packet(self):
         """One same-wave recovery packet may carry wave identity in Task without changing routing anchor."""

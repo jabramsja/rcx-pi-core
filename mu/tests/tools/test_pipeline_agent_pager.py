@@ -358,6 +358,148 @@ def test_overlapping_emit_calls_do_not_duplicate_delivery(tmp_path, monkeypatch)
     assert len(_load_log(repo)) == 1
 
 
+def test_invalid_codex_listener_port_stays_pending_and_reportable(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="codex")
+    monkeypatch.setenv("RCX_CODEX_APP_SERVER_URL", "ws://127.0.0.1:not-a-port")
+
+    result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+
+    assert result["enabled"] is True
+    assert result["attempted"] == [
+        {
+            "event_id": result["event_id"],
+            "target": "codex",
+            "acknowledged": False,
+            "error": "RCX_CODEX_APP_SERVER_URL must include a valid websocket port",
+            "receipt_log_warning": "",
+        }
+    ]
+    state = _load_state(repo)
+    entry = state["events"][result["event_id"]]
+    assert entry["delivered_targets"] == {}
+    assert entry["pending_targets"] == ["codex"]
+    assert entry["attempts"]["codex"]["count"] == 1
+    assert entry["attempts"]["codex"]["last_error"] == (
+        "RCX_CODEX_APP_SERVER_URL must include a valid websocket port"
+    )
+    assert state["codex_thread_id"] is None
+    assert _load_delivery_log(repo) == []
+
+
+def test_missing_codex_listener_port_stays_pending_without_exchange(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="codex")
+    monkeypatch.setenv("RCX_CODEX_APP_SERVER_URL", "ws://127.0.0.1")
+
+    def unexpected_exchange(url, requests, timeout_s):
+        raise AssertionError(f"unexpected exchange attempt for {url}")
+
+    monkeypatch.setattr(
+        pager_mod,
+        "_codex_app_server_exchange",
+        unexpected_exchange,
+    )
+
+    result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+
+    assert result["enabled"] is True
+    assert result["attempted"] == [
+        {
+            "event_id": result["event_id"],
+            "target": "codex",
+            "acknowledged": False,
+            "error": "RCX_CODEX_APP_SERVER_URL must include a valid websocket port",
+            "receipt_log_warning": "",
+        }
+    ]
+    state = _load_state(repo)
+    entry = state["events"][result["event_id"]]
+    assert entry["delivered_targets"] == {}
+    assert entry["pending_targets"] == ["codex"]
+    assert entry["attempts"]["codex"]["count"] == 1
+    assert entry["attempts"]["codex"]["last_error"] == (
+        "RCX_CODEX_APP_SERVER_URL must include a valid websocket port"
+    )
+    assert state["codex_thread_id"] is None
+    assert _load_delivery_log(repo) == []
+
+
+def test_non_loopback_codex_listener_stays_pending_and_reportable(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="codex")
+    state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager state setup
+    state["codex_thread_id"] = "thread-existing"
+    pager_mod._save_state(repo, state)  # ANTICHEAT_OK: direct pager state setup
+    monkeypatch.setenv("RCX_CODEX_APP_SERVER_URL", "ws://192.168.1.50:8765")
+
+    result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+
+    assert result["attempted"] == [
+        {
+            "event_id": result["event_id"],
+            "target": "codex",
+            "acknowledged": False,
+            "error": "RCX_CODEX_APP_SERVER_URL must target a loopback websocket listener",
+            "receipt_log_warning": "",
+        }
+    ]
+    state = _load_state(repo)
+    entry = state["events"][result["event_id"]]
+    assert entry["delivered_targets"] == {}
+    assert entry["pending_targets"] == ["codex"]
+    assert entry["attempts"]["codex"]["last_error"] == (
+        "RCX_CODEX_APP_SERVER_URL must target a loopback websocket listener"
+    )
+    assert state["codex_thread_id"] == "thread-existing"
+    assert _load_delivery_log(repo) == []
+
+
+def test_unavailable_codex_listener_stays_pending_and_reportable(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="codex")
+    state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager state setup
+    state["codex_thread_id"] = "thread-existing"
+    pager_mod._save_state(repo, state)  # ANTICHEAT_OK: direct pager state setup
+
+    def unavailable_exchange(url, requests, timeout_s):
+        raise pager_mod.PipelineAgentPagerError(
+            f"{url} unavailable: websocket connection failed"
+        )
+
+    monkeypatch.setattr(
+        pager_mod,
+        "_codex_app_server_exchange",
+        unavailable_exchange,
+    )
+
+    result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+
+    assert result["attempted"] == [
+        {
+            "event_id": result["event_id"],
+            "target": "codex",
+            "acknowledged": False,
+            "error": "ws://127.0.0.1:8765 unavailable: websocket connection failed",
+            "receipt_log_warning": "",
+        }
+    ]
+    state = _load_state(repo)
+    entry = state["events"][result["event_id"]]
+    assert entry["delivered_targets"] == {}
+    assert entry["pending_targets"] == ["codex"]
+    assert entry["attempts"]["codex"]["count"] == 1
+    assert entry["attempts"]["codex"]["last_error"] == (
+        "ws://127.0.0.1:8765 unavailable: websocket connection failed"
+    )
+    assert state["codex_thread_id"] == "thread-existing"
+    assert _load_delivery_log(repo) == []
+
+
 def test_codex_ack_requires_accepted_turn_response_fields(tmp_path):
     state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager adapter contract test
     event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
