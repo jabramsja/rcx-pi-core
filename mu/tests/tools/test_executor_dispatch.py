@@ -5778,6 +5778,10 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:2] == ["git", "fetch"]:
                 fetch_cwds.append(cwd)
                 return completed(cmd)
+            if cmd[:4] == ["git", "diff", "--name-only", "HEAD"]:
+                return completed(cmd)
+            if cmd[:4] == ["git", "ls-files", "--others", "--exclude-standard"]:
+                return completed(cmd)
             if cmd[:3] == ["git", "merge", "--ff-only"]:
                 return completed(cmd)
             if cmd[:2] == ["git", "pull"]:
@@ -5803,6 +5807,120 @@ class TestCommitContinuationAndBotFreshness:
         assert "step" not in post_commit
         assert post_commit["merge_sha"] == "merge456"
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert merge_cwds == [repo.parent]
+        assert fetch_cwds == [dev_worktree]
+
+    def test_post_commit_warns_when_linked_base_worktree_is_already_dirty(self, tmp_path, monkeypatch):
+        repo = tmp_path / "feature-worktree"
+        repo.mkdir()
+        dev_worktree = tmp_path / "dev-worktree"
+        dev_worktree.mkdir()
+        handoff = _make_new_handoff()
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        result = {
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "git_commit",
+                "hold_check",
+                "run_pre_push_script",
+                "git_push",
+                "ensure_pr",
+                "wait_ci",
+            ],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+            "pr_number": "674",
+        }
+        merge_cwds = []
+        fetch_cwds = []
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:4] == ["git", "remote", "get-url", "origin"]:
+                return completed(cmd, stdout="https://github.com/jabramsja/rcx-pi-core.git\n")
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout="abc123\n")
+            if cmd[:3] == ["git", "rev-parse", "origin/dev"]:
+                return completed(cmd, stdout="merge789\n")
+            if cmd[:4] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return completed(cmd, stdout="jabramsja/test-wave-id\n")
+            if cmd[:4] == ["git", "worktree", "list", "--porcelain"]:
+                stdout = (
+                    f"worktree {repo}\n"
+                    "HEAD abc123\n"
+                    "branch refs/heads/jabramsja/test-wave-id\n\n"
+                    f"worktree {dev_worktree}\n"
+                    "HEAD merge456\n"
+                    "branch refs/heads/dev\n\n"
+                )
+                return completed(cmd, stdout=stdout)
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                payload = {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "headRefOid": "abc123",
+                                "reviewDecision": "",
+                                "latestReviews": {
+                                    "nodes": [
+                                        {
+                                            "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                                            "state": "COMMENTED",
+                                            "commit": {"oid": "abc123"},
+                                        }
+                                    ]
+                                },
+                                "reviewThreads": {"nodes": []},
+                                "comments": {"nodes": []},
+                            }
+                        }
+                    }
+                }
+                return completed(cmd, stdout=json.dumps(payload))
+            if cmd[:2] == ["bash", str(merge_script)]:
+                merge_cwds.append(cwd)
+                return completed(cmd)
+            if cmd[:2] == ["git", "fetch"]:
+                fetch_cwds.append(cwd)
+                return completed(cmd)
+            if cmd[:4] == ["git", "diff", "--name-only", "HEAD"]:
+                return completed(cmd, stdout="TASKS.md\n")
+            if cmd[:4] == ["git", "ls-files", "--others", "--exclude-standard"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd, stdout=" M TASKS.md\n")
+            if cmd[:3] == ["git", "merge", "--ff-only"]:
+                raise AssertionError("dirty linked verify root must not run git merge --ff-only")
+            if cmd[:2] == ["git", "pull"]:
+                raise AssertionError("git pull must not be used in post-merge verify path; use git fetch + git merge --ff-only")
+            if cmd[:2] == ["git", "checkout"]:
+                raise AssertionError("post-merge verify should not checkout dev in feature worktree")
+            raise AssertionError(f"unexpected command: {cmd} cwd={cwd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: reproduces dirty linked-base verify root after successful merge
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert "step" not in post_commit
+        assert post_commit["merge_sha"] == "merge789"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert "TASKS.md" in post_commit["post_merge_verify_warning"]
         assert merge_cwds == [repo.parent]
         assert fetch_cwds == [dev_worktree]
 
