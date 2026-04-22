@@ -3,7 +3,7 @@
 Task: `[PIPELINE-AGENT-PAGER]`  
 Wave ID: `pager-codex-app-server-provisioning`  
 Date: `2026-04-22`  
-Status: ACTIVE (commit-path packet refresh applied; supervisor rerun pending)
+Status: ACTIVE
 Phase-A-Lock: LOCKED
 
 ## Outcome
@@ -45,54 +45,61 @@ split:
 
 ## Code Truth
 
-Changed files:
+Current staged corrective follow-up:
 
 - `TASKS.md`
+- `reports/control_plane/pager_codex_app_server_provisioning_2026-04-22.md`
+- `reports/l4_wave_indicators/pager-codex-app-server-provisioning.json`
+
+Already committed on this branch, but not restaged in the current corrective
+follow-up:
+
 - `mu/tests/tools/test_phase_b_executor.py`
 - `mu/tests/tools/test_pipeline_agent_pager.py`
 - `mu/tests/tools/test_recovery_gate.py`
 - `mu/tools/executors/phase_b_executor.py`
 - `mu/tools/executors/recovery_gate.py`
 - `mu/tools/observability/pipeline_agent_pager.py`
-- `reports/control_plane/pager_codex_app_server_provisioning_2026-04-22.md`
 - `reports/control_plane/pager_codex_app_server_transport_2026-04-22.md`
-- `reports/l4_wave_indicators/pager-codex-app-server-provisioning.json`
+
+Branch-local implementation anchor:
+
+- local commit `d6cc7b91` (`feat: Phase B implementation for
+  pager-codex-app-server-provisioning`) carries the provisioning code/test
+  changes listed above
+- the current staged follow-up is narrower: it corrects founder-facing packet
+  truth, records the newly diagnosed mechanization gap, and refreshes the
+  indicator before push
 
 Why `TASKS.md` changed:
 
-- the existing `[PIPELINE-AGENT-PAGER]` entry still authorizes this work as a
-  derived same-lane follow-up under the live 2026-04-22 transport slice, but
-  the commit-ready handoff path auto-appended the canonical tracker sync note
-  for `pager-codex-app-server-provisioning`, so this staged wave does touch
-  `TASKS.md` without creating a new task id
+- the canonical tracker sync note for this wave was already present before the
+  current follow-up
+- this staged correction updates the existing `[PIPELINE-AGENT-PAGER]`
+  mechanization note with the newly reproduced packet-truth, status-line, and
+  handoff-scope drift so the next automation wave is explicitly grounded
 
 Why the indicator artifact changed:
 
-- the handoff path also staged
-  `reports/l4_wave_indicators/pager-codex-app-server-provisioning.json`, so the
-  indicator belongs in the wave-owned file list for this packet
-- commit-path tracker-note / indicator injection is still not mechanically
-  reflected back into this packet before Step 6 meta review, so this evidence
-  refresh is manual in the current wave and the mechanization follow-on is
-  recorded in `TASKS.md`
+- Step 5 refreshes and restages
+  `reports/l4_wave_indicators/pager-codex-app-server-provisioning.json` on each
+  commit attempt, so the indicator is part of the current 3-file staged diff
 
-Why the Phase B / recovery support files are still part of this bounded packet:
+Why the packet changed:
 
-- this packet's own canonical headers are rendered as
-  `Wave ID: \`pager-codex-app-server-provisioning\`` and
-  `Task: \`[PIPELINE-AGENT-PAGER]\``
-- `phase_b_executor.load_plan_packet()` / `validate_inputs()` consume those
-  exact authoritative headers on re-entry, so stripping Markdown backticks is a
-  narrow prerequisite for this derived same-wave packet to preserve its
-  canonical identity tuple and bridge attribution
-- `recovery_gate` is part of the same bounded surface because this packet's
-  missing `Phase-A-Lock` header and stale `bridge.lock` were the exact
-  structural reasons the dispatcher died instead of retrying Phase B
-- this does not create a second task, a second listener surface, or a broader
-  startup-hardening packet; it only lets the existing locked packet parse as
-  itself
+- line 6 no longer claims `supervisor rerun pending` after
+  `.scratch/commit_executor_live.log` already recorded `Step 6: supervisor
+  COMMIT_GO`
+- `Code Truth` and `Validation` now distinguish the earlier branch-local
+  implementation commit from the current 3-file corrective follow-up, which is
+  the actual staged diff at the commit gate
 
 ## Regression Coverage
+
+The provisioning coverage below comes from the already-committed branch-local
+implementation anchored at `d6cc7b91`. The current staged corrective follow-up
+does not change runtime or test files; it keeps the packet aligned with that
+implementation before push.
 
 `mu/tests/tools/test_pipeline_agent_pager.py` now adds provisioning-owned
 coverage adjacent to the pager adapter:
@@ -132,31 +139,33 @@ cases were not re-listed here.
 
 ## Validation
 
-Executed:
+Previously executed for the branch-local implementation already on this branch:
 
 - `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_pipeline_agent_pager.py`
 - `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_phase_b_executor.py -k 'canonical_identity_headers_strip_markdown_ticks or markdown_wrapped_task_header_matches_plain_routing_task_id or validate_inputs_error_carries_plan_path'`
 - `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py -k 'missing_phase_a_lock_validation_error or unlocked_phase_a_lock_not_misclassified_as_missing or missing_phase_a_lock_repaired_and_stale_bridge_lock_cleared'`
 - `python3 tools/checks/enforce_l4_execution_contract.py --files mu/tools/executors/phase_b_executor.py mu/tools/executors/recovery_gate.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_recovery_gate.py reports/control_plane/pager_codex_app_server_provisioning_2026-04-22.md`
 
-Scope notes:
+Executed for the current staged corrective follow-up:
 
-- the recorded `enforce_l4_execution_contract.py` run above covered only the
-  Phase B / recovery repair subset named in that command
-- the current staged wave also includes `TASKS.md`,
-  `mu/tools/observability/pipeline_agent_pager.py`,
-  `mu/tests/tools/test_pipeline_agent_pager.py`,
-  `reports/control_plane/pager_codex_app_server_transport_2026-04-22.md`, and
-  `reports/l4_wave_indicators/pager-codex-app-server-provisioning.json`
-- commit-ready staged validation now runs against the full 10-file staged wave
-  after the packet text and tracker override were refreshed
+- `python3 tools/checks/enforce_l4_execution_contract.py --files TASKS.md reports/control_plane/pager_codex_app_server_provisioning_2026-04-22.md`
+- `python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id pager-codex-app-server-provisioning`
+- `./tools/checks/check_docs_consistency.sh`
 
 Results:
 
-- phase-b executor targeted tests: `3 passed, 289 deselected`
-- recovery-gate targeted tests: `3 passed, 899 deselected`
-- pager test file: `30 passed`
-- subset L4 execution contract: `PASS` (`Wave class: (none)`, `Changed files: 5`,
+- branch-local implementation proofs preserved: phase-b executor targeted tests
+  `3 passed, 289 deselected`; recovery-gate targeted tests
+  `3 passed, 899 deselected`; pager test file `30 passed`; subset L4 execution
+  contract `PASS` (`Wave class: (none)`, `Changed files: 5`, `Runtime files: 0`)
+- current staged corrective follow-up: local file-scoped L4 `PASS` for
+  `TASKS.md` + this packet (`Wave class: (none)`, `Changed files: 2`,
   `Runtime files: 0`)
-- full staged L4 execution contract: `PASS` via `python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id pager-codex-app-server-provisioning` (`Wave class: L4_ENABLER`, `Changed files: 10`, `Runtime files: 0`, `FOUNDER_OVERRIDE active — allowing non-structural adjacency`, `FOUNDER_OVERRIDE active — allowing rolling window without STRUCTURAL`)
-- docs consistency: `PASS` via `./tools/checks/check_docs_consistency.sh` (`42 passed in 0.59s`, `50 passed in 0.06s`, `8 passed in 0.01s`, `All checks passed. Docs are consistent.`)
+- current staged corrective follow-up: staged L4 `PASS` via
+  `python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id pager-codex-app-server-provisioning`
+  (`Wave class: L4_ENABLER`, `Changed files: 3`, `Runtime files: 0`,
+  `FOUNDER_OVERRIDE active — allowing non-structural adjacency`,
+  `FOUNDER_OVERRIDE active — allowing rolling window without STRUCTURAL`)
+- current staged corrective follow-up: docs consistency `PASS` via
+  `./tools/checks/check_docs_consistency.sh` (`42 passed in 0.68s`,
+  `50 passed in 0.06s`, `8 passed in 0.01s`, `All checks passed. Docs are consistent.`)
