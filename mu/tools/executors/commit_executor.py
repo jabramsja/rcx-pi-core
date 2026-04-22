@@ -916,9 +916,11 @@ def _build_tracker_followup_note(*, wave_id: str, tracker_paths: list[str]) -> s
 
 
 def _append_founder_override_to_tracker_note(
-    note: str,
+    note: Any,
     founder_override_token: str | None,
-) -> str:
+) -> Any:
+    if not isinstance(note, str):
+        return note
     token = _normalize_founder_override_token(founder_override_token)
     if not token:
         return note

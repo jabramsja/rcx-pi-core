@@ -586,6 +586,31 @@ class TestCommitHandoffValidation:
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
+    def test_build_commit_handoff_non_string_tracker_note_still_returns_validation_error_with_founder_override(
+        self,
+        tmp_path,
+    ):
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        test_file = repo / "mu" / "tests" / "tools" / "test_auto_note.py"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+        handoff, errors = commit_mod.build_commit_handoff(
+            wave_id="test-wave-id",
+            task_id="[PIPELINE-RECOVERY]",
+            files_to_stage=["mu/tests/tools/test_auto_note.py"],
+            commit_message="fix: malformed tracker note type",
+            fixes_implemented=["preserve fail-closed validation on malformed tracker note types"],
+            tracker_note_text={"bad": "type"},
+            repo_root=repo,
+            founder_override_token="test-wave-id",
+        )
+        assert handoff["tracker_note_text"] == {"bad": "type"}
+        assert "tracker_note_text must be a non-empty string" in errors
+
     def test_missing_fields_fails(self):
         valid, errors = commit_mod.validate_handoff({"files_to_stage": ["x"]})
         assert not valid
