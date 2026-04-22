@@ -544,6 +544,48 @@ class TestCommitHandoffValidation:
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
+    def test_build_commit_handoff_appends_founder_override_to_explicit_tracker_note(self, tmp_path):
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        test_file = repo / "mu" / "tests" / "tools" / "test_auto_note.py"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+        explicit_note = (
+            "- Tracker sync note (2026-04-22, test-wave-id): **fix: explicit tracker note.**. "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+            "mu/tests/tools/test_auto_note.py`. "
+            "evidence_delta: (1) explicit note provided. "
+            "progress_proof_before: tracker note lacked founder override metadata. "
+            "progress_proof_after: builder preserves explicit note text while appending the token. "
+            "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+            "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py "
+            "--wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        )
+        handoff, errors = commit_mod.build_commit_handoff(
+            wave_id="test-wave-id",
+            task_id="[PIPELINE-RECOVERY]",
+            files_to_stage=["mu/tests/tools/test_auto_note.py"],
+            commit_message="fix: explicit tracker note",
+            fixes_implemented=["preserve explicit tracker note founder override threading"],
+            tracker_note_text=explicit_note,
+            repo_root=repo,
+            founder_override_token="test-wave-id",
+        )
+        assert not errors, errors
+        note = handoff["tracker_note_text"]
+        assert "FOUNDER_OVERRIDE:test-wave-id" in note
+        assert note.count("FOUNDER_OVERRIDE:") == 1
+        assert "builder preserves explicit note text while appending the token" in note
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
     def test_missing_fields_fails(self):
         valid, errors = commit_mod.validate_handoff({"files_to_stage": ["x"]})
         assert not valid

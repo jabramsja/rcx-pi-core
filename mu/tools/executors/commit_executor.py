@@ -905,6 +905,22 @@ def _build_tracker_followup_note(*, wave_id: str, tracker_paths: list[str]) -> s
     )
 
 
+def _append_founder_override_to_tracker_note(
+    note: str,
+    founder_override_token: str | None,
+) -> str:
+    token = _normalize_founder_override_token(founder_override_token)
+    if not token:
+        return note
+    if _extract_founder_override_from_tracker_note(note):
+        return note
+    return note.rstrip() + (
+        f" FOUNDER_OVERRIDE:{token} (standing pipeline-bug-fix authorization "
+        "per memory feedback_autonomous_executor_fix.md; auto-appended by "
+        "build_commit_handoff for commit-gate + pre-push adjacency-cap clearance)"
+    )
+
+
 def _build_default_tracker_note_text(
     *,
     wave_id: str,
@@ -925,16 +941,6 @@ def _build_default_tracker_note_text(
     append. Mirrors the manual-append pattern used repeatedly during
     2026-04-20 standalone commit work; mechanizes the skip-pattern.
     """
-    def _maybe_append_override(note: str) -> str:
-        token = _normalize_founder_override_token(founder_override_token)
-        if not token:
-            return note
-        return note.rstrip() + (
-            f" FOUNDER_OVERRIDE:{token} (standing pipeline-bug-fix authorization "
-            "per memory feedback_autonomous_executor_fix.md; auto-appended by "
-            "_build_default_tracker_note_text for commit-gate + pre-push adjacency-cap clearance)"
-        )
-
     summary = (commit_message or "").splitlines()[0].strip() or f"update {wave_id}"
     indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
     indicator_cmd = (
@@ -963,7 +969,10 @@ def _build_default_tracker_note_text(
                 unblocks_wave_id=(unblocks_wave_id or "").strip(),
                 unblocks_runtime_blocker=(unblocks_runtime_blocker or "").strip(),
             )
-            return _maybe_append_override(_tracker_sync_note.render_tracker_sync_note(fields))
+            return _append_founder_override_to_tracker_note(
+                _tracker_sync_note.render_tracker_sync_note(fields),
+                founder_override_token,
+            )
         note = (
             f"- Tracker sync note ({datetime.now(timezone.utc).strftime('%Y-%m-%d')}, {wave_id}): "
             f"**{summary}.**. Class: {wave_class}. target_gate_id: {target_gate_id}. "
@@ -980,7 +989,7 @@ def _build_default_tracker_note_text(
             "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
             "boot0_track_id: V1. boot0_progress_state: HOLD."
         )
-        return _maybe_append_override(note)
+        return _append_founder_override_to_tracker_note(note, founder_override_token)
 
     if test_files:
         evidence_command = (
@@ -1023,9 +1032,12 @@ def _build_default_tracker_note_text(
             indicator_artifact_ref=indicator_path,
             indicator_collection_command=indicator_cmd,
         )
-        return _maybe_append_override(_tracker_sync_note.render_tracker_sync_note(fields))
+        return _append_founder_override_to_tracker_note(
+            _tracker_sync_note.render_tracker_sync_note(fields),
+            founder_override_token,
+        )
 
-    return _maybe_append_override(
+    return _append_founder_override_to_tracker_note(
         f"- Tracker sync note ({datetime.now(timezone.utc).strftime('%Y-%m-%d')}, {wave_id}): "
         f"**{summary}.**. Class: {wave_class}. target_gate_id: {target_gate_id}. "
         f"evidence_command: `{evidence_command}`. evidence_delta: {evidence_delta}. "
@@ -1033,7 +1045,8 @@ def _build_default_tracker_note_text(
         "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
         f"indicator_artifact_ref: {indicator_path}. indicator_collection_command: {indicator_cmd}. "
         "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
-        "boot0_track_id: V1. boot0_progress_state: HOLD."
+        "boot0_track_id: V1. boot0_progress_state: HOLD.",
+        founder_override_token,
     )
 
 
@@ -3357,6 +3370,21 @@ def build_commit_handoff(
     else:
         effective_receipt = pre_commit_receipt_path or ".agent_bus/meta/pre_commit_receipt.json"
 
+    effective_tracker_note = tracker_note_text or _build_default_tracker_note_text(
+        wave_id=wave_id,
+        wave_class=wave_class,
+        target_gate_id=target_gate_id,
+        commit_message=commit_message,
+        files_to_stage=effective_files + effective_force,
+        founder_override_token=founder_override_token,
+        unblocks_wave_id=unblocks_wave_id,
+        unblocks_runtime_blocker=unblocks_runtime_blocker,
+    )
+    effective_tracker_note = _append_founder_override_to_tracker_note(
+        effective_tracker_note,
+        founder_override_token,
+    )
+
     handoff = {
         "wave_id": wave_id,
         "task_id": task_id,
@@ -3364,16 +3392,7 @@ def build_commit_handoff(
         "target_gate_id": target_gate_id,
         "caller": caller,
         "branch_prefix": branch_prefix,
-        "tracker_note_text": tracker_note_text or _build_default_tracker_note_text(
-            wave_id=wave_id,
-            wave_class=wave_class,
-            target_gate_id=target_gate_id,
-            commit_message=commit_message,
-            files_to_stage=effective_files + effective_force,
-            founder_override_token=founder_override_token,
-            unblocks_wave_id=unblocks_wave_id,
-            unblocks_runtime_blocker=unblocks_runtime_blocker,
-        ),
+        "tracker_note_text": effective_tracker_note,
         "fixes_implemented": fixes_implemented,
         "files_to_stage": effective_files,
         "force_add_files": effective_force,
