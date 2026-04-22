@@ -20,8 +20,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib import error as urllib_error
-from urllib import request as urllib_request
+from urllib import parse as urllib_parse
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -532,29 +531,181 @@ def _excerpt(value: str, limit: int = 240) -> str:
     return text[: limit - 3] + "..."
 
 
-def _http_json_post(url: str, payload: dict[str, Any], timeout_s: float) -> dict[str, Any]:
-    body = json.dumps(payload).encode("utf-8")
-    request = urllib_request.Request(
-        url,
-        data=body,
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
+_CODEX_APP_SERVER_NODE_SCRIPT = r"""
+const [url, requestsJson, timeoutMsText] = process.argv.slice(1);
+const requests = JSON.parse(requestsJson);
+const timeoutMs = Math.max(1, Number(timeoutMsText));
+let finished = false;
+let activeRequest = null;
+const responses = [];
+const responsesById = new Map();
+
+function finish(code, payload) {
+  if (finished) {
+    return;
+  }
+  finished = true;
+  clearTimeout(timer);
+  try {
+    socket.close();
+  } catch {}
+  process.stdout.write(JSON.stringify(payload));
+  process.exit(code);
+}
+
+function lookupPath(value, path) {
+  if (!path) {
+    return value;
+  }
+  let current = value;
+  for (const part of path.split(".")) {
+    if (current == null || typeof current !== "object" || !(part in current)) {
+      return undefined;
+    }
+    current = current[part];
+  }
+  return current;
+}
+
+function resolveRefs(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => resolveRefs(item));
+  }
+  if (value && typeof value === "object") {
+    if (Object.keys(value).length === 1 && typeof value.$from === "string") {
+      const [idText, ...pathParts] = value.$from.split(".");
+      const response = responsesById.get(Number(idText));
+      return lookupPath(response, pathParts.join("."));
+    }
+    const resolved = {};
+    for (const [key, inner] of Object.entries(value)) {
+      resolved[key] = resolveRefs(inner);
+    }
+    return resolved;
+  }
+  return value;
+}
+
+function sendNext() {
+  if (!requests.length) {
+    finish(0, { responses });
+    return;
+  }
+  activeRequest = requests.shift();
+  const payload = {
+    jsonrpc: "2.0",
+    id: activeRequest.id,
+    method: activeRequest.method,
+  };
+  const params = resolveRefs(activeRequest.params ?? {});
+  if (params && (typeof params !== "object" || Object.keys(params).length > 0)) {
+    payload.params = params;
+  }
+  socket.send(JSON.stringify(payload));
+}
+
+if (typeof WebSocket !== "function") {
+  process.stdout.write(JSON.stringify({ error: "node WebSocket unavailable" }));
+  process.exit(1);
+}
+
+const socket = new WebSocket(url);
+const timer = setTimeout(() => {
+  finish(1, { error: "timed out before acknowledgement", responses });
+}, timeoutMs);
+
+socket.addEventListener("open", () => {
+  sendNext();
+});
+
+socket.addEventListener("message", (event) => {
+  let message;
+  try {
+    message = JSON.parse(String(event.data));
+  } catch {
+    return;
+  }
+  if (
+    !activeRequest ||
+    !message ||
+    typeof message !== "object" ||
+    !Object.prototype.hasOwnProperty.call(message, "id") ||
+    message.id !== activeRequest.id
+  ) {
+    return;
+  }
+  responses.push(message);
+  responsesById.set(activeRequest.id, message);
+  activeRequest = null;
+  sendNext();
+});
+
+socket.addEventListener("error", () => {
+  finish(1, { error: "websocket connection failed", responses });
+});
+
+socket.addEventListener("close", () => {
+  if (!finished) {
+    finish(1, { error: "websocket closed before completing exchange", responses });
+  }
+});
+"""
+
+
+def _codex_app_server_url() -> str:
+    raw = str(
+        os.environ.get("RCX_CODEX_APP_SERVER_URL", "ws://127.0.0.1:8765")
+    ).strip()
+    parts = urllib_parse.urlparse(raw)
+    host = (parts.hostname or "").strip().lower()
+    if parts.scheme != "ws":
+        raise PipelineAgentPagerError(
+            "RCX_CODEX_APP_SERVER_URL must be a ws:// loopback listener URL"
+        )
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        raise PipelineAgentPagerError(
+            "RCX_CODEX_APP_SERVER_URL must target a loopback websocket listener"
+        )
+    return raw
+
+
+def _codex_app_server_exchange(
+    url: str,
+    requests: list[dict[str, Any]],
+    timeout_s: float,
+) -> list[dict[str, Any]]:
+    if timeout_s <= 0:
+        raise PipelineAgentPagerError("codex pager acknowledgement timed out before acknowledgement")
     try:
-        with urllib_request.urlopen(request, timeout=timeout_s) as response:
-            raw = response.read().decode("utf-8")
-            status = getattr(response, "status", 200)
-    except (urllib_error.URLError, TimeoutError, OSError, ValueError) as exc:
+        proc = subprocess.run(
+            [
+                "node",
+                "-e",
+                _CODEX_APP_SERVER_NODE_SCRIPT,
+                url,
+                json.dumps(requests),
+                str(max(1, int(timeout_s * 1000))),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=max(timeout_s, 0.001) + 0.25,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
         raise PipelineAgentPagerError(f"{url} unavailable: {type(exc).__name__}") from exc
-    if status < 200 or status >= 300:
-        raise PipelineAgentPagerError(f"{url} returned HTTP {status}")
     try:
-        parsed = json.loads(raw or "{}")
+        parsed = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError as exc:
         raise PipelineAgentPagerError(f"{url} returned invalid JSON") from exc
     if not isinstance(parsed, dict):
         raise PipelineAgentPagerError(f"{url} returned non-object JSON")
-    return parsed
+    responses = parsed.get("responses")
+    if not isinstance(responses, list):
+        raise PipelineAgentPagerError(f"{url} returned invalid response list")
+    if proc.returncode != 0:
+        error = str(parsed.get("error") or _excerpt(proc.stderr) or "websocket exchange failed").strip()
+        raise PipelineAgentPagerError(f"{url} unavailable: {error}")
+    return responses
 
 
 def _remaining_timeout(deadline: float, *, label: str) -> float:
@@ -564,6 +715,52 @@ def _remaining_timeout(deadline: float, *, label: str) -> float:
     return remaining
 
 
+def _response_nested_value(response: dict[str, Any], *paths: tuple[str, ...]) -> Any:
+    for path in paths:
+        current: Any = response
+        for part in path:
+            if not isinstance(current, dict) or part not in current:
+                current = None
+                break
+            current = current[part]
+        if current not in (None, ""):
+            return current
+    return None
+
+
+def _codex_response_error(response: dict[str, Any]) -> str:
+    message = _response_nested_value(response, ("error", "message"))
+    if message not in (None, ""):
+        return str(message).strip()
+    error = response.get("error")
+    if error not in (None, ""):
+        return _excerpt(error)
+    return ""
+
+
+def _codex_thread_id_from_response(response: dict[str, Any]) -> str:
+    value = _response_nested_value(
+        response,
+        ("result", "thread", "id"),
+        ("thread", "id"),
+    )
+    return str(value or "").strip()
+
+
+def _codex_turn_id_from_response(response: dict[str, Any]) -> str:
+    value = _response_nested_value(
+        response,
+        ("result", "turn", "id"),
+        ("turn", "id"),
+    )
+    return str(value or "").strip()
+
+
+def _codex_is_stale_thread_error(message: str) -> bool:
+    lower = str(message or "").strip().lower()
+    return "thread not found" in lower or "no rollout found" in lower
+
+
 def _dispatch_codex(
     repo_root: Path,
     event: dict[str, Any],
@@ -571,60 +768,106 @@ def _dispatch_codex(
     *,
     timeout_s: float,
 ) -> dict[str, Any]:
-    base_url = os.environ.get("RCX_CODEX_APP_SERVER_URL", "http://127.0.0.1:8765").rstrip("/")
-    threads_path = os.environ.get("RCX_CODEX_APP_SERVER_THREADS_PATH", "/api/threads")
-    turns_template = os.environ.get(
-        "RCX_CODEX_APP_SERVER_TURNS_PATH_TEMPLATE",
-        "/api/threads/{thread_id}/turns",
-    )
+    base_url = ""
     thread_id = str(state.get("codex_thread_id") or "").strip()
     deadline = time.monotonic() + max(timeout_s, 0.001)
 
-    def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
-        response = _http_json_post(
-            url,
-            payload,
+    def exchange(requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        responses = _codex_app_server_exchange(
+            base_url,
+            requests,
             _remaining_timeout(deadline, label="codex pager acknowledgement"),
         )
         _remaining_timeout(deadline, label="codex pager acknowledgement")
-        return response
+        return responses
 
+    def initialize_request(request_id: int) -> dict[str, Any]:
+        return {
+            "id": request_id,
+            "method": "initialize",
+            "params": {
+                "clientInfo": {
+                    "name": "pipeline_agent_pager",
+                    "version": "1.0",
+                }
+            },
+        }
+
+    def thread_start_request(request_id: int) -> dict[str, Any]:
+        return {"id": request_id, "method": "thread/start", "params": {}}
+
+    def turn_start_request(request_id: int, target_thread: Any) -> dict[str, Any]:
+        return {
+            "id": request_id,
+            "method": "turn/start",
+            "params": {
+                "threadId": target_thread,
+                "input": [{"type": "text", "text": _event_prompt(event)}],
+            },
+        }
+
+    clear_thread_id = False
     try:
-        if not thread_id:
-            created = post_json(
-                f"{base_url}{threads_path}",
-                {
-                    "title": "RCX Pipeline Pager",
-                    "source": "pipeline_agent_pager",
-                },
+        base_url = _codex_app_server_url()
+        if thread_id:
+            existing_responses = exchange(
+                [initialize_request(1), turn_start_request(2, thread_id)]
             )
-            thread_id = str(created.get("thread_id") or created.get("id") or "").strip()
+            turn_response = existing_responses[-1] if existing_responses else {}
+            turn_error = _codex_response_error(turn_response)
+            if turn_error and _codex_is_stale_thread_error(turn_error):
+                clear_thread_id = True
+                thread_id = ""
+            elif turn_error:
+                return {
+                    "acknowledged": False,
+                    "error": turn_error,
+                    "codex_thread_id": state.get("codex_thread_id") or None,
+                }
+        if not thread_id:
+            new_thread_responses = exchange(
+                [
+                    initialize_request(1),
+                    thread_start_request(2),
+                    turn_start_request(3, {"$from": "2.result.thread.id"}),
+                ]
+            )
+            thread_response = new_thread_responses[1] if len(new_thread_responses) > 1 else {}
+            thread_error = _codex_response_error(thread_response)
+            if thread_error:
+                return {
+                    "acknowledged": False,
+                    "error": thread_error,
+                    "codex_thread_id": None,
+                    "clear_codex_thread_id": clear_thread_id,
+                }
+            thread_id = _codex_thread_id_from_response(thread_response)
             if not thread_id:
                 return {
                     "acknowledged": False,
                     "error": "codex thread create missing thread_id",
+                    "codex_thread_id": None,
+                    "clear_codex_thread_id": clear_thread_id,
                 }
-        turn_response = post_json(
-            f"{base_url}{turns_template.format(thread_id=thread_id)}",
-            {
-                "prompt": _event_prompt(event),
-                "event": event,
-                "source": "pipeline_agent_pager",
-            },
-        )
+            turn_response = new_thread_responses[-1] if new_thread_responses else {}
     except PipelineAgentPagerError as exc:
         return {
             "acknowledged": False,
             "error": str(exc),
             "codex_thread_id": thread_id or None,
+            "clear_codex_thread_id": clear_thread_id and not thread_id,
         }
-    response_thread_id = str(turn_response.get("thread_id") or "").strip()
-    turn_id = str(
-        turn_response.get("turn_id")
-        or turn_response.get("turn_handle")
-        or turn_response.get("id")
-        or ""
-    ).strip()
+    response_error = _codex_response_error(turn_response)
+    if response_error:
+        return {
+            "acknowledged": False,
+            "error": response_error,
+            "codex_thread_id": thread_id or None,
+            "clear_codex_thread_id": clear_thread_id and not thread_id,
+        }
+    response_thread_id = _codex_thread_id_from_response(turn_response)
+    effective_thread_id = response_thread_id or thread_id
+    turn_id = _codex_turn_id_from_response(turn_response)
     if response_thread_id and response_thread_id != thread_id:
         return {
             "acknowledged": False,
@@ -634,22 +877,21 @@ def _dispatch_codex(
             ),
             "codex_thread_id": thread_id or None,
         }
-    ack_thread_id = response_thread_id or thread_id
-    if not ack_thread_id or not turn_id:
+    if not turn_id:
         return {
             "acknowledged": False,
-            "error": "codex accepted-turn response missing thread_id or turn_id",
+            "error": "codex accepted-turn response missing turn_id",
             "codex_thread_id": thread_id or None,
         }
     return {
         "acknowledged": True,
         "ack": {
             "acknowledged_at": _utcnow(),
-            "thread_id": ack_thread_id,
+            "thread_id": effective_thread_id,
             "turn_id": turn_id,
             "target": "codex",
         },
-        "codex_thread_id": ack_thread_id,
+        "codex_thread_id": effective_thread_id,
     }
 
 
@@ -853,7 +1095,9 @@ def _dispatch_pending_locked(
                 attempt_record.pop("last_error", None)
             attempt_record.pop("last_receipt_log_warning", None)
             attempts[target] = attempt_record
-            if dispatch_result.get("codex_thread_id"):
+            if dispatch_result.get("clear_codex_thread_id"):
+                state["codex_thread_id"] = None
+            elif dispatch_result.get("codex_thread_id"):
                 state["codex_thread_id"] = dispatch_result["codex_thread_id"]
             receipt_log_warning = ""
             state_saved = False
