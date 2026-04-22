@@ -684,13 +684,13 @@ def _collect_branch_rebind_dirty_scope(
     handoff: dict[str, Any],
 ) -> tuple[set[str], set[str], list[str]]:
     """Return tracked, untracked, and out-of-scope dirty paths for branch rebinding."""
-    allowed_paths = {
+    allowed_pathspecs = [
         path for path in [
             *handoff.get("files_to_stage", []),
             *handoff.get("force_add_files", []),
         ]
         if isinstance(path, str) and path.strip()
-    }
+    ]
     tracked_dirty = {
         path for path in _tracked_dirty_paths(repo_root)
         if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
@@ -700,7 +700,19 @@ def _collect_branch_rebind_dirty_scope(
         if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
     }
     dirty_paths = tracked_dirty | untracked_dirty
-    outside_scope = sorted(dirty_paths - allowed_paths)
+    # Handoff scope entries are Git pathspecs, not just literal file paths.
+    # Re-resolve dirty files through Git so `.` and directory pathspecs are
+    # treated as in-scope during branch rebinding the same way staging does.
+    scoped_dirty = set()
+    if allowed_pathspecs:
+        scoped_dirty = {
+            path for path in (
+                _tracked_dirty_paths(repo_root, pathspecs=allowed_pathspecs)
+                | _untracked_worktree_paths(repo_root, pathspecs=allowed_pathspecs)
+            )
+            if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+        }
+    outside_scope = sorted(dirty_paths - scoped_dirty)
     return tracked_dirty, untracked_dirty, outside_scope
 
 
@@ -720,14 +732,13 @@ def _probe_feature_branch_existence(repo_root: Path, target_branch: str) -> tupl
     return local_check.returncode == 0, bool(remote_check.stdout.strip())
 
 
-def _tracked_dirty_paths(repo_root: Path) -> set[str]:
+def _tracked_dirty_paths(repo_root: Path, pathspecs: list[str] | None = None) -> set[str]:
     """Return tracked paths that differ from HEAD."""
     dirty: set[str] = set()
-    diff_proc = _run(
-        ["git", "diff", "--name-only", "HEAD"],
-        cwd=repo_root,
-        check=False,
-    )
+    cmd = ["git", "diff", "--name-only", "HEAD"]
+    if pathspecs:
+        cmd.extend(["--", *pathspecs])
+    diff_proc = _run(cmd, cwd=repo_root, check=False)
     if diff_proc.returncode == 0:
         dirty.update(
             path.strip()
@@ -737,14 +748,13 @@ def _tracked_dirty_paths(repo_root: Path) -> set[str]:
     return dirty
 
 
-def _untracked_worktree_paths(repo_root: Path) -> set[str]:
+def _untracked_worktree_paths(repo_root: Path, pathspecs: list[str] | None = None) -> set[str]:
     """Return untracked repo-relative paths."""
     dirty: set[str] = set()
-    untracked_proc = _run(
-        ["git", "ls-files", "--others", "--exclude-standard"],
-        cwd=repo_root,
-        check=False,
-    )
+    cmd = ["git", "ls-files", "--others", "--exclude-standard"]
+    if pathspecs:
+        cmd.extend(["--", *pathspecs])
+    untracked_proc = _run(cmd, cwd=repo_root, check=False)
     if untracked_proc.returncode == 0:
         dirty.update(
             path.strip()
