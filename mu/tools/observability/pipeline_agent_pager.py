@@ -657,6 +657,16 @@ def _codex_app_server_url() -> str:
         os.environ.get("RCX_CODEX_APP_SERVER_URL", "ws://127.0.0.1:8765")
     ).strip()
     parts = urllib_parse.urlparse(raw)
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise PipelineAgentPagerError(
+            "RCX_CODEX_APP_SERVER_URL must include a valid websocket port"
+        ) from exc
+    if port is None:
+        raise PipelineAgentPagerError(
+            "RCX_CODEX_APP_SERVER_URL must include a valid websocket port"
+        )
     host = (parts.hostname or "").strip().lower()
     if parts.scheme != "ws":
         raise PipelineAgentPagerError(

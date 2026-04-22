@@ -64,10 +64,12 @@ at the adapter boundary:
 - one-budget stale-thread reseed behavior
 - pager-state clearing when dispatch returns `clear_codex_thread_id`
 
-These are unit-level proofs for the pager adapter and state contract. Live
-startup/reachability verification for the local App Server listener remains
-out of scope for this packet and belongs to `[CODEX-STARTUP-HARDENING]`, per
-the locked plan.
+These are unit-level proofs for the pager adapter and state contract. The
+derived provisioning follow-up at
+`reports/control_plane/pager_codex_app_server_provisioning_2026-04-22.md`
+owns only the fail-closed handling for invalid or unavailable
+`RCX_CODEX_APP_SERVER_URL` provisioning; live listener startup/orchestration
+still remains out of scope for this transport slice.
 
 ## Control-Surface Note
 

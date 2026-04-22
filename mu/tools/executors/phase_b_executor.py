@@ -935,7 +935,10 @@ def _extract_plan_metadata_value(
     the same-wave task_id exception.
     """
     if line.startswith(prefixes):
-        return line.split(":", 1)[1].strip(), None
+        value = line.split(":", 1)[1].strip()
+        if value.startswith("`") and value.endswith("`") and len(value) >= 2:
+            value = value[1:-1].strip()
+        return value, None
     clean = _normalize_plan_metadata_line(line)
     if clean.startswith(prefixes):
         return None, clean.split(":", 1)[1].strip()
@@ -2787,7 +2790,13 @@ def run_phase_b(
         try:
             plan = load_plan_packet(repo_root, plan_path)
         except PhaseBExecutorError as exc:
-            return {"status": "error", "step": "load_plan", "errors": [str(exc)]}
+            return {
+                "status": "error",
+                "step": "load_plan",
+                "plan_path": plan_path,
+                "errors": [str(exc)],
+            }
+        result["plan_path"] = plan_path
         log(f"Plan loaded: {plan_path}")
     else:
         # Planless mode: derive bounded context from routing record
@@ -2813,7 +2822,12 @@ def run_phase_b(
             log(f"BOOTSTRAP_PHASE_B_EXCEPTION: Validation errors overridden: {exc}")
             result["bootstrap_exception"] = True
         else:
-            return {"status": "error", "step": "validate_inputs", "errors": [str(exc)]}
+            return {
+                "status": "error",
+                "step": "validate_inputs",
+                "plan_path": plan_path,
+                "errors": [str(exc)],
+            }
 
     # Step 2: Load executor config for backend/model/timeout
     try:
