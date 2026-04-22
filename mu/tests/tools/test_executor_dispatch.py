@@ -513,6 +513,37 @@ class TestCommitHandoffValidation:
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
+    def test_build_commit_handoff_normalizes_prefixed_founder_override_and_renders_maintenance_bypass(self, tmp_path):
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        test_file = repo / "mu" / "tests" / "tools" / "test_auto_note.py"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+        handoff, errors = commit_mod.build_commit_handoff(
+            wave_id="test-wave-id",
+            task_id="[TEST-1]",
+            files_to_stage=["mu/tests/tools/test_auto_note.py"],
+            commit_message="fix: auto note",
+            fixes_implemented=["auto tracker generation"],
+            wave_class="MAINTENANCE",
+            repo_root=repo,
+            founder_override_token="FOUNDER_OVERRIDE:test-wave-restart-branch-continuation",
+            unblocks_wave_id="wave-next-codex-post-redteam",
+            unblocks_runtime_blocker="INV_STRUCTURAL_FORWARD_MOTION",
+        )
+        assert not errors, errors
+        note = handoff["tracker_note_text"]
+        assert note.count("FOUNDER_OVERRIDE:") == 1
+        assert "FOUNDER_OVERRIDE:test-wave-restart-branch-continuation" in note
+        assert "FOUNDER_OVERRIDE:FOUNDER_OVERRIDE:" not in note
+        assert "unblocks_wave_id: wave-next-codex-post-redteam" in note
+        assert "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION" in note
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
     def test_missing_fields_fails(self):
         valid, errors = commit_mod.validate_handoff({"files_to_stage": ["x"]})
         assert not valid

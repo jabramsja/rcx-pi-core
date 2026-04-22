@@ -1,0 +1,24 @@
+{
+  "wave_id": "founder-override-metadata-2026-04-21",
+  "repeat_run_speedup_ratio": 1.136951,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.45195,
+  "repeat_run_raw_seconds": [
+    0.513845,
+    0.45195
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.513845
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.965795
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-04-22T01:34:37Z",
+  "collector_version": "2.2.0"
+}

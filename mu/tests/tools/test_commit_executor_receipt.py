@@ -628,7 +628,9 @@ class TestWaveIdBounds:
         (packet_dir / "resume.md").write_text(
             "# Resume\n"
             "FOUNDER_OVERRIDE:pipeline-recovery-2026-04-21 "
-            "(founder authorized resumed continuation narrowing)\n",
+            "(founder authorized resumed continuation narrowing)\n"
+            "unblocks_wave_id: wave-next-codex-post-redteam\n"
+            "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION\n",
             encoding="utf-8",
         )
         (repo / "file.py").write_text("# staged now\n", encoding="utf-8")
@@ -644,6 +646,8 @@ class TestWaveIdBounds:
             "summary": "stale earlier same-wave fixes",
             "decision": "COMMIT_GO",
             "task_id": "[PIPELINE-RECOVERY]",
+            "wave_class": "MAINTENANCE",
+            "target_gate_id": "G8",
             "next_candidates": [
                 {
                     "candidate": "resume",
@@ -665,6 +669,11 @@ class TestWaveIdBounds:
         assert handoff["files_to_stage"] == ["file.py"]
         assert "stale earlier same-wave fixes" not in handoff["fixes_implemented"][0]
         assert "FOUNDER_OVERRIDE:pipeline-recovery-2026-04-21" in handoff["tracker_note_text"]
+        assert "unblocks_wave_id: wave-next-codex-post-redteam" in handoff["tracker_note_text"]
+        assert (
+            "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION"
+            in handoff["tracker_note_text"]
+        )
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
