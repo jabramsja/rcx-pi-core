@@ -281,18 +281,22 @@ def _extract_maintenance_bypass_fields_from_text(text: str) -> tuple[str, str]:
         return "", ""
     unblocks_wave_id = ""
     unblocks_runtime_blocker = ""
+    unblocks_wave_pattern = re.compile(
+        r"(?<![A-Za-z0-9_])(?:Unblocks wave id:|unblocks_wave_id:)\s*([A-Za-z0-9_-]+)"
+    )
+    unblocks_runtime_blocker_pattern = re.compile(
+        r"(?<![A-Za-z0-9_])(?:Unblocks runtime blocker:|unblocks_runtime_blocker:)\s*(.+?)(?:\.\s|$)"
+    )
     for raw_line in text.splitlines():
         clean = str(raw_line or "").strip()
-        if (
-            clean.startswith("Unblocks wave id:")
-            or clean.startswith("unblocks_wave_id:")
-        ) and not unblocks_wave_id:
-            unblocks_wave_id = clean.split(":", 1)[1].strip().strip("`").rstrip(".,;")
-        if (
-            clean.startswith("Unblocks runtime blocker:")
-            or clean.startswith("unblocks_runtime_blocker:")
-        ) and not unblocks_runtime_blocker:
-            unblocks_runtime_blocker = clean.split(":", 1)[1].strip().strip("`").rstrip(".,;")
+        if not unblocks_wave_id:
+            match = unblocks_wave_pattern.search(clean)
+            if match:
+                unblocks_wave_id = match.group(1).strip().strip("`").rstrip(".,;")
+        if not unblocks_runtime_blocker:
+            match = unblocks_runtime_blocker_pattern.search(clean)
+            if match:
+                unblocks_runtime_blocker = match.group(1).strip().strip("`").rstrip(".,;")
         if unblocks_wave_id and unblocks_runtime_blocker:
             return unblocks_wave_id, unblocks_runtime_blocker
     return unblocks_wave_id, unblocks_runtime_blocker
