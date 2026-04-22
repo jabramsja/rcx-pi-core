@@ -2386,7 +2386,7 @@ class TestEnsureFeatureBranch:
         subprocess.run(["git", "push", "origin", "dev"], cwd=worker, capture_output=True, env=env, check=True)
 
         (repo / "file1.py").write_text("wave-owned dirty\n", encoding="utf-8")
-        original_run = commit_mod._run
+        original_run = getattr(commit_mod, "_run")
 
         def fail_remote_checkout(cmd, *args, **kwargs):
             if cmd == ["git", "checkout", "-b", "jabramsja/test-wave-id", "origin/dev"]:
@@ -2421,7 +2421,7 @@ class TestEnsureFeatureBranch:
         """A timed-out fetched-base probe must fall back to the local base branch."""
         repo, _env = _init_git_repo(tmp_path)
         (repo / "file1.py").write_text("wave-owned dirty\n", encoding="utf-8")
-        original_run = commit_mod._run
+        original_run = getattr(commit_mod, "_run")
 
         def timeout_fetch(cmd, *args, **kwargs):
             if cmd == ["git", "fetch", "origin", "dev"]:
