@@ -727,7 +727,8 @@ def fix_feature_branch_mismatch(repo_root: Path, **kw: Any) -> dict[str, Any]:
             "handoff_missing_branch_fields",
             "handoff missing wave_id, branch_prefix, or base_branch",
         )
-    target_branch = f"{branch_prefix}/{wave_id}"
+    explicit_target_branch = str(handoff.get("target_branch", "")).strip()
+    target_branch = explicit_target_branch or f"{branch_prefix}/{wave_id}"
 
     if expectation is not None:
         if expectation["base"] != base_branch or expectation["target"] != target_branch:

@@ -559,6 +559,20 @@ class TestCommitHandoffValidation:
         assert not valid
         assert any("branch_prefix" in e for e in errors)
 
+    def test_target_branch_must_match_branch_prefix(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_handoff(target_branch="other/restart-branch"),
+        )
+        assert not valid
+        assert any("target_branch must equal" in e for e in errors)
+
+    def test_target_branch_must_bind_to_wave_id_restart_shape(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_handoff(target_branch="jabramsja/other-wave-restart-2026-04-21"),
+        )
+        assert not valid
+        assert any("target_branch must equal" in e for e in errors)
+
     def test_force_add_nested_env_path_fails(self):
         valid, errors = commit_mod.validate_handoff(
             _make_new_handoff(force_add_files=["reports/.env/secrets.txt"]),
@@ -685,6 +699,7 @@ class TestPhaseBCommitHandoff:
             task_id="[TEST]",
             wave_class="MAINTENANCE",
             target_gate_id="G8",
+            fixes_implemented=["test handoff"],
             files_to_stage=["a.py"],
             commit_message="feat: test",
             pr_title="feat: test",
@@ -2215,6 +2230,72 @@ class TestEnsureFeatureBranch:
         assert result["step"] == "ensure_feature_branch"
         assert any("Refusing auto-rebind" in e for e in result["errors"])
 
+    def test_10c_explicit_target_branch_allows_restart_branch(self, tmp_path):
+        """An explicit restart target_branch bypasses canonical collision on Step 2."""
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id-restart-2026-04-21", "dev"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        handoff = _make_new_handoff(target_branch="jabramsja/test-wave-id-restart-2026-04-21")
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+        assert "ensure_feature_branch" in result.get("steps_completed", [])
+        current = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert current == "jabramsja/test-wave-id-restart-2026-04-21"
+
+    def test_10d_standalone_regeneration_preserves_restart_branch_for_step_2(self, tmp_path):
+        """Standalone handoff rebuild must keep restart target_branch for Step 2."""
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id-restart-2026-04-21", "dev"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+        subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
+        record = {
+            "wave_name": "test-wave-id",
+            "summary": "restart continuation",
+            "decision": "COMMIT_GO",
+            "handoff": _make_new_handoff(
+                target_branch="jabramsja/test-wave-id-restart-2026-04-21",
+            ),
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert errors == []
+        assert handoff is not None
+        assert handoff["caller"] == "standalone"
+        assert handoff["target_branch"] == "jabramsja/test-wave-id-restart-2026-04-21"
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+        assert "ensure_feature_branch" in result.get("steps_completed", [])
+        current = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert current == "jabramsja/test-wave-id-restart-2026-04-21"
     def test_11_remote_collision_errors(self, tmp_path):
         """Test 11: Remote branch collision → error (mocked)."""
         repo, env = _init_git_repo(tmp_path)
@@ -5479,6 +5560,112 @@ class TestCommitContinuationAndBotFreshness:
         assert "timed out" in post_commit["errors"][0]
         assert "wait_ci" in post_commit["steps_completed"]
 
+    def test_post_commit_late_auto_resolve_retries_ci_and_merge(self, tmp_path, monkeypatch):
+        repo, _ = _init_git_repo(tmp_path)
+        handoff = _make_new_handoff()
+        continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
+        merge_script.parent.mkdir(parents=True, exist_ok=True)
+        merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        result = {
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "git_commit",
+                "hold_check",
+                "run_pre_push_script",
+                "git_push",
+                "ensure_pr",
+                "wait_ci",
+            ],
+            "handoff_sha": "handoff-sha",
+            "commit_sha": "abc123",
+            "receipt_decision": "COMMIT_GO",
+            "pr_number": "673",
+        }
+
+        merge_attempts = {"count": 0}
+        ci_watch_calls = []
+        auto_resolve_calls = []
+        head_reads = iter(["abc123\n", "def456\n", "def456\n", "merge789\n"])
+
+        def completed(cmd, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout=next(head_reads))
+            if cmd[:4] == ["gh", "pr", "checks", "673"]:
+                ci_watch_calls.append(cmd)
+                return completed(cmd)
+            if cmd[:2] == ["bash", str(merge_script)]:
+                merge_attempts["count"] += 1
+                if merge_attempts["count"] == 1:
+                    raise subprocess.CalledProcessError(
+                        1,
+                        cmd,
+                        stderr="X Pull request jabramsja/rcx-pi-core#673 is not mergeable: the merge commit cannot be cleanly created.",
+                    )
+                return completed(cmd)
+            if cmd[:2] == ["git", "fetch"]:
+                return completed(cmd)
+            if cmd[:3] == ["git", "merge", "--ff-only"]:
+                return completed(cmd)
+            if cmd[:2] == ["git", "status"]:
+                return completed(cmd, stdout="")
+            raise AssertionError(f"Unexpected command: {cmd} cwd={cwd}")
+
+        def fake_auto_resolve(repo_root, *, pr_number, base_branch, branch_name, log=None):
+            auto_resolve_calls.append((repo_root, pr_number, base_branch, branch_name))
+            return {
+                "resolved": True,
+                "action": "tasks_md_resolved",
+                "detail": "merged origin/dev, resolved TASKS chronologically, pushed",
+            }
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+        monkeypatch.setattr(commit_mod, "_parse_origin_owner_repo", lambda _: ("jabramsja", "rcx-pi-core"))
+        monkeypatch.setattr(commit_mod, "_query_pr_review_state", lambda *args, **kwargs: {"headRefOid": "ignored"})
+        monkeypatch.setattr(commit_mod, "_assert_expected_pr_head", lambda pr_data, head_sha: None)
+        monkeypatch.setattr(commit_mod, "_has_recorded_current_head_bot_request", lambda *args, **kwargs: False)
+        monkeypatch.setattr(commit_mod, "_has_fresh_connector_review", lambda pr_data, head_sha: True)
+        monkeypatch.setattr(
+            commit_mod,
+            "_extract_review_findings",
+            lambda pr_data, head_sha, *, result, pr_number: {"outcome": "clear"},
+        )
+        monkeypatch.setattr(commit_mod, "_try_auto_resolve_pr_conflict", fake_auto_resolve)
+        monkeypatch.setattr(commit_mod, "_wait_for_required_checks_to_register", lambda *args, **kwargs: None)
+        monkeypatch.setattr(commit_mod, "_resolve_post_merge_verify_root", lambda repo_root, base_branch, log=None: repo)
+        monkeypatch.setattr(
+            commit_mod,
+            "_post_merge_cleanup",
+            lambda *args, **kwargs: {
+                "worktree_removed": False,
+                "branch_deleted": False,
+                "stashes_dropped": 0,
+                "warnings": [],
+            },
+        )
+
+        post_commit = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercising late step-15 auto-resolve retry path
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+            target_branch="jabramsja/test-wave-id",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _: None,
+        )
+
+        assert auto_resolve_calls == [(repo, "673", "dev", "jabramsja/test-wave-id")]
+        assert len(ci_watch_calls) == 1
+        assert merge_attempts["count"] == 2
+        assert post_commit["merge_sha"] == "merge789"
+        assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
+        assert continuation_path.exists() is False
+
     def test_post_commit_uses_linked_base_worktree_for_merge_verification(self, tmp_path, monkeypatch):
         repo = tmp_path / "feature-worktree"
         repo.mkdir()
@@ -6313,13 +6500,18 @@ class TestPhaseBNewSchemaHandoff:
 
     def test_handoff_includes_tracker_note_text(self, tmp_path):
         """Handoff includes tracker_note_text for commit executor."""
+        tracker_note_text = _make_new_handoff(
+            wave_id="test-wave",
+            target_gate_id="G8",
+        )["tracker_note_text"]
         path = phase_b_mod.prepare_commit_handoff(
             tmp_path,
             wave_id="test-wave",
             task_id="[TEST]",
             wave_class="L4_ENABLER",
             target_gate_id="G8",
-            tracker_note_text="- Tracker sync note (test): test.",
+            target_branch="jabramsja/test-wave-restart-2026-04-21",
+            tracker_note_text=tracker_note_text,
             fixes_implemented=["fix1"],
             files_to_stage=["a.py"],
             commit_message="feat: test",
@@ -6327,11 +6519,12 @@ class TestPhaseBNewSchemaHandoff:
             pr_body="## Summary\ntest",
         )
         handoff = json.loads(path.read_text())
-        assert handoff["tracker_note_text"] == "- Tracker sync note (test): test."
+        assert handoff["tracker_note_text"] == tracker_note_text
         assert handoff["fixes_implemented"] == ["fix1"]
         assert handoff["force_add_files"] == []
         assert "wave_id" in handoff
         assert "branch_prefix" in handoff
+        assert handoff["target_branch"] == "jabramsja/test-wave-restart-2026-04-21"
 
 
 # ===========================================================================
