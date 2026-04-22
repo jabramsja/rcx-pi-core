@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -116,6 +117,46 @@ VALID_CALLERS = {"phase_b", "phase_a", "update_tracker_only", "standalone"}
 
 # Fields that may be empty/missing when caller is "standalone"
 STANDALONE_OPTIONAL_FIELDS = {"pre_commit_receipt_path"}
+
+
+@contextmanager
+def _prepend_sys_path(path: Path | str):
+    """Temporarily prepend a path for a bounded import without leaking it globally."""
+    entry = str(path)
+    inserted = False
+    if entry and entry not in sys.path:
+        sys.path.insert(0, entry)
+        inserted = True
+    try:
+        yield
+    finally:
+        if inserted:
+            try:
+                sys.path.remove(entry)
+            except ValueError:
+                pass
+
+
+def _load_repo_meta_bridge_client(repo_root: Path) -> tuple[Any, Any]:
+    """Import the repo-local meta_bridge_client without leaving temp agent paths on sys.path."""
+    try:
+        from meta_bridge_client import run_meta_bridge_package, MetaBridgeClientError
+    except ImportError:
+        with _prepend_sys_path(repo_root / "mu" / "tools" / "agents"):
+            from meta_bridge_client import run_meta_bridge_package, MetaBridgeClientError
+    return run_meta_bridge_package, MetaBridgeClientError
+
+
+def _load_repo_recovery_symbols(repo_root: Path) -> tuple[Any, Any]:
+    """Import standalone recovery helpers without leaking repo_root onto sys.path."""
+    try:
+        from mu.tools.executors.recovery_gate import attempt_recovery
+        from mu.tools.executors.executor_common import normalize_wave_id
+    except ImportError:
+        with _prepend_sys_path(repo_root):
+            from mu.tools.executors.recovery_gate import attempt_recovery
+            from mu.tools.executors.executor_common import normalize_wave_id
+    return attempt_recovery, normalize_wave_id
 
 # GraphQL query for PR review state
 PR_REVIEW_QUERY = """
@@ -206,19 +247,120 @@ for _sub_name, _sub_val in [
         )
 
 
-def _extract_founder_override_from_tracker_note(text: str) -> str:
-    """Extract wave-bound FOUNDER_OVERRIDE token from stored tracker-note text.
-
-    Mirrors the extraction rule used in phase_b_executor._extract_founder_override
-    (line-level scan, trailing `` `.,; ``-stripped). Returns the captured wave-id
-    or `""` when no match is present.
-    """
+def _extract_founder_override_token(text: str) -> str:
+    """Extract a bounded FOUNDER_OVERRIDE token from untrusted text."""
     if not text:
         return ""
     match = re.search(r"FOUNDER_OVERRIDE:\s*(\S+)", text)
     if not match:
         return ""
     return match.group(1).strip().rstrip("`.,;")
+
+
+def _extract_founder_override_from_tracker_note(text: str) -> str:
+    """Extract wave-bound FOUNDER_OVERRIDE token from stored tracker-note text."""
+    return _extract_founder_override_token(text)
+
+
+def _dedupe_repo_paths(paths: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for raw_path in paths:
+        normalized = _normalize_repo_relpath(raw_path)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
+
+
+def _current_staged_diff_paths(repo_root: Path) -> list[str]:
+    try:
+        proc = _run(["git", "diff", "--cached", "--name-only"], cwd=repo_root)
+    except subprocess.CalledProcessError:
+        return []
+    return _dedupe_repo_paths(proc.stdout.splitlines())
+
+
+def _tracked_packet_text_from_record(record: dict[str, Any], repo_root: Path) -> str:
+    candidates = record.get("next_candidates")
+    if not isinstance(candidates, list):
+        return ""
+    repo_root_resolved = repo_root.resolve()
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        tracked_packet = _normalize_repo_relpath(str(candidate.get("tracked_packet") or ""))
+        if not tracked_packet:
+            continue
+        if _is_absolute_untrusted_path(tracked_packet) or _has_path_traversal(tracked_packet):
+            continue
+        packet_path = (repo_root / tracked_packet).resolve()
+        if repo_root_resolved not in packet_path.parents:
+            continue
+        if not packet_path.is_file():
+            continue
+        try:
+            return packet_path.read_text(encoding="utf-8")
+        except OSError:
+            return ""
+    return ""
+
+
+def _extract_founder_override_from_routing_record(
+    record: dict[str, Any],
+    repo_root: Path,
+    *,
+    embedded_handoff: dict[str, Any] | None = None,
+) -> str:
+    for text in [
+        str(record.get("tracker_note_text") or ""),
+        str((embedded_handoff or {}).get("tracker_note_text") or ""),
+        _tracked_packet_text_from_record(record, repo_root),
+    ]:
+        token = _extract_founder_override_token(text)
+        if token:
+            return token
+    return ""
+
+
+def _summarize_path_preview(paths: list[str]) -> str:
+    preview = ", ".join(paths[:3])
+    remainder = len(paths) - min(len(paths), 3)
+    if remainder > 0:
+        preview = f"{preview}, +{remainder} more"
+    return preview
+
+
+def _build_standalone_staged_diff_fixes(paths: list[str]) -> list[str]:
+    preview = _summarize_path_preview(paths)
+    return [f"Resume standalone continuation for current staged diff: {preview}."]
+
+
+def _build_standalone_commit_message(wave_id: str) -> str:
+    return f"chore: continue {wave_id} staged diff"
+
+
+def _is_wave_bound_target_branch(
+    target_branch: str,
+    *,
+    branch_prefix: str,
+    wave_id: str,
+) -> bool:
+    """Allow only the canonical wave branch or its restart descendants."""
+    if not target_branch or not branch_prefix or not wave_id:
+        return False
+    prefix = f"{branch_prefix}/"
+    if not target_branch.startswith(prefix):
+        return False
+    suffix = target_branch[len(prefix):]
+    if not TARGET_BRANCH_SUFFIX_RE.fullmatch(suffix):
+        return False
+    return (
+        suffix == wave_id
+        or suffix == f"{wave_id}-restart"
+        or suffix.startswith(f"{wave_id}-restart-")
+    )
 
 
 def _handoff_plan_path(handoff: dict[str, Any]) -> str | None:
@@ -344,8 +486,12 @@ def _run_pytest_on_files(
     if not test_files:
         return {"exit_code": 0, "stdout": "", "stderr": "", "passed": True}
     # A single affected control-plane test file can legitimately take close to
-    # two minutes, so the gate needs real slack instead of a near-zero buffer.
-    effective_timeout = max(timeout, 180, 90 * len(test_files))
+    # two minutes, and the real 2-file gate for
+    # `test_phase_b_executor.py test_recovery_gate.py` took 198.857s on
+    # 2026-04-21. Keep the single-file floor at 180s, then add real slack for
+    # each additional file so the targeted gate fails on test truth, not an
+    # undersized timeout budget.
+    effective_timeout = max(timeout, 180, 180 + 120 * (len(test_files) - 1))
     try:
         result = subprocess.run(
             [
@@ -2055,6 +2201,85 @@ def _push_branch(repo_root: Path, branch_name: str) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _wait_for_pr_ci(
+    repo_root: Path,
+    *,
+    pr_number: str,
+    result: dict[str, Any],
+    continuation_path: Path,
+    target_branch: str,
+    log: Any = None,
+    step_label: str = "Step 14",
+) -> dict[str, Any] | None:
+    """Wait for required CI checks and checkpoint `wait_ci` once."""
+    if log is not None:
+        log(f"{step_label}: waiting for CI on PR #{pr_number}...")
+    try:
+        _wait_for_required_checks_to_register(
+            repo_root,
+            pr_number=pr_number,
+            log=log,
+        )
+        _run(
+            ["gh", "pr", "checks", pr_number, "--watch", "--required"],
+            cwd=repo_root, timeout=600,
+        )
+        if "wait_ci" not in result["steps_completed"]:
+            result["steps_completed"].append("wait_ci")
+            _checkpoint_post_commit_progress(
+                result,
+                continuation_path=continuation_path,
+                target_branch=target_branch,
+            )
+        if log is not None:
+            log(f"{step_label}: CI passed")
+        return None
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, TimeoutError) as exc:
+        if log is not None:
+            log(
+                f"{step_label}: gh pr checks exited ({exc.__class__.__name__}), "
+                "polling CI as fallback"
+            )
+        if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=900, log=log):
+            return {
+                "status": "error",
+                "step": "wait_ci",
+                "errors": [f"CI checks failed (confirmed by polling): {exc}"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number,
+            }
+        if "wait_ci" not in result["steps_completed"]:
+            result["steps_completed"].append("wait_ci")
+            _checkpoint_post_commit_progress(
+                result,
+                continuation_path=continuation_path,
+                target_branch=target_branch,
+            )
+        if log is not None:
+            log(f"{step_label}: CI passed (confirmed by polling fallback)")
+        return None
+
+
+def _prepare_result_for_late_conflict_retry(
+    repo_root: Path,
+    *,
+    result: dict[str, Any],
+    continuation_path: Path,
+    target_branch: str,
+) -> None:
+    """Refresh continuation state after a late auto-resolve push changes HEAD."""
+    result["commit_sha"] = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+    result["steps_completed"] = [
+        step for step in result["steps_completed"] if step != "wait_ci"
+    ]
+    result.pop("bot_review_request_sha", None)
+    _checkpoint_post_commit_progress(
+        result,
+        continuation_path=continuation_path,
+        target_branch=target_branch,
+    )
+
+
 def _poll_ci_checks_fallback(
     repo_root: Path,
     pr_number: str,
@@ -2689,6 +2914,8 @@ def _wait_for_required_checks_to_register(
 def prepare_handoff_from_routing_record(
     record: dict[str, Any],
     repo_root: Path,
+    *,
+    standalone: bool = False,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     """Prepare a commit handoff from a routing record.
 
@@ -2716,16 +2943,19 @@ def prepare_handoff_from_routing_record(
     if isinstance(embedded_handoff, dict):
         embedded_copy = copy.deepcopy(embedded_handoff)
         valid, handoff_errors = validate_handoff(embedded_copy)
-        if valid:
+        if valid and not standalone:
             return embedded_copy, []
-        return None, [f"Embedded handoff invalid: {err}" for err in handoff_errors]
+        if not valid:
+            return None, [f"Embedded handoff invalid: {err}" for err in handoff_errors]
+    else:
+        embedded_copy = None
 
     # COMMIT_GO / COMMIT_GO_HOLD_PUSH require a pre-prepared handoff with
     # an exact Phase B receipt chain.  The supervisor receipt (written in
     # step 6) is the runtime commit-decision authority; the Phase B handoff
     # receipt provides provenance traceability.  Synthesizing a handoff here
     # would lack both, so only embedded handoffs (validated above) are accepted.
-    if decision in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+    if not standalone and decision in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
         return None, [
             f"{decision} requires a pre-prepared Phase B handoff (or valid "
             f"embedded handoff). Cannot synthesize a handoff from a routing "
@@ -2748,7 +2978,7 @@ def prepare_handoff_from_routing_record(
         # Default to TASKS.md for tracker-only updates
         if decision == "UPDATE_TRACKER_ONLY":
             files_to_stage = ["TASKS.md"]
-        else:
+        elif not standalone:
             errors.append("Cannot derive files_to_stage from routing record")
 
     if errors:
@@ -2769,37 +2999,90 @@ def prepare_handoff_from_routing_record(
     raw_force_add_files = record.get("force_add_files")
     force_add_files = [] if raw_force_add_files is None else raw_force_add_files
 
+    if standalone:
+        staged_files = _current_staged_diff_paths(repo_root)
+        if not staged_files:
+            return None, [
+                "Standalone routing-record regeneration requires a non-empty staged diff"
+            ]
+        standalone_target_branch = (embedded_copy or {}).get("target_branch")
+        if not isinstance(standalone_target_branch, str) or not standalone_target_branch.strip():
+            standalone_target_branch = record.get("target_branch")
+        founder_override_token = _extract_founder_override_from_routing_record(
+            record,
+            repo_root,
+            embedded_handoff=embedded_copy,
+        )
+        wave_id = normalize_wave_id(
+            str(
+                (embedded_copy or {}).get("wave_id")
+                or wave_name
+            )
+        )
+        commit_message = _build_standalone_commit_message(wave_id)
+        handoff, build_errors = build_commit_handoff(
+            wave_id=wave_id,
+            task_id=str((embedded_copy or {}).get("task_id") or record.get("task_id", f"[{wave_name}]")),
+            files_to_stage=staged_files,
+            commit_message=commit_message,
+            fixes_implemented=_build_standalone_staged_diff_fixes(staged_files),
+            wave_class=str((embedded_copy or {}).get("wave_class") or wave_class),
+            target_gate_id=str((embedded_copy or {}).get("target_gate_id") or target_gate_id),
+            caller="standalone",
+            base_branch=str((embedded_copy or {}).get("base_branch") or "dev"),
+            branch_prefix=str((embedded_copy or {}).get("branch_prefix") or "jabramsja"),
+            pr_title=commit_message[:70],
+            pr_body=None,
+            tracker_note_text=None,
+            supervisor_lane=(embedded_copy or {}).get("supervisor_lane"),
+            deferred_items=(embedded_copy or {}).get("deferred_items"),
+            bridge_status=(embedded_copy or {}).get("bridge_status"),
+            scope_items=staged_files,
+            evidence_handles=None,
+            pre_commit_receipt_path="",
+            target_branch=(
+                standalone_target_branch.strip()
+                if isinstance(standalone_target_branch, str) and standalone_target_branch.strip()
+                else None
+            ),
+            repo_root=repo_root,
+            founder_override_token=founder_override_token,
+        )
+        if build_errors:
+            return None, build_errors
+        return handoff, []
+
     # UPDATE_TRACKER_ONLY routing records may omit tracker_note_text. In that
     # case, synthesize the same contract-complete note shape that validate_handoff
     # now requires instead of the older one-line fallback.
+    founder_override_token = ""
     if decision == "UPDATE_TRACKER_ONLY" and not tracker_note:
-        force_add = force_add_files if isinstance(force_add_files, list) else []
-        tracker_note = _build_default_tracker_note_text(
-            wave_id=wave_id,
-            wave_class=wave_class,
-            target_gate_id=target_gate_id,
-            commit_message=commit_message,
-            files_to_stage=files_to_stage + force_add,
+        founder_override_token = _extract_founder_override_from_routing_record(
+            record,
+            repo_root,
         )
 
-    handoff = {
-        "wave_id": wave_id,
-        "task_id": record.get("task_id", f"[{wave_name}]"),
-        "wave_class": wave_class,
-        "target_gate_id": target_gate_id,
-        "caller": "update_tracker_only" if decision == "UPDATE_TRACKER_ONLY" else "phase_b",
-        "branch_prefix": "jabramsja",
-        "tracker_note_text": tracker_note,
-        "fixes_implemented": record.get("fixes_implemented", [summary]),
-        "files_to_stage": files_to_stage,
-        "force_add_files": force_add_files,
-        "commit_message": commit_message,
-        "pr_title": record.get("pr_title", f"chore: {summary}"[:70]),
-        "pr_body": record.get("pr_body", f"## Summary\n\n- {summary}"),
-        "base_branch": "dev",
-        "pre_commit_receipt_path": ".agent_bus/meta/pre_commit_receipt.json",
-    }
-
+    handoff, build_errors = build_commit_handoff(
+        wave_id=wave_id,
+        task_id=str(record.get("task_id", f"[{wave_name}]")),
+        files_to_stage=files_to_stage,
+        commit_message=commit_message,
+        fixes_implemented=record.get("fixes_implemented", [summary]),
+        wave_class=wave_class,
+        target_gate_id=target_gate_id,
+        caller="update_tracker_only" if decision == "UPDATE_TRACKER_ONLY" else "phase_b",
+        base_branch="dev",
+        branch_prefix="jabramsja",
+        force_add_files=force_add_files,
+        pr_title=record.get("pr_title", f"chore: {summary}"[:70]),
+        pr_body=record.get("pr_body", f"## Summary\n\n- {summary}"),
+        tracker_note_text=tracker_note or None,
+        pre_commit_receipt_path=".agent_bus/meta/pre_commit_receipt.json",
+        repo_root=repo_root,
+        founder_override_token=founder_override_token or None,
+    )
+    if build_errors:
+        return None, build_errors
     return handoff, []
 
 
@@ -2815,12 +3098,14 @@ def build_commit_handoff(
     caller: str = "phase_b",
     base_branch: str = "dev",
     branch_prefix: str = "jabramsja",
+    target_branch: str | None = None,
     force_add_files: list[str] | None = None,
     pr_title: str | None = None,
     pr_body: str | None = None,
     tracker_note_text: str | None = None,
     supervisor_lane: str | None = None,
     deferred_items: list[str] | None = None,
+    bridge_status: dict[str, Any] | None = None,
     scope_items: list[str] | None = None,
     evidence_handles: dict[str, str] | None = None,
     pre_commit_receipt_path: str | None = None,
@@ -2904,7 +3189,10 @@ def build_commit_handoff(
     # Use the canonical receipt path — no directory-sort discovery.
     # The commit executor's Step 6 runs the supervisor and gets a fresh
     # per-invocation receipt. This handoff receipt is provenance only.
-    effective_receipt = pre_commit_receipt_path or ".agent_bus/meta/pre_commit_receipt.json"
+    if caller == "standalone" and pre_commit_receipt_path == "":
+        effective_receipt = ""
+    else:
+        effective_receipt = pre_commit_receipt_path or ".agent_bus/meta/pre_commit_receipt.json"
 
     handoff = {
         "wave_id": wave_id,
@@ -2936,10 +3224,14 @@ def build_commit_handoff(
         handoff["supervisor_lane"] = supervisor_lane
     if deferred_items is not None:
         handoff["deferred_items"] = deferred_items
+    if bridge_status is not None:
+        handoff["bridge_status"] = bridge_status
     if scope_items:
         handoff["scope_items"] = scope_items
     if evidence_handles:
         handoff["evidence_handles"] = evidence_handles
+    if isinstance(target_branch, str) and target_branch.strip():
+        handoff["target_branch"] = target_branch.strip()
 
     # Validate against schema
     valid, validation_errors = validate_handoff(handoff)
@@ -3130,16 +3422,16 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
         if not isinstance(target_branch, str) or not target_branch.strip():
             errors.append("target_branch must be a non-empty string when provided")
         else:
-            expected_prefix = f"{branch_prefix}/" if isinstance(branch_prefix, str) and branch_prefix else ""
             normalized_target_branch = target_branch.strip()
-            if expected_prefix and not normalized_target_branch.startswith(expected_prefix):
+            if not _is_wave_bound_target_branch(
+                normalized_target_branch,
+                branch_prefix=str(branch_prefix or ""),
+                wave_id=str(wave_id or ""),
+            ):
                 errors.append(
-                    f"target_branch must start with '{expected_prefix}' when provided: {normalized_target_branch}"
+                    "target_branch must equal the canonical wave branch or a "
+                    f"restart branch derived from wave_id '{wave_id}': {normalized_target_branch}"
                 )
-            else:
-                suffix = normalized_target_branch[len(expected_prefix):]
-                if not TARGET_BRANCH_SUFFIX_RE.fullmatch(suffix):
-                    errors.append(f"target_branch contains unsafe characters: {normalized_target_branch}")
 
     # Caller validation
     caller = handoff.get("caller", "")
@@ -3300,6 +3592,7 @@ def _run_post_commit_pipeline(
     log: Any,
 ) -> dict[str, Any]:
     pr_number = str(result.get("pr_number") or "")
+    late_conflict_retry_used = bool(result.pop("_late_conflict_retry_used", False))
 
     # ── Step 11: run_pre_push_script ──────────────────────────────────
     if "run_pre_push_script" not in result["steps_completed"]:
@@ -3460,34 +3753,17 @@ def _run_post_commit_pipeline(
                 "failure_class": "pr_conflicting",
                 "auto_resolve_action": action,
             }
-        log(f"Step 14: waiting for CI on PR #{pr_number}...")
-        try:
-            _wait_for_required_checks_to_register(
-                repo_root,
-                pr_number=pr_number,
-                log=log,
-            )
-            _run(
-                ["gh", "pr", "checks", pr_number, "--watch", "--required"],
-                cwd=repo_root, timeout=600,
-            )
-            result["steps_completed"].append("wait_ci")
-            _checkpoint_post_commit_progress(
-                result,
-                continuation_path=continuation_path,
-                target_branch=target_branch,
-            )
-            log("Step 14: CI passed")
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, TimeoutError) as exc:
-            # gh pr checks --watch exits 1 on pending checks (not failed).
-            # Fallback to polling before giving up.
-            log(f"Step 14: gh pr checks exited ({exc.__class__.__name__}), polling CI as fallback")
-            if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=900, log=log):
-                return {"status": "error", "step": "wait_ci",
-                        "errors": [f"CI checks failed (confirmed by polling): {exc}"],
-                        "steps_completed": result["steps_completed"],
-                        "pr_number": pr_number}
-            log("Step 14: CI passed (confirmed by polling fallback)")
+        ci_response = _wait_for_pr_ci(
+            repo_root,
+            pr_number=pr_number,
+            result=result,
+            continuation_path=continuation_path,
+            target_branch=target_branch,
+            log=log,
+            step_label="Step 14",
+        )
+        if ci_response is not None:
+            return ci_response
     else:
         log(f"Step 14: required checks already passed for PR #{pr_number}, skipping")
 
@@ -3647,6 +3923,51 @@ def _run_post_commit_pipeline(
             cwd=repo_root.parent, timeout=120,
         )
     except subprocess.CalledProcessError as exc:
+        if not late_conflict_retry_used:
+            resolve_result = _try_auto_resolve_pr_conflict(
+                repo_root,
+                pr_number=pr_number,
+                base_branch=base_branch,
+                branch_name=target_branch,
+                log=log,
+            )
+            if resolve_result.get("resolved") and resolve_result.get("action") != "no_action":
+                result["_late_conflict_retry_used"] = True
+                try:
+                    _prepare_result_for_late_conflict_retry(
+                        repo_root,
+                        result=result,
+                        continuation_path=continuation_path,
+                        target_branch=target_branch,
+                    )
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as retry_exc:
+                    return {
+                        "status": "error",
+                        "step": "ensure_review_clear_and_merge",
+                        "errors": [f"Late auto-resolve refresh failed: {retry_exc}"],
+                        "steps_completed": result["steps_completed"],
+                        "pr_number": pr_number,
+                    }
+                ci_response = _wait_for_pr_ci(
+                    repo_root,
+                    pr_number=pr_number,
+                    result=result,
+                    continuation_path=continuation_path,
+                    target_branch=target_branch,
+                    log=log,
+                    step_label="Step 15 late auto-resolve",
+                )
+                if ci_response is not None:
+                    return ci_response
+                return _run_post_commit_pipeline(
+                    handoff=handoff,
+                    repo_root=repo_root,
+                    result=result,
+                    target_branch=target_branch,
+                    base_branch=base_branch,
+                    continuation_path=continuation_path,
+                    log=log,
+                )
         return {"status": "error", "step": "ensure_review_clear_and_merge",
                 "errors": [f"merge_pr.sh failed: {exc.stderr.strip()}"],
                 "steps_completed": result["steps_completed"],
@@ -4253,10 +4574,7 @@ def run_commit_pipeline(
 
         # Run supervisor via structured client
         try:
-            agents_dir = str(repo_root / "mu" / "tools" / "agents")
-            if agents_dir not in sys.path:
-                sys.path.insert(0, agents_dir)
-            from meta_bridge_client import run_meta_bridge_package, MetaBridgeClientError
+            run_meta_bridge_package, MetaBridgeClientError = _load_repo_meta_bridge_client(repo_root)
             sup_result = run_meta_bridge_package(pkg_path, wait_for_lock_seconds=30, verbose=verbose)
             if sup_result.decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
                 return {"status": "error", "step": "build_and_run_supervisor",
@@ -4309,33 +4627,37 @@ def run_commit_pipeline(
         # The handoff receipt path is preserved for provenance traceability only;
         # it is NOT authoritative for the commit decision.
         handoff_receipt_rel = handoff["pre_commit_receipt_path"]
-        # Containment check: handoff receipt must resolve inside the repo root.
-        # Reject path traversal and symlinks that escape the repo boundary.
-        if _has_path_traversal(handoff_receipt_rel):
-            return {"status": "error", "step": "validate_receipt",
-                    "errors": [f"Path traversal in handoff receipt path: {handoff_receipt_rel}"],
-                    "steps_completed": result["steps_completed"]}
-        handoff_receipt_file = (repo_root / handoff_receipt_rel).resolve()
-        if not handoff_receipt_file.is_relative_to(repo_root.resolve()):
-            return {"status": "error", "step": "validate_receipt",
-                    "errors": [f"Handoff receipt escapes repo root: {handoff_receipt_rel}"],
-                    "steps_completed": result["steps_completed"]}
-        if not handoff_receipt_file.exists():
-            return {"status": "error", "step": "validate_receipt",
-                    "errors": [f"Phase B handoff receipt not found at: {handoff_receipt_rel}"],
-                    "steps_completed": result["steps_completed"]}
-
-        try:
-            handoff_receipt_data = json.loads(handoff_receipt_file.read_text(encoding="utf-8"))
-            handoff_receipt_decision = handoff_receipt_data.get("decision", "")
-            if handoff_receipt_decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+        handoff_receipt_decision = ""
+        if handoff_receipt_rel:
+            # Containment check: handoff receipt must resolve inside the repo root.
+            # Reject path traversal and symlinks that escape the repo boundary.
+            if _has_path_traversal(handoff_receipt_rel):
                 return {"status": "error", "step": "validate_receipt",
-                        "errors": [f"Phase B handoff receipt decision '{handoff_receipt_decision}' does not authorize commit"],
+                        "errors": [f"Path traversal in handoff receipt path: {handoff_receipt_rel}"],
                         "steps_completed": result["steps_completed"]}
-        except (json.JSONDecodeError, OSError) as exc:
-            return {"status": "error", "step": "validate_receipt",
-                    "errors": [f"Phase B handoff receipt unreadable: {exc}"],
-                    "steps_completed": result["steps_completed"]}
+            handoff_receipt_file = (repo_root / handoff_receipt_rel).resolve()
+            if not handoff_receipt_file.is_relative_to(repo_root.resolve()):
+                return {"status": "error", "step": "validate_receipt",
+                        "errors": [f"Handoff receipt escapes repo root: {handoff_receipt_rel}"],
+                        "steps_completed": result["steps_completed"]}
+            if not handoff_receipt_file.exists():
+                return {"status": "error", "step": "validate_receipt",
+                        "errors": [f"Phase B handoff receipt not found at: {handoff_receipt_rel}"],
+                        "steps_completed": result["steps_completed"]}
+
+            try:
+                handoff_receipt_data = json.loads(handoff_receipt_file.read_text(encoding="utf-8"))
+                handoff_receipt_decision = handoff_receipt_data.get("decision", "")
+                if handoff_receipt_decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
+                    return {"status": "error", "step": "validate_receipt",
+                            "errors": [f"Phase B handoff receipt decision '{handoff_receipt_decision}' does not authorize commit"],
+                            "steps_completed": result["steps_completed"]}
+            except (json.JSONDecodeError, OSError) as exc:
+                return {"status": "error", "step": "validate_receipt",
+                        "errors": [f"Phase B handoff receipt unreadable: {exc}"],
+                        "steps_completed": result["steps_completed"]}
+        else:
+            handoff_receipt_decision = "STANDALONE_SKIP"
 
         receipt_file = repo_root / receipt_path_from_supervisor
         if not receipt_file.exists():
@@ -4572,7 +4894,11 @@ def main() -> int:
         except json.JSONDecodeError as exc:
             print(f"[error] Invalid routing record JSON: {exc}", file=sys.stderr)
             return 1
-        handoff, prep_errors = prepare_handoff_from_routing_record(record, repo_root)
+        handoff, prep_errors = prepare_handoff_from_routing_record(
+            record,
+            repo_root,
+            standalone=args.standalone,
+        )
         if prep_errors or handoff is None:
             print(f"[error] Cannot prepare handoff from routing record: {prep_errors}", file=sys.stderr)
             return 1
@@ -4618,9 +4944,7 @@ def main() -> int:
     # instead of silently exiting.
     if result.get("status") == "bot_findings_pending" and args.standalone:
         try:
-            sys.path.insert(0, str(repo_root))
-            from mu.tools.executors.recovery_gate import attempt_recovery
-            from mu.tools.executors.executor_common import normalize_wave_id
+            attempt_recovery, normalize_wave_id = _load_repo_recovery_symbols(repo_root)
             wave_id = normalize_wave_id(handoff.get("wave_id", "unknown"))
             recovery = attempt_recovery(repo_root, result, wave_id)
             result["recovery"] = recovery

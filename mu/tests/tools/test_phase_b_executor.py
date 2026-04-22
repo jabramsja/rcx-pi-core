@@ -441,6 +441,7 @@ class TestPrepareCommitHandoff:
             target_gate_id="G8",
             files_to_stage=["file.py"],
             commit_message="test",
+            fixes_implemented=["test handoff"],
             pr_title="test",
             pr_body="test",
         )
@@ -463,6 +464,7 @@ class TestPrepareCommitHandoff:
             files_to_stage=["file.py"],
             pre_commit_receipt_path=".agent_bus/meta/pre_commit_receipts/receipt_2026-03-23.json",
             commit_message="test",
+            fixes_implemented=["test handoff"],
             pr_title="test",
             pr_body="test",
         )
@@ -470,20 +472,51 @@ class TestPrepareCommitHandoff:
         assert handoff["pre_commit_receipt_path"] == ".agent_bus/meta/pre_commit_receipts/receipt_2026-03-23.json"
 
     def test_tracker_note_text_in_handoff(self, tmp_path):
+        tracker_note_text = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            wave_id="test",
+            task_id="[T]",
+            wave_class="MAINTENANCE",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/test_plan.md",
+            changed_files=["file.py"],
+            test_files=[],
+            receipt_path=".agent_bus/meta/pre_commit_receipts/receipt_test.json",
+            bridge_rounds=1,
+            reentry=False,
+        )
         path = pb_mod.prepare_commit_handoff(
             tmp_path,
             wave_id="test",
             task_id="[T]",
             wave_class="MAINTENANCE",
             target_gate_id="G8",
-            tracker_note_text="- Tracker sync note (test): test note.",
+            tracker_note_text=tracker_note_text,
+            files_to_stage=["file.py"],
             commit_message="test",
+            fixes_implemented=["test handoff"],
             pr_title="test",
             pr_body="test",
         )
         handoff = json.loads(path.read_text())
         assert "tracker_note_text" in handoff
-        assert handoff["tracker_note_text"] == "- Tracker sync note (test): test note."
+        assert handoff["tracker_note_text"] == tracker_note_text
+
+    def test_blank_target_branch_omitted_from_handoff(self, tmp_path):
+        path = pb_mod.prepare_commit_handoff(
+            tmp_path,
+            wave_id="test",
+            task_id="[T]",
+            wave_class="MAINTENANCE",
+            target_gate_id="G8",
+            target_branch="",
+            files_to_stage=["file.py"],
+            commit_message="test",
+            fixes_implemented=["test handoff"],
+            pr_title="test",
+            pr_body="test",
+        )
+        handoff = json.loads(path.read_text())
+        assert "target_branch" not in handoff
 
     def test_optional_supervisor_context_in_handoff(self, tmp_path):
         path = pb_mod.prepare_commit_handoff(
@@ -496,6 +529,7 @@ class TestPrepareCommitHandoff:
             scope_items=["reports/control_plane/test_plan.md", "file.py"],
             evidence_handles={"receipt_chain": "direct receipt path preserved"},
             commit_message="test",
+            fixes_implemented=["test handoff"],
             pr_title="test",
             pr_body="test",
         )
@@ -504,6 +538,28 @@ class TestPrepareCommitHandoff:
         assert handoff["evidence_handles"] == {
             "receipt_chain": "direct receipt path preserved"
         }
+
+    def test_wave_bound_target_branch_accepts_restart_branch(self):
+        target_branch = pb_mod._wave_bound_target_branch(  # ANTICHEAT_OK: validating bounded restart-branch selection
+            "jabramsja/test-wave-restart-2026-04-21",
+            wave_id="test-wave",
+        )
+        assert target_branch == "jabramsja/test-wave-restart-2026-04-21"
+
+    def test_wave_bound_target_branch_rejects_unrelated_branch(self):
+        target_branch = pb_mod._wave_bound_target_branch(  # ANTICHEAT_OK: validating unrelated-branch rejection
+            "jabramsja/other-wave-restart-2026-04-21",
+            wave_id="test-wave",
+        )
+        assert target_branch == ""
+
+    def test_wave_bound_target_branch_accepts_non_default_prefix(self):
+        target_branch = pb_mod._wave_bound_target_branch(  # ANTICHEAT_OK: validating non-default branch-prefix preservation
+            "codex/test-wave-restart-2026-04-21",
+            wave_id="test-wave",
+            branch_prefix="codex",
+        )
+        assert target_branch == "codex/test-wave-restart-2026-04-21"
 
     def test_build_phase_b_tracker_note_is_l4_compliant(self):
         note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
@@ -637,6 +693,7 @@ class TestPrepareCommitHandoff:
             target_gate_id="G8",
             files_to_stage=["new_file.py"],
             commit_message="test",
+            fixes_implemented=["test handoff"],
             pr_title="test",
             pr_body="test",
         )
@@ -652,6 +709,7 @@ class TestPrepareCommitHandoff:
             target_gate_id="G8",
             files_to_stage=["new_file.py"],
             commit_message="test",
+            fixes_implemented=["test handoff"],
             pr_title="test",
             pr_body="test",
             supervisor_lane="hooks/agents/bridge control-surface",

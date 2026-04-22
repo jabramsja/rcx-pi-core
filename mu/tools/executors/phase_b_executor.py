@@ -2355,41 +2355,71 @@ def prepare_commit_handoff(
 
     Produces the 15-field handoff required by the commit executor state machine.
     """
-    handoff: dict[str, Any] = {
-        "wave_id": wave_id,
-        "task_id": task_id,
-        "wave_class": wave_class,
-        "target_gate_id": target_gate_id,
-        "caller": caller,
-        "branch_prefix": branch_prefix,
-        "tracker_note_text": tracker_note_text,
-        "fixes_implemented": fixes_implemented or [],
-        "files_to_stage": files_to_stage or [],
-        "force_add_files": force_add_files or [],
-        "commit_message": commit_message,
-        "pr_title": pr_title,
-        "pr_body": pr_body,
-        "base_branch": "dev",
-        "pre_commit_receipt_path": pre_commit_receipt_path,
-    }
-    if target_branch is not None:
-        handoff["target_branch"] = target_branch
-    if supervisor_lane is not None:
-        handoff["supervisor_lane"] = supervisor_lane
-    if deferred_items is not None:
-        handoff["deferred_items"] = deferred_items
-    if bridge_status is not None:
-        handoff["bridge_status"] = bridge_status
-    if scope_items is not None:
-        handoff["scope_items"] = scope_items
-    if evidence_handles is not None:
-        handoff["evidence_handles"] = evidence_handles
+    try:
+        from commit_executor import build_commit_handoff
+    except ImportError:
+        import importlib.util as _ilu
+        _commit_path = SCRIPT_DIR / "commit_executor.py"
+        _commit_spec = _ilu.spec_from_file_location("commit_executor", str(_commit_path))
+        _commit_mod = _ilu.module_from_spec(_commit_spec)
+        assert _commit_spec.loader is not None
+        _commit_spec.loader.exec_module(_commit_mod)
+        build_commit_handoff = _commit_mod.build_commit_handoff
+
+    handoff, errors = build_commit_handoff(
+        wave_id=wave_id,
+        task_id=task_id,
+        files_to_stage=list(files_to_stage or []),
+        commit_message=commit_message,
+        fixes_implemented=list(fixes_implemented or []),
+        wave_class=wave_class,
+        target_gate_id=target_gate_id,
+        caller=caller,
+        base_branch="dev",
+        branch_prefix=branch_prefix,
+        target_branch=target_branch,
+        force_add_files=list(force_add_files or []),
+        pr_title=pr_title,
+        pr_body=pr_body,
+        tracker_note_text=tracker_note_text or None,
+        supervisor_lane=supervisor_lane,
+        deferred_items=deferred_items,
+        bridge_status=bridge_status,
+        scope_items=scope_items,
+        evidence_handles=evidence_handles,
+        pre_commit_receipt_path=pre_commit_receipt_path,
+        repo_root=repo_root,
+    )
+    if errors:
+        raise PhaseBExecutorError(
+            "Cannot prepare commit handoff via build_commit_handoff: "
+            + "; ".join(errors)
+        )
 
     handoff_dir = repo_root / ".agent_bus" / "executors"
     handoff_dir.mkdir(parents=True, exist_ok=True)
     handoff_path = handoff_dir / "phase_b_handoff.json"
     handoff_path.write_text(json.dumps(handoff, indent=2) + "\n", encoding="utf-8")
     return handoff_path
+
+
+def _wave_bound_target_branch(
+    observed_branch: str,
+    *,
+    wave_id: str,
+    branch_prefix: str = "jabramsja",
+) -> str:
+    """Return only a canonical wave branch or a restart branch for that wave."""
+    if not observed_branch or not wave_id or not branch_prefix:
+        return ""
+    canonical_branch = f"{branch_prefix}/{wave_id}"
+    if observed_branch == canonical_branch:
+        return observed_branch
+    if observed_branch == f"{canonical_branch}-restart":
+        return observed_branch
+    if observed_branch.startswith(f"{canonical_branch}-restart-"):
+        return observed_branch
+    return ""
 
 
 def _build_phase_b_tracker_note(
@@ -4276,6 +4306,7 @@ def run_phase_b(
     )
     log(f"Preparing commit handoff ({len(wave_owned_files)} wave-owned files)...")
     commit_target_branch: str | None = None
+    commit_branch_prefix = "jabramsja"
     branch_result = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         cwd=str(repo_root),
@@ -4284,16 +4315,24 @@ def run_phase_b(
     )
     if branch_result.returncode == 0:
         observed_branch = branch_result.stdout.strip()
-        if observed_branch.startswith("jabramsja/") and observed_branch not in ("dev", "main", "master", "HEAD"):
-            commit_target_branch = observed_branch
-
+        if "/" in observed_branch and observed_branch not in ("dev", "main", "master", "HEAD"):
+            observed_branch_prefix = observed_branch.split("/", 1)[0].strip() or "jabramsja"
+            wave_bound_target_branch = _wave_bound_target_branch(
+                observed_branch,
+                wave_id=wave_id,
+                branch_prefix=observed_branch_prefix,
+            )
+            if wave_bound_target_branch:
+                commit_branch_prefix = observed_branch_prefix
+                commit_target_branch = wave_bound_target_branch
     handoff_path = prepare_commit_handoff(
         repo_root,
         wave_id=wave_id,
         task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
         wave_class=wave_class,
         target_gate_id=target_gate_id,
-        target_branch=commit_target_branch,
+        branch_prefix=commit_branch_prefix,
+        target_branch=commit_target_branch or None,
         tracker_note_text=tracker_note_text,
         fixes_implemented=["Phase B implementation per locked plan"],
         files_to_stage=wave_owned_files,
