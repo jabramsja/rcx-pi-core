@@ -654,6 +654,56 @@ def _resolve_post_merge_verify_root(repo_root: Path, base_branch: str, *, log: A
     return repo_root
 
 
+def _preferred_branch_creation_base(repo_root: Path, base_branch: str) -> str:
+    """Prefer the fetched remote base for new feature branches when available."""
+    try:
+        fetch_proc = _run(
+            ["git", "fetch", "origin", base_branch],
+            cwd=repo_root,
+            check=False,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        return base_branch
+    if fetch_proc.returncode != 0:
+        return base_branch
+    remote_ref = f"refs/remotes/origin/{base_branch}"
+    remote_check = _run(
+        ["git", "rev-parse", "--verify", remote_ref],
+        cwd=repo_root,
+        check=False,
+    )
+    if remote_check.returncode == 0:
+        return f"origin/{base_branch}"
+    return base_branch
+
+
+def _collect_branch_rebind_dirty_scope(
+    repo_root: Path,
+    *,
+    handoff: dict[str, Any],
+) -> tuple[set[str], set[str], list[str]]:
+    """Return tracked, untracked, and out-of-scope dirty paths for branch rebinding."""
+    allowed_paths = {
+        path for path in [
+            *handoff.get("files_to_stage", []),
+            *handoff.get("force_add_files", []),
+        ]
+        if isinstance(path, str) and path.strip()
+    }
+    tracked_dirty = {
+        path for path in _tracked_dirty_paths(repo_root)
+        if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+    }
+    untracked_dirty = {
+        path for path in _untracked_worktree_paths(repo_root)
+        if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+    }
+    dirty_paths = tracked_dirty | untracked_dirty
+    outside_scope = sorted(dirty_paths - allowed_paths)
+    return tracked_dirty, untracked_dirty, outside_scope
+
+
 def _probe_feature_branch_existence(repo_root: Path, target_branch: str) -> tuple[bool, bool]:
     """Return local/remote existence for the canonical target branch."""
     local_check = _run(
@@ -757,6 +807,28 @@ def _restore_scope_snapshot(repo_root: Path, snapshot: dict[str, bytes | None]) 
             continue
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_bytes(payload)
+
+
+def _restore_scope_snapshot_on_branch_failure(
+    repo_root: Path,
+    *,
+    snapshot: dict[str, bytes | None],
+    expected_branch: str,
+) -> None:
+    """Restore a captured bounded scope when checkout failed before branch switch."""
+    if not snapshot:
+        return
+    current_after_failure = _run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=repo_root,
+        check=False,
+    ).stdout.strip()
+    if current_after_failure != expected_branch:
+        return
+    try:
+        _restore_scope_snapshot(repo_root, snapshot)
+    except subprocess.CalledProcessError:
+        pass
 
 
 def _handoff_sha(handoff: dict[str, Any]) -> str:
@@ -4254,6 +4326,8 @@ def run_commit_pipeline(
         return {"status": "error", "step": "ensure_feature_branch",
                 "errors": ["Timeout checking target branch collisions"],
                 "steps_completed": result["steps_completed"]}
+    branch_start_ref = _preferred_branch_creation_base(repo_root, base_branch)
+    start_from_remote_base = branch_start_ref != base_branch
 
     if current == base_branch:
         if local_target_exists:
@@ -4265,9 +4339,43 @@ def run_commit_pipeline(
                     "errors": [f"Remote branch {target_branch} already exists"],
                     "steps_completed": result["steps_completed"]}
         try:
-            _run(["git", "checkout", "-b", target_branch], cwd=repo_root)
-            log(f"Step 2: created branch {target_branch}")
+            if start_from_remote_base:
+                tracked_dirty, untracked_dirty, outside_scope = _collect_branch_rebind_dirty_scope(
+                    repo_root,
+                    handoff=handoff,
+                )
+                if outside_scope:
+                    preview = ", ".join(outside_scope[:10])
+                    if len(outside_scope) > 10:
+                        preview += ", ..."
+                    return {"status": "error", "step": "ensure_feature_branch",
+                            "errors": [
+                                "Refusing branch creation from fetched base because dirty paths outside "
+                                f"the wave scope are present: {preview}"
+                            ],
+                            "steps_completed": result["steps_completed"]}
+                scoped_dirty = sorted((tracked_dirty | untracked_dirty) - set(outside_scope))
+                snapshot: dict[str, bytes | None] = {}
+                if scoped_dirty:
+                    snapshot = _capture_scope_snapshot(repo_root, scoped_dirty)
+                    _clear_scope_for_branch_rebind(
+                        repo_root,
+                        tracked_paths=sorted(tracked_dirty),
+                        untracked_paths=sorted(untracked_dirty),
+                    )
+                _run(["git", "checkout", "-b", target_branch, branch_start_ref], cwd=repo_root)
+                if snapshot:
+                    _restore_scope_snapshot(repo_root, snapshot)
+                log(f"Step 2: created branch {target_branch} from {branch_start_ref}")
+            else:
+                _run(["git", "checkout", "-b", target_branch], cwd=repo_root)
+                log(f"Step 2: created branch {target_branch}")
         except subprocess.CalledProcessError as exc:
+            _restore_scope_snapshot_on_branch_failure(
+                repo_root,
+                snapshot=locals().get("snapshot", {}),
+                expected_branch=current,
+            )
             return {"status": "error", "step": "ensure_feature_branch",
                     "errors": [f"git checkout -b failed: {exc.stderr.strip()}"],
                     "steps_completed": result["steps_completed"]}
@@ -4287,23 +4395,10 @@ def run_commit_pipeline(
                         f"Refusing auto-rebind because {collision_text} already exists"
                     ],
                     "steps_completed": result["steps_completed"]}
-        allowed_paths = sorted({
-            path for path in [
-                *handoff.get("files_to_stage", []),
-                *handoff.get("force_add_files", []),
-            ]
-            if isinstance(path, str) and path.strip()
-        })
-        tracked_dirty = {
-            path for path in _tracked_dirty_paths(repo_root)
-            if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
-        }
-        untracked_dirty = {
-            path for path in _untracked_worktree_paths(repo_root)
-            if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
-        }
-        dirty_paths = tracked_dirty | untracked_dirty
-        outside_scope = sorted(set(dirty_paths) - set(allowed_paths))
+        tracked_dirty, untracked_dirty, outside_scope = _collect_branch_rebind_dirty_scope(
+            repo_root,
+            handoff=handoff,
+        )
         if outside_scope:
             preview = ", ".join(outside_scope[:10])
             if len(outside_scope) > 10:
@@ -4314,7 +4409,7 @@ def run_commit_pipeline(
                         f"{preview}"
                     ],
                     "steps_completed": result["steps_completed"]}
-        scoped_dirty = sorted(set(dirty_paths) & set(allowed_paths))
+        scoped_dirty = sorted((tracked_dirty | untracked_dirty) - set(outside_scope))
         snapshot: dict[str, bytes | None] = {}
         try:
             # When dev has diverged on wave-owned files, a raw checkout can fail
@@ -4328,28 +4423,22 @@ def run_commit_pipeline(
                 )
                 _clear_scope_for_branch_rebind(
                     repo_root,
-                    tracked_paths=sorted(set(tracked_dirty) & set(allowed_paths)),
-                    untracked_paths=sorted(set(untracked_dirty) & set(allowed_paths)),
+                    tracked_paths=sorted(tracked_dirty),
+                    untracked_paths=sorted(untracked_dirty),
                 )
-            _run(["git", "checkout", "-b", target_branch, base_branch], cwd=repo_root)
+            _run(["git", "checkout", "-b", target_branch, branch_start_ref], cwd=repo_root)
             if snapshot:
                 _restore_scope_snapshot(repo_root, snapshot)
             log(
                 "Step 2: rebound worktree from "
-                f"{current} to {target_branch} using {base_branch} as base"
+                f"{current} to {target_branch} using {branch_start_ref} as base"
             )
         except subprocess.CalledProcessError as exc:
-            if snapshot:
-                current_after_failure = _run(
-                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                    cwd=repo_root,
-                    check=False,
-                ).stdout.strip()
-                if current_after_failure == current:
-                    try:
-                        _restore_scope_snapshot(repo_root, snapshot)
-                    except subprocess.CalledProcessError:
-                        pass
+            _restore_scope_snapshot_on_branch_failure(
+                repo_root,
+                snapshot=snapshot,
+                expected_branch=current,
+            )
             failed_cmd = exc.cmd if isinstance(exc.cmd, list) else []
             detail = (exc.stderr or exc.stdout or "").strip()
             cmd_text = " ".join(str(part) for part in failed_cmd) or "step-2 rebind helper"

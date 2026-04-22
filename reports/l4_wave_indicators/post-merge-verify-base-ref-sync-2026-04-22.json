@@ -1,0 +1,24 @@
+{
+  "wave_id": "post-merge-verify-base-ref-sync-2026-04-22",
+  "repeat_run_speedup_ratio": 1.01997,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.447417,
+  "repeat_run_raw_seconds": [
+    0.456352,
+    0.447417
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.456352
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.903769
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-04-22T03:17:25Z",
+  "collector_version": "2.2.0"
+}
