@@ -5,7 +5,7 @@ Status: COMPLETED (commit-ready, supervisor COMMIT_GO)
 Task: [PIPELINE-REENTRY-REROUTE]
 Wave ID: post-reentry-reroute-and-notification-truth-2026-04-23
 Phase-A-Lock: LOCKED
-Wave class: MAINTENANCE
+Wave class: L4_ENABLER
 Target gate: G8
 
 ## Purpose

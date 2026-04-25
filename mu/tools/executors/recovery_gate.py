@@ -67,6 +67,7 @@ class FailureClass(Enum):
     MISSING_BRIDGE_CONFIG = "missing_bridge_config"
     POST_REENTRY_NEEDS_PHASE_B = "post_reentry_needs_phase_b"
     PHASE_B_PLAN_REQUIRED = "phase_b_plan_required"
+    MISSING_PHASE_A_LOCK = "missing_phase_a_lock"
     # Tier 2 -- auto-retry with adjustment (zero tokens)
     PROCESS_TIMEOUT = "process_timeout"
     TRANSIENT_KILL = "transient_kill"
@@ -94,6 +95,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.MISSING_BRIDGE_CONFIG: 1,
     FailureClass.POST_REENTRY_NEEDS_PHASE_B: 1,
     FailureClass.PHASE_B_PLAN_REQUIRED: 1,
+    FailureClass.MISSING_PHASE_A_LOCK: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
     FailureClass.UPSTREAM_CONNECTIVITY: 2,
     FailureClass.AGGREGATION_HANG: 2, FailureClass.IMPLEMENTER_STALE: 2,
@@ -251,6 +253,8 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.TRACKER_NOTE_CONTRACT
     if _looks_like_feature_branch_mismatch(result):
         return FailureClass.FEATURE_BRANCH_MISMATCH
+    if _looks_like_missing_phase_a_lock(result):
+        return FailureClass.MISSING_PHASE_A_LOCK
 
     # Tier 2: transient / timeout issues
     if (
@@ -471,7 +475,6 @@ def _looks_like_feature_branch_mismatch(result: dict[str, Any]) -> bool:
     }
     return "ensure_feature_branch" in steps or not steps
 
-
 def _looks_like_post_reentry_needs_phase_b(result: dict[str, Any]) -> bool:
     reason_lower = _summarize_result_reason(result).lower()
     if "supervisor returned needs_phase_b" not in reason_lower:
@@ -521,6 +524,37 @@ def _looks_like_git_index_permission_failure(detail: str) -> bool:
         return False
     return "unable to create" in lowered or "could not create" in lowered
 
+
+def _looks_like_missing_phase_a_lock(result: dict[str, Any]) -> bool:
+    errors = _extract_validation_errors(result)
+    if not errors:
+        return False
+    missing_lock = any(
+        re.fullmatch(
+            r"validate_inputs fatal: Plan Phase-A-Lock must be LOCKED "
+            r"\(or ROUTING_RECORD_AUTHORITY for planless\), got",
+            text,
+        )
+        for text in errors
+    )
+    if not missing_lock:
+        return False
+    steps = {
+        str(candidate.get("step", "")).strip()
+        for candidate in _extract_result_candidates(result)
+        if candidate.get("step")
+    }
+    return "validate_inputs" in steps or not steps
+
+
+def _extract_plan_path(result: dict[str, Any]) -> str:
+    for candidate in _extract_result_candidates(result):
+        plan_path = str(candidate.get("plan_path", "") or "").strip()
+        if plan_path:
+            return plan_path
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Tier 1 auto-fix functions
 # ---------------------------------------------------------------------------
@@ -555,6 +589,81 @@ def fix_stale_bridge_lock(repo_root: Path) -> dict[str, Any]:
             )
     return _fix_result(False, "noop",
                        "bridge.lock held by a live flock after bounded wait — cannot remove")
+
+
+def fix_missing_phase_a_lock(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Repair a missing Phase-A-Lock header on a Phase B control-plane packet.
+
+    This is intentionally narrow: it only repairs packets where the parsed
+    Phase-A-Lock is absent. If the packet already declares UNLOCKED or any
+    other non-empty value, recovery must not auto-upgrade it.
+    """
+    result = kw.get("result", {}) or {}
+    plan_path = _extract_plan_path(result)
+    if not plan_path:
+        return _fix_result(
+            False,
+            "plan_path_missing",
+            "missing Phase-A-Lock repair needs plan_path from the executor result",
+        )
+
+    repo_root_resolved = repo_root.resolve()
+    try:
+        plan_file = (repo_root / plan_path).resolve()
+        plan_file.relative_to(repo_root_resolved)
+    except ValueError:
+        return _fix_result(False, "unsafe_plan_path", f"unsafe plan_path outside repo: {plan_path}")
+    if not plan_file.is_file():
+        return _fix_result(False, "plan_missing", f"plan packet not found: {plan_path}")
+
+    try:
+        phase_a_mod = _load_executor_module_from_repo(repo_root, "phase_a_executor")
+        phase_b_mod = _load_executor_module_from_repo(repo_root, "phase_b_executor")
+    except Exception as exc:
+        return _fix_result(False, "module_load_failed", f"could not load plan helpers: {exc}")
+
+    try:
+        plan = phase_b_mod.load_plan_packet(repo_root, plan_path)
+    except Exception as exc:
+        return _fix_result(False, "plan_parse_failed", f"could not parse plan packet: {exc}")
+
+    phase_a_lock = str(plan.get("phase_a_lock", "") or "").strip()
+    if phase_a_lock:
+        return _fix_result(
+            False,
+            "phase_a_lock_present",
+            f"{plan_path} already declares Phase-A-Lock: {phase_a_lock}; requires explicit Phase A or packet repair",
+        )
+
+    lock_path = repo_root / ".agent_bus" / "bridge.lock"
+    lock_detail = ""
+    if lock_path.exists():
+        if not _claim_and_remove_bridge_lock(lock_path):
+            return _fix_result(
+                False,
+                "bridge_lock_live",
+                "bridge.lock is still held by a live flock — cannot safely retry after repairing Phase-A-Lock",
+            )
+        lock_detail = " + cleared stale bridge.lock"
+
+    try:
+        phase_a_mod.lock_plan(repo_root, plan_path)
+        repaired = phase_b_mod.load_plan_packet(repo_root, plan_path)
+    except Exception as exc:
+        return _fix_result(False, "lock_repair_failed", f"could not repair Phase-A-Lock: {exc}")
+
+    if str(repaired.get("phase_a_lock", "") or "").strip() != "LOCKED":
+        return _fix_result(
+            False,
+            "lock_repair_failed",
+            f"{plan_path} did not converge to Phase-A-Lock: LOCKED after repair",
+        )
+
+    return _fix_result(
+        True,
+        "repair_missing_phase_a_lock",
+        f"inserted and locked missing Phase-A-Lock in {plan_path}{lock_detail}",
+    )
 
 
 def fix_stale_git_index_lock(repo_root: Path) -> dict[str, Any]:
@@ -1127,6 +1236,7 @@ _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.MISSING_BRIDGE_CONFIG: lambda root, **kw: fix_missing_bridge_config(root),
     FailureClass.POST_REENTRY_NEEDS_PHASE_B: fix_post_reentry_needs_phase_b,
     FailureClass.PHASE_B_PLAN_REQUIRED: fix_phase_b_plan_required,
+    FailureClass.MISSING_PHASE_A_LOCK: fix_missing_phase_a_lock,
 }
 
 
