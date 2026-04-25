@@ -399,7 +399,10 @@ def _sync_deferred_non_blocking_state(
     )
     if packet_path is None:
         if previous_packet_path:
-            executor_created.discard(previous_packet_path)
+            # Keep the cleared packet in executor-owned scope until the next
+            # scoped staging pass reconciles a possible staged-add/worktree-delete
+            # state. Dropping it here can leave an AD packet outside the handoff.
+            executor_created.add(previous_packet_path)
         return current_findings, None
     rel_path = str(packet_path.relative_to(repo_root))
     executor_created.add(rel_path)
@@ -461,14 +464,15 @@ def _collect_supervisor_deferred_items(
     deferred_packet_path: str | None,
 ) -> list[str]:
     """Surface active wave-owned deferred non-blocking packets in supervisor packages."""
+    changed_file_set = set(changed_files)
     deferred_items = {
         rel_path
-        for rel_path in changed_files
+        for rel_path in changed_file_set
         if rel_path.startswith("reports/deferred/non_blocking/")
         and rel_path.endswith(".md")
         and not rel_path.endswith("/README.md")
     }
-    if deferred_packet_path:
+    if deferred_packet_path and deferred_packet_path in changed_file_set:
         deferred_items.add(deferred_packet_path)
     return sorted(deferred_items)
 
@@ -1249,8 +1253,13 @@ def _emit_phase_b_event(
     )
 
 
-def _phase_b_review_transition_key(round_num: int) -> str:
-    return f"phase-b-r{round_num}"
+def _phase_b_review_transition_key(round_num: int, bridge_job_id: str) -> str:
+    return str(bridge_job_id or "").strip() or f"phase-b-r{round_num}"
+
+
+def _phase_b_transition_key(bridge_job_id: str, state: str) -> str:
+    bridge_job_text = str(bridge_job_id or "").strip() or "phase-b"
+    return f"{bridge_job_text}:{state}"
 
 
 def _phase_b_hard_fail_transition_key(
@@ -1457,7 +1466,7 @@ def _bridge_process_snapshot(root_pid: int, repo_root: Path) -> tuple[tuple[int,
             text=True,
             check=True,
         )
-    except subprocess.CalledProcessError:
+    except (PermissionError, OSError, subprocess.CalledProcessError):
         return (), ()
 
     children_by_parent: dict[int, set[int]] = {}
@@ -1539,12 +1548,34 @@ def _bridge_progress_snapshot(
     }
 
 
-def _terminate_bridge_subprocess(proc: subprocess.Popen[str]) -> None:
-    """Terminate a bridge subprocess and its process group."""
+def _signal_process_group_or_pid(pid: int, sig: int) -> None:
+    try:
+        os.killpg(pid, sig)
+        return
+    except (OSError, ProcessLookupError):
+        pass
+    try:
+        os.kill(pid, sig)
+    except (OSError, ProcessLookupError):
+        pass
+
+
+def _terminate_bridge_subprocess(
+    proc: subprocess.Popen[str],
+    *,
+    child_pids: tuple[int, ...] = (),
+) -> None:
+    """Terminate a bridge subprocess, including detached adapter children."""
     try:
         pgid = os.getpgid(proc.pid)
     except (OSError, ProcessLookupError):
         pgid = None
+
+    detached_child_pids = tuple(
+        sorted({pid for pid in child_pids if pid > 0 and pid != proc.pid})
+    )
+    for child_pid in detached_child_pids:
+        _signal_process_group_or_pid(child_pid, signal.SIGTERM)
 
     try:
         if pgid is not None:
@@ -1567,6 +1598,8 @@ def _terminate_bridge_subprocess(proc: subprocess.Popen[str]) -> None:
             proc.kill()
     except (OSError, ProcessLookupError):
         pass
+    for child_pid in detached_child_pids:
+        _signal_process_group_or_pid(child_pid, signal.SIGKILL)
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
@@ -1659,7 +1692,7 @@ def _run_bridge_review_subprocess(
                 }
 
             if not snapshot["child_pids"] and idle_for >= aggregation_hang_timeout:
-                _terminate_bridge_subprocess(proc)
+                _terminate_bridge_subprocess(proc, child_pids=snapshot["child_pids"])
                 stdout, stderr = _read_logs()
                 return {
                     "exit_code": -3,
@@ -1674,7 +1707,7 @@ def _run_bridge_review_subprocess(
                 }
 
             if idle_for >= stale_timeout:
-                _terminate_bridge_subprocess(proc)
+                _terminate_bridge_subprocess(proc, child_pids=snapshot["child_pids"])
                 stdout, stderr = _read_logs()
                 return {
                     "exit_code": -2,
@@ -1690,7 +1723,7 @@ def _run_bridge_review_subprocess(
                 }
 
             if now - start_time >= timeout:
-                _terminate_bridge_subprocess(proc)
+                _terminate_bridge_subprocess(proc, child_pids=snapshot["child_pids"])
                 stdout, stderr = _read_logs()
                 return {
                     "exit_code": -1,
@@ -1756,7 +1789,11 @@ def run_bridge_review(
         stale_timeout=max(BRIDGE_REVIEW_STALE_TIMEOUT, bridge_turn_timeout),
         env={
             **os.environ,
-            "RCX_BRIDGE_MAX_TURN_WALL_TIME_S": str(min(timeout, bridge_turn_timeout)),
+            # The outer bridge wrapper already enforces the authoritative total
+            # review budget. Keep the inner adapter aligned with that outer
+            # subprocess timeout so an in-progress reviewer does not get killed
+            # early by the narrower config stale window.
+            "RCX_BRIDGE_MAX_TURN_WALL_TIME_S": str(float(timeout)),
         },
     )
     stdout_stripped = result["stdout"].strip()
@@ -2250,8 +2287,8 @@ def _resolve_review_depth(config: dict[str, Any], phase_key: str, default: str =
     return depth
 
 
-def _stage_files(repo_root: Path, files: list[str]) -> bool:
-    """Stage files for commit. Returns True on success.
+def _stage_files_with_diagnostics(repo_root: Path, files: list[str]) -> tuple[bool, str]:
+    """Stage files for commit and return a failure detail when git rejects them.
 
     Files under .claude/ are staged individually to avoid the git multi-path
     pathspec resolver false-positive: batch ``git add`` with .claude/ paths
@@ -2261,7 +2298,7 @@ def _stage_files(repo_root: Path, files: list[str]) -> bool:
     See .claude/rules/learning.md 2026-04-11 entry (git add multi-path).
     """
     if not files:
-        return False
+        return False, "no files supplied"
     claude_files = [f for f in files if f.startswith(".claude/") or f.startswith(".claude\\")]
     other_files = [f for f in files if f not in claude_files]
     try:
@@ -2275,11 +2312,38 @@ def _stage_files(repo_root: Path, files: list[str]) -> bool:
                 ["git", "add", "--", cf],
                 cwd=repo_root, capture_output=True, text=True, check=True,
             )
-        return True
-    except subprocess.CalledProcessError:
+        return True, ""
+    except subprocess.CalledProcessError as exc:
         # Fail closed. Phase B must not bypass ignore rules by force-adding
         # files the repo has explicitly excluded from normal staging.
-        return False
+        detail_parts = [
+            f"git add failed with exit={exc.returncode}",
+            (exc.stderr or "").strip(),
+            (exc.stdout or "").strip(),
+        ]
+        return False, " | ".join(part for part in detail_parts if part)
+
+
+_LAST_STAGE_FILES_DETAIL = ""
+
+
+def _stage_files(repo_root: Path, files: list[str]) -> bool:
+    """Stage files for commit. Returns True on success."""
+    global _LAST_STAGE_FILES_DETAIL
+    ok, detail = _stage_files_with_diagnostics(repo_root, files)
+    _LAST_STAGE_FILES_DETAIL = detail
+    return ok
+
+
+def _stage_files_for_pipeline(repo_root: Path, files: list[str]) -> tuple[bool, str]:
+    """Stage through the existing seam while preserving git diagnostics."""
+    global _LAST_STAGE_FILES_DETAIL
+    _LAST_STAGE_FILES_DETAIL = ""
+    ok = _stage_files(repo_root, files)
+    detail = _LAST_STAGE_FILES_DETAIL
+    if not ok and not detail:
+        detail = "git add failed without diagnostic detail"
+    return ok, detail
 
 
 def _agent_review_scope_fingerprint(repo_root: Path, files: list[str], *, depth: str) -> str:
@@ -3290,6 +3354,7 @@ def run_phase_b(
                 result["agent_review_report_path"] = saved_state.get("agent_review_report_path")
                 result["agent_review_status_path"] = saved_state.get("agent_review_status_path")
                 result["agent_review_stdout_path"] = saved_state.get("agent_review_stdout_path")
+                result["agent_review_stderr_path"] = saved_state.get("agent_review_stderr_path")
                 log("Step 4: SKIPPED (resume_after=agent_review, scope fingerprint matched)")
                 log(f"Agent review exit code: {result['agent_exit_code']} (resumed)")
             else:
@@ -3310,6 +3375,7 @@ def run_phase_b(
                 result["agent_review_report_path"] = agent_result.get("report_path")
                 result["agent_review_status_path"] = agent_result.get("status_path")
                 result["agent_review_stdout_path"] = agent_result.get("stdout_path")
+                result["agent_review_stderr_path"] = agent_result.get("stderr_path")
                 log(f"Agent review exit code: {agent_result['exit_code']}")
 
                 if agent_result["exit_code"] < 0 or agent_result["exit_code"] == 4:
@@ -3354,6 +3420,7 @@ def run_phase_b(
                     "agent_review_report_path": agent_result.get("report_path"),
                     "agent_review_status_path": agent_result.get("status_path"),
                     "agent_review_stdout_path": agent_result.get("stdout_path"),
+                    "agent_review_stderr_path": agent_result.get("stderr_path"),
                 })
 
             if result["agent_exit_code"] != 0:
@@ -3412,7 +3479,7 @@ def run_phase_b(
         if round_num <= _resume_bridge_round:
             continue  # Skip already-completed rounds on resume
         bridge_job_id = f"phase-b-r{round_num}-{uuid.uuid4().hex[:8]}"
-        transition_key = _phase_b_review_transition_key(round_num)
+        transition_key = _phase_b_review_transition_key(round_num, bridge_job_id)
         log(f"Bridge review round {round_num}/{max_bridge_rounds} (job={bridge_job_id})...")
         result["bridge_rounds"] = round_num
 
@@ -3426,10 +3493,15 @@ def run_phase_b(
         )
         if changed_files:
             log(f"Staging {len(changed_files)} wave-owned files before bridge review...")
-            if not _stage_files(repo_root, changed_files):
+            staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, changed_files)
+            if not staged_ok:
                 result["status"] = "error"
                 result["step"] = "bridge_staging"
-                result["errors"] = ["Failed to stage files before bridge review"]
+                result["stderr"] = stage_detail
+                result["errors"] = [
+                    "Failed to stage files before bridge review",
+                    stage_detail,
+                ]
                 _clear_state(repo_root)
                 return result
 
@@ -3479,6 +3551,9 @@ def run_phase_b(
             return result
 
         # Parse decision from bridge result
+        result["bridge_job_id"] = bridge_job_id
+        result["bridge_stdout_path"] = bridge_result.get("stdout_path")
+        result["bridge_stderr_path"] = bridge_result.get("stderr_path")
         bridge_decision = bridge_result.get("decision", "")
         log(f"Bridge decision: {bridge_decision!r} (exit={bridge_result['exit_code']})")
 
@@ -3530,6 +3605,28 @@ def run_phase_b(
                     if prior_deferred_packet_path:
                         log("Cleared stale deferred non-blocking packet after GO")
             log("Bridge converged: GO")
+            try:
+                _emit_phase_b_event(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan=plan,
+                    plan_path=plan_path,
+                    event_type="phase_b_bridge_completed",
+                    state="bridge_go",
+                    transition_key=_phase_b_transition_key(bridge_job_id, "bridge_go"),
+                    summary=f"Phase B bridge GO for round {round_num}",
+                    artifact_paths={
+                        "bridge_stdout": str(bridge_result.get("stdout_path") or ""),
+                        "bridge_stderr": str(bridge_result.get("stderr_path") or ""),
+                        "deferred_packet": str(deferred_packet_path or ""),
+                    },
+                )
+            except Exception as exc:
+                result["status"] = "error"
+                result["step"] = "phase_b_pager"
+                result["errors"] = [f"Phase B pager emission failed after bridge GO: {exc}"]
+                _clear_state(repo_root)
+                return result
             bridge_converged = True
             break
 
@@ -3808,6 +3905,25 @@ def run_phase_b(
         final_test_files = [f for f in changed_files if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")]
         if final_test_files:
             log(f"Final pytest gate: running {len(final_test_files)} test file(s)...")
+            bridge_job_for_pytest = str(result.get("bridge_job_id") or "").strip()
+            try:
+                _emit_phase_b_event(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan=plan,
+                    plan_path=plan_path,
+                    event_type="phase_b_final_pytest_started",
+                    state="final_pytest_started",
+                    transition_key=_phase_b_transition_key(bridge_job_for_pytest, "final_pytest_started"),
+                    summary=f"Phase B final pytest started for {len(final_test_files)} test file(s)",
+                    artifact_paths={"test_files": ",".join(final_test_files)},
+                )
+            except Exception as exc:
+                result["status"] = "error"
+                result["step"] = "phase_b_pager"
+                result["errors"] = [f"Phase B pager emission failed before final pytest: {exc}"]
+                _clear_state(repo_root)
+                return result
             final_pytest = _run_pytest_on_files(repo_root, final_test_files, timeout=pytest_gate_timeout)
             if not final_pytest["passed"]:
                 return {
@@ -3820,6 +3936,24 @@ def run_phase_b(
                     ],
                 }
             log("Final pytest gate: PASSED")
+            try:
+                _emit_phase_b_event(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan=plan,
+                    plan_path=plan_path,
+                    event_type="phase_b_final_pytest_passed",
+                    state="final_pytest_passed",
+                    transition_key=_phase_b_transition_key(bridge_job_for_pytest, "final_pytest_passed"),
+                    summary=f"Phase B final pytest passed for {len(final_test_files)} test file(s)",
+                    artifact_paths={"test_files": ",".join(final_test_files)},
+                )
+            except Exception as exc:
+                result["status"] = "error"
+                result["step"] = "phase_b_pager"
+                result["errors"] = [f"Phase B pager emission failed after final pytest: {exc}"]
+                _clear_state(repo_root)
+                return result
 
         # Step 5b: Update tracked packet status before staging.
         # Advances from "Phase A" to "Phase B (bridge-converged)" so the
@@ -3842,11 +3976,16 @@ def run_phase_b(
         # Scope to wave-owned files only — do not sweep unrelated dirty worktree files.
         if changed_files:
             log(f"Staging {len(changed_files)} wave-owned files before supervisor...")
-            if not _stage_files(repo_root, changed_files):
+            staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, changed_files)
+            if not staged_ok:
                 return {
                     "status": "error",
                     "step": "staging",
-                    "errors": ["Failed to stage files before supervisor"],
+                    "stderr": stage_detail,
+                    "errors": [
+                        "Failed to stage files before supervisor",
+                        stage_detail,
+                    ],
                 }
 
         # Step 7: Build and run pre-commit supervisor via structured client
@@ -3961,17 +4100,22 @@ def run_phase_b(
 
             if changed_files:
                 log(f"Re-entry: staging {len(changed_files)} wave-owned files before bridge review...")
-                if not _stage_files(repo_root, changed_files):
+                staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, changed_files)
+                if not staged_ok:
                     _clear_state(repo_root)
                     return {
                         "status": "error",
                         "step": "reentry_bridge_staging",
-                        "errors": ["Failed to stage files before bridge review during re-entry"],
+                        "stderr": stage_detail,
+                        "errors": [
+                            "Failed to stage files before bridge review during re-entry",
+                            stage_detail,
+                        ],
                     }
 
             # Bridge reviews the fix (bound to exact job_id)
             bridge_job_id = f"phase-b-reentry-r{reentry_round}-{uuid.uuid4().hex[:8]}"
-            transition_key = _phase_b_review_transition_key(reentry_round)
+            transition_key = _phase_b_review_transition_key(reentry_round, bridge_job_id)
             try:
                 bridge_result = run_bridge_review(
                     repo_root,
@@ -4050,6 +4194,29 @@ def run_phase_b(
                         if prior_deferred_packet_path:
                             log("Re-entry GO cleared stale deferred non-blocking packet")
                 log("Bridge re-entry converged: GO")
+                result["bridge_job_id"] = bridge_job_id
+                try:
+                    _emit_phase_b_event(
+                        repo_root,
+                        routing_record=routing_record,
+                        plan=plan,
+                        plan_path=plan_path,
+                        event_type="phase_b_bridge_completed",
+                        state="reentry_bridge_go",
+                        transition_key=_phase_b_transition_key(bridge_job_id, "reentry_bridge_go"),
+                        summary=f"Phase B re-entry bridge GO for round {reentry_round}",
+                        artifact_paths={
+                            "bridge_stdout": str(bridge_result.get("stdout_path") or ""),
+                            "bridge_stderr": str(bridge_result.get("stderr_path") or ""),
+                            "deferred_packet": str(deferred_packet_path or ""),
+                        },
+                    )
+                except Exception as exc:
+                    result["status"] = "error"
+                    result["step"] = "phase_b_pager"
+                    result["errors"] = [f"Phase B pager emission failed after re-entry bridge GO: {exc}"]
+                    _clear_state(repo_root)
+                    return result
                 reentry_converged = True
                 break
 
@@ -4273,12 +4440,17 @@ def run_phase_b(
         # FAIL CLOSED if restaging fails — do not run supervisor on stale state
         # Scope to wave-owned files only — do not sweep unrelated dirty worktree files.
         if changed_files:
-            if not _stage_files(repo_root, changed_files):
+            staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, changed_files)
+            if not staged_ok:
                 _clear_state(repo_root)
                 return {
                     "status": "error",
                     "step": "reentry_staging",
-                    "errors": ["Failed to stage files after re-entry convergence"],
+                    "stderr": stage_detail,
+                    "errors": [
+                        "Failed to stage files after re-entry convergence",
+                        stage_detail,
+                    ],
                 }
 
         # Refresh ALL supervisor package truth for re-entry
@@ -4317,12 +4489,31 @@ def run_phase_b(
             log(f"Post-reentry supervisor summary: {result['pre_commit_summary']}")
 
         if decision == "NEEDS_PHASE_B":
+            changed_files = _collect_wave_owned_files(
+                repo_root,
+                plan_path,
+                plan_declared_files,
+                implementer_changed or None,
+                executor_created or None,
+                baseline_wave_files or None,
+            )
             result["status"] = "needs_phase_b"
+            result["step"] = "post_reentry_supervisor"
             detail = result.get("pre_commit_summary", "")
             message = "Supervisor returned NEEDS_PHASE_B after reentry convergence. Manual intervention required."
             if detail:
                 message += f" {detail}"
+            result["detail"] = message
+            result["reason"] = message
+            result["resume_after"] = "needs_phase_b_reentry"
             result["errors"] = [message]
+            result["changed_files"] = sorted(changed_files)
+            result["bridge_scope_fingerprint"] = _bridge_scope_fingerprint(repo_root, changed_files)
+            result["implementer_changed"] = sorted(implementer_changed)
+            result["executor_created"] = sorted(executor_created)
+            result["baseline_wave_files"] = sorted(baseline_wave_files)
+            result["all_non_blocking"] = all_non_blocking
+            result["finding_history"] = finding_history
             try:
                 _emit_phase_b_hard_fail(
                     repo_root,
@@ -4447,7 +4638,7 @@ def run_phase_b(
         fixes_implemented=["Phase B implementation per locked plan"],
         files_to_stage=wave_owned_files,
         pre_commit_receipt_path=receipt_path,
-        commit_message=f"feat: Phase B implementation for {wave_id}\n\nCo-Authored-By: Codex GPT-5.4 xhigh <noreply@openai.com>",
+        commit_message=f"feat: Phase B implementation for {wave_id}\n\nCo-Authored-By: Codex GPT-5.5 xhigh <noreply@openai.com>",
         pr_title=f"feat: Phase B - {wave_id}",
         pr_body=f"## Summary\nPhase B implementation per locked plan at {plan_path}",
         supervisor_lane="hooks/agents/bridge control-surface",
@@ -4460,6 +4651,27 @@ def run_phase_b(
     result["handoff_path"] = str(handoff_path)
     result["pre_commit_decision"] = decision
     result["receipt_path"] = receipt_path
+    try:
+        _emit_phase_b_event(
+            repo_root,
+            routing_record=routing_record,
+            plan=plan,
+            plan_path=plan_path,
+            event_type="commit_ready",
+            state="commit_ready",
+            transition_key=_phase_b_transition_key(str(receipt_path or result.get("bridge_job_id") or ""), "commit_ready"),
+            summary="Phase B reached commit_ready",
+            artifact_paths={
+                "handoff": str(handoff_path),
+                "supervisor_receipt": str(receipt_path),
+            },
+        )
+    except Exception as exc:
+        result["status"] = "error"
+        result["step"] = "phase_b_pager"
+        result["errors"] = [f"Phase B pager emission failed at commit_ready: {exc}"]
+        _clear_state(repo_root)
+        return result
     # Now that COMMIT_GO is confirmed, advance packet to COMPLETED
     # (deferred from Step 5b to avoid premature COMPLETED on rejection)
     if not plan_path.startswith("<"):
@@ -4519,6 +4731,11 @@ def main() -> int:
              "the wave modifies executor/implementer surfaces themselves. "
              "Not a generic bypass — see CLAUDE.md.",
     )
+    parser.add_argument(
+        "--dispatcher-owned-recovery",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     # Keep --force as hidden alias for backward compatibility in tests
     parser.add_argument(
         "--force",
@@ -4574,7 +4791,10 @@ def main() -> int:
         routing_record_override=routing_record_override,
     )
 
-    if result.get("status") not in ("success", "ready", "commit_ready"):
+    if (
+        result.get("status") not in ("success", "ready", "commit_ready")
+        and not args.dispatcher_owned_recovery
+    ):
         try:
             from recovery_gate import attempt_recovery
         except ImportError:

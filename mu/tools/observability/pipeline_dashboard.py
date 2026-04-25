@@ -20,7 +20,7 @@ if str(EXECUTORS_DIR) not in sys.path:
     sys.path.insert(0, str(EXECUTORS_DIR))
 DEFAULT_AGENT_DISPLAY_NAMES = {
     "claude": "Claude Opus 4.7 max",
-    "codex": "Codex 5.4 xhigh",
+    "codex": "Codex 5.5 xhigh",
 }
 
 try:
@@ -138,6 +138,10 @@ def bridge_role_for_pid(pid):
 
 def _bridge_agent_name_for_command(line: str) -> str | None:
     lowered = line.lower()
+    if "autonomous workingrcx pipeline watchdog tick." in lowered:
+        return None
+    if "workingrcx pipeline pager wakeup." in lowered:
+        return None
     if "codex" in lowered and " exec" in lowered and "codex.app" not in lowered and "codex helper" not in lowered:
         return "codex"
     if "claude" in lowered and "--print" in lowered:
@@ -269,6 +273,10 @@ def _pid_state(pid_value: Any) -> tuple[int, str]:
         return 0, ""
     try:
         os.kill(pid, 0)
+    except PermissionError:
+        return pid, "alive"
+    except ProcessLookupError:
+        return pid, "dead"
     except OSError:
         return pid, "dead"
     return pid, "alive"
@@ -524,9 +532,21 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
         return lines
 
     active = bool(status.get("active"))
+    owner_pid, owner_state = _pid_state(status.get("owner_pid"))
+    child_pid, child_state = _pid_state(status.get("child_pid"))
+    stale_active_owner = (
+        active
+        and owner_pid > 0
+        and owner_state == "dead"
+        and child_pid <= 0
+    )
+    if stale_active_owner:
+        active = False
     age = _age_seconds(status.get("updated_at", ""), now=now)
     label = "ACTIVE"
-    if active and age is not None and age >= _HUNG_THRESHOLD_SECONDS:
+    if stale_active_owner:
+        label = "STALE RECOVERY"
+    elif active and age is not None and age >= _HUNG_THRESHOLD_SECONDS:
         label = "POSSIBLY HUNG"
     elif not active:
         label = "LAST RECOVERY"
@@ -537,6 +557,8 @@ def render_recovery_lines(repo_root: Path, *, now: datetime | None = None) -> li
     lines.append(f"  Problem: {_human_failure_class(failure_class)}")
     if not active:
         lines.append("  No recovery is running now.")
+        if stale_active_owner:
+            lines.append("  Recovery status was left active by a dead owner process.")
 
     wave_id = _excerpt(status.get("wave_id", ""), 80)
     if wave_id:
@@ -637,6 +659,8 @@ def _is_observability_noise(line: str) -> bool:
         or "rcx_log_watcher.sh" in lowered
         or "_pane_" in lowered
         or "pipeline_monitor.sh" in lowered
+        or "autonomous workingrcx pipeline watchdog tick." in lowered
+        or "workingrcx pipeline pager wakeup." in lowered
     )
 
 

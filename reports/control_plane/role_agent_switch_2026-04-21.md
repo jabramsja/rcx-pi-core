@@ -15,7 +15,7 @@ Governing packet: This file
   allowed manual parallel wave while the active pipeline wave continues.
 - The operational trigger is reproduced in live repo truth:
   - main checkout dirty control-plane config already points implementer and
-    reviewer defaults at Codex 5.4 xhigh
+    reviewer defaults at Codex 5.5 xhigh
   - fresh worktrees still inherit committed `dev` truth, which remained
     Claude-backed for `phase_a_executor`, `phase_b_executor`, and
     `bot_remediation`
@@ -78,12 +78,18 @@ Only these files are in scope:
 - Make tmux panes, dashboard text, and post-merge reviewer logs render the
   configured role display names instead of hard-coded `Claude` / `Codex`
   strings
-- Use `.agent_bus/bridge_config.json` catalog metadata (via the example schema)
-  as provider/model/display-name truth for labels
+- Use `executor_config.json` as the tracked switch surface:
+  `role_agents.implementer` / `role_agents.reviewer` select Claude versus
+  Codex, while `bridge_agent_defaults` selects each bridge agent's
+  display/model/effort. Hidden `.agent_bus/bridge_config.json` files remain
+  local command skeletons and are overlaid at load time.
 
 **C. Future switch ergonomics**
 
 - Keep implementer/reviewer switching config-only for both Codex and Claude
+- Keep Codex/Claude model and effort changes config-only through
+  `bridge_agent_defaults`, so changing the current Codex model requires one
+  tracked JSON edit instead of repeated hidden bridge-config edits
 - Preserve backward compatibility for older config shapes that only set
   `backends` / `bridge_reviewers`
 - Keep recovery truthful without widening the wave: Tier 3 recovery already
@@ -140,8 +146,8 @@ Only these files are in scope:
 
 1. `executor_common.py` and `executor_config.json` agree on the committed
    default role-agent truth.
-2. Implementer defaults are Codex 5.4 xhigh in fresh worktrees, and reviewer
-   defaults are Codex 5.4 xhigh in fresh worktrees.
+2. Implementer defaults are Codex 5.5 xhigh in fresh worktrees, and reviewer
+   defaults are Codex 5.5 xhigh in fresh worktrees.
 3. Setting `RCX_IMPLEMENTER_AGENT_OVERRIDE=claude` changes implementer paths
    without retargeting reviewer paths.
 4. Setting `RCX_REVIEWER_AGENT_OVERRIDE=claude` or the legacy
@@ -150,4 +156,8 @@ Only these files are in scope:
 5. Dashboard/tmux/post-merge labels follow the selected provider display names.
 6. Pre-commit meta-review no longer fails in a fresh linked worktree solely
    because `.agent_bus/bridge_config.json` has not yet been copied in.
-7. The candidate diff stays confined to the scoped control-plane files above.
+7. Setting `bridge_agent_defaults.codex.model` and
+   `bridge_agent_defaults.codex.reasoning_effort` changes Codex bridge command
+   arguments through the bridge loader, even when the hidden bridge config still
+   contains stale local command arguments.
+8. The candidate diff stays confined to the scoped control-plane files above.

@@ -16,8 +16,8 @@ Flip four gated-off pipeline controls in a single MAINTENANCE wave:
 3. `backends.phase_a_executor`, `backends.phase_b_executor`,
    `backends.bot_remediation`: `codex` → `claude` (implementer roles move to
    Claude Opus 4.7 max-effort; non-implementer backends `post_merge_supervisor`
-   + `dialectic_executor` stay on codex gpt-5.4 xhigh; `bridge_reviewers.phase_a`
-   + `bridge_reviewers.phase_b` stay on codex gpt-5.4 xhigh).
+   + `dialectic_executor` stay on codex gpt-5.5 xhigh; `bridge_reviewers.phase_a`
+   + `bridge_reviewers.phase_b` stay on codex gpt-5.5 xhigh).
 4. `mu/tools/agents/bridge_config.example.json` claude adapter template: updated
    to explicit `--model claude-opus-4-7 --effort max --verbose --output-format
    stream-json --max-turns 50`, `timeout_s: 900`. Replaces the minimal

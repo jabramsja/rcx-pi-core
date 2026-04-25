@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from mu.tests.tools.module_loader import load_module
 
 _TOOLS_DIR = Path(__file__).resolve().parent.parent.parent / "tools"
@@ -14,6 +16,11 @@ pager_mod = load_module(
     "pipeline_agent_pager",
     _TOOLS_DIR / "observability" / "pipeline_agent_pager.py",
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_live_codex_thread_id(monkeypatch):
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
 
 
 def _write_config(
@@ -69,6 +76,31 @@ def _load_delivery_log(repo_root: Path) -> list[dict]:
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _write_autoping_state(
+    codex_home: Path,
+    repo_root: Path,
+    thread_id: str,
+    *,
+    updated_at: str,
+    status: str = "waiting_for_prior_ping",
+) -> None:
+    state_dir = codex_home / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    safe_thread = "".join(ch if ch.isalnum() or ch in "_.-" else "_" for ch in thread_id)
+    (state_dir / f"rcx_autoping_{safe_thread}.json").write_text(
+        json.dumps(
+            {
+                "thread_id": thread_id,
+                "status": status,
+                "updated_at": updated_at,
+                "bridge_state": {"wave_root": str(repo_root.resolve())},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _codex_initialize_response(request_id: int = 1) -> dict:
@@ -321,6 +353,26 @@ def test_trigger_budget_exhaustion_leaves_pending_target_durable_for_replay(tmp_
     assert calls == ["codex"]
 
 
+def test_dispatcher_state_persists_last_dispatch_provenance(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="notify-only")
+
+    result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+
+    state = _load_state(repo)
+    last_dispatch = state["dispatcher"]["last_dispatch"]
+    assert last_dispatch["event_id"] == result["event_id"]
+    assert last_dispatch["event_type"] == "commit_ready"
+    assert last_dispatch["phase"] == "phase_b"
+    assert last_dispatch["state"] == "commit_ready"
+    assert last_dispatch["target"] == pager_mod.NOTIFY_ONLY_TARGET
+    assert last_dispatch["acknowledged"] is True
+    assert last_dispatch["attempted_at"]
+    assert last_dispatch["completed_at"]
+    assert last_dispatch["summary"] == "commit ready"
+
+
 def test_overlapping_emit_calls_do_not_duplicate_delivery(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -458,7 +510,9 @@ def test_non_loopback_codex_listener_stays_pending_and_reportable(tmp_path, monk
     assert _load_delivery_log(repo) == []
 
 
-def test_unavailable_codex_listener_stays_pending_and_reportable(tmp_path, monkeypatch):
+def test_unavailable_codex_listener_fallback_failure_stays_pending_and_reportable(
+    tmp_path, monkeypatch
+):
     repo = tmp_path / "repo"
     repo.mkdir()
     _write_config(repo, route="codex")
@@ -476,15 +530,28 @@ def test_unavailable_codex_listener_stays_pending_and_reportable(tmp_path, monke
         "_codex_app_server_exchange",
         unavailable_exchange,
     )
+    monkeypatch.setattr(
+        pager_mod,
+        "_dispatch_codex_exec_resume",
+        lambda repo_root, event_record, *, thread_id, timeout_s: {
+            "acknowledged": False,
+            "error": "codex exec resume exited 1: fallback unavailable",
+            "codex_thread_id": thread_id,
+        },
+    )
 
     result = pager_mod.emit_transition_event(repo, **_event_kwargs())
+    expected_error = (
+        "ws://127.0.0.1:8765 unavailable: websocket connection failed; "
+        "codex exec resume exited 1: fallback unavailable"
+    )
 
     assert result["attempted"] == [
         {
             "event_id": result["event_id"],
             "target": "codex",
             "acknowledged": False,
-            "error": "ws://127.0.0.1:8765 unavailable: websocket connection failed",
+            "error": expected_error,
             "receipt_log_warning": "",
         }
     ]
@@ -493,9 +560,7 @@ def test_unavailable_codex_listener_stays_pending_and_reportable(tmp_path, monke
     assert entry["delivered_targets"] == {}
     assert entry["pending_targets"] == ["codex"]
     assert entry["attempts"]["codex"]["count"] == 1
-    assert entry["attempts"]["codex"]["last_error"] == (
-        "ws://127.0.0.1:8765 unavailable: websocket connection failed"
-    )
+    assert entry["attempts"]["codex"]["last_error"] == expected_error
     assert state["codex_thread_id"] == "thread-existing"
     assert _load_delivery_log(repo) == []
 
@@ -590,6 +655,178 @@ def test_codex_ack_rejects_mismatched_thread_id(tmp_path):
     assert failed["codex_thread_id"] == "thread-expected"
 
 
+def test_codex_app_server_dispatch_prefers_live_thread_over_stored_thread(tmp_path, monkeypatch):
+    state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager adapter contract test
+    state["codex_thread_id"] = "thread-stale"
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-live")
+    monkeypatch.setenv("RCX_CODEX_HOME", str(tmp_path / "codex-home"))
+    request_batches: list[list[dict]] = []
+
+    def fake_exchange(url, requests, timeout_s):
+        request_batches.append(requests)
+        return [
+            _codex_initialize_response(1),
+            _codex_turn_response(2, thread_id="thread-live", turn_id="turn-1"),
+        ]
+
+    with patch.object(pager_mod, "_codex_app_server_exchange", side_effect=fake_exchange):
+        result = pager_mod._dispatch_codex(tmp_path, event, state, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is True
+    assert result["codex_thread_id"] == "thread-live"
+    assert [request["method"] for request in request_batches[0]] == [
+        "initialize",
+        "turn/start",
+    ]
+    assert request_batches[0][1]["params"]["threadId"] == "thread-live"
+
+
+def test_codex_app_server_failure_falls_back_to_exec_resume_for_live_thread(tmp_path, monkeypatch):
+    state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager adapter contract test
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+    seen: dict[str, object] = {}
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-live")
+
+    def fake_exec_resume(repo_root, event_record, *, thread_id, timeout_s):
+        seen["repo_root"] = repo_root
+        seen["event_id"] = event_record["event_id"]
+        seen["thread_id"] = thread_id
+        seen["timeout_s"] = timeout_s
+        return {
+            "acknowledged": True,
+            "ack": {
+                "acknowledged_at": "2026-04-17T00:00:00+00:00",
+                "thread_id": thread_id,
+                "target": "codex",
+                "mode": "exec_resume",
+                "pid": 12345,
+            },
+            "codex_thread_id": thread_id,
+        }
+
+    with patch.object(
+        pager_mod,
+        "_codex_app_server_exchange",
+        side_effect=pager_mod.PipelineAgentPagerError("ws://127.0.0.1:8765 unavailable: HTTPError"),
+    ), patch.object(
+        pager_mod,
+        "_dispatch_codex_exec_resume",
+        side_effect=fake_exec_resume,
+    ):
+        fallback = pager_mod._dispatch_codex(tmp_path, event, state, timeout_s=5)  # ANTICHEAT_OK
+
+    assert fallback["acknowledged"] is True
+    assert fallback["ack"]["mode"] == "exec_resume"
+    assert fallback["codex_thread_id"] == "thread-live"
+    assert seen["thread_id"] == "thread-live"
+    assert seen["event_id"] == event["event_id"]
+
+
+def test_codex_node_websocket_unavailable_falls_back_to_exec_resume_for_live_thread(
+    tmp_path, monkeypatch
+):
+    state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager adapter contract test
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+    seen: dict[str, object] = {}
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-live")
+
+    def fake_node_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=1,
+            stdout='{"error":"node WebSocket unavailable"}',
+            stderr="",
+        )
+
+    def fake_exec_resume(repo_root, event_record, *, thread_id, timeout_s):
+        seen["thread_id"] = thread_id
+        seen["timeout_s"] = timeout_s
+        return {
+            "acknowledged": True,
+            "ack": {
+                "acknowledged_at": "2026-04-17T00:00:00+00:00",
+                "thread_id": thread_id,
+                "target": "codex",
+                "mode": "exec_resume",
+                "pid": 12345,
+            },
+            "codex_thread_id": thread_id,
+        }
+
+    monkeypatch.setattr(pager_mod.subprocess, "run", fake_node_run)
+    monkeypatch.setattr(pager_mod, "_dispatch_codex_exec_resume", fake_exec_resume)
+
+    fallback = pager_mod._dispatch_codex(tmp_path, event, state, timeout_s=5)  # ANTICHEAT_OK
+
+    assert fallback["acknowledged"] is True
+    assert fallback["ack"]["mode"] == "exec_resume"
+    assert fallback["codex_thread_id"] == "thread-live"
+    assert seen["thread_id"] == "thread-live"
+    assert seen["timeout_s"] > 0
+
+
+def test_codex_app_server_fallback_returns_failure_when_timeout_is_exhausted(
+    tmp_path,
+    monkeypatch,
+):
+    state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager adapter contract test
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-live")
+
+    def fake_exchange(url, requests, timeout_s):
+        time.sleep(0.01)
+        raise pager_mod.PipelineAgentPagerError(
+            "ws://127.0.0.1:8765 unavailable: HTTPError"
+        )
+
+    with patch.object(
+        pager_mod,
+        "_codex_app_server_exchange",
+        side_effect=fake_exchange,
+    ), patch.object(
+        pager_mod,
+        "_dispatch_codex_exec_resume",
+        side_effect=AssertionError("exhausted timeout must not launch fallback"),
+    ):
+        result = pager_mod._dispatch_codex(tmp_path, event, state, timeout_s=0.001)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is False
+    assert result["codex_thread_id"] == "thread-live"
+    assert "unavailable" in result["error"]
+    assert "timed out before acknowledgement" in result["error"]
+
+
+def test_event_prompt_forbids_headless_pipeline_relaunch():
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager prompt contract test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    prompt = pager_mod._event_prompt(event)  # ANTICHEAT_OK: direct pager prompt contract test
+
+    assert "Do not run shell commands" in prompt
+    assert "Do not edit files" in prompt
+    assert "Do not launch or relaunch executor_dispatch.py" in prompt
+    assert "foreground restart to the operator-visible pipeline surface" in prompt
+
 def test_codex_thread_start_requires_explicit_thread_id_field(tmp_path):
     state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager adapter contract test
     event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
@@ -658,6 +895,344 @@ def test_codex_stale_thread_reseeds_on_explicit_error(tmp_path):
         "thread/start",
         "turn/start",
     ]
+
+
+def test_codex_exec_resume_fallback_prefers_live_thread_over_stored_thread(tmp_path, monkeypatch):
+    state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager adapter contract test
+    state["codex_thread_id"] = "thread-stale"
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+    seen: dict[str, object] = {}
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-live")
+
+    def fake_exec_resume(repo_root, event_record, *, thread_id, timeout_s):
+        seen["repo_root"] = repo_root
+        seen["event_id"] = event_record["event_id"]
+        seen["thread_id"] = thread_id
+        seen["timeout_s"] = timeout_s
+        return {
+            "acknowledged": True,
+            "ack": {
+                "acknowledged_at": "2026-04-17T00:00:00+00:00",
+                "thread_id": thread_id,
+                "target": "codex",
+                "mode": "exec_resume",
+                "pid": 12345,
+            },
+            "codex_thread_id": thread_id,
+        }
+
+    with patch.object(
+        pager_mod,
+        "_codex_app_server_exchange",
+        side_effect=pager_mod.PipelineAgentPagerError("ws://127.0.0.1:8765 unavailable: HTTPError"),
+    ), patch.object(
+        pager_mod,
+        "_dispatch_codex_exec_resume",
+        side_effect=fake_exec_resume,
+    ):
+        result = pager_mod._dispatch_codex(tmp_path, event, state, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is True
+    assert result["codex_thread_id"] == "thread-live"
+    assert result["ack"]["mode"] == "exec_resume"
+    assert seen["thread_id"] == "thread-live"
+
+
+def test_codex_exec_resume_fallback_uses_autoping_thread_when_env_missing(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.setenv("RCX_CODEX_HOME", str(codex_home))
+    _write_autoping_state(
+        codex_home,
+        repo,
+        "thread-live",
+        updated_at="2026-04-24T18:48:05+00:00",
+    )
+    state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager adapter contract test
+    state["codex_thread_id"] = "thread-stale"
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+    seen: dict[str, object] = {}
+
+    def fake_exec_resume(repo_root, event_record, *, thread_id, timeout_s):
+        seen["thread_id"] = thread_id
+        return {
+            "acknowledged": True,
+            "ack": {
+                "acknowledged_at": "2026-04-17T00:00:00+00:00",
+                "thread_id": thread_id,
+                "target": "codex",
+                "mode": "exec_resume",
+                "pid": 12345,
+            },
+            "codex_thread_id": thread_id,
+        }
+
+    with patch.object(
+        pager_mod,
+        "_codex_app_server_exchange",
+        side_effect=pager_mod.PipelineAgentPagerError("ws://127.0.0.1:8765 unavailable: HTTPError"),
+    ), patch.object(
+        pager_mod,
+        "_dispatch_codex_exec_resume",
+        side_effect=fake_exec_resume,
+    ):
+        result = pager_mod._dispatch_codex(repo, event, state, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is True
+    assert result["codex_thread_id"] == "thread-live"
+    assert seen["thread_id"] == "thread-live"
+
+
+def test_codex_exec_resume_fallback_skips_paused_context_exhausted_autoping_thread(
+    tmp_path,
+    monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.setenv("RCX_CODEX_HOME", str(codex_home))
+    _write_autoping_state(
+        codex_home,
+        repo,
+        "thread-exhausted",
+        updated_at="2026-04-24T18:48:05+00:00",
+        status="context_exhausted_paused",
+    )
+    state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager adapter contract test
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    with patch.object(
+        pager_mod,
+        "_codex_app_server_exchange",
+        side_effect=pager_mod.PipelineAgentPagerError(
+            "ws://127.0.0.1:8765 unavailable: HTTPError"
+        ),
+    ), patch.object(
+        pager_mod,
+        "_dispatch_codex_exec_resume",
+        side_effect=AssertionError("exhausted autoping thread must not be resumed"),
+    ):
+        result = pager_mod._dispatch_codex(repo, event, state, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is False
+    assert "unavailable" in result["error"]
+
+
+def test_codex_exec_resume_fallback_skips_paused_context_exhausted_env_thread(
+    tmp_path,
+    monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-exhausted")
+    monkeypatch.setenv("RCX_CODEX_HOME", str(codex_home))
+    _write_autoping_state(
+        codex_home,
+        repo,
+        "thread-exhausted",
+        updated_at="2026-04-24T18:48:05+00:00",
+        status="context_exhausted_paused",
+    )
+    state = pager_mod._default_state()  # ANTICHEAT_OK: direct pager adapter contract test
+    state["codex_thread_id"] = "thread-exhausted"
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    with patch.object(
+        pager_mod,
+        "_codex_app_server_exchange",
+        side_effect=pager_mod.PipelineAgentPagerError(
+            "ws://127.0.0.1:8765 unavailable: HTTPError"
+        ),
+    ), patch.object(
+        pager_mod,
+        "_dispatch_codex_exec_resume",
+        side_effect=AssertionError("exhausted ambient thread must not be resumed"),
+    ):
+        result = pager_mod._dispatch_codex(repo, event, state, timeout_s=5)  # ANTICHEAT_OK
+
+    assert result["acknowledged"] is False
+    assert "unavailable" in result["error"]
+
+
+def test_replay_prefers_autoping_thread_over_stale_delivery_receipt(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="codex")
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.setenv("RCX_CODEX_HOME", str(codex_home))
+    _write_autoping_state(
+        codex_home,
+        repo,
+        "thread-live",
+        updated_at="2026-04-24T18:48:05+00:00",
+    )
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager state reconciliation test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+    event_log_path = repo / pager_mod.EVENT_LOG_PATH
+    event_log_path.parent.mkdir(parents=True, exist_ok=True)
+    event_log_path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+    delivery_path = repo / pager_mod.DELIVERY_LOG_PATH
+    delivery_path.write_text(
+        json.dumps(
+            {
+                "event_id": event["event_id"],
+                "target": "codex",
+                "ack": {
+                    "acknowledged_at": "2026-04-24T18:47:07+00:00",
+                    "target": "codex",
+                    "thread_id": "thread-stale",
+                },
+                "codex_thread_id": "thread-stale",
+                "recorded_at": "2026-04-24T18:47:07+00:00",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    replay = pager_mod.dispatch_pending_events(repo)
+
+    assert replay["attempted"] == []
+    state = _load_state(repo)
+    assert state["codex_thread_id"] == "thread-live"
+    entry = state["events"][event["event_id"]]
+    assert entry["pending_targets"] == []
+
+
+def test_codex_exec_resume_env_preserves_live_codex_environment(monkeypatch):
+    monkeypatch.setenv("HOME", "/tmp/rcx-codex-runtime-home")
+    monkeypatch.setenv("CODEX_HOME", "/tmp/rcx-codex-runtime-home")
+    monkeypatch.setenv("RCX_CODEX_HOME", "/tmp/rcx-codex-runtime-home")
+    monkeypatch.setenv("KEEP_ME", "yes")
+
+    env = pager_mod._codex_exec_resume_env()  # ANTICHEAT_OK: direct pager adapter contract test
+
+    assert env["HOME"] == "/tmp/rcx-codex-runtime-home"
+    assert env["CODEX_HOME"] == "/tmp/rcx-codex-runtime-home"
+    assert env["RCX_CODEX_HOME"] == "/tmp/rcx-codex-runtime-home"
+    assert env["KEEP_ME"] == "yes"
+
+
+def test_codex_exec_resume_command_uses_read_only_sandbox_without_bypass():
+    command = pager_mod._codex_exec_resume_command(  # ANTICHEAT_OK: pager argv contract test
+        "codex-bin",
+        "thread-live",
+        "wake prompt",
+    )
+
+    assert command[:3] == [
+        "codex-bin",
+        "exec",
+        "resume",
+    ]
+    assert "--ignore-user-config" in command
+    assert "--ignore-rules" in command
+    disabled_features = {
+        command[index + 1]
+        for index, value in enumerate(command[:-1])
+        if value == "--disable"
+    }
+    assert disabled_features == set(pager_mod.CODEX_NO_TOOLS_DISABLED_FEATURES)
+    assert 'sandbox_mode="read-only"' in command
+    assert 'approval_policy="never"' in command
+    assert command[-2:] == ["thread-live", "wake prompt"]
+    assert "--dangerously-bypass-approvals-and-sandbox" not in command
+
+
+def test_codex_exec_resume_requires_success_before_acknowledgement(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+    terminated: list[int] = []
+
+    class RunningPopen:
+        pid = 4242
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def wait(self, timeout=None):
+            raise subprocess.TimeoutExpired(["codex"], timeout)
+
+    monkeypatch.setattr(pager_mod.subprocess, "Popen", RunningPopen)
+    monkeypatch.setattr(
+        pager_mod,
+        "_terminate_process_group",
+        lambda proc: terminated.append(proc.pid),
+    )
+
+    result = pager_mod._dispatch_codex_exec_resume(  # ANTICHEAT_OK: direct pager adapter contract test
+        repo,
+        event,
+        thread_id="thread-live",
+        timeout_s=0.01,
+    )
+
+    assert result["acknowledged"] is False
+    assert result["codex_thread_id"] == "thread-live"
+    assert "timed out" in result["error"]
+    assert terminated == [4242]
+
+
+def test_codex_exec_resume_acknowledges_only_zero_exit(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    event = pager_mod._build_event_record(  # ANTICHEAT_OK: direct pager adapter contract test
+        route="codex",
+        metadata=None,
+        **_event_kwargs(),
+    )
+
+    class SuccessfulPopen:
+        pid = 4243
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(pager_mod.subprocess, "Popen", SuccessfulPopen)
+
+    result = pager_mod._dispatch_codex_exec_resume(  # ANTICHEAT_OK: direct pager adapter contract test
+        repo,
+        event,
+        thread_id="thread-live",
+        timeout_s=0.01,
+    )
+
+    assert result["acknowledged"] is True
+    assert result["ack"]["mode"] == "exec_resume"
+    assert result["ack"]["thread_id"] == "thread-live"
+    assert result["ack"]["pid"] == 4243
 
 
 def test_replay_uses_delivery_receipt_log_after_state_persist_crash(tmp_path, monkeypatch):
@@ -1199,3 +1774,15 @@ def test_session_start_hook_writes_orchestrator_session_id_for_pager_read(tmp_pa
             f"hook wrote file for malformed payload {payload_bad!r}: "
             f"{bad_target.read_text() if bad_target.exists() else '<missing>'}"
         )
+
+
+def test_codex_exec_resume_env_preserves_rcx_overlay_when_present(monkeypatch):
+    monkeypatch.setenv("HOME", "/tmp/real-home")
+    monkeypatch.setenv("CODEX_HOME", "/tmp/real-codex-home")
+    monkeypatch.setenv("RCX_CODEX_HOME", "/tmp/rcx-overlay")
+
+    env = pager_mod._codex_exec_resume_env()  # ANTICHEAT_OK: tool unit test
+
+    assert env["HOME"] == "/tmp/real-home"
+    assert env["CODEX_HOME"] == "/tmp/real-codex-home"
+    assert env["RCX_CODEX_HOME"] == "/tmp/rcx-overlay"

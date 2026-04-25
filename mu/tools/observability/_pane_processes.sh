@@ -174,13 +174,43 @@ human_gate_decision() {
   esac
 }
 
+command_matches_live_keyword() {
+  local kw="$1" cmd="$2"
+  case "$kw" in
+    phase_a_executor|phase_b_executor|commit_executor|executor_dispatch|bridge_supervisor|meta_bridge_supervisor)
+      case "$cmd" in
+        *"/${kw}.py"*|*" ${kw}.py"*)
+          return 0
+          ;;
+      esac
+      return 1
+      ;;
+    *)
+      case "$cmd" in
+        *"$kw"*) return 0 ;;
+      esac
+      return 1
+      ;;
+  esac
+}
+
+is_control_plane_resume_command() {
+  local cmd="$1"
+  case "$cmd" in
+    *"Autonomous WorkingRCX pipeline watchdog tick."*|*"WorkingRCX pipeline pager wakeup."*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 find_live_pid() {
   local kw="$1" pid cmd
   while IFS= read -r pid; do
     [ -z "$pid" ] && continue
     cmd=$(ps -p "$pid" -o command= 2>/dev/null) || continue
     case "$cmd" in
-      *"tail -f "*|*"rcx_log_watcher.sh"*|*"_pane_"*|*"pipeline_monitor.sh"*)
+      *"tail -f "*|*"rcx_log_watcher.sh"*|*/_pane_*.sh*|*"pipeline_monitor.sh"*)
         continue
         ;;
       # Skip shell wrappers and tee — they contain executor keywords in
@@ -190,8 +220,9 @@ find_live_pid() {
         continue
         ;;
     esac
+    is_control_plane_resume_command "$cmd" && continue
     pid_matches_repo_root "$pid" || continue
-    if echo "$cmd" | grep -q "$kw"; then
+    if command_matches_live_keyword "$kw" "$cmd"; then
       printf "%s\n" "$pid"
       return 0
     fi
@@ -208,7 +239,7 @@ pid_matches_repo_root() {
   local pid="$1" cmd cwd
   cmd=$(ps -p "$pid" -o command= 2>/dev/null || true)
   case "$cmd" in
-    *"$REPO_ROOT"*) return 0 ;;
+    *"$REPO_ROOT"* ) return 0 ;;
   esac
   cwd="$(pid_cwd "$pid")"
   [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ]
@@ -225,16 +256,166 @@ pid_command() {
 }
 
 bridge_agent_name_for_command() {
-  local cmd="$1"
-  if echo "$cmd" | grep -E -i -q '(^|[ /])codex([[:space:]]|$).*(^|[[:space:]])exec([[:space:]]|$)'; then
-    printf '%s\n' "codex"
-    return 0
-  fi
-  if echo "$cmd" | grep -E -i -q '(^|[ /])claude([[:space:]]|$).*--print'; then
-    printf '%s\n' "claude"
-    return 0
-  fi
+  local cmd="$1" lowered=""
+  is_control_plane_resume_command "$cmd" && return 1
+  lowered="$(printf '%s' "$cmd" | tr '[:upper:]' '[:lower:]')"
+  case "$lowered" in
+    *"codex exec"*)
+      case "$lowered" in
+        *"codex.app"*|*"codex helper"*) ;;
+        *)
+          printf '%s\n' "codex"
+          return 0
+          ;;
+      esac
+      ;;
+  esac
+  case "$lowered" in
+    *"claude"*--print*)
+      printf '%s\n' "claude"
+      return 0
+      ;;
+  esac
   return 1
+}
+
+render_pager_dispatch_line() {
+  python3 - "$REPO_ROOT" <<'PY' 2>/dev/null
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from pathlib import Path
+import sys
+
+repo_root = Path(sys.argv[1]).resolve()
+state_path = repo_root / ".agent_bus" / "observability" / "pipeline_agent_pager_state.json"
+if not state_path.is_file():
+    raise SystemExit(0)
+
+try:
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(0)
+
+dispatcher = payload.get("dispatcher")
+if not isinstance(dispatcher, dict):
+    raise SystemExit(0)
+last_dispatch = dispatcher.get("last_dispatch")
+if not isinstance(last_dispatch, dict):
+    raise SystemExit(0)
+
+event_type = str(last_dispatch.get("event_type") or "").strip()
+if not event_type:
+    raise SystemExit(0)
+
+attempted_at = str(last_dispatch.get("attempted_at") or "").strip()
+stamp = ""
+if attempted_at:
+    try:
+        stamp = datetime.fromisoformat(attempted_at.replace("Z", "+00:00")).astimezone().strftime("%H:%M:%S")
+    except ValueError:
+        stamp = attempted_at
+
+parts = []
+if stamp:
+    parts.append(stamp)
+parts.append(event_type)
+phase = str(last_dispatch.get("phase") or "").strip()
+state = str(last_dispatch.get("state") or "").strip()
+if phase or state:
+    parts.append(" / ".join(part for part in (phase, state) if part))
+target = str(last_dispatch.get("target") or "").strip()
+if target:
+    parts.append(f"target {target}")
+ack = last_dispatch.get("acknowledged")
+if ack is True:
+    parts.append("ack yes")
+elif ack is False:
+    parts.append("ack no")
+
+summary = " ".join(str(last_dispatch.get("summary") or "").split())
+if summary:
+    parts.append(summary[:72] + ("..." if len(summary) > 72 else ""))
+
+print(" | ".join(parts))
+PY
+}
+
+render_autoping_attention_line() {
+  python3 - "$REPO_ROOT" <<'PY' 2>/dev/null
+from __future__ import annotations
+
+import json
+import os
+from datetime import datetime
+from pathlib import Path
+import sys
+
+repo_root = Path(sys.argv[1]).resolve()
+codex_home_raw = os.environ.get("RCX_CODEX_HOME") or os.environ.get("CODEX_HOME")
+codex_home = Path(codex_home_raw).expanduser() if codex_home_raw else Path.home() / ".codex"
+state_dir = codex_home / "state"
+if not state_dir.is_dir():
+    raise SystemExit(0)
+
+
+def parse_stamp(value: object) -> float:
+    if not isinstance(value, str) or not value:
+        return 0.0
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def same_repo(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        return Path(value).resolve() == repo_root
+    except OSError:
+        return False
+
+
+def read_summary(payload: dict[str, object]) -> str:
+    value = payload.get("last_summary")
+    if isinstance(value, str) and value.strip():
+        return " ".join(value.split())
+    summary_path = payload.get("summary_path")
+    if isinstance(summary_path, str) and summary_path:
+        try:
+            return " ".join(Path(summary_path).read_text(encoding="utf-8", errors="replace").split())
+        except OSError:
+            return ""
+    return ""
+
+
+best: tuple[float, str] | None = None
+for state_path in state_dir.glob("rcx_autoping_*.json"):
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        continue
+    if not isinstance(payload, dict):
+        continue
+    if payload.get("status") != "attention_required":
+        continue
+    bridge_state = payload.get("bridge_state")
+    if not isinstance(bridge_state, dict):
+        bridge_state = {}
+    if not (same_repo(payload.get("wave_root")) or same_repo(bridge_state.get("wave_root"))):
+        continue
+    summary = read_summary(payload) or "autoping reports operator attention is required"
+    if len(summary) > 180:
+        summary = summary[:177].rstrip() + "..."
+    rank = parse_stamp(payload.get("last_attention_at") or payload.get("updated_at"))
+    if best is None or rank >= best[0]:
+        best = (rank, summary)
+
+if best is not None:
+    print(best[1])
+PY
 }
 
 pid_has_ancestor_matching() {
@@ -304,8 +485,13 @@ while true; do
     fi
   fi
 
+  autoping_attention="$(render_autoping_attention_line)"
   if [ "$phase" = "idle" ]; then
-    echo -e "  ${DIM}No pipeline step is running. Waiting for the next wave.${RESET}"
+    if [ -n "$autoping_attention" ]; then
+      echo -e "  ${DIM}No pipeline step is running. Autoping reports operator attention is required.${RESET}"
+    else
+      echo -e "  ${DIM}No pipeline step is running. Waiting for the next wave.${RESET}"
+    fi
   else
     started=$(ps -p "$phase_pid" -o lstart= 2>/dev/null | xargs)
     started_ts=""
@@ -319,6 +505,7 @@ while true; do
   echo ""
 
   worker_lines=0
+  attention_lines=0
 
   # Check for bridge-agent workers. The configured reviewer/implementer may be
   # Codex or Claude, so infer role from the live parent chain.
@@ -338,6 +525,7 @@ while true; do
       case "$cmd" in
         "bash -c "*|*/bash\ -c\ *|"tee "*) continue ;;
       esac
+      is_control_plane_resume_command "$cmd" && continue
       bridge_agent_name_for_command "$cmd" >/dev/null || continue
       pid_matches_repo_root "$pid" || continue
       role="$(bridge_role_for_pid "$pid")"
@@ -447,7 +635,14 @@ else:
     echo -e "  ${DIM}A pipeline step is running, but no model subprocess is active yet.${RESET}"
   fi
 
-  if [ "$worker_lines" -eq 0 ]; then
+  if [ -n "$autoping_attention" ]; then
+    echo -e "${BOLD}ATTENTION${RESET}"
+    echo "─────────────────────────────────────"
+    echo -e "  ${RED}Autoping attention:${RESET} $autoping_attention"
+    attention_lines=$((attention_lines + 1))
+  fi
+
+  if [ "$worker_lines" -eq 0 ] && [ "$attention_lines" -eq 0 ]; then
     echo -e "  ${DIM}Nobody is working right now.${RESET}"
   fi
 
@@ -576,6 +771,12 @@ else:
       echo ""
     fi
     rm -f "$RECOVERY_TMP"
+  fi
+
+  pager_line="$(render_pager_dispatch_line)"
+  if [ -n "$pager_line" ]; then
+    echo -e "  ${DIM}Last pager wake:${RESET} $pager_line"
+    echo ""
   fi
 
   } > "$TMPOUT" 2>/dev/null

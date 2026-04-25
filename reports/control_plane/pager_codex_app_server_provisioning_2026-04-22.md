@@ -1,8 +1,8 @@
 # Pager Codex App Server Provisioning
 
-Task: `[PIPELINE-AGENT-PAGER]`  
-Wave ID: `pager-codex-app-server-provisioning`  
-Date: `2026-04-22`  
+Task: `[PIPELINE-AGENT-PAGER]`
+Wave ID: `pager-codex-app-server-provisioning`
+Date: `2026-04-22`
 Status: ACTIVE
 Phase-A-Lock: LOCKED
 

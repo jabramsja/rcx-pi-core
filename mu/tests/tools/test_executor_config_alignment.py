@@ -71,6 +71,14 @@ def _load_json_config_role_agents() -> dict[str, str]:
     return json.loads(CONFIG_JSON_PATH.read_text(encoding="utf-8"))["role_agents"]
 
 
+def _load_default_executor_config_bridge_agent_defaults() -> dict[str, dict[str, str]]:
+    return _load_default_executor_config()["bridge_agent_defaults"]
+
+
+def _load_json_config_bridge_agent_defaults() -> dict[str, dict[str, str]]:
+    return json.loads(CONFIG_JSON_PATH.read_text(encoding="utf-8"))["bridge_agent_defaults"]
+
+
 class TestExecutorConfigJsonValid:
     def test_config_json_exists_and_valid(self):
         assert CONFIG_JSON_PATH.exists(), "executor_config.json missing"
@@ -234,3 +242,23 @@ class TestRoleAgentConfigAlignment:
         defaults = _load_default_executor_config_role_agents()
         live = _load_json_config_role_agents()
         assert set(defaults) == set(live) == {"implementer", "reviewer"}
+
+
+class TestBridgeAgentDefaultConfigAlignment:
+    def test_bridge_agent_defaults_match_between_default_and_live_config(self):
+        defaults = _load_default_executor_config_bridge_agent_defaults()
+        live = _load_json_config_bridge_agent_defaults()
+        assert defaults == live
+
+    def test_bridge_agent_defaults_define_provider_model_and_effort_switches(self):
+        defaults = _load_json_config_bridge_agent_defaults()
+        assert defaults["claude"] == {
+            "display_name": "Claude Opus 4.7 max",
+            "model": "claude-opus-4-7",
+            "effort": "max",
+        }
+        assert defaults["codex"] == {
+            "display_name": "Codex 5.5 xhigh",
+            "model": "gpt-5.5",
+            "reasoning_effort": "xhigh",
+        }

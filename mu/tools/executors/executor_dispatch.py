@@ -32,6 +32,7 @@ try:
         DEFAULT_EXECUTOR_CONFIG,
         load_executor_config as _common_load_executor_config,
         load_routing_record as _common_load_routing_record,
+        build_and_write_routing_record as _common_build_and_write_routing_record,
         ROUTING_RECORD_PATH as _COMMON_ROUTING_RECORD_PATH,
         merge_executor_config_overrides,
         ensure_not_agent_review_mode,
@@ -49,6 +50,7 @@ except ImportError:
     DEFAULT_EXECUTOR_CONFIG = _mod.DEFAULT_EXECUTOR_CONFIG
     _common_load_executor_config = _mod.load_executor_config
     _common_load_routing_record = _mod.load_routing_record
+    _common_build_and_write_routing_record = _mod.build_and_write_routing_record
     _COMMON_ROUTING_RECORD_PATH = _mod.ROUTING_RECORD_PATH
     merge_executor_config_overrides = _mod.merge_executor_config_overrides
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
@@ -128,6 +130,7 @@ SURFACE_COMMANDS = {
 }
 
 DEFAULT_CONFIG_PATH = SCRIPT_DIR / "executor_config.json"
+PHASE_B_RECOVERY_PLAN_ENV = "RCX_RECOVERY_PHASE_B_PLAN_PATH"
 
 
 class DispatchError(RuntimeError):
@@ -240,6 +243,41 @@ def _canonicalize_surface_task_id(task_id: str) -> str:
     return f"[{clean}]"
 
 
+def _surface_phase_b_plan_from_routing_payload(routing_payload: str | None) -> str | None:
+    """Prefer tracked_packet from a Phase B routing payload when no explicit plan is given."""
+    if not routing_payload:
+        return None
+    try:
+        record = json.loads(routing_payload)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    candidates = record.get("next_candidates")
+    if not isinstance(candidates, list):
+        return None
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        tracked_packet = str(candidate.get("tracked_packet") or "").strip()
+        if tracked_packet:
+            return tracked_packet
+    return None
+
+
+def _routing_record_tracked_packet(record: dict[str, Any]) -> str:
+    candidates = record.get("next_candidates")
+    if not isinstance(candidates, list):
+        return ""
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        tracked_packet = str(candidate.get("tracked_packet") or "").strip()
+        if tracked_packet:
+            return tracked_packet
+    return ""
+
+
 def build_surface_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Modular control-plane entrypoint for executors and supervisors",
@@ -309,13 +347,20 @@ def build_surface_command(args: argparse.Namespace) -> list[str]:
             str(SCRIPT_DIR / "phase_b_executor.py"),
             "--max-rounds",
             str(args.max_rounds),
+            "--dispatcher-owned-recovery",
         ]
-        if args.plan:
-            cmd.extend(["--plan", args.plan])
         routing_payload = _load_routing_record_payload(
             path_value=args.routing_record_path,
             json_value=args.routing_record_json,
         )
+        recovery_plan_path = os.environ.get(PHASE_B_RECOVERY_PLAN_ENV, "").strip()
+        plan_path = (
+            args.plan
+            or _surface_phase_b_plan_from_routing_payload(routing_payload)
+            or recovery_plan_path
+        )
+        if plan_path:
+            cmd.extend(["--plan", plan_path])
         if routing_payload:
             cmd.extend(["--routing-record", routing_payload])
         if args.bootstrap_exception:
@@ -449,6 +494,20 @@ def _surface_decision(args: argparse.Namespace) -> str:
     raise ControlSurfaceError(f"Unsupported recoverable surface: {args.surface}")
 
 
+def _reload_explicit_routing_record(
+    path: Path | None,
+    *,
+    verbose: bool = False,
+) -> dict[str, Any] | None:
+    """Best-effort reload for caller-owned routing files between retries."""
+    if path is None:
+        return None
+    record = _load_routing_record_json(path)
+    if record is None and verbose:
+        print(f"[dispatch] Explicit routing reload skipped: could not parse {path}")
+    return record
+
+
 def run_recoverable_surface_command(
     args: argparse.Namespace,
     *,
@@ -456,7 +515,6 @@ def run_recoverable_surface_command(
     config: dict[str, Any],
 ) -> int:
     """Run recoverable control surfaces through the dispatcher recovery gate."""
-    cmd = build_surface_command(args)
     executor_name = {
         "phase-a": "phase_a_executor",
         "phase-b": "phase_b_executor",
@@ -488,6 +546,7 @@ def run_recoverable_surface_command(
                     return 0
                 result = retried
             else:
+                cmd = build_surface_command(args)
                 _default_timeout = DEFAULT_EXECUTOR_CONFIG["timeouts"].get(executor_name, 600)
                 timeout = config.get("timeouts", {}).get(executor_name, _default_timeout)
                 try:
@@ -550,6 +609,18 @@ def run_recoverable_surface_command(
                         "stderr": "",
                     }
 
+            embedded_recovery = result.get("recovery")
+            if isinstance(embedded_recovery, dict) and embedded_recovery.get("recovered"):
+                if getattr(args, "verbose", False):
+                    print(
+                        "[dispatch] Surface Phase B recovered in-process — "
+                        "retrying before commit chain"
+                    )
+                _clear_phase_b_state_for_retry(
+                    repo_root, result, verbose=getattr(args, "verbose", False)
+                )
+                continue
+
             if result.get("status") == "failed" and _is_terminal_executor_outcome(result):
                 break
 
@@ -576,9 +647,16 @@ def run_recoverable_surface_command(
                 repo_root, original_timeouts,
                 verbose=getattr(args, "verbose", False),
             )
-            config["timeouts"] = dict(original_timeouts)
+            config["timeouts"] = _recovery_original_section(original_timeouts, "timeouts")
+            config["bridge_turn_timeouts"] = _recovery_original_section(
+                original_timeouts, "bridge_turn_timeouts"
+            )
         for env_key in list(os.environ):
-            if env_key.startswith("RCX_RECOVERY_ORIGINAL_TIMEOUT_"):
+            if env_key.startswith((
+                "RCX_RECOVERY_ORIGINAL_TIMEOUT_",
+                "RCX_RECOVERY_ORIGINAL_BRIDGE_TURN_TIMEOUT_",
+                PHASE_B_RECOVERY_PLAN_ENV,
+            )):
                 os.environ.pop(env_key, None)
 
 
@@ -609,6 +687,46 @@ def _validate_phase_b_handoff_identity(handoff_path: Path, record: dict[str, Any
         )
 
     return True, "ok"
+
+
+def _phase_b_tracked_plan_or_error(
+    repo: Path,
+    record: dict[str, Any],
+    *,
+    include_recovery_env: bool = False,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Resolve a Phase B tracked packet path, optionally from recovery env."""
+    for candidate in record.get("next_candidates", []):
+        if not isinstance(candidate, dict):
+            continue
+        tracked_packet = candidate.get("tracked_packet")
+        if tracked_packet and isinstance(tracked_packet, str):
+            plan_path = tracked_packet
+            break
+    else:
+        plan_path = None
+
+    if not plan_path and include_recovery_env:
+        plan_path = os.environ.get(PHASE_B_RECOVERY_PLAN_ENV, "").strip() or None
+    if not plan_path:
+        return None, None
+
+    plan_resolved = (repo / plan_path).resolve()
+    if Path(plan_path).is_absolute() or ".." in Path(plan_path).parts:
+        return None, {
+            "status": "error",
+            "decision": record.get("decision", ""),
+            "executor": "phase_b_executor",
+            "message": f"Path traversal in tracked_packet: {plan_path}",
+        }
+    if not plan_resolved.is_relative_to(repo.resolve()):
+        return None, {
+            "status": "error",
+            "decision": record.get("decision", ""),
+            "executor": "phase_b_executor",
+            "message": f"tracked_packet escapes repo root: {plan_path}",
+        }
+    return plan_path, None
 
 
 def _is_terminal_executor_outcome(result: dict[str, Any]) -> bool:
@@ -712,6 +830,29 @@ def _classify_commit_executor_result(
     if "[commit-executor] Status: error" in stdout:
         return "failed", "COMMIT_GO"
     return "success", "COMMIT_GO"
+
+
+def _extract_structured_stdout_payload(stdout: str) -> dict[str, Any] | None:
+    """Best-effort decode of executor stdout JSON."""
+    if not stdout:
+        return None
+    try:
+        payload = json.loads(stdout)
+        if isinstance(payload, dict):
+            return payload
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("{"):
+            continue
+        try:
+            payload = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
 
 def _parse_worktree_list(output: str) -> list[dict[str, str]]:
     """Parse `git worktree list --porcelain` into entry dicts."""
@@ -863,6 +1004,7 @@ def _continue_successful_executor_chain(
             str(SCRIPT_DIR / "phase_b_executor.py"),
             "--plan", plan_path,
             "--routing-record", json.dumps(phase_b_routing),
+            "--dispatcher-owned-recovery",
             "--json",
         ]
         try:
@@ -904,6 +1046,46 @@ def _continue_successful_executor_chain(
         handoff_path = repo_root / ".agent_bus" / "executors" / "phase_b_handoff.json"
         if not handoff_path.exists():
             origin = chain_origin or "phase_b_executor"
+            payload = _extract_structured_stdout_payload(completed.stdout or "")
+            if isinstance(payload, dict):
+                recovery = payload.get("recovery")
+                status = payload.get("status")
+                if (
+                    isinstance(recovery, dict)
+                    and recovery.get("recovered")
+                    and status not in {"success", "ready", "commit_ready"}
+                ):
+                    return {
+                        "status": "failed",
+                        "decision": "ROUTE_PHASE_B",
+                        "executor": executor_name,
+                        "exit_code": completed.returncode,
+                        "stdout": completed.stdout,
+                        "stderr": completed.stderr,
+                        "message": (
+                            "Phase B recovered in-process and must be retried "
+                            "before chaining commit"
+                        ),
+                        "recovery": recovery,
+                        "chained_from": (
+                            "phase_a_executor" if origin == "phase_a_executor" else None
+                        ),
+                    }
+                if status not in {None, "success", "ready", "commit_ready"}:
+                    return {
+                        "status": "failed",
+                        "decision": "ROUTE_PHASE_B",
+                        "executor": executor_name,
+                        "exit_code": completed.returncode,
+                        "stdout": completed.stdout,
+                        "stderr": completed.stderr,
+                        "message": (
+                            f"Phase B exited 0 with status {status} but produced no handoff"
+                        ),
+                        "chained_from": (
+                            "phase_a_executor" if origin == "phase_a_executor" else None
+                        ),
+                    }
             return {
                 "status": "failed",
                 "decision": "ROUTE_PHASE_B",
@@ -1120,7 +1302,7 @@ def _apply_recovery_overrides(
     config: dict[str, Any],
     repo_root: Path | None = None,
     verbose: bool = False,
-) -> dict[str, Any] | None:
+) -> dict[str, dict[str, Any]] | None:
     """Apply Tier 2 recovery env var overrides to config for retry.
 
     fix_process_timeout sets RCX_RECOVERY_TIMEOUT_OVERRIDE (and
@@ -1132,11 +1314,11 @@ def _apply_recovery_overrides(
     subprocesses which reload config from disk (e.g. phase_b_implementer)
     pick up the adjusted values.
 
-    Returns original disk timeouts dict if disk was modified (caller
+    Returns original disk timeout sections if disk was modified (caller
     should pass to _restore_config_on_disk after retry), or None.
     """
     disk_config = None
-    original_timeouts = None
+    original_config = None
     config_path = None
     disk_modified = False
 
@@ -1144,7 +1326,10 @@ def _apply_recovery_overrides(
         config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
         try:
             disk_config = json.loads(config_path.read_text(encoding="utf-8"))
-            original_timeouts = dict(disk_config.get("timeouts", {}))
+            original_config = {
+                "timeouts": dict(disk_config.get("timeouts", {})),
+                "bridge_turn_timeouts": dict(disk_config.get("bridge_turn_timeouts", {})),
+            }
         except (json.JSONDecodeError, OSError):
             disk_config = None
 
@@ -1166,6 +1351,25 @@ def _apply_recovery_overrides(
         # retries or --loop waves (Bridge R4 Finding fix).
         os.environ.pop("RCX_RECOVERY_TIMEOUT_OVERRIDE", None)
         os.environ.pop("RCX_RECOVERY_TIMEOUT_KEY", None)
+
+    bridge_turn_timeout_override = os.environ.get("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE")
+    if bridge_turn_timeout_override:
+        try:
+            val = int(bridge_turn_timeout_override)
+            phase_key = os.environ.get("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", "phase_b")
+            config.setdefault("bridge_turn_timeouts", {})[phase_key] = val
+            if disk_config is not None:
+                disk_config.setdefault("bridge_turn_timeouts", {})[phase_key] = val
+                disk_modified = True
+            if verbose:
+                print(
+                    "[dispatch] Applied bridge turn timeout override: "
+                    f"{phase_key}={val}s"
+                )
+        except ValueError:
+            pass
+        os.environ.pop("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE", None)
+        os.environ.pop("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", None)
 
     stale_override = os.environ.get("RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE")
     if stale_override:
@@ -1192,23 +1396,43 @@ def _apply_recovery_overrides(
         except OSError:
             pass
 
-    return original_timeouts if disk_modified else None
+    return original_config if disk_modified else None
+
+
+def _recovery_original_section(
+    original_config: dict[str, Any],
+    section: str,
+) -> dict[str, Any]:
+    """Return a timeout section from either current nested or legacy flat baselines."""
+    if not isinstance(original_config, dict):
+        return {}
+    value = original_config.get(section)
+    if isinstance(value, dict):
+        return dict(value)
+    if section == "timeouts":
+        nested_section_keys = {"timeouts", "bridge_turn_timeouts"}
+        if not any(isinstance(original_config.get(key), dict) for key in nested_section_keys):
+            return dict(original_config)
+    return {}
 
 
 def _restore_config_on_disk(
     repo_root: Path,
-    original_timeouts: dict[str, Any],
+    original_config: dict[str, dict[str, Any]],
     verbose: bool = False,
 ) -> None:
-    """Restore original timeouts to executor_config.json after recovery retry."""
+    """Restore original timeout sections to executor_config.json after recovery retry."""
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
     try:
         disk_config = json.loads(config_path.read_text(encoding="utf-8"))
-        disk_config["timeouts"] = original_timeouts
+        disk_config["timeouts"] = _recovery_original_section(original_config, "timeouts")
+        disk_config["bridge_turn_timeouts"] = _recovery_original_section(
+            original_config, "bridge_turn_timeouts"
+        )
         config_path.write_text(
             json.dumps(disk_config, indent=2) + "\n", encoding="utf-8")
         if verbose:
-            print("[dispatch] Restored original executor_config.json timeouts")
+            print("[dispatch] Restored original executor_config.json timeout sections")
     except (json.JSONDecodeError, OSError):
         pass
 
@@ -1228,6 +1452,16 @@ def _clear_phase_b_state_for_retry(
     required bridge-fix cycle.  Clearing the state forces a fresh start.
     """
     if result.get("executor") != "phase_b_executor":
+        return
+    recovery = result.get("recovery")
+    if (
+        isinstance(recovery, dict)
+        and recovery.get("recovered")
+        and recovery.get("failure_class") == "post_reentry_needs_phase_b"
+        and recovery.get("action") == "resume_phase_b_reentry"
+    ):
+        if verbose:
+            print("[dispatch] Preserved recovery-seeded Phase B re-entry state before retry")
         return
     state_path = repo_root / _PHASE_B_STATE_PATH
     if state_path.exists():
@@ -1307,6 +1541,48 @@ def _auto_refresh_routing(
 
     if verbose:
         print(f"[dispatch] Auto-refresh succeeded: decision={refreshed.get('decision')}")
+    return True, refreshed
+
+
+def _refresh_canonical_routing_record_state(
+    repo_root: Path,
+    record: dict[str, Any],
+    *,
+    output_path: Path | None = None,
+    verbose: bool = False,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Rebind the canonical packet-owned routing record to the current repo state."""
+    tracked_packet = _routing_record_tracked_packet(record)
+    if not tracked_packet:
+        if verbose:
+            print("[dispatch] Canonical routing rebind failed: no tracked_packet")
+        return False, None
+
+    refreshed, errors = _common_build_and_write_routing_record(
+        wave_name=str(record.get("wave_name") or record.get("wave_id") or ""),
+        task_id=str(record.get("task_id") or ""),
+        tracked_packet=tracked_packet,
+        request_for_claude=str(record.get("request_for_claude") or ""),
+        summary=str(record.get("summary") or ""),
+        decision=str(record.get("decision") or ""),
+        merged_pr=record.get("merged_pr") if isinstance(record.get("merged_pr"), int) else None,
+        merge_sha=record.get("merge_sha") if isinstance(record.get("merge_sha"), str) else None,
+        repo_root=repo_root,
+        output_path=output_path or _canonical_routing_record_path(repo_root),
+    )
+    if errors:
+        if verbose:
+            print("[dispatch] Canonical routing rebind failed: " + "; ".join(errors[:3]))
+        return False, None
+
+    fresh, msg = validate_routing_record_freshness(refreshed, repo_root)
+    if not fresh:
+        if verbose:
+            print(f"[dispatch] Canonical routing rebind still stale: {msg}")
+        return False, None
+
+    if verbose:
+        print(f"[dispatch] Canonical routing rebind succeeded: decision={refreshed.get('decision')}")
     return True, refreshed
 
 
@@ -1411,6 +1687,10 @@ def dispatch(
                 routing_record_path is not None
                 and routing_record_path.resolve() != _canonical_routing_record_path(repo)
             )
+            is_canonical_explicit = (
+                routing_record_path is not None
+                and routing_record_path.resolve() == _canonical_routing_record_path(repo)
+            )
             if verbose:
                 print(f"[dispatch] Routing record stale: {msg}")
                 if is_noncanonical_explicit:
@@ -1423,6 +1703,8 @@ def dispatch(
                         "[dispatch] Inline routing record does not match the canonical "
                         "routing file; refusing implicit rebind."
                     )
+                elif is_canonical_explicit:
+                    print("[dispatch] Rebinding canonical routing record via builder...")
                 else:
                     print("[dispatch] Auto-refreshing via post-merge supervisor...")
             if is_noncanonical_explicit:
@@ -1447,6 +1729,13 @@ def dispatch(
                         "authoritative routing instead of being rebound implicitly."
                     ),
                 }
+            elif is_canonical_explicit:
+                refreshed, refresh_record = _refresh_canonical_routing_record_state(
+                    repo,
+                    record,
+                    output_path=routing_record_path,
+                    verbose=verbose,
+                )
             else:
                 refreshed, refresh_record = _auto_refresh_routing(repo, verbose=verbose)
             if not refreshed or refresh_record is None:
@@ -1577,31 +1866,15 @@ def dispatch(
             executor_args.extend(["--plan-name", plan_name])
         elif executor_name == "phase_b_executor":
             # Phase B: prefer --plan from next_candidates tracked_packet,
-            # fall back to planless mode (routing record as authority source)
-            candidates = record.get("next_candidates", [])
-            plan_path = None
-            for c in candidates:
-                tp = c.get("tracked_packet")
-                if tp and isinstance(tp, str):
-                    # Validate: no path traversal, must be relative, must
-                    # resolve inside repo root.
-                    tp_resolved = (repo / tp).resolve()
-                    if ".." in Path(tp).parts:
-                        return {
-                            "status": "error",
-                            "decision": decision,
-                            "executor": executor_name,
-                            "message": f"Path traversal in tracked_packet: {tp}",
-                        }
-                    if not tp_resolved.is_relative_to(repo.resolve()):
-                        return {
-                            "status": "error",
-                            "decision": decision,
-                            "executor": executor_name,
-                            "message": f"tracked_packet escapes repo root: {tp}",
-                        }
-                    plan_path = tp
-                    break
+            # then recovery-seeded --plan, then planless routing authority.
+            executor_args.append("--dispatcher-owned-recovery")
+            plan_path, plan_error = _phase_b_tracked_plan_or_error(
+                repo,
+                record,
+                include_recovery_env=True,
+            )
+            if plan_error:
+                return plan_error
             if plan_path:
                 executor_args.extend(["--plan", plan_path])
                 executor_args.extend(["--routing-record", json.dumps(record)])
@@ -1823,6 +2096,29 @@ def main(argv: list[str] | None = None) -> int:
                     skip_freshness=args.skip_freshness,
                     verbose=args.verbose,
                 )
+            embedded_recovery = result.get("recovery")
+            if isinstance(embedded_recovery, dict) and embedded_recovery.get("recovered"):
+                if args.verbose:
+                    print(
+                        "[dispatch] Phase B recovered in-process — retrying "
+                        "before commit chain"
+                    )
+                _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose)
+                if not _is_chained_commit_failure(result):
+                    if args.routing_record:
+                        explicit_record = _reload_explicit_routing_record(
+                            args.routing_record,
+                            verbose=args.verbose,
+                        )
+                        if explicit_record is not None:
+                            record = explicit_record
+                    else:
+                        refreshed, refresh_record = _auto_refresh_routing(
+                            repo_root, verbose=args.verbose
+                        )
+                        if refreshed and refresh_record is not None:
+                            record = refresh_record
+                continue
             # Non-retryable dispatch statuses — break immediately
             if result.get("status") in _NON_RETRYABLE_DISPATCH_STATUSES:
                 break
@@ -1862,11 +2158,19 @@ def main(argv: list[str] | None = None) -> int:
                         _recovery_original_timeouts = new_orig
                     # Recovery succeeded — grant one extra attempt (don't increment counter)
                     _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose)
-                    if not args.routing_record and not _is_chained_commit_failure(result):
-                        refreshed, refresh_record = _auto_refresh_routing(
-                            repo_root, verbose=args.verbose)
-                        if refreshed and refresh_record is not None:
-                            record = refresh_record
+                    if not _is_chained_commit_failure(result):
+                        if args.routing_record:
+                            explicit_record = _reload_explicit_routing_record(
+                                args.routing_record,
+                                verbose=args.verbose,
+                            )
+                            if explicit_record is not None:
+                                record = explicit_record
+                        else:
+                            refreshed, refresh_record = _auto_refresh_routing(
+                                repo_root, verbose=args.verbose)
+                            if refreshed and refresh_record is not None:
+                                record = refresh_record
                     continue  # retry dispatch without counting against budget
                 elif recovery.get("exhausted"):
                     if args.verbose:
@@ -1895,10 +2199,18 @@ def main(argv: list[str] | None = None) -> int:
             # Do NOT unlink the existing routing record before refresh — if
             # refresh fails, the canonical record would be permanently lost.
             # The supervisor overwrites the file in place on success.
-            if not args.routing_record and not _is_chained_commit_failure(result):
-                refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose)
-                if refreshed and refresh_record is not None:
-                    record = refresh_record
+            if not _is_chained_commit_failure(result):
+                if args.routing_record:
+                    explicit_record = _reload_explicit_routing_record(
+                        args.routing_record,
+                        verbose=args.verbose,
+                    )
+                    if explicit_record is not None:
+                        record = explicit_record
+                else:
+                    refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose)
+                    if refreshed and refresh_record is not None:
+                        record = refresh_record
             attempt += 1
 
         # Restore disk AND in-memory config if recovery overrides were written.
@@ -1908,11 +2220,20 @@ def main(argv: list[str] | None = None) -> int:
             _restore_config_on_disk(
                 repo_root, _recovery_original_timeouts,
                 verbose=args.verbose)
-            config["timeouts"] = dict(_recovery_original_timeouts)
+            config["timeouts"] = _recovery_original_section(
+                _recovery_original_timeouts, "timeouts"
+            )
+            config["bridge_turn_timeouts"] = _recovery_original_section(
+                _recovery_original_timeouts, "bridge_turn_timeouts"
+            )
         # Clean up original-baseline env vars set by fix_process_timeout /
         # fix_implementer_stale to prevent leakage to --loop waves.
         for _env_key in list(os.environ):
-            if _env_key.startswith("RCX_RECOVERY_ORIGINAL_TIMEOUT_"):
+            if _env_key.startswith((
+                "RCX_RECOVERY_ORIGINAL_TIMEOUT_",
+                "RCX_RECOVERY_ORIGINAL_BRIDGE_TURN_TIMEOUT_",
+                PHASE_B_RECOVERY_PLAN_ENV,
+            )):
                 os.environ.pop(_env_key, None)
 
         if result.get("status") in ("success", "held"):

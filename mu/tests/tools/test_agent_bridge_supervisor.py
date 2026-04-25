@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import pwd
 import sqlite3
 import subprocess
 import sys
@@ -21,6 +22,10 @@ from tests.repo_root import REPO_ROOT
 adapters = load_module("bridge_adapters", REPO_ROOT / "mu" / "tools" / "agents" / "bridge_adapters.py")
 bridge = load_module("bridge_supervisor", REPO_ROOT / "tools" / "agents" / "bridge_supervisor.py")
 migrations = load_module("bridge_migrations", REPO_ROOT / "tools" / "agents" / "bridge_migrations.py")
+executor_common = load_module(
+    "executor_common_for_bridge_defaults",
+    REPO_ROOT / "mu" / "tools" / "executors" / "executor_common.py",
+)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -150,6 +155,252 @@ def test_parse_envelope_ignores_replayed_stderr_envelope() -> None:
     parsed = bridge.parse_envelope(output)
     assert parsed["decision"] == "GO"
     assert parsed["summary"] == "current"
+
+
+def test_load_bridge_config_overlays_tracked_agent_model_defaults(tmp_path: Path) -> None:
+    config_path = tmp_path / ".agent_bus" / "bridge_config.json"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "claude": {
+                        "mode": "live",
+                        "display_name": "Claude old",
+                        "cmd": [
+                            "claude",
+                            "--print",
+                            "--model",
+                            "claude-old",
+                            "--effort",
+                            "low",
+                        ],
+                        "prompt_via_stdin": True,
+                        "timeout_s": 900,
+                    },
+                    "codex": {
+                        "mode": "live",
+                        "display_name": "Codex stale xhigh",
+                        "cmd": [
+                            "codex",
+                            "exec",
+                            "-",
+                            "--json",
+                            "-m",
+                            "gpt-stale-codex",
+                            "-c",
+                            'model_reasoning_effort="medium"',
+                            "--sandbox",
+                            "danger-full-access",
+                        ],
+                        "prompt_via_stdin": True,
+                        "timeout_s": 1200,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    executor_config_path = tmp_path / "mu" / "tools" / "executors" / "executor_config.json"
+    executor_config_path.parent.mkdir(parents=True)
+    executor_config_path.write_text(
+        json.dumps(
+            {
+                "bridge_agent_defaults": {
+                    "claude": {
+                        "display_name": "Claude Opus 4.7 max",
+                        "model": "claude-opus-4-7",
+                        "effort": "max",
+                    },
+                    "codex": {
+                        "display_name": "Codex 5.5 xhigh",
+                        "model": "gpt-5.5",
+                        "reasoning_effort": "xhigh",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = adapters.load_bridge_config(config_path)
+
+    claude = config["agents"]["claude"]
+    assert claude["display_name"] == "Claude Opus 4.7 max"
+    assert claude["cmd"] == [
+        "claude",
+        "--print",
+        "--model",
+        "claude-opus-4-7",
+        "--effort",
+        "max",
+    ]
+    codex = config["agents"]["codex"]
+    assert codex["display_name"] == "Codex 5.5 xhigh"
+    assert codex["cmd"] == [
+        "codex",
+        "exec",
+        "-",
+        "--json",
+        "-m",
+        "gpt-5.5",
+        "-c",
+        'model_reasoning_effort="xhigh"',
+        "--sandbox",
+        "danger-full-access",
+    ]
+
+
+def test_load_bridge_config_appends_missing_codex_reasoning_default(tmp_path: Path) -> None:
+    config_path = tmp_path / ".agent_bus" / "bridge_config.json"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "codex": {
+                        "mode": "live",
+                        "cmd": ["codex", "exec", "-", "--json", "-m", "gpt-stale-codex"],
+                        "prompt_via_stdin": True,
+                        "timeout_s": 1200,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    executor_config_path = tmp_path / "mu" / "tools" / "executors" / "executor_config.json"
+    executor_config_path.parent.mkdir(parents=True)
+    executor_config_path.write_text(
+        json.dumps(
+            {
+                "bridge_agent_defaults": {
+                    "codex": {
+                        "model": "gpt-5.5",
+                        "reasoning_effort": "xhigh",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = adapters.load_bridge_config(config_path)
+
+    assert config["agents"]["codex"]["cmd"] == [
+        "codex",
+        "exec",
+        "-",
+        "--json",
+        "-m",
+        "gpt-5.5",
+        "-c",
+        'model_reasoning_effort="xhigh"',
+    ]
+
+
+def test_bridge_agent_display_name_uses_tracked_defaults_over_hidden_config(tmp_path: Path) -> None:
+    config_path = tmp_path / ".agent_bus" / "bridge_config.json"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "codex": {
+                        "mode": "live",
+                        "display_name": "Codex stale xhigh",
+                        "cmd": ["codex", "exec", "-", "--json", "-m", "gpt-stale-codex"],
+                        "prompt_via_stdin": True,
+                        "timeout_s": 1200,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    executor_config_path = tmp_path / "mu" / "tools" / "executors" / "executor_config.json"
+    executor_config_path.parent.mkdir(parents=True)
+    executor_config_path.write_text(
+        json.dumps(
+            {
+                "bridge_agent_defaults": {
+                    "codex": {
+                        "display_name": "Codex 5.5 xhigh",
+                        "model": "gpt-5.5",
+                        "reasoning_effort": "xhigh",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert executor_common.bridge_agent_display_name(tmp_path, "codex") == "Codex 5.5 xhigh"
+
+
+def test_prepare_adapter_env_uses_real_home_when_writable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fake_home = tmp_path / "home"
+    fake_codex = fake_home / ".codex"
+    fake_codex.mkdir(parents=True)
+    (fake_codex / "auth.json").write_text('{"auth_mode":"chatgpt"}', encoding="utf-8")
+    (fake_codex / "config.toml").write_text('model = "gpt-5.5"\n', encoding="utf-8")
+    monkeypatch.setattr(adapters, "_real_home_dir", lambda: str(fake_home))
+    monkeypatch.setattr(adapters, "_codex_home_is_writable", lambda home: True)
+    monkeypatch.delenv("RCX_CODEX_HOME", raising=False)
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=["codex", "exec", "-", "--json"],
+        timeout_s=60,
+    )
+
+    cmd, env = adapters._prepare_adapter_env(  # ANTICHEAT_OK: direct adapter env contract test
+        spec,
+        {"repo_root": str(tmp_path)},
+    )
+
+    assert cmd == ["codex", "exec", "-", "--json"]
+    assert env["HOME"] == str(fake_home)
+    assert "CODEX_HOME" not in env
+    assert "RCX_CODEX_HOME" not in env
+
+
+def test_prepare_adapter_env_seeds_runtime_overlay_when_real_home_unwritable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fake_home = tmp_path / "home"
+    fake_codex = fake_home / ".codex"
+    fake_codex.mkdir(parents=True)
+    (fake_codex / "auth.json").write_text('{"auth_mode":"chatgpt"}', encoding="utf-8")
+    (fake_codex / "config.toml").write_text('model = "gpt-5.5"\n', encoding="utf-8")
+    (fake_codex / "installation_id").write_text("inst\n", encoding="utf-8")
+    monkeypatch.setattr(adapters, "_real_home_dir", lambda: str(fake_home))
+    monkeypatch.setattr(adapters, "_codex_home_is_writable", lambda home: False)
+    monkeypatch.delenv("RCX_CODEX_HOME", raising=False)
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=["codex", "exec", "-", "--json"],
+        timeout_s=60,
+    )
+
+    cmd, env = adapters._prepare_adapter_env(  # ANTICHEAT_OK: direct adapter env contract test
+        spec,
+        {"repo_root": str(tmp_path)},
+    )
+
+    runtime_home = tmp_path / ".agent_bus" / "codex_runtime_home"
+    assert cmd == ["codex", "exec", "-", "--json"]
+    assert env["HOME"] == str(runtime_home)
+    assert env["CODEX_HOME"] == str(runtime_home)
+    assert env["RCX_CODEX_HOME"] == str(runtime_home)
+    assert (runtime_home / "auth.json").read_text(encoding="utf-8") == '{"auth_mode":"chatgpt"}'
+    assert (runtime_home / "config.toml").read_text(encoding="utf-8") == 'model = "gpt-5.5"\n'
+    assert (runtime_home / "installation_id").read_text(encoding="utf-8") == "inst\n"
+    for child in ("sessions", "state", "log", "tmp"):
+        assert (runtime_home / child).is_dir()
 
 
 def test_run_adapter_normalizes_claude_stream_json_result(tmp_path: Path) -> None:
@@ -838,6 +1089,17 @@ def test_pid_is_live_non_zombie_rejects_zombie(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(adapters.subprocess, "run", fake_run)
 
     assert not adapters._pid_is_live_non_zombie(7001)  # ANTICHEAT_OK: testing zombie-aware liveness helper directly
+
+
+def test_process_tree_fingerprint_fail_open_on_permission_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(adapters.os, "kill", lambda pid, sig: None)
+
+    def fake_run(*_args, **_kwargs):
+        raise PermissionError(1, "Operation not permitted", "ps")
+
+    monkeypatch.setattr(adapters.subprocess, "run", fake_run)
+
+    assert adapters._process_tree_fingerprint(7001) == ((7001, 0.0),)  # ANTICHEAT_OK: bridge watchdog must degrade safely when ps is blocked
 
 
 def test_init_db_creates_runtime_paths_and_config(tmp_path: Path) -> None:
@@ -2836,6 +3098,64 @@ def test_bridge_turn_timeout_env_override_allows_longer_reviewer_turn(
     # during pre-push-fast while a commit_executor remediation subprocess
     # was consuming CPU for 10 min in parallel). 5.0s gives ~10x headroom
     # and still proves the override widens the cap (default is 0.05s).
+    monkeypatch.setattr(bridge, "BRIDGE_MAX_TURN_WALL_TIME_S", 0.05)
+    monkeypatch.setenv("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", "5.0")
+
+    assert bridge.continue_job(paths, job_id) == "GO"
+
+
+def test_bridge_turn_timeout_env_override_can_exceed_adapter_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Executor-provided turn budgets must be able to widen agent config defaults."""
+    paths, _ = _setup_bridge_repo(tmp_path)
+
+    slow_reviewer = paths.repo_root / "slow_reviewer.py"
+    slow_reviewer.write_text(
+        "import sys\n"
+        "import time\n"
+        "sys.stdin.read()\n"
+        "time.sleep(1.2)\n"
+        "print('BEGIN_AGENT_ENVELOPE')\n"
+        "print('{')\n"
+        "print('  \"job_id\": \"job-1\",')\n"
+        "print('  \"turn_id\": \"r1-reviewer\",')\n"
+        "print('  \"agent_role\": \"reviewer\",')\n"
+        "print('  \"decision\": \"GO\",')\n"
+        "print('  \"summary\": \"finished after adapter default\",')\n"
+        "print('  \"touched_files_claimed\": [],')\n"
+        "print('  \"findings\": [],')\n"
+        "print('  \"validations_claimed\": [],')\n"
+        "print('  \"request_for_next_agent\": \"\"')\n"
+        "print('}')\n"
+        "print('END_AGENT_ENVELOPE')\n",
+        encoding="utf-8",
+    )
+    config = json.loads(paths.config_path.read_text(encoding="utf-8"))
+    config["agents"]["codex"] = {
+        "mode": "live",
+        "cmd": [sys.executable, str(slow_reviewer)],
+        "prompt_via_stdin": True,
+        "timeout_s": 1,
+        "env": {},
+    }
+    paths.config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    job_id = bridge.submit_job(
+        paths,
+        task_text="env override exceeds adapter timeout test",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=[],
+        job_id="wall-time-cap-exceeds-adapter-job",
+    )
+    assert bridge.run_job(paths, job_id, pause_after_reader=True) == "PAUSED"
+
     monkeypatch.setattr(bridge, "BRIDGE_MAX_TURN_WALL_TIME_S", 0.05)
     monkeypatch.setenv("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", "5.0")
 

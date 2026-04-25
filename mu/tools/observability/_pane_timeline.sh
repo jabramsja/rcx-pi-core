@@ -41,6 +41,7 @@ BOLD="\033[1m" DIM="\033[2m" GREEN="\033[32m" YELLOW="\033[33m"
 RED="\033[31m" CYAN="\033[36m" PURPLE="\033[35m" RESET="\033[0m"
 LAST_HASH=""
 TMPOUT="/tmp/rcx_pane_timeline_$$.txt"
+ONESHOT="${RCX_PANE_ONESHOT:-0}"
 
 load_role_agent_labels() {
   local root="${1:-$REPO_ROOT}" output="" key="" value=""
@@ -92,21 +93,33 @@ pid_cwd() {
   lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
 }
 
+is_control_plane_resume_command() {
+  local cmd="$1"
+  case "$cmd" in
+    *"Autonomous WorkingRCX pipeline watchdog tick."*|*"WorkingRCX pipeline pager wakeup."*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 repo_has_process() {
   local pattern="$1" pid cmd cwd
   while IFS= read -r pid; do
     [ -z "$pid" ] && continue
     cmd=$(ps -p "$pid" -o command= 2>/dev/null || true)
     case "$cmd" in
-      *"tail -f "*|*"rcx_log_watcher.sh"*|*"_pane_"*|*"pipeline_monitor.sh"*)
+      *"tail -f "*|*"rcx_log_watcher.sh"*|*/_pane_*.sh*|*"pipeline_monitor.sh"*)
         continue
         ;;
       "bash -c "*|*/bash\ -c\ *|"tee "*)
         continue
         ;;
     esac
+    is_control_plane_resume_command "$cmd" && continue
+    command_matches_live_keyword "$pattern" "$cmd" || continue
     case "$cmd" in
-      *"$REPO_ROOT"*)
+      *"$REPO_ROOT"* )
         return 0
         ;;
     esac
@@ -115,6 +128,34 @@ repo_has_process() {
       return 0
     fi
   done < <(pgrep -f "$pattern" 2>/dev/null || true)
+  return 1
+}
+
+command_matches_live_keyword() {
+  local kw="$1" cmd="$2"
+  case "$kw" in
+    phase_a_executor|phase_b_executor|commit_executor|executor_dispatch|bridge_supervisor|meta_bridge_supervisor)
+      case "$cmd" in
+        *"/${kw}.py"*|*" ${kw}.py"*)
+          return 0
+          ;;
+      esac
+      return 1
+      ;;
+    *)
+      case "$cmd" in
+        *"$kw"*) return 0 ;;
+      esac
+      return 1
+      ;;
+  esac
+}
+
+repo_has_any_process() {
+  local pattern=""
+  for pattern in "$@"; do
+    repo_has_process "$pattern" && return 0
+  done
   return 1
 }
 
@@ -129,11 +170,26 @@ pid_command() {
 }
 
 bridge_agent_name_for_command() {
-  local cmd="$1"
-  if echo "$cmd" | grep -E -i -q '(^|[ /])codex([[:space:]]|$).*(^|[[:space:]])exec([[:space:]]|$)'; then
-    printf '%s\n' "codex"
-    return 0
-  fi
+  local cmd="$1" lowered=""
+  is_control_plane_resume_command "$cmd" && return 1
+  lowered="$(printf '%s' "$cmd" | tr '[:upper:]' '[:lower:]')"
+  case "$lowered" in
+    *"codex exec"*)
+      case "$lowered" in
+        *"codex.app"*|*"codex helper"*) ;;
+        *)
+          printf '%s\n' "codex"
+          return 0
+          ;;
+      esac
+      ;;
+  esac
+  case "$lowered" in
+    *"claude"*--print*)
+      printf '%s\n' "claude"
+      return 0
+      ;;
+  esac
   if echo "$cmd" | grep -E -i -q '(^|[ /])claude([[:space:]]|$).*--print'; then
     printf '%s\n' "claude"
     return 0
@@ -158,18 +214,19 @@ pid_has_ancestor_matching() {
 }
 
 repo_has_bridge_role() {
-  local wanted_role="$1" line="" pid="" cmd="" cwd=""
-  while IFS= read -r line; do
-    read -r pid cmd <<< "$line"
+  local wanted_role="$1" pid="" cmd="" cwd=""
+  while IFS= read -r pid; do
     [ -z "$pid" ] && continue
+    cmd="$(pid_command "$pid")"
     case "$cmd" in
-      *"tail -f "*|*"rcx_log_watcher.sh"*|*"_pane_"*|*"pipeline_monitor.sh"*|"bash -c "*|*/bash\ -c\ *|"tee "*)
+      *"tail -f "*|*"rcx_log_watcher.sh"*|*/_pane_*.sh*|*"pipeline_monitor.sh"*|"bash -c "*|*/bash\ -c\ *|"tee "*)
         continue
         ;;
     esac
+    is_control_plane_resume_command "$cmd" && continue
     bridge_agent_name_for_command "$cmd" >/dev/null || continue
     case "$cmd" in
-      *"$REPO_ROOT"*) ;;
+      *"$REPO_ROOT"* ) ;;
       *)
         cwd="$(pid_cwd "$pid")"
         [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ] || continue
@@ -181,8 +238,164 @@ repo_has_bridge_role() {
     if [ "$wanted_role" = "implement" ] && pid_has_ancestor_matching "$pid" 'phase_b_executor\.py|phase_a_executor\.py|commit_executor\.py'; then
       return 0
     fi
-  done < <(ps -axo pid=,command= 2>/dev/null || true)
+  done < <(pgrep -f "codex.*exec|claude.*--print" 2>/dev/null || true)
   return 1
+}
+
+render_autoping_status() {
+  python3 - "$REPO_ROOT" <<'PY' 2>/dev/null
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from pathlib import Path
+import sys
+
+repo_root = Path(sys.argv[1]).resolve()
+state_dir = Path.home() / ".codex" / "state"
+if not state_dir.is_dir():
+    raise SystemExit(0)
+
+
+def parse_stamp(value: object) -> tuple[float, str]:
+    if not isinstance(value, str) or not value:
+        return (0.0, "")
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return (0.0, value)
+    return (dt.timestamp(), dt.astimezone().strftime("%H:%M:%S"))
+
+
+best: tuple[float, dict[str, object]] | None = None
+for state_path in state_dir.glob("rcx_autoping_*.json"):
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        continue
+    if not isinstance(payload, dict):
+        continue
+    bridge_state = payload.get("bridge_state")
+    if not isinstance(bridge_state, dict):
+        continue
+    wave_root = bridge_state.get("wave_root")
+    if not isinstance(wave_root, str):
+        continue
+    try:
+        wave_path = Path(wave_root).resolve()
+    except OSError:
+        continue
+    if wave_path != repo_root:
+        continue
+    rank, _ = parse_stamp(payload.get("updated_at") or payload.get("last_dispatched_at"))
+    if best is None or rank >= best[0]:
+        best = (rank, payload)
+
+if best is None:
+    raise SystemExit(0)
+
+_, payload = best
+summary = ""
+summary_path = payload.get("summary_path")
+if isinstance(summary_path, str):
+    try:
+        summary = Path(summary_path).read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        summary = ""
+if not summary:
+    value = payload.get("last_summary")
+    if isinstance(value, str):
+        summary = value.strip()
+summary = " ".join(summary.split())
+if len(summary) > 140:
+    summary = summary[:137].rstrip() + "..."
+
+_, dispatched = parse_stamp(payload.get("last_dispatched_at"))
+_, completed = parse_stamp(payload.get("last_completed_at"))
+status = payload.get("status")
+if not isinstance(status, str) or not status:
+    status = "-"
+
+parts = []
+if dispatched:
+    parts.append(f"last ping {dispatched}")
+if completed:
+    parts.append(f"last done {completed}")
+parts.append(f"status {status}")
+
+print("AUTOPING\t" + " | ".join(parts))
+if summary:
+    print("SUMMARY\t" + summary)
+PY
+}
+
+render_pager_status() {
+  python3 - "$REPO_ROOT" <<'PY' 2>/dev/null
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from pathlib import Path
+import sys
+
+repo_root = Path(sys.argv[1]).resolve()
+state_path = repo_root / ".agent_bus" / "observability" / "pipeline_agent_pager_state.json"
+if not state_path.is_file():
+    raise SystemExit(0)
+
+try:
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(0)
+
+dispatcher = payload.get("dispatcher")
+if not isinstance(dispatcher, dict):
+    raise SystemExit(0)
+last_dispatch = dispatcher.get("last_dispatch")
+if not isinstance(last_dispatch, dict):
+    raise SystemExit(0)
+
+if not any(last_dispatch.get(key) for key in ("event_id", "event_type", "summary", "attempted_at")):
+    raise SystemExit(0)
+
+
+def parse_stamp(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone().strftime("%H:%M:%S")
+    except ValueError:
+        return value
+
+
+parts = []
+attempted = parse_stamp(last_dispatch.get("attempted_at"))
+if attempted:
+    parts.append(f"last wake {attempted}")
+event_type = str(last_dispatch.get("event_type") or "").strip()
+if event_type:
+    parts.append(event_type)
+phase = str(last_dispatch.get("phase") or "").strip()
+state = str(last_dispatch.get("state") or "").strip()
+if phase or state:
+    parts.append(" / ".join(part for part in (phase, state) if part))
+target = str(last_dispatch.get("target") or "").strip()
+if target:
+    parts.append(f"target {target}")
+ack = last_dispatch.get("acknowledged")
+if ack is True:
+    parts.append("ack yes")
+elif ack is False:
+    parts.append("ack no")
+
+summary = " ".join(str(last_dispatch.get("summary") or "").split())
+if len(summary) > 140:
+    summary = summary[:137].rstrip() + "..."
+
+print("PAGER\t" + " | ".join(parts))
+if summary:
+    print("PAGER_SUMMARY\t" + summary)
+PY
 }
 
 while true; do
@@ -193,6 +406,32 @@ while true; do
   echo -e "  ${DIM}This pane shows the recent milestones in time order.${RESET}"
   echo -e "  ${DIM}Watching:${RESET} $BRANCH_NAME"
   echo -e "  ${DIM}Worktree:${RESET} $REPO_ROOT"
+  autoping_status="$(render_autoping_status)"
+  if [ -n "$autoping_status" ]; then
+    while IFS=$'\t' read -r tag value; do
+      case "$tag" in
+        AUTOPING)
+          echo -e "  ${DIM}Autoping:${RESET} $value"
+          ;;
+        SUMMARY)
+          echo -e "  ${DIM}Last ping:${RESET} $value"
+          ;;
+      esac
+    done <<< "$autoping_status"
+  fi
+  pager_status="$(render_pager_status)"
+  if [ -n "$pager_status" ]; then
+    while IFS=$'\t' read -r tag value; do
+      case "$tag" in
+        PAGER)
+          echo -e "  ${DIM}Pager:${RESET} $value"
+          ;;
+        PAGER_SUMMARY)
+          echo -e "  ${DIM}Last pager event:${RESET} $value"
+          ;;
+      esac
+    done <<< "$pager_status"
+  fi
   echo ""
 
   # Collect events with timestamps, then sort chronologically
@@ -336,7 +575,7 @@ PY
     echo -e "  ${DIM}${now}${RESET}  ${PURPLE}← ${IMPLEMENTER_SHORT} implementing now${RESET}"
   elif repo_has_process "run_review.py"; then
     echo -e "  ${DIM}${now}${RESET}  ${CYAN}← SDK review agents checking this worktree now${RESET}"
-  elif repo_has_process "phase_a_executor\|phase_b_executor\|commit_executor\|executor_dispatch"; then
+  elif repo_has_any_process "phase_a_executor" "phase_b_executor" "commit_executor" "executor_dispatch"; then
     echo -e "  ${DIM}${now}${RESET}  ${CYAN}← pipeline executor working in this worktree now${RESET}"
   else
     echo -e "  ${DIM}${now}${RESET}  ${DIM}← idle${RESET}"
@@ -371,6 +610,11 @@ PY
     exec bash "$_SELF"
   fi
   _SELF_MTIME="$_NEW_MTIME"
+
+  if [ "$ONESHOT" = "1" ]; then
+    rm -f "$TMPOUT"
+    exit 0
+  fi
 
   sleep 5
 done

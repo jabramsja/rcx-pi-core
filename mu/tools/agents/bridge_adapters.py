@@ -6,8 +6,10 @@ from __future__ import annotations
 import io
 import json
 import os
+import pwd
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import threading
@@ -40,6 +42,44 @@ class AdapterSpec:
     prompt_via_stdin: bool = True
     env: dict[str, str] | None = None
     mode: str = "live"
+
+
+def _real_home_dir() -> str:
+    """Return the account home directory without trusting $HOME overrides."""
+    return pwd.getpwuid(os.getuid()).pw_dir
+
+
+def _real_codex_home() -> Path:
+    return Path(_real_home_dir()) / ".codex"
+
+
+def _codex_home_is_writable(home: Path) -> bool:
+    required_paths = (
+        home,
+        home / "sessions",
+        home / "state",
+        home / "log",
+    )
+    for path in required_paths:
+        target = path if path.exists() else path.parent
+        if not target.exists():
+            return False
+        if not os.access(target, os.W_OK | os.X_OK):
+            return False
+    return True
+
+
+def _seed_codex_runtime_home(runtime_home: Path) -> None:
+    """Populate a repo-local Codex runtime home with auth/config surfaces."""
+    runtime_home.mkdir(parents=True, exist_ok=True)
+    for child in ("sessions", "state", "log", "tmp"):
+        (runtime_home / child).mkdir(parents=True, exist_ok=True)
+
+    source_home = _real_codex_home()
+    for name in ("auth.json", "config.toml", "config.json", "installation_id"):
+        src = source_home / name
+        if src.is_file():
+            shutil.copy2(src, runtime_home / name)
 
 
 _AGENT_ENVELOPE_BEGIN = "BEGIN_AGENT_ENVELOPE"
@@ -239,7 +279,7 @@ def _process_tree_fingerprint(root_pid: int) -> tuple[tuple[int, float], ...]:
             text=True,
             check=True,
         )
-    except subprocess.CalledProcessError:
+    except (PermissionError, OSError, subprocess.CalledProcessError):
         return ((root_pid, 0.0),)
 
     children_by_parent: dict[int, set[int]] = {}
@@ -426,6 +466,133 @@ def _expand_value(value: str, context: dict[str, str]) -> str:
         raise BridgeAdapterError(f"Missing bridge command placeholder: {missing}") from exc
 
 
+def _repo_root_from_bridge_config_path(config_path: Path) -> Path | None:
+    resolved = config_path.expanduser().resolve()
+    if resolved.name != "bridge_config.json" or resolved.parent.name != ".agent_bus":
+        return None
+    return resolved.parent.parent
+
+
+def _nonempty_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _load_bridge_agent_defaults(config_path: Path) -> dict[str, dict[str, Any]]:
+    repo_root = _repo_root_from_bridge_config_path(config_path)
+    if repo_root is None:
+        return {}
+    executor_config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    if not executor_config_path.exists():
+        return {}
+    try:
+        payload = json.loads(executor_config_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    defaults = payload.get("bridge_agent_defaults")
+    if not isinstance(defaults, dict):
+        return {}
+    return {
+        name: data
+        for name, data in defaults.items()
+        if isinstance(name, str) and isinstance(data, dict)
+    }
+
+
+def _replace_option_value(
+    cmd: list[str],
+    flags: tuple[str, ...],
+    value: str,
+) -> tuple[list[str], bool]:
+    updated = list(cmd)
+    for index, part in enumerate(updated):
+        if part in flags and index + 1 < len(updated):
+            updated[index + 1] = value
+            return updated, True
+        for flag in flags:
+            prefix = f"{flag}="
+            if part.startswith(prefix):
+                updated[index] = f"{prefix}{value}"
+                return updated, True
+    return updated, False
+
+
+def _replace_codex_reasoning_effort(cmd: list[str], effort: str) -> tuple[list[str], bool]:
+    updated = list(cmd)
+    option = f'model_reasoning_effort="{effort}"'
+    for index, part in enumerate(updated):
+        if part == "-c" and index + 1 < len(updated):
+            next_part = updated[index + 1]
+            if next_part.startswith("model_reasoning_effort="):
+                updated[index + 1] = option
+                return updated, True
+        if part.startswith("model_reasoning_effort="):
+            updated[index] = option
+            return updated, True
+    updated.extend(["-c", option])
+    return updated, False
+
+
+def _apply_agent_defaults(
+    agent_name: str,
+    agent_config: dict[str, Any],
+    defaults: dict[str, Any],
+) -> dict[str, Any]:
+    updated = dict(agent_config)
+    display_name = _nonempty_string(defaults.get("display_name"))
+    if display_name is not None:
+        updated["display_name"] = display_name
+
+    cmd = updated.get("cmd")
+    if not isinstance(cmd, list) or not all(isinstance(part, str) for part in cmd):
+        return updated
+
+    command = list(cmd)
+    model = _nonempty_string(defaults.get("model"))
+    if model is not None:
+        model_flags = ("-m", "--model") if agent_name == "codex" else ("--model", "-m")
+        command, found = _replace_option_value(command, model_flags, model)
+        if not found:
+            command.extend([model_flags[0], model])
+
+    if agent_name == "codex":
+        reasoning_effort = _nonempty_string(defaults.get("reasoning_effort"))
+        if reasoning_effort is not None:
+            command, _found = _replace_codex_reasoning_effort(command, reasoning_effort)
+
+    effort = _nonempty_string(defaults.get("effort"))
+    if effort is not None:
+        command, found = _replace_option_value(command, ("--effort",), effort)
+        if not found:
+            command.extend(["--effort", effort])
+
+    updated["cmd"] = command
+    return updated
+
+
+def _apply_bridge_agent_defaults(
+    config: dict[str, Any],
+    config_path: Path,
+) -> dict[str, Any]:
+    defaults = _load_bridge_agent_defaults(config_path)
+    if not defaults:
+        return config
+    agents = config.get("agents")
+    if not isinstance(agents, dict):
+        return config
+    for agent_name, agent_defaults in defaults.items():
+        agent_config = agents.get(agent_name)
+        if isinstance(agent_config, dict):
+            agents[agent_name] = _apply_agent_defaults(
+                agent_name,
+                agent_config,
+                agent_defaults,
+            )
+    return config
+
+
 def load_bridge_config(config_path: Path) -> dict[str, Any]:
     if not config_path.exists():
         raise BridgeAdapterError(
@@ -433,9 +600,12 @@ def load_bridge_config(config_path: Path) -> dict[str, Any]:
             "to .agent_bus/bridge_config.json and fill in your local CLI commands."
         )
     try:
-        return json.loads(config_path.read_text(encoding="utf-8"))
+        config = json.loads(config_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise BridgeAdapterError(f"Bridge config is not valid JSON: {exc}") from exc
+    if not isinstance(config, dict):
+        raise BridgeAdapterError("Bridge config must be a JSON object")
+    return _apply_bridge_agent_defaults(config, config_path)
 
 
 def get_adapter(config: dict[str, Any], adapter_name: str) -> AdapterSpec:
@@ -487,6 +657,30 @@ def _prepare_adapter_env(spec: AdapterSpec, context: dict[str, str]) -> tuple[li
     env["RCX_PIPELINE_SESSION"] = "1"
     if spec.env:
         env.update({key: _expand_value(value, context) for key, value in spec.env.items()})
+    if spec.name == "codex":
+        explicit_env = spec.env or {}
+        if (
+            "HOME" not in explicit_env
+            and "CODEX_HOME" not in explicit_env
+            and "RCX_CODEX_HOME" not in explicit_env
+        ):
+            real_codex_home = _real_codex_home()
+            if _codex_home_is_writable(real_codex_home):
+                env["HOME"] = _real_home_dir()
+                env.pop("CODEX_HOME", None)
+                env.pop("RCX_CODEX_HOME", None)
+            else:
+                repo_root_text = str(context.get("repo_root") or "").strip()
+                if repo_root_text:
+                    runtime_home = Path(repo_root_text) / ".agent_bus" / "codex_runtime_home"
+                    _seed_codex_runtime_home(runtime_home)
+                    env["HOME"] = str(runtime_home)
+                    env["CODEX_HOME"] = str(runtime_home)
+                    env["RCX_CODEX_HOME"] = str(runtime_home)
+                else:
+                    env["HOME"] = _real_home_dir()
+                    env.pop("CODEX_HOME", None)
+                    env.pop("RCX_CODEX_HOME", None)
     return cmd, env
 
 

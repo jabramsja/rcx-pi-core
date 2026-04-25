@@ -214,6 +214,9 @@ class TestTemplateValidationFailureRouting:
         assert "Reading `FOUNDER_SESSION_BOOTSTRAP.md` remains REQUIRED" in prompt
         assert "Do not print bootstrap confirmations, contract recaps, or progress updates. Emit only the final envelope." in prompt
         assert "Do NOT invoke `founder_session_guard.sh`" in prompt
+        assert "This invocation is the receipt-producing pre-commit supervisor" in prompt
+        assert "Do not call `verify_pre_commit_receipt.py` or `verify_pre_commit_receipt()`" in prompt
+        assert "missing or stale existing receipts are expected" in prompt
         assert "`bridge_status` and `blocker_report_paths` may legitimately be empty" in prompt
         assert "Do not use `set -e`/`pipefail` shell blocks" in prompt
 

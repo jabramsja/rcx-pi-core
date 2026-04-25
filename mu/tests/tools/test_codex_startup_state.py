@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import http.server
 import json
+import os
+import re
 import subprocess
 import threading
 
@@ -15,6 +17,45 @@ _tool_path = REPO_ROOT / "tools" / "session" / "check_codex_startup_state.py"
 startup_mod = load_module("check_codex_startup_state", _tool_path)
 _snapshot_tool_path = REPO_ROOT / "tools" / "session" / "founder_learning_snapshot.py"
 snapshot_mod = load_module("founder_learning_snapshot", _snapshot_tool_path)
+
+
+def _autoping_thread_slug(thread_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", thread_id)
+
+
+def _write_executor_config(tmp_path, *, enabled: bool = True, route: str = "codex"):
+    config_path = tmp_path / "mu" / "tools" / "executors" / "executor_config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "pipeline_agent_pager": {
+                    "enabled": enabled,
+                    "route": route,
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_autoping_state(codex_home, thread_id: str, **overrides):
+    state_path = (
+        codex_home
+        / "state"
+        / f"rcx_autoping_{_autoping_thread_slug(thread_id)}.json"
+    )
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "thread_id": thread_id,
+        "watcher_pid": os.getpid(),
+        "status": "ping_dispatched",
+        "last_exit_code": 0,
+    }
+    payload.update(overrides)
+    state_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    return state_path
 
 
 def test_founder_learning_snapshot_preserves_fixed_entry_dates(tmp_path):
@@ -91,6 +132,98 @@ def test_binary_guard_version_drift_fails(monkeypatch, tmp_path):
     assert "version drift" in result.detail
 
 
+def test_binary_guard_absent_only_partial_state_passes(monkeypatch, tmp_path):
+    codex_home = tmp_path / ".codex"
+    bin_dir = codex_home / "bin"
+    bin_dir.mkdir(parents=True)
+    guard = bin_dir / "codex-binary-guard"
+    guard.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    monkeypatch.setattr(startup_mod.os, "access", lambda path, mode: path == guard)
+    monkeypatch.setattr(
+        startup_mod,
+        "_run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            0,
+            json.dumps(
+                {
+                    "version": "0.122.0",
+                    "version_changed_since_patch": False,
+                    "overall_status": "partially_patched",
+                    "specs": [
+                        {"patch_id": "reread_after_apply_patch", "status": "patched"},
+                        {"patch_id": "voice_friendly_intro", "status": "absent"},
+                        {"patch_id": "ack_every_response", "status": "absent"},
+                    ],
+                }
+            ),
+            "",
+        ),
+    )
+
+    result = startup_mod._audit_binary_guard(codex_home, tmp_path)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert result.detail == "patched+absent version=v0.122.0"
+
+
+def test_preflight_wrapper_missing_autoping_canaries_fails(monkeypatch, tmp_path):
+    codex_home = tmp_path / ".codex"
+    bin_dir = codex_home / "bin"
+    bin_dir.mkdir(parents=True)
+    wrapper = bin_dir / "codex-rcx-preflight"
+    wrapper.write_text("#!/usr/bin/env bash\necho preflight\n", encoding="utf-8")
+
+    repo_root = tmp_path / "repo"
+    launcher = repo_root / "tools" / "session" / "ensure_codex_autoping.sh"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        startup_mod.os,
+        "access",
+        lambda path, mode: path in {wrapper, launcher},
+    )
+
+    result = startup_mod._check_preflight_wrapper(codex_home, repo_root)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "FAIL"
+    assert "missing autoping canaries" in result.detail
+
+
+def test_preflight_wrapper_accepts_autoping_aware_wrapper(monkeypatch, tmp_path):
+    codex_home = tmp_path / ".codex"
+    bin_dir = codex_home / "bin"
+    bin_dir.mkdir(parents=True)
+    wrapper = bin_dir / "codex-rcx-preflight"
+    wrapper.write_text(
+        "#!/usr/bin/env bash\n"
+        "echo 'Codex pager: route=codex'\n"
+        "echo 'Codex autoping: ACTIVE'\n"
+        "echo '--no-autoping'\n"
+        "echo 'ensure_codex_autoping.sh'\n"
+        "echo 'rev-parse --is-inside-work-tree'\n",
+        encoding="utf-8",
+    )
+
+    repo_root = tmp_path / "repo"
+    launcher = repo_root / "tools" / "session" / "ensure_codex_autoping.sh"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        startup_mod.os,
+        "access",
+        lambda path, mode: path in {wrapper, launcher},
+    )
+
+    result = startup_mod._check_preflight_wrapper(codex_home, repo_root)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert "pager+autoping-aware" in result.detail
+
+
 def test_models_cache_canaries_fail(tmp_path):
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
@@ -119,7 +252,7 @@ def test_models_cache_allows_vendor_personality_friendly_lane(tmp_path):
             {
                 "models": [
                     {
-                        "slug": "gpt-5.4",
+                        "slug": "gpt-5.5",
                         "base_instructions": "You are a deeply pragmatic, effective software engineer.",
                         "instructions_variables": {
                             "personality_default": "",
@@ -1219,6 +1352,41 @@ def test_dashboard_health_rejects_unrelated_json_service():
         server.server_close()
 
 
+def test_dashboard_health_uses_extended_live_timeout(monkeypatch):
+    calls: list[int] = []
+
+    class DummyResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def read(self):
+            return json.dumps(
+                {
+                    "timestamp": "now",
+                    "phase": {"phase": "idle", "pid": None, "started": None},
+                    "git_branch": "dev",
+                    "narrative": [],
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(url, timeout):
+        calls.append(timeout)
+        return DummyResponse()
+
+    monkeypatch.setattr(startup_mod.urllib.request, "urlopen", fake_urlopen)
+
+    healthy, detail = startup_mod._dashboard_health(8123)  # ANTICHEAT_OK: tool unit test
+
+    assert healthy is True
+    assert "serving RCX dashboard" in detail
+    assert calls == [startup_mod.DASHBOARD_HEALTH_TIMEOUT_S]
+
+
 def test_web_dashboard_recovery_starts_requested_port(monkeypatch, tmp_path):
     web_script = tmp_path / "tools" / "observability" / "pipeline_dashboard_web.py"
     web_script.parent.mkdir(parents=True)
@@ -1281,6 +1449,152 @@ def test_web_dashboard_recovery_spawn_failure_fails_closed(monkeypatch, tmp_path
     assert "OSError: spawn failed" in result.detail
 
 
+def test_codex_pager_target_skips_non_codex_route(tmp_path):
+    _write_executor_config(tmp_path, route="claude")
+
+    result = startup_mod._ensure_codex_pager_target(tmp_path)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert result.detail == "pipeline_agent_pager route=claude; no Codex pager target required"
+
+
+def test_codex_pager_target_accepts_http_error_as_reachable(monkeypatch, tmp_path):
+    _write_executor_config(tmp_path, route="codex")
+
+    def fake_urlopen(url, timeout=2):
+        raise startup_mod.urllib.error.HTTPError(url, 405, "Method Not Allowed", None, None)
+
+    monkeypatch.setattr(startup_mod.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        startup_mod,
+        "_codex_exec_resume_health",
+        lambda codex_home: (True, "codex exec resume fallback available"),
+    )
+
+    result = startup_mod._ensure_codex_pager_target(tmp_path)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert "Codex pager target reachable" in result.detail
+    assert "HTTP 405" in result.detail
+    assert "exec resume fallback available" in result.detail
+
+
+def test_codex_pager_target_fails_closed_on_connection_refused(monkeypatch, tmp_path):
+    _write_executor_config(tmp_path, route="codex")
+
+    def fake_urlopen(url, timeout=2):
+        raise startup_mod.urllib.error.URLError(ConnectionRefusedError("connection refused"))
+
+    monkeypatch.setattr(startup_mod.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        startup_mod,
+        "_codex_exec_resume_health",
+        lambda codex_home: (False, "codex exec resume help failed"),
+    )
+
+    result = startup_mod._ensure_codex_pager_target(tmp_path)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "FAIL"
+    assert "required Codex pager target unavailable" in result.detail
+    assert "ConnectionRefusedError" in result.detail
+    assert "codex exec resume help failed" in result.detail
+
+
+def test_codex_autoping_skips_without_thread_id(monkeypatch, tmp_path):
+    monkeypatch.delenv("RCX_PIPELINE_SESSION", raising=False)
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+
+    result = startup_mod._ensure_codex_autoping(tmp_path, tmp_path / ".codex")  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert "CODEX_THREAD_ID unset" in result.detail
+
+
+def test_codex_autoping_skips_inside_pipeline_session(monkeypatch, tmp_path):
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-123")
+    monkeypatch.setenv("RCX_PIPELINE_SESSION", "1")
+
+    result = startup_mod._ensure_codex_autoping(tmp_path, tmp_path / ".codex")  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert "RCX_PIPELINE_SESSION=1" in result.detail
+
+
+def test_codex_autoping_accepts_live_state(monkeypatch, tmp_path):
+    thread_id = "thread-123"
+    codex_home = tmp_path / ".codex"
+    monkeypatch.delenv("RCX_PIPELINE_SESSION", raising=False)
+    monkeypatch.setenv("CODEX_THREAD_ID", thread_id)
+    _write_autoping_state(codex_home, thread_id)
+
+    result = startup_mod._ensure_codex_autoping(tmp_path, codex_home)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert f"thread={thread_id}" in result.detail
+    assert f"pid={os.getpid()}" in result.detail
+
+
+def test_codex_autoping_context_exhausted_degrades_without_recovery(monkeypatch, tmp_path):
+    thread_id = "thread-exhausted"
+    codex_home = tmp_path / ".codex"
+    monkeypatch.delenv("RCX_PIPELINE_SESSION", raising=False)
+    monkeypatch.setenv("CODEX_THREAD_ID", thread_id)
+    _write_autoping_state(
+        codex_home,
+        thread_id,
+        status="context_exhausted",
+        last_exit_code=1,
+        last_summary="autoping wake failed: current Codex thread context window is exhausted",
+    )
+
+    def fail_if_recovery_runs(*args, **kwargs):
+        raise AssertionError("context-exhausted autoping must not restart recovery")
+
+    monkeypatch.setattr(startup_mod, "_run", fail_if_recovery_runs)
+
+    result = startup_mod._ensure_codex_autoping(tmp_path, codex_home)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert "degraded" in result.detail
+    assert "context exhausted" in result.detail
+    assert "pager remains primary" in result.detail
+
+
+def test_codex_autoping_recovers_missing_state(monkeypatch, tmp_path):
+    thread_id = "thread-456"
+    codex_home = tmp_path / ".codex"
+    repo_root = tmp_path / "repo"
+    launcher = repo_root / "tools" / "session" / "ensure_codex_autoping.sh"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o755)
+    calls: list[list[str]] = []
+    monkeypatch.delenv("RCX_PIPELINE_SESSION", raising=False)
+    monkeypatch.setenv("CODEX_THREAD_ID", thread_id)
+
+    def fake_run(cmd, *, cwd=None, timeout=60):
+        calls.append(cmd)
+        _write_autoping_state(codex_home, thread_id)
+        return subprocess.CompletedProcess(cmd, 0, "Codex autoping: ACTIVE\n", "")
+
+    monkeypatch.setattr(startup_mod, "_run", fake_run)
+
+    result = startup_mod._ensure_codex_autoping(repo_root, codex_home)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert "started Codex autoping" in result.detail
+    assert calls == [
+        [
+            str(launcher),
+            "--repo",
+            str(repo_root),
+            "--thread-id",
+            thread_id,
+            "--force-restart",
+        ]
+    ]
+
+
 def test_tmux_monitor_signature_accepts_live_pane_content(monkeypatch, tmp_path):
     pane_listing = "\n".join(
         [
@@ -1288,6 +1602,7 @@ def test_tmux_monitor_signature_accepts_live_pane_content(monkeypatch, tmp_path)
             "%2\tPANE 2 · REVIEW FINDINGS",
             "%3\tPANE 3 · PLAIN-ENGLISH STATUS",
             "%4\tPANE 4 · SESSION TIMELINE",
+            "%5\tAUTO-PING",
         ]
     )
     pane_bodies = {
@@ -1299,6 +1614,7 @@ def test_tmux_monitor_signature_accepts_live_pane_content(monkeypatch, tmp_path)
 
     def fake_run(cmd, **kwargs):
         if cmd[:2] == ["tmux", "list-panes"]:
+            assert "-s" in cmd
             return subprocess.CompletedProcess(cmd, 0, pane_listing, "")
         if cmd[:2] == ["tmux", "capture-pane"]:
             return subprocess.CompletedProcess(cmd, 0, pane_bodies[cmd[-1]], "")
@@ -1538,6 +1854,16 @@ def test_gather_results_fails_closed_when_codex_home_is_missing(monkeypatch, tmp
         "_ensure_web_dashboard",
         lambda repo_root: startup_mod.CheckResult("web_dashboard", "OK", "dashboard active"),
     )
+    monkeypatch.setattr(
+        startup_mod,
+        "_ensure_codex_pager_target",
+        lambda repo_root, codex_home=None: startup_mod.CheckResult("codex_pager_target", "FAIL", "listener unavailable"),
+    )
+    monkeypatch.setattr(
+        startup_mod,
+        "_ensure_codex_autoping",
+        lambda repo_root, codex_home: startup_mod.CheckResult("codex_autoping", "OK", "autoping active"),
+    )
 
     local_results, observability_results = startup_mod.gather_results(
         tmp_path,
@@ -1554,4 +1880,6 @@ def test_gather_results_fails_closed_when_codex_home_is_missing(monkeypatch, tmp
     assert observability_results == [
         startup_mod.CheckResult("tmux_monitor", "OK", "session active"),
         startup_mod.CheckResult("web_dashboard", "OK", "dashboard active"),
+        startup_mod.CheckResult("codex_pager_target", "FAIL", "listener unavailable"),
+        startup_mod.CheckResult("codex_autoping", "OK", "autoping active"),
     ]

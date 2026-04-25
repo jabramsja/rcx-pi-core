@@ -118,6 +118,32 @@ On machines where the local Codex startup hook is installed, this wrapper
 should already run automatically on session start or resume in `docs` mode; rerun
 it manually only if you need a narrower mode, want a stricter attestation flow,
 or need to recover from a startup-hook failure.
+When the local wrapper and repo helper are both current, this path should also
+auto-start the Codex pipeline autoping watcher for the current `CODEX_THREAD_ID`
+and expose its state / latest summary paths at startup. Treat that as the
+mechanical Codex-side wakeup/watch surface, not as a substitute for the pager
+lane itself. Founder preflight should surface both notification channels
+explicitly: the repo-native pager target and the separate Codex autoping
+watcher.
+The autoping watcher is diagnostic-only: it may summarize stale or broken
+pipeline state, but it must not edit repo files, run git, apply structural
+fixes, or launch/relaunch executor processes from the headless wake path.
+It must not run shell commands, tools, broad preflight, docs consistency, or
+pytest suites from that wake path; it should consume provided bridge/tmux state
+and report the narrowest operator-visible next action.
+The watcher should accept only `Autoping summary:` lines as autoping summaries
+and must terminate stale resumed ping subprocesses after the configured wake
+timeout so a headless ping cannot remain attached to the live operator thread.
+If a resumed ping reports that the current Codex thread context window is
+exhausted, the watcher should mark that thread `context_exhausted_paused`
+and stop dispatching further resumes into it; startup may report that live
+watcher as degraded while the repo-native pager remains the primary wake lane.
+If bridge/tmux state already proves foreground operator intervention is needed,
+the watcher should mark the state `attention_required`, update the durable
+summary, surface the alert in AUTO-PING / pane 3, and avoid repeated model
+resumes for that same terminal state.
+Once it has summarized an unchanged bridge/tmux state, it should suppress
+repeated model resumes until that visible pipeline state changes.
 On machines where local Codex persona hardening is installed, this wrapper also
 audits Codex-local startup state and should surface binary drift or
 contradiction re-audit guidance at session start. Keep the contradiction map and
@@ -203,6 +229,26 @@ Any full prompt should include:
    byte-level patch before the interactive `codex` path is trusted again.
    Text-surface fixes to `~/.codex/models_cache.json`, hooks, or rules do not
    require binary re-signing; only Mach-O edits do.
+   If the local wrapper is current, it should also auto-start the Codex
+   autoping watcher for the current thread and print the autoping state / latest
+   summary paths. It should also surface the separate Codex pager target health.
+   Autoping output is a diagnostic reminder surface only; any structural fix or
+   pipeline restart belongs in an operator-visible foreground/pipeline path.
+   It must not run shell commands, tools, broad preflight, docs consistency, or
+   pytest suites from the headless wake path.
+   It should accept only `Autoping summary:` lines as autoping summaries and
+   terminate stale resumed ping subprocesses after the configured wake timeout.
+   If the active Codex thread context window is exhausted, it should pause
+   that thread instead of repeatedly resuming it; startup should surface the
+   paused live watcher as degraded, with pager still primary.
+   If bridge/tmux state already proves foreground operator intervention is
+   needed, it should mark `attention_required`, update the durable summary,
+   surface the alert in AUTO-PING / pane 3, and avoid repeated model resumes
+   for that terminal state.
+   It should suppress repeated model resumes for unchanged bridge/tmux state
+   after a summary has already been captured.
+   If those lines are missing, treat that as startup drift in the Codex-local
+   preflight layer.
    The repo-native preflight should also inspect the active shared learning
    surfaces (`.claude/hooks/capture-learning.sh`,
    `.agent_bus/recovery/learned_patterns.json`, and

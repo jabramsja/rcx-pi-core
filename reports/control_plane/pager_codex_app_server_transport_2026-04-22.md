@@ -1,8 +1,8 @@
 # Pager Codex App Server Transport
 
-Task: `[PIPELINE-AGENT-PAGER]`  
-Wave ID: `pager-codex-app-server-transport`  
-Date: `2026-04-22`  
+Task: `[PIPELINE-AGENT-PAGER]`
+Wave ID: `pager-codex-app-server-transport`
+Date: `2026-04-22`
 Status: `implemented (Phase B local)`
 
 ## Outcome

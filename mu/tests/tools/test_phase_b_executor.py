@@ -1412,15 +1412,20 @@ class TestMaintenanceTrackerMetadataPropagation:
 
         assert result["status"] == "commit_ready"
         assert pager_calls
-        event = pager_calls[0]
+        event = next(call for call in pager_calls if call["event_type"] == "phase_b_reviewer_started")
         assert event["event_type"] == "phase_b_reviewer_started"
         assert event["task_id"] == "[PIPELINE-AGENT-PAGER]"
         assert event["plan_path"] == "reports/control_plane/plan.md"
         assert event["phase"] == "phase_b"
         assert event["state"] == "reviewer_started"
-        assert event["transition_key"] == "phase-b-r1"
+        assert event["transition_key"] == "phase-b-r1-deadbeef"
+        assert [call["event_type"] for call in pager_calls] == [
+            "phase_b_reviewer_started",
+            "phase_b_bridge_completed",
+            "commit_ready",
+        ]
 
-    def test_run_phase_b_reviewer_transition_key_stays_stable_across_retry(self, tmp_path):
+    def test_run_phase_b_reviewer_transition_key_changes_across_reruns(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -1478,7 +1483,14 @@ class TestMaintenanceTrackerMetadataPropagation:
 
         assert first["status"] == "error"
         assert second["status"] == "error"
-        assert [call["transition_key"] for call in pager_calls] == ["phase-b-r1", "phase-b-r1"]
+        reviewer_started_calls = [
+            call for call in pager_calls
+            if call["event_type"] == "phase_b_reviewer_started"
+        ]
+        assert [call["transition_key"] for call in reviewer_started_calls] == [
+            "phase-b-r1-deadbeef",
+            "phase-b-r1-feedface",
+        ]
 
     def test_run_phase_b_does_not_emit_reviewer_started_before_bridge_launch(self, tmp_path):
         repo = tmp_path / "repo"
@@ -1567,6 +1579,7 @@ class TestMaintenanceTrackerMetadataPropagation:
                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
             },
         ])
+        uuid_values = iter(["11111111aaaaaaaa", "22222222bbbbbbbb"])
 
         def fake_emit(repo_root, **kwargs):
             pager_calls.append(kwargs)
@@ -1590,6 +1603,7 @@ class TestMaintenanceTrackerMetadataPropagation:
             }
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex=next(uuid_values)))), \
              patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
              patch.object(pb_mod, "load_routing_record", return_value=routing), \
              patch.object(pb_mod, "_collect_changed_files", return_value=["TASKS.md"]), \
@@ -1604,9 +1618,19 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert result["status"] == "commit_ready"
         assert [call["event_type"] for call in pager_calls] == [
             "phase_b_reviewer_started",
+            "phase_b_bridge_completed",
             "phase_b_reviewer_started",
+            "phase_b_bridge_completed",
+            "commit_ready",
         ]
-        assert [call["transition_key"] for call in pager_calls] == ["phase-b-r1", "phase-b-r2"]
+        reviewer_started_calls = [
+            call for call in pager_calls
+            if call["event_type"] == "phase_b_reviewer_started"
+        ]
+        assert [call["transition_key"] for call in reviewer_started_calls] == [
+            "phase-b-r1-11111111",
+            "phase-b-reentry-r2-22222222",
+        ]
 
 
 @pytest.mark.usefixtures("mock_routing_record")
@@ -2031,8 +2055,19 @@ class TestFinalPytestGate:
         (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
 
         mock_impl = _make_mock_impl()
+        pager_calls = []
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": f"evt-{len(pager_calls)}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
              patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tests/tools/test_foo.py"]), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tests/tools/test_foo.py"]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
@@ -2056,8 +2091,19 @@ class TestFinalPytestGate:
         (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
 
         mock_impl = _make_mock_impl()
+        pager_calls = []
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": f"evt-{len(pager_calls)}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
              patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tests/tools/test_foo.py"]), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tests/tools/test_foo.py"]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
@@ -2076,6 +2122,14 @@ class TestFinalPytestGate:
 
         assert result["status"] == "commit_ready"
         mock_pytest.assert_called_once_with(repo, ["mu/tests/tools/test_foo.py"], timeout=300)
+        assert [call["event_type"] for call in pager_calls] == [
+            "phase_b_bridge_completed",
+            "phase_b_final_pytest_started",
+            "phase_b_final_pytest_passed",
+            "commit_ready",
+        ]
+        assert pager_calls[1]["state"] == "final_pytest_started"
+        assert pager_calls[2]["state"] == "final_pytest_passed"
 
 
 class TestBridgeRenderAssociation:
@@ -2127,8 +2181,8 @@ class TestBridgeRenderAssociation:
         idx = call_args.index("--reviewer")
         assert call_args[idx + 1] == "claude"
 
-    def test_run_bridge_review_sets_configured_turn_timeout_env(self, tmp_path):
-        """Phase B bridge review should widen the bridge turn budget via env."""
+    def test_run_bridge_review_sets_inner_turn_timeout_to_outer_bridge_budget(self, tmp_path):
+        """Inner bridge turn timeout must inherit the outer subprocess budget."""
         config_dir = tmp_path / "mu" / "tools" / "executors"
         config_dir.mkdir(parents=True)
         (config_dir / "executor_config.json").write_text(
@@ -2147,7 +2201,29 @@ class TestBridgeRenderAssociation:
             )
 
         call_kwargs = mock_run.call_args.kwargs
-        assert call_kwargs["env"]["RCX_BRIDGE_MAX_TURN_WALL_TIME_S"] == "901.0"
+        assert call_kwargs["env"]["RCX_BRIDGE_MAX_TURN_WALL_TIME_S"] == "1200.0"
+
+    def test_run_bridge_review_caps_inner_turn_timeout_when_outer_budget_is_smaller(self, tmp_path):
+        """The inner bridge turn timeout must still honor a smaller outer budget."""
+        config_dir = tmp_path / "mu" / "tools" / "executors"
+        config_dir.mkdir(parents=True)
+        (config_dir / "executor_config.json").write_text(
+            json.dumps({"bridge_turn_timeouts": {"phase_b": 901}}),
+            encoding="utf-8",
+        )
+        with patch.object(pb_mod, "_run_bridge_review_subprocess") as mock_run:
+            mock_run.return_value = {
+                "exit_code": 0, "stdout": "GO\n", "stderr": "",
+            }
+            pb_mod.run_bridge_review(
+                tmp_path,
+                "test review",
+                job_id="phase-b-r1-abc12345",
+                timeout=600,
+            )
+
+        call_kwargs = mock_run.call_args.kwargs
+        assert call_kwargs["env"]["RCX_BRIDGE_MAX_TURN_WALL_TIME_S"] == "600.0"
 
     def test_run_bridge_review_parses_decision_from_stdout(self, tmp_path):
         """Decision is parsed from stdout, not from rendered file freshness."""
@@ -2250,7 +2326,25 @@ class TestBridgeReviewMonitoring:
 
         assert result["exit_code"] == -2
         assert "stale" in result["stderr"]
-        mock_terminate.assert_called_once()
+        mock_terminate.assert_called_once_with(proc, child_pids=(200,))
+
+    def test_terminate_bridge_subprocess_signals_detached_child_groups(self):
+        proc = MagicMock()
+        proc.pid = 12345
+        proc.poll.side_effect = [None, 0]
+
+        with patch.object(pb_mod.os, "getpgid", return_value=12345), \
+             patch.object(pb_mod.os, "killpg") as mock_killpg, \
+             patch.object(pb_mod.os, "kill") as mock_kill, \
+             patch.object(pb_mod.time, "sleep", return_value=None):
+            pb_mod._terminate_bridge_subprocess(  # ANTICHEAT_OK: testing subprocess cleanup helper
+                proc,
+                child_pids=(200, 200, 12345),
+            )
+
+        assert (200, pb_mod.signal.SIGTERM) in [call.args for call in mock_killpg.call_args_list]
+        assert (12345, pb_mod.signal.SIGTERM) in [call.args for call in mock_killpg.call_args_list]
+        assert not mock_kill.called
 
 
 class TestImplementerIsConfigDriven:
@@ -2984,6 +3078,36 @@ class TestStageFiles:
         ).stdout.splitlines()
         assert staged == []
 
+    def test_stage_files_with_diagnostics_returns_git_stderr(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        failure = subprocess.CalledProcessError(
+            128,
+            ["git", "add"],
+            output="",
+            stderr="fatal: Unable to create '/repo/.git/worktrees/w/index.lock': Operation not permitted",
+        )
+        with patch.object(pb_mod.subprocess, "run", side_effect=failure):
+            ok, detail = pb_mod._stage_files_with_diagnostics(repo, ["ok.txt"])  # ANTICHEAT_OK
+
+        assert ok is False
+        assert "git add failed with exit=128" in detail
+        assert "index.lock" in detail
+        assert "Operation not permitted" in detail
+
+    def test_stage_files_with_diagnostics_preserves_git_error(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+        (repo / "ignored.txt").write_text("x", encoding="utf-8")
+
+        ok, detail = pb_mod._stage_files_with_diagnostics(repo, ["ignored.txt"])  # ANTICHEAT_OK: testing internal executor functions
+
+        assert ok is False
+        assert "git add failed" in detail
+        assert "ignored.txt" in detail
+
 
 class TestHighSeverityDetailHeuristic:
     """High severity no longer downgrades from prose-only detail/description text."""
@@ -3214,6 +3338,13 @@ class TestDeferredPacketFiling:
         )
         assert deferred_items == ["reports/deferred/non_blocking/wave_bridge_nonblockers.md"]
 
+    def test_collect_supervisor_deferred_items_ignores_stale_explicit_packet(self):
+        deferred_items = pb_mod._collect_supervisor_deferred_items(  # ANTICHEAT_OK: testing internal executor functions
+            ["mu/tools/executors/phase_b_executor.py"],
+            "reports/deferred/non_blocking/wave_bridge_nonblockers.md",
+        )
+        assert deferred_items == []
+
     def test_record_non_blocking_findings_replaces_prior_packet_contents(self, tmp_path):
         existing = [
             {"title": "Old nit", "class": "DOC_ACCURACY", "severity": "low", "file": "old.py", "disposition": "non_blocking"},
@@ -3251,6 +3382,65 @@ class TestDeferredPacketFiling:
         assert current_findings == []
         assert refreshed_packet is None
         assert not packet_path.exists()
+
+    def test_cleared_staged_deferred_packet_stays_wave_owned_until_staged(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+
+        executor_created: set[str] = set()
+        findings = [
+            {
+                "title": "Lingering nit",
+                "class": "DOC_ACCURACY",
+                "severity": "low",
+                "file": "foo.py",
+                "disposition": "non_blocking",
+            },
+        ]
+        _current, packet_rel = pb_mod._sync_deferred_non_blocking_state(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            "plan",
+            [],
+            findings,
+            previous_packet_path=None,
+            executor_created=executor_created,
+        )
+        assert packet_rel == "reports/deferred/non_blocking/plan_bridge_nonblockers.md"
+        subprocess.run(["git", "add", "--", packet_rel], cwd=repo, check=True)
+
+        current, refreshed_packet = pb_mod._sync_deferred_non_blocking_state(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            "plan",
+            findings,
+            [],
+            previous_packet_path=packet_rel,
+            executor_created=executor_created,
+        )
+
+        assert current == []
+        assert refreshed_packet is None
+        assert packet_rel in executor_created
+        assert not (repo / packet_rel).exists()
+
+        changed_files = pb_mod._collect_wave_owned_files(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            "reports/control_plane/plan.md",
+            plan_declared_files=["mu/tools/executors/foo.py"],
+            implementer_changed_files=set(),
+            executor_created_files=executor_created,
+        )
+        assert packet_rel in changed_files
+
+        assert pb_mod._stage_files(repo, changed_files)  # ANTICHEAT_OK: testing internal executor staging helper
+        status = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert packet_rel not in status
 
 
 @pytest.mark.usefixtures("mock_routing_record")
@@ -6711,6 +6901,35 @@ class TestPlanlessPhaseB:
         assert recovery_calls["status"] == "error"
         assert recovery_calls["wave_id"] == "standalone-wave"
 
+    def test_main_skips_internal_recovery_when_dispatcher_owns_it(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        recovery_calls = {"count": 0}
+
+        def fake_git_rev_parse(args, capture_output, text, check):
+            return SimpleNamespace(stdout=str(repo))
+
+        def fake_run_phase_b(repo_root, plan_path, **kwargs):
+            return {"status": "error", "step": "derive_planless_context", "wave_id": "dispatch-wave"}
+
+        def fake_attempt_recovery(repo_root, result, wave_id):
+            recovery_calls["count"] += 1
+            return {"recovered": False, "failure_class": "phase_b_plan_required", "tier": 1}
+
+        monkeypatch.setattr(pb_mod.subprocess, "run", fake_git_rev_parse)
+        monkeypatch.setattr(pb_mod, "run_phase_b", fake_run_phase_b)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["phase_b_executor.py", "--dispatcher-owned-recovery", "--json"],
+        )
+
+        with patch.dict(sys.modules, {"recovery_gate": SimpleNamespace(attempt_recovery=fake_attempt_recovery)}):
+            exit_code = pb_mod.main()
+
+        assert exit_code == 1
+        assert recovery_calls["count"] == 0
+
 
 class TestSdkReviewDepthContract:
     """Phase A/B should use the 4-agent SDK gate by default."""
@@ -6873,6 +7092,16 @@ class TestSdkReviewDepthContract:
     def test_phase_b_bridge_turn_timeout_config_rejects_invalid_value(self):
         with pytest.raises(pb_mod.PhaseBExecutorError, match="Invalid bridge turn timeout"):
             pb_mod._resolve_bridge_turn_timeout({"bridge_turn_timeouts": {"phase_b": -1}}, "phase_b", 300)  # ANTICHEAT_OK: testing config resolver
+
+    def test_bridge_process_snapshot_fail_open_on_permission_error(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pb_mod.os, "kill", lambda pid, sig: None)
+
+        def fake_run(*_args, **_kwargs):
+            raise PermissionError(1, "Operation not permitted", "ps")
+
+        monkeypatch.setattr(pb_mod.subprocess, "run", fake_run)
+
+        assert pb_mod._bridge_process_snapshot(12345, tmp_path) == ((), ())  # ANTICHEAT_OK: phase-b bridge watchdog must degrade safely when ps is blocked
 
 
 class TestValidateInputsAcceptsRoutingRecordAuthority:
