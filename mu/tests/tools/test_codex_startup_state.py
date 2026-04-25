@@ -1483,8 +1483,8 @@ def test_codex_pager_target_url_uses_http_probe_for_ws_listener(monkeypatch):
     monkeypatch.setenv("RCX_CODEX_APP_SERVER_URL", "ws://127.0.0.1:9876")
     monkeypatch.setenv("RCX_CODEX_APP_SERVER_THREADS_PATH", "api/threads")
 
-    assert startup_mod._codex_pager_target_url() == "http://127.0.0.1:9876/api/threads"
-    assert startup_mod._codex_app_server_listener_url() == "ws://127.0.0.1:9876"
+    assert startup_mod._codex_pager_target_url() == "http://127.0.0.1:9876/api/threads"  # ANTICHEAT_OK: tool unit test
+    assert startup_mod._codex_app_server_listener_url() == "ws://127.0.0.1:9876"  # ANTICHEAT_OK: tool unit test
 
 
 def test_codex_pager_target_starts_tmux_app_server_when_listener_missing(monkeypatch, tmp_path):

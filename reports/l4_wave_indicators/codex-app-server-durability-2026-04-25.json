@@ -1,24 +1,24 @@
 {
   "wave_id": "codex-app-server-durability-2026-04-25",
-  "repeat_run_speedup_ratio": 1.036384,
+  "repeat_run_speedup_ratio": 1.003125,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.408948,
+  "step_growth_slope": 0.41498,
   "repeat_run_raw_seconds": [
-    0.423827,
-    0.408948
+    0.416277,
+    0.41498
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.423827
+      "elapsed_seconds": 0.416277
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.832775
+      "elapsed_seconds": 0.831257
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-25T18:36:47Z",
+  "collection_timestamp_utc": "2026-04-25T18:40:57Z",
   "collector_version": "2.2.0"
 }
