@@ -145,18 +145,53 @@ def _read_latest_autoping_thread_id(repo_root: Path) -> str:
 
 
 def _autoping_payload_matches_repo(payload: dict[str, Any], repo_resolved: Path) -> bool:
-    bridge_state = payload.get("bridge_state")
-    wave_root = ""
-    if isinstance(bridge_state, dict):
-        wave_root = str(bridge_state.get("wave_root") or "").strip()
-    if not wave_root:
-        wave_root = str(payload.get("wave_root") or "").strip()
+    wave_root = _autoping_payload_wave_root(payload)
     if not wave_root:
         return False
     try:
         return Path(wave_root).expanduser().resolve() == repo_resolved
     except OSError:
         return False
+
+
+def _autoping_payload_wave_root(payload: dict[str, Any]) -> str:
+    bridge_state = payload.get("bridge_state")
+    wave_root = ""
+    if isinstance(bridge_state, dict):
+        wave_root = str(bridge_state.get("wave_root") or "").strip()
+    if not wave_root:
+        wave_root = str(payload.get("wave_root") or "").strip()
+    return wave_root
+
+
+def _autoping_thread_is_foreign_to_repo(repo_root: Path, thread_id: str) -> bool:
+    thread_id = str(thread_id or "").strip()
+    if not thread_id:
+        return False
+    state_dir = _codex_state_dir()
+    if not state_dir.is_dir():
+        return False
+    repo_resolved = repo_root.resolve()
+    saw_foreign_state = False
+    for state_path in state_dir.glob(AUTOPING_STATE_GLOB):
+        try:
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("thread_id") or "").strip() != thread_id:
+            continue
+        wave_root = _autoping_payload_wave_root(payload)
+        if not wave_root:
+            continue
+        try:
+            if Path(wave_root).expanduser().resolve() == repo_resolved:
+                return False
+        except OSError:
+            continue
+        saw_foreign_state = True
+    return saw_foreign_state
 
 
 def _autoping_thread_is_paused(repo_root: Path, thread_id: str) -> bool:
@@ -941,11 +976,17 @@ def _dispatch_codex(
     )
     autoping_thread_id = _read_latest_autoping_thread_id(repo_root)
     env_thread_id = str(os.environ.get("CODEX_THREAD_ID") or "").strip()
-    if env_thread_id and _autoping_thread_is_paused(repo_root, env_thread_id):
+    if env_thread_id and (
+        _autoping_thread_is_paused(repo_root, env_thread_id)
+        or _autoping_thread_is_foreign_to_repo(repo_root, env_thread_id)
+    ):
         env_thread_id = ""
     live_thread_id = env_thread_id or autoping_thread_id
     state_thread_id = str(state.get("codex_thread_id") or "").strip()
-    if state_thread_id and _autoping_thread_is_paused(repo_root, state_thread_id):
+    if state_thread_id and (
+        _autoping_thread_is_paused(repo_root, state_thread_id)
+        or _autoping_thread_is_foreign_to_repo(repo_root, state_thread_id)
+    ):
         state_thread_id = ""
     thread_id = live_thread_id or state_thread_id
     deadline = time.monotonic() + max(timeout_s, 0.001)

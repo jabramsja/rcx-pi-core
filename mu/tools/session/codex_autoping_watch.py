@@ -291,10 +291,14 @@ def _read_bridge_state(wave_root: Path | None) -> dict[str, object]:
                 "SELECT job_id, status, COALESCE(terminal_decision, '-') AS decision "
                 "FROM jobs ORDER BY rowid DESC LIMIT 1"
             ).fetchone()
-            turn = conn.execute(
-                "SELECT turn_id, agent_role, status, COALESCE(decision, '-') AS decision "
-                "FROM turns ORDER BY rowid DESC LIMIT 1"
-            ).fetchone()
+            turn = None
+            if job:
+                turn = conn.execute(
+                    "SELECT turn_id, job_id, agent_role, status, "
+                    "COALESCE(decision, '-') AS decision "
+                    "FROM turns WHERE job_id = ? ORDER BY rowid DESC LIMIT 1",
+                    (job["job_id"],),
+                ).fetchone()
         finally:
             conn.close()
     except sqlite3.Error as exc:
@@ -343,6 +347,10 @@ def _attention_required_summary(bridge_state: dict[str, object]) -> str | None:
         return None
 
     job_id = str(job.get("job_id") or "unknown-job").strip()
+    turn_job_id = str(turn.get("job_id") or "").strip()
+    if turn_job_id and turn_job_id != job_id:
+        return None
+
     job_status = str(job.get("status") or "unknown").strip()
     turn_id = str(turn.get("turn_id") or "unknown-turn").strip()
     role = str(turn.get("agent_role") or "agent").strip()
