@@ -98,6 +98,8 @@ failure shape and surface it honestly:
 38. `reports/control_plane/session_handoff_2026-04-24_post_reentry_reroute_pipeline_pager_autoping.md`
 39. `mu/tests/docs/test_doc_placement_rules.py`
 40. `mu/tests/docs/test_growth_caps.py`
+41. `mu/tools/agents/templates/meta_bridge_task.txt`
+42. `mu/tests/tools/test_meta_bridge_supervisor.py`
 
 Out of scope:
 
@@ -228,6 +230,10 @@ Out of scope:
 - Pre-commit doc governance now applies the same transient-artifact principle to
   tracker-section placement checks, and the growth caps record the founder-signed
   one-test/four-tool increase required by the Codex autoping watcher surface.
+- The commit-gate meta-bridge prompt now explicitly treats missing or stale
+  existing receipts as expected before the receipt-producing supervisor returns
+  COMMIT_GO, so it cannot self-block by verifying the old pre-commit receipt
+  before writing the fresh current-staged-tree receipt.
 - Follow-up after this wave is clean: mechanize the live-dashboard code root so
   tmux panes execute the active worktree's observability scripts, or maintain a
   repo-native sync path for root-launched pane scripts. During this pass the

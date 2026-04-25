@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import re
 import subprocess
 import threading
 
@@ -16,6 +17,10 @@ _tool_path = REPO_ROOT / "tools" / "session" / "check_codex_startup_state.py"
 startup_mod = load_module("check_codex_startup_state", _tool_path)
 _snapshot_tool_path = REPO_ROOT / "tools" / "session" / "founder_learning_snapshot.py"
 snapshot_mod = load_module("founder_learning_snapshot", _snapshot_tool_path)
+
+
+def _autoping_thread_slug(thread_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", thread_id)
 
 
 def _write_executor_config(tmp_path, *, enabled: bool = True, route: str = "codex"):
@@ -39,7 +44,7 @@ def _write_autoping_state(codex_home, thread_id: str, **overrides):
     state_path = (
         codex_home
         / "state"
-        / f"rcx_autoping_{startup_mod._codex_autoping_thread_slug(thread_id)}.json"
+        / f"rcx_autoping_{_autoping_thread_slug(thread_id)}.json"
     )
     state_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {

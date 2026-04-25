@@ -38,6 +38,7 @@ $control_surface_obligations
 ## Bounded Review Contract
 
 - Treat the package JSON and validation gate results as primary evidence. Re-run a passed gate only when you find a concrete contradiction.
+- This invocation is the receipt-producing pre-commit supervisor. Do not call `verify_pre_commit_receipt.py` or `verify_pre_commit_receipt()` to judge existing receipts before deciding; missing or stale existing receipts are expected when the current staged content changed. A fresh receipt is written only after this review returns COMMIT_GO or COMMIT_GO_HOLD_PUSH.
 - `TASKS.md auth` already ran mechanically against NOW/NEXT. If that gate is PASS, start from the authorization excerpt above and only downgrade it if that excerpt itself contradicts the package.
 - Reading `FOUNDER_SESSION_BOOTSTRAP.md` remains REQUIRED for this review.
 - Do not print bootstrap confirmations, contract recaps, or progress updates. Emit only the final envelope.
