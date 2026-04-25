@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DEFAULT_REPO="/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX"
+TMUX_SESSION="rcx-pipeline"
+REPO=""
+THREAD_ID="${CODEX_THREAD_ID:-}"
+INTERVAL="20"
+INITIAL_DELAY="30"
+PING_TIMEOUT="120"
+FORCE_RESTART=0
+
+usage() {
+    cat <<'EOF'
+Usage:
+  ./tools/session/ensure_codex_autoping.sh [options]
+
+Options:
+  --repo <path>            Override the WorkingRCX repo path
+  --thread-id <id>         Override CODEX_THREAD_ID
+  --interval <seconds>     Poll interval (default: 20)
+  --initial-delay <sec>    Initial delay before first tick (default: 30)
+  --ping-timeout <sec>     Kill a stale ping subprocess after this many seconds (default: 120)
+  --force-restart          Restart an existing watcher for this thread
+  -h, --help               Show this help
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --repo)
+            [ $# -ge 2 ] || { echo "ERROR: --repo requires a path" >&2; exit 2; }
+            REPO="$2"
+            shift 2
+            ;;
+        --thread-id)
+            [ $# -ge 2 ] || { echo "ERROR: --thread-id requires a value" >&2; exit 2; }
+            THREAD_ID="$2"
+            shift 2
+            ;;
+        --interval)
+            [ $# -ge 2 ] || { echo "ERROR: --interval requires a value" >&2; exit 2; }
+            INTERVAL="$2"
+            shift 2
+            ;;
+        --initial-delay)
+            [ $# -ge 2 ] || { echo "ERROR: --initial-delay requires a value" >&2; exit 2; }
+            INITIAL_DELAY="$2"
+            shift 2
+            ;;
+        --ping-timeout)
+            [ $# -ge 2 ] || { echo "ERROR: --ping-timeout requires a value" >&2; exit 2; }
+            PING_TIMEOUT="$2"
+            shift 2
+            ;;
+        --force-restart)
+            FORCE_RESTART=1
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "ERROR: unknown argument: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [ -z "$REPO" ]; then
+    if git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+        REPO="$git_root"
+    else
+        REPO="$DEFAULT_REPO"
+    fi
+fi
+
+if [ "${RCX_PIPELINE_SESSION:-0}" = "1" ]; then
+    echo "Codex autoping: skipped (RCX_PIPELINE_SESSION=1)"
+    exit 0
+fi
+
+if [ -z "$THREAD_ID" ]; then
+    echo "Codex autoping: skipped (CODEX_THREAD_ID unset)"
+    exit 0
+fi
+
+WATCH_SCRIPT="$REPO/tools/session/codex_autoping_watch.py"
+if [ ! -f "$WATCH_SCRIPT" ]; then
+    echo "Codex autoping: missing watcher script at $WATCH_SCRIPT"
+    exit 1
+fi
+WINDOW_SCRIPT="$REPO/tools/session/codex_autoping_window.sh"
+if [ ! -f "$WINDOW_SCRIPT" ]; then
+    echo "Codex autoping: missing tmux window script at $WINDOW_SCRIPT"
+    exit 1
+fi
+
+THREAD_SLUG="$(printf '%s' "$THREAD_ID" | tr -c 'A-Za-z0-9_.-' '_')"
+STATE_DIR="${RCX_CODEX_HOME:-$HOME/.codex}/state"
+LOG_DIR="${RCX_CODEX_HOME:-$HOME/.codex}/log/autoping"
+STATE_PATH="$STATE_DIR/rcx_autoping_${THREAD_SLUG}.json"
+SUMMARY_PATH="$STATE_DIR/rcx_autoping_${THREAD_SLUG}_summary.txt"
+RUNNER_LOG="$LOG_DIR/rcx_autoping_${THREAD_SLUG}.runner.log"
+mkdir -p "$STATE_DIR" "$LOG_DIR"
+
+existing_pid=""
+if [ -f "$STATE_PATH" ]; then
+    existing_pid="$(python3 - <<'PY' "$STATE_PATH"
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+try:
+    payload = json.loads(path.read_text())
+except Exception:
+    print("")
+else:
+    pid = payload.get("watcher_pid") or payload.get("active_pid")
+    print("" if pid in (None, "") else str(pid))
+PY
+)"
+fi
+
+if [ -n "$existing_pid" ] && ps -p "$existing_pid" > /dev/null 2>&1; then
+    if [ "$FORCE_RESTART" -ne 1 ]; then
+        echo "Codex autoping: active pid=$existing_pid thread=$THREAD_ID"
+        echo "Autoping state: $STATE_PATH"
+        echo "Autoping summary: $SUMMARY_PATH"
+        exit 0
+    fi
+    kill "$existing_pid" >/dev/null 2>&1 || true
+    sleep 1
+fi
+
+cleanup_orphaned_resumes() {
+    python3 - <<'PY' "$THREAD_ID"
+import os
+import signal
+import subprocess
+import sys
+
+thread_id = sys.argv[1]
+try:
+    proc = subprocess.run(
+        ["ps", "-Ao", "pid=,ppid=,command="],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+except OSError:
+    raise SystemExit(0)
+if proc.returncode not in (0, 1) and not proc.stdout:
+    raise SystemExit(0)
+if not proc.stdout:
+    raise SystemExit(0)
+for raw_line in proc.stdout.splitlines():
+    line = raw_line.strip()
+    if not line:
+        continue
+    parts = line.split(None, 2)
+    if len(parts) != 3:
+        continue
+    pid_text, ppid_text, command = parts
+    if thread_id not in command:
+        continue
+    if "codex exec resume" not in command:
+        continue
+    if "Autonomous WorkingRCX pipeline watchdog tick." not in command:
+        continue
+    try:
+        pid = int(pid_text)
+        ppid = int(ppid_text)
+    except ValueError:
+        continue
+    if ppid != 1:
+        continue
+    try:
+        os.kill(pid, signal.SIGTERM)
+        print(f"Codex autoping: cleaned orphaned resume pid={pid}")
+    except ProcessLookupError:
+        continue
+PY
+}
+
+cleanup_orphaned_resumes
+
+CMD=(python3 "$WATCH_SCRIPT" --repo-root "$REPO" --thread-id "$THREAD_ID" --interval "$INTERVAL" --initial-delay "$INITIAL_DELAY" --ping-timeout "$PING_TIMEOUT")
+WINDOW_CMD=("$WINDOW_SCRIPT" --repo "$REPO" --thread-id "$THREAD_ID" --interval "$INTERVAL" --initial-delay "$INITIAL_DELAY" --ping-timeout "$PING_TIMEOUT")
+WINDOW_CMD_STRING="$(printf '%q ' "${WINDOW_CMD[@]}")"
+WINDOW_CMD_STRING="${WINDOW_CMD_STRING% }"
+
+if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    if tmux list-windows -t "$TMUX_SESSION" -F '#W' | grep -qx 'AUTO-PING'; then
+        tmux respawn-window -k -t "$TMUX_SESSION:AUTO-PING" "$WINDOW_CMD_STRING"
+    else
+        tmux new-window -d -t "$TMUX_SESSION" -n "AUTO-PING" "$WINDOW_CMD_STRING"
+    fi
+    echo "Codex autoping: ACTIVE in tmux-managed AUTO-PING window for thread $THREAD_ID"
+else
+    nohup "${CMD[@]}" >"$RUNNER_LOG" 2>&1 </dev/null &
+    WATCHER_PID="$!"
+    echo "Codex autoping: ACTIVE in background pid=$WATCHER_PID for thread $THREAD_ID"
+fi
+
+echo "Autoping state: $STATE_PATH"
+echo "Autoping summary: $SUMMARY_PATH"
+echo "Autoping watcher: $WATCH_SCRIPT"

@@ -3,6 +3,18 @@
     "implementer": "codex",
     "reviewer": "codex"
   },
+  "bridge_agent_defaults": {
+    "claude": {
+      "display_name": "Claude Opus 4.7 max",
+      "model": "claude-opus-4-7",
+      "effort": "max"
+    },
+    "codex": {
+      "display_name": "Codex 5.5 xhigh",
+      "model": "gpt-5.5",
+      "reasoning_effort": "xhigh"
+    }
+  },
   "backends": {
     "post_merge_supervisor": "codex",
     "dialectic_executor": "codex",

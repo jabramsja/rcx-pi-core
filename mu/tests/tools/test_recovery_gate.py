@@ -227,6 +227,18 @@ class TestClassifyFailure:
     def test_missing_bridge_config_tier1(self):
         assert rg_mod.tier_for(FailureClass.MISSING_BRIDGE_CONFIG) == 1
 
+    def test_phase_b_plan_required_from_planless_tracked_packet_stop(self):
+        result = {
+            "status": "error",
+            "step": "derive_planless_context",
+            "errors": [
+                "Routing record references tracked packet 'reports/control_plane/pager.md' which exists. "
+                "Use --plan reports/control_plane/pager.md instead of planless mode."
+            ],
+        }
+        assert rg_mod.classify_failure(result) == FailureClass.PHASE_B_PLAN_REQUIRED
+        assert rg_mod.tier_for(FailureClass.PHASE_B_PLAN_REQUIRED) == 1
+
     def test_stale_bridge_lock_in_stdout(self):
         assert rg_mod.classify_failure(
             {"status": "error", "stdout": "bridge.lock held", "stderr": "",
@@ -260,6 +272,22 @@ class TestClassifyFailure:
         assert rg_mod.classify_failure(
             {"status": "error", "stderr": "Unable to create index.lock",
              "step": "stage_files"}) == FailureClass.STALE_GIT_INDEX_LOCK
+
+    def test_git_index_permission_failure_is_terminal_not_tier3(self):
+        result = {
+            "status": "error",
+            "step": "bridge_staging",
+            "stderr": (
+                "git add failed with exit=128 | fatal: Unable to create "
+                "'/repo/.git/worktrees/w/index.lock': Operation not permitted"
+            ),
+            "errors": [
+                "Failed to stage files before bridge review",
+                "fatal: Unable to create '/repo/.git/worktrees/w/index.lock': "
+                "Operation not permitted",
+            ],
+        }
+        assert rg_mod.classify_failure(result) == FailureClass.UNCLASSIFIED
 
     def test_stale_executor_state(self):
         assert rg_mod.classify_failure(
@@ -332,6 +360,35 @@ class TestClassifyFailure:
              "stderr": "error: git add failed", "stdout": ""}
         ) == FailureClass.GIT_STAGING_CONFLICT
 
+    def test_bridge_staging_failure_is_git_staging_conflict(self):
+        assert rg_mod.classify_failure(
+            {
+                "status": "error",
+                "step": "bridge_staging",
+                "errors": ["Failed to stage files before bridge review"],
+            }
+        ) == FailureClass.GIT_STAGING_CONFLICT
+
+    def test_bridge_staging_failure_is_not_agent_review_crash(self):
+        result = {
+            "status": "error",
+            "step": "bridge_staging",
+            "errors": ["Failed to stage files before bridge review"],
+        }
+        assert rg_mod.classify_failure(result) == FailureClass.GIT_STAGING_CONFLICT
+
+    def test_git_index_permission_denial_is_terminal_environment_failure(self):
+        assert rg_mod.classify_failure(
+            {
+                "status": "error",
+                "step": "bridge_staging",
+                "stderr": (
+                    "git add failed with exit=128 | fatal: Unable to create "
+                    "'/repo/.git/worktrees/w/index.lock': Operation not permitted"
+                ),
+            }
+        ) == FailureClass.UNCLASSIFIED
+
     def test_test_failure(self):
         assert rg_mod.classify_failure(
             {"status": "error", "step": "pre_commit",
@@ -341,6 +398,48 @@ class TestClassifyFailure:
         assert rg_mod.classify_failure(
             {"status": "error", "step": "agent_review",
              "stderr": "agent died"}) == FailureClass.AGENT_REVIEW_CRASH
+
+    def test_codex_session_or_auth_failures_are_terminal_not_retryable(self):
+        result = {
+            "status": "error",
+            "step": "agent_review",
+            "stderr": (
+                "Failed to create session: Operation not permitted. "
+                "Codex cannot access session files at /Users/test/.codex/sessions "
+                "(permission denied). unexpected status 401 Unauthorized: "
+                "Missing bearer or basic authentication in header"
+            ),
+        }
+        assert rg_mod.classify_failure(result) == FailureClass.UNCLASSIFIED
+
+    def test_codex_session_or_auth_failures_in_reason_text_are_terminal_not_retryable(self):
+        result = {
+            "status": "error",
+            "step": "implementer",
+            "errors": [
+                "Implementer failed: error (exit=1): Error: thread/start: thread/start failed: "
+                "error creating thread: Fatal error: Codex cannot access session files at "
+                "/Users/test/.codex/sessions (permission denied). unexpected status 401 Unauthorized: "
+                "Missing bearer or basic authentication in header"
+            ],
+        }
+        assert rg_mod.classify_failure(result) == FailureClass.UNCLASSIFIED
+
+    def test_codex_websocket_dns_failure_is_tier2_upstream_connectivity(self):
+        result = {
+            "status": "error",
+            "step": "implementer",
+            "errors": [
+                "Implementer failed: error (exit=1): Adapter 'codex' exited 1. "
+                "Output tail:\n"
+                "2026-04-24T17:57:35.497449Z ERROR "
+                "codex_api::endpoint::responses_websocket: failed to connect "
+                "to websocket: IO error: failed to lookup address information: "
+                "nodename nor servname provided, or not known, url: "
+                "wss://chatgpt.com/backend-api/codex/responses"
+            ],
+        }
+        assert rg_mod.classify_failure(result) == FailureClass.UPSTREAM_CONNECTIVITY
 
     def test_unknown_error(self):
         assert rg_mod.classify_failure(
@@ -403,6 +502,46 @@ class TestClassifyFailure:
         assert rg_mod.classify_failure(
             {"status": "failed", "step": "phase_a_executor", "stdout": stdout}
         ) == FailureClass.AGENT_REVIEW_CRASH
+
+    def test_bridge_subprocess_timeout_classified_as_process_timeout(self):
+        result = {
+            "status": "error",
+            "step": "bridge_subprocess",
+            "errors": [
+                "Bridge subprocess failed in round 1 (exit=1). stderr: ERROR: Adapter 'codex' timed out after 900.0s"
+            ],
+        }
+        assert rg_mod.classify_failure(result) == FailureClass.PROCESS_TIMEOUT
+
+    def test_codex_websocket_dns_failure_classified_as_upstream_connectivity(self):
+        result = {
+            "status": "error",
+            "step": "implementer",
+            "errors": [
+                "Implementer failed: error (exit=1): Adapter 'codex' exited 1. "
+                "Output tail:\n2026-04-24T17:57:35.497449Z ERROR "
+                "codex_api::endpoint::responses_websocket: failed to connect "
+                "to websocket: IO error: failed to lookup address information: "
+                "nodename nor servname provided, or not known, url: "
+                "wss://chatgpt.com/backend-api/codex/responses"
+            ],
+        }
+        assert rg_mod.classify_failure(result) == FailureClass.UPSTREAM_CONNECTIVITY
+        assert rg_mod.tier_for(FailureClass.UPSTREAM_CONNECTIVITY) == 2
+
+    def test_codex_websocket_auth_failure_not_upstream_connectivity(self):
+        result = {
+            "status": "error",
+            "step": "implementer",
+            "errors": [
+                "Implementer failed: error (exit=1): Adapter 'codex' exited 1. "
+                "Output tail:\n2026-04-24T00:21:26.532620Z ERROR "
+                "codex_api::endpoint::responses_websocket: failed to connect "
+                "to websocket: HTTP error: 401 Unauthorized, url: "
+                "wss://api.openai.com/v1/responses"
+            ],
+        }
+        assert rg_mod.classify_failure(result) != FailureClass.UPSTREAM_CONNECTIVITY
 
     def test_unclassified(self):
         assert rg_mod.classify_failure({"status": "weird"}) == FailureClass.UNCLASSIFIED
@@ -488,7 +627,9 @@ class TestTierMapping:
                          FailureClass.STALE_EXECUTOR_STATE, FailureClass.STALE_CONTINUATION,
                          FailureClass.MIXED_STAGING, FailureClass.TRACKER_NOTE_CONTRACT,
                          FailureClass.FEATURE_BRANCH_MISMATCH,
-                         FailureClass.MISSING_BRIDGE_CONFIG}
+                         FailureClass.MISSING_BRIDGE_CONFIG,
+                         FailureClass.POST_REENTRY_NEEDS_PHASE_B,
+                         FailureClass.PHASE_B_PLAN_REQUIRED}
         # STALE_GIT_INDEX_LOCK demoted to Tier 2 (no sound ownership check)
         assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
         tier4 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 4}
@@ -1015,6 +1156,10 @@ class TestRecoveryLog:
         assert rg_mod._count_prior_attempts(attempts, "w1", "s1", "x") == 2 # ANTICHEAT_OK
         assert rg_mod._count_prior_attempts(attempts, "w2", "s1", "x") == 0 # ANTICHEAT_OK
 
+    def test_upstream_connectivity_has_bounded_higher_attempt_budget(self):
+        assert rg_mod._max_attempts_for_failure(FailureClass.UPSTREAM_CONNECTIVITY) == 6 # ANTICHEAT_OK
+        assert rg_mod._max_attempts_for_failure(FailureClass.UNKNOWN_ERROR) == 2 # ANTICHEAT_OK
+
 
 class TestRecoveryStatus:
     def test_status_round_trip_and_wave_invocation_count(self, tmp_path):
@@ -1059,6 +1204,27 @@ class TestAttemptRecovery:
         r = rg_mod.attempt_recovery(tmp_path, {"status": "timeout", "step": "p"}, "w1")
         assert r["recovered"] is True and r["tier"] == 2
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+
+    def test_tier2_upstream_connectivity_recovers_via_retry(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY", raising=False)
+        result = {
+            "status": "error",
+            "step": "implementer",
+            "errors": [
+                "Adapter 'codex' exited 1. Output tail: "
+                "codex_api::endpoint::responses_websocket: failed to connect "
+                "to websocket: IO error: failed to lookup address information"
+            ],
+        }
+
+        r = rg_mod.attempt_recovery(tmp_path, result, "w1")
+
+        assert r["recovered"] is True
+        assert r["tier"] == 2
+        assert r["failure_class"] == FailureClass.UPSTREAM_CONNECTIVITY.value
+        assert r["action"] == "retry_upstream_connectivity"
+        assert os.environ["RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY"] == "1"
+        monkeypatch.delenv("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY", raising=False)
 
     def test_tier2_pr_merge_conflict_recovers_via_branch_sync(self, tmp_path, monkeypatch):
         calls: list[list[str]] = []
@@ -1619,6 +1785,29 @@ class TestFixProcessTimeout:
             monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
             monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
 
+    def test_bridge_subprocess_timeout_targets_bridge_turn_timeout(self, tmp_path, monkeypatch):
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        (cfg_dir / "executor_config.json").write_text(json.dumps({
+            "timeouts": {"phase_b_executor": 3600},
+            "bridge_turn_timeouts": {"phase_b": 900},
+        }))
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_ORIGINAL_BRIDGE_TURN_TIMEOUT_phase_b", raising=False)
+        r = rg_mod.fix_process_timeout(
+            tmp_path,
+            result={"executor": "phase_b_executor", "step": "bridge_subprocess", "status": "error"},
+        )
+        assert r["fixed"] is True
+        assert os.environ["RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE"] == "1350"
+        assert os.environ["RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY"] == "phase_b"
+        assert "bridge_turn_timeouts.phase_b" in r["detail"]
+        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE", raising=False)
+        monkeypatch.delenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", raising=False)
+
 
 class TestFixTransientKill:
     def test_returns_retryable(self, tmp_path):
@@ -1815,8 +2004,8 @@ class TestFixImplementerStale:
 
 
 class TestTier2FixesMap:
-    def test_all_seven_registered(self):
-        """All 7 Tier 2 failure classes have registered fix functions."""
+    def test_all_eight_registered(self):
+        """All 8 Tier 2 failure classes have registered fix functions."""
         expected = {
             rg_mod.FailureClass.STALE_GIT_INDEX_LOCK,
             rg_mod.FailureClass.PROCESS_TIMEOUT,
@@ -1825,6 +2014,7 @@ class TestTier2FixesMap:
             rg_mod.FailureClass.IMPLEMENTER_STALE,
             rg_mod.FailureClass.PR_MERGE_CONFLICT,
             rg_mod.FailureClass.PR_CONFLICTING,
+            rg_mod.FailureClass.UPSTREAM_CONNECTIVITY,
         }
         assert set(rg_mod._TIER2_FIXES.keys()) == expected  # ANTICHEAT_OK
 
@@ -1844,6 +2034,29 @@ class TestTier2AttemptRecovery:
         assert r["tier"] == 2
         assert r["failure_class"] == "process_timeout"
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
+
+    def test_tier2_upstream_connectivity_recovers_as_retryable(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY", raising=False)
+        result = {
+            "status": "error",
+            "step": "implementer",
+            "errors": [
+                "Implementer failed: Adapter 'codex' exited 1. "
+                "codex_api::endpoint::responses_websocket: failed to connect "
+                "to websocket: IO error: failed to lookup address information: "
+                "nodename nor servname provided, or not known, url: "
+                "wss://chatgpt.com/backend-api/codex/responses"
+            ],
+        }
+
+        r = rg_mod.attempt_recovery(tmp_path, result, "w-upstream")
+
+        assert r["recovered"] is True
+        assert r["tier"] == 2
+        assert r["failure_class"] == "upstream_connectivity"
+        assert r["action"] == "retry_upstream_connectivity"
+        assert os.environ["RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY"] == "1"
+        monkeypatch.delenv("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY", raising=False)
 
     def test_tier2_transient_kill_recovers(self, tmp_path):
         r = rg_mod.attempt_recovery(
@@ -1993,6 +2206,74 @@ class TestRecoveryLoop:
         assert status["outcome"] == "exhausted"
         assert status["state"] == "tier3_exhausted"
         assert status["current_iteration"] == 3
+
+    @pytest.mark.parametrize(
+        "stderr_tail",
+        [
+            (
+                "2026-04-24T00:21:26.532620Z ERROR codex_api::endpoint::responses_websocket: "
+                "failed to connect to websocket: HTTP error: 401 Unauthorized, "
+                "url: wss://api.openai.com/v1/responses"
+            ),
+            (
+                "Error: thread/start: thread/start failed: error creating thread: "
+                "Fatal error: Codex cannot access session files at "
+                "/Users/jeffabrams/.codex/sessions (permission denied)."
+            ),
+        ],
+    )
+    def test_nonretryable_recovery_agent_failure_exhausts_immediately(self, tmp_path, stderr_tail):
+        result = {"status": "failed", "step": "implementer", "stderr": "bridge failed", "stdout": ""}
+        fake = FakePopen(stdout="", stderr=stderr_tail, pid=31338)
+        fake.returncode = 1
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *args, **kwargs: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = lambda *args, **kwargs: fake
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(tmp_path, result, "w-nonretryable", max_iterations=3)
+
+        assert r["recovered"] is False
+        assert r["exhausted"] is True
+        assert r["iterations"] == 1
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["active"] is False
+        assert status["outcome"] == "exhausted"
+        assert status["state"] == "tier3_exhausted"
+        if "401 Unauthorized" in stderr_tail:
+            assert "responses_websocket" in status["detail"]
+        else:
+            assert "thread/start failed" in status["detail"]
+        entries = rg_mod._load_recovery_log(tmp_path)  # ANTICHEAT_OK
+        assert entries[-1]["action"] == "tier3_iter1_error"
+
+    def test_recovery_agent_upstream_connectivity_grants_retry(self, tmp_path):
+        stderr_tail = (
+            "2026-04-24T01:10:45.791822Z ERROR codex_api::endpoint::responses_websocket: "
+            "failed to connect to websocket: IO error: failed to lookup address information: "
+            "nodename nor servname provided, or not known, url: "
+            "wss://chatgpt.com/backend-api/codex/responses"
+        )
+        result = {"status": "failed", "step": "implementer", "stderr": "bridge failed", "stdout": ""}
+        fake = FakePopen(stdout="", stderr=stderr_tail, pid=31338)
+        fake.returncode = 1
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *args, **kwargs: MagicMock(returncode=0, stdout="", stderr="")
+            mock_sp.Popen = lambda *args, **kwargs: fake
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(tmp_path, result, "w-upstream", max_iterations=3)
+
+        assert r["recovered"] is True
+        assert r["exhausted"] is False
+        assert r["iterations"] == 1
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["active"] is False
+        assert status["outcome"] == "success"
+        assert status["state"] == "tier3_upstream_connectivity_retryable"
+        assert status["last_action"] == "retryable_upstream_connectivity"
 
     def test_escalate_action(self, tmp_path):
         """Verify escalate action returns exhausted=True on the final iteration.
@@ -2361,6 +2642,54 @@ class TestRecoveryPagerEvents:
         assert restored["state"] == "tier3_starting"
         assert restored["current_iteration"] == 0
         assert restored["detail"] == ""
+
+    def test_update_recovery_status_noops_after_terminal_finish(self, tmp_path):
+        initial = {
+            "active": False,
+            "invocation_id": "invoke-finished",
+            "wave_id": "wave-recovery-pager",
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "plan_path": "reports/control_plane/plan.md",
+            "step": "phase_b_executor",
+            "failure_class": FailureClass.TEST_FAILURE.value,
+            "tier": 3,
+            "tuple_attempt_index": 1,
+            "wave_invocation_count": 1,
+            "started_at": "2026-04-17T00:00:00+00:00",
+            "updated_at": "2026-04-17T00:00:01+00:00",
+            "finished_at": "2026-04-17T00:00:02+00:00",
+            "owner_pid": 1,
+            "child_pid": 0,
+            "child_role": "",
+            "state": "tier3_exhausted",
+            "reason": "FAILED test_x",
+            "retry_target": "phase_b_executor",
+            "current_iteration": 1,
+            "max_iterations": 3,
+            "last_action": "exhausted",
+            "current_command": "",
+            "explanation": "",
+            "detail": "still failing after recovery",
+            "recovered": False,
+            "exhausted": True,
+            "outcome": "exhausted",
+        }
+        rg_mod._save_recovery_status(tmp_path, initial)  # ANTICHEAT_OK: seed terminal record for stale-update guard
+
+        updated = rg_mod._update_recovery_status(  # ANTICHEAT_OK: terminal recovery record must resist stale mutation
+            tmp_path,
+            state="tier3_waiting_on_agent",
+            current_iteration=2,
+            detail="stale waiter should not win",
+        )
+
+        assert updated["state"] == "tier3_exhausted"
+        assert updated["current_iteration"] == 1
+        assert updated["detail"] == "still failing after recovery"
+        persisted = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK: persisted terminal record must stay stable
+        assert persisted["state"] == "tier3_exhausted"
+        assert persisted["current_iteration"] == 1
+        assert persisted["detail"] == "still failing after recovery"
 
 
 class TestHybridDelegatePayload:
@@ -2818,6 +3147,42 @@ class TestHybridScopeAudit:
         assert ok is False
         assert ".scratch/recovery_agent_other-step-1.txt" in audit["detail"]
 
+    def test_bridge_failure_logs_are_allowed_when_declared_in_exception_paths(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        scratch = tmp_path / ".scratch"
+        scratch.mkdir(exist_ok=True)
+        bridge_stdout = scratch / "phase_b_bridge_phase-b-r4-test.stdout.log"
+        bridge_stderr = scratch / "phase_b_bridge_phase-b-r4-test.stderr.log"
+        bridge_stdout.write_text("bridge stdout\n", encoding="utf-8")
+        bridge_stderr.write_text("bridge stderr\n", encoding="utf-8")
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+                result_exception_paths=[
+                    ".scratch/phase_b_bridge_phase-b-r4-test.stdout.log",
+                    ".scratch/phase_b_bridge_phase-b-r4-test.stderr.log",
+                ],
+            ),
+        )
+        assert ok is True
+
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+                result_exception_paths=[
+                    ".scratch/phase_b_bridge_phase-b-r4-test.stdout.log",
+                    ".scratch/phase_b_bridge_phase-b-r4-test.stderr.log",
+                ],
+            ),
+        )
+        assert ok is True
+        assert audit["observed_drift"] == []
+
     def test_git_control_drift_fails_closed(self, tmp_path, monkeypatch):
         init_hybrid_delegate_tree(tmp_path)
         tuples = iter([{"stable": True}, {"stable": False}])
@@ -3002,6 +3367,39 @@ class TestRecoveryStatusRendering:
         assert "Next step if this works: Phase A" in rendered
         assert "Recovery run: #2 in this wave · step failure #1" in rendered
         assert "Reason: phase_a timed out" in rendered
+
+    def test_dead_owner_active_status_renders_stale(self, tmp_path):
+        status_path = tmp_path / ".agent_bus" / "recovery"
+        status_path.mkdir(parents=True)
+        now = datetime(2026, 4, 24, 18, 49, tzinfo=timezone.utc)
+        (status_path / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": True,
+                    "wave_id": "wave-stale",
+                    "failure_class": "upstream_connectivity",
+                    "tier": 2,
+                    "wave_invocation_count": 19,
+                    "tuple_attempt_index": 3,
+                    "retry_target": "phase_b_executor",
+                    "state": "tier2_starting",
+                    "owner_pid": 999999,
+                    "child_pid": 0,
+                    "reason": "failed to lookup address information",
+                    "updated_at": (now - timedelta(seconds=12)).isoformat(),
+                    "current_iteration": 0,
+                    "max_iterations": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        rendered = "\n".join(dash_mod.render_recovery_lines(tmp_path, now=now))
+
+        assert "STALE RECOVERY — Tier 2 recovery" in rendered
+        assert "No recovery is running now." in rendered
+        assert "dead owner process" in rendered
+        assert "owner 999999 (dead, historical)" in rendered
 
     def test_hung_child_pid_and_completed_outcome(self, tmp_path):
         status_path = tmp_path / ".agent_bus" / "recovery"
@@ -4509,6 +4907,81 @@ esac
         assert "RCX_OBS_STATUS_SCRIPT=" in log_text
         assert "RCX_OBS_REPO_ROOT=" not in log_text
 
+    def test_pipeline_monitor_start_reseeds_autoping_when_thread_id_is_present(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        launcher_dir = repo_root / "tools" / "session"
+        launcher_dir.mkdir(parents=True, exist_ok=True)
+        marker = tmp_path / "autoping.log"
+        launcher = launcher_dir / "ensure_codex_autoping.sh"
+        launcher.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -eu\n"
+            f"printf '%s\\n' \"$*\" >> {marker!s}\n",
+            encoding="utf-8",
+        )
+        launcher.chmod(launcher.stat().st_mode | 0o111)
+        git_bin = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/test-wave",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        env = os.environ | {
+            "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            "CODEX_THREAD_ID": "thread-123",
+        }
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0
+        marker_text = marker.read_text(encoding="utf-8")
+        assert "--repo" in marker_text
+        assert str(repo_root) in marker_text
+        assert "--thread-id thread-123" in marker_text
+        assert "--force-restart" in marker_text
+
+    def test_ensure_codex_autoping_skips_pipeline_worker_sessions(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        launcher_dir = repo_root / "tools" / "session"
+        launcher_dir.mkdir(parents=True, exist_ok=True)
+        watch_script = launcher_dir / "codex_autoping_watch.py"
+        watch_script.write_text("print('watcher should not start')\n", encoding="utf-8")
+        window_script = launcher_dir / "codex_autoping_window.sh"
+        window_script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        window_script.chmod(window_script.stat().st_mode | 0o111)
+        launcher = launcher_dir / "ensure_codex_autoping.sh"
+        launcher.write_text(
+            (repo_root / "tools" / "session" / "ensure_codex_autoping.sh").read_text(encoding="utf-8")
+            if (repo_root / "tools" / "session" / "ensure_codex_autoping.sh").exists()
+            else (
+                (_OBSERVABILITY_DIR.parents[2] / "tools" / "session" / "ensure_codex_autoping.sh")
+                .read_text(encoding="utf-8")
+            ),
+            encoding="utf-8",
+        )
+        launcher.chmod(launcher.stat().st_mode | 0o111)
+
+        result = subprocess.run(
+            ["bash", str(launcher), "--repo", str(repo_root), "--thread-id", "thread-123"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PIPELINE_SESSION": "1"},
+        )
+
+        assert result.returncode == 0
+        assert "Codex autoping: skipped (RCX_PIPELINE_SESSION=1)" in result.stdout
+
     def test_pipeline_monitor_find_newest_log_ignores_blank_bridge_stderr_and_uses_raw_reviewer(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -4532,7 +5005,10 @@ esac
         self._set_age_seconds(blank_stderr, age_seconds=5)
         self._set_age_seconds(reviewer, age_seconds=20)
         script = repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
-        env = os.environ | {"RCX_OBS_REPO_ROOT": str(repo_root)}
+        env = os.environ | {
+            "RCX_OBS_REPO_ROOT": str(repo_root),
+            "RCX_PIPELINE_LIVE_LOG": str(tmp_path / "rcx_pipeline_live.txt"),
+        }
 
         result = subprocess.run(
             [
@@ -4575,7 +5051,10 @@ esac
         self._set_age_seconds(reviewer, age_seconds=20)
         self._set_age_seconds(reader, age_seconds=5)
         script = repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
-        env = os.environ | {"RCX_OBS_REPO_ROOT": str(repo_root)}
+        env = os.environ | {
+            "RCX_OBS_REPO_ROOT": str(repo_root),
+            "RCX_PIPELINE_LIVE_LOG": str(tmp_path / "rcx_pipeline_live.txt"),
+        }
 
         result = subprocess.run(
             [
@@ -4616,7 +5095,10 @@ esac
         self._set_age_seconds(reviewer, age_seconds=20)
         self._set_age_seconds(executor_live, age_seconds=5)
         script = repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
-        env = os.environ | {"RCX_OBS_REPO_ROOT": str(repo_root)}
+        env = os.environ | {
+            "RCX_OBS_REPO_ROOT": str(repo_root),
+            "RCX_PIPELINE_LIVE_LOG": str(tmp_path / "rcx_pipeline_live.txt"),
+        }
 
         result = subprocess.run(
             [
@@ -4657,7 +5139,10 @@ esac
         self._set_age_seconds(reviewer, age_seconds=20)
         self._set_age_seconds(bridge_stderr, age_seconds=5)
         script = repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
-        env = os.environ | {"RCX_OBS_REPO_ROOT": str(repo_root)}
+        env = os.environ | {
+            "RCX_OBS_REPO_ROOT": str(repo_root),
+            "RCX_PIPELINE_LIVE_LOG": str(tmp_path / "rcx_pipeline_live.txt"),
+        }
 
         result = subprocess.run(
             [
@@ -4704,6 +5189,79 @@ esac
         assert "No active Phase A/Phase B bridge rounds" in result.stdout
         assert "Commit path" in result.stdout
         assert "Step 14: waiting for CI on PR #719..." in result.stdout
+
+    def test_pane_findings_uses_bridge_db_failed_turn_when_envelope_missing(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        raw_dir = repo_root / ".agent_bus" / "raw" / "phase-b-r1-deadbeef"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        reviewer = raw_dir / "phase-b-r1-deadbeef--r1-reviewer.txt"
+        reviewer.write_text("reviewer subprocess log with no agent envelope\n", encoding="utf-8")
+        db_path = repo_root / ".agent_bus" / "bridge.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE jobs (
+                  job_id TEXT PRIMARY KEY,
+                  status TEXT NOT NULL,
+                  terminal_decision TEXT,
+                  updated_at TEXT NOT NULL
+                );
+                CREATE TABLE turns (
+                  turn_id TEXT PRIMARY KEY,
+                  job_id TEXT NOT NULL,
+                  agent_role TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  decision TEXT,
+                  started_at TEXT NOT NULL,
+                  finished_at TEXT,
+                  raw_output_path TEXT NOT NULL
+                );
+                """
+            )
+            conn.execute(
+                "INSERT INTO jobs VALUES (?, ?, ?, ?)",
+                (
+                    "phase-b-r1-deadbeef",
+                    "AWAITING_REVIEWER_APPROVAL",
+                    None,
+                    "2026-04-24T00:58:44+00:00",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO turns VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "phase-b-r1-deadbeef--r1-reviewer",
+                    "phase-b-r1-deadbeef",
+                    "reviewer",
+                    "FAILED",
+                    "ERROR",
+                    "2026-04-24T00:43:43+00:00",
+                    "2026-04-24T00:58:44+00:00",
+                    str(reviewer),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Decision: ERROR" in clean_stdout
+        assert "Why it stopped: bridge reviewer turn is FAILED / ERROR." in clean_stdout
+        assert "Bridge job status: AWAITING_REVIEWER_APPROVAL" in clean_stdout
+        assert "In progress..." not in clean_stdout
 
     def test_pane_findings_renders_latest_meta_review_when_bridge_rounds_are_idle(self, tmp_path):
         repo_root = tmp_path / "repo"
@@ -4931,6 +5489,462 @@ esac
         assert "REQUEST_CHANGES" not in clean_stdout
         assert "No active Phase A/Phase B bridge rounds" in clean_stdout
 
+    def test_pane_timeline_detects_live_codex_review_chain(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_timeline.sh")
+
+        executors_dir = repo_root / "mu" / "tools" / "executors"
+        executors_dir.mkdir(parents=True, exist_ok=True)
+        (executors_dir / "executor_common.py").write_text(
+            """
+def configured_role_agents(_repo_root):
+    return {
+        "reviewer": {"display_name": "Codex 5.5 xhigh", "status_name": "Codex"},
+        "implementer": {"display_name": "Codex 5.5 xhigh", "status_name": "Codex"},
+    }
+""".strip()
+            + "\n",
+            encoding="utf-8",
+        )
+
+        proc_bin = tmp_path / "proc-bin"
+        proc_bin.mkdir()
+        self._write_executable(
+            proc_bin / "pgrep",
+            """#!/usr/bin/env bash
+set -eu
+pattern="${2:-}"
+case "$pattern" in
+  "codex.*exec|claude.*--print")
+    printf '2222\\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "ps",
+            f"""#!/usr/bin/env bash
+set -eu
+case "$*" in
+  "-p 2222 -o command=")
+    printf '%s\\n' 'node /Users/test/.npm-global/bin/codex exec - --json -m gpt-5.5'
+    ;;
+  "-p 2222 -o ppid=")
+    printf '1111\\n'
+    ;;
+  "-p 1111 -o command=")
+    printf '%s\\n' 'python {repo_root}/tools/agents/bridge_supervisor.py review --reviewer codex'
+    ;;
+  "-p 1111 -o ppid=")
+    printf '1000\\n'
+    ;;
+  "-p 1000 -o command=")
+    printf '%s\\n' 'python {repo_root}/mu/tools/executors/phase_b_executor.py --plan reports/control_plane/pager.md'
+    ;;
+  "-p 1000 -o ppid=")
+    printf '1\\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "lsof",
+            f"""#!/usr/bin/env bash
+set -eu
+printf 'n{repo_root}\\n'
+""",
+        )
+
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\\nHEAD 1111111111111111\\nbranch refs/heads/jabramsja/repo-wave\\n",
+        )
+        env = os.environ | {
+            "PATH": f"{proc_bin}:{bin_dir}:{os.environ['PATH']}",
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Watching: jabramsja/repo-wave" in clean_stdout
+        assert "← Codex reviewing now" in clean_stdout
+        assert "← idle" not in clean_stdout
+
+    def test_pane_timeline_shows_last_pager_wake_summary(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_timeline.sh")
+
+        pager_state = repo_root / ".agent_bus" / "observability" / "pipeline_agent_pager_state.json"
+        pager_state.parent.mkdir(parents=True, exist_ok=True)
+        pager_state.write_text(
+            json.dumps(
+                {
+                    "dispatcher": {
+                        "active": False,
+                        "pid": 0,
+                        "started_at": "",
+                        "updated_at": "2026-04-23T19:10:00+00:00",
+                        "last_dispatch": {
+                            "event_id": "evt-1",
+                            "event_type": "recovery_state_changed",
+                            "wave_id": "wave-pager",
+                            "task_id": "[PIPELINE-AGENT-PAGER]",
+                            "phase": "recovery",
+                            "state": "tier3_waiting_on_agent",
+                            "transition_key": "recovery-tier3",
+                            "summary": "Recovery moved to tier3_waiting_on_agent and woke dispatcher.",
+                            "target": "codex",
+                            "attempted_at": "2026-04-23T19:09:55+00:00",
+                            "completed_at": "2026-04-23T19:09:56+00:00",
+                            "acknowledged": True,
+                            "error": "",
+                        },
+                    }
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\nHEAD 1111111111111111\nbranch refs/heads/jabramsja/repo-wave\n",
+        )
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Pager: last wake" in clean_stdout
+        assert "recovery_state_changed" in clean_stdout
+        assert "Last pager event: Recovery moved to tier3_waiting_on_agent and woke dispatcher." in clean_stdout
+
+    def test_pane_timeline_executor_pointer_checks_keywords_individually(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_timeline.sh")
+
+        proc_bin = tmp_path / "proc-bin"
+        proc_bin.mkdir()
+        self._write_executable(
+            proc_bin / "pgrep",
+            """#!/usr/bin/env bash
+set -eu
+pattern="${2:-}"
+case "$pattern" in
+  "phase_b_executor")
+    printf '1000\\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "ps",
+            f"""#!/usr/bin/env bash
+set -eu
+case "$*" in
+  "-p 1000 -o command=")
+    printf '%s\\n' 'python {repo_root}/mu/tools/executors/phase_b_executor.py --plan reports/control_plane/pager.md'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "lsof",
+            f"""#!/usr/bin/env bash
+set -eu
+printf 'n{repo_root}\\n'
+""",
+        )
+
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\\nHEAD 1111111111111111\\nbranch refs/heads/jabramsja/repo-wave\\n",
+        )
+        timeline_script = repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh"
+        helper_prefix = timeline_script.read_text(encoding="utf-8").split("while true; do", 1)[0]
+        helper_script = tmp_path / "probe_timeline_helpers.sh"
+        helper_script.write_text(helper_prefix, encoding="utf-8")
+        helper_script.chmod(helper_script.stat().st_mode | 0o111)
+        probe_script = tmp_path / "probe_timeline_executor.sh"
+        probe_script.write_text(
+            f"""#!/usr/bin/env bash
+set -eu
+source {helper_script}
+REPO_ROOT={repo_root}
+if repo_has_any_process phase_a_executor phase_b_executor commit_executor executor_dispatch; then
+  printf 'executor-active\\n'
+else
+  printf 'executor-idle\\n'
+fi
+""",
+            encoding="utf-8",
+        )
+        probe_script.chmod(probe_script.stat().st_mode | 0o111)
+        env = os.environ | {
+            "PATH": f"{proc_bin}:{bin_dir}:{os.environ['PATH']}",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(probe_script)],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == "executor-active"
+
+    def test_pane_helpers_do_not_treat_executor_test_names_as_live_executors(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_timeline.sh")
+        self._install_observability_script(repo_root, "_pane_processes.sh")
+
+        proc_bin = tmp_path / "proc-bin"
+        proc_bin.mkdir()
+        self._write_executable(
+            proc_bin / "pgrep",
+            """#!/usr/bin/env bash
+set -eu
+pattern="${2:-}"
+case "$pattern" in
+  "phase_b_executor")
+    printf '1000\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "ps",
+            """#!/usr/bin/env bash
+set -eu
+case "$*" in
+  "-p 1000 -o command=")
+    printf '%s\n' 'python3 -m pytest -q mu/tests/tools/test_phase_b_executor.py'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "lsof",
+            f"""#!/usr/bin/env bash
+set -eu
+printf 'n{repo_root}\n'
+""",
+        )
+
+        timeline_script = repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh"
+        timeline_helpers = tmp_path / "probe_timeline_helpers.sh"
+        timeline_helpers.write_text(
+            timeline_script.read_text(encoding="utf-8").split("while true; do", 1)[0],
+            encoding="utf-8",
+        )
+        timeline_helpers.chmod(timeline_helpers.stat().st_mode | 0o111)
+
+        processes_script = repo_root / "mu" / "tools" / "observability" / "_pane_processes.sh"
+        processes_helpers = tmp_path / "probe_processes_helpers.sh"
+        processes_helpers.write_text(
+            processes_script.read_text(encoding="utf-8").split("while true; do", 1)[0],
+            encoding="utf-8",
+        )
+        processes_helpers.chmod(processes_helpers.stat().st_mode | 0o111)
+
+        probe_script = tmp_path / "probe_test_name_false_positive.sh"
+        probe_script.write_text(
+            f"""#!/usr/bin/env bash
+set -eu
+source {timeline_helpers}
+REPO_ROOT={repo_root}
+if repo_has_any_process phase_a_executor phase_b_executor commit_executor executor_dispatch; then
+  printf 'timeline-active\n'
+else
+  printf 'timeline-idle\n'
+fi
+source {processes_helpers}
+REPO_ROOT={repo_root}
+if find_live_pid phase_b_executor >/dev/null; then
+  printf 'processes-active\n'
+else
+  printf 'processes-idle\n'
+fi
+""",
+            encoding="utf-8",
+        )
+        probe_script.chmod(probe_script.stat().st_mode | 0o111)
+        env = os.environ | {
+            "PATH": f"{proc_bin}:{os.environ['PATH']}",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(probe_script)],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["timeline-idle", "processes-idle"]
+
+    def test_pane_helpers_ignore_watchdog_resume_prompts_with_executor_keywords(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_timeline.sh")
+        self._install_observability_script(repo_root, "_pane_processes.sh")
+
+        proc_bin = tmp_path / "proc-bin"
+        proc_bin.mkdir()
+        self._write_executable(
+            proc_bin / "pgrep",
+            """#!/usr/bin/env bash
+set -eu
+pattern="${2:-}"
+case "$pattern" in
+  "phase_a_executor"|"phase_b_executor"|"executor_dispatch"|"codex.*exec|claude.*--print")
+    printf '1000\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "ps",
+            """#!/usr/bin/env bash
+set -eu
+case "$*" in
+  "-p 1000 -o command=")
+    printf '%s\n' 'node /Users/test/.npm-global/bin/codex exec resume thread-1 Autonomous WorkingRCX pipeline watchdog tick. Do not launch or relaunch executor_dispatch.py, phase_a_executor.py, phase_b_executor.py, commit_executor.py, or bridge_supervisor.py run from this watchdog wake path.'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "lsof",
+            f"""#!/usr/bin/env bash
+set -eu
+printf 'n{repo_root}\n'
+""",
+        )
+
+        timeline_script = repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh"
+        timeline_helpers = tmp_path / "probe_timeline_watchdog_helpers.sh"
+        timeline_helpers.write_text(
+            timeline_script.read_text(encoding="utf-8").split("while true; do", 1)[0],
+            encoding="utf-8",
+        )
+        timeline_helpers.chmod(timeline_helpers.stat().st_mode | 0o111)
+
+        processes_script = repo_root / "mu" / "tools" / "observability" / "_pane_processes.sh"
+        processes_helpers = tmp_path / "probe_processes_watchdog_helpers.sh"
+        processes_helpers.write_text(
+            processes_script.read_text(encoding="utf-8").split("while true; do", 1)[0],
+            encoding="utf-8",
+        )
+        processes_helpers.chmod(processes_helpers.stat().st_mode | 0o111)
+
+        probe_script = tmp_path / "probe_watchdog_false_positive.sh"
+        probe_script.write_text(
+            f"""#!/usr/bin/env bash
+set -eu
+source {timeline_helpers}
+REPO_ROOT={repo_root}
+if repo_has_any_process phase_a_executor phase_b_executor commit_executor executor_dispatch; then
+  printf 'timeline-active\n'
+else
+  printf 'timeline-idle\n'
+fi
+source {processes_helpers}
+REPO_ROOT={repo_root}
+if find_live_pid phase_a_executor >/dev/null || find_live_pid phase_b_executor >/dev/null || find_live_pid executor_dispatch >/dev/null; then
+  printf 'processes-active\n'
+else
+  printf 'processes-idle\n'
+fi
+""",
+            encoding="utf-8",
+        )
+        probe_script.chmod(probe_script.stat().st_mode | 0o111)
+        env = os.environ | {
+            "PATH": f"{proc_bin}:{os.environ['PATH']}",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(probe_script)],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["timeline-idle", "processes-idle"]
+
     def test_pane_processes_ignores_unrelated_global_codex_session_logs(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -5051,6 +6065,128 @@ esac
         assert "Watching: jabramsja/active-wave" in clean_stdout
         assert "ACTIVE — Tier 3 recovery" in clean_stdout
         assert "Problem: a review subprocess crashed" in clean_stdout
+
+    def test_pane_processes_shows_last_pager_wake_line(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_processes.sh")
+        self._install_observability_script(repo_root, "pipeline_status.sh")
+        self._install_observability_script(repo_root, "pipeline_dashboard.py")
+
+        pager_state = repo_root / ".agent_bus" / "observability" / "pipeline_agent_pager_state.json"
+        pager_state.parent.mkdir(parents=True, exist_ok=True)
+        pager_state.write_text(
+            json.dumps(
+                {
+                    "dispatcher": {
+                        "active": False,
+                        "pid": 0,
+                        "started_at": "",
+                        "updated_at": "2026-04-23T19:10:00+00:00",
+                        "last_dispatch": {
+                            "event_id": "evt-1",
+                            "event_type": "recovery_state_changed",
+                            "wave_id": "wave-pager",
+                            "task_id": "[PIPELINE-AGENT-PAGER]",
+                            "phase": "recovery",
+                            "state": "tier3_waiting_on_agent",
+                            "transition_key": "recovery-tier3",
+                            "summary": "Recovery moved to tier3_waiting_on_agent and woke dispatcher.",
+                            "target": "codex",
+                            "attempted_at": "2026-04-23T19:09:55+00:00",
+                            "completed_at": "2026-04-23T19:09:56+00:00",
+                            "acknowledged": True,
+                            "error": "",
+                        },
+                    }
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\nHEAD 1111111111111111\nbranch refs/heads/jabramsja/repo-wave\n",
+        )
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_processes.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Last pager wake:" in clean_stdout
+        assert "recovery_state_changed" in clean_stdout
+        assert "target codex" in clean_stdout
+
+    def test_pane_processes_surfaces_autoping_attention_without_idle_claim(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_processes.sh")
+        self._install_observability_script(repo_root, "pipeline_status.sh")
+        self._install_observability_script(repo_root, "pipeline_dashboard.py")
+
+        codex_home = tmp_path / "codex-home"
+        state_dir = codex_home / "state"
+        state_dir.mkdir(parents=True)
+        (state_dir / "rcx_autoping_thread.json").write_text(
+            json.dumps(
+                {
+                    "thread_id": "thread",
+                    "status": "attention_required",
+                    "updated_at": "2026-04-25T01:47:01+00:00",
+                    "last_attention_at": "2026-04-25T01:47:01+00:00",
+                    "last_summary": "attention required: reviewer turn failed while the job waits for approval",
+                    "bridge_state": {"wave_root": str(repo_root)},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\nHEAD 1111111111111111\nbranch refs/heads/jabramsja/repo-wave\n",
+        )
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_CODEX_HOME": str(codex_home),
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_processes.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Autoping attention:" in clean_stdout
+        assert "reviewer turn failed while the job waits for approval" in clean_stdout
+        assert "Nobody is working right now." not in clean_stdout
+        assert "Waiting for the next wave." not in clean_stdout
 
     def test_pane_processes_honors_pinned_repo_root_env(self, tmp_path):
         quiet = tmp_path / "quiet"
@@ -5300,6 +6436,125 @@ class TestNeedsPhaseB_Tier3:
         """needs_phase_b must NOT be classified as TERMINAL_POLICY."""
         fc = rg_mod.classify_failure({"status": "needs_phase_b", "step": "x"})
         assert fc != FailureClass.TERMINAL_POLICY
+
+    def test_post_reentry_needs_phase_b_classified_as_tier1_resume(self):
+        fc = rg_mod.classify_failure(
+            {
+                "status": "needs_phase_b",
+                "step": "post_reentry_supervisor",
+                "plan_path": "reports/control_plane/pager.md",
+                "errors": [
+                    "Supervisor returned NEEDS_PHASE_B after reentry convergence. bridge_status drifted"
+                ],
+            }
+        )
+        assert fc == FailureClass.POST_REENTRY_NEEDS_PHASE_B
+        assert rg_mod.tier_for(fc) == 1
+
+    def test_attempt_recovery_seeds_phase_b_reentry_checkpoint_for_post_reentry_veto(self, tmp_path):
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": "reports/control_plane/pager.md",
+            "wave_id": "wave-post-reentry",
+            "bridge_rounds": 6,
+            "pre_commit_summary": "Bridge status drifted after reentry convergence.",
+            "errors": [
+                "Supervisor returned NEEDS_PHASE_B after reentry convergence. Bridge status drifted after reentry convergence."
+            ],
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, "wave-post-reentry")
+
+        assert recovery["recovered"] is True
+        assert recovery["tier"] == 1
+        assert recovery["failure_class"] == "post_reentry_needs_phase_b"
+        assert recovery["action"] == "resume_phase_b_reentry"
+
+        checkpoint_path = tmp_path / ".agent_bus" / "executors" / "phase_b_state.json"
+        checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        assert checkpoint["completed_step"] == "needs_phase_b_reentry"
+        assert checkpoint["plan_path"] == "reports/control_plane/pager.md"
+        assert checkpoint["bridge_rounds"] == 6
+        assert checkpoint["reentry_findings"] == "Bridge status drifted after reentry convergence."
+        assert checkpoint["bridge_scope_fingerprint"] == rg_mod._bridge_scope_fingerprint_for_files(  # ANTICHEAT_OK: regression locks Phase B resume fingerprint parity
+            tmp_path, []
+        )
+
+    def test_attempt_recovery_preserves_post_reentry_bridge_scope_fingerprint(self, tmp_path):
+        scoped_file = tmp_path / "mu" / "tools" / "executors" / "recovery_gate.py"
+        scoped_file.parent.mkdir(parents=True, exist_ok=True)
+        scoped_file.write_text("after recovery\n", encoding="utf-8")
+        result = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": "reports/control_plane/pager.md",
+            "wave_id": "wave-post-reentry",
+            "bridge_rounds": 6,
+            "pre_commit_summary": "Bridge status drifted after reentry convergence.",
+            "changed_files": ["mu/tools/executors/recovery_gate.py"],
+            "bridge_scope_fingerprint": rg_mod._bridge_scope_fingerprint_for_files(  # ANTICHEAT_OK: regression locks Phase B resume fingerprint parity
+                tmp_path,
+                ["mu/tools/executors/recovery_gate.py"],
+            ),
+            "errors": [
+                "Supervisor returned NEEDS_PHASE_B after reentry convergence. Bridge status drifted after reentry convergence."
+            ],
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, "wave-post-reentry")
+
+        assert recovery["recovered"] is True
+        checkpoint_path = tmp_path / ".agent_bus" / "executors" / "phase_b_state.json"
+        checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        assert checkpoint["completed_step"] == "needs_phase_b_reentry"
+        assert checkpoint["changed_files"] == ["mu/tools/executors/recovery_gate.py"]
+        assert checkpoint["baseline_wave_files"] == ["mu/tools/executors/recovery_gate.py"]
+        assert checkpoint["bridge_scope_fingerprint"] == result["bridge_scope_fingerprint"]
+
+    def test_repo_module_loader_ignores_cached_global_phase_b_module(self, tmp_path, monkeypatch):
+        executors_dir = tmp_path / "mu" / "tools" / "executors"
+        executors_dir.mkdir(parents=True)
+        (executors_dir / "phase_b_executor.py").write_text(
+            "def marker():\n"
+            "    return 'repo-root-bound'\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "phase_b_executor",
+            SimpleNamespace(marker=lambda: "cached-global"),
+        )
+
+        loaded = rg_mod._load_executor_module_from_repo(  # ANTICHEAT_OK: regression locks repo-root-bound helper loading
+            tmp_path,
+            "phase_b_executor",
+        )
+
+        assert loaded.marker() == "repo-root-bound"
+
+    def test_attempt_recovery_retries_phase_b_with_plan_after_planless_stop(self, tmp_path, monkeypatch):
+        plan_path = tmp_path / "reports" / "control_plane" / "pager.md"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text("Status: LOCKED\n", encoding="utf-8")
+        monkeypatch.delenv(rg_mod.PHASE_B_RECOVERY_PLAN_ENV, raising=False)
+        result = {
+            "status": "error",
+            "step": "derive_planless_context",
+            "errors": [
+                "Routing record references tracked packet 'reports/control_plane/pager.md' which exists. "
+                "Use --plan reports/control_plane/pager.md instead of planless mode."
+            ],
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, "wave-plan-required")
+
+        assert recovery["recovered"] is True
+        assert recovery["tier"] == 1
+        assert recovery["failure_class"] == "phase_b_plan_required"
+        assert recovery["action"] == "retry_phase_b_with_plan"
+        assert "--plan reports/control_plane/pager.md" in recovery["detail"]
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/pager.md"
 
 
 class TestDangerousGitPatterns:

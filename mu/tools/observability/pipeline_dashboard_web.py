@@ -25,7 +25,7 @@ if str(EXECUTORS_DIR) not in sys.path:
     sys.path.insert(0, str(EXECUTORS_DIR))
 DEFAULT_AGENT_DISPLAY_NAMES = {
     "claude": "Claude Opus 4.7 max",
-    "codex": "Codex 5.4 xhigh",
+    "codex": "Codex 5.5 xhigh",
 }
 
 
@@ -138,6 +138,10 @@ def bridge_role_for_pid(pid):
 
 def _bridge_agent_name_for_command(line):
     lowered = line.lower()
+    if "autonomous workingrcx pipeline watchdog tick." in lowered:
+        return None
+    if "workingrcx pipeline pager wakeup." in lowered:
+        return None
     if "codex" in lowered and " exec" in lowered and "codex.app" not in lowered and "codex helper" not in lowered:
         return "codex"
     if "claude" in lowered and "--print" in lowered:
@@ -152,6 +156,8 @@ def _is_observability_noise(line):
         or "rcx_log_watcher.sh" in lowered
         or "_pane_" in lowered
         or "pipeline_monitor.sh" in lowered
+        or "autonomous workingrcx pipeline watchdog tick." in lowered
+        or "workingrcx pipeline pager wakeup." in lowered
     )
 
 

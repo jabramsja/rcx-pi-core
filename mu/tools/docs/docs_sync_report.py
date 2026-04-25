@@ -46,6 +46,9 @@ def collect_report() -> dict:
         if classification == "unknown":
             report["unclassified_markdown"].append(rel)
 
+        if classification == "exempt":
+            continue
+
         content = md_file.read_text(encoding="utf-8")
         match = TRACKER_SECTION_PATTERN.search(content)
         if match and classification != "root_canonical":

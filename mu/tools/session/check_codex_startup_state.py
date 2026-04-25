@@ -17,6 +17,14 @@ from pathlib import Path
 
 TMUX_SESSION = "rcx-pipeline"
 WEB_PORT = 8099
+DASHBOARD_HEALTH_TIMEOUT_S = 8
+DEFAULT_CODEX_APP_SERVER_URL = "http://127.0.0.1:8765"
+DEFAULT_CODEX_APP_SERVER_THREADS_PATH = "/api/threads"
+CODEX_PAGER_REQUIRED_ROUTES = frozenset({"codex", "both"})
+CODEX_AUTOPING_MAX_STATE_AGE_S = 180
+CODEX_AUTOPING_CONTEXT_EXHAUSTED_STATUSES = frozenset(
+    {"context_exhausted", "context_exhausted_paused"}
+)
 
 STALE_MODELS_CACHE_CANARIES = (
     "team morale and being a supportive teammate as much as code quality",
@@ -35,6 +43,13 @@ SESSION_START_REQUIRED_CANARIES = (
     "codex-binary-guard",
     "rcx_codex_persona_hardening.md",
     "codex_binary_patch_surface.md",
+)
+PREFLIGHT_WRAPPER_REQUIRED_CANARIES = (
+    "ensure_codex_autoping.sh",
+    "--no-autoping",
+    "Codex autoping:",
+    "Codex pager:",
+    "rev-parse --is-inside-work-tree",
 )
 ALLOWED_SESSION_START_PRE_EMIT_ENV_VARS = frozenset({"CODEX_RCX_PREFLIGHT_DISABLE"})
 
@@ -1715,6 +1730,20 @@ def _extract_binary_contradictions(payload: dict) -> list[str]:
     return contradictions
 
 
+def _binary_audit_is_actionable(payload: dict) -> bool:
+    if payload.get("version_changed_since_patch"):
+        return True
+    if _extract_binary_contradictions(payload):
+        return True
+    for item in payload.get("specs") or []:
+        if str(item.get("status") or "") not in {"patched", "absent"}:
+            return True
+    return str(payload.get("overall_status") or "unknown") not in {
+        "patched",
+        "partially_patched",
+    }
+
+
 def _audit_binary_guard(codex_home: Path, repo_root: Path) -> CheckResult:
     binary_guard = codex_home / "bin" / "codex-binary-guard"
     if not binary_guard.exists():
@@ -1758,22 +1787,77 @@ def _audit_binary_guard(codex_home: Path, repo_root: Path) -> CheckResult:
             "FAIL",
             f"version drift current=v{version} last_patched=v{last_version}",
         )
-    if payload.get("overall_status") != "patched":
-        return CheckResult(
-            "binary_guard",
-            "FAIL",
-            f"overall_status={payload.get('overall_status')} version=v{version}",
-        )
     if contradictions:
         return CheckResult(
             "binary_guard",
             "FAIL",
             "contradictions present: " + ", ".join(contradictions),
         )
+    if _binary_audit_is_actionable(payload):
+        return CheckResult(
+            "binary_guard",
+            "FAIL",
+            f"overall_status={payload.get('overall_status')} version=v{version}",
+        )
+    if payload.get("overall_status") == "partially_patched":
+        return CheckResult(
+            "binary_guard",
+            "OK",
+            f"patched+absent version=v{version}",
+        )
     return CheckResult(
         "binary_guard",
         "OK",
         f"patched version=v{version}",
+    )
+
+
+def _check_preflight_wrapper(codex_home: Path, repo_root: Path) -> CheckResult:
+    wrapper_path = codex_home / "bin" / "codex-rcx-preflight"
+    text = _read_text(wrapper_path)
+    if text is None:
+        return CheckResult(
+            "preflight_wrapper",
+            "FAIL",
+            f"missing: {wrapper_path}",
+        )
+    if not os.access(wrapper_path, os.X_OK):
+        return CheckResult(
+            "preflight_wrapper",
+            "FAIL",
+            f"not executable: {wrapper_path}",
+        )
+
+    missing = [
+        needle
+        for needle in PREFLIGHT_WRAPPER_REQUIRED_CANARIES
+        if needle not in text
+    ]
+    if missing:
+        return CheckResult(
+            "preflight_wrapper",
+            "FAIL",
+            "missing autoping canaries: " + ", ".join(missing),
+        )
+
+    launcher_path = repo_root / "tools" / "session" / "ensure_codex_autoping.sh"
+    if not launcher_path.exists():
+        return CheckResult(
+            "preflight_wrapper",
+            "FAIL",
+            f"missing repo launcher: {launcher_path}",
+        )
+    if not os.access(launcher_path, os.X_OK):
+        return CheckResult(
+            "preflight_wrapper",
+            "FAIL",
+            f"repo launcher not executable: {launcher_path}",
+        )
+
+    return CheckResult(
+        "preflight_wrapper",
+        "OK",
+        "pager+autoping-aware codex-rcx-preflight installed",
     )
 
 
@@ -2065,10 +2149,13 @@ def _check_models_cache(codex_home: Path) -> CheckResult:
     )
 
 
-def _dashboard_health(port: int = WEB_PORT) -> tuple[bool, str]:
+def _dashboard_health(
+    port: int = WEB_PORT,
+    timeout_s: int = DASHBOARD_HEALTH_TIMEOUT_S,
+) -> tuple[bool, str]:
     url = f"http://127.0.0.1:{port}/api/state"
     try:
-        with urllib.request.urlopen(url, timeout=2) as response:
+        with urllib.request.urlopen(url, timeout=timeout_s) as response:
             if response.status != 200:
                 return False, f"unexpected HTTP {response.status} from {url}"
             payload = json.loads(response.read())
@@ -2101,6 +2188,131 @@ def _dashboard_health(port: int = WEB_PORT) -> tuple[bool, str]:
 def _dashboard_healthy(port: int = WEB_PORT) -> bool:
     healthy, _ = _dashboard_health(port)
     return healthy
+
+
+def _executor_config_payload(repo_root: Path) -> tuple[dict[str, object] | None, str]:
+    config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    raw = _read_text(config_path)
+    if raw is None:
+        return None, f"missing executor config: {config_path}"
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return None, f"invalid executor config JSON: {config_path}: {exc.msg}"
+    if not isinstance(payload, dict):
+        return None, f"executor config must be a JSON object: {config_path}"
+    return payload, ""
+
+
+def _codex_pager_target_url() -> str:
+    base_url = os.environ.get("RCX_CODEX_APP_SERVER_URL", DEFAULT_CODEX_APP_SERVER_URL).rstrip("/")
+    threads_path = os.environ.get(
+        "RCX_CODEX_APP_SERVER_THREADS_PATH",
+        DEFAULT_CODEX_APP_SERVER_THREADS_PATH,
+    )
+    if not threads_path.startswith("/"):
+        threads_path = "/" + threads_path
+    return f"{base_url}{threads_path}"
+
+
+def _codex_pager_target_health() -> tuple[bool, str]:
+    url = _codex_pager_target_url()
+    try:
+        with urllib.request.urlopen(url, timeout=2):
+            pass
+    except urllib.error.HTTPError as exc:
+        return True, f"Codex pager target reachable at {url} (HTTP {exc.code})"
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        detail = type(exc).__name__
+        if isinstance(exc, urllib.error.URLError):
+            reason = exc.reason
+            detail = reason if isinstance(reason, str) else type(reason).__name__
+        return False, f"required Codex pager target unavailable: {url} ({detail})"
+    return True, f"Codex pager target reachable at {url}"
+
+
+def _codex_exec_resume_health(codex_home: Path) -> tuple[bool, str]:
+    sessions_dir = codex_home / "sessions"
+    if not sessions_dir.exists():
+        return False, f"missing Codex sessions directory for exec resume fallback: {sessions_dir}"
+    if not os.access(sessions_dir, os.R_OK | os.W_OK | os.X_OK):
+        return False, f"Codex sessions directory is not read/write/searchable: {sessions_dir}"
+
+    codex_bin = os.environ.get("RCX_PIPELINE_AGENT_PAGER_CODEX_BIN", "codex")
+    proc = _run([codex_bin, "exec", "resume", "--help"], timeout=10)
+    if proc.returncode != 0:
+        return False, f"codex exec resume help failed: {_excerpt(proc.stderr or proc.stdout)}"
+    if "Resume a previous session" not in proc.stdout:
+        return False, "codex exec resume help missing resume command marker"
+    return True, f"codex exec resume fallback available with sessions at {sessions_dir}"
+
+
+def _codex_autoping_thread_slug(thread_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", thread_id)
+
+
+def _pid_alive(pid_value: object) -> bool:
+    try:
+        pid = int(str(pid_value))
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _codex_autoping_state_path(codex_home: Path, thread_id: str) -> Path:
+    return codex_home / "state" / f"rcx_autoping_{_codex_autoping_thread_slug(thread_id)}.json"
+
+
+def _codex_autoping_health(codex_home: Path, thread_id: str) -> tuple[bool, str]:
+    state_path = _codex_autoping_state_path(codex_home, thread_id)
+    raw = _read_text(state_path)
+    if raw is None:
+        return False, f"missing Codex autoping state: {state_path}"
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return False, f"invalid Codex autoping state: {state_path}: {exc.msg}"
+    if not isinstance(payload, dict):
+        return False, f"invalid Codex autoping state payload: {state_path}"
+
+    recorded_thread = str(payload.get("thread_id") or "").strip()
+    if recorded_thread != thread_id:
+        return False, f"Codex autoping state thread mismatch: {recorded_thread or 'unset'}"
+
+    watcher_pid = payload.get("watcher_pid")
+    if not _pid_alive(watcher_pid):
+        return False, f"Codex autoping watcher not live: pid={watcher_pid or 'unset'}"
+
+    try:
+        age_s = time.time() - state_path.stat().st_mtime
+    except OSError as exc:
+        return False, f"Codex autoping state stat failed: {type(exc).__name__}"
+    if age_s > CODEX_AUTOPING_MAX_STATE_AGE_S:
+        return False, f"Codex autoping state stale: age={age_s:.0f}s path={state_path}"
+
+    status = str(payload.get("status") or "unknown")
+    normalized_status = status.strip().lower()
+    last_exit_code = payload.get("last_exit_code")
+    if last_exit_code not in (None, 0, "0"):
+        if normalized_status in CODEX_AUTOPING_CONTEXT_EXHAUSTED_STATUSES:
+            return (
+                True,
+                "Codex autoping degraded "
+                f"pid={watcher_pid} thread={thread_id} status={normalized_status} "
+                f"last_exit={last_exit_code}: current thread context exhausted; "
+                "watcher paused repeated resume attempts and pager remains primary",
+            )
+        return False, f"Codex autoping last ping failed: exit={last_exit_code}"
+
+    return True, f"Codex autoping active pid={watcher_pid} thread={thread_id} status={status}"
 
 
 def _strip_ansi(text: str) -> str:
@@ -2161,7 +2373,7 @@ def _tmux_pane_has_live_content(title: str, body: str) -> tuple[bool, str]:
 
 def _tmux_monitor_signature(repo_root: Path, session: str) -> tuple[bool, str]:
     panes = _run(
-        ["tmux", "list-panes", "-t", session, "-F", "#{pane_id}\t#{pane_title}"],
+        ["tmux", "list-panes", "-s", "-t", session, "-F", "#{pane_id}\t#{pane_title}"],
         cwd=repo_root,
         timeout=10,
     )
@@ -2332,11 +2544,130 @@ def _ensure_web_dashboard(repo_root: Path, port: int = WEB_PORT) -> CheckResult:
     )
 
 
+def _ensure_codex_pager_target(
+    repo_root: Path,
+    codex_home: Path | None = None,
+) -> CheckResult:
+    payload, error_detail = _executor_config_payload(repo_root)
+    if payload is None:
+        return CheckResult(
+            "codex_pager_target",
+            "FAIL",
+            error_detail,
+        )
+
+    pager_config = payload.get("pipeline_agent_pager")
+    if not isinstance(pager_config, dict):
+        return CheckResult(
+            "codex_pager_target",
+            "FAIL",
+            "executor config missing pipeline_agent_pager object",
+        )
+
+    if not pager_config.get("enabled"):
+        return CheckResult(
+            "codex_pager_target",
+            "OK",
+            "pipeline_agent_pager disabled; no Codex pager target required",
+        )
+
+    route = str(pager_config.get("route") or "").strip()
+    if route not in CODEX_PAGER_REQUIRED_ROUTES:
+        route_detail = route or "unset"
+        return CheckResult(
+            "codex_pager_target",
+            "OK",
+            f"pipeline_agent_pager route={route_detail}; no Codex pager target required",
+        )
+
+    healthy, detail = _codex_pager_target_health()
+    resume_healthy, resume_detail = _codex_exec_resume_health(codex_home or _codex_home())
+    combined_detail = f"{detail}; {resume_detail}"
+    return CheckResult(
+        "codex_pager_target",
+        "OK" if healthy and resume_healthy else "FAIL",
+        combined_detail,
+    )
+
+
+def _ensure_codex_autoping(repo_root: Path, codex_home: Path) -> CheckResult:
+    if os.environ.get("RCX_PIPELINE_SESSION", "") == "1":
+        return CheckResult(
+            "codex_autoping",
+            "OK",
+            "RCX_PIPELINE_SESSION=1; Codex autoping skipped inside pipeline-owned subprocess",
+        )
+
+    thread_id = os.environ.get("CODEX_THREAD_ID", "").strip()
+    if not thread_id:
+        return CheckResult(
+            "codex_autoping",
+            "OK",
+            "CODEX_THREAD_ID unset; Codex autoping skipped outside an interactive Codex thread",
+        )
+
+    healthy, detail = _codex_autoping_health(codex_home, thread_id)
+    if healthy:
+        return CheckResult("codex_autoping", "OK", detail)
+
+    launcher_path = repo_root / "tools" / "session" / "ensure_codex_autoping.sh"
+    if not launcher_path.exists():
+        return CheckResult(
+            "codex_autoping",
+            "FAIL",
+            f"{detail}; missing launcher: {launcher_path}",
+        )
+    if not os.access(launcher_path, os.X_OK):
+        return CheckResult(
+            "codex_autoping",
+            "FAIL",
+            f"{detail}; launcher not executable: {launcher_path}",
+        )
+
+    proc = _run(
+        [
+            str(launcher_path),
+            "--repo",
+            str(repo_root),
+            "--thread-id",
+            thread_id,
+            "--force-restart",
+        ],
+        cwd=repo_root,
+        timeout=20,
+    )
+    if proc.returncode != 0:
+        return CheckResult(
+            "codex_autoping",
+            "FAIL",
+            f"{detail}; recovery failed: {_excerpt(proc.stderr or proc.stdout)}",
+        )
+
+    deadline = time.time() + 8
+    last_detail = detail
+    while time.time() < deadline:
+        healthy, last_detail = _codex_autoping_health(codex_home, thread_id)
+        if healthy:
+            return CheckResult(
+                "codex_autoping",
+                "OK",
+                last_detail.replace("Codex autoping active", "started Codex autoping"),
+            )
+        time.sleep(0.5)
+
+    return CheckResult(
+        "codex_autoping",
+        "FAIL",
+        "failed closed after recovery attempt: " + last_detail,
+    )
+
+
 def gather_results(repo_root: Path, codex_home: Path) -> tuple[list[CheckResult], list[CheckResult]]:
     local_results: list[CheckResult]
     if codex_home.exists():
         local_results = [
             _audit_binary_guard(codex_home, repo_root),
+            _check_preflight_wrapper(codex_home, repo_root),
             _check_session_start_hook(codex_home),
             _check_prompt_hook(codex_home),
             _check_default_rules(codex_home),
@@ -2354,6 +2685,8 @@ def gather_results(repo_root: Path, codex_home: Path) -> tuple[list[CheckResult]
     observability_results = [
         _ensure_tmux_monitor(repo_root),
         _ensure_web_dashboard(repo_root),
+        _ensure_codex_pager_target(repo_root, codex_home),
+        _ensure_codex_autoping(repo_root, codex_home),
     ]
     return local_results, observability_results
 

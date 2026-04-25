@@ -35,6 +35,8 @@ class TestDocPlacementRules:
         for doc_path in sorted(REPO_ROOT.rglob("*.md")):
             rel = str(doc_path.relative_to(REPO_ROOT))
             classification = classify_md_path(doc_path)
+            if classification == "exempt":
+                continue
             content = doc_path.read_text(encoding="utf-8")
 
             match = TRACKER_SECTION_PATTERN.search(content)

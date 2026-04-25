@@ -101,12 +101,24 @@ def _resolve_timeout_override(name: str, default: float) -> float:
     return value if value > 0 else default
 
 
-def _bridge_max_turn_wall_time_s() -> float:
-    """Allow executor-driven bridge runs to widen the reviewer turn budget."""
-    return _resolve_timeout_override(
-        "RCX_BRIDGE_MAX_TURN_WALL_TIME_S",
-        BRIDGE_MAX_TURN_WALL_TIME_S,
-    )
+def _bridge_max_turn_wall_time_override_s() -> float | None:
+    """Read the executor-provided bridge turn budget, when explicitly set."""
+    raw = os.getenv("RCX_BRIDGE_MAX_TURN_WALL_TIME_S", "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def _bridge_turn_timeout_s(adapter_timeout_s: int) -> float:
+    """Resolve the bridge turn timeout budget for a reader/reviewer adapter."""
+    override = _bridge_max_turn_wall_time_override_s()
+    if override is not None:
+        return override
+    return min(float(adapter_timeout_s), BRIDGE_MAX_TURN_WALL_TIME_S)
 
 
 def _lock_metadata_payload(holder: str, lock_path: Path) -> dict[str, Any]:
@@ -1208,7 +1220,7 @@ def execute_agent_turn(
     # Validate adapter config BEFORE recording RUNNING turn to avoid phantom rows
     config = load_bridge_config(paths.config_path)
     adapter = get_adapter(config, adapter_name)
-    turn_timeout_s = min(adapter.timeout_s, _bridge_max_turn_wall_time_s())
+    turn_timeout_s = _bridge_turn_timeout_s(adapter.timeout_s)
     zero_output_timeout_s = BRIDGE_ZERO_OUTPUT_TIMEOUT_S if agent_role == "reviewer" else None
 
     # Pre-allocate raw output file so it exists from adapter start

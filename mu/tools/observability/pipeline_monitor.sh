@@ -28,7 +28,8 @@ if ! REPO_ROOT="$(resolve_observability_repo_root)"; then
   exit 1
 fi
 SESSION="rcx-pipeline"
-LIVE_LOG="/tmp/rcx_pipeline_live.txt"
+LIVE_LOG_KEY="$(printf '%s' "$REPO_ROOT" | cksum | awk '{print $1}')"
+LIVE_LOG="${RCX_PIPELINE_LIVE_LOG:-/tmp/rcx_pipeline_live_${LIVE_LOG_KEY}.txt}"
 SESSION_WIDTH="${RCX_PIPELINE_TMUX_WIDTH:-240}"
 SESSION_HEIGHT="${RCX_PIPELINE_TMUX_HEIGHT:-70}"
 
@@ -67,7 +68,6 @@ write_log_watcher() {
 #!/usr/bin/env bash
 # Resilient: never exits on transient errors
 set +e  # Do not exit on error
-LIVE_LOG="/tmp/rcx_pipeline_live.txt"
 # Keep the freshest real phase log visible for longer after a run ends so the
 # monitor still shows the last live failure/success instead of blanking almost
 # immediately.
@@ -99,6 +99,19 @@ resolve_repo_root() {
   fi
   git rev-parse --show-toplevel 2>/dev/null || pwd
 }
+
+resolve_live_log() {
+  if [ -n "${RCX_PIPELINE_LIVE_LOG:-}" ]; then
+    printf '%s\n' "$RCX_PIPELINE_LIVE_LOG"
+    return 0
+  fi
+  local repo_root="" key=""
+  repo_root="$(resolve_repo_root)"
+  key="$(printf '%s' "$repo_root" | cksum | awk '{print $1}')"
+  printf '/tmp/rcx_pipeline_live_%s.txt\n' "$key"
+}
+
+LIVE_LOG="$(resolve_live_log)"
 
 resolve_branch_name() {
   local repo_root=""
@@ -316,6 +329,13 @@ cmd_start() {
   tmux select-pane -t "$pane3_id" -T "PANE 3 · PLAIN-ENGLISH STATUS"
   tmux select-pane -t "$pane4_id" -T "PANE 4 · SESSION TIMELINE"
   tmux select-pane -t "$pane1_id"
+
+  local autoping_launcher="$REPO_ROOT/tools/session/ensure_codex_autoping.sh"
+  if [ -n "${CODEX_THREAD_ID:-}" ] && [ -x "$autoping_launcher" ]; then
+    if ! "$autoping_launcher" --repo "$REPO_ROOT" --thread-id "$CODEX_THREAD_ID" --force-restart >/dev/null 2>&1; then
+      echo "WARN: failed to restart Codex autoping after tmux session reset" >&2
+    fi
+  fi
 
   echo "Pipeline monitor started (session: $SESSION)"
   if [ "$detach" = false ]; then

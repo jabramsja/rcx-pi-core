@@ -12,6 +12,7 @@ import fcntl
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -43,16 +44,25 @@ EVENT_LOG_PATH = OBSERVABILITY_DIR / "pipeline_agent_events.jsonl"
 DELIVERY_LOG_PATH = OBSERVABILITY_DIR / "pipeline_agent_delivery_receipts.jsonl"
 STATE_PATH = OBSERVABILITY_DIR / "pipeline_agent_pager_state.json"
 LOCK_PATH = OBSERVABILITY_DIR / "pipeline_agent_pager.lock"
+AUTOPING_STATE_GLOB = "rcx_autoping_*.json"
+PAUSED_AUTOPING_STATUSES = frozenset({
+    "context_exhausted",
+    "context_exhausted_paused",
+})
 # Single source of truth for the orchestrator-session-id file path.
-# The pager is read-only here; a follow-on wave authors the writer. When the
-# file is absent (current repo state) the pager dispatches plain ``claude -p``
-# rather than ``claude --continue``, keeping dispatch deterministic even while
-# other Claude subprocesses run concurrently in this repo.
+# The pager is read-only here; the writer lives in
+# ``.claude/hooks/session-start.sh``. When the file is absent or stale the
+# pager dispatches plain ``claude -p`` rather than ``claude --resume``,
+# keeping dispatch deterministic even while other Claude subprocesses run
+# concurrently in this repo.
 ORCHESTRATOR_SESSION_ID_PATH = OBSERVABILITY_DIR / "orchestrator_session_id"
 STATE_VERSION = 1
 NOTIFY_ONLY_TARGET = "notify-only"
 ALLOWED_EVENT_TYPES = frozenset({
     "phase_b_reviewer_started",
+    "phase_b_bridge_completed",
+    "phase_b_final_pytest_started",
+    "phase_b_final_pytest_passed",
     "recovery_started",
     "recovery_state_changed",
     "recovery_failed",
@@ -71,6 +81,107 @@ class PipelineAgentPagerError(RuntimeError):
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_timestamp_rank(value: Any) -> float:
+    if not isinstance(value, str) or not value.strip():
+        return 0.0
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _codex_state_dir() -> Path:
+    codex_home = (
+        os.environ.get("RCX_CODEX_HOME")
+        or os.environ.get("CODEX_HOME")
+        or str(Path.home() / ".codex")
+    )
+    return Path(codex_home).expanduser() / "state"
+
+
+def _read_latest_autoping_thread_id(repo_root: Path) -> str:
+    state_dir = _codex_state_dir()
+    if not state_dir.is_dir():
+        return ""
+    repo_resolved = repo_root.resolve()
+    best_rank = 0.0
+    best_thread_id = ""
+    for state_path in state_dir.glob(AUTOPING_STATE_GLOB):
+        try:
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        thread_id = str(payload.get("thread_id") or "").strip()
+        if not thread_id:
+            continue
+        if str(payload.get("status") or "").strip().lower() in PAUSED_AUTOPING_STATUSES:
+            continue
+        bridge_state = payload.get("bridge_state")
+        wave_root = ""
+        if isinstance(bridge_state, dict):
+            wave_root = str(bridge_state.get("wave_root") or "").strip()
+        if not wave_root:
+            wave_root = str(payload.get("wave_root") or "").strip()
+        if not wave_root:
+            continue
+        try:
+            if Path(wave_root).expanduser().resolve() != repo_resolved:
+                continue
+        except OSError:
+            continue
+        rank = max(
+            _parse_timestamp_rank(payload.get("updated_at")),
+            _parse_timestamp_rank(payload.get("last_dispatched_at")),
+            _parse_timestamp_rank(payload.get("last_completed_at")),
+        )
+        if rank >= best_rank:
+            best_rank = rank
+            best_thread_id = thread_id
+    return best_thread_id
+
+
+def _autoping_payload_matches_repo(payload: dict[str, Any], repo_resolved: Path) -> bool:
+    bridge_state = payload.get("bridge_state")
+    wave_root = ""
+    if isinstance(bridge_state, dict):
+        wave_root = str(bridge_state.get("wave_root") or "").strip()
+    if not wave_root:
+        wave_root = str(payload.get("wave_root") or "").strip()
+    if not wave_root:
+        return False
+    try:
+        return Path(wave_root).expanduser().resolve() == repo_resolved
+    except OSError:
+        return False
+
+
+def _autoping_thread_is_paused(repo_root: Path, thread_id: str) -> bool:
+    thread_id = str(thread_id or "").strip()
+    if not thread_id:
+        return False
+    state_dir = _codex_state_dir()
+    if not state_dir.is_dir():
+        return False
+    repo_resolved = repo_root.resolve()
+    for state_path in state_dir.glob(AUTOPING_STATE_GLOB):
+        try:
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("thread_id") or "").strip() != thread_id:
+            continue
+        status = str(payload.get("status") or "").strip().lower()
+        if status not in PAUSED_AUTOPING_STATUSES:
+            continue
+        if _autoping_payload_matches_repo(payload, repo_resolved):
+            return True
+    return False
 
 
 def _repo_lock(repo_root: Path) -> threading.Lock:
@@ -106,17 +217,40 @@ class _PagerLock:
             self._thread_lock.release()
 
 
+def _default_dispatch_record() -> dict[str, Any]:
+    return {
+        "event_id": "",
+        "event_type": "",
+        "wave_id": "",
+        "task_id": "",
+        "phase": "",
+        "state": "",
+        "transition_key": "",
+        "summary": "",
+        "target": "",
+        "attempted_at": "",
+        "completed_at": "",
+        "acknowledged": None,
+        "error": "",
+    }
+
+
+def _default_dispatcher_state() -> dict[str, Any]:
+    return {
+        "active": False,
+        "pid": 0,
+        "started_at": "",
+        "updated_at": "",
+        "last_dispatch": _default_dispatch_record(),
+    }
+
+
 def _default_state() -> dict[str, Any]:
     return {
         "version": STATE_VERSION,
         "events": {},
         "codex_thread_id": None,
-        "dispatcher": {
-            "active": False,
-            "pid": 0,
-            "started_at": "",
-            "updated_at": "",
-        },
+        "dispatcher": _default_dispatcher_state(),
         "updated_at": _utcnow(),
     }
 
@@ -145,8 +279,20 @@ def _load_state(repo_root: Path) -> dict[str, Any]:
     merged.update(state)
     if not isinstance(merged.get("events"), dict):
         raise PipelineAgentPagerError("pager state 'events' must be an object")
-    if not isinstance(merged.get("dispatcher"), dict):
-        merged["dispatcher"] = _default_state()["dispatcher"]
+    dispatcher_state = merged.get("dispatcher")
+    if not isinstance(dispatcher_state, dict):
+        merged["dispatcher"] = _default_dispatcher_state()
+    else:
+        normalized_dispatcher = _default_dispatcher_state()
+        normalized_dispatcher.update(dispatcher_state)
+        last_dispatch = dispatcher_state.get("last_dispatch")
+        if isinstance(last_dispatch, dict):
+            normalized_last_dispatch = _default_dispatch_record()
+            normalized_last_dispatch.update(last_dispatch)
+            normalized_dispatcher["last_dispatch"] = normalized_last_dispatch
+        else:
+            normalized_dispatcher["last_dispatch"] = _default_dispatch_record()
+        merged["dispatcher"] = normalized_dispatcher
     return merged
 
 
@@ -488,16 +634,51 @@ def _reconcile_delivery_state(
         if target == "codex" and thread_id:
             state["codex_thread_id"] = thread_id
         _refresh_pending_targets(entry)
+    autoping_thread_id = _read_latest_autoping_thread_id(repo_root)
+    if autoping_thread_id:
+        state["codex_thread_id"] = autoping_thread_id
 
 
 def _set_dispatcher(state: dict[str, Any], *, active: bool) -> None:
-    dispatcher = state.setdefault("dispatcher", {})
+    dispatcher = state.setdefault("dispatcher", _default_dispatcher_state())
     dispatcher["active"] = active
     dispatcher["pid"] = os.getpid()
     if active and not dispatcher.get("started_at"):
         dispatcher["started_at"] = _utcnow()
     if not active:
         dispatcher["started_at"] = ""
+    dispatcher["updated_at"] = _utcnow()
+
+
+def _begin_dispatch_record(state: dict[str, Any], event: dict[str, Any], *, target: str) -> None:
+    dispatcher = state.setdefault("dispatcher", _default_dispatcher_state())
+    dispatcher["last_dispatch"] = {
+        "event_id": str(event.get("event_id") or "").strip(),
+        "event_type": str(event.get("event_type") or "").strip(),
+        "wave_id": str(event.get("wave_id") or "").strip(),
+        "task_id": str(event.get("task_id") or "").strip(),
+        "phase": str(event.get("phase") or "").strip(),
+        "state": str(event.get("state") or "").strip(),
+        "transition_key": str(event.get("transition_key") or "").strip(),
+        "summary": str(event.get("summary") or "").strip(),
+        "target": str(target or "").strip(),
+        "attempted_at": _utcnow(),
+        "completed_at": "",
+        "acknowledged": None,
+        "error": "",
+    }
+    dispatcher["updated_at"] = _utcnow()
+
+
+def _finish_dispatch_record(state: dict[str, Any], *, acknowledged: bool, error: str = "") -> None:
+    dispatcher = state.setdefault("dispatcher", _default_dispatcher_state())
+    last_dispatch = dispatcher.get("last_dispatch")
+    if not isinstance(last_dispatch, dict):
+        last_dispatch = _default_dispatch_record()
+        dispatcher["last_dispatch"] = last_dispatch
+    last_dispatch["completed_at"] = _utcnow()
+    last_dispatch["acknowledged"] = bool(acknowledged)
+    last_dispatch["error"] = str(error or "").strip()
     dispatcher["updated_at"] = _utcnow()
 
 
@@ -522,6 +703,23 @@ def _event_prompt(event: dict[str, Any]) -> str:
         for label, path in sorted(artifact_paths.items()):
             lines.append(f"- {label}: {path}")
     lines.append("Use these authoritative facts directly; do not re-scrape the repo just to rediscover the transition.")
+    lines.append(
+        "Do not run shell commands, tests, preflight checks, docs consistency, "
+        "or tools from this headless pager wake path."
+    )
+    lines.append(
+        "Do not edit files, run git add/commit/push, or apply structural fixes "
+        "from this headless pager wake path."
+    )
+    lines.append(
+        "Do not launch or relaunch executor_dispatch.py, phase_a_executor.py, "
+        "phase_b_executor.py, commit_executor.py, or bridge_supervisor.py from "
+        "this pager wake path."
+    )
+    lines.append(
+        "If the pipeline is dead, report the diagnosed root cause and leave "
+        "foreground restart to the operator-visible pipeline surface."
+    )
     return "\n".join(lines)
 
 
@@ -564,6 +762,170 @@ def _remaining_timeout(deadline: float, *, label: str) -> float:
     return remaining
 
 
+def _is_codex_transport_unavailable(error_text: str) -> bool:
+    lowered = str(error_text or "").lower()
+    return "unavailable" in lowered or "returned http" in lowered
+
+
+def _codex_exec_resume_env() -> dict[str, str]:
+    # Preserve the live shell environment so resume inherits the same auth/session
+    # context while still allowing a repo-local RCX overlay when present.
+    return os.environ.copy()
+
+
+CODEX_NO_TOOLS_DISABLED_FEATURES = (
+    "apps",
+    "apply_patch_freeform",
+    "apply_patch_streaming_events",
+    "artifact",
+    "browser_use",
+    "code_mode",
+    "code_mode_only",
+    "codex_git_commit",
+    "computer_use",
+    "image_generation",
+    "js_repl",
+    "js_repl_tools_only",
+    "multi_agent",
+    "multi_agent_v2",
+    "plugins",
+    "request_permissions_tool",
+    "shell_snapshot",
+    "shell_tool",
+    "skill_mcp_dependency_install",
+    "tool_call_mcp_elicitation",
+    "tool_search",
+    "tool_suggest",
+    "unified_exec",
+    "workspace_dependencies",
+)
+CODEX_NO_TOOLS_RESUME_ARGS = tuple(
+    part
+    for feature_name in CODEX_NO_TOOLS_DISABLED_FEATURES
+    for part in ("--disable", feature_name)
+)
+CODEX_PAGER_RESUME_CONFIG = (
+    "--ignore-user-config",
+    "--ignore-rules",
+    *CODEX_NO_TOOLS_RESUME_ARGS,
+    "-c",
+    'sandbox_mode="read-only"',
+    "-c",
+    'approval_policy="never"',
+)
+
+
+def _codex_exec_resume_command(codex_bin: str, thread_id: str, prompt: str) -> list[str]:
+    return [
+        codex_bin,
+        "exec",
+        "resume",
+        *CODEX_PAGER_RESUME_CONFIG,
+        "--json",
+        thread_id,
+        prompt,
+    ]
+
+
+def _terminate_process_group(proc: subprocess.Popen[str], *, grace_s: float = 5.0) -> None:
+    try:
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=grace_s)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=grace_s)
+    except subprocess.TimeoutExpired:
+        return
+
+
+def _dispatch_codex_exec_resume(
+    repo_root: Path,
+    event: dict[str, Any],
+    *,
+    thread_id: str,
+    timeout_s: float,
+) -> dict[str, Any]:
+    codex_bin = os.environ.get("RCX_PIPELINE_AGENT_PAGER_CODEX_BIN", "codex")
+    log_dir = repo_root / OBSERVABILITY_DIR / "codex_pager_dispatch"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    log_path = log_dir / f"codex_pager_{stamp}_{event['event_id'][:8]}.jsonl"
+    command = _codex_exec_resume_command(codex_bin, thread_id, _event_prompt(event))
+    try:
+        with log_path.open("w", encoding="utf-8") as sink:
+            proc = subprocess.Popen(
+                command,
+                cwd=repo_root,
+                stdin=subprocess.DEVNULL,
+                stdout=sink,
+                stderr=subprocess.STDOUT,
+                text=True,
+                start_new_session=True,
+                env=_codex_exec_resume_env(),
+            )
+    except OSError as exc:
+        return {
+            "acknowledged": False,
+            "error": f"codex exec resume launch failed: {exc}",
+            "codex_thread_id": thread_id,
+        }
+
+    try:
+        exit_code = proc.wait(timeout=max(timeout_s, 0.001))
+    except subprocess.TimeoutExpired:
+        _terminate_process_group(proc)
+        try:
+            detail = _excerpt(log_path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            detail = ""
+        return {
+            "acknowledged": False,
+            "error": (
+                f"codex exec resume timed out after {timeout_s:.3g}s"
+                + (f": {detail}" if detail else "")
+            ),
+            "codex_thread_id": thread_id,
+        }
+    if exit_code != 0:
+        try:
+            detail = _excerpt(log_path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            detail = ""
+        return {
+            "acknowledged": False,
+            "error": (
+                f"codex exec resume exited {exit_code}"
+                + (f": {detail}" if detail else "")
+            ),
+            "codex_thread_id": thread_id,
+        }
+    return {
+        "acknowledged": True,
+        "ack": {
+            "acknowledged_at": _utcnow(),
+            "thread_id": thread_id,
+            "target": "codex",
+            "mode": "exec_resume",
+            "pid": proc.pid,
+            "log_path": str(log_path),
+        },
+        "codex_thread_id": thread_id,
+    }
+
+
 def _dispatch_codex(
     repo_root: Path,
     event: dict[str, Any],
@@ -577,7 +939,15 @@ def _dispatch_codex(
         "RCX_CODEX_APP_SERVER_TURNS_PATH_TEMPLATE",
         "/api/threads/{thread_id}/turns",
     )
-    thread_id = str(state.get("codex_thread_id") or "").strip()
+    autoping_thread_id = _read_latest_autoping_thread_id(repo_root)
+    env_thread_id = str(os.environ.get("CODEX_THREAD_ID") or "").strip()
+    if env_thread_id and _autoping_thread_is_paused(repo_root, env_thread_id):
+        env_thread_id = ""
+    live_thread_id = env_thread_id or autoping_thread_id
+    state_thread_id = str(state.get("codex_thread_id") or "").strip()
+    if state_thread_id and _autoping_thread_is_paused(repo_root, state_thread_id):
+        state_thread_id = ""
+    thread_id = live_thread_id or state_thread_id
     deadline = time.monotonic() + max(timeout_s, 0.001)
 
     def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -613,6 +983,30 @@ def _dispatch_codex(
             },
         )
     except PipelineAgentPagerError as exc:
+        fallback_thread_id = live_thread_id or thread_id
+        if fallback_thread_id and _is_codex_transport_unavailable(str(exc)):
+            fallback_timeout_s = deadline - time.monotonic()
+            if fallback_timeout_s <= 0:
+                return {
+                    "acknowledged": False,
+                    "error": (
+                        f"{exc}; codex exec resume fallback skipped because "
+                        "codex pager acknowledgement timed out before acknowledgement"
+                    ),
+                    "codex_thread_id": fallback_thread_id,
+                }
+            fallback = _dispatch_codex_exec_resume(
+                repo_root,
+                event,
+                thread_id=fallback_thread_id,
+                timeout_s=fallback_timeout_s,
+            )
+            if not fallback.get("acknowledged"):
+                error_text = str(fallback.get("error") or "").strip()
+                fallback["error"] = (
+                    f"{exc}; {error_text}" if error_text else str(exc)
+                )
+            return fallback
         return {
             "acknowledged": False,
             "error": str(exc),
@@ -656,13 +1050,13 @@ def _dispatch_codex(
 def _read_orchestrator_session_id(repo_root: Path) -> str | None:
     """Return the orchestrator session id for pager ``--resume`` dispatch.
 
-    The file at ``ORCHESTRATOR_SESSION_ID_PATH`` is authored by a follow-on
-    orchestrator-side writer and is absent in the current repo state. The
+    The file at ``ORCHESTRATOR_SESSION_ID_PATH`` is authored by the
+    SessionStart hook writer in ``.claude/hooks/session-start.sh``. The
     pager is read-only here and tolerates every absent/malformed case so
-    that a missing or corrupt file never crashes the orchestrator: missing
-    file, empty file, whitespace-only file, and a single trailing newline
-    all yield ``None``. A session id containing internal whitespace or
-    newlines — or a file whose bytes are not valid UTF-8 — is treated as
+    that a missing, stale, or corrupt file never crashes the orchestrator:
+    missing file, empty file, whitespace-only file, and a single trailing
+    newline all yield ``None``. A session id containing internal whitespace
+    or newlines — or a file whose bytes are not valid UTF-8 — is treated as
     malformed: a single fallback note is emitted to stderr and ``None`` is
     returned so the caller falls back to plain ``claude -p`` dispatch.
     """
@@ -832,6 +1226,7 @@ def _dispatch_pending_locked(
                 _save_state(repo_root, state)
                 return report
             timeout_s = _target_timeout(config, target, remaining_s)
+            _begin_dispatch_record(state, event, target=target)
             dispatch_result = _dispatch_target(
                 repo_root,
                 target,
@@ -847,6 +1242,11 @@ def _dispatch_pending_locked(
                 "last_attempt_at": _utcnow(),
             }
             error_text = str(dispatch_result.get("error") or "").strip()
+            _finish_dispatch_record(
+                state,
+                acknowledged=bool(dispatch_result.get("acknowledged")),
+                error=error_text,
+            )
             if error_text:
                 attempt_record["last_error"] = error_text
             else:

@@ -65,9 +65,12 @@ class FailureClass(Enum):
     TRACKER_NOTE_CONTRACT = "tracker_note_contract"
     FEATURE_BRANCH_MISMATCH = "feature_branch_mismatch"
     MISSING_BRIDGE_CONFIG = "missing_bridge_config"
+    POST_REENTRY_NEEDS_PHASE_B = "post_reentry_needs_phase_b"
+    PHASE_B_PLAN_REQUIRED = "phase_b_plan_required"
     # Tier 2 -- auto-retry with adjustment (zero tokens)
     PROCESS_TIMEOUT = "process_timeout"
     TRANSIENT_KILL = "transient_kill"
+    UPSTREAM_CONNECTIVITY = "upstream_connectivity"
     AGGREGATION_HANG = "aggregation_hang"
     IMPLEMENTER_STALE = "implementer_stale"
     PR_MERGE_CONFLICT = "pr_merge_conflict"
@@ -89,7 +92,10 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.MIXED_STAGING: 1, FailureClass.TRACKER_NOTE_CONTRACT: 1,
     FailureClass.FEATURE_BRANCH_MISMATCH: 1,
     FailureClass.MISSING_BRIDGE_CONFIG: 1,
+    FailureClass.POST_REENTRY_NEEDS_PHASE_B: 1,
+    FailureClass.PHASE_B_PLAN_REQUIRED: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
+    FailureClass.UPSTREAM_CONNECTIVITY: 2,
     FailureClass.AGGREGATION_HANG: 2, FailureClass.IMPLEMENTER_STALE: 2,
     FailureClass.PR_MERGE_CONFLICT: 2,
     FailureClass.PR_CONFLICTING: 2,
@@ -105,6 +111,7 @@ _TERMINAL_STATUSES = frozenset({
     "supervisor_rejected",
 })
 _TRANSIENT_KILL_CODES = frozenset({-9, -15, 137})
+PHASE_B_RECOVERY_PLAN_ENV = "RCX_RECOVERY_PHASE_B_PLAN_PATH"
 STALE_BRIDGE_LOCK_WAIT_TIMEOUT_S = 30.0
 STALE_BRIDGE_LOCK_WAIT_POLL_S = 0.5
 _FEATURE_BRANCH_RE = re.compile(
@@ -165,6 +172,23 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     if embedded_status in _TERMINAL_STATUSES:
         return FailureClass.TERMINAL_POLICY
 
+    # Tier 1: a post-reentry supervisor NEEDS_PHASE_B veto can deterministically
+    # seed the in-branch re-entry checkpoint and retry Phase B without Tier 3.
+    if _looks_like_post_reentry_needs_phase_b(result):
+        return FailureClass.POST_REENTRY_NEEDS_PHASE_B
+
+    if (
+        status_failed
+        and ("use --plan" in reason_lower or "use --plan" in combined_lower)
+        and ("tracked packet" in reason_lower or "tracked packet" in combined_lower)
+        and (
+            "derive_planless_context" in step_lower
+            or "planless mode" in reason_lower
+            or "planless mode" in combined_lower
+        )
+    ):
+        return FailureClass.PHASE_B_PLAN_REQUIRED
+
     # Tier 3: needs_phase_b is recoverable (retry Phase B)
     # Commit executor currently wraps a supervisor NEEDS_PHASE_B return as a
     # generic error payload whose reason begins with "Supervisor returned
@@ -183,6 +207,8 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.BOT_FINDINGS_PENDING
 
     stdout_lower = stdout.lower() if isinstance(stdout, str) else ""
+    if status_failed and _looks_like_upstream_connectivity_failure(f"{combined_text}\n{reason_text}"):
+        return FailureClass.UPSTREAM_CONNECTIVITY
     if (
         result.get("failure_class") == "pr_conflicting"
         or embedded_stdout.get("failure_class") == "pr_conflicting"
@@ -204,6 +230,8 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.PR_MERGE_CONFLICT
 
     # Tier 1: deterministic lock/state issues
+    if _looks_like_git_index_permission_failure(f"{combined_text}\n{reason_text}"):
+        return FailureClass.UNCLASSIFIED
     if "bridge config not found" in reason_lower or "bridge config not found" in combined_lower:
         return FailureClass.MISSING_BRIDGE_CONFIG
     if "bridge.lock" in reason_lower or "bridge.lock" in combined_lower:
@@ -225,6 +253,12 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.FEATURE_BRANCH_MISMATCH
 
     # Tier 2: transient / timeout issues
+    if (
+        status_failed
+        and step_lower in ("bridge_subprocess", "reentry_bridge_subprocess")
+        and ("timed out after" in reason_lower or "timed out after" in combined_lower)
+    ):
+        return FailureClass.PROCESS_TIMEOUT
     if status == "timeout":
         return FailureClass.PROCESS_TIMEOUT
     if exit_code is not None and exit_code in _TRANSIENT_KILL_CODES:
@@ -235,8 +269,32 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.IMPLEMENTER_STALE
 
     # Tier 3: needs diagnosis
-    if step in ("stage_files", "git_commit") and "git add" in combined_lower:
+    staging_steps = {
+        "stage_files",
+        "git_commit",
+        "staging",
+        "bridge_staging",
+        "reentry_bridge_staging",
+        "reentry_staging",
+    }
+    if step in staging_steps and (
+        "git add" in combined_lower
+        or "git add" in reason_lower
+        or "failed to stage files" in combined_lower
+        or "failed to stage files" in reason_lower
+    ):
         return FailureClass.GIT_STAGING_CONFLICT
+    fatal_codex_launch_hints = (
+        "codex cannot access session files",
+        "failed to create session",
+        "missing bearer or basic authentication in header",
+        "401 unauthorized",
+    )
+    if status_failed and any(
+        hint in combined_lower or hint in reason_lower
+        for hint in fatal_codex_launch_hints
+    ):
+        return FailureClass.UNCLASSIFIED
     if "test" in combined_lower and ("fail" in combined_lower or "error" in combined_lower):
         return FailureClass.TEST_FAILURE
     review_crash_hints = (
@@ -413,6 +471,55 @@ def _looks_like_feature_branch_mismatch(result: dict[str, Any]) -> bool:
     }
     return "ensure_feature_branch" in steps or not steps
 
+
+def _looks_like_post_reentry_needs_phase_b(result: dict[str, Any]) -> bool:
+    reason_lower = _summarize_result_reason(result).lower()
+    if "supervisor returned needs_phase_b" not in reason_lower:
+        return False
+    if "after reentry convergence" in reason_lower:
+        return True
+    step = _effective_result_step(result).lower()
+    return step == "post_reentry_supervisor"
+
+
+def _looks_like_upstream_connectivity_failure(detail: str) -> bool:
+    """Detect transient Codex/OpenAI transport failures, excluding auth/session defects."""
+    lowered = str(detail or "").lower()
+    if not lowered:
+        return False
+    terminal_hints = (
+        "401 unauthorized",
+        "missing bearer or basic authentication",
+        "codex cannot access session files",
+        "failed to initialize rollout recorder",
+    )
+    if any(hint in lowered for hint in terminal_hints):
+        return False
+    upstream_hints = (
+        "failed to lookup address information",
+        "nodename nor servname provided",
+        "temporary failure in name resolution",
+    )
+    if any(hint in lowered for hint in upstream_hints):
+        return True
+    if "responses_websocket" in lowered and "failed to connect to websocket" in lowered:
+        return True
+    if (
+        "stream disconnected before completion" in lowered
+        and "error sending request for url" in lowered
+        and ("backend-api/codex" in lowered or "/v1/responses" in lowered)
+    ):
+        return True
+    return False
+
+
+def _looks_like_git_index_permission_failure(detail: str) -> bool:
+    lowered = str(detail or "").lower()
+    if "index.lock" not in lowered:
+        return False
+    if "operation not permitted" not in lowered and "permission denied" not in lowered:
+        return False
+    return "unable to create" in lowered or "could not create" in lowered
 
 # ---------------------------------------------------------------------------
 # Tier 1 auto-fix functions
@@ -601,19 +708,82 @@ def fix_mixed_staging(repo_root: Path) -> dict[str, Any]:
 def _load_executor_module_from_repo(repo_root: Path, module_name: str) -> Any:
     """Load an executor helper module from the current repo on demand."""
     executors_dir = repo_root / "mu" / "tools" / "executors"
+    module_path = executors_dir / f"{module_name}.py"
+    if not module_path.is_file():
+        raise ImportError(f"{module_name} not found at {module_path}")
+
+    import importlib.util as _ilu
+
+    module_key = (
+        f"_rcx_recovery_{module_name}_"
+        f"{hashlib.sha256(str(module_path.resolve()).encode('utf-8')).hexdigest()[:12]}"
+    )
+    spec = _ilu.spec_from_file_location(module_key, str(module_path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"could not load spec for {module_name} from {module_path}")
+
+    old_sys_path = list(sys.path)
     if str(executors_dir) not in sys.path:
         sys.path.insert(0, str(executors_dir))
+    module = _ilu.module_from_spec(spec)
+    sys.modules[module_key] = module
     try:
-        import importlib
-        return importlib.import_module(module_name)
-    except ImportError:
-        import importlib.util as _ilu
-        module_path = executors_dir / f"{module_name}.py"
-        spec = _ilu.spec_from_file_location(module_name, str(module_path))
-        module = _ilu.module_from_spec(spec)
-        assert spec.loader is not None
         spec.loader.exec_module(module)
-        return module
+    finally:
+        sys.path[:] = old_sys_path
+        sys.modules.pop(module_key, None)
+    return module
+
+
+def _coerce_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return sorted({str(item).strip() for item in value if str(item).strip()})
+
+
+def _bridge_scope_fingerprint_for_files(repo_root: Path, files: list[str]) -> str:
+    digest = hashlib.sha256()
+    for rel_path in sorted(files):
+        digest.update(b"\0path\0")
+        digest.update(rel_path.encode("utf-8", errors="surrogatepass"))
+        full_path = repo_root / rel_path
+        if not full_path.exists():
+            digest.update(b"\0missing")
+            continue
+        digest.update(b"\0present\0")
+        digest.update(full_path.read_bytes())
+    return digest.hexdigest()
+
+
+def _post_reentry_scope_files(repo_root: Path, result: dict[str, Any], plan_path: str) -> list[str]:
+    explicit_files = _coerce_string_list(result.get("changed_files"))
+    if explicit_files:
+        return explicit_files
+    try:
+        phase_b_mod = _load_executor_module_from_repo(repo_root, "phase_b_executor")
+        plan_declared_files = _coerce_string_list(result.get("plan_declared_files"))
+        if not plan_declared_files and plan_path:
+            try:
+                plan_file = (repo_root / plan_path).resolve()
+                plan_file.relative_to(repo_root.resolve())
+                if plan_file.is_file() and hasattr(phase_b_mod, "_parse_plan_declared_files"):
+                    plan_declared_files = _coerce_string_list(
+                        phase_b_mod._parse_plan_declared_files(  # ANTICHEAT_OK: recovery mirrors Phase B scope parsing
+                            plan_file.read_text(encoding="utf-8")
+                        )
+                    )
+            except (OSError, ValueError):
+                plan_declared_files = []
+        return phase_b_mod._collect_wave_owned_files(  # ANTICHEAT_OK: recovery seeds the exact Phase B resume scope
+            repo_root,
+            plan_path,
+            plan_declared_files or None,
+            set(_coerce_string_list(result.get("implementer_changed"))) or None,
+            set(_coerce_string_list(result.get("executor_created"))) or None,
+            set(_coerce_string_list(result.get("baseline_wave_files"))) or None,
+        )
+    except Exception:
+        return []
 
 
 def fix_tracker_note_contract(repo_root: Path, **kw: Any) -> dict[str, Any]:
@@ -819,6 +989,129 @@ def fix_feature_branch_mismatch(repo_root: Path, **kw: Any) -> dict[str, Any]:
     return _fix_result(True, "create_expected_feature_branch", detail)
 
 
+def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Resume the deterministic Phase B re-entry path after a post-reentry veto."""
+    result = kw.get("result", {})
+    plan_path = str(result.get("plan_path") or "").strip()
+    if not plan_path:
+        return _fix_result(
+            False,
+            "missing_plan_path",
+            "post-reentry NEEDS_PHASE_B result missing plan_path",
+        )
+
+    wave_hint = str(result.get("wave_id") or Path(plan_path).stem or "wave-unknown").strip()
+    bridge_rounds_raw = result.get("bridge_rounds", 0)
+    try:
+        bridge_rounds = int(bridge_rounds_raw or 0)
+    except (TypeError, ValueError):
+        bridge_rounds = 0
+
+    findings = str(
+        result.get("pre_commit_summary")
+        or _summarize_result_reason(result)
+        or "Fix required"
+    ).strip()
+
+    resume_state: dict[str, Any] = {
+        "plan_path": plan_path,
+        "completed_step": "needs_phase_b_reentry",
+        "wave_id": normalize_wave_id(wave_hint),
+        "bridge_rounds": bridge_rounds,
+        "reentry_findings": findings,
+    }
+    scope_files = _post_reentry_scope_files(repo_root, result, plan_path)
+    scope_fingerprint = str(result.get("bridge_scope_fingerprint") or "").strip()
+    if not scope_fingerprint:
+        scope_fingerprint = _bridge_scope_fingerprint_for_files(repo_root, scope_files)
+    resume_state["bridge_scope_fingerprint"] = scope_fingerprint
+    if scope_files:
+        resume_state["changed_files"] = scope_files
+
+    for list_key in ("implementer_changed", "executor_created", "baseline_wave_files"):
+        list_value = _coerce_string_list(result.get(list_key))
+        if list_value:
+            resume_state[list_key] = list_value
+    if scope_files and not resume_state.get("baseline_wave_files"):
+        resume_state["baseline_wave_files"] = scope_files
+    all_non_blocking = result.get("all_non_blocking")
+    if isinstance(all_non_blocking, list):
+        resume_state["all_non_blocking"] = all_non_blocking
+    finding_history = result.get("finding_history")
+    if isinstance(finding_history, dict):
+        resume_state["finding_history"] = finding_history
+
+    deferred_packet_path = str(result.get("deferred_packet_path") or "").strip()
+    if deferred_packet_path:
+        resume_state["deferred_packet_path"] = deferred_packet_path
+
+    state_path = repo_root / ".agent_bus" / "executors" / "phase_b_state.json"
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(resume_state, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        return _fix_result(
+            False,
+            "phase_b_state_write_failed",
+            f"could not seed {state_path}: {exc}",
+        )
+
+    return _fix_result(
+        True,
+        "resume_phase_b_reentry",
+        f"seeded {state_path} so dispatcher retry resumes NEEDS_PHASE_B re-entry for {plan_path}",
+    )
+
+
+def _phase_b_plan_required_path(result: dict[str, Any]) -> str:
+    plan_path = str(result.get("plan_path") or "").strip()
+    if plan_path:
+        return plan_path
+
+    candidates = [
+        _summarize_result_reason(result),
+        str(result.get("stdout") or ""),
+        str(result.get("stderr") or ""),
+        _summarize_json_value(_parse_json_object(result.get("stdout", ""))),
+        _summarize_json_value(_parse_json_object(result.get("stderr", ""))),
+    ]
+    for text in candidates:
+        match = re.search(r"\bUse\s+--plan\s+([^\s]+)", text or "", flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip().rstrip(".,;:")
+    return ""
+
+
+def fix_phase_b_plan_required(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Let dispatcher retry Phase B with --plan after a planless tracked-packet stop."""
+    result = kw.get("result", {})
+    plan_path = _phase_b_plan_required_path(result)
+    if not plan_path:
+        try:
+            plan_path = _routing_plan_path(load_routing_record(repo_root))
+        except Exception:
+            plan_path = ""
+    if not plan_path:
+        return _fix_result(
+            False,
+            "missing_plan_path",
+            "phase_b plan-required recovery could not resolve a tracked packet path",
+        )
+    resolved = repo_root / plan_path
+    if not resolved.exists():
+        return _fix_result(
+            False,
+            "missing_plan_file",
+            f"tracked packet {plan_path} does not exist for dispatcher retry",
+        )
+    os.environ[PHASE_B_RECOVERY_PLAN_ENV] = plan_path
+    return _fix_result(
+        True,
+        "retry_phase_b_with_plan",
+        f"dispatcher retry will relaunch Phase B with --plan {plan_path}",
+    )
+
+
 _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.STALE_BRIDGE_LOCK: lambda root, **kw: fix_stale_bridge_lock(root),
     # STALE_GIT_INDEX_LOCK demoted to Tier 2: no sound ownership check exists
@@ -832,6 +1125,8 @@ _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.TRACKER_NOTE_CONTRACT: fix_tracker_note_contract,
     FailureClass.FEATURE_BRANCH_MISMATCH: fix_feature_branch_mismatch,
     FailureClass.MISSING_BRIDGE_CONFIG: lambda root, **kw: fix_missing_bridge_config(root),
+    FailureClass.POST_REENTRY_NEEDS_PHASE_B: fix_post_reentry_needs_phase_b,
+    FailureClass.PHASE_B_PLAN_REQUIRED: fix_phase_b_plan_required,
 }
 
 
@@ -848,6 +1143,16 @@ def _load_config_timeouts(repo_root: Path) -> dict[str, Any]:
     try:
         cfg = json.loads(config_path.read_text(encoding="utf-8"))
         return cfg.get("timeouts", {})
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _load_config_bridge_turn_timeouts(repo_root: Path) -> dict[str, Any]:
+    """Load bridge_turn_timeouts dict from executor_config.json (read-only)."""
+    config_path = repo_root / _CONFIG_PATH_REL
+    try:
+        cfg = json.loads(config_path.read_text(encoding="utf-8"))
+        return cfg.get("bridge_turn_timeouts", {})
     except (json.JSONDecodeError, OSError):
         return {}
 
@@ -966,10 +1271,13 @@ def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     breaking mutual exclusion.
     """
     timeouts = _load_config_timeouts(repo_root)
+    bridge_turn_timeouts = _load_config_bridge_turn_timeouts(repo_root)
     # Determine which executor timed out from the result
     result = kw.get("result", {})
     executor = result.get("executor", "phase_b_executor")
     timeout_key = executor if executor in timeouts else "phase_b_executor"
+    step = _effective_result_step(result).lower()
+    bridge_turn_key = "phase_b" if step in ("bridge_subprocess", "reentry_bridge_subprocess") else ""
 
     # Clear stale bridge lock ONLY when the bridge-owning executor timed out.
     # phase_b_executor drives bridge review; its timeout leaves bridge.lock
@@ -984,31 +1292,60 @@ def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     lock_cleared = False
     if executor == "phase_b_executor" and lock_path.exists():
         lock_cleared = _claim_and_remove_bridge_lock(lock_path)
-    current = timeouts.get(timeout_key, 3600)
-    # Track original baseline across sequential recoveries.  On the first
-    # call the env var is absent so we seed it from the (still-original)
-    # config value.  Subsequent calls read the stored original.
-    baseline_env_key = f"RCX_RECOVERY_ORIGINAL_TIMEOUT_{timeout_key}"
-    stored_baseline = os.environ.get(baseline_env_key)
-    if stored_baseline is not None:
-        baseline = int(stored_baseline)
+    if bridge_turn_key:
+        current = int(bridge_turn_timeouts.get(bridge_turn_key, 300))
+        baseline_env_key = (
+            f"RCX_RECOVERY_ORIGINAL_BRIDGE_TURN_TIMEOUT_{bridge_turn_key}"
+        )
+        stored_baseline = os.environ.get(baseline_env_key)
+        if stored_baseline is not None:
+            baseline = int(stored_baseline)
+        else:
+            baseline = current
+            os.environ[baseline_env_key] = str(baseline)
+        new_timeout = min(int(current * 1.5), baseline * 2)
+        os.environ["RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE"] = str(new_timeout)
+        os.environ["RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY"] = bridge_turn_key
+        target_label = f"bridge_turn_timeouts.{bridge_turn_key}"
+        override_label = "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE"
     else:
-        baseline = current
-        os.environ[baseline_env_key] = str(baseline)
-    new_timeout = min(int(current * 1.5), baseline * 2)
-    os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] = str(new_timeout)
-    os.environ["RCX_RECOVERY_TIMEOUT_KEY"] = timeout_key
+        current = int(timeouts.get(timeout_key, 3600))
+        # Track original baseline across sequential recoveries.  On the first
+        # call the env var is absent so we seed it from the (still-original)
+        # config value.  Subsequent calls read the stored original.
+        baseline_env_key = f"RCX_RECOVERY_ORIGINAL_TIMEOUT_{timeout_key}"
+        stored_baseline = os.environ.get(baseline_env_key)
+        if stored_baseline is not None:
+            baseline = int(stored_baseline)
+        else:
+            baseline = current
+            os.environ[baseline_env_key] = str(baseline)
+        new_timeout = min(int(current * 1.5), baseline * 2)
+        os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] = str(new_timeout)
+        os.environ["RCX_RECOVERY_TIMEOUT_KEY"] = timeout_key
+        target_label = timeout_key
+        override_label = "RCX_RECOVERY_TIMEOUT_OVERRIDE"
     lock_msg = " + bridge.lock cleared" if lock_cleared else ""
     return _fix_result(True, "increase_timeout",
-                       f"timeout for {timeout_key} increased from {current}s "
+                       f"timeout for {target_label} increased from {current}s "
                        f"to {new_timeout}s (capped at 2x original {baseline}s) "
-                       f"via RCX_RECOVERY_TIMEOUT_OVERRIDE{lock_msg}")
+                       f"via {override_label}{lock_msg}")
 
 
 def fix_transient_kill(repo_root: Path, **kw: Any) -> dict[str, Any]:
     """No-op fix — marks as retryable. Dispatcher already retries."""
     return _fix_result(True, "retryable",
                        "transient kill — safe to retry with same parameters")
+
+
+def fix_upstream_connectivity(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Mark external Codex/network failures as retryable without Tier 3."""
+    os.environ["RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY"] = "1"
+    return _fix_result(
+        True,
+        "retry_upstream_connectivity",
+        "upstream Codex connectivity failed — retrying the failed pipeline step without invoking Tier 3 recovery",
+    )
 
 
 def fix_aggregation_hang(repo_root: Path, **kw: Any) -> dict[str, Any]:
@@ -1356,6 +1693,7 @@ _TIER2_FIXES: dict[FailureClass, Any] = {
     FailureClass.STALE_GIT_INDEX_LOCK: lambda root, **kw: fix_stale_git_index_lock(root),
     FailureClass.PROCESS_TIMEOUT: fix_process_timeout,
     FailureClass.TRANSIENT_KILL: fix_transient_kill,
+    FailureClass.UPSTREAM_CONNECTIVITY: fix_upstream_connectivity,
     FailureClass.AGGREGATION_HANG: fix_aggregation_hang,
     FailureClass.IMPLEMENTER_STALE: fix_implementer_stale,
     FailureClass.PR_MERGE_CONFLICT: fix_pr_merge_conflict,
@@ -2524,6 +2862,7 @@ def _hybrid_exception_paths(
     job_id: str | None = None,
     *,
     recovery_prompt_relpath: str | None = None,
+    result_exception_paths: list[str] | tuple[str, ...] | None = None,
 ) -> frozenset[str]:
     """Return the exact admitted .scratch nodes for the hybrid branch."""
     paths = {
@@ -2537,7 +2876,28 @@ def _hybrid_exception_paths(
         paths.add(recovery_prompt)
     if job_id:
         paths.add(f".scratch/phase_b_implementer_output_{job_id}.txt")
+    if result_exception_paths:
+        for rel_path in result_exception_paths:
+            normalized = _normalize_hybrid_repo_relative(rel_path)
+            if normalized and normalized.startswith(".scratch/"):
+                paths.add(normalized)
     return frozenset(paths)
+
+
+def _result_scratch_exception_paths(result: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for key in (
+        "agent_review_stdout_path",
+        "agent_review_stderr_path",
+        "bridge_stdout_path",
+        "bridge_stderr_path",
+        "stdout_path",
+        "stderr_path",
+    ):
+        value = str(result.get(key) or "").strip()
+        if value:
+            paths.append(value)
+    return paths
 
 
 def _hybrid_scope_contract(files_in_scope: list[str], validation_spec: list[dict[str, Any]]) -> str:
@@ -3215,6 +3575,7 @@ def _run_delegate_implementer_action(
         files_in_scope=delegate_payload["files_in_scope"],
         exception_paths=_hybrid_exception_paths(
             recovery_prompt_relpath=recovery_prompt_relpath,
+            result_exception_paths=_result_scratch_exception_paths(result),
         ),
     )
     if not baseline_ok:
@@ -3252,6 +3613,7 @@ def _run_delegate_implementer_action(
     exception_paths = _hybrid_exception_paths(
         implementer_result.get("job_id") or None,
         recovery_prompt_relpath=recovery_prompt_relpath,
+        result_exception_paths=_result_scratch_exception_paths(result),
     )
     pre_validation_ok, pre_validation_audit = _audit_hybrid_checkpoint(
         repo_root,
@@ -3358,6 +3720,23 @@ def _log_tier3_attempt(
     )
     attempts.append(asdict(attempt))
     _save_recovery_log(repo_root, attempts)
+
+
+def _is_nonretryable_recovery_agent_failure(detail: str) -> bool:
+    lowered = str(detail or "").lower()
+    if not lowered:
+        return False
+    if "401 unauthorized" in lowered:
+        return True
+    if (
+        "fatal error: codex cannot access session files" in lowered
+        or ("thread/start failed" in lowered and "session files" in lowered)
+        or ("thread/resume failed" in lowered and "session files" in lowered)
+    ):
+        return True
+    if "failed to initialize rollout recorder" in lowered and "operation not permitted" in lowered:
+        return True
+    return False
 
 
 def run_recovery_loop(
@@ -3515,13 +3894,48 @@ def run_recovery_loop(
             continue
         except Exception as exc:
             dur = round(time.monotonic() - iteration_t0, 3)
+            detail = f"recovery agent invocation failed: {exc}"
             loop_log.append({
                 "iteration": i + 1, "action": "error",
-                "detail": f"recovery agent invocation failed: {exc}",
+                "detail": detail,
                 "duration_s": dur})
-            _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
-                               "error", "failed", dur, f"recovery agent invocation failed: {exc}",
-                               invocation_id=invocation_id)
+            _log_tier3_attempt(
+                repo_root, wave_id, step, fc, i + 1,
+                "error", "failed", dur, detail,
+                invocation_id=invocation_id,
+            )
+            if _looks_like_upstream_connectivity_failure(detail):
+                _finish_recovery_status(
+                    repo_root,
+                    recovered=True,
+                    exhausted=False,
+                    outcome="success",
+                    action="retryable_upstream_connectivity",
+                    detail=detail,
+                    state="tier3_upstream_connectivity_retryable",
+                )
+                return {
+                    "recovered": True,
+                    "exhausted": False,
+                    "iterations": i + 1,
+                    "log": loop_log,
+                }
+            if _is_nonretryable_recovery_agent_failure(detail):
+                _finish_recovery_status(
+                    repo_root,
+                    recovered=False,
+                    exhausted=True,
+                    outcome="exhausted",
+                    action="exhausted",
+                    detail=detail,
+                    state="tier3_exhausted",
+                )
+                return {
+                    "recovered": False,
+                    "exhausted": True,
+                    "iterations": i + 1,
+                    "log": loop_log,
+                }
             _update_recovery_status(
                 repo_root,
                 state="tier3_error",
@@ -3529,7 +3943,7 @@ def run_recovery_loop(
                 child_role="",
                 current_command="",
                 last_action="error",
-                detail=_excerpt(f"recovery agent invocation failed: {exc}"),
+                detail=_excerpt(detail),
             )
             continue
 
@@ -5681,6 +6095,14 @@ def _begin_recovery_status(
 
 def _update_recovery_status(repo_root: Path, **updates: Any) -> dict[str, Any]:
     status = _load_recovery_status(repo_root)
+    if (
+        status
+        and not bool(status.get("active", False))
+        and "active" not in updates
+        and "invocation_id" not in updates
+        and "started_at" not in updates
+    ):
+        return status
     prior_state = str(status.get("state") or "")
     status.update(updates)
     status["updated_at"] = _now_iso()
@@ -5907,6 +6329,13 @@ def _count_prior_attempts(
 # ---------------------------------------------------------------------------
 
 MAX_ATTEMPTS_PER_TUPLE = 2
+MAX_UPSTREAM_CONNECTIVITY_ATTEMPTS_PER_TUPLE = 6
+
+
+def _max_attempts_for_failure(fc: FailureClass) -> int:
+    if fc == FailureClass.UPSTREAM_CONNECTIVITY:
+        return MAX_UPSTREAM_CONNECTIVITY_ATTEMPTS_PER_TUPLE
+    return MAX_ATTEMPTS_PER_TUPLE
 
 
 def _make_result(recovered: bool, action: str, tier: int,
@@ -6005,9 +6434,10 @@ def attempt_recovery(
         invocation_id=invocation_id,
     )
 
-    if prior >= MAX_ATTEMPTS_PER_TUPLE:
+    max_attempts = _max_attempts_for_failure(fc)
+    if prior >= max_attempts:
         detail = (
-            f"max {MAX_ATTEMPTS_PER_TUPLE} attempts reached for "
+            f"max {max_attempts} attempts reached for "
             f"({wave_id}, {step}, {fc.value})"
         )
         _finish_recovery_status(

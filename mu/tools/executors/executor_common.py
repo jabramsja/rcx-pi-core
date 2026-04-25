@@ -41,13 +41,25 @@ IMPLEMENTER_BACKEND_KEYS = frozenset(
 REVIEWER_BRIDGE_KEYS = frozenset({"phase_a", "phase_b"})
 DEFAULT_AGENT_DISPLAY_NAMES = {
     "claude": "Claude Opus 4.7 max",
-    "codex": "Codex 5.4 xhigh",
+    "codex": "Codex 5.5 xhigh",
 }
 
 DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     "role_agents": {
         "implementer": "codex",
         "reviewer": "codex",
+    },
+    "bridge_agent_defaults": {
+        "claude": {
+            "display_name": "Claude Opus 4.7 max",
+            "model": "claude-opus-4-7",
+            "effort": "max",
+        },
+        "codex": {
+            "display_name": "Codex 5.5 xhigh",
+            "model": "gpt-5.5",
+            "reasoning_effort": "xhigh",
+        },
     },
     "backends": {
         "post_merge_supervisor": "codex",
@@ -336,20 +348,31 @@ def _materialize_role_agents(
 def load_bridge_agent_catalog(repo_root: Path) -> dict[str, dict[str, Any]]:
     """Load optional display metadata for configured bridge agents."""
     config_path = repo_root / BRIDGE_CONFIG_PATH
-    if not config_path.exists():
-        return {}
-    try:
-        payload = json.loads(config_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
-    agents = payload.get("agents")
+    payload: dict[str, Any] = {}
+    if config_path.exists():
+        try:
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            loaded = {}
+        if isinstance(loaded, dict):
+            payload = loaded
+    agents = payload.get("agents", {})
     if not isinstance(agents, dict):
-        return {}
-    return {
+        agents = {}
+    catalog = {
         name: data
         for name, data in agents.items()
         if isinstance(name, str) and isinstance(data, dict)
     }
+    defaults = load_executor_config(repo_root).get("bridge_agent_defaults", {})
+    if isinstance(defaults, dict):
+        for name, data in defaults.items():
+            if not isinstance(name, str) or not isinstance(data, dict):
+                continue
+            display_name = _nonempty_str(data.get("display_name"))
+            if display_name is not None:
+                catalog.setdefault(name, {})["display_name"] = display_name
+    return catalog
 
 
 def bridge_agent_display_name(repo_root: Path, agent_name: str) -> str:
@@ -463,7 +486,7 @@ def process_descendants(root_pid: int, *, cwd: Path | None = None) -> set[int]:
             text=True,
             check=True,
         )
-    except subprocess.CalledProcessError:
+    except (PermissionError, OSError, subprocess.CalledProcessError):
         return set()
 
     children_by_parent: dict[int, set[int]] = {}

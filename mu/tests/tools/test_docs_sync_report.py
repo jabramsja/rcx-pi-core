@@ -38,3 +38,27 @@ def test_docs_sync_report_check_mode_passes_in_repo_state():
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_docs_sync_report_ignores_tracker_sections_in_exempt_paths():
+    scratch_tasks = REPO_ROOT / ".scratch" / "pytest_docs_sync_exempt" / "TASKS.md"
+    scratch_tasks.parent.mkdir(parents=True, exist_ok=True)
+    scratch_tasks.write_text("## NOW\nscratch copy\n", encoding="utf-8")
+    try:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--json"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+    finally:
+        scratch_tasks.unlink(missing_ok=True)
+        scratch_tasks.parent.rmdir()
+
+    payload = json.loads(result.stdout)
+    assert {
+        "path": ".scratch/pytest_docs_sync_exempt/TASKS.md",
+        "section": "NOW",
+    } not in payload["tracker_section_violations"]

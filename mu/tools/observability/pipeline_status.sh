@@ -103,6 +103,16 @@ pid_cwd() {
   lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
 }
 
+is_control_plane_resume_command() {
+  local cmd="$1"
+  case "$cmd" in
+    *"Autonomous WorkingRCX pipeline watchdog tick."*|*"WorkingRCX pipeline pager wakeup."*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 pid_matches_worktree() {
   local pid="$1" path="$2" cmd="" cwd="" normalized=""
   normalized="$(normalize_path "$path")"
@@ -112,6 +122,9 @@ pid_matches_worktree() {
       return 1
       ;;
   esac
+  if is_control_plane_resume_command "$cmd"; then
+    return 1
+  fi
   case "$cmd" in
     *"$normalized"/*|*"$normalized "'*|*"$normalized\""*|*"$normalized"\'*|*"$normalized") return 0 ;;
   esac

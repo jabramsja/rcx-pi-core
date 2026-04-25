@@ -118,6 +118,62 @@ meta_next_fix() {
   return 1
 }
 
+bridge_reviewer_state_for_round() {
+  local round="$1"
+  local db="$REPO_ROOT/.agent_bus/bridge.db"
+  [ -s "$db" ] || return 1
+  python3 - "$db" "$round" <<'PY' 2>/dev/null
+import sqlite3
+import sys
+
+db_path, round_name = sys.argv[1:3]
+conn = sqlite3.connect(db_path)
+conn.row_factory = sqlite3.Row
+try:
+    turn = conn.execute(
+        """
+        SELECT status, COALESCE(decision, '') AS decision,
+               COALESCE(finished_at, '') AS finished_at,
+               COALESCE(raw_output_path, '') AS raw_output_path
+        FROM turns
+        WHERE job_id = ? AND agent_role = 'reviewer'
+        ORDER BY started_at DESC
+        LIMIT 1
+        """,
+        (round_name,),
+    ).fetchone()
+    job = conn.execute(
+        """
+        SELECT status, COALESCE(terminal_decision, '') AS terminal_decision,
+               COALESCE(updated_at, '') AS updated_at
+        FROM jobs
+        WHERE job_id = ?
+        LIMIT 1
+        """,
+        (round_name,),
+    ).fetchone()
+finally:
+    conn.close()
+if turn is None and job is None:
+    sys.exit(1)
+
+def emit(key: str, value: object) -> None:
+    text = "" if value is None else str(value)
+    text = text.replace("\n", " ")[:500]
+    print(f"{key}={text}")
+
+if turn is not None:
+    emit("TURN_STATUS", turn["status"])
+    emit("TURN_DECISION", turn["decision"])
+    emit("TURN_FINISHED_AT", turn["finished_at"])
+    emit("TURN_RAW_OUTPUT", turn["raw_output_path"])
+if job is not None:
+    emit("JOB_STATUS", job["status"])
+    emit("JOB_TERMINAL_DECISION", job["terminal_decision"])
+    emit("JOB_UPDATED_AT", job["updated_at"])
+PY
+}
+
 while true; do
   refresh_context
   # Build output to temp file, only redraw if content changed
@@ -331,7 +387,27 @@ for f in nb:
     fi
 
     if [ -z "$ENVELOPE" ]; then
-      # No envelope yet — review still in progress. Show this and stop.
+      BRIDGE_STATE=$(bridge_reviewer_state_for_round "$ROUND_NAME" || true)
+      TURN_STATUS=$(echo "$BRIDGE_STATE" | grep '^TURN_STATUS=' | cut -d= -f2-)
+      TURN_DECISION=$(echo "$BRIDGE_STATE" | grep '^TURN_DECISION=' | cut -d= -f2-)
+      TURN_RAW_OUTPUT=$(echo "$BRIDGE_STATE" | grep '^TURN_RAW_OUTPUT=' | cut -d= -f2-)
+      JOB_STATUS=$(echo "$BRIDGE_STATE" | grep '^JOB_STATUS=' | cut -d= -f2-)
+      if [ "$TURN_STATUS" = "FAILED" ] || [ "$TURN_STATUS" = "ERROR" ] || [ "$TURN_DECISION" = "ERROR" ]; then
+        echo -e ""
+        echo -e "  ${CYAN}$ROUND_NAME${RESET} ${DIM}($age_str)${RESET}"
+        echo -e "  Decision: ${RED}${BOLD}ERROR${RESET}"
+        echo -e "  ${DIM}Meaning: $(decision_meaning ERROR)${RESET}"
+        echo -e "  Why it stopped: bridge reviewer turn is ${TURN_STATUS:-unknown}${TURN_DECISION:+ / $TURN_DECISION}."
+        if [ -n "$JOB_STATUS" ]; then
+          echo -e "  ${DIM}Bridge job status: $JOB_STATUS${RESET}"
+        fi
+        if [ -n "$TURN_RAW_OUTPUT" ]; then
+          echo -e "  ${DIM}Raw output: $TURN_RAW_OUTPUT${RESET}"
+        fi
+        found_any=true
+        break
+      fi
+      # No envelope and no terminal reviewer state yet — review still in progress.
       SIZE=$(wc -c < "$REVIEW_SOURCE" | xargs)
       echo -e ""
       echo -e "  ${CYAN}$ROUND_NAME${RESET} ${DIM}($age_str, ${SIZE}B)${RESET}"
