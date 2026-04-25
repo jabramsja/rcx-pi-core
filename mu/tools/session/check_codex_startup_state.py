@@ -20,6 +20,8 @@ WEB_PORT = 8099
 DASHBOARD_HEALTH_TIMEOUT_S = 8
 DEFAULT_CODEX_APP_SERVER_URL = "http://127.0.0.1:8765"
 DEFAULT_CODEX_APP_SERVER_THREADS_PATH = "/api/threads"
+CODEX_APP_SERVER_TMUX_SESSION = "rcx-codex-app-server"
+CODEX_APP_SERVER_START_TIMEOUT_S = 8
 CODEX_PAGER_REQUIRED_ROUTES = frozenset({"codex", "both"})
 CODEX_AUTOPING_MAX_STATE_AGE_S = 180
 CODEX_AUTOPING_CONTEXT_EXHAUSTED_STATUSES = frozenset(
@@ -2204,8 +2206,30 @@ def _executor_config_payload(repo_root: Path) -> tuple[dict[str, object] | None,
     return payload, ""
 
 
+def _codex_app_server_listener_url() -> str:
+    raw = (
+        os.environ.get("RCX_CODEX_APP_SERVER_URL", DEFAULT_CODEX_APP_SERVER_URL)
+        .strip()
+        .rstrip("/")
+    )
+    if raw.startswith("http://"):
+        return "ws://" + raw[len("http://") :]
+    if raw.startswith("https://"):
+        return "wss://" + raw[len("https://") :]
+    return raw
+
+
+def _codex_app_server_http_base_url() -> str:
+    raw = _codex_app_server_listener_url()
+    if raw.startswith("ws://"):
+        return "http://" + raw[len("ws://") :]
+    if raw.startswith("wss://"):
+        return "https://" + raw[len("wss://") :]
+    return raw
+
+
 def _codex_pager_target_url() -> str:
-    base_url = os.environ.get("RCX_CODEX_APP_SERVER_URL", DEFAULT_CODEX_APP_SERVER_URL).rstrip("/")
+    base_url = _codex_app_server_http_base_url()
     threads_path = os.environ.get(
         "RCX_CODEX_APP_SERVER_THREADS_PATH",
         DEFAULT_CODEX_APP_SERVER_THREADS_PATH,
@@ -2229,6 +2253,58 @@ def _codex_pager_target_health() -> tuple[bool, str]:
             detail = reason if isinstance(reason, str) else type(reason).__name__
         return False, f"required Codex pager target unavailable: {url} ({detail})"
     return True, f"Codex pager target reachable at {url}"
+
+
+def _start_codex_app_server(repo_root: Path) -> tuple[bool, str]:
+    listen_url = _codex_app_server_listener_url()
+    codex_bin = os.environ.get("RCX_PIPELINE_AGENT_PAGER_CODEX_BIN", "codex")
+    command = f"{shlex.quote(codex_bin)} app-server --listen {shlex.quote(listen_url)}"
+    target = f"{CODEX_APP_SERVER_TMUX_SESSION}:0.0"
+
+    session_probe = _run(
+        ["tmux", "has-session", "-t", CODEX_APP_SERVER_TMUX_SESSION],
+        cwd=repo_root,
+        timeout=10,
+    )
+    if session_probe.returncode == 0:
+        action = "respawned"
+        proc = _run(
+            [
+                "tmux",
+                "respawn-pane",
+                "-k",
+                "-c",
+                str(repo_root),
+                "-t",
+                target,
+                command,
+            ],
+            cwd=repo_root,
+            timeout=10,
+        )
+    else:
+        action = "started"
+        proc = _run(
+            [
+                "tmux",
+                "new-session",
+                "-d",
+                "-s",
+                CODEX_APP_SERVER_TMUX_SESSION,
+                "-c",
+                str(repo_root),
+                command,
+            ],
+            cwd=repo_root,
+            timeout=10,
+        )
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        if not detail and session_probe.returncode != 0:
+            detail = (session_probe.stderr or session_probe.stdout or "").strip()
+        return False, f"{action} {CODEX_APP_SERVER_TMUX_SESSION} failed: {detail or proc.returncode}"
+    return True, f"{action} {CODEX_APP_SERVER_TMUX_SESSION} with {listen_url}"
 
 
 def _codex_exec_resume_health(codex_home: Path) -> tuple[bool, str]:
@@ -2581,6 +2657,24 @@ def _ensure_codex_pager_target(
         )
 
     healthy, detail = _codex_pager_target_health()
+    if not healthy:
+        started, start_detail = _start_codex_app_server(repo_root)
+        if started:
+            deadline = time.time() + CODEX_APP_SERVER_START_TIMEOUT_S
+            last_detail = detail
+            while time.time() < deadline:
+                healthy, last_detail = _codex_pager_target_health()
+                if healthy:
+                    detail = f"{last_detail}; {start_detail}"
+                    break
+                time.sleep(0.5)
+            else:
+                detail = (
+                    "failed closed after recovery attempt: "
+                    f"{last_detail}; {start_detail}"
+                )
+        else:
+            detail = f"failed closed after recovery attempt: {detail}; {start_detail}"
     resume_healthy, resume_detail = _codex_exec_resume_health(codex_home or _codex_home())
     combined_detail = f"{detail}; {resume_detail}"
     return CheckResult(
