@@ -1479,13 +1479,82 @@ def test_codex_pager_target_accepts_http_error_as_reachable(monkeypatch, tmp_pat
     assert "exec resume fallback available" in result.detail
 
 
-def test_codex_pager_target_fails_closed_on_connection_refused(monkeypatch, tmp_path):
+def test_codex_pager_target_url_uses_http_probe_for_ws_listener(monkeypatch):
+    monkeypatch.setenv("RCX_CODEX_APP_SERVER_URL", "ws://127.0.0.1:9876")
+    monkeypatch.setenv("RCX_CODEX_APP_SERVER_THREADS_PATH", "api/threads")
+
+    assert startup_mod._codex_pager_target_url() == "http://127.0.0.1:9876/api/threads"  # ANTICHEAT_OK: tool unit test
+    assert startup_mod._codex_app_server_listener_url() == "ws://127.0.0.1:9876"  # ANTICHEAT_OK: tool unit test
+
+
+def test_codex_pager_target_starts_tmux_app_server_when_listener_missing(monkeypatch, tmp_path):
+    _write_executor_config(tmp_path, route="codex")
+    monkeypatch.delenv("RCX_CODEX_APP_SERVER_URL", raising=False)
+
+    health_results = iter(
+        [
+            (
+                False,
+                "required Codex pager target unavailable: http://127.0.0.1:8765/api/threads "
+                "(ConnectionRefusedError)",
+            ),
+            (
+                True,
+                "Codex pager target reachable at http://127.0.0.1:8765/api/threads (HTTP 400)",
+            ),
+        ]
+    )
+    run_calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        run_calls.append(cmd)
+        if cmd[:3] == ["tmux", "has-session", "-t"]:
+            return subprocess.CompletedProcess(cmd, 1, "", "can't find session")
+        if cmd[:3] == ["tmux", "new-session", "-d"]:
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(startup_mod, "_codex_pager_target_health", lambda: next(health_results))
+    monkeypatch.setattr(startup_mod, "_run", fake_run)
+    monkeypatch.setattr(startup_mod.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        startup_mod,
+        "_codex_exec_resume_health",
+        lambda codex_home: (True, "codex exec resume fallback available"),
+    )
+
+    result = startup_mod._ensure_codex_pager_target(tmp_path)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert "Codex pager target reachable" in result.detail
+    assert "started rcx-codex-app-server with ws://127.0.0.1:8765" in result.detail
+    assert run_calls == [
+        ["tmux", "has-session", "-t", startup_mod.CODEX_APP_SERVER_TMUX_SESSION],
+        [
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            startup_mod.CODEX_APP_SERVER_TMUX_SESSION,
+            "-c",
+            str(tmp_path),
+            "codex app-server --listen ws://127.0.0.1:8765",
+        ],
+    ]
+
+
+def test_codex_pager_target_fails_closed_when_recovery_cannot_start(monkeypatch, tmp_path):
     _write_executor_config(tmp_path, route="codex")
 
     def fake_urlopen(url, timeout=2):
         raise startup_mod.urllib.error.URLError(ConnectionRefusedError("connection refused"))
 
     monkeypatch.setattr(startup_mod.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        startup_mod,
+        "_start_codex_app_server",
+        lambda repo_root: (False, "started rcx-codex-app-server failed: tmux unavailable"),
+    )
     monkeypatch.setattr(
         startup_mod,
         "_codex_exec_resume_health",
@@ -1495,8 +1564,10 @@ def test_codex_pager_target_fails_closed_on_connection_refused(monkeypatch, tmp_
     result = startup_mod._ensure_codex_pager_target(tmp_path)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "FAIL"
+    assert "failed closed after recovery attempt" in result.detail
     assert "required Codex pager target unavailable" in result.detail
     assert "ConnectionRefusedError" in result.detail
+    assert "tmux unavailable" in result.detail
     assert "codex exec resume help failed" in result.detail
 
 
