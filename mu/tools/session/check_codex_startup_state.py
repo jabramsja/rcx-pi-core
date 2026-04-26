@@ -179,6 +179,10 @@ TMUX_PANE_STATE_CANARIES = {
 TMUX_PANE_4_AUTOPING_DETAIL_CANARIES = frozenset(
     {
         "Autoping detail:",
+    }
+)
+TMUX_PANE_4_AUTOPING_OPTIONAL_DETAIL_CANARIES = frozenset(
+    {
         "Autoping summary:",
     }
 )
@@ -2460,11 +2464,18 @@ def _tmux_pane_has_live_content(title: str, body: str) -> tuple[bool, str]:
     if title == "PANE 4 · SESSION TIMELINE" and has_live_state:
         missing_detail: list[str] = []
         if "Autoping:" in joined:
-            missing_detail.extend(
+            missing_autoping_detail = [
                 canary
                 for canary in sorted(TMUX_PANE_4_AUTOPING_DETAIL_CANARIES)
                 if canary not in joined
-            )
+            ]
+            missing_detail.extend(missing_autoping_detail)
+            if missing_autoping_detail:
+                missing_detail.extend(
+                    canary
+                    for canary in sorted(TMUX_PANE_4_AUTOPING_OPTIONAL_DETAIL_CANARIES)
+                    if canary not in joined
+                )
         if "Pager:" in joined or "Last pager wake:" in joined:
             missing_detail.extend(
                 canary
