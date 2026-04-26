@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import threading
 import time
@@ -120,6 +121,77 @@ def _codex_turn_response(request_id: int, *, thread_id: str, turn_id: str | None
 
 def _codex_error_response(request_id: int, message: str) -> dict:
     return {"jsonrpc": "2.0", "id": request_id, "error": {"message": message}}
+
+
+def test_codex_node_bridge_preserves_explicit_empty_params():
+    if shutil.which("node") is None:
+        pytest.skip("node is required to exercise the Codex websocket bridge")
+    requests = [
+        {
+            "id": 1,
+            "method": "initialize",
+            "params": {"clientInfo": {"name": "test", "version": "1.0"}},
+        },
+        {"id": 2, "method": "thread/start", "params": {}},
+        {
+            "id": 3,
+            "method": "turn/start",
+            "params": {
+                "threadId": {"$from": "2.result.thread.id"},
+                "input": [{"type": "text", "text": "pager wake"}],
+            },
+        },
+    ]
+    websocket_stub = r"""
+class StubWebSocket {
+  constructor() {
+    this.listeners = {};
+    setImmediate(() => this.listeners.open && this.listeners.open());
+  }
+  addEventListener(name, callback) {
+    this.listeners[name] = callback;
+  }
+  send(raw) {
+    const sent = JSON.parse(raw);
+    const result = { echo: sent };
+    if (sent.method === "thread/start") {
+      result.thread = { id: "thread-1" };
+    }
+    if (sent.method === "turn/start") {
+      result.thread = { id: sent.params.threadId };
+      result.turn = { id: "turn-1" };
+    }
+    setImmediate(() => {
+      this.listeners.message({
+        data: JSON.stringify({ jsonrpc: "2.0", id: sent.id, result }),
+      });
+    });
+  }
+  close() {}
+}
+global.WebSocket = StubWebSocket;
+"""
+
+    proc = subprocess.run(
+        [
+            "node",
+            "-e",
+            websocket_stub + pager_mod.CODEX_APP_SERVER_NODE_SCRIPT,
+            "ws://127.0.0.1:1",
+            json.dumps(requests),
+            "1000",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+
+    assert proc.returncode == 0
+    payload = json.loads(proc.stdout)
+    thread_start = payload["responses"][1]["result"]["echo"]
+    assert thread_start["method"] == "thread/start"
+    assert thread_start["params"] == {}
 
 
 def test_event_id_uses_canonical_identity_tuple_and_log_appends_once(tmp_path):

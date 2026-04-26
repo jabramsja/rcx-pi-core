@@ -116,6 +116,7 @@ _TRANSIENT_KILL_CODES = frozenset({-9, -15, 137})
 PHASE_B_RECOVERY_PLAN_ENV = "RCX_RECOVERY_PHASE_B_PLAN_PATH"
 STALE_BRIDGE_LOCK_WAIT_TIMEOUT_S = 30.0
 STALE_BRIDGE_LOCK_WAIT_POLL_S = 0.5
+CONTROL_PLANE_PACKET_PREFIX = "reports/control_plane/"
 _FEATURE_BRANCH_RE = re.compile(
     r"On branch (?P<current>[^,\n]+), expected (?P<base>\S+) or (?P<target>\S+)"
 )
@@ -555,6 +556,34 @@ def _extract_plan_path(result: dict[str, Any]) -> str:
     return ""
 
 
+def _normalize_phase_a_lock_repair_packet_path(plan_path: str) -> str | None:
+    candidate = str(plan_path or "").strip().replace("\\", "/")
+    if not candidate:
+        return None
+    while candidate.startswith("./"):
+        candidate = candidate[2:]
+    if candidate.startswith("/"):
+        return None
+
+    parts: list[str] = []
+    for part in PurePosixPath(candidate).parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            return None
+        parts.append(part)
+    if not parts:
+        return None
+
+    normalized = PurePosixPath(*parts).as_posix()
+    path = PurePosixPath(normalized)
+    if path.parent.as_posix() != CONTROL_PLANE_PACKET_PREFIX.rstrip("/"):
+        return None
+    if path.suffix != ".md":
+        return None
+    return normalized
+
+
 # ---------------------------------------------------------------------------
 # Tier 1 auto-fix functions
 # ---------------------------------------------------------------------------
@@ -608,9 +637,20 @@ def fix_missing_phase_a_lock(repo_root: Path, **kw: Any) -> dict[str, Any]:
         )
 
     repo_root_resolved = repo_root.resolve()
+    normalized_plan_path = _normalize_phase_a_lock_repair_packet_path(plan_path)
+    if normalized_plan_path is None:
+        return _fix_result(
+            False,
+            "non_packet_plan_path",
+            "missing Phase-A-Lock repair only applies to "
+            f"{CONTROL_PLANE_PACKET_PREFIX}*.md packets: {plan_path}",
+        )
+    plan_path = normalized_plan_path
+
     try:
         plan_file = (repo_root / plan_path).resolve()
         plan_file.relative_to(repo_root_resolved)
+        plan_file.relative_to((repo_root / CONTROL_PLANE_PACKET_PREFIX).resolve())
     except ValueError:
         return _fix_result(False, "unsafe_plan_path", f"unsafe plan_path outside repo: {plan_path}")
     if not plan_file.is_file():
