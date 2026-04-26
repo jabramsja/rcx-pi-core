@@ -2001,6 +2001,33 @@ def _extract_review_findings(
     return {"outcome": "clean"}
 
 
+def _extract_timeout_verified_current_head_findings(
+    pr_data: dict[str, Any],
+    head_sha: str,
+    *,
+    result: dict[str, Any],
+    pr_number: str,
+) -> dict[str, Any]:
+    """Extract findings after review-wait timeout only with current-head proof."""
+    _assert_expected_pr_head(pr_data, head_sha)
+    issue_comment_outcome = _current_head_connector_issue_comment_outcome(
+        pr_data, head_sha,
+    )
+    has_current_head_bot_signal = (
+        _has_fresh_connector_review(pr_data, head_sha)
+        or issue_comment_outcome is not None
+    )
+    findings_result = _extract_review_findings(
+        pr_data, head_sha, result=result, pr_number=pr_number,
+    )
+    if (
+        not has_current_head_bot_signal
+        and findings_result["outcome"] == "bot_findings"
+    ):
+        return {"outcome": "unverified"}
+    return findings_result
+
+
 def _build_bot_remediation_prompt(
     bot_findings: list[dict[str, Any]],
     *,
@@ -2945,12 +2972,12 @@ def _attempt_bot_finding_remediation(
         except TimeoutError as exc:
             # The remediation commit at current_head is already pushed and CI
             # passed at step 14 before we got here. The bot simply did not post
-            # a fresh review/clearance within the wait window. Treat this as
-            # the false-positive case: the finding WAS addressed by the
-            # pushed remediation, bot didn't confirm, so auto-defer instead
-            # of blocking merge. Per feedback_bot_comments_not_gates.md:
-            # "Bot comments are signal, not gates. Auto-defer, don't block
-            # next wave." Closes
+            # a fresh review/clearance within the wait window. Old findings
+            # cannot be auto-deferred unless a current-head bot review or
+            # current-head connector issue comment proves they still apply.
+            # Per feedback_bot_comments_not_gates.md: "Bot comments are signal,
+            # not gates." A timeout with no current-head proof skips report
+            # creation and proceeds without manufacturing stale evidence. Closes
             # reports/deferred/blocking/commit_executor_bot_findings_false_positive_2026-04-17.md.
             #
             # SAFETY NOTE (hotfix 2026-04-17, closes bot P1 on PR #789):
@@ -2963,15 +2990,76 @@ def _attempt_bot_finding_remediation(
             # the catch-all below which preserves the prior safe bail-out to
             # bot_findings_pending.
             log(f"Step 15: review wait failed after round {round_num}: {exc}")
+            try:
+                timeout_pr_data = _query_pr_review_state(
+                    repo_root,
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    pr_number=pr_number,
+                )
+                timeout_findings_result = (
+                    _extract_timeout_verified_current_head_findings(
+                        timeout_pr_data,
+                        current_head,
+                        result=result,
+                        pr_number=pr_number,
+                    )
+                )
+            except (
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+                json.JSONDecodeError,
+                ValueError,
+            ) as state_exc:
+                log(
+                    f"Step 15: review-wait-timeout recheck failed with "
+                    f"{type(state_exc).__name__}: {state_exc}; "
+                    f"falling back to bot_findings_pending"
+                )
+                return {
+                    "status": "bot_findings_pending",
+                    "bot_findings": current_findings,
+                    "pr_number": pr_number,
+                    "steps_completed": result["steps_completed"],
+                    "remediation_rounds_attempted": round_num,
+                    "review_wait_timeout": True,
+                    "review_wait_failure_class": type(state_exc).__name__,
+                }
+
+            if timeout_findings_result["outcome"] == "error":
+                timeout_response = timeout_findings_result["response"]
+                timeout_response["review_wait_timeout"] = True
+                return timeout_response
+
+            if timeout_findings_result["outcome"] == "unverified":
+                log(
+                    f"Step 15: remediation commit {current_head[:8]} already pushed + "
+                    f"CI green at step 14; no current-head bot review/comment "
+                    f"proved findings still apply after timeout, so skipping "
+                    f"auto-defer report and proceeding to merge"
+                )
+                return None
+
+            if timeout_findings_result["outcome"] != "bot_findings":
+                log(
+                    f"Step 15: remediation commit {current_head[:8]} already pushed + "
+                    f"CI green at step 14; current-head review snapshot is clean "
+                    f"after timeout, so skipping auto-defer report and proceeding "
+                    f"to merge"
+                )
+                return None
+
+            verified_findings = timeout_findings_result["bot_findings"]
             log(
                 f"Step 15: remediation commit {current_head[:8]} already pushed + "
-                f"CI green at step 14; bot review timeout treated as false-positive, "
-                f"auto-deferring current findings"
+                f"CI green at step 14; current-head review snapshot still has "
+                f"{len(verified_findings)} bot finding(s), auto-deferring verified "
+                f"current-head findings"
             )
             try:
                 _auto_defer_bot_findings(
                     repo_root=repo_root,
-                    findings=current_findings,
+                    findings=verified_findings,
                     wave_id=wave_id,
                     pr_number=pr_number,
                     repo_owner=repo_owner,
@@ -2985,7 +3073,7 @@ def _attempt_bot_finding_remediation(
                 )
                 return {
                     "status": "bot_findings_pending",
-                    "bot_findings": current_findings,
+                    "bot_findings": verified_findings,
                     "pr_number": pr_number,
                     "steps_completed": result["steps_completed"],
                     "remediation_rounds_attempted": round_num,
@@ -2993,8 +3081,9 @@ def _attempt_bot_finding_remediation(
                 }
             log(
                 f"Step 15: auto-defer succeeded after review-wait-timeout; "
-                f"findings written to reports/deferred/non_blocking/ and bot "
-                f"threads resolved. Proceeding to merge."
+                f"verified current-head findings written to "
+                f"reports/deferred/non_blocking/ and bot threads resolved. "
+                f"Proceeding to merge."
             )
             return None
         except (

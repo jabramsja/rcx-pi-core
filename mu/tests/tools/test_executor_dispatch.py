@@ -3817,31 +3817,36 @@ class TestPRAndReview:
             "(the P1 regression that this hotfix closes)"
         )
 
-    def test_35a_review_wait_timeout_triggers_auto_defer_before_bot_findings_pending(self):
-        """Test 35a: bot-review-timeout post-remediation auto-defers instead
-        of bailing to bot_findings_pending.
+    def test_35a_review_wait_timeout_rechecks_current_head_before_auto_defer(self):
+        """Test 35a: bot-review-timeout post-remediation rechecks current head
+        before writing an auto-defer report.
 
         Closes reports/deferred/blocking/commit_executor_bot_findings_false_positive_2026-04-17.md.
         Before this fix, `_wait_for_bot_review_freshness` raising TimeoutError
         (bot didn't post fresh review within 58s after remediation push)
         caused commit_executor to exit `bot_findings_pending` even though the
         remediation commit passed CI — forcing human `merge_pr.sh` unblock.
-        Post-fix: the except block calls `_auto_defer_bot_findings` first and
-        only falls back to bot_findings_pending if the auto-defer itself
-        fails.
+        Current fix: the except block queries the PR again and only writes a
+        deferred report when a current-head bot signal proves findings still
+        apply. Without that proof it proceeds without manufacturing a stale
+        report.
         """
         source = _commit_post_commit_source()
-        # Verify the new auto-defer call site exists in the review-wait except block.
+        # Verify the timeout branch keeps diagnostics and rechecks current head.
         assert "review wait failed after round" in source, (
             "review-wait-timeout log line should remain for diagnostics"
         )
-        assert "auto-deferring current findings" in source, (
-            "auto-defer log line should signal that the except branch attempts "
-            "_auto_defer_bot_findings"
+        assert "_extract_timeout_verified_current_head_findings" in source, (
+            "review-wait-timeout branch must filter stale findings before any "
+            "auto-defer report is written"
         )
-        assert "bot review timeout treated as false-positive" in source, (
-            "policy-referencing log line should remain so operators understand "
-            "the semantics"
+        assert "skipping auto-defer report" in source, (
+            "timeout branch must have a no-report path when no current-head bot "
+            "signal proves findings still apply"
+        )
+        assert "verified current-head findings" in source, (
+            "auto-defer report text must distinguish verified current-head "
+            "findings from stale pre-remediation findings"
         )
         # Fall-back: if _auto_defer_bot_findings itself raises, we still
         # return bot_findings_pending so nothing is silently swallowed.
@@ -3852,6 +3857,82 @@ class TestPRAndReview:
             "fall-back response should tag review_wait_timeout so recovery_gate "
             "can distinguish this sub-class"
         )
+
+    def test_35c_review_wait_timeout_helper_ignores_unverified_stale_thread(self):
+        """Timeout helper must not treat pre-remediation bot threads as current."""
+        helper = commit_mod._extract_timeout_verified_current_head_findings  # ANTICHEAT_OK: behavioral test for commit executor timeout helper
+        pr_data = {
+            "headRefOid": "abc123",
+            "reviewDecision": "",
+            "latestReviews": {"nodes": []},
+            "comments": {"nodes": []},
+            "reviewThreads": {"nodes": [{
+                "isResolved": False,
+                "isOutdated": False,
+                "comments": {"nodes": [{
+                    "author": {"login": "chatgpt-codex-connector"},
+                    "body": "P2 stale issue",
+                    "path": "mu/tools/executors/commit_executor.py",
+                    "line": 10,
+                    "createdAt": "2026-04-26T00:00:00Z",
+                }]},
+            }]},
+        }
+
+        outcome = helper(
+            pr_data,
+            "abc123",
+            result={"steps_completed": []},
+            pr_number="822",
+        )
+
+        assert outcome == {"outcome": "unverified"}
+
+    def test_35d_review_wait_timeout_helper_keeps_verified_current_head_finding(self):
+        """Timeout helper may defer only findings tied to a current-head bot signal."""
+        helper = commit_mod._extract_timeout_verified_current_head_findings  # ANTICHEAT_OK: behavioral test for commit executor timeout helper
+        pr_data = {
+            "headRefOid": "abc123",
+            "reviewDecision": "",
+            "latestReviews": {"nodes": [{
+                "author": {"login": "chatgpt-codex-connector"},
+                "state": "COMMENTED",
+                "submittedAt": "2026-04-26T00:02:00Z",
+                "commit": {"oid": "abc123"},
+            }]},
+            "comments": {"nodes": [{
+                "databaseId": 1,
+                "author": {"login": "jabramsja"},
+                "body": "@codex review",
+                "createdAt": "2026-04-26T00:01:00Z",
+            }]},
+            "reviewThreads": {"nodes": [{
+                "isResolved": False,
+                "isOutdated": False,
+                "comments": {"nodes": [{
+                    "author": {"login": "chatgpt-codex-connector"},
+                    "body": "P2 current issue",
+                    "path": "mu/tools/executors/commit_executor.py",
+                    "line": 10,
+                    "createdAt": "2026-04-26T00:03:00Z",
+                }]},
+            }]},
+        }
+
+        outcome = helper(
+            pr_data,
+            "abc123",
+            result={"steps_completed": []},
+            pr_number="822",
+        )
+
+        assert outcome["outcome"] == "bot_findings"
+        assert outcome["bot_findings"] == [{
+            "author": "chatgpt-codex-connector",
+            "body": "P2 current issue",
+            "path": "mu/tools/executors/commit_executor.py",
+            "line": 10,
+        }]
 
     def test_36_resolved_bot_threads_clear(self):
         """Test 36: Resolved bot threads only → clear, merge proceeds.
