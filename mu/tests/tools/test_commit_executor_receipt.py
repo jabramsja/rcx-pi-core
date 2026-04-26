@@ -65,6 +65,10 @@ def _make_new_schema_handoff(**overrides):
     return base
 
 
+def _with_founder_override(note: str, token: str) -> str:
+    return f"{note} FOUNDER_OVERRIDE:{token} (test authorization)"
+
+
 def _setup_repo(tmp_path):
     """Create a minimal git repo for pipeline tests."""
     import subprocess
@@ -201,7 +205,10 @@ class TestSupervisorReceiptIsAuthority:
 
         assert result["status"] == "success", f"Unexpected commit pipeline result: {result}"
         assert pager_calls
-        event = pager_calls[0]
+        event = next(
+            call for call in pager_calls
+            if call.get("event_type") == "commit_ready"
+        )
         assert event["event_type"] == "commit_ready"
         assert event["task_id"] == "[TEST]"
         assert event["plan_path"] == "reports/control_plane/test_wave.md"
@@ -345,11 +352,20 @@ class TestSupervisorReceiptIsAuthority:
     def test_commit_pipeline_fails_closed_in_agent_review_mode(self, tmp_path):
         repo = _setup_repo(tmp_path)
         handoff = _make_new_schema_handoff()
-        with patch.dict(commit_mod.os.environ, {"RCX_AGENT_REVIEW_MODE": "run_review"}, clear=False):
+        pager_calls = []
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            return {"enabled": True, "event_id": "review-mode", "attempted": []}
+
+        with patch.dict(commit_mod.os.environ, {"RCX_AGENT_REVIEW_MODE": "run_review"}, clear=False), \
+             patch.object(commit_mod, "_commit_lifecycle_pager_enabled", return_value=True), \
+             patch.object(commit_mod, "emit_pipeline_agent_event", side_effect=fake_emit):
             result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
         assert result["status"] == "error"
         assert result["step"] == "review_mode_guard"
         assert any("agent review mode" in err for err in result["errors"])
+        assert pager_calls == []
 
 
 class TestReceiptChainEndToEnd:
@@ -612,10 +628,12 @@ class TestWaveIdBounds:
             caller="standalone",
             pre_commit_receipt_path="",
             repo_root=repo,
+            founder_override_token="standalone-wave",
         )
         assert errors == []
         assert handoff["caller"] == "standalone"
         assert handoff["pre_commit_receipt_path"] == ""
+        assert "FOUNDER_OVERRIDE:standalone-wave" in handoff["tracker_note_text"]
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
@@ -632,6 +650,18 @@ class TestWaveIdBounds:
             "unblocks_wave_id: wave-next-codex-post-redteam\n"
             "unblocks_runtime_blocker: INV_STRUCTURAL_FORWARD_MOTION\n",
             encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "add", "--", "reports/control_plane/resume.md"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "add resume packet"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
         )
         (repo / "file.py").write_text("# staged now\n", encoding="utf-8")
         subprocess.run(
@@ -692,6 +722,12 @@ class TestWaveIdBounds:
             wave_id="pipeline-recovery-2026-04-21",
             files_to_stage=["old.py"],
             fixes_implemented=["old stale claim"],
+            tracker_note_text=_with_founder_override(
+                _make_new_schema_handoff(
+                    wave_id="pipeline-recovery-2026-04-21",
+                )["tracker_note_text"],
+                "pipeline-recovery-2026-04-21",
+            ),
         )
         record = {
             "wave_name": "pipeline-recovery-2026-04-21",
@@ -731,6 +767,12 @@ class TestWaveIdBounds:
             files_to_stage=["old.py"],
             fixes_implemented=["old stale claim"],
             target_branch="jabramsja/pipeline-recovery-2026-04-21-restart-2026-04-21",
+            tracker_note_text=_with_founder_override(
+                _make_new_schema_handoff(
+                    wave_id="pipeline-recovery-2026-04-21",
+                )["tracker_note_text"],
+                "pipeline-recovery-2026-04-21",
+            ),
         )
         record = {
             "wave_name": "pipeline-recovery-2026-04-21",

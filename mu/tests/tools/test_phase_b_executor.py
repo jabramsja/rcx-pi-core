@@ -1420,8 +1420,13 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert event["state"] == "reviewer_started"
         assert event["transition_key"] == "phase-b-r1-deadbeef"
         assert [call["event_type"] for call in pager_calls] == [
+            "phase_b_implementer_started",
+            "phase_b_implementer_completed",
             "phase_b_reviewer_started",
             "phase_b_bridge_completed",
+            "pre_commit_supervisor_started",
+            "pre_commit_supervisor_completed",
+            "phase_b_final_verdict",
             "commit_ready",
         ]
 
@@ -1542,7 +1547,9 @@ class TestMaintenanceTrackerMetadataPropagation:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
         assert result["status"] == "error"
-        assert pager_calls == []
+        assert "phase_b_reviewer_started" not in [
+            call["event_type"] for call in pager_calls
+        ]
 
     def test_run_phase_b_emits_reviewer_started_event_during_needs_phase_b_reentry(self, tmp_path):
         repo = tmp_path / "repo"
@@ -1617,10 +1624,19 @@ class TestMaintenanceTrackerMetadataPropagation:
 
         assert result["status"] == "commit_ready"
         assert [call["event_type"] for call in pager_calls] == [
+            "phase_b_implementer_started",
+            "phase_b_implementer_completed",
             "phase_b_reviewer_started",
             "phase_b_bridge_completed",
+            "pre_commit_supervisor_started",
+            "pre_commit_supervisor_completed",
+            "phase_b_implementer_started",
+            "phase_b_implementer_completed",
             "phase_b_reviewer_started",
             "phase_b_bridge_completed",
+            "pre_commit_supervisor_started",
+            "pre_commit_supervisor_completed",
+            "phase_b_final_verdict",
             "commit_ready",
         ]
         reviewer_started_calls = [
@@ -2031,8 +2047,19 @@ class TestFinalPytestGate:
         (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
 
         mock_impl = _make_mock_impl()
+        pager_calls = []
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": f"evt-{len(pager_calls)}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
              patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tests/tools/test_foo.py", "mu/tools/executors/foo.py"]), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tests/tools/test_foo.py", "mu/tools/executors/foo.py"]), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
@@ -2047,6 +2074,86 @@ class TestFinalPytestGate:
 
         assert result["status"] == "error"
         assert result["step"] == "final_pytest_gate"
+        assert any(
+            call["event_type"] == "phase_b_final_verdict"
+            and call["state"] == "final_pytest_failed"
+            for call in pager_calls
+        )
+        assert any(
+            call["event_type"] == "pipeline_hard_fail"
+            and call["state"] == "final_pytest_failed"
+            for call in pager_calls
+        )
+
+    def test_reentry_pytest_failure_emits_final_verdict_and_hard_fail(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+        state_dir = repo / ".agent_bus" / "executors"
+        state_dir.mkdir(parents=True)
+        changed_files = ["mu/tests/tools/test_foo.py"]
+        (state_dir / "phase_b_state.json").write_text(json.dumps({
+            "plan_path": "reports/control_plane/plan.md",
+            "completed_step": "needs_phase_b_reentry",
+            "wave_id": "plan",
+            "bridge_rounds": 1,
+            "bridge_scope_fingerprint": pb_mod._bridge_scope_fingerprint(repo, changed_files),  # ANTICHEAT_OK: testing internal executor functions
+            "deferred_packet_path": None,
+            "implementer_changed": changed_files,
+            "executor_created": [],
+            "baseline_wave_files": [],
+            "all_non_blocking": [],
+            "finding_history": [],
+            "reentry_findings": "Fix the thing",
+        }))
+
+        mock_impl = _make_mock_impl()
+        pager_calls = []
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": f"evt-{len(pager_calls)}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        def bridge_go(*args, **kwargs):
+            kwargs["on_started"]()
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": "reentry-go",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_go), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 1, "stdout": "FAILED test_foo.py", "stderr": "", "passed": False,
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == "reentry_pytest_gate"
+        assert any(
+            call["event_type"] == "phase_b_final_verdict"
+            and call["state"] == "reentry_pytest_failed"
+            for call in pager_calls
+        )
+        assert any(
+            call["event_type"] == "pipeline_hard_fail"
+            and call["state"] == "reentry_pytest_failed"
+            for call in pager_calls
+        )
 
     def test_pytest_failure_surfaces_stderr_when_stdout_empty(self, tmp_path):
         repo = tmp_path / "repo"
@@ -2123,13 +2230,18 @@ class TestFinalPytestGate:
         assert result["status"] == "commit_ready"
         mock_pytest.assert_called_once_with(repo, ["mu/tests/tools/test_foo.py"], timeout=300)
         assert [call["event_type"] for call in pager_calls] == [
+            "phase_b_implementer_started",
+            "phase_b_implementer_completed",
             "phase_b_bridge_completed",
             "phase_b_final_pytest_started",
             "phase_b_final_pytest_passed",
+            "pre_commit_supervisor_started",
+            "pre_commit_supervisor_completed",
+            "phase_b_final_verdict",
             "commit_ready",
         ]
-        assert pager_calls[1]["state"] == "final_pytest_started"
-        assert pager_calls[2]["state"] == "final_pytest_passed"
+        assert pager_calls[3]["state"] == "final_pytest_started"
+        assert pager_calls[4]["state"] == "final_pytest_passed"
 
 
 class TestBridgeRenderAssociation:
@@ -2655,6 +2767,7 @@ class TestReentryLoopMirrorsInitial:
 
         mock_impl = _make_mock_impl()
         bridge_calls = [0]
+        pager_calls = []
 
         def bridge_side(*a, **kw):
             bridge_calls[0] += 1
@@ -2667,6 +2780,15 @@ class TestReentryLoopMirrorsInitial:
             # Re-entry R2: GO
             return {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "re2"}
 
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": f"evt-{kwargs['transition_key']}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
              patch.object(pb_mod, "_collect_changed_files", return_value=["f.py"]), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py"]), \
@@ -2674,6 +2796,7 @@ class TestReentryLoopMirrorsInitial:
              patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
              patch.object(pb_mod, "_read_bridge_render", return_value="bridge findings text"), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
                  "exit_code": 0,
                  "parsed": {"decision": "NEEDS_PHASE_B", "summary": "needs fix", "status": "ok", "findings": []},
@@ -2686,6 +2809,16 @@ class TestReentryLoopMirrorsInitial:
         # Implementer must have been called at least 3 times:
         # 1. initial, 2. first re-entry (supervisor findings), 3. second re-entry (bridge findings)
         assert mock_impl.invoke_implementer.call_count >= 3
+        reentry_starts = [
+            call for call in pager_calls
+            if call["event_type"] == "phase_b_implementer_started"
+            and call["state"] == "reentry_started"
+        ]
+        transition_keys = [call["transition_key"] for call in reentry_starts]
+        assert len(transition_keys) == 2
+        assert len(transition_keys) == len(set(transition_keys))
+        assert transition_keys[0].endswith(":supervisor:implementer_started")
+        assert ":phase-b-reentry-r2-" in transition_keys[1]
 
 
 class TestExactReceiptAuthority:
@@ -4875,6 +5008,12 @@ class TestPytestFixTracksChangedFiles:
             wave_owned_results.append(result)
             return result
 
+        pager_calls = []
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            return {"enabled": True, "event_id": f"evt-{len(pager_calls)}", "attempted": []}
+
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
              patch.object(pb_mod, "_collect_changed_files", side_effect=changed_files_side), \
              patch.object(pb_mod, "_collect_wave_owned_files", side_effect=tracking_collect), \
@@ -4883,6 +5022,7 @@ class TestPytestFixTracksChangedFiles:
              patch.object(pb_mod, "_read_bridge_render", return_value="findings"), \
              patch.object(pb_mod, "_run_pytest_on_files", side_effect=pytest_side), \
              patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
                  "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
                  "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
@@ -4895,6 +5035,18 @@ class TestPytestFixTracksChangedFiles:
         # (via implementer_changed tracking from the pytest-fix pass)
         last_wave_owned = wave_owned_results[-1] if wave_owned_results else []
         assert "mu/tools/executors/new_helper.py" in last_wave_owned
+        pytest_fix_events = [
+            call for call in pager_calls
+            if str(call.get("transition_key", "")).startswith("round-1:pytest_fix:")
+        ]
+        assert [call["event_type"] for call in pytest_fix_events] == [
+            "phase_b_implementer_started",
+            "phase_b_implementer_completed",
+        ]
+        assert [call["state"] for call in pytest_fix_events] == [
+            "pytest_fix_started",
+            "pytest_fix_success",
+        ]
 
 
 @pytest.mark.usefixtures("mock_routing_record")

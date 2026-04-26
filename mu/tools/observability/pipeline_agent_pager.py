@@ -58,15 +58,36 @@ ORCHESTRATOR_SESSION_ID_PATH = OBSERVABILITY_DIR / "orchestrator_session_id"
 STATE_VERSION = 1
 NOTIFY_ONLY_TARGET = "notify-only"
 ALLOWED_EVENT_TYPES = frozenset({
+    "phase_a_entered",
+    "phase_a_reviewer_started",
+    "phase_a_reviewer_completed",
+    "phase_a_implementer_started",
+    "phase_a_implementer_completed",
+    "phase_a_go",
+    "phase_a_no_go",
+    "phase_a_question",
+    "phase_b_implementer_started",
+    "phase_b_implementer_completed",
     "phase_b_reviewer_started",
     "phase_b_bridge_completed",
     "phase_b_final_pytest_started",
     "phase_b_final_pytest_passed",
+    "phase_b_final_verdict",
+    "pre_commit_supervisor_started",
+    "pre_commit_supervisor_completed",
+    "commit_started",
     "recovery_started",
     "recovery_state_changed",
+    "recovery_escalated",
+    "recovery_returned",
+    "recovery_succeeded",
     "recovery_failed",
     "pipeline_hard_fail",
+    "executor_hard_fail",
     "commit_ready",
+    "commit_succeeded",
+    "commit_failed",
+    "commit_held",
 })
 ALLOWED_ROUTES = frozenset({"codex", "claude", "both", NOTIFY_ONLY_TARGET})
 

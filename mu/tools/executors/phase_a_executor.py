@@ -55,6 +55,8 @@ try:
         load_routing_record,
         ensure_not_agent_review_mode,
         ExecutorCommonError,
+        emit_pipeline_agent_event,
+        normalize_wave_id,
         artifact_size_mtime_ns,
         process_descendants,
         terminate_process_tree,
@@ -69,6 +71,8 @@ except ImportError:
     load_routing_record = _mod.load_routing_record
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
+    emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
+    normalize_wave_id = _mod.normalize_wave_id
     artifact_size_mtime_ns = _mod.artifact_size_mtime_ns
     process_descendants = _mod.process_descendants
     terminate_process_tree = _mod.terminate_process_tree
@@ -1007,6 +1011,75 @@ def lock_plan(repo_root: Path, plan_path: str) -> None:
     full_path.write_text(content, encoding="utf-8")
 
 
+def _phase_a_task_id(routing_record: dict[str, Any], plan_content: str) -> str:
+    task_id = str(routing_record.get("task_id") or "").strip()
+    if task_id:
+        return task_id
+    for line in plan_content.splitlines():
+        if line.strip().startswith("Task:"):
+            value = line.split("Task:", 1)[1].strip()
+            if value:
+                return value
+    return "[PIPELINE-AGENT-PAGER]"
+
+
+def _phase_a_wave_id(
+    routing_record: dict[str, Any],
+    *,
+    plan_name: str,
+    rel_plan_path: str,
+    plan_content: str,
+) -> str:
+    for line in plan_content.splitlines():
+        if line.strip().lower().startswith("wave id:"):
+            value = line.split(":", 1)[1].strip().strip("`")
+            if value:
+                return normalize_wave_id(value)
+    candidate = (
+        str(routing_record.get("wave_name") or routing_record.get("wave_id") or "").strip()
+        or Path(rel_plan_path).stem
+        or plan_name
+    )
+    return normalize_wave_id(candidate)
+
+
+def _emit_phase_a_event(
+    repo_root: Path,
+    *,
+    routing_record: dict[str, Any],
+    plan_name: str,
+    rel_plan_path: str,
+    event_type: str,
+    state: str,
+    transition_key: str,
+    summary: str,
+    artifact_paths: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    plan_content = ""
+    try:
+        plan_content = (repo_root / rel_plan_path).read_text(encoding="utf-8")
+    except OSError:
+        pass
+    return emit_pipeline_agent_event(
+        repo_root,
+        event_type=event_type,
+        wave_id=_phase_a_wave_id(
+            routing_record,
+            plan_name=plan_name,
+            rel_plan_path=rel_plan_path,
+            plan_content=plan_content,
+        ),
+        task_id=_phase_a_task_id(routing_record, plan_content),
+        plan_path=rel_plan_path,
+        phase="phase_a",
+        state=state,
+        transition_key=transition_key,
+        summary=summary,
+        reason=summary,
+        artifact_paths=artifact_paths,
+    )
+
+
 def checkpoint_commit_plan(
     repo_root: Path,
     plan_path: str,
@@ -1108,6 +1181,7 @@ def run_phase_a(
         routing_record = load_routing_record(repo_root)
         scope = extract_plan_scope(routing_record)
     except (PhaseAExecutorError, ExecutorCommonError):
+        routing_record = {}
         scope = {"request": "", "summary": "", "decision": "ROUTE_PHASE_A"}
 
     # Create or load plan draft
@@ -1120,6 +1194,22 @@ def run_phase_a(
     rel_plan_path = str(plan_path.relative_to(repo_root))
     result["plan_path"] = rel_plan_path
     log(f"Plan draft: {rel_plan_path}")
+    try:
+        _emit_phase_a_event(
+            repo_root,
+            routing_record=routing_record,
+            plan_name=plan_name,
+            rel_plan_path=rel_plan_path,
+            event_type="phase_a_entered",
+            state="entered",
+            transition_key=f"{rel_plan_path}:entered",
+            summary=f"Phase A entered for {rel_plan_path}",
+            artifact_paths={"plan": rel_plan_path},
+        )
+    except Exception as exc:
+        result["status"] = "error"
+        result["error"] = f"Phase A pager emission failed on entry: {exc}"
+        return result
     review_depth = resolve_review_depth(config, "phase_a")
     agent_timeout = config.get("timeouts", {}).get("agent_review", 900)
     plan_content = plan_path.read_text(encoding="utf-8")
@@ -1203,6 +1293,22 @@ def run_phase_a(
             bridge_job_id = f"phase-a-r{round_num}-{uuid.uuid4().hex[:8]}"
             log(f"Bridge design review round {round_num}/{max_bridge_rounds} (job={bridge_job_id})...")
             result["bridge_rounds"] = round_num
+            try:
+                _emit_phase_a_event(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan_name=plan_name,
+                    rel_plan_path=rel_plan_path,
+                    event_type="phase_a_reviewer_started",
+                    state="reviewer_started",
+                    transition_key=f"{bridge_job_id}:reviewer_started",
+                    summary=f"Phase A reviewer started for round {round_num}",
+                    artifact_paths={"plan": rel_plan_path},
+                )
+            except Exception as exc:
+                result["status"] = "error"
+                result["error"] = f"Phase A pager emission failed before bridge review: {exc}"
+                return False
 
             bridge_result = run_bridge_design_review(
                 repo_root, rel_plan_path, round_num,
@@ -1215,6 +1321,22 @@ def run_phase_a(
             if rendered_path.exists():
                 render_content = rendered_path.read_text(encoding="utf-8")
                 bridge_decision = _extract_bridge_decision(render_content)
+                try:
+                    _emit_phase_a_event(
+                        repo_root,
+                        routing_record=routing_record,
+                        plan_name=plan_name,
+                        rel_plan_path=rel_plan_path,
+                        event_type="phase_a_reviewer_completed",
+                        state=bridge_decision.lower() if bridge_decision else "reviewer_completed",
+                        transition_key=f"{bridge_job_id}:reviewer_completed:{bridge_decision or 'unknown'}",
+                        summary=f"Phase A reviewer completed round {round_num} with {bridge_decision or 'unknown'}",
+                        artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                    )
+                except Exception as exc:
+                    result["status"] = "error"
+                    result["error"] = f"Phase A pager emission failed after bridge review: {exc}"
+                    return False
                 if bridge_decision == "GO":
                     if bridge_result["exit_code"] != 0:
                         log(
@@ -1231,6 +1353,22 @@ def run_phase_a(
                         return False
                     log("Bridge converged: GO")
                     result["status"] = "converged"
+                    try:
+                        _emit_phase_a_event(
+                            repo_root,
+                            routing_record=routing_record,
+                            plan_name=plan_name,
+                            rel_plan_path=rel_plan_path,
+                            event_type="phase_a_go",
+                            state="go",
+                            transition_key=f"{bridge_job_id}:go",
+                            summary=f"Phase A bridge GO for round {round_num}",
+                            artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                        )
+                    except Exception as exc:
+                        result["status"] = "error"
+                        result["error"] = f"Phase A pager emission failed on GO: {exc}"
+                        return False
                     return True
                 elif bridge_decision in {"REQUEST_CHANGES", "NO_GO"}:
                 # bridge_supervisor.py review returns exit=1 for non-GO decisions.
@@ -1301,6 +1439,25 @@ def run_phase_a(
                         )
                         result["status"] = "converged"
                         result["non_blocking_count"] = len(non_blocking)
+                        try:
+                            _emit_phase_a_event(
+                                repo_root,
+                                routing_record=routing_record,
+                                plan_name=plan_name,
+                                rel_plan_path=rel_plan_path,
+                                event_type="phase_a_go",
+                                state="go",
+                                transition_key=f"{bridge_job_id}:non_blocking_go",
+                                summary=(
+                                    "Phase A treated non-blocking-only "
+                                    f"{bridge_decision} as GO for round {round_num}"
+                                ),
+                                artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                            )
+                        except Exception as exc:
+                            result["status"] = "error"
+                            result["error"] = f"Phase A pager emission failed on non-blocking GO: {exc}"
+                            return False
                         return True
 
                     if _invoke_implementer is not None and blocking:
@@ -1362,12 +1519,47 @@ def run_phase_a(
                             "Replace the stub with the real plan directly in that file."
                         )
                         log("Invoking implementer to fix blocking findings...")
+                        try:
+                            _emit_phase_a_event(
+                                repo_root,
+                                routing_record=routing_record,
+                                plan_name=plan_name,
+                                rel_plan_path=rel_plan_path,
+                                event_type="phase_a_implementer_started",
+                                state="implementer_started",
+                                transition_key=f"{bridge_job_id}:implementer_started",
+                                summary=f"Phase A implementer started after {bridge_decision} round {round_num}",
+                                artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                            )
+                        except Exception as exc:
+                            result["status"] = "error"
+                            result["error"] = f"Phase A pager emission failed before implementer: {exc}"
+                            return False
                         impl_result = _invoke_implementer(
                             repo_root, impl_prompt,
                             backend=implementer_backend,
                             timeout=900,
                             verbose=verbose,
                         )
+                        try:
+                            _emit_phase_a_event(
+                                repo_root,
+                                routing_record=routing_record,
+                                plan_name=plan_name,
+                                rel_plan_path=rel_plan_path,
+                                event_type="phase_a_implementer_completed",
+                                state=str(impl_result.get("status") or "implementer_completed"),
+                                transition_key=f"{bridge_job_id}:implementer_completed",
+                                summary=(
+                                    "Phase A implementer completed with "
+                                    f"{impl_result.get('status', 'unknown')} after round {round_num}"
+                                ),
+                                artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                            )
+                        except Exception as exc:
+                            result["status"] = "error"
+                            result["error"] = f"Phase A pager emission failed after implementer: {exc}"
+                            return False
                         # Always check if the plan file was modified, even on
                         # adapter-level failure.  The implementer may have
                         # successfully edited the file via Edit tool calls
@@ -1414,6 +1606,23 @@ def run_phase_a(
                             "Bridge: REQUEST_CHANGES — no implementer available, "
                             "continuing with unmodified plan"
                         )
+                    if bridge_decision == "NO_GO":
+                        try:
+                            _emit_phase_a_event(
+                                repo_root,
+                                routing_record=routing_record,
+                                plan_name=plan_name,
+                                rel_plan_path=rel_plan_path,
+                                event_type="phase_a_no_go",
+                                state="no_go",
+                                transition_key=f"{bridge_job_id}:no_go",
+                                summary=f"Phase A bridge NO_GO for round {round_num}",
+                                artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                            )
+                        except Exception as exc:
+                            result["status"] = "error"
+                            result["error"] = f"Phase A pager emission failed on NO_GO: {exc}"
+                            return False
                     continue
                 elif bridge_decision == "QUESTION":
                     if bridge_result["exit_code"] not in (0, 1):
@@ -1433,6 +1642,20 @@ def run_phase_a(
                     result["status"] = "error"
                     result["error"] = "Bridge returned QUESTION decision — requires human resolution"
                     result["rendered_path"] = str(rendered_path)
+                    try:
+                        _emit_phase_a_event(
+                            repo_root,
+                            routing_record=routing_record,
+                            plan_name=plan_name,
+                            rel_plan_path=rel_plan_path,
+                            event_type="phase_a_question",
+                            state="question",
+                            transition_key=f"{bridge_job_id}:question",
+                            summary="Phase A bridge QUESTION requires human resolution",
+                            artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                        )
+                    except Exception as exc:
+                        result["error"] = f"Phase A pager emission failed on QUESTION: {exc}"
                     return False
                 elif bridge_decision in {"STALE", "ERROR", "SYNTHETIC"}:
                     if bridge_result["exit_code"] not in (0, 1):

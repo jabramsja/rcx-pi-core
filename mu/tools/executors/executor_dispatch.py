@@ -37,6 +37,7 @@ try:
         merge_executor_config_overrides,
         ensure_not_agent_review_mode,
         ExecutorCommonError,
+        emit_pipeline_agent_event,
         normalize_wave_id,
         process_descendants,
         terminate_process_tree,
@@ -55,6 +56,7 @@ except ImportError:
     merge_executor_config_overrides = _mod.merge_executor_config_overrides
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
+    emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
     normalize_wave_id = _mod.normalize_wave_id
     process_descendants = _mod.process_descendants
     terminate_process_tree = _mod.terminate_process_tree
@@ -128,6 +130,53 @@ SURFACE_COMMANDS = {
     "commit",
     "post-merge-supervisor",
 }
+
+
+def _emit_executor_hard_fail_event(
+    repo_root: Path,
+    result: dict[str, Any],
+    wave_id: str,
+    record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Emit the dispatcher-owned terminal failure event from recovery facts."""
+    record = record or {}
+    recovery = result.get("recovery")
+    recovery = recovery if isinstance(recovery, dict) else {}
+    executor_name = str(result.get("executor") or result.get("step") or "dispatcher")
+    status = str(result.get("status") or "failed")
+    decision = str(result.get("decision") or record.get("decision") or "unknown")
+    failure_class = str(recovery.get("failure_class") or result.get("failure_class") or "unknown")
+    outcome = str(recovery.get("outcome") or recovery.get("action") or "terminal")
+    normalized_wave_id = normalize_wave_id(
+        wave_id
+        or str(record.get("wave_name") or record.get("wave_id") or "")
+        or str(result.get("wave_id") or result.get("wave_name") or "")
+    )
+    transition_key = ":".join([
+        normalized_wave_id,
+        executor_name,
+        status,
+        decision,
+        failure_class,
+        outcome,
+    ])
+    return emit_pipeline_agent_event(
+        repo_root,
+        event_type="executor_hard_fail",
+        wave_id=normalized_wave_id,
+        task_id=str(
+            result.get("task_id")
+            or record.get("task_id")
+            or "[PIPELINE-RECOVERY]"
+        ).strip(),
+        plan_path=str(record.get("tracked_packet") or result.get("plan_path") or ""),
+        phase="executor_dispatch",
+        state=status,
+        transition_key=transition_key,
+        summary=f"{executor_name} failed after dispatcher recovery handling",
+        reason=str(result.get("message") or result.get("summary") or failure_class),
+        artifact_paths={},
+    )
 
 DEFAULT_CONFIG_PATH = SCRIPT_DIR / "executor_config.json"
 PHASE_B_RECOVERY_PLAN_ENV = "RCX_RECOVERY_PHASE_B_PLAN_PATH"
@@ -622,6 +671,7 @@ def run_recoverable_surface_command(
                 continue
 
             if result.get("status") == "failed" and _is_terminal_executor_outcome(result):
+                _emit_executor_hard_fail_event(repo_root, result, wave_id, surface_record)
                 break
 
             recovery = attempt_recovery(repo_root, result, wave_id)
@@ -632,6 +682,7 @@ def run_recoverable_surface_command(
                     f"tier={recovery.get('tier')} recovered={recovery.get('recovered')}"
                 )
             if not recovery.get("recovered"):
+                _emit_executor_hard_fail_event(repo_root, result, wave_id, surface_record)
                 break
 
             new_orig = _apply_recovery_overrides(
@@ -2127,6 +2178,12 @@ def main(argv: list[str] | None = None) -> int:
             if result.get("status") == "failed" and _is_terminal_executor_outcome(result):
                 if args.verbose:
                     print("[dispatch] Executor returned terminal outcome — not retrying")
+                _emit_executor_hard_fail_event(
+                    repo_root,
+                    result,
+                    str(record.get("wave_name") or record.get("wave_id") or ""),
+                    record,
+                )
                 break
             # Recovery gate: classify failure and attempt Tier 1/2 auto-fix
             # "timeout" is included so PROCESS_TIMEOUT reaches Tier 2 recovery
@@ -2175,6 +2232,7 @@ def main(argv: list[str] | None = None) -> int:
                 elif recovery.get("exhausted"):
                     if args.verbose:
                         print("[dispatch] Recovery exhausted — not retrying")
+                    _emit_executor_hard_fail_event(repo_root, result, _wave_id, record)
                     break
                 else:
                     # Tier 3/4 non-recovery: fail closed instead of falling
@@ -2184,8 +2242,16 @@ def main(argv: list[str] | None = None) -> int:
                         if args.verbose:
                             print(f"[dispatch] Tier {_rec_tier} recovery not "
                                   f"available — failing closed")
+                        _emit_executor_hard_fail_event(repo_root, result, _wave_id, record)
                         break
             if attempt >= max_attempts:
+                if result.get("status") in ("failed", "timeout"):
+                    _emit_executor_hard_fail_event(
+                        repo_root,
+                        result,
+                        str(record.get("wave_name") or record.get("wave_id") or ""),
+                        record,
+                    )
                 break
             if args.verbose:
                 print(f"[dispatch] Attempt {attempt}/{max_attempts} failed — retrying...")

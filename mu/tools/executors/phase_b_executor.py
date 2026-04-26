@@ -1262,6 +1262,19 @@ def _phase_b_transition_key(bridge_job_id: str, state: str) -> str:
     return f"{bridge_job_text}:{state}"
 
 
+def _phase_b_reentry_implementer_transition_key(
+    reentry_round: int,
+    *,
+    source_key: str,
+    state: str,
+) -> str:
+    source_text = str(source_key or "").strip() or "supervisor"
+    return _phase_b_transition_key(
+        f"reentry-round-{reentry_round}:{source_text}",
+        state,
+    )
+
+
 def _phase_b_hard_fail_transition_key(
     repo_root: Path,
     *,
@@ -1299,6 +1312,43 @@ def _emit_phase_b_hard_fail(
             reentry=reentry,
         ),
         summary=summary,
+    )
+
+
+def _emit_phase_b_pytest_failure(
+    repo_root: Path,
+    *,
+    routing_record: dict[str, Any],
+    plan: dict[str, Any],
+    plan_path: str,
+    state: str,
+    source_key: str,
+    changed_files: list[str],
+    test_files: list[str],
+    summary: str,
+    reentry: bool = False,
+) -> None:
+    artifact_paths = {"test_files": ",".join(test_files)}
+    _emit_phase_b_event(
+        repo_root,
+        routing_record=routing_record,
+        plan=plan,
+        plan_path=plan_path,
+        event_type="phase_b_final_verdict",
+        state=state,
+        transition_key=_phase_b_transition_key(source_key, state),
+        summary=summary,
+        artifact_paths=artifact_paths,
+    )
+    _emit_phase_b_hard_fail(
+        repo_root,
+        routing_record=routing_record,
+        plan=plan,
+        plan_path=plan_path,
+        state=state,
+        changed_files=changed_files,
+        summary=summary,
+        reentry=reentry,
     )
 
 
@@ -3062,11 +3112,67 @@ def run_phase_b(
                     learning_context=learning_context,
                 )
                 pre_pytest_fix_files = set(_collect_changed_files(repo_root))
+                pytest_fix_transition = f"round-{round_num}:pytest_fix"
+                try:
+                    _emit_phase_b_event(
+                        repo_root,
+                        routing_record=routing_record,
+                        plan=plan,
+                        plan_path=plan_path,
+                        event_type="phase_b_implementer_started",
+                        state="pytest_fix_started",
+                        transition_key=_phase_b_transition_key(
+                            pytest_fix_transition,
+                            "pytest_fix_started",
+                        ),
+                        summary=(
+                            "Phase B implementer started pytest fix after "
+                            f"bridge round {round_num}"
+                        ),
+                        artifact_paths={"plan": plan_path},
+                    )
+                except Exception as exc:
+                    return {
+                        "status": "error",
+                        "step": "phase_b_pager",
+                        "errors": [
+                            "Phase B pager emission failed before pytest-fix "
+                            f"implementer: {exc}"
+                        ],
+                    }
                 pytest_fix = invoke_implementer(
                     repo_root, pytest_prompt,
                     backend=backend, model_override=model,
                     timeout=timeout, verbose=verbose,
                 )
+                try:
+                    _emit_phase_b_event(
+                        repo_root,
+                        routing_record=routing_record,
+                        plan=plan,
+                        plan_path=plan_path,
+                        event_type="phase_b_implementer_completed",
+                        state=f"pytest_fix_{pytest_fix.get('status', 'completed')}",
+                        transition_key=_phase_b_transition_key(
+                            pytest_fix_transition,
+                            "pytest_fix_completed",
+                        ),
+                        summary=(
+                            "Phase B implementer completed pytest fix after "
+                            f"bridge round {round_num} with "
+                            f"{pytest_fix.get('status', 'unknown')}"
+                        ),
+                        artifact_paths={"plan": plan_path},
+                    )
+                except Exception as exc:
+                    return {
+                        "status": "error",
+                        "step": "phase_b_pager",
+                        "errors": [
+                            "Phase B pager emission failed after pytest-fix "
+                            f"implementer: {exc}"
+                        ],
+                    }
                 if pytest_fix["status"] != "success":
                     return {
                         "status": "error",
@@ -3104,11 +3210,50 @@ def run_phase_b(
         """Run the post-bridge implementer fix and persist the completed round."""
         pre_fix_files = set(_collect_changed_files(repo_root))
         fix_prompt = _build_bridge_fix_prompt(round_num, bridge_decision, findings_for_impl)
+        try:
+            _emit_phase_b_event(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                event_type="phase_b_implementer_started",
+                state="bridge_fix_started",
+                transition_key=_phase_b_transition_key(f"round-{round_num}", "bridge_fix_started"),
+                summary=f"Phase B implementer started bridge fix for round {round_num}",
+                artifact_paths={"plan": plan_path},
+            )
+        except Exception as exc:
+            return {
+                "status": "error",
+                "step": "phase_b_pager",
+                "errors": [f"Phase B pager emission failed before bridge-fix implementer: {exc}"],
+            }
         fix_result = invoke_implementer(
             repo_root, fix_prompt,
             backend=backend, model_override=model,
             timeout=timeout, verbose=verbose,
         )
+        try:
+            _emit_phase_b_event(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                event_type="phase_b_implementer_completed",
+                state=f"bridge_fix_{fix_result.get('status', 'completed')}",
+                transition_key=_phase_b_transition_key(f"round-{round_num}", "bridge_fix_completed"),
+                summary=(
+                    "Phase B implementer completed bridge fix round "
+                    f"{round_num} with {fix_result.get('status', 'unknown')}"
+                ),
+                artifact_paths={"plan": plan_path},
+            )
+        except Exception as exc:
+            return {
+                "status": "error",
+                "step": "phase_b_pager",
+                "errors": [f"Phase B pager emission failed after bridge-fix implementer: {exc}"],
+            }
         return _complete_bridge_fix(round_num, fix_result, pre_fix_files)
 
     def _complete_reentry_fix(
@@ -3227,6 +3372,23 @@ def run_phase_b(
         # Snapshot dirty files before implementer runs
         pre_impl_files = set(_collect_changed_files(repo_root))
         log(f"Invoking implementer (backend={backend}, model_override={model}, timeout={timeout}s)...")
+        try:
+            _emit_phase_b_event(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                event_type="phase_b_implementer_started",
+                state="implementer_started",
+                transition_key=_phase_b_transition_key(wave_id, "implementer_started"),
+                summary="Phase B implementer started",
+                artifact_paths={"plan": plan_path},
+            )
+        except Exception as exc:
+            result["status"] = "error"
+            result["step"] = "phase_b_pager"
+            result["errors"] = [f"Phase B pager emission failed before implementer: {exc}"]
+            return result
         impl_prompt = build_implementation_prompt(
             plan.get("content", ""),
             repo_root=repo_root,
@@ -3244,6 +3406,23 @@ def run_phase_b(
         result["implementer_status"] = impl_result["status"]
         result["model_override_applied"] = impl_result.get("model_override_applied", False)
         log(f"Implementer: {impl_result['status']} (exit={impl_result['exit_code']})")
+        try:
+            _emit_phase_b_event(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                event_type="phase_b_implementer_completed",
+                state=str(impl_result.get("status") or "implementer_completed"),
+                transition_key=_phase_b_transition_key(wave_id, "implementer_completed"),
+                summary=f"Phase B implementer completed with {impl_result.get('status', 'unknown')}",
+                artifact_paths={"plan": plan_path},
+            )
+        except Exception as exc:
+            result["status"] = "error"
+            result["step"] = "phase_b_pager"
+            result["errors"] = [f"Phase B pager emission failed after implementer: {exc}"]
+            return result
 
         # FAIL CLOSED: any implementer failure is fatal, not just timeout
         if impl_result["status"] != "success":
@@ -3640,6 +3819,21 @@ def run_phase_b(
             ]
             if render:
                 result["bridge_render"] = render[:2000]
+            try:
+                _emit_phase_b_event(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan=plan,
+                    plan_path=plan_path,
+                    event_type="phase_b_final_verdict",
+                    state="question_for_founder",
+                    transition_key=_phase_b_transition_key(bridge_job_id, "question_for_founder"),
+                    summary=result["errors"][0],
+                )
+            except Exception as exc:
+                result["status"] = "error"
+                result["step"] = "phase_b_pager"
+                result["errors"].append(f"Phase B pager emission failed on QUESTION verdict: {exc}")
             _clear_state(repo_root)
             return result
 
@@ -3754,14 +3948,7 @@ def run_phase_b(
             )
             log(f"Bridge: {bridge_decision} — {len(blocking_findings)} blocking, "
                 f"{len(non_blocking_findings)} non-blocking — re-invoking implementer")
-            pre_fix_files = set(_collect_changed_files(repo_root))
-            fix_prompt = _build_bridge_fix_prompt(round_num, bridge_decision, findings_for_impl)
-            fix_result = invoke_implementer(
-                repo_root, fix_prompt,
-                backend=backend, model_override=model,
-                timeout=timeout, verbose=verbose,
-            )
-            bridge_fix_error = _complete_bridge_fix(round_num, fix_result, pre_fix_files)
+            bridge_fix_error = _apply_bridge_fix(round_num, bridge_decision, findings_for_impl)
             if bridge_fix_error is not None:
                 return bridge_fix_error
             continue
@@ -3788,6 +3975,16 @@ def run_phase_b(
             result["deferred_non_blocking_count"] = len(all_non_blocking)
         log(f"Max bridge rounds ({max_bridge_rounds}) reached without convergence")
         try:
+            _emit_phase_b_event(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                event_type="phase_b_final_verdict",
+                state="max_rounds_reached",
+                transition_key=_phase_b_transition_key("phase-b", "max_rounds_reached"),
+                summary=result["errors"][0],
+            )
             _emit_phase_b_hard_fail(
                 repo_root,
                 routing_record=routing_record,
@@ -3926,14 +4123,35 @@ def run_phase_b(
                 return result
             final_pytest = _run_pytest_on_files(repo_root, final_test_files, timeout=pytest_gate_timeout)
             if not final_pytest["passed"]:
+                failure_summary = (
+                    f"Final pytest gate FAILED (exit={final_pytest['exit_code']}). "
+                    "Tests must pass before commit. "
+                    + _summarize_pytest_failure(final_pytest)
+                )
+                try:
+                    _emit_phase_b_pytest_failure(
+                        repo_root,
+                        routing_record=routing_record,
+                        plan=plan,
+                        plan_path=plan_path,
+                        state="final_pytest_failed",
+                        source_key=bridge_job_for_pytest,
+                        changed_files=changed_files,
+                        test_files=final_test_files,
+                        summary=failure_summary,
+                    )
+                except Exception as exc:
+                    result["status"] = "error"
+                    result["step"] = "phase_b_pager"
+                    result["errors"] = [
+                        f"Phase B pager emission failed after final pytest failure: {exc}"
+                    ]
+                    _clear_state(repo_root)
+                    return result
                 return {
                     "status": "error",
                     "step": "final_pytest_gate",
-                    "errors": [
-                        f"Final pytest gate FAILED (exit={final_pytest['exit_code']}). "
-                        "Tests must pass before commit. "
-                        + _summarize_pytest_failure(final_pytest)
-                    ],
+                    "errors": [failure_summary],
                 }
             log("Final pytest gate: PASSED")
             try:
@@ -4028,6 +4246,24 @@ def run_phase_b(
         package_path.write_text(json.dumps(supervisor_package, indent=2) + "\n", encoding="utf-8")
 
         log("Running pre-commit supervisor...")
+        try:
+            _emit_phase_b_event(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                event_type="pre_commit_supervisor_started",
+                state="started",
+                transition_key=_phase_b_transition_key(str(package_path.relative_to(repo_root)), "supervisor_started"),
+                summary="Pre-commit supervisor started from Phase B",
+                artifact_paths={"supervisor_package": str(package_path.relative_to(repo_root))},
+            )
+        except Exception as exc:
+            result["status"] = "error"
+            result["step"] = "phase_b_pager"
+            result["errors"] = [f"Phase B pager emission failed before pre-commit supervisor: {exc}"]
+            _clear_state(repo_root)
+            return result
         supervisor_result = run_pre_commit_supervisor(
             repo_root, package_path, verbose=verbose,
         )
@@ -4040,6 +4276,30 @@ def run_phase_b(
             log(f"Supervisor summary: {result['pre_commit_summary']}")
 
         decision = result["pre_commit_decision"]
+        try:
+            _emit_phase_b_event(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                event_type="pre_commit_supervisor_completed",
+                state=str(decision or "unknown"),
+                transition_key=_phase_b_transition_key(
+                    str(receipt_path or package_path.relative_to(repo_root)),
+                    f"supervisor_completed:{decision or 'unknown'}",
+                ),
+                summary=f"Pre-commit supervisor completed with {decision or 'unknown'}",
+                artifact_paths={
+                    "supervisor_package": str(package_path.relative_to(repo_root)),
+                    "supervisor_receipt": str(receipt_path or ""),
+                },
+            )
+        except Exception as exc:
+            result["status"] = "error"
+            result["step"] = "phase_b_pager"
+            result["errors"] = [f"Phase B pager emission failed after pre-commit supervisor: {exc}"]
+            _clear_state(repo_root)
+            return result
     if decision == "NEEDS_PHASE_B":
         # Re-entry: implementer fixes → bridge reviews → loop
         log("NEEDS_PHASE_B — re-invoking implementer then bridge loop")
@@ -4089,11 +4349,58 @@ def run_phase_b(
                     scope_hint="Fix findings from bridge/supervisor review",
                     learning_context=learning_context,
                 )
+                try:
+                    _emit_phase_b_event(
+                        repo_root,
+                        routing_record=routing_record,
+                        plan=plan,
+                        plan_path=plan_path,
+                        event_type="phase_b_implementer_started",
+                        state="reentry_started",
+                        transition_key=_phase_b_reentry_implementer_transition_key(
+                            reentry_round,
+                            source_key="supervisor",
+                            state="implementer_started",
+                        ),
+                        summary=f"Phase B re-entry implementer started for round {reentry_round}",
+                        artifact_paths={"plan": plan_path},
+                    )
+                except Exception as exc:
+                    return {
+                        "status": "error",
+                        "step": "phase_b_pager",
+                        "errors": [f"Phase B pager emission failed before re-entry implementer: {exc}"],
+                    }
                 impl_result = invoke_implementer(
                     repo_root, reentry_prompt,
                     backend=backend, model_override=model,
                     timeout=timeout, verbose=verbose,
                 )
+                try:
+                    _emit_phase_b_event(
+                        repo_root,
+                        routing_record=routing_record,
+                        plan=plan,
+                        plan_path=plan_path,
+                        event_type="phase_b_implementer_completed",
+                        state=f"reentry_{impl_result.get('status', 'completed')}",
+                        transition_key=_phase_b_reentry_implementer_transition_key(
+                            reentry_round,
+                            source_key="supervisor",
+                            state="implementer_completed",
+                        ),
+                        summary=(
+                            "Phase B re-entry implementer completed round "
+                            f"{reentry_round} with {impl_result.get('status', 'unknown')}"
+                        ),
+                        artifact_paths={"plan": plan_path},
+                    )
+                except Exception as exc:
+                    return {
+                        "status": "error",
+                        "step": "phase_b_pager",
+                        "errors": [f"Phase B pager emission failed after re-entry implementer: {exc}"],
+                    }
                 reentry_fix_error = _complete_reentry_fix(impl_result, pre_reentry_files)
                 if reentry_fix_error is not None:
                     return reentry_fix_error
@@ -4230,6 +4537,26 @@ def run_phase_b(
                 ]
                 if render:
                     result["bridge_render"] = render[:2000]
+                try:
+                    _emit_phase_b_event(
+                        repo_root,
+                        routing_record=routing_record,
+                        plan=plan,
+                        plan_path=plan_path,
+                        event_type="phase_b_final_verdict",
+                        state="reentry_question_for_founder",
+                        transition_key=_phase_b_transition_key(
+                            bridge_job_id,
+                            "reentry_question_for_founder",
+                        ),
+                        summary=result["errors"][0],
+                    )
+                except Exception as exc:
+                    result["status"] = "error"
+                    result["step"] = "phase_b_pager"
+                    result["errors"].append(
+                        f"Phase B pager emission failed on re-entry QUESTION verdict: {exc}"
+                    )
                 _clear_state(repo_root)
                 return result
 
@@ -4355,11 +4682,58 @@ def run_phase_b(
                     scope_hint="Fix findings from bridge/supervisor review",
                     learning_context=learning_context,
                 )
+                try:
+                    _emit_phase_b_event(
+                        repo_root,
+                        routing_record=routing_record,
+                        plan=plan,
+                        plan_path=plan_path,
+                        event_type="phase_b_implementer_started",
+                        state="reentry_started",
+                        transition_key=_phase_b_reentry_implementer_transition_key(
+                            reentry_round,
+                            source_key=bridge_job_id,
+                            state="implementer_started",
+                        ),
+                        summary=f"Phase B re-entry implementer started for round {reentry_round}",
+                        artifact_paths={"plan": plan_path},
+                    )
+                except Exception as exc:
+                    return {
+                        "status": "error",
+                        "step": "phase_b_pager",
+                        "errors": [f"Phase B pager emission failed before re-entry implementer: {exc}"],
+                    }
                 impl_result = invoke_implementer(
                     repo_root, reentry_prompt,
                     backend=backend, model_override=model,
                     timeout=timeout, verbose=verbose,
                 )
+                try:
+                    _emit_phase_b_event(
+                        repo_root,
+                        routing_record=routing_record,
+                        plan=plan,
+                        plan_path=plan_path,
+                        event_type="phase_b_implementer_completed",
+                        state=f"reentry_{impl_result.get('status', 'completed')}",
+                        transition_key=_phase_b_reentry_implementer_transition_key(
+                            reentry_round,
+                            source_key=bridge_job_id,
+                            state="implementer_completed",
+                        ),
+                        summary=(
+                            "Phase B re-entry implementer completed round "
+                            f"{reentry_round} with {impl_result.get('status', 'unknown')}"
+                        ),
+                        artifact_paths={"plan": plan_path},
+                    )
+                except Exception as exc:
+                    return {
+                        "status": "error",
+                        "step": "phase_b_pager",
+                        "errors": [f"Phase B pager emission failed after re-entry implementer: {exc}"],
+                    }
                 reentry_fix_error = _complete_reentry_fix(impl_result, pre_reentry_files)
                 if reentry_fix_error is not None:
                     return reentry_fix_error
@@ -4388,6 +4762,19 @@ def run_phase_b(
             if all_non_blocking:
                 result["deferred_non_blocking_count"] = len(all_non_blocking)
             try:
+                _emit_phase_b_event(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan=plan,
+                    plan_path=plan_path,
+                    event_type="phase_b_final_verdict",
+                    state="reentry_max_rounds_reached",
+                    transition_key=_phase_b_transition_key(
+                        "phase-b-reentry",
+                        "max_rounds_reached",
+                    ),
+                    summary=result["errors"][0],
+                )
                 _emit_phase_b_hard_fail(
                     repo_root,
                     routing_record=routing_record,
@@ -4424,15 +4811,37 @@ def run_phase_b(
             log(f"Re-entry pytest gate: running {len(reentry_test_files)} test file(s)...")
             reentry_pytest = _run_pytest_on_files(repo_root, reentry_test_files, timeout=pytest_gate_timeout)
             if not reentry_pytest["passed"]:
+                failure_summary = (
+                    f"Re-entry pytest gate FAILED (exit={reentry_pytest['exit_code']}). "
+                    "Tests must pass before commit. "
+                    + _summarize_pytest_failure(reentry_pytest)
+                )
+                try:
+                    _emit_phase_b_pytest_failure(
+                        repo_root,
+                        routing_record=routing_record,
+                        plan=plan,
+                        plan_path=plan_path,
+                        state="reentry_pytest_failed",
+                        source_key=str(result.get("bridge_job_id") or "phase-b-reentry"),
+                        changed_files=changed_files,
+                        test_files=reentry_test_files,
+                        summary=failure_summary,
+                        reentry=True,
+                    )
+                except Exception as exc:
+                    result["status"] = "error"
+                    result["step"] = "phase_b_pager"
+                    result["errors"] = [
+                        f"Phase B pager emission failed after re-entry pytest failure: {exc}"
+                    ]
+                    _clear_state(repo_root)
+                    return result
                 _clear_state(repo_root)
                 return {
                     "status": "error",
                     "step": "reentry_pytest_gate",
-                    "errors": [
-                        f"Re-entry pytest gate FAILED (exit={reentry_pytest['exit_code']}). "
-                        "Tests must pass before commit. "
-                        + _summarize_pytest_failure(reentry_pytest)
-                    ],
+                    "errors": [failure_summary],
                 }
             log("Re-entry pytest gate: PASSED")
 
@@ -4476,6 +4885,28 @@ def run_phase_b(
         package_path.write_text(json.dumps(supervisor_package, indent=2) + "\n", encoding="utf-8")
 
         log("Re-running supervisor after bridge re-entry...")
+        try:
+            _emit_phase_b_event(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                event_type="pre_commit_supervisor_started",
+                state="reentry_started",
+                transition_key=_phase_b_transition_key(
+                    str(package_path.relative_to(repo_root)),
+                    "reentry_supervisor_started",
+                ),
+                summary="Pre-commit supervisor re-started after Phase B re-entry",
+                artifact_paths={"supervisor_package": str(package_path.relative_to(repo_root))},
+            )
+        except Exception as exc:
+            _clear_state(repo_root)
+            return {
+                "status": "error",
+                "step": "phase_b_pager",
+                "errors": [f"Phase B pager emission failed before re-entry supervisor: {exc}"],
+            }
         supervisor_result = run_pre_commit_supervisor(
             repo_root, package_path, verbose=verbose,
         )
@@ -4487,6 +4918,30 @@ def run_phase_b(
         log(f"Post-reentry supervisor decision: {decision}")
         if result.get("pre_commit_summary"):
             log(f"Post-reentry supervisor summary: {result['pre_commit_summary']}")
+        try:
+            _emit_phase_b_event(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                event_type="pre_commit_supervisor_completed",
+                state=f"reentry_{decision or 'unknown'}",
+                transition_key=_phase_b_transition_key(
+                    str(receipt_path or package_path.relative_to(repo_root)),
+                    f"reentry_supervisor_completed:{decision or 'unknown'}",
+                ),
+                summary=f"Pre-commit supervisor re-entry completed with {decision or 'unknown'}",
+                artifact_paths={
+                    "supervisor_package": str(package_path.relative_to(repo_root)),
+                    "supervisor_receipt": str(receipt_path or ""),
+                },
+            )
+        except Exception as exc:
+            result["status"] = "error"
+            result["step"] = "phase_b_pager"
+            result["errors"] = [f"Phase B pager emission failed after re-entry supervisor: {exc}"]
+            _clear_state(repo_root)
+            return result
 
         if decision == "NEEDS_PHASE_B":
             changed_files = _collect_wave_owned_files(
@@ -4543,6 +4998,26 @@ def run_phase_b(
             if detail:
                 message += f". {detail}"
             result["errors"] = [message]
+            try:
+                _emit_phase_b_event(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan=plan,
+                    plan_path=plan_path,
+                    event_type="phase_b_final_verdict",
+                    state="reentry_supervisor_rejected",
+                    transition_key=_phase_b_transition_key(
+                        str(receipt_path or "post-reentry-supervisor"),
+                        f"supervisor_rejected:{decision or 'unknown'}",
+                    ),
+                    summary=message,
+                )
+            except Exception as exc:
+                result["status"] = "error"
+                result["step"] = "phase_b_pager"
+                result["errors"].append(
+                    f"Phase B pager emission failed on re-entry supervisor verdict: {exc}"
+                )
             _clear_state(repo_root)
             return result
 
@@ -4554,6 +5029,26 @@ def run_phase_b(
         if detail:
             message += f". {detail}"
         result["errors"] = [message]
+        try:
+            _emit_phase_b_event(
+                repo_root,
+                routing_record=routing_record,
+                plan=plan,
+                plan_path=plan_path,
+                event_type="phase_b_final_verdict",
+                state="supervisor_rejected",
+                transition_key=_phase_b_transition_key(
+                    str(receipt_path or "pre-commit-supervisor"),
+                    f"supervisor_rejected:{decision or 'unknown'}",
+                ),
+                summary=message,
+            )
+        except Exception as exc:
+            result["status"] = "error"
+            result["step"] = "phase_b_pager"
+            result["errors"].append(
+                f"Phase B pager emission failed on supervisor verdict: {exc}"
+            )
         _clear_state(repo_root)
         return result
 
@@ -4652,6 +5147,20 @@ def run_phase_b(
     result["pre_commit_decision"] = decision
     result["receipt_path"] = receipt_path
     try:
+        _emit_phase_b_event(
+            repo_root,
+            routing_record=routing_record,
+            plan=plan,
+            plan_path=plan_path,
+            event_type="phase_b_final_verdict",
+            state=str(decision or "commit_ready"),
+            transition_key=_phase_b_transition_key(str(receipt_path), "phase_b_final_verdict"),
+            summary=f"Phase B final verdict {decision or 'COMMIT_GO'}",
+            artifact_paths={
+                "handoff": str(handoff_path),
+                "supervisor_receipt": str(receipt_path),
+            },
+        )
         _emit_phase_b_event(
             repo_root,
             routing_record=routing_record,
