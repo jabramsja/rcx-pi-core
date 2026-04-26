@@ -305,6 +305,14 @@ Admitted files and directories:
   errors as staging failures before generic test-failure detection, so paths
   containing `test` do not misclassify staging errors.
 
+## Pre-Push Tracker Update (2026-04-26)
+
+- Commit executor Step 11 pre-push failed because `TASKS.md` still carried the
+  PR #823 founder-override mechanization follow-on in NEXT without a landed
+  marker. `tools/checks/check_stale_next_items.sh` accepts `~~`, `Landed`,
+  `COMPLETE`, `CLOSED`, or `Resolved`; `TASKS.md` now marks that follow-on
+  `Landed` and binds the implemented repair to this packet.
+
 ## Validation
 
 Expected focused validation after Phase B implementation:
