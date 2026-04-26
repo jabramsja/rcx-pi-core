@@ -176,7 +176,7 @@ global.WebSocket = StubWebSocket;
         [
             "node",
             "-e",
-            websocket_stub + pager_mod._CODEX_APP_SERVER_NODE_SCRIPT,
+            websocket_stub + pager_mod.CODEX_APP_SERVER_NODE_SCRIPT,
             "ws://127.0.0.1:1",
             json.dumps(requests),
             "1000",

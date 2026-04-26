@@ -764,7 +764,7 @@ def _excerpt(value: str, limit: int = 240) -> str:
     return text[: limit - 3] + "..."
 
 
-_CODEX_APP_SERVER_NODE_SCRIPT = r"""
+CODEX_APP_SERVER_NODE_SCRIPT = r"""
 const [url, requestsJson, timeoutMsText] = process.argv.slice(1);
 const requests = JSON.parse(requestsJson);
 const timeoutMs = Math.max(1, Number(timeoutMsText));
@@ -923,7 +923,7 @@ def _codex_app_server_exchange(
             [
                 "node",
                 "-e",
-                _CODEX_APP_SERVER_NODE_SCRIPT,
+                CODEX_APP_SERVER_NODE_SCRIPT,
                 url,
                 json.dumps(requests),
                 str(max(1, int(timeout_s * 1000))),
