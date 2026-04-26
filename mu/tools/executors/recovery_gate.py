@@ -282,7 +282,12 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         "reentry_bridge_staging",
         "reentry_staging",
     }
-    if step in staging_steps and (
+    structured_step_names = {
+        str(candidate).strip().lower()
+        for candidate in (step, embedded_step)
+        if str(candidate or "").strip()
+    }
+    if structured_step_names.intersection(staging_steps) and (
         "git add" in combined_lower
         or "git add" in reason_lower
         or "failed to stage files" in combined_lower
@@ -707,20 +712,19 @@ def fix_missing_phase_a_lock(repo_root: Path, **kw: Any) -> dict[str, Any]:
 
 
 def fix_stale_git_index_lock(repo_root: Path) -> dict[str, Any]:
-    """Placeholder for future Tier 2/3 index.lock recovery.
+    """Recover only index.lock cases that have already self-cleared.
 
-    Demoted from Tier 1 auto-fix because no sound ownership check exists to
-    prove the lock is stale vs held by a live git process. See Codex review
-    2026-03-31: pgrep-based PID detection is unreliable (git processes
-    launched from repo cwd don't include the repo name in argv).
-
-    When Tier 2 retry or Tier 3 LLM diagnosis is implemented, this function
-    can be upgraded with a proper ownership check (e.g., lsof on the lock
-    file or /proc/$pid/cwd inspection).
+    Existing lock files still fail closed because no sound ownership check
+    proves stale vs. live. If the failure text named index.lock but the lock is
+    gone by recovery time, the safest zero-mutation action is to grant a retry.
     """
     lock_path = repo_root / ".git" / "index.lock"
     if not lock_path.exists():
-        return _fix_result(False, "noop", "index.lock not found")
+        return _fix_result(
+            True,
+            "transient_index_lock_released",
+            "index.lock not found after index.lock failure; retry without deleting",
+        )
     return _fix_result(False, "demoted_to_tier2",
                        "index.lock exists but Tier 1 auto-fix disabled — "
                        "no sound ownership check to prove lock is stale")
@@ -6275,6 +6279,22 @@ def _update_recovery_status(repo_root: Path, **updates: Any) -> dict[str, Any]:
                 artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
             )
         )
+        if new_state == "resolved_by_later_success":
+            event_actions.append(
+                lambda status=status, new_state=new_state, transition_key=transition_key: _emit_recovery_event(
+                    repo_root,
+                    status=status,
+                    event_type="recovery_returned",
+                    state=new_state,
+                    transition_key=(
+                        f"{status.get('invocation_id', 'recovery')}:"
+                        "recovery_returned"
+                    ),
+                    summary="Recovery returned to normal pipeline execution",
+                    reason=str(status.get("detail") or status.get("reason") or new_state),
+                    artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+                )
+            )
     return _commit_recovery_status(repo_root, status, event_actions=event_actions)
 
 
@@ -6338,8 +6358,24 @@ def _finish_recovery_status(
                 summary=f"Recovery failed with outcome {outcome or state}",
                 reason=_excerpt(detail),
                 artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+                )
             )
-        )
+        if outcome == "escalated" or "escalated" in state:
+            event_actions.append(
+                lambda status=status, state=state, outcome=outcome, detail=detail: _emit_recovery_event(
+                    repo_root,
+                    status=status,
+                    event_type="recovery_escalated",
+                    state=str(status.get("state") or state),
+                    transition_key=(
+                        f"{status.get('invocation_id', 'recovery')}:"
+                        f"recovery_escalated:{outcome or state}"
+                    ),
+                    summary=f"Recovery escalated with outcome {outcome or state}",
+                    reason=_excerpt(detail),
+                    artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+                )
+            )
         if exhausted:
             event_actions.append(
                 lambda status=status, state=state, outcome=outcome, detail=detail: _emit_recovery_event(
@@ -6356,6 +6392,23 @@ def _finish_recovery_status(
                     artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
                 )
             )
+    else:
+        transition_key = (
+            f"{status.get('invocation_id', 'recovery')}:"
+            f"recovery_succeeded:{outcome or state}"
+        )
+        event_actions.append(
+            lambda status=status, state=state, outcome=outcome, detail=detail, transition_key=transition_key: _emit_recovery_event(
+                repo_root,
+                status=status,
+                event_type="recovery_succeeded",
+                state=str(status.get("state") or state),
+                transition_key=transition_key,
+                summary=f"Recovery succeeded with outcome {outcome or state}",
+                reason=_excerpt(detail),
+                artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+            )
+        )
     return _commit_recovery_status(repo_root, status, event_actions=event_actions)
 
 

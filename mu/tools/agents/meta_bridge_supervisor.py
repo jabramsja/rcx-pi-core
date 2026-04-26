@@ -44,7 +44,9 @@ from executor_common import (
     ensure_not_agent_review_mode,
     ExecutorCommonError,
     bridge_agent_display_name,
+    emit_pipeline_agent_event,
     load_executor_config,
+    normalize_wave_id,
     resolve_role_agent,
 )
 
@@ -217,6 +219,87 @@ REQUIRED_PACKAGE_FIELDS = {
 
 class MetaBridgeError(RuntimeError):
     """Raised when meta-bridge execution cannot continue."""
+
+
+def _emit_pre_commit_supervisor_lifecycle_event(
+    package_path: Path,
+    *,
+    event_type: str,
+    state: str,
+    response: "MetaBridgeResponse | None" = None,
+) -> dict[str, Any]:
+    """Emit pre-commit supervisor lifecycle from the package and response."""
+    package: dict[str, Any] = {}
+    try:
+        loaded = json.loads(package_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            package = loaded
+    except (json.JSONDecodeError, OSError):
+        package = {}
+
+    package_dir = package_path.resolve().parent
+    try:
+        toplevel = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=str(package_dir),
+        ).stdout.strip()
+        repo_root = Path(toplevel)
+    except subprocess.CalledProcessError:
+        repo_root = package_dir
+
+    try:
+        rel_package = str(package_path.resolve().relative_to(repo_root.resolve()))
+    except ValueError:
+        rel_package = str(package_path)
+
+    try:
+        package_digest = hashlib.sha256(package_path.read_bytes()).hexdigest()
+    except OSError:
+        package_digest = package_path.name
+
+    wave_id = normalize_wave_id(str(package.get("wave_name") or package_path.stem))
+    task_id = str(package.get("task_id") or "[PRE-COMMIT-SUPERVISOR]").strip()
+    decision = str(response.decision if response else "pending")
+    transition_key = f"pre-commit-supervisor:{package_digest}:{state}:{decision}"
+    summary = (
+        f"Pre-commit supervisor {state}"
+        if response is None
+        else f"Pre-commit supervisor {state}: {response.decision}"
+    )
+    return emit_pipeline_agent_event(
+        repo_root,
+        event_type=event_type,
+        wave_id=wave_id,
+        task_id=task_id,
+        plan_path=rel_package,
+        phase="pre_commit_supervisor",
+        state=state,
+        transition_key=transition_key,
+        summary=summary,
+        reason=summary,
+        artifact_paths={"package": rel_package},
+    )
+
+
+def _safe_emit_pre_commit_supervisor_lifecycle_event(
+    package_path: Path,
+    *,
+    event_type: str,
+    state: str,
+    response: "MetaBridgeResponse | None" = None,
+) -> dict[str, Any]:
+    try:
+        return _emit_pre_commit_supervisor_lifecycle_event(
+            package_path,
+            event_type=event_type,
+            state=state,
+            response=response,
+        )
+    except Exception as exc:
+        return {"enabled": False, "error": str(exc)}
 
 
 class _MetaBridgeLock:
@@ -1647,10 +1730,6 @@ def write_pre_commit_receipt(
     receipt_dir = repo_root / META_BUS_DIR_NAME
     receipt_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write canonical hook-compatible receipt (backward compat for git hooks)
-    canonical_path = receipt_dir / PRE_COMMIT_RECEIPT_NAME
-    canonical_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
-
     # Write per-invocation receipt — this is the exact artifact for executor flow
     receipts_dir = receipt_dir / "pre_commit_receipts"
     receipts_dir.mkdir(parents=True, exist_ok=True)
@@ -1660,6 +1739,12 @@ def write_pre_commit_receipt(
     unique_suffix = _uuid.uuid4().hex[:8]
     per_invocation_path = receipts_dir / f"receipt_{ts_slug}_{unique_suffix}.json"
     per_invocation_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+
+    # Write canonical hook-compatible receipt last.  If the exact
+    # per-invocation receipt cannot be written, the commit-capable decision is
+    # void and the canonical hook receipt must not advertise COMMIT_GO.
+    canonical_path = receipt_dir / PRE_COMMIT_RECEIPT_NAME
+    canonical_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
 
     # Return the per-invocation path — callers get the exact receipt for this invocation.
     # Hook flow uses canonical_path independently (verify_pre_commit_receipt defaults to it).
@@ -3113,6 +3198,8 @@ def main() -> int:
     if not args.package.exists():
         return output_error("Package file not found", "FILE_NOT_FOUND")
 
+    emit_pre_commit_lifecycle = args.mode != "post-merge" and not args.dry_run
+
     try:
         if args.mode == "post-merge":
             if args.dry_run:
@@ -3122,6 +3209,17 @@ def main() -> int:
                 verbose=args.verbose,
             )
         else:
+            if emit_pre_commit_lifecycle:
+                try:
+                    ensure_not_agent_review_mode("meta_bridge_supervisor.run_meta_bridge")
+                except ExecutorCommonError:
+                    emit_pre_commit_lifecycle = False
+                else:
+                    _safe_emit_pre_commit_supervisor_lifecycle_event(
+                        args.package,
+                        event_type="pre_commit_supervisor_started",
+                        state="started",
+                    )
             response = run_meta_bridge(
                 args.package,
                 verbose=args.verbose,
@@ -3140,7 +3238,41 @@ def main() -> int:
             print(json.dumps(error_response.to_dict(), indent=2))
         else:
             print(f"[error] {exc}", file=sys.stderr)
+        if emit_pre_commit_lifecycle:
+            _safe_emit_pre_commit_supervisor_lifecycle_event(
+                args.package,
+                event_type="pre_commit_supervisor_completed",
+                state="error",
+                response=error_response,
+            )
         return 1
+
+    # Pre-commit mode: write receipt on commit-capable decisions
+    receipt = None
+    if args.mode != "post-merge" and not args.dry_run and response.decision in RECEIPT_CAPABLE_DECISIONS:
+        try:
+            receipt = write_pre_commit_receipt(response, args.package)
+        except Exception as exc:
+            error_response = MetaBridgeResponse(
+                status="error",
+                decision=Decision.ERROR_VALIDATION_FAILED.value,
+                summary="Pre-commit receipt write failed; COMMIT_GO decision voided",
+                error_code="RECEIPT_WRITE_FAILED",
+                error_detail=str(exc),
+                recovery_hint="Fix receipt writing and re-run the supervisor on the current staged state.",
+            )
+            if emit_pre_commit_lifecycle:
+                _safe_emit_pre_commit_supervisor_lifecycle_event(
+                    args.package,
+                    event_type="pre_commit_supervisor_completed",
+                    state="error",
+                    response=error_response,
+                )
+            if args.json:
+                print(json.dumps(error_response.to_dict(), indent=2))
+            print(f"[error] Failed to write pre-commit receipt: {exc}", file=sys.stderr)
+            print("[error] COMMIT_GO decision voided — receipt is required for commit.", file=sys.stderr)
+            return 1
 
     if args.json:
         print(json.dumps(response.to_dict(), indent=2))
@@ -3156,17 +3288,16 @@ def main() -> int:
                 print(f"  - {f['name']}: {f['error']}")
         if response.request_for_claude:
             print(f"Request for Claude: {response.request_for_claude}")
+    if args.verbose and receipt is not None:
+        print(f"[meta-bridge] Pre-commit receipt written: {receipt}")
 
-    # Pre-commit mode: write receipt on commit-capable decisions
-    if args.mode != "post-merge" and not args.dry_run and response.decision in RECEIPT_CAPABLE_DECISIONS:
-        try:
-            receipt = write_pre_commit_receipt(response, args.package)
-            if args.verbose:
-                print(f"[meta-bridge] Pre-commit receipt written: {receipt}")
-        except Exception as exc:
-            print(f"[error] Failed to write pre-commit receipt: {exc}", file=sys.stderr)
-            print("[error] COMMIT_GO decision voided — receipt is required for commit.", file=sys.stderr)
-            return 1
+    if emit_pre_commit_lifecycle:
+        _safe_emit_pre_commit_supervisor_lifecycle_event(
+            args.package,
+            event_type="pre_commit_supervisor_completed",
+            state=response.status,
+            response=response,
+        )
 
     # Exit code based on decision
     success_decisions = {

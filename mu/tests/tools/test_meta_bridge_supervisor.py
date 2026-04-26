@@ -45,6 +45,121 @@ def _make_validation_results(passed_names, failed_names_errors):
     return results
 
 
+class TestPreCommitSupervisorLifecyclePager:
+    def test_pre_commit_supervisor_lifecycle_event_uses_package_identity(self, tmp_path):
+        package_path = tmp_path / "pre_commit_package.json"
+        package_path.write_text(
+            json.dumps(
+                {
+                    "task_id": "[PIPELINE-AGENT-PAGER]",
+                    "wave_name": "pager-lifecycle-event-coverage-2026-04-23",
+                }
+            ),
+            encoding="utf-8",
+        )
+        response = meta.MetaBridgeResponse(
+            status="success",
+            decision=meta.Decision.COMMIT_GO.value,
+            summary="ready",
+        )
+        calls = []
+
+        def fake_emit(repo_root, **kwargs):
+            calls.append(kwargs)
+            return {"enabled": True, "event_id": "pre-commit", "attempted": []}
+
+        with patch.object(meta, "emit_pipeline_agent_event", side_effect=fake_emit):
+            meta._emit_pre_commit_supervisor_lifecycle_event(  # ANTICHEAT_OK: testing lifecycle helper
+                package_path,
+                event_type="pre_commit_supervisor_completed",
+                state="success",
+                response=response,
+            )
+
+        assert len(calls) == 1
+        call = calls[0]
+        assert call["event_type"] == "pre_commit_supervisor_completed"
+        assert call["wave_id"] == "pager-lifecycle-event-coverage-2026-04-23"
+        assert call["task_id"] == "[PIPELINE-AGENT-PAGER]"
+        assert call["phase"] == "pre_commit_supervisor"
+        assert call["state"] == "success"
+        assert "pre-commit-supervisor:" in call["transition_key"]
+        assert call["artifact_paths"]["package"].endswith("pre_commit_package.json")
+
+    def test_main_emits_completed_error_after_receipt_write_failure(self, tmp_path):
+        package_path = tmp_path / "pre_commit_package.json"
+        package_path.write_text(
+            json.dumps(
+                {
+                    "task_id": "[PIPELINE-AGENT-PAGER]",
+                    "wave_name": "pager-lifecycle-event-coverage-2026-04-23",
+                }
+            ),
+            encoding="utf-8",
+        )
+        response = meta.MetaBridgeResponse(
+            status="success",
+            decision=meta.Decision.COMMIT_GO.value,
+            summary="ready",
+        )
+        lifecycle_calls = []
+
+        def fake_lifecycle(*args, **kwargs):
+            lifecycle_calls.append(kwargs)
+
+        with patch.object(sys, "argv", ["meta_bridge_supervisor.py", "--package", str(package_path), "--json"]), \
+             patch.object(meta, "run_meta_bridge", return_value=response), \
+             patch.object(meta, "write_pre_commit_receipt", side_effect=RuntimeError("receipt disk full")), \
+             patch.object(meta, "_safe_emit_pre_commit_supervisor_lifecycle_event", side_effect=fake_lifecycle):
+            result = meta.main()
+
+        assert result == 1
+        completed = [
+            call for call in lifecycle_calls
+            if call["event_type"] == "pre_commit_supervisor_completed"
+        ]
+        assert len(completed) == 1
+        assert completed[0]["state"] == "error"
+        assert completed[0]["response"].error_code == "RECEIPT_WRITE_FAILED"
+        assert not any(call.get("state") == "success" for call in completed)
+
+    def test_main_suppresses_lifecycle_events_in_agent_review_mode(self, tmp_path):
+        package_path = tmp_path / "pre_commit_package.json"
+        package_path.write_text("{}", encoding="utf-8")
+        lifecycle_calls = []
+
+        def fake_lifecycle(*args, **kwargs):
+            lifecycle_calls.append(kwargs)
+
+        with patch.object(sys, "argv", ["meta_bridge_supervisor.py", "--package", str(package_path), "--json"]), \
+             patch.dict(meta.os.environ, {"RCX_AGENT_REVIEW_MODE": "run_review"}, clear=False), \
+             patch.object(meta, "_safe_emit_pre_commit_supervisor_lifecycle_event", side_effect=fake_lifecycle):
+            result = meta.main()
+
+        assert result == 1
+        assert lifecycle_calls == []
+
+    def test_receipt_write_failure_does_not_leave_canonical_commit_go(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        package_path = repo / "pre_commit_package.json"
+        package_path.write_text("{}", encoding="utf-8")
+        receipt_dir = repo / meta.META_BUS_DIR_NAME
+        receipt_dir.mkdir(parents=True)
+        (receipt_dir / "pre_commit_receipts").write_text("not a directory", encoding="utf-8")
+        response = meta.MetaBridgeResponse(
+            status="success",
+            decision=meta.Decision.COMMIT_GO.value,
+            summary="ready",
+        )
+
+        with patch.object(meta, "compute_staged_sha", return_value="staged-sha"), \
+             pytest.raises(FileExistsError):
+            meta.write_pre_commit_receipt(response, package_path, repo_root=repo)
+
+        assert not (receipt_dir / meta.PRE_COMMIT_RECEIPT_NAME).exists()
+
+
 class TestCommitBlockedOnFailedValidation:
     """Commit-capable decisions must be impossible when validations fail."""
 

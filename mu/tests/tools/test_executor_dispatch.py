@@ -86,6 +86,46 @@ class TestDispatcherRouting:
     def test_unknown_token_returns_none(self):
         assert dispatch_mod.resolve_executor("UNKNOWN_TOKEN") is None
 
+    def test_executor_hard_fail_pager_event_uses_recovery_facts(self, tmp_path):
+        calls = []
+
+        def fake_emit(repo_root, **kwargs):
+            calls.append(kwargs)
+            return {"enabled": True, "event_id": "hard-fail", "attempted": []}
+
+        result = {
+            "status": "failed",
+            "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "message": "bridge exhausted",
+            "recovery": {
+                "failure_class": "test_failure",
+                "outcome": "exhausted",
+            },
+        }
+        record = {
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_name": "Pager Lifecycle Event Coverage",
+            "decision": "ROUTE_PHASE_B",
+        }
+
+        with patch.object(dispatch_mod, "emit_pipeline_agent_event", side_effect=fake_emit):
+            dispatch_mod._emit_executor_hard_fail_event(  # ANTICHEAT_OK: testing dispatcher pager helper
+                tmp_path,
+                result,
+                "Pager Lifecycle Event Coverage",
+                record,
+            )
+
+        assert len(calls) == 1
+        call = calls[0]
+        assert call["event_type"] == "executor_hard_fail"
+        assert call["wave_id"] == "pager-lifecycle-event-coverage"
+        assert call["task_id"] == "[PIPELINE-AGENT-PAGER]"
+        assert call["phase"] == "executor_dispatch"
+        assert call["state"] == "failed"
+        assert "phase_b_executor:failed:ROUTE_PHASE_B:test_failure:exhausted" in call["transition_key"]
+
 
 class TestDispatcherStopTokens:
     """Stop tokens produce stopped status, not executor dispatch."""
@@ -497,10 +537,11 @@ def _compute_staged_sha(repo):
 
 
 def _commit_post_commit_source() -> str:
-    """Return combined source for the main pipeline and extracted post-commit helper."""
+    """Return combined source for the commit pipeline and extracted helpers."""
     import inspect
     parts = [
         inspect.getsource(commit_mod.run_commit_pipeline),
+        inspect.getsource(commit_mod._run_commit_pipeline_impl),  # ANTICHEAT_OK: testing extracted commit pipeline implementation
         inspect.getsource(commit_mod._run_post_commit_pipeline),  # ANTICHEAT_OK: testing extracted post-commit helper source
     ]
     for helper in ("_extract_review_findings", "_attempt_bot_finding_remediation"):
@@ -633,6 +674,53 @@ class TestCommitHandoffValidation:
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
+    def test_build_commit_handoff_accepts_standalone_l4_explicit_tracker_note_founder_override(
+        self,
+        tmp_path,
+    ):
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env,
+        )
+        test_file = repo / "mu" / "tests" / "tools" / "test_auto_note.py"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+        explicit_note = (
+            "- Tracker sync note (2026-04-22, test-wave-id): **fix: explicit tracker note.**. "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+            "mu/tests/tools/test_auto_note.py`. "
+            "evidence_delta: (1) explicit note provided. "
+            "progress_proof_before: tracker note already carried founder override metadata. "
+            "progress_proof_after: builder preserves explicit standalone L4 override authority. "
+            "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-id.json. "
+            "indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py "
+            "--wave-id test-wave-id --output reports/l4_wave_indicators/test-wave-id.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD. "
+            "FOUNDER_OVERRIDE:test-wave-id (explicit same-wave authorization)."
+        )
+        handoff, errors = commit_mod.build_commit_handoff(
+            wave_id="test-wave-id",
+            task_id="[PIPELINE-RECOVERY]",
+            files_to_stage=["mu/tests/tools/test_auto_note.py"],
+            commit_message="fix: explicit tracker note",
+            fixes_implemented=["preserve explicit tracker note founder override threading"],
+            caller="standalone",
+            pre_commit_receipt_path="",
+            tracker_note_text=explicit_note,
+            repo_root=repo,
+        )
+        assert not errors, errors
+        note = handoff["tracker_note_text"]
+        assert "FOUNDER_OVERRIDE:test-wave-id" in note
+        assert note.count("FOUNDER_OVERRIDE:") == 1
+        assert "explicit standalone L4 override authority" in note
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
     def test_build_commit_handoff_non_string_tracker_note_still_returns_validation_error_with_founder_override(
         self,
         tmp_path,
@@ -657,6 +745,62 @@ class TestCommitHandoffValidation:
         )
         assert handoff["tracker_note_text"] == {"bad": "type"}
         assert "tracker_note_text must be a non-empty string" in errors
+
+    def test_commit_lifecycle_pager_emits_started_and_success_outcome(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        handoff = _make_new_handoff()
+        calls = []
+
+        def fake_emit(repo_root, **kwargs):
+            calls.append(kwargs)
+            return {"enabled": True, "event_id": kwargs["event_type"], "attempted": []}
+
+        with patch.object(commit_mod, "_commit_lifecycle_pager_enabled", return_value=True), \
+             patch.object(commit_mod, "_run_commit_pipeline_impl", return_value={
+                 "status": "success",
+                 "steps_completed": ["validate_inputs"],
+                 "commit_sha": "abc123",
+             }), \
+             patch.object(commit_mod, "emit_pipeline_agent_event", side_effect=fake_emit):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "success"
+        assert [call["event_type"] for call in calls] == [
+            "commit_started",
+            "commit_succeeded",
+        ]
+        assert calls[0]["phase"] == "commit_executor"
+        assert calls[1]["state"] == "success"
+
+    def test_commit_lifecycle_pager_emits_held_and_failed_outcomes(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        handoff = _make_new_handoff()
+        calls = []
+        outcomes = iter([
+            {"status": "held", "steps_completed": ["hold_check"], "commit_sha": "abc123"},
+            {"status": "error", "step": "build_and_run_supervisor", "errors": ["missing token"]},
+        ])
+
+        def fake_emit(repo_root, **kwargs):
+            calls.append(kwargs)
+            return {"enabled": True, "event_id": kwargs["event_type"], "attempted": []}
+
+        with patch.object(commit_mod, "_commit_lifecycle_pager_enabled", return_value=True), \
+             patch.object(commit_mod, "_run_commit_pipeline_impl", side_effect=lambda *a, **k: next(outcomes)), \
+             patch.object(commit_mod, "emit_pipeline_agent_event", side_effect=fake_emit):
+            held = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+            failed = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert held["status"] == "held"
+        assert failed["status"] == "error"
+        assert [call["event_type"] for call in calls] == [
+            "commit_started",
+            "commit_held",
+            "commit_started",
+            "commit_failed",
+        ]
 
     def test_missing_fields_fails(self):
         valid, errors = commit_mod.validate_handoff({"files_to_stage": ["x"]})
@@ -2618,6 +2762,10 @@ class TestEnsureFeatureBranch:
             "decision": "COMMIT_GO",
             "handoff": _make_new_handoff(
                 target_branch="jabramsja/test-wave-id-restart-2026-04-21",
+                tracker_note_text=(
+                    _make_new_handoff()["tracker_note_text"]
+                    + " FOUNDER_OVERRIDE:test-wave-id (test authorization)"
+                ),
             ),
         }
 
@@ -3176,6 +3324,12 @@ class TestSupervisorPackage:
         mock_result.decision = "NEEDS_PHASE_B"
         mock_result.receipt_path = ".agent_bus/meta/pre_commit_receipt.json"
         mock_result.summary = "re-enter phase b"
+        mock_result.status = "success"
+        pager_calls = []
+
+        def fake_emit(repo_root, **kwargs):
+            pager_calls.append(kwargs)
+            return {"enabled": True, "event_id": kwargs["event_type"], "attempted": []}
 
         handoff = _make_new_handoff(
             caller="phase_b",
@@ -3192,10 +3346,22 @@ class TestSupervisorPackage:
         with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
             sys.modules["meta_bridge_client"].run_meta_bridge_package = MagicMock(return_value=mock_result)
             sys.modules["meta_bridge_client"].MetaBridgeClientError = Exception
-            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+            with patch.object(commit_mod, "emit_pipeline_agent_event", side_effect=fake_emit):
+                result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
 
         assert result["status"] == "error"
         assert result["step"] == "build_and_run_supervisor"
+        assert [call["event_type"] for call in pager_calls] == [
+            "pre_commit_supervisor_started",
+            "pre_commit_supervisor_completed",
+        ]
+        assert [call["phase"] for call in pager_calls] == [
+            "pre_commit_supervisor",
+            "pre_commit_supervisor",
+        ]
+        assert pager_calls[0]["state"] == "started"
+        assert pager_calls[1]["state"] == "success"
+        assert pager_calls[1]["transition_key"].endswith(":success:NEEDS_PHASE_B")
         package = json.loads((repo / ".scratch" / "auto_supervisor_package.json").read_text())
         assert package["lane"] == "hooks/agents/bridge control-surface"
         assert package["deferred_items"] == ["reports/deferred/non_blocking/example.md"]
@@ -3258,7 +3424,7 @@ class TestReceiptAndCommit:
         receipt file, and does NOT call verify_pre_commit_receipt().
         """
         import inspect
-        source = inspect.getsource(commit_mod.run_commit_pipeline)
+        source = inspect.getsource(commit_mod._run_commit_pipeline_impl)  # ANTICHEAT_OK: Step 7 lives in extracted implementation
         # Step 7 should NOT call verify_pre_commit_receipt
         # It should use json.loads to read the receipt directly
         # The function uses receipt_data = json.loads(receipt_file.read_text(...))
@@ -3726,7 +3892,7 @@ class TestReceiptAndCommit:
         at various steps in the pipeline.
         """
         import inspect
-        source = inspect.getsource(commit_mod.run_commit_pipeline)
+        source = inspect.getsource(commit_mod._run_commit_pipeline_impl)  # ANTICHEAT_OK: timeout handling lives in extracted implementation
         assert "TimeoutExpired" in source
 
 
@@ -8308,6 +8474,315 @@ class TestCommitExecutorRoutingRecordAcceptance:
         handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
         assert errors
         assert handoff is None
+
+    def test_standalone_routing_record_derives_founder_override_for_authorized_control_surface_l4(
+        self,
+        tmp_path,
+    ):
+        repo, env = _init_git_repo(tmp_path)
+        packet = repo / "reports" / "control_plane" / "pager_lifecycle_event_coverage_2026-04-23.md"
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Pager lifecycle event coverage\n\n"
+            "Wave ID: pager-lifecycle-event-coverage-2026-04-23\n"
+            "Lane: control-surface (agent automation / observability)\n"
+            "Founder authorization: standing pipeline-bug-fix authorization.\n",
+            encoding="utf-8",
+        )
+        changed = repo / "file1.py"
+        changed.write_text("x = 2\n", encoding="utf-8")
+        subprocess.run(
+            [
+                "git",
+                "add",
+                "file1.py",
+                "reports/control_plane/pager_lifecycle_event_coverage_2026-04-23.md",
+            ],
+            cwd=repo,
+            capture_output=True,
+            env=env,
+        )
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "pager lifecycle event coverage",
+            "wave_name": "pager-lifecycle-event-coverage-2026-04-23",
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+            "next_candidates": [
+                {
+                    "tracked_packet": (
+                        "reports/control_plane/"
+                        "pager_lifecycle_event_coverage_2026-04-23.md"
+                    )
+                }
+            ],
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert not errors, errors
+        assert handoff is not None
+        assert (
+            "FOUNDER_OVERRIDE:pager-lifecycle-event-coverage-2026-04-23"
+            in handoff["tracker_note_text"]
+        )
+        assert handoff["caller"] == "standalone"
+
+    def test_standalone_routing_record_ignores_unstaged_packet_authorization(
+        self,
+        tmp_path,
+    ):
+        repo, env = _init_git_repo(tmp_path)
+        packet = repo / "reports" / "control_plane" / "auth_packet.md"
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Auth packet\n\n"
+            "Wave ID: auth-packet-wave\n"
+            "Lane: runtime\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "add", "reports/control_plane/auth_packet.md"],
+            cwd=repo,
+            capture_output=True,
+            env=env,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "add unauthorizing packet"],
+            cwd=repo,
+            capture_output=True,
+            env=env,
+        )
+        packet.write_text(
+            "# Auth packet\n\n"
+            "Wave ID: auth-packet-wave\n"
+            "Lane: control-surface (agent automation / observability)\n"
+            "Founder authorization: standing pipeline-bug-fix authorization.\n",
+            encoding="utf-8",
+        )
+        changed = repo / "file1.py"
+        changed.write_text("x = 2\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "auth packet wave",
+            "wave_name": "auth-packet-wave",
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+            "next_candidates": [{"tracked_packet": "reports/control_plane/auth_packet.md"}],
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert handoff is None
+        assert any("Missing FOUNDER_OVERRIDE token" in err for err in errors)
+        assert not any("FOUNDER_OVERRIDE:auth-packet-wave" in err for err in errors)
+
+    def test_standalone_routing_record_requires_exact_packet_wave_id(
+        self,
+        tmp_path,
+    ):
+        repo, env = _init_git_repo(tmp_path)
+        packet = repo / "reports" / "control_plane" / "substring_auth_packet.md"
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Substring auth packet\n\n"
+            "Wave ID: unrelated-test-wave\n"
+            "Lane: control-surface (agent automation / observability)\n"
+            "Founder authorization: standing pipeline-bug-fix authorization.\n",
+            encoding="utf-8",
+        )
+        changed = repo / "file1.py"
+        changed.write_text("x = 2\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "file1.py", "reports/control_plane/substring_auth_packet.md"],
+            cwd=repo,
+            capture_output=True,
+            env=env,
+        )
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "test wave",
+            "wave_name": "test",
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+            "next_candidates": [
+                {"tracked_packet": "reports/control_plane/substring_auth_packet.md"}
+            ],
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert handoff is None
+        assert any("Missing FOUNDER_OVERRIDE token" in err for err in errors)
+        assert not any("FOUNDER_OVERRIDE:test" in err for err in errors)
+
+    def test_standalone_routing_record_does_not_derive_founder_override_from_untracked_packet(
+        self,
+        tmp_path,
+    ):
+        repo, env = _init_git_repo(tmp_path)
+        packet = repo / "reports" / "control_plane" / "fake_packet.md"
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Fake packet\n\n"
+            "Wave ID: fake-control-surface-wave\n"
+            "Lane: control-surface (agent automation / observability)\n"
+            "Founder authorization: standing pipeline-bug-fix authorization.\n",
+            encoding="utf-8",
+        )
+        changed = repo / "file1.py"
+        changed.write_text("x = 2\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "fake control-surface wave",
+            "wave_name": "fake-control-surface-wave",
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+            "next_candidates": [{"tracked_packet": "reports/control_plane/fake_packet.md"}],
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert handoff is None
+        assert any("Missing FOUNDER_OVERRIDE token" in err for err in errors)
+        assert not any("FOUNDER_OVERRIDE:fake-control-surface-wave" in err for err in errors)
+
+    def test_standalone_routing_record_does_not_derive_founder_override_from_pipeline_task_id_only(
+        self,
+        tmp_path,
+    ):
+        repo, env = _init_git_repo(tmp_path)
+        changed = repo / "file1.py"
+        changed.write_text("x = 2\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "unauthorized pipeline l4",
+            "wave_name": "unauthorized-pipeline-l4",
+            "task_id": "[PIPELINE-UNAUTHORIZED]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert handoff is None
+        assert any("Missing FOUNDER_OVERRIDE token" in err for err in errors)
+        assert not any("FOUNDER_OVERRIDE:unauthorized-pipeline-l4" in err for err in errors)
+
+    def test_standalone_routing_record_does_not_derive_founder_override_from_control_surface_lane_only(
+        self,
+        tmp_path,
+    ):
+        repo, env = _init_git_repo(tmp_path)
+        changed = repo / "file1.py"
+        changed.write_text("x = 2\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "unauthorized lane l4",
+            "wave_name": "unauthorized-lane-l4",
+            "task_id": "[RUNTIME-WAVE]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+            "lane": "hooks/agents/bridge control-surface",
+            "supervisor_lane": "hooks/agents/bridge control-surface",
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert handoff is None
+        assert any("Missing FOUNDER_OVERRIDE token" in err for err in errors)
+        assert not any("FOUNDER_OVERRIDE:unauthorized-lane-l4" in err for err in errors)
+
+    def test_standalone_routing_record_missing_founder_override_fails_before_commit_handoff(
+        self,
+        tmp_path,
+    ):
+        repo, env = _init_git_repo(tmp_path)
+        changed = repo / "file1.py"
+        changed.write_text("x = 2\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "unauthorized standalone l4",
+            "wave_name": "unauthorized-l4-wave",
+            "task_id": "[RUNTIME-WAVE]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert handoff is None
+        assert any("Missing FOUNDER_OVERRIDE token" in err for err in errors)
+        assert any("before supervisor Step 6" in err for err in errors)
+        assert any("routing_record.tracker_note_text" in err for err in errors)
+
+    def test_standalone_routing_record_does_not_derive_override_from_generic_control_plane_packet(
+        self,
+        tmp_path,
+    ):
+        repo, env = _init_git_repo(tmp_path)
+        packet = repo / "reports" / "control_plane" / "runtime_plan.md"
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text("# generic-runtime-l4-wave\n", encoding="utf-8")
+        changed = repo / "file1.py"
+        changed.write_text("x = 2\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "generic runtime l4 wave",
+            "wave_name": "generic-runtime-l4-wave",
+            "task_id": "[RUNTIME-WAVE]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+            "next_candidates": [{"tracked_packet": "reports/control_plane/runtime_plan.md"}],
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert handoff is None
+        assert any("Missing FOUNDER_OVERRIDE token" in err for err in errors)
+        assert not any("FOUNDER_OVERRIDE:generic-runtime-l4-wave" in err for err in errors)
 
 
 class TestDispatcherPlanlessPhaseB:

@@ -322,6 +322,44 @@ def _current_staged_diff_paths(repo_root: Path) -> list[str]:
     return _dedupe_repo_paths(proc.stdout.splitlines())
 
 
+def _git_index_contains_repo_path(repo_root: Path, relpath: str) -> bool:
+    """Return true when relpath is bound to Git's tracked/staged index."""
+    normalized = _normalize_repo_relpath(str(relpath or ""))
+    if not normalized or _is_absolute_untrusted_path(normalized) or _has_path_traversal(normalized):
+        return False
+    try:
+        result = _run(
+            ["git", "ls-files", "--error-unmatch", "--", normalized],
+            cwd=repo_root,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _git_index_text_for_repo_path(repo_root: Path, relpath: str) -> str | None:
+    """Read relpath from Git's index instead of the mutable working tree."""
+    normalized = _normalize_repo_relpath(str(relpath or ""))
+    if not normalized or _is_absolute_untrusted_path(normalized) or _has_path_traversal(normalized):
+        return None
+    if not _git_index_contains_repo_path(repo_root, normalized):
+        return None
+    try:
+        result = _run(
+            ["git", "show", f":{normalized}"],
+            cwd=repo_root,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
 def _tracked_packet_text_from_record(record: dict[str, Any], repo_root: Path) -> str:
     candidates = record.get("next_candidates")
     if not isinstance(candidates, list):
@@ -338,12 +376,9 @@ def _tracked_packet_text_from_record(record: dict[str, Any], repo_root: Path) ->
         packet_path = (repo_root / tracked_packet).resolve()
         if repo_root_resolved not in packet_path.parents:
             continue
-        if not packet_path.is_file():
-            continue
-        try:
-            return packet_path.read_text(encoding="utf-8")
-        except OSError:
-            return ""
+        packet_text = _git_index_text_for_repo_path(repo_root, tracked_packet)
+        if packet_text is not None:
+            return packet_text
     return ""
 
 
@@ -362,6 +397,116 @@ def _extract_founder_override_from_routing_record(
         if token:
             return token
     return ""
+
+
+def _packet_declares_same_wave_id(packet_text: str, normalized_wave_id: str) -> bool:
+    """Return true when packet metadata declares exactly normalized_wave_id."""
+    if not packet_text or not normalized_wave_id:
+        return False
+    wave_id_pattern = re.compile(
+        r"^\s*(?:[-*]\s*)?(?:\*\*)?(?:Wave ID|wave_id)(?:\*\*)?\s*:\s*`?([A-Za-z0-9][A-Za-z0-9._-]*)`?",
+        re.IGNORECASE,
+    )
+    for line in packet_text.splitlines():
+        match = wave_id_pattern.match(line)
+        if not match:
+            continue
+        if normalize_wave_id(match.group(1)) == normalized_wave_id:
+            return True
+    return False
+
+
+def _control_surface_packet_authorized(
+    record: dict[str, Any],
+    repo_root: Path,
+    *,
+    wave_id: str,
+) -> bool:
+    """Return true only when packet content declares control-surface authority."""
+    candidates = record.get("next_candidates")
+    if not isinstance(candidates, list):
+        return False
+    normalized_wave_id = normalize_wave_id(wave_id or str(record.get("wave_name") or record.get("wave_id") or ""))
+    if not normalized_wave_id:
+        return False
+    repo_resolved = repo_root.resolve()
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        tracked_packet = _normalize_repo_relpath(str(candidate.get("tracked_packet") or ""))
+        if not tracked_packet or _is_absolute_untrusted_path(tracked_packet) or _has_path_traversal(tracked_packet):
+            continue
+        if not tracked_packet.startswith("reports/control_plane/"):
+            continue
+        packet_path = (repo_root / tracked_packet).resolve()
+        if repo_resolved not in packet_path.parents:
+            continue
+        packet_text = _git_index_text_for_repo_path(repo_root, tracked_packet)
+        if packet_text is None:
+            continue
+        if not _packet_declares_same_wave_id(packet_text, normalized_wave_id):
+            continue
+        if re.search(r"(?im)^\s*(?:\*\*)?Lane(?:\*\*)?:\s*.*control-surface", packet_text):
+            return True
+        packet_text_lower = packet_text.lower()
+        if "authorized control-surface l4_enabler" in packet_text_lower:
+            return True
+        if "standing pipeline-bug-fix authorization" in packet_text_lower:
+            return True
+    return False
+
+
+def _is_authorized_control_surface_l4_enabler(
+    record: dict[str, Any],
+    *,
+    embedded_handoff: dict[str, Any] | None,
+    wave_id: str,
+    wave_class: str,
+    repo_root: Path,
+) -> bool:
+    if str(wave_class or "").strip() != "L4_ENABLER":
+        return False
+    _ = embedded_handoff
+    return _control_surface_packet_authorized(record, repo_root, wave_id=str(wave_id or ""))
+
+
+def _missing_founder_override_error(wave_id: str) -> str:
+    return (
+        "Missing FOUNDER_OVERRIDE token for standalone L4_ENABLER commit handoff "
+        f"before supervisor Step 6 (wave_id={wave_id}). Expected source: "
+        "routing_record.tracker_note_text, embedded handoff tracker_note_text, "
+        "tracked packet text, or authorized reports/control_plane packet text "
+        "declaring same-wave control-surface authorization that permits deriving "
+        "FOUNDER_OVERRIDE:<wave_id>."
+    )
+
+
+def _resolve_standalone_founder_override_token(
+    record: dict[str, Any],
+    repo_root: Path,
+    *,
+    embedded_handoff: dict[str, Any] | None,
+    wave_id: str,
+    wave_class: str,
+) -> tuple[str, str | None]:
+    token = _extract_founder_override_from_routing_record(
+        record,
+        repo_root,
+        embedded_handoff=embedded_handoff,
+    )
+    if token:
+        return token, None
+    if _is_authorized_control_surface_l4_enabler(
+        record,
+        embedded_handoff=embedded_handoff,
+        wave_id=wave_id,
+        wave_class=wave_class,
+        repo_root=repo_root,
+    ):
+        return normalize_wave_id(wave_id), None
+    if str(wave_class or "").strip() == "L4_ENABLER":
+        return "", _missing_founder_override_error(wave_id)
+    return "", None
 
 
 def _extract_maintenance_bypass_from_routing_record(
@@ -463,6 +608,119 @@ def _emit_commit_ready_event(
             "handoff_receipt": handoff_receipt_rel,
         },
     )
+
+
+def _emit_commit_lifecycle_event(
+    repo_root: Path,
+    *,
+    handoff: dict[str, Any],
+    event_type: str,
+    state: str,
+    transition_key: str,
+    summary: str,
+    artifact_paths: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    return emit_pipeline_agent_event(
+        repo_root,
+        event_type=event_type,
+        wave_id=str(handoff.get("wave_id") or "").strip(),
+        task_id=str(handoff.get("task_id") or "[COMMIT-EXECUTOR]").strip(),
+        plan_path=_handoff_plan_path(handoff),
+        phase="commit_executor",
+        state=state,
+        transition_key=transition_key,
+        summary=summary,
+        reason=summary,
+        artifact_paths=artifact_paths,
+    )
+
+
+def _emit_pre_commit_supervisor_lifecycle_event(
+    repo_root: Path,
+    package_path: Path,
+    *,
+    event_type: str,
+    state: str,
+    decision: str = "pending",
+    summary: str | None = None,
+) -> dict[str, Any]:
+    """Emit the structured pre-commit supervisor lifecycle from package facts."""
+    package: dict[str, Any] = {}
+    try:
+        loaded = json.loads(package_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            package = loaded
+    except (json.JSONDecodeError, OSError):
+        package = {}
+
+    try:
+        rel_package = str(package_path.resolve().relative_to(repo_root.resolve()))
+    except ValueError:
+        rel_package = str(package_path)
+
+    try:
+        package_digest = hashlib.sha256(package_path.read_bytes()).hexdigest()
+    except OSError:
+        package_digest = package_path.name
+
+    wave_id = normalize_wave_id(str(package.get("wave_name") or package_path.stem))
+    task_id = str(package.get("task_id") or "[PRE-COMMIT-SUPERVISOR]").strip()
+    event_summary = summary or (
+        f"Pre-commit supervisor {state}"
+        if decision == "pending"
+        else f"Pre-commit supervisor {state}: {decision}"
+    )
+    return emit_pipeline_agent_event(
+        repo_root,
+        event_type=event_type,
+        wave_id=wave_id,
+        task_id=task_id,
+        plan_path=rel_package,
+        phase="pre_commit_supervisor",
+        state=state,
+        transition_key=f"pre-commit-supervisor:{package_digest}:{state}:{decision}",
+        summary=event_summary,
+        reason=event_summary,
+        artifact_paths={"package": rel_package},
+    )
+
+
+def _safe_emit_pre_commit_supervisor_lifecycle_event(
+    repo_root: Path,
+    package_path: Path,
+    *,
+    event_type: str,
+    state: str,
+    decision: str = "pending",
+    summary: str | None = None,
+) -> dict[str, Any]:
+    try:
+        return _emit_pre_commit_supervisor_lifecycle_event(
+            repo_root,
+            package_path,
+            event_type=event_type,
+            state=state,
+            decision=decision,
+            summary=summary,
+        )
+    except Exception as exc:
+        return {"enabled": False, "error": str(exc)}
+
+
+def _commit_outcome_event_type(status: str) -> str:
+    if status == "success":
+        return "commit_succeeded"
+    if status == "held":
+        return "commit_held"
+    return "commit_failed"
+
+
+def _commit_lifecycle_pager_enabled(repo_root: Path) -> bool:
+    try:
+        config = load_executor_config(repo_root)
+    except Exception:
+        return False
+    return bool(config.get("pipeline_agent_pager", {}).get("enabled", False))
 
 
 def _run(
@@ -3268,11 +3526,6 @@ def prepare_handoff_from_routing_record(
         standalone_target_branch = (embedded_copy or {}).get("target_branch")
         if not isinstance(standalone_target_branch, str) or not standalone_target_branch.strip():
             standalone_target_branch = record.get("target_branch")
-        founder_override_token = _extract_founder_override_from_routing_record(
-            record,
-            repo_root,
-            embedded_handoff=embedded_copy,
-        )
         unblocks_wave_id, unblocks_runtime_blocker = _extract_maintenance_bypass_from_routing_record(
             record,
             repo_root,
@@ -3284,6 +3537,16 @@ def prepare_handoff_from_routing_record(
                 or wave_name
             )
         )
+        standalone_wave_class = str((embedded_copy or {}).get("wave_class") or wave_class)
+        founder_override_token, override_error = _resolve_standalone_founder_override_token(
+            record,
+            repo_root,
+            embedded_handoff=embedded_copy,
+            wave_id=wave_id,
+            wave_class=standalone_wave_class,
+        )
+        if override_error:
+            return None, [override_error]
         commit_message = _build_standalone_commit_message(wave_id)
         handoff, build_errors = build_commit_handoff(
             wave_id=wave_id,
@@ -3291,7 +3554,7 @@ def prepare_handoff_from_routing_record(
             files_to_stage=staged_files,
             commit_message=commit_message,
             fixes_implemented=_build_standalone_staged_diff_fixes(staged_files),
-            wave_class=str((embedded_copy or {}).get("wave_class") or wave_class),
+            wave_class=standalone_wave_class,
             target_gate_id=str((embedded_copy or {}).get("target_gate_id") or target_gate_id),
             caller="standalone",
             base_branch=str((embedded_copy or {}).get("base_branch") or "dev"),
@@ -3471,19 +3734,32 @@ def build_commit_handoff(
     else:
         effective_receipt = pre_commit_receipt_path or ".agent_bus/meta/pre_commit_receipt.json"
 
+    effective_founder_override_token = _normalize_founder_override_token(founder_override_token)
+    if not effective_founder_override_token and isinstance(tracker_note_text, str):
+        effective_founder_override_token = _extract_founder_override_from_tracker_note(
+            tracker_note_text
+        )
+
+    if (
+        caller == "standalone"
+        and str(wave_class or "").strip() == "L4_ENABLER"
+        and not effective_founder_override_token
+    ):
+        return {}, [_missing_founder_override_error(wave_id)]
+
     effective_tracker_note = tracker_note_text or _build_default_tracker_note_text(
         wave_id=wave_id,
         wave_class=wave_class,
         target_gate_id=target_gate_id,
         commit_message=commit_message,
         files_to_stage=effective_files + effective_force,
-        founder_override_token=founder_override_token,
+        founder_override_token=effective_founder_override_token,
         unblocks_wave_id=unblocks_wave_id,
         unblocks_runtime_blocker=unblocks_runtime_blocker,
     )
     effective_tracker_note = _append_founder_override_to_tracker_note(
         effective_tracker_note,
-        founder_override_token,
+        effective_founder_override_token,
     )
 
     handoff = {
@@ -4333,7 +4609,7 @@ def _run_post_commit_pipeline(
     return result
 
 
-def run_commit_pipeline(
+def _run_commit_pipeline_impl(
     handoff: dict[str, Any],
     *,
     repo_root: Path,
@@ -4894,9 +5170,23 @@ def run_commit_pipeline(
         pkg_path.write_text(json.dumps(supervisor_package, indent=2) + "\n", encoding="utf-8")
 
         # Run supervisor via structured client
+        _safe_emit_pre_commit_supervisor_lifecycle_event(
+            repo_root,
+            pkg_path,
+            event_type="pre_commit_supervisor_started",
+            state="started",
+        )
         try:
             run_meta_bridge_package, MetaBridgeClientError = _load_repo_meta_bridge_client(repo_root)
             sup_result = run_meta_bridge_package(pkg_path, wait_for_lock_seconds=30, verbose=verbose)
+            _safe_emit_pre_commit_supervisor_lifecycle_event(
+                repo_root,
+                pkg_path,
+                event_type="pre_commit_supervisor_completed",
+                state=str(getattr(sup_result, "status", "") or "success"),
+                decision=str(getattr(sup_result, "decision", "") or "unknown"),
+                summary=f"Pre-commit supervisor completed: {getattr(sup_result, 'decision', 'unknown')}",
+            )
             if sup_result.decision not in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
                 return {"status": "error", "step": "build_and_run_supervisor",
                         "errors": [f"Supervisor returned {sup_result.decision}: {sup_result.summary[:200]}"],
@@ -4930,14 +5220,38 @@ def run_commit_pipeline(
             result["steps_completed"].append("build_and_run_supervisor")
             log(f"Step 6: supervisor {receipt_decision}, receipt: {receipt_path_from_supervisor}")
         except ImportError as exc:
+            _safe_emit_pre_commit_supervisor_lifecycle_event(
+                repo_root,
+                pkg_path,
+                event_type="pre_commit_supervisor_completed",
+                state="error",
+                decision="ERROR_INTERNAL",
+                summary=f"Pre-commit supervisor import failed: {exc}",
+            )
             return {"status": "error", "step": "build_and_run_supervisor",
                     "errors": [f"Cannot import meta_bridge_client: {exc}"],
                     "steps_completed": result["steps_completed"]}
         except subprocess.TimeoutExpired:
+            _safe_emit_pre_commit_supervisor_lifecycle_event(
+                repo_root,
+                pkg_path,
+                event_type="pre_commit_supervisor_completed",
+                state="error",
+                decision="ERROR_CODEX_TIMEOUT",
+                summary="Pre-commit supervisor timed out",
+            )
             return {"status": "error", "step": "build_and_run_supervisor",
                     "errors": ["Supervisor timed out"],
                     "steps_completed": result["steps_completed"]}
         except Exception as exc:
+            _safe_emit_pre_commit_supervisor_lifecycle_event(
+                repo_root,
+                pkg_path,
+                event_type="pre_commit_supervisor_completed",
+                state="error",
+                decision="ERROR_INTERNAL",
+                summary=f"Pre-commit supervisor failed: {exc}",
+            )
             return {"status": "error", "step": "build_and_run_supervisor",
                     "errors": [f"Supervisor failed: {exc}"],
                     "steps_completed": result["steps_completed"]}
@@ -5139,6 +5453,83 @@ def run_commit_pipeline(
         continuation_path=continuation_path,
         log=log,
     )
+
+
+def run_commit_pipeline(
+    handoff: dict[str, Any],
+    *,
+    repo_root: Path,
+    verbose: bool = False,
+    skip_supervisor: bool = False,
+) -> dict[str, Any]:
+    """Execute the commit pipeline with pager lifecycle edges around the run."""
+    try:
+        ensure_not_agent_review_mode("commit_executor.run_commit_pipeline")
+    except ExecutorCommonError as exc:
+        return {
+            "status": "error",
+            "step": "review_mode_guard",
+            "errors": [str(exc)],
+            "steps_completed": [],
+        }
+
+    wave_id = str(handoff.get("wave_id") or "unknown").strip() or "unknown"
+    handoff_sha = _handoff_sha(handoff) if isinstance(handoff, dict) else "invalid"
+    lifecycle_pager_enabled = _commit_lifecycle_pager_enabled(repo_root)
+    if lifecycle_pager_enabled:
+        try:
+            _emit_commit_lifecycle_event(
+                repo_root,
+                handoff=handoff,
+                event_type="commit_started",
+                state="started",
+                transition_key=f"{wave_id}:{handoff_sha}:started",
+                summary=f"Commit executor started for {wave_id}",
+                artifact_paths={"handoff_sha": handoff_sha},
+            )
+        except Exception as exc:
+            return {
+                "status": "error",
+                "step": "commit_started_pager",
+                "errors": [f"Commit-start pager emission failed: {exc}"],
+                "steps_completed": [],
+            }
+
+    result = _run_commit_pipeline_impl(
+        handoff,
+        repo_root=repo_root,
+        verbose=verbose,
+        skip_supervisor=skip_supervisor,
+    )
+    status = str(result.get("status") or "error")
+    event_type = _commit_outcome_event_type(status)
+    commit_sha = str(result.get("commit_sha") or "").strip()
+    transition_key = f"{wave_id}:{handoff_sha}:{status}:{commit_sha or result.get('step', '')}"
+    if lifecycle_pager_enabled:
+        try:
+            _emit_commit_lifecycle_event(
+                repo_root,
+                handoff=handoff,
+                event_type=event_type,
+                state=status,
+                transition_key=transition_key,
+                summary=f"Commit executor finished with {status}",
+                artifact_paths={
+                    "commit_sha": commit_sha,
+                    "handoff_sha": handoff_sha,
+                    "step": str(result.get("step") or ""),
+                },
+            )
+        except Exception as exc:
+            outcome_errors = list(result.get("errors") or [])
+            outcome_errors.append(f"Commit-outcome pager emission failed: {exc}")
+            result = {
+                **result,
+                "status": "error",
+                "step": "commit_outcome_pager",
+                "errors": outcome_errors,
+            }
+    return result
 
 
 def main() -> int:

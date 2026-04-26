@@ -299,6 +299,21 @@ class TestClassifyFailure:
             {"status": "error", "stderr": "Unable to create index.lock",
              "step": "stage_files"}) == FailureClass.STALE_GIT_INDEX_LOCK
 
+    def test_embedded_stage_files_git_add_error_wins_over_test_path_text(self):
+        result = {
+            "status": "failed",
+            "stdout": json.dumps({
+                "status": "error",
+                "step": "stage_files",
+                "errors": [
+                    "git add failed: fatal: pathspec "
+                    "'tests/docs/test_growth_caps.py' is beyond a symbolic link"
+                ],
+            }),
+            "stderr": "",
+        }
+        assert rg_mod.classify_failure(result) == FailureClass.GIT_STAGING_CONFLICT
+
     def test_git_index_permission_failure_is_terminal_not_tier3(self):
         result = {
             "status": "error",
@@ -1085,9 +1100,11 @@ class TestFixStaleBridgeLock:
 
 
 class TestFixStaleGitIndexLock:
-    def test_no_lock(self, tmp_path):
+    def test_no_lock_grants_transient_retry_without_deleting(self, tmp_path):
         (tmp_path / ".git").mkdir()
-        assert rg_mod.fix_stale_git_index_lock(tmp_path)["fixed"] is False
+        r = rg_mod.fix_stale_git_index_lock(tmp_path)
+        assert r["fixed"] is True
+        assert r["action"] == "transient_index_lock_released"
 
     def test_lock_not_removed_demoted(self, tmp_path):
         """index.lock auto-fix demoted to Tier 2 — never deletes."""
@@ -1384,6 +1401,15 @@ class TestAttemptRecovery:
         r = rg_mod.attempt_recovery(
             tmp_path, {"status": "error", "stderr": "index.lock held", "step": "s"}, "w1")
         assert r["recovered"] is False and r["tier"] == 2 and r["action"] == "demoted_to_tier2"
+
+    def test_tier2_index_lock_retries_after_lock_self_clears(self, tmp_path):
+        """If index.lock disappeared before recovery, retry without touching .git."""
+        (tmp_path / ".git").mkdir()
+        r = rg_mod.attempt_recovery(
+            tmp_path, {"status": "error", "stderr": "index.lock held", "step": "s"}, "w1")
+        assert r["recovered"] is True
+        assert r["tier"] == 2
+        assert r["action"] == "transient_index_lock_released"
 
     def test_exhausted_after_max_attempts(self, tmp_path):
         rg_mod._save_recovery_log(tmp_path, [ # ANTICHEAT_OK
@@ -2637,6 +2663,85 @@ class TestRecoveryPagerEvents:
         assert "recovery_state_changed" in event_types
         assert "recovery_failed" in event_types
         assert "pipeline_hard_fail" in event_types
+
+    def test_status_helpers_emit_success_escalation_and_return_events(self, tmp_path):
+        calls = []
+        base_status = {
+            "active": True,
+            "invocation_id": "invoke-life",
+            "wave_id": "wave-recovery-pager",
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "plan_path": "reports/control_plane/plan.md",
+            "step": "phase_b_executor",
+            "failure_class": FailureClass.TEST_FAILURE.value,
+            "tier": 3,
+            "tuple_attempt_index": 1,
+            "wave_invocation_count": 1,
+            "started_at": "2026-04-17T00:00:00+00:00",
+            "updated_at": "2026-04-17T00:00:00+00:00",
+            "finished_at": "",
+            "owner_pid": 1,
+            "child_pid": 0,
+            "child_role": "",
+            "state": "tier3_waiting_on_agent",
+            "reason": "FAILED test_x",
+            "retry_target": "phase_b_executor",
+            "current_iteration": 1,
+            "max_iterations": 3,
+            "last_action": "",
+            "current_command": "",
+            "explanation": "",
+            "detail": "",
+            "recovered": False,
+            "exhausted": False,
+            "outcome": "",
+        }
+
+        def fake_emit(repo_root, **kwargs):
+            calls.append(kwargs)
+            return {
+                "enabled": True,
+                "event_id": f"evt-{len(calls)}",
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+
+        with patch.object(rg_mod, "emit_pipeline_agent_event", side_effect=fake_emit):
+            rg_mod._save_recovery_status(tmp_path, dict(base_status))  # ANTICHEAT_OK
+            rg_mod._finish_recovery_status(  # ANTICHEAT_OK: terminal success edge
+                tmp_path,
+                recovered=True,
+                exhausted=False,
+                outcome="success",
+                action="fix_process_timeout",
+                detail="timeout increased",
+                state="tier2_recovered",
+            )
+
+            escalated = dict(base_status, invocation_id="invoke-escalate")
+            rg_mod._save_recovery_status(tmp_path, escalated)  # ANTICHEAT_OK
+            rg_mod._finish_recovery_status(  # ANTICHEAT_OK: escalation edge
+                tmp_path,
+                recovered=False,
+                exhausted=True,
+                outcome="escalated",
+                action="escalate",
+                detail="human intervention required",
+                state="tier3_escalated",
+            )
+
+            returned = dict(base_status, active=False, invocation_id="invoke-return")
+            rg_mod._save_recovery_status(tmp_path, returned)  # ANTICHEAT_OK
+            rg_mod.clear_stale_recovery_status_on_success(
+                tmp_path,
+                wave_id="wave-recovery-pager",
+                success_target="phase_b_executor",
+            )
+
+        event_types = [call["event_type"] for call in calls]
+        assert "recovery_succeeded" in event_types
+        assert "recovery_escalated" in event_types
+        assert "recovery_returned" in event_types
 
     def test_begin_recovery_status_rolls_back_and_raises_when_pager_emit_fails(self, tmp_path):
         result = {

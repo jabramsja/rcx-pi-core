@@ -212,6 +212,96 @@ def test_event_id_uses_canonical_identity_tuple_and_log_appends_once(tmp_path):
     assert entry["pending_targets"] == []
 
 
+def test_lifecycle_event_types_are_accepted_persisted_deduped_and_routed(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="notify-only")
+
+    lifecycle_event_types = [
+        "phase_a_entered",
+        "phase_a_reviewer_started",
+        "phase_a_reviewer_completed",
+        "phase_a_implementer_started",
+        "phase_a_implementer_completed",
+        "phase_a_go",
+        "phase_a_no_go",
+        "phase_a_question",
+        "phase_b_implementer_started",
+        "phase_b_implementer_completed",
+        "phase_b_reviewer_started",
+        "phase_b_bridge_completed",
+        "phase_b_final_pytest_started",
+        "phase_b_final_pytest_passed",
+        "phase_b_final_verdict",
+        "pre_commit_supervisor_started",
+        "pre_commit_supervisor_completed",
+        "commit_started",
+        "commit_ready",
+        "commit_succeeded",
+        "commit_failed",
+        "commit_held",
+        "recovery_started",
+        "recovery_state_changed",
+        "recovery_escalated",
+        "recovery_returned",
+        "recovery_succeeded",
+        "recovery_failed",
+        "pipeline_hard_fail",
+        "executor_hard_fail",
+    ]
+
+    first_ids = []
+    for event_type in lifecycle_event_types:
+        first = pager_mod.emit_transition_event(
+            repo,
+            **_event_kwargs(
+                event_type=event_type,
+                phase=event_type.split("_", 1)[0],
+                state=event_type,
+                transition_key=f"{event_type}:transition",
+                summary=f"{event_type} summary",
+            ),
+        )
+        second = pager_mod.emit_transition_event(
+            repo,
+            **_event_kwargs(
+                event_type=event_type,
+                phase=event_type.split("_", 1)[0],
+                state=event_type,
+                transition_key=f"{event_type}:transition",
+                summary=f"{event_type} duplicate",
+            ),
+        )
+        assert second["event_id"] == first["event_id"]
+        first_ids.append(first["event_id"])
+
+    assert len(set(first_ids)) == len(lifecycle_event_types)
+    log_entries = _load_log(repo)
+    assert len(log_entries) == len(lifecycle_event_types)
+    state = _load_state(repo)
+    assert set(state["events"]) == set(first_ids)
+    for event_id in first_ids:
+        entry = state["events"][event_id]
+        assert entry["requested_targets"] == [pager_mod.NOTIFY_ONLY_TARGET]
+        assert entry["pending_targets"] == []
+        assert pager_mod.NOTIFY_ONLY_TARGET in entry["delivered_targets"]
+
+
+def test_unsupported_lifecycle_event_type_fails_closed(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, route="notify-only")
+
+    with pytest.raises(pager_mod.PipelineAgentPagerError, match="unsupported pager event_type"):
+        pager_mod.emit_transition_event(
+            repo,
+            **_event_kwargs(event_type="phase_a_secret_unreviewed_transition"),
+        )
+
+    assert _load_log(repo) == []
+    assert not (repo / pager_mod.STATE_PATH).exists()
+
+
 def test_disabled_pager_skips_route_validation(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
