@@ -830,9 +830,8 @@ function sendNext() {
     id: activeRequest.id,
     method: activeRequest.method,
   };
-  const params = resolveRefs(activeRequest.params ?? {});
-  if (params && (typeof params !== "object" || Object.keys(params).length > 0)) {
-    payload.params = params;
+  if (Object.prototype.hasOwnProperty.call(activeRequest, "params")) {
+    payload.params = resolveRefs(activeRequest.params);
   }
   socket.send(JSON.stringify(payload));
 }

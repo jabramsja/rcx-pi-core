@@ -1723,6 +1723,69 @@ def test_tmux_pane_1_rejects_monitor_error_only_output(pane_body, detail_fragmen
     assert detail_fragment in detail
 
 
+def test_tmux_pane_4_rejects_autoping_without_detail():
+    pane_body = (
+        "Pane 4: session timeline\n"
+        "Autoping: last ping 12:34 | status idle_unchanged_state\n"
+        "Last ping: checked only a truncated summary\n"
+        "12:35  ← idle\n"
+        "Typical durations:\n"
+    )
+
+    healthy, detail = startup_mod._tmux_pane_has_live_content(  # ANTICHEAT_OK: tool unit test
+        "PANE 4 · SESSION TIMELINE",
+        pane_body,
+    )
+
+    assert healthy is False
+    assert "missing pane 4 observability detail" in detail
+    assert "Autoping detail:" in detail
+    assert "Autoping summary:" in detail
+
+
+def test_tmux_pane_4_rejects_pager_without_detail():
+    pane_body = (
+        "Pane 4: session timeline\n"
+        "Last pager wake: 12:34 | commit_ready | codex | ack no\n"
+        "Last pager event: Commit path reached COMMIT_GO\n"
+        "12:35  ← idle\n"
+        "Typical durations:\n"
+    )
+
+    healthy, detail = startup_mod._tmux_pane_has_live_content(  # ANTICHEAT_OK: tool unit test
+        "PANE 4 · SESSION TIMELINE",
+        pane_body,
+    )
+
+    assert healthy is False
+    assert "missing pane 4 observability detail" in detail
+    assert "Pager detail:" in detail
+    assert "Pager state:" in detail
+
+
+def test_tmux_pane_4_accepts_observability_detail():
+    pane_body = (
+        "Pane 4: session timeline\n"
+        "Autoping: last ping 12:34 | status idle_unchanged_state\n"
+        "Autoping detail: thread 019dc06c-863 | watcher pid 1234 | updated 12:35 (2s old)\n"
+        "Autoping summary: bridge shows reviewer GO\n"
+        "Last pager wake: 12:34 | commit_ready | codex | ack no\n"
+        "Pager detail: event 6b7b96e9f534 | wave wave-1 | done 12:34\n"
+        "Pager state: route codex | pending codex | requested codex | attempts codex:1\n"
+        "Last pager event: Commit path reached COMMIT_GO\n"
+        "12:35  ← idle\n"
+        "Typical durations:\n"
+    )
+
+    healthy, detail = startup_mod._tmux_pane_has_live_content(  # ANTICHEAT_OK: tool unit test
+        "PANE 4 · SESSION TIMELINE",
+        pane_body,
+    )
+
+    assert healthy is True
+    assert "Autoping:" in detail
+
+
 def test_tmux_monitor_signature_rejects_pane_1_monitor_errors(monkeypatch, tmp_path):
     pane_listing = "\n".join(
         [

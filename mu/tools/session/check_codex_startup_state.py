@@ -176,6 +176,19 @@ TMUX_PANE_STATE_CANARIES = {
         }
     ),
 }
+TMUX_PANE_4_AUTOPING_DETAIL_CANARIES = frozenset(
+    {
+        "Autoping detail:",
+        "Autoping summary:",
+    }
+)
+TMUX_PANE_4_PAGER_DETAIL_CANARIES = frozenset(
+    {
+        "Pager detail:",
+        "Pager state:",
+        "Last pager event:",
+    }
+)
 TMUX_PANE_1_INFRA_ERROR_PATTERNS = (
     re.compile(
         r"^(?:bash|sh|zsh): .*?(?:No such file or directory|command not found)$"
@@ -2444,6 +2457,22 @@ def _tmux_pane_has_live_content(title: str, body: str) -> tuple[bool, str]:
     joined = "\n".join(lines)
     canaries = TMUX_PANE_STATE_CANARIES.get(title, frozenset())
     has_live_state = any(canary in joined for canary in canaries)
+    if title == "PANE 4 · SESSION TIMELINE" and has_live_state:
+        missing_detail: list[str] = []
+        if "Autoping:" in joined:
+            missing_detail.extend(
+                canary
+                for canary in sorted(TMUX_PANE_4_AUTOPING_DETAIL_CANARIES)
+                if canary not in joined
+            )
+        if "Pager:" in joined or "Last pager wake:" in joined:
+            missing_detail.extend(
+                canary
+                for canary in sorted(TMUX_PANE_4_PAGER_DETAIL_CANARIES)
+                if canary not in joined
+            )
+        if missing_detail:
+            return False, "missing pane 4 observability detail: " + ", ".join(missing_detail)
     return has_live_state, _preview_lines(lines)
 
 

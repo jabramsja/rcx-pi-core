@@ -42,6 +42,7 @@ RED="\033[31m" CYAN="\033[36m" PURPLE="\033[35m" RESET="\033[0m"
 LAST_HASH=""
 TMPOUT="/tmp/rcx_pane_timeline_$$.txt"
 ONESHOT="${RCX_PANE_ONESHOT:-0}"
+VERBOSE="${RCX_PANE_VERBOSE:-0}"
 
 load_role_agent_labels() {
   local root="${1:-$REPO_ROOT}" output="" key="" value=""
@@ -247,6 +248,7 @@ render_autoping_status() {
 from __future__ import annotations
 
 import json
+import textwrap
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -267,7 +269,66 @@ def parse_stamp(value: object) -> tuple[float, str]:
     return (dt.timestamp(), dt.astimezone().strftime("%H:%M:%S"))
 
 
-best: tuple[float, dict[str, object]] | None = None
+def age_text(rank: float) -> str:
+    if rank <= 0:
+        return ""
+    elapsed = max(0, int(datetime.now().timestamp() - rank))
+    if elapsed < 60:
+        return f"{elapsed}s old"
+    if elapsed < 3600:
+        return f"{elapsed // 60}m old"
+    return f"{elapsed // 3600}h {(elapsed % 3600) // 60}m old"
+
+
+def clip_text(value: str, limit: int = 260) -> str:
+    text = " ".join(value.split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def compact_path(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    text = value.strip()
+    home = str(Path.home())
+    if text == home:
+        return "~"
+    if text.startswith(home + "/"):
+        return "~" + text[len(home):]
+    try:
+        path = Path(text)
+        if path.is_absolute():
+            return str(path)
+    except OSError:
+        pass
+    return text
+
+
+def short_id(value: object, width: int = 12) -> str:
+    text = str(value or "").strip()
+    if len(text) <= width:
+        return text
+    return text[:width]
+
+
+def print_wrapped(tag: str, text: str, *, width: int = 108, max_lines: int = 3) -> None:
+    lines = textwrap.wrap(
+        " ".join(text.split()),
+        width=width,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    truncated = len(lines) > max_lines
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+    if truncated:
+        lines[-1] = clip_text(lines[-1].rstrip() + " ...", width)
+    for index, line in enumerate(lines):
+        print(f"{tag if index == 0 else tag + '_CONT'}\t{line}")
+
+
+best: tuple[float, Path, dict[str, object]] | None = None
 for state_path in state_dir.glob("rcx_autoping_*.json"):
     try:
         payload = json.loads(state_path.read_text(encoding="utf-8"))
@@ -287,14 +348,18 @@ for state_path in state_dir.glob("rcx_autoping_*.json"):
         continue
     if wave_path != repo_root:
         continue
-    rank, _ = parse_stamp(payload.get("updated_at") or payload.get("last_dispatched_at"))
+    rank = max(
+        parse_stamp(payload.get("updated_at"))[0],
+        parse_stamp(payload.get("last_dispatched_at"))[0],
+        parse_stamp(payload.get("last_completed_at"))[0],
+    )
     if best is None or rank >= best[0]:
-        best = (rank, payload)
+        best = (rank, state_path, payload)
 
 if best is None:
     raise SystemExit(0)
 
-_, payload = best
+_, state_path, payload = best
 summary = ""
 summary_path = payload.get("summary_path")
 if isinstance(summary_path, str):
@@ -306,12 +371,11 @@ if not summary:
     value = payload.get("last_summary")
     if isinstance(value, str):
         summary = value.strip()
-summary = " ".join(summary.split())
-if len(summary) > 140:
-    summary = summary[:137].rstrip() + "..."
+summary = clip_text(summary)
 
 _, dispatched = parse_stamp(payload.get("last_dispatched_at"))
 _, completed = parse_stamp(payload.get("last_completed_at"))
+updated_rank, updated = parse_stamp(payload.get("updated_at"))
 status = payload.get("status")
 if not isinstance(status, str) or not status:
     status = "-"
@@ -321,11 +385,36 @@ if dispatched:
     parts.append(f"last ping {dispatched}")
 if completed:
     parts.append(f"last done {completed}")
+if updated:
+    age = age_text(updated_rank)
+    parts.append(f"state updated {updated}" + (f" ({age})" if age else ""))
 parts.append(f"status {status}")
 
 print("AUTOPING\t" + " | ".join(parts))
+detail_parts = []
+thread_id = short_id(payload.get("thread_id"))
+if thread_id:
+    detail_parts.append(f"thread {thread_id}")
+watcher_pid = str(payload.get("watcher_pid") or "").strip()
+if watcher_pid:
+    detail_parts.append(f"watcher pid {watcher_pid}")
+active_pid = str(payload.get("active_pid") or "").strip()
+if active_pid:
+    detail_parts.append(f"active pid {active_pid}")
+last_pid = str(payload.get("last_dispatched_pid") or "").strip()
+if last_pid:
+    detail_parts.append(f"last ping pid {last_pid}")
+if updated:
+    age = age_text(updated_rank)
+    detail_parts.append(f"updated {updated}" + (f" ({age})" if age else ""))
+if detail_parts:
+    print("AUTOPING_DETAIL\t" + " | ".join(detail_parts))
+print("AUTOPING_STATE_PATH\t" + compact_path(str(state_path)))
+summary_display = compact_path(summary_path)
+if summary_display:
+    print("AUTOPING_SUMMARY_PATH\t" + summary_display)
 if summary:
-    print("SUMMARY\t" + summary)
+    print_wrapped("SUMMARY", summary)
 PY
 }
 
@@ -334,6 +423,7 @@ render_pager_status() {
 from __future__ import annotations
 
 import json
+import textwrap
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -368,40 +458,124 @@ def parse_stamp(value: object) -> str:
         return value
 
 
+def clip_text(value: str, limit: int = 260) -> str:
+    text = " ".join(value.split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def short_id(value: object, width: int = 12) -> str:
+    text = str(value or "").strip()
+    if len(text) <= width:
+        return text
+    return text[:width]
+
+
+def join_values(values: object) -> str:
+    if not isinstance(values, list):
+        return ""
+    return ",".join(str(value).strip() for value in values if str(value).strip())
+
+
+def print_wrapped(tag: str, text: str, *, width: int = 108, max_lines: int = 3) -> None:
+    lines = textwrap.wrap(
+        " ".join(text.split()),
+        width=width,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    truncated = len(lines) > max_lines
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+    if truncated:
+        lines[-1] = clip_text(lines[-1].rstrip() + " ...", width)
+    for index, line in enumerate(lines):
+        print(f"{tag if index == 0 else tag + '_CONT'}\t{line}")
+
+
 parts = []
 attempted = parse_stamp(last_dispatch.get("attempted_at"))
 if attempted:
-    parts.append(f"last wake {attempted}")
+    parts.append(attempted)
 event_type = str(last_dispatch.get("event_type") or "").strip()
 if event_type:
     parts.append(event_type)
 phase = str(last_dispatch.get("phase") or "").strip()
 state = str(last_dispatch.get("state") or "").strip()
 if phase or state:
-    parts.append(" / ".join(part for part in (phase, state) if part))
+    parts.append("/".join(part for part in (phase, state) if part))
 target = str(last_dispatch.get("target") or "").strip()
 if target:
-    parts.append(f"target {target}")
+    parts.append(target)
 ack = last_dispatch.get("acknowledged")
 if ack is True:
     parts.append("ack yes")
 elif ack is False:
     parts.append("ack no")
 
-summary = " ".join(str(last_dispatch.get("summary") or "").split())
-if len(summary) > 140:
-    summary = summary[:137].rstrip() + "..."
+summary = clip_text(str(last_dispatch.get("summary") or ""))
 
-print("PAGER\t" + " | ".join(parts))
+print("PAGER_WAKE\t" + " | ".join(parts))
+event_id = str(last_dispatch.get("event_id") or "").strip()
+detail_parts = []
+if event_id:
+    detail_parts.append(f"event {short_id(event_id)}")
+wave_id = str(last_dispatch.get("wave_id") or "").strip()
+if wave_id:
+    detail_parts.append(f"wave {wave_id}")
+completed = parse_stamp(last_dispatch.get("completed_at"))
+if completed:
+    detail_parts.append(f"done {completed}")
+if detail_parts:
+    print("PAGER_DETAIL\t" + " | ".join(detail_parts))
+transition_key = str(last_dispatch.get("transition_key") or "").strip()
+if transition_key:
+    print("PAGER_TRANSITION\t" + transition_key)
+events = payload.get("events")
+event_state = events.get(event_id) if isinstance(events, dict) and event_id else None
+state_parts = []
+if isinstance(event_state, dict):
+    route = str(event_state.get("route") or "").strip()
+    if route:
+        state_parts.append(f"route {route}")
+    pending = join_values(event_state.get("pending_targets"))
+    state_parts.append(f"pending {pending or 'none'}")
+    requested = join_values(event_state.get("requested_targets"))
+    if requested:
+        state_parts.append(f"requested {requested}")
+    delivered = join_values(sorted((event_state.get("delivered_targets") or {}).keys())) if isinstance(event_state.get("delivered_targets"), dict) else ""
+    if delivered:
+        state_parts.append(f"delivered {delivered}")
+    attempts = event_state.get("attempts")
+    if isinstance(attempts, dict) and attempts:
+        attempt_bits = []
+        for attempt_target, attempt_data in sorted(attempts.items()):
+            count = ""
+            if isinstance(attempt_data, dict):
+                count = str(attempt_data.get("count") or "").strip()
+            label = str(attempt_target or "").strip()
+            if label:
+                attempt_bits.append(f"{label}:{count or '?'}")
+        if attempt_bits:
+            state_parts.append("attempts " + ",".join(attempt_bits))
+if state_parts:
+    print("PAGER_STATE\t" + " | ".join(state_parts))
+error = str(last_dispatch.get("error") or "").strip()
+if error:
+    print_wrapped("PAGER_ERROR", error)
+print("PAGER_STATE_PATH\t.agent_bus/observability/pipeline_agent_pager_state.json")
+print("PAGER_EVENTS_PATH\t.agent_bus/observability/pipeline_agent_events.jsonl")
+print("PAGER_RECEIPTS_PATH\t.agent_bus/observability/pipeline_agent_delivery_receipts.jsonl")
 if summary:
-    print("PAGER_SUMMARY\t" + summary)
+    print_wrapped("PAGER_SUMMARY", summary)
 PY
 }
 
 while true; do
   refresh_context
   {
-  echo -e "${BOLD}Pane 4: session timeline${RESET}"
+  echo -e "${BOLD}Pane 4: session timeline${RESET}  $(date '+%H:%M:%S')"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo -e "  ${DIM}This pane shows the recent milestones in time order.${RESET}"
   echo -e "  ${DIM}Watching:${RESET} $BRANCH_NAME"
@@ -413,8 +587,20 @@ while true; do
         AUTOPING)
           echo -e "  ${DIM}Autoping:${RESET} $value"
           ;;
+        AUTOPING_DETAIL)
+          echo -e "  ${DIM}Autoping detail:${RESET} $value"
+          ;;
+        AUTOPING_STATE_PATH)
+          [ "$VERBOSE" = "1" ] && echo -e "  ${DIM}Autoping state:${RESET} $value"
+          ;;
+        AUTOPING_SUMMARY_PATH)
+          [ "$VERBOSE" = "1" ] && echo -e "  ${DIM}Autoping summary file:${RESET} $value"
+          ;;
         SUMMARY)
-          echo -e "  ${DIM}Last ping:${RESET} $value"
+          echo -e "  ${DIM}Autoping summary:${RESET} $value"
+          ;;
+        SUMMARY_CONT)
+          echo -e "  ${DIM}                 ${RESET} $value"
           ;;
       esac
     done <<< "$autoping_status"
@@ -426,8 +612,38 @@ while true; do
         PAGER)
           echo -e "  ${DIM}Pager:${RESET} $value"
           ;;
+        PAGER_WAKE)
+          echo -e "  ${DIM}Last pager wake:${RESET} $value"
+          ;;
+        PAGER_DETAIL)
+          echo -e "  ${DIM}Pager detail:${RESET} $value"
+          ;;
+        PAGER_TRANSITION)
+          [ "$VERBOSE" = "1" ] && echo -e "  ${DIM}Pager transition:${RESET} $value"
+          ;;
+        PAGER_STATE)
+          echo -e "  ${DIM}Pager state:${RESET} $value"
+          ;;
+        PAGER_ERROR)
+          echo -e "  ${DIM}Pager error:${RESET} $value"
+          ;;
+        PAGER_ERROR_CONT)
+          echo -e "  ${DIM}            ${RESET} $value"
+          ;;
+        PAGER_STATE_PATH)
+          [ "$VERBOSE" = "1" ] && echo -e "  ${DIM}Pager state file:${RESET} $value"
+          ;;
+        PAGER_EVENTS_PATH)
+          [ "$VERBOSE" = "1" ] && echo -e "  ${DIM}Pager events log:${RESET} $value"
+          ;;
+        PAGER_RECEIPTS_PATH)
+          [ "$VERBOSE" = "1" ] && echo -e "  ${DIM}Pager receipts:${RESET} $value"
+          ;;
         PAGER_SUMMARY)
           echo -e "  ${DIM}Last pager event:${RESET} $value"
+          ;;
+        PAGER_SUMMARY_CONT)
+          echo -e "  ${DIM}                 ${RESET} $value"
           ;;
       esac
     done <<< "$pager_status"

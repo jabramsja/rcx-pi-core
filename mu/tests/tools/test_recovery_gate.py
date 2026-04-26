@@ -5671,6 +5671,37 @@ printf 'n{repo_root}\\n'
         repo_root.mkdir()
         self._minimal_bus(repo_root)
         self._install_observability_script(repo_root, "_pane_timeline.sh")
+        home_dir = tmp_path / "home"
+        state_dir = home_dir / ".codex" / "state"
+        state_dir.mkdir(parents=True)
+        autoping_thread_id = "019dc06c-8639-7150-8121-efc11a7aa5df"
+        autoping_summary = state_dir / f"rcx_autoping_{autoping_thread_id}_summary.txt"
+        autoping_summary.write_text(
+            "bridge shows reviewer GO; pager wake commit_ready reached COMMIT_GO; no intervention\n",
+            encoding="utf-8",
+        )
+        (state_dir / f"rcx_autoping_{autoping_thread_id}.json").write_text(
+            json.dumps(
+                {
+                    "thread_id": autoping_thread_id,
+                    "status": "idle_unchanged_state",
+                    "watcher_pid": 1234,
+                    "last_dispatched_pid": 2345,
+                    "updated_at": "2026-04-23T19:11:30+00:00",
+                    "last_dispatched_at": "2026-04-23T19:11:10+00:00",
+                    "last_completed_at": "2026-04-23T19:11:20+00:00",
+                    "summary_path": str(autoping_summary),
+                    "bridge_state": {
+                        "wave_root": str(repo_root),
+                        "bridge_db": str(repo_root / ".agent_bus" / "bridge.db"),
+                        "job": {"job_id": "phase-b-r2", "status": "DONE", "decision": "GO"},
+                        "turn": {"turn_id": "turn-1", "status": "completed", "decision": "GO"},
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
         pager_state = repo_root / ".agent_bus" / "observability" / "pipeline_agent_pager_state.json"
         pager_state.parent.mkdir(parents=True, exist_ok=True)
@@ -5697,7 +5728,16 @@ printf 'n{repo_root}\\n'
                             "acknowledged": True,
                             "error": "",
                         },
-                    }
+                    },
+                    "events": {
+                        "evt-1": {
+                            "event_id": "evt-1",
+                            "route": "codex",
+                            "requested_targets": ["codex"],
+                            "pending_targets": ["codex"],
+                            "attempts": {"codex": {"count": 1}},
+                        }
+                    },
                 }
             )
             + "\n",
@@ -5712,6 +5752,7 @@ printf 'n{repo_root}\\n'
         )
         env = os.environ | {
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "HOME": str(home_dir),
             "RCX_PANE_ONESHOT": "1",
             "TERM": "xterm",
         }
@@ -5727,8 +5768,24 @@ printf 'n{repo_root}\\n'
 
         assert result.returncode == 0
         clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
-        assert "Pager: last wake" in clean_stdout
+        assert "Autoping: last ping" in clean_stdout
+        assert "last done" in clean_stdout
+        assert "state updated" in clean_stdout
+        assert "Autoping detail: thread 019dc06c-863" in clean_stdout
+        assert "watcher pid 1234" in clean_stdout
+        assert "last ping pid 2345" in clean_stdout
+        assert "Autoping state:" not in clean_stdout
+        assert "Autoping summary file:" not in clean_stdout
+        assert "Autoping summary: bridge shows reviewer GO; pager wake commit_ready reached COMMIT_GO; no intervention" in clean_stdout
+        assert "Last pager wake:" in clean_stdout
         assert "recovery_state_changed" in clean_stdout
+        assert "Recovery moved to tier3_waiting_on_agent and woke dispatcher." in clean_stdout
+        assert "Pager detail: event evt-1" in clean_stdout
+        assert "Pager transition:" not in clean_stdout
+        assert "Pager state: route codex | pending codex | requested codex | attempts codex:1" in clean_stdout
+        assert "Pager state file:" not in clean_stdout
+        assert "Pager events log:" not in clean_stdout
+        assert "Pager receipts:" not in clean_stdout
         assert "Last pager event: Recovery moved to tier3_waiting_on_agent and woke dispatcher." in clean_stdout
 
     def test_pane_timeline_executor_pointer_checks_keywords_individually(self, tmp_path):
