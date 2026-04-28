@@ -6665,7 +6665,8 @@ class TestModularSurfaceEntrypoints:
         assert "post-merge" in cmd
         assert "--verbose" in cmd
 
-    def test_phase_b_surface_recovery_retries_after_tier3_success(self, tmp_path):
+    def test_phase_b_surface_recovery_retries_after_tier3_success(self, tmp_path, monkeypatch):
+        monkeypatch.delenv(dispatch_mod.PHASE_B_RECOVERY_PLAN_ENV, raising=False)
         handoff_dir = tmp_path / ".agent_bus" / "executors"
         handoff_dir.mkdir(parents=True)
         _write_phase_b_handoff(handoff_dir / "phase_b_handoff.json")

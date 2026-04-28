@@ -354,7 +354,6 @@ substrate, Mu, Stage0, or bootstrap authority.
   - `pre_commit_receipt`: `.agent_bus/meta/pre_commit_receipts/receipt_2026-04-28T21-57-28p00-00_88dc0f2a.json`
 - Current staged files:
   - `mu/tests/tools/test_executor_dispatch.py`
-  - `mu/tools/executors/commit_executor.py`
   - `reports/control_plane/pager_commit_packet_truth_refresh_2026-04-28.md`
   - `reports/l4_wave_indicators/pager-commit-packet-truth-refresh-2026-04-28.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

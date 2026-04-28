@@ -1,24 +1,24 @@
 {
   "wave_id": "pager-commit-packet-truth-refresh-2026-04-28",
-  "repeat_run_speedup_ratio": 1.006481,
+  "repeat_run_speedup_ratio": 1.195801,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.431101,
+  "step_growth_slope": 0.453072,
   "repeat_run_raw_seconds": [
-    0.433895,
-    0.431101
+    0.541784,
+    0.453072
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.433895
+      "elapsed_seconds": 0.541784
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.864996
+      "elapsed_seconds": 0.994856
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-28T22:27:03Z",
+  "collection_timestamp_utc": "2026-04-28T22:43:00Z",
   "collector_version": "2.2.0"
 }
