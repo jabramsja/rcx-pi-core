@@ -8694,6 +8694,42 @@ class TestCommitExecutorRoutingRecordAcceptance:
         )
         assert handoff["caller"] == "standalone"
 
+    def test_standalone_routing_record_accepts_explicit_founder_override_field(
+        self,
+        tmp_path,
+    ):
+        repo, env = _init_git_repo(tmp_path)
+        changed = repo / "file1.py"
+        changed.write_text("x = 2\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file1.py"], cwd=repo, capture_output=True, env=env)
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "pager pane observability follow-up",
+            "wave_name": "pane4-pinned-wake-status-2026-04-28",
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_class": "MAINTENANCE",
+            "target_gate_id": "G8",
+            "founder_override_token": (
+                "FOUNDER_OVERRIDE:pane4-pinned-wake-status-2026-04-28 "
+                "(explicit operator authorization)"
+            ),
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert not errors, errors
+        assert handoff is not None
+        assert handoff["wave_class"] == "MAINTENANCE"
+        assert (
+            "FOUNDER_OVERRIDE:pane4-pinned-wake-status-2026-04-28"
+            in handoff["tracker_note_text"]
+        )
+        assert "FOUNDER_OVERRIDE:FOUNDER_OVERRIDE:" not in handoff["tracker_note_text"]
+
     def test_standalone_routing_record_ignores_unstaged_packet_authorization(
         self,
         tmp_path,

@@ -5900,6 +5900,12 @@ printf 'n{repo_root}\\n'
         assert "Pager detail: event evt-1" in visible_tail
         assert "Pager state: route codex | pending codex | requested codex | attempts codex:1" in visible_tail
         assert "Last pager event: Recovery moved to tier3_waiting_on_agent and woke dispatcher." in visible_tail
+        pinned_tail = [line for line in clean_stdout.splitlines() if line.strip()][-3:]
+        assert "Wake status pinned:" in pinned_tail[0]
+        assert "Autoping latest: last ping" in pinned_tail[1]
+        assert "status idle_unchanged_state" in pinned_tail[1]
+        assert "Pager latest:" in pinned_tail[2]
+        assert "recovery_state_changed" in pinned_tail[2]
 
     def test_pane_timeline_executor_pointer_checks_keywords_individually(self, tmp_path):
         repo_root = tmp_path / "repo"

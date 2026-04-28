@@ -404,6 +404,10 @@ def _extract_founder_override_from_routing_record(
     *,
     embedded_handoff: dict[str, Any] | None = None,
 ) -> str:
+    for key in ("founder_override_token", "founder_override"):
+        token = _normalize_founder_override_token(record.get(key))
+        if token:
+            return token
     for text in [
         str(record.get("tracker_note_text") or ""),
         str((embedded_handoff or {}).get("tracker_note_text") or ""),
