@@ -4548,11 +4548,15 @@ def _run_post_commit_pipeline(
             try:
                 _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=PRE_PUSH_FAST_TIMEOUT_S)
             except subprocess.CalledProcessError as exc:
-                detail = (exc.stderr or exc.stdout or "").strip()
+                detail = _tail_failure_excerpt(
+                    exc.stderr or exc.stdout or "",
+                    limit=4000,
+                    max_lines=80,
+                )
                 if not detail:
                     detail = f"exit {exc.returncode}"
                 return {"status": "error", "step": "run_pre_push_script",
-                        "errors": [f"pre-push-fast failed: {detail[:500]}"],
+                        "errors": [f"pre-push-fast failed: {detail}"],
                         "steps_completed": result["steps_completed"]}
             except subprocess.TimeoutExpired:
                 return {"status": "error", "step": "run_pre_push_script",

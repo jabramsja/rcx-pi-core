@@ -3790,6 +3790,35 @@ class TestReceiptAndCommit:
         assert result["step"] == "run_pre_push_script"
         assert any("tracker note contract failed" in e for e in result["errors"])
 
+    def test_step11_pre_push_failure_keeps_actionable_tail(self, tmp_path):
+        """Noisy Step 11 failures should report the failing tail, not the banner prefix."""
+        repo, env, mock_result = self._setup_repo_through_supervisor(tmp_path, "COMMIT_GO")
+
+        hooks_dir = repo / "mu" / "tools" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        script = hooks_dir / "pre-push-fast"
+        script.write_text(
+            "#!/bin/bash\n"
+            "for i in $(seq 1 120); do echo \"banner noise $i\"; done\n"
+            "echo 'ERROR: Found private attr access in tests/'\n"
+            "echo '  tests/tools/test_executor_dispatch.py:7211: ._continue_successful_executor_chain'\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        script.chmod(0o755)
+
+        with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
+            sys.modules["meta_bridge_client"].run_meta_bridge_package = MagicMock(return_value=mock_result)
+            sys.modules["meta_bridge_client"].MetaBridgeClientError = Exception
+            result = commit_mod.run_commit_pipeline(_make_new_handoff(), repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "run_pre_push_script"
+        error_text = "\n".join(result["errors"])
+        assert "ERROR: Found private attr access in tests/" in error_text
+        assert "._continue_successful_executor_chain" in error_text
+        assert "banner noise 1" not in error_text.splitlines()
+
     def test_step11_uses_extended_pre_push_timeout(self, tmp_path):
         """Step 11 must give pre-push-fast enough time for the real fast audit path."""
         repo, env, mock_result = self._setup_repo_through_supervisor(tmp_path, "COMMIT_GO")
@@ -7207,19 +7236,31 @@ class TestModularSurfaceEntrypoints:
             ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
         )
 
-        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
-            result = dispatch_mod._continue_successful_executor_chain(
-                "phase_b_executor",
-                phase_b_ok,
+        with patch.object(
+            dispatch_mod, "_run_executor_in_group", return_value=phase_b_ok,
+        ) as mock_run:
+            result = dispatch_mod.dispatch(
+                record,
                 repo_root=tmp_path,
-                config={"timeouts": {"commit_executor": 300}},
-                record=record,
+                config={
+                    "timeouts": {
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+                skip_freshness=True,
             )
 
         assert result["status"] == "error"
         assert result["executor"] == "commit_executor"
         assert "tracked_packet mismatch" in result["message"]
-        mock_run.assert_not_called()
+        assert mock_run.call_count == 1
+        phase_b_cmd = mock_run.call_args[0][0]
+        assert phase_b_cmd[:2] == [
+            dispatch_mod.sys.executable,
+            str(dispatch_mod.SCRIPT_DIR / "phase_b_executor.py"),
+        ]
+        assert str(dispatch_mod.SCRIPT_DIR / "commit_executor.py") not in phase_b_cmd
 
     def test_phase_b_chain_rejects_planless_stale_handoff_identity(self, tmp_path):
         handoff_dir = tmp_path / ".agent_bus" / "executors"
@@ -7240,19 +7281,31 @@ class TestModularSurfaceEntrypoints:
             ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
         )
 
-        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
-            result = dispatch_mod._continue_successful_executor_chain(
-                "phase_b_executor",
-                phase_b_ok,
+        with patch.object(
+            dispatch_mod, "_run_executor_in_group", return_value=phase_b_ok,
+        ) as mock_run:
+            result = dispatch_mod.dispatch(
+                record,
                 repo_root=tmp_path,
-                config={"timeouts": {"commit_executor": 300}},
-                record=record,
+                config={
+                    "timeouts": {
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+                skip_freshness=True,
             )
 
         assert result["status"] == "error"
         assert result["executor"] == "commit_executor"
         assert "wave_id mismatch" in result["message"]
-        mock_run.assert_not_called()
+        assert mock_run.call_count == 1
+        phase_b_cmd = mock_run.call_args[0][0]
+        assert phase_b_cmd[:2] == [
+            dispatch_mod.sys.executable,
+            str(dispatch_mod.SCRIPT_DIR / "phase_b_executor.py"),
+        ]
+        assert str(dispatch_mod.SCRIPT_DIR / "commit_executor.py") not in phase_b_cmd
 
     def test_commit_surface_failure_routes_to_recovery_and_retries(self, tmp_path):
         handoff_path = tmp_path / "handoff.json"

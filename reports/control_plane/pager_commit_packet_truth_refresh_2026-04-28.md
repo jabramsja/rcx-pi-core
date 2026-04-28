@@ -353,16 +353,8 @@ substrate, Mu, Stage0, or bootstrap authority.
   - `indicator`: `reports/l4_wave_indicators/pager-commit-packet-truth-refresh-2026-04-28.json`
   - `pre_commit_receipt`: `.agent_bus/meta/pre_commit_receipts/receipt_2026-04-28T21-57-28p00-00_88dc0f2a.json`
 - Current staged files:
-  - `TASKS.md`
-  - `mu/tests/tools/test_commit_executor_receipt.py`
   - `mu/tests/tools/test_executor_dispatch.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
-  - `mu/tests/tools/test_recovery_gate.py`
   - `mu/tools/executors/commit_executor.py`
-  - `mu/tools/executors/executor_dispatch.py`
-  - `mu/tools/executors/phase_b_executor.py`
-  - `mu/tools/executors/recovery_gate.py`
-  - `mu/tools/observability/_pane_timeline.sh`
   - `reports/control_plane/pager_commit_packet_truth_refresh_2026-04-28.md`
   - `reports/l4_wave_indicators/pager-commit-packet-truth-refresh-2026-04-28.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
