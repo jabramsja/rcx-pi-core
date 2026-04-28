@@ -572,14 +572,7 @@ if summary:
 PY
 }
 
-while true; do
-  refresh_context
-  {
-  echo -e "${BOLD}Pane 4: session timeline${RESET}  $(date '+%H:%M:%S')"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo -e "  ${DIM}This pane shows the recent milestones in time order.${RESET}"
-  echo -e "  ${DIM}Watching:${RESET} $BRANCH_NAME"
-  echo -e "  ${DIM}Worktree:${RESET} $REPO_ROOT"
+print_observability_status() {
   autoping_status="$(render_autoping_status)"
   if [ -n "$autoping_status" ]; then
     while IFS=$'\t' read -r tag value; do
@@ -648,7 +641,16 @@ while true; do
       esac
     done <<< "$pager_status"
   fi
-  echo ""
+}
+
+while true; do
+  refresh_context
+  {
+  echo -e "${BOLD}Pane 4: session timeline${RESET}  $(date '+%H:%M:%S')"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo -e "  ${DIM}This pane shows the recent milestones in time order.${RESET}"
+  echo -e "  ${DIM}Watching:${RESET} $BRANCH_NAME"
+  echo -e "  ${DIM}Worktree:${RESET} $REPO_ROOT"
 
   # Collect events with timestamps, then sort chronologically
   EVENTS=""
@@ -796,6 +798,8 @@ PY
   else
     echo -e "  ${DIM}${now}${RESET}  ${DIM}← idle${RESET}"
   fi
+  echo ""
+  print_observability_status
 
   # Helpful reference
   echo ""

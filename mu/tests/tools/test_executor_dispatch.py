@@ -482,6 +482,23 @@ def _make_new_handoff(**overrides):
     return base
 
 
+def _write_phase_b_handoff(
+    path: Path,
+    *,
+    wave_id: str = "surface-wave",
+    task_id: str = "",
+    tracked_packet: str | None = None,
+) -> None:
+    payload: dict[str, object] = {
+        "wave_id": wave_id,
+        "task_id": task_id,
+    }
+    if tracked_packet:
+        payload["tracked_packet"] = tracked_packet
+        payload["scope_items"] = [tracked_packet]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def _init_git_repo(tmp_path):
     """Create a git repo with initial commit and TASKS.md with Ra section."""
     repo = tmp_path / "repo"
@@ -6622,7 +6639,7 @@ class TestModularSurfaceEntrypoints:
     def test_phase_b_surface_recovery_retries_after_tier3_success(self, tmp_path):
         handoff_dir = tmp_path / ".agent_bus" / "executors"
         handoff_dir.mkdir(parents=True)
-        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+        _write_phase_b_handoff(handoff_dir / "phase_b_handoff.json")
         args = dispatch_mod.build_surface_parser().parse_args(
             [
                 "phase-b",
@@ -6708,7 +6725,7 @@ class TestModularSurfaceEntrypoints:
         plan_path.write_text("# plan\n", encoding="utf-8")
         handoff_dir = tmp_path / ".agent_bus" / "executors"
         handoff_dir.mkdir(parents=True)
-        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+        _write_phase_b_handoff(handoff_dir / "phase_b_handoff.json")
 
         args = dispatch_mod.build_surface_parser().parse_args(
             ["phase-a", "--plan-name", "surface-wave", "--json"]
@@ -6802,7 +6819,10 @@ class TestModularSurfaceEntrypoints:
             if len(calls) == 1:
                 return phase_b_recovered
             if len(calls) == 2:
-                (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+                _write_phase_b_handoff(
+                    handoff_dir / "phase_b_handoff.json",
+                    task_id="[PIPELINE-REENTRY-REROUTE]",
+                )
                 return phase_b_ok
             return commit_ok
 
@@ -6916,7 +6936,10 @@ class TestModularSurfaceEntrypoints:
                 )
                 return phase_b_recovered
             if len(calls) == 2:
-                (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+                _write_phase_b_handoff(
+                    handoff_dir / "phase_b_handoff.json",
+                    tracked_packet="reports/control_plane/example.md",
+                )
                 return phase_b_ok
             return commit_ok
 
@@ -6978,7 +7001,11 @@ class TestModularSurfaceEntrypoints:
             if len(calls) == 1:
                 return phase_b_plan_required
             if len(calls) == 2:
-                (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+                _write_phase_b_handoff(
+                    handoff_dir / "phase_b_handoff.json",
+                    wave_id="example",
+                    tracked_packet="reports/control_plane/example.md",
+                )
                 return phase_b_ok
             return commit_ok
 
@@ -7008,7 +7035,10 @@ class TestModularSurfaceEntrypoints:
         plan_path.write_text("# plan\n", encoding="utf-8")
         handoff_dir = tmp_path / ".agent_bus" / "executors"
         handoff_dir.mkdir(parents=True)
-        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+        _write_phase_b_handoff(
+            handoff_dir / "phase_b_handoff.json",
+            task_id="[PIPELINE-RECOVERY]",
+        )
 
         args = dispatch_mod.build_surface_parser().parse_args(
             ["phase-a", "--plan-name", "surface-wave", "--task-id", "PIPELINE-RECOVERY", "--json"]
@@ -7053,7 +7083,7 @@ class TestModularSurfaceEntrypoints:
         plan_path.write_text("# plan\n", encoding="utf-8")
         handoff_dir = tmp_path / ".agent_bus" / "executors"
         handoff_dir.mkdir(parents=True)
-        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+        _write_phase_b_handoff(handoff_dir / "phase_b_handoff.json")
 
         args = dispatch_mod.build_surface_parser().parse_args(
             ["phase-a", "--plan-name", "surface-wave", "--json"]
@@ -7101,7 +7131,10 @@ class TestModularSurfaceEntrypoints:
     def test_phase_b_surface_success_chains_to_commit(self, tmp_path):
         handoff_dir = tmp_path / ".agent_bus" / "executors"
         handoff_dir.mkdir(parents=True)
-        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+        _write_phase_b_handoff(
+            handoff_dir / "phase_b_handoff.json",
+            tracked_packet="reports/control_plane/example.md",
+        )
         args = dispatch_mod.build_surface_parser().parse_args(
             [
                 "phase-b",
@@ -7146,6 +7179,80 @@ class TestModularSurfaceEntrypoints:
             dispatch_mod.sys.executable,
             str(dispatch_mod.SCRIPT_DIR / "commit_executor.py"),
         ]
+
+    def test_phase_b_chain_rejects_stale_handoff_tracked_packet(self, tmp_path):
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text(
+            json.dumps(
+                {
+                    "wave_id": "surface-wave",
+                    "task_id": "[PIPELINE-AGENT-PAGER]",
+                    "tracked_packet": "reports/control_plane/old_packet.md",
+                    "scope_items": ["reports/control_plane/old_packet.md"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "phase b converged",
+            "wave_name": "surface-wave",
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "next_candidates": [
+                {"tracked_packet": "reports/control_plane/current_packet.md"}
+            ],
+        }
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
+            result = dispatch_mod._continue_successful_executor_chain(
+                "phase_b_executor",
+                phase_b_ok,
+                repo_root=tmp_path,
+                config={"timeouts": {"commit_executor": 300}},
+                record=record,
+            )
+
+        assert result["status"] == "error"
+        assert result["executor"] == "commit_executor"
+        assert "tracked_packet mismatch" in result["message"]
+        mock_run.assert_not_called()
+
+    def test_phase_b_chain_rejects_planless_stale_handoff_identity(self, tmp_path):
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        _write_phase_b_handoff(
+            handoff_dir / "phase_b_handoff.json",
+            wave_id="old-wave",
+            task_id="[OLD]",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "phase b converged without a tracked packet",
+            "wave_name": "current-wave",
+            "task_id": "[CURRENT]",
+            "next_candidates": [{"candidate": "do current work"}],
+        }
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
+            result = dispatch_mod._continue_successful_executor_chain(
+                "phase_b_executor",
+                phase_b_ok,
+                repo_root=tmp_path,
+                config={"timeouts": {"commit_executor": 300}},
+                record=record,
+            )
+
+        assert result["status"] == "error"
+        assert result["executor"] == "commit_executor"
+        assert "wave_id mismatch" in result["message"]
+        mock_run.assert_not_called()
 
     def test_commit_surface_failure_routes_to_recovery_and_retries(self, tmp_path):
         handoff_path = tmp_path / "handoff.json"
@@ -7235,7 +7342,7 @@ class TestModularSurfaceEntrypoints:
         plan_path.write_text("# plan\n", encoding="utf-8")
         handoff_dir = tmp_path / ".agent_bus" / "executors"
         handoff_dir.mkdir(parents=True)
-        (handoff_dir / "phase_b_handoff.json").write_text("{}", encoding="utf-8")
+        _write_phase_b_handoff(handoff_dir / "phase_b_handoff.json")
 
         args = dispatch_mod.build_surface_parser().parse_args(
             ["phase-a", "--plan-name", "surface-wave", "--json"]
@@ -9015,6 +9122,32 @@ class TestDispatcherStaleHandoffOverride:
         )
         assert result["status"] == "error"
         assert "handoff validation failed" in result["message"]
+
+    def test_commit_go_rejects_stale_handoff_tracked_packet(self, tmp_path):
+        """COMMIT_GO must fail closed if handoff packet identity drifted."""
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        (handoff_dir / "phase_b_handoff.json").write_text(json.dumps({
+            "wave_id": "ready-to-commit",
+            "task_id": "[EXECUTOR-SURFACES]",
+            "tracked_packet": "reports/control_plane/old_packet.md",
+            "scope_items": ["reports/control_plane/old_packet.md"],
+        }))
+
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "ready to commit",
+            "wave_name": "ready-to-commit",
+            "task_id": "[EXECUTOR-SURFACES]",
+            "next_candidates": [
+                {"tracked_packet": "reports/control_plane/current_packet.md"}
+            ],
+        }
+        result = dispatch_mod.dispatch(
+            record, repo_root=tmp_path, skip_freshness=True
+        )
+        assert result["status"] == "error"
+        assert "tracked_packet mismatch" in result["message"]
 
     def test_commit_go_without_handoff_fails_closed(self, tmp_path):
         """COMMIT_GO without handoff file must fail closed — no fallback to --routing-record."""

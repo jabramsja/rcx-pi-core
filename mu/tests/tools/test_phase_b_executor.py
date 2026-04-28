@@ -539,6 +539,26 @@ class TestPrepareCommitHandoff:
             "receipt_chain": "direct receipt path preserved"
         }
 
+    def test_tracked_packet_in_handoff(self, tmp_path):
+        path = pb_mod.prepare_commit_handoff(
+            tmp_path,
+            wave_id="test",
+            task_id="[T]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            files_to_stage=["file.py", "reports/control_plane/test_plan.md"],
+            tracked_packet="reports/control_plane/test_plan.md",
+            scope_items=["reports/control_plane/test_plan.md"],
+            evidence_handles={"indicator": "reports/l4_wave_indicators/test.json"},
+            commit_message="test",
+            fixes_implemented=["test handoff"],
+            pr_title="test",
+            pr_body="test",
+        )
+        handoff = json.loads(path.read_text())
+        assert handoff["tracked_packet"] == "reports/control_plane/test_plan.md"
+        assert handoff["scope_items"] == ["reports/control_plane/test_plan.md"]
+
     def test_wave_bound_target_branch_accepts_restart_branch(self):
         target_branch = pb_mod._wave_bound_target_branch(  # ANTICHEAT_OK: validating bounded restart-branch selection
             "jabramsja/test-wave-restart-2026-04-21",
@@ -1349,6 +1369,130 @@ class TestMaintenanceTrackerMetadataPropagation:
             "rounds": 1,
             "total_rounds": 1,
         }
+
+    def test_run_phase_b_handoff_bridge_status_uses_documented_round_floor(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        (repo / "TASKS.md").write_text(
+            "- Tracker sync note (2026-04-28, pager-commit-packet-truth-refresh-2026-04-28): done\n"
+            "  **2026-04-28 bridge round 1 remediation:** fixed first bridge finding.\n"
+            "  **2026-04-28 bridge round 2 remediation:** fixed second bridge finding.\n"
+            "  **2026-04-28 bridge round 3 remediation:** fixed third bridge finding.\n",
+            encoding="utf-8",
+        )
+        plan_path = "reports/control_plane/pager_commit_packet_truth_refresh_2026-04-28.md"
+        plan = repo / plan_path
+        plan.write_text(
+            "# Plan\n"
+            "Wave ID: pager-commit-packet-truth-refresh-2026-04-28\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-AGENT-PAGER]\n\n"
+            "## Bridge Round 1 Remediation\n"
+            "- fixed first bridge finding.\n\n"
+            "## Bridge Round 2 Remediation\n"
+            "- fixed second bridge finding.\n\n"
+            "## Bridge Round 3 Remediation\n"
+            "- fixed third bridge finding.\n",
+            encoding="utf-8",
+        )
+
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-AGENT-PAGER]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+        }
+        wave_owned = [
+            "TASKS.md",
+            "mu/tools/executors/phase_b_executor.py",
+            "mu/tests/tools/test_phase_b_executor.py",
+            plan_path,
+        ]
+        captured_package: dict[str, object] = {}
+
+        def _capture_supervisor_package(repo_root, package_path, **_kwargs):
+            captured_package.update(json.loads(package_path.read_text(encoding="utf-8")))
+            return {
+                "exit_code": 0,
+                "parsed": {
+                    "decision": "COMMIT_GO",
+                    "summary": "",
+                    "status": "success",
+                    "findings": [],
+                },
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=wave_owned), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=wave_owned), \
+             patch.object(
+                 pb_mod,
+                 "_run_pytest_on_files",
+                 return_value={
+                     "exit_code": 0,
+                     "passed": True,
+                     "stdout": "",
+                     "stderr": "",
+                 },
+             ), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(
+                 pb_mod,
+                 "run_bridge_review",
+                 return_value={
+                     "exit_code": 0,
+                     "stdout": "GO\n",
+                     "stderr": "",
+                     "decision": "GO",
+                     "job_id": "j1",
+                 },
+             ), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=_capture_supervisor_package), \
+             patch.object(
+                 pb_mod,
+                 "prepare_commit_handoff",
+                 return_value=repo / ".agent_bus" / "handoff.json",
+             ) as mock_handoff:
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        expected_status = {"rounds": 3, "total_rounds": 3}
+        assert result["status"] == "commit_ready"
+        assert captured_package["bridge_status"] == expected_status
+        assert mock_handoff.call_args.kwargs["bridge_status"] == expected_status
+
+    def test_packet_documented_bridge_round_floor_bounds_tasks_scan_to_current_entry(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        plan_path = "reports/control_plane/current-wave-2026-04-28.md"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            "Wave ID: current-wave-2026-04-28\n\n"
+            "## Bridge Round 2 Remediation\n"
+            "- Current packet records round two.\n",
+            encoding="utf-8",
+        )
+        (repo / "TASKS.md").write_text(
+            "- **[PIPELINE-AGENT-PAGER]** **IN PROGRESS**\n"
+            "  - Tracker sync note (2026-04-28, current-wave-2026-04-28): current.\n"
+            "  **2026-04-28 bridge round 3 remediation:** current wave round three.\n"
+            "  - Tracker sync note (2026-04-28, later-wave-2026-04-28): later.\n"
+            "  **2026-04-28 bridge round 9 remediation:** later wave must not count.\n",
+            encoding="utf-8",
+        )
+
+        assert pb_mod._documented_bridge_round_floor(  # ANTICHEAT_OK: direct helper regression for package truth floor
+            repo,
+            "current-wave-2026-04-28",
+            plan_path,
+        ) == 3
 
     def test_run_phase_b_emits_reviewer_started_event_from_authoritative_bridge_round(self, tmp_path):
         repo = tmp_path / "repo"
@@ -6970,6 +7114,64 @@ class TestPlanlessPhaseB:
         assert result.get("planless") is True
         assert result.get("status") == "error"
         assert result.get("step") == "implementer"
+
+    def test_planless_commit_ready_omits_tracked_packet_from_handoff(self, tmp_path):
+        """Planless handoffs must not bind the synthetic plan marker as a tracked packet."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".scratch").mkdir()
+        routing_record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test planless",
+            "wave_name": "planless-regression-2026-04-28",
+            "task_id": "[PLANLESS]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+            "next_candidates": [{"candidate": "do something"}],
+        }
+
+        mock_impl = _make_mock_impl()
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_emit_phase_b_event", return_value={}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tools/executors/phase_b_executor.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tools/executors/phase_b_executor.py"]), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0,
+                 "passed": True,
+                 "stdout": "",
+                 "stderr": "",
+             }), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0,
+                 "stdout": "GO\n",
+                 "stderr": "",
+                 "decision": "GO",
+                 "job_id": "j1",
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(
+                 pb_mod,
+                 "prepare_commit_handoff",
+                 return_value=repo / ".agent_bus" / "handoff.json",
+             ) as mock_handoff:
+            result = pb_mod.run_phase_b(
+                repo,
+                None,
+                max_bridge_rounds=5,
+                routing_record_override=routing_record,
+            )
+
+        assert result["status"] == "commit_ready"
+        assert mock_handoff.call_args.kwargs["tracked_packet"] is None
+        assert mock_handoff.call_args.kwargs["scope_items"] == [
+            "<planless:planless-regression-2026-04-28>"
+        ]
 
     def test_planless_with_underspecified_record_fails_closed(self, tmp_path):
         """Planless mode fails closed when routing record is under-specified."""

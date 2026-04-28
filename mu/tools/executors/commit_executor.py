@@ -106,6 +106,7 @@ REQUIRED_HANDOFF_FIELDS = {
 }
 OPTIONAL_HANDOFF_FIELDS = {
     "target_branch",
+    "tracked_packet",
     "supervisor_lane",
     "deferred_items",
     "bridge_status",
@@ -226,6 +227,8 @@ BOT_USAGE_LIMIT_COMMENT_RE = re.compile(
 COMMIT_CONTINUATION_VERSION = 1
 CONTINUATION_ACTIVE_STATUS = "post_commit_pending"
 TRANSIENT_STATUS_PREFIXES = (".agent_bus/", ".scratch/")
+COMMIT_PATH_REFRESH_START = "<!-- COMMIT_PATH_TRUTH_REFRESH:start -->"
+COMMIT_PATH_REFRESH_END = "<!-- COMMIT_PATH_TRUTH_REFRESH:end -->"
 
 BOT_REMEDIATION_MAX_ROUNDS = 2
 _COMMIT_EXECUTOR_BACKENDS = _COMMIT_EXECUTOR_CONFIG.get("backends", {})
@@ -379,6 +382,19 @@ def _tracked_packet_text_from_record(record: dict[str, Any], repo_root: Path) ->
         packet_text = _git_index_text_for_repo_path(repo_root, tracked_packet)
         if packet_text is not None:
             return packet_text
+    return ""
+
+
+def _tracked_packet_path_from_record(record: dict[str, Any]) -> str:
+    candidates = record.get("next_candidates")
+    if not isinstance(candidates, list):
+        return ""
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        tracked_packet = _normalize_repo_relpath(str(candidate.get("tracked_packet") or ""))
+        if tracked_packet:
+            return tracked_packet
     return ""
 
 
@@ -645,6 +661,9 @@ def _is_wave_bound_target_branch(
 
 
 def _handoff_plan_path(handoff: dict[str, Any]) -> str | None:
+    tracked_packet = handoff.get("tracked_packet")
+    if isinstance(tracked_packet, str) and tracked_packet.strip():
+        return _normalize_repo_relpath(tracked_packet)
     scope_items = handoff.get("scope_items")
     if not isinstance(scope_items, list):
         return None
@@ -653,6 +672,281 @@ def _handoff_plan_path(handoff: dict[str, Any]) -> str | None:
         if text.endswith(".md"):
             return text
     return None
+
+
+def _path_field_error(field_name: str, path: str) -> str | None:
+    if not path:
+        return f"{field_name} is required"
+    if _is_absolute_untrusted_path(path):
+        return f"{field_name} must be repo-relative: {path}"
+    if _has_path_traversal(path):
+        return f"Path traversal in {field_name}: {path}"
+    return None
+
+
+def _commit_refresh_packet_path(handoff: dict[str, Any]) -> tuple[str, str | None]:
+    """Resolve the builder-owned control-plane packet path from the canonical handoff."""
+    tracked_packet = handoff.get("tracked_packet")
+    if tracked_packet is not None:
+        if not isinstance(tracked_packet, str) or not tracked_packet.strip():
+            return "", "tracked_packet must be a non-empty string when provided"
+        packet = _normalize_repo_relpath(tracked_packet)
+        error = _path_field_error("tracked_packet", packet)
+        if error:
+            return "", error
+        if not packet.startswith("reports/control_plane/") or not packet.endswith(".md"):
+            return "", f"tracked_packet must name a reports/control_plane/*.md packet: {packet}"
+        return packet, None
+
+    return "", None
+
+
+def _tracker_marker_value(note: str, marker: str) -> str:
+    marker_names = [
+        "Class",
+        "target_gate_id",
+        "no_op_proof",
+        "defer_reason_code",
+        "evidence_command",
+        "evidence_delta",
+        "progress_proof_before",
+        "progress_proof_after",
+        "primary_blocker_class",
+        "primary_invariant_id",
+        "indicator_artifact_ref",
+        "indicator_collection_command",
+        "bootstrap_endgame_policy",
+        "boot0_track_id",
+        "boot0_progress_state",
+        "FOUNDER_OVERRIDE",
+        "unblocks_wave_id",
+        "unblocks_runtime_blocker",
+    ]
+    other_markers = "|".join(re.escape(name) for name in marker_names if name != marker)
+    pattern = re.compile(
+        rf"(?:^|\s){re.escape(marker)}:\s*"
+        rf"(.+?)(?=\s(?:{other_markers}):|$)"
+    )
+    match = pattern.search(note or "")
+    if not match:
+        return ""
+    return match.group(1).strip().rstrip()
+
+
+def _render_commit_path_truth_refresh_block(
+    *,
+    wave_id: str,
+    active_packet_path: str,
+    tracker_note_text: str,
+    staged_paths: list[str],
+    indicator_path: str,
+    commit_status: str,
+    evidence_handles: dict[str, str],
+    pre_commit_receipt_path: str,
+) -> str:
+    tracker_note_sha = hashlib.sha256(tracker_note_text.encode("utf-8")).hexdigest()
+    evidence_command = _tracker_marker_value(tracker_note_text, "evidence_command")
+    evidence_delta = _tracker_marker_value(tracker_note_text, "evidence_delta")
+    lines = [
+        COMMIT_PATH_REFRESH_START,
+        "## Commit Path Truth Refresh",
+        "",
+        f"- Refresh wave: `{wave_id}`",
+        f"- Active packet: `{active_packet_path}`",
+        f"- Commit status: `{commit_status}`",
+        f"- Tracker note sha256: `{tracker_note_sha}`",
+        f"- Indicator artifact: `{indicator_path}`",
+    ]
+    if pre_commit_receipt_path:
+        lines.append(f"- Pre-commit receipt handle: `{pre_commit_receipt_path}`")
+    if evidence_command:
+        lines.append(f"- Evidence command: {evidence_command}")
+    if evidence_delta:
+        lines.append(f"- Evidence delta: {evidence_delta}")
+    lines.append("- Evidence handles:")
+    if evidence_handles:
+        for key in sorted(evidence_handles):
+            lines.append(f"  - `{key}`: `{evidence_handles[key]}`")
+    else:
+        lines.append("  - none")
+    lines.append("- Current staged files:")
+    for path in staged_paths:
+        lines.append(f"  - `{path}`")
+    lines.append(COMMIT_PATH_REFRESH_END)
+    return "\n".join(lines) + "\n"
+
+
+def _replace_commit_path_truth_refresh_block(packet_text: str, block: str) -> str:
+    start = packet_text.find(COMMIT_PATH_REFRESH_START)
+    end = packet_text.find(COMMIT_PATH_REFRESH_END)
+    if start != -1 and end != -1 and end > start:
+        end += len(COMMIT_PATH_REFRESH_END)
+        trailing_newline = "\n" if end < len(packet_text) and packet_text[end:end + 1] != "\n" else ""
+        return packet_text[:start].rstrip() + "\n\n" + block.rstrip() + trailing_newline + packet_text[end:]
+    if start != -1 or end != -1:
+        raise ValueError("existing Commit Path Truth Refresh markers are unbalanced")
+    return packet_text.rstrip() + "\n\n" + block
+
+
+def _commit_refresh_evidence_handles(
+    handoff: dict[str, Any],
+    *,
+    indicator_path: str,
+) -> dict[str, str]:
+    evidence_handles: dict[str, str] = {}
+    raw = handoff.get("evidence_handles")
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if isinstance(key, str) and isinstance(value, str):
+                evidence_handles[key] = value
+    evidence_handles.setdefault("indicator", indicator_path)
+    receipt = handoff.get("pre_commit_receipt_path")
+    if isinstance(receipt, str) and receipt.strip():
+        evidence_handles.setdefault("pre_commit_receipt", receipt.strip())
+    return evidence_handles
+
+
+def _rebuild_handoff_after_packet_truth_refresh(
+    handoff: dict[str, Any],
+    *,
+    repo_root: Path,
+    active_packet_path: str,
+    staged_paths: list[str],
+    evidence_handles: dict[str, str],
+) -> tuple[dict[str, Any], list[str]]:
+    scope_items = handoff.get("scope_items")
+    rebuilt_scope_items = _dedupe_repo_paths([
+        *(scope_items if isinstance(scope_items, list) else []),
+        active_packet_path,
+    ])
+    return build_commit_handoff(
+        wave_id=str(handoff.get("wave_id") or ""),
+        task_id=str(handoff.get("task_id") or ""),
+        files_to_stage=staged_paths,
+        commit_message=str(handoff.get("commit_message") or ""),
+        fixes_implemented=list(handoff.get("fixes_implemented") or []),
+        wave_class=str(handoff.get("wave_class") or "L4_ENABLER"),
+        target_gate_id=str(handoff.get("target_gate_id") or "G8"),
+        caller=str(handoff.get("caller") or "phase_b"),
+        base_branch=str(handoff.get("base_branch") or "dev"),
+        branch_prefix=str(handoff.get("branch_prefix") or "jabramsja"),
+        target_branch=handoff.get("target_branch") if isinstance(handoff.get("target_branch"), str) else None,
+        force_add_files=[],
+        pr_title=str(handoff.get("pr_title") or ""),
+        pr_body=str(handoff.get("pr_body") or ""),
+        tracker_note_text=str(handoff.get("tracker_note_text") or ""),
+        supervisor_lane=(
+            str(handoff.get("supervisor_lane"))
+            if isinstance(handoff.get("supervisor_lane"), str)
+            else None
+        ),
+        deferred_items=(
+            list(handoff.get("deferred_items"))
+            if isinstance(handoff.get("deferred_items"), list)
+            else None
+        ),
+        bridge_status=(
+            dict(handoff.get("bridge_status"))
+            if isinstance(handoff.get("bridge_status"), dict)
+            else None
+        ),
+        scope_items=rebuilt_scope_items,
+        evidence_handles=evidence_handles,
+        pre_commit_receipt_path=(
+            str(handoff.get("pre_commit_receipt_path") or "")
+            if "pre_commit_receipt_path" in handoff
+            else None
+        ),
+        repo_root=repo_root,
+        tracked_packet=active_packet_path,
+    )
+
+
+def refresh_commit_path_packet_truth(
+    *,
+    repo_root: Path,
+    handoff: dict[str, Any],
+    indicator_path: str,
+    commit_status: str,
+) -> tuple[dict[str, Any], list[str], str | None]:
+    """Refresh the wave packet from current commit-path facts before supervisor review."""
+    active_packet_path, packet_error = _commit_refresh_packet_path(handoff)
+    if packet_error:
+        return handoff, [], packet_error
+    if not active_packet_path:
+        return handoff, _current_staged_diff_paths(repo_root), None
+
+    if str(handoff.get("wave_class") or "").strip() != "L4_ENABLER":
+        return handoff, _current_staged_diff_paths(repo_root), None
+
+    tracker_note_text = str(handoff.get("tracker_note_text") or "")
+    if not tracker_note_text.strip():
+        return handoff, [], "tracker_note_text is required for commit packet truth refresh"
+    if not indicator_path:
+        return handoff, [], "indicator_path is required for commit packet truth refresh"
+
+    packet_full = (repo_root / active_packet_path).resolve()
+    repo_resolved = repo_root.resolve()
+    if repo_resolved not in packet_full.parents:
+        return handoff, [], f"active packet escapes repo root: {active_packet_path}"
+    if not packet_full.exists():
+        return handoff, [], f"active packet not found for commit packet truth refresh: {active_packet_path}"
+    packet_text = packet_full.read_text(encoding="utf-8")
+    wave_id = str(handoff.get("wave_id") or "")
+    if not _packet_declares_same_wave_id(packet_text, normalize_wave_id(wave_id)):
+        return handoff, [], (
+            "active packet missing matching Wave ID for commit packet truth refresh: "
+            f"{active_packet_path} (wave_id={wave_id})"
+        )
+
+    staged_paths_before = sorted(_current_staged_diff_paths(repo_root))
+    if indicator_path not in staged_paths_before:
+        return handoff, [], (
+            "indicator artifact is not staged before commit packet truth refresh: "
+            f"{indicator_path}"
+        )
+    staged_paths_for_block = sorted(_dedupe_repo_paths([*staged_paths_before, active_packet_path]))
+    evidence_handles = _commit_refresh_evidence_handles(handoff, indicator_path=indicator_path)
+    block = _render_commit_path_truth_refresh_block(
+        wave_id=wave_id,
+        active_packet_path=active_packet_path,
+        tracker_note_text=tracker_note_text,
+        staged_paths=staged_paths_for_block,
+        indicator_path=indicator_path,
+        commit_status=commit_status,
+        evidence_handles=evidence_handles,
+        pre_commit_receipt_path=str(handoff.get("pre_commit_receipt_path") or ""),
+    )
+    try:
+        refreshed_text = _replace_commit_path_truth_refresh_block(packet_text, block)
+    except ValueError as exc:
+        return handoff, [], str(exc)
+    packet_changed = refreshed_text != packet_text
+    if packet_changed:
+        packet_full.write_text(refreshed_text, encoding="utf-8")
+    try:
+        _run(["git", "add", "--", active_packet_path], cwd=repo_root)
+    except subprocess.CalledProcessError as exc:
+        return handoff, [], f"git add failed for refreshed packet {active_packet_path}: {exc.stderr.strip()}"
+
+    final_staged_paths = sorted(_current_staged_diff_paths(repo_root))
+    if not final_staged_paths:
+        return handoff, [], "staged file set empty after commit packet truth refresh"
+    if packet_changed and active_packet_path not in final_staged_paths:
+        return handoff, [], f"refreshed packet is not staged: {active_packet_path}"
+    if indicator_path not in final_staged_paths:
+        return handoff, [], f"indicator artifact is not staged after commit packet truth refresh: {indicator_path}"
+
+    refreshed_handoff, errors = _rebuild_handoff_after_packet_truth_refresh(
+        handoff,
+        repo_root=repo_root,
+        active_packet_path=active_packet_path,
+        staged_paths=final_staged_paths,
+        evidence_handles=evidence_handles,
+    )
+    if errors:
+        return handoff, [], "rebuilt commit handoff invalid after packet truth refresh: " + "; ".join(errors)
+    return refreshed_handoff, final_staged_paths, None
 
 
 def _emit_commit_ready_event(
@@ -3633,6 +3927,7 @@ def prepare_handoff_from_routing_record(
             pr_title=commit_message[:70],
             pr_body=None,
             tracker_note_text=None,
+            tracked_packet=_tracked_packet_path_from_record(record) or None,
             supervisor_lane=(embedded_copy or {}).get("supervisor_lane"),
             deferred_items=(embedded_copy or {}).get("deferred_items"),
             bridge_status=(embedded_copy or {}).get("bridge_status"),
@@ -3684,6 +3979,7 @@ def prepare_handoff_from_routing_record(
         pr_title=record.get("pr_title", f"chore: {summary}"[:70]),
         pr_body=record.get("pr_body", f"## Summary\n\n- {summary}"),
         tracker_note_text=tracker_note or None,
+        tracked_packet=_tracked_packet_path_from_record(record) or None,
         pre_commit_receipt_path=".agent_bus/meta/pre_commit_receipt.json",
         repo_root=repo_root,
         founder_override_token=founder_override_token or None,
@@ -3712,6 +4008,7 @@ def build_commit_handoff(
     pr_title: str | None = None,
     pr_body: str | None = None,
     tracker_note_text: str | None = None,
+    tracked_packet: str | None = None,
     supervisor_lane: str | None = None,
     deferred_items: list[str] | None = None,
     bridge_status: dict[str, Any] | None = None,
@@ -3862,6 +4159,8 @@ def build_commit_handoff(
         handoff["scope_items"] = scope_items
     if evidence_handles:
         handoff["evidence_handles"] = evidence_handles
+    if tracked_packet:
+        handoff["tracked_packet"] = _normalize_repo_relpath(tracked_packet)
     if isinstance(target_branch, str) and target_branch.strip():
         handoff["target_branch"] = target_branch.strip()
 
@@ -4017,6 +4316,22 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
                     errors.append("evidence_handles keys must be non-empty strings")
                 if not isinstance(value, str):
                     errors.append(f"evidence_handles['{key}'] must be a string")
+
+    tracked_packet = handoff.get("tracked_packet")
+    if tracked_packet is not None:
+        if not isinstance(tracked_packet, str) or not tracked_packet.strip():
+            errors.append("tracked_packet must be a non-empty string when provided")
+        else:
+            normalized_packet = _normalize_repo_relpath(tracked_packet)
+            if _is_absolute_untrusted_path(normalized_packet):
+                errors.append(f"Absolute path in tracked_packet: {tracked_packet}")
+            if _has_path_traversal(normalized_packet):
+                errors.append(f"Path traversal in tracked_packet: {tracked_packet}")
+            if not normalized_packet.startswith("reports/control_plane/") or not normalized_packet.endswith(".md"):
+                errors.append(
+                    "tracked_packet must name a reports/control_plane/*.md packet, "
+                    f"got: {tracked_packet}"
+                )
 
     # tracker_note_text must be non-empty string
     tnt = handoff.get("tracker_note_text", "")
@@ -4744,6 +5059,9 @@ def _run_commit_pipeline_impl(
     else:
         target_branch = f"{branch_prefix}/{wave_id}"
     base_branch = handoff["base_branch"]
+    # Continuation records bind to the caller-supplied handoff. Step 5c can
+    # rebuild the in-memory handoff for supervisor packaging, but a rerun still
+    # reloads the original --handoff payload.
     handoff_sha = _handoff_sha(handoff)
     result["handoff_sha"] = handoff_sha
     continuation_path = _continuation_record_path(repo_root, wave_id)
@@ -5165,6 +5483,28 @@ def _run_commit_pipeline_impl(
                 tasks_path.write_text(patched, encoding="utf-8")
                 _run(["git", "add", "--", "TASKS.md"], cwd=repo_root)
                 log("Step 5b: reconciled indicator_artifact_ref in TASKS.md")
+
+    # ── Step 5c: refresh packet truth + rebound handoff scope ────────
+    refreshed_handoff, refreshed_staged_paths, refresh_error = refresh_commit_path_packet_truth(
+        repo_root=repo_root,
+        handoff=handoff,
+        indicator_path=indicator_path,
+        commit_status="pre_commit_supervisor_pending",
+    )
+    if refresh_error:
+        return {
+            "status": "error",
+            "step": "refresh_commit_packet_truth",
+            "errors": [refresh_error],
+            "steps_completed": result["steps_completed"],
+        }
+    if refreshed_handoff is not handoff:
+        handoff = refreshed_handoff
+        result["refreshed_handoff_sha"] = _handoff_sha(handoff)
+        result["steps_completed"].append("refresh_commit_packet_truth")
+        log(f"Step 5c: refreshed commit packet truth for {handoff.get('tracked_packet')}")
+        if refreshed_staged_paths:
+            log(f"Step 5c: rebound staged handoff scope to {len(refreshed_staged_paths)} file(s)")
 
     # ── Steps 6-7 skip (--skip-supervisor) ──────────────────────────
     if skip_supervisor:

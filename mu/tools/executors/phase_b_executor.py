@@ -2138,6 +2138,67 @@ def _build_bridge_status(rounds: Any, *, reentry: bool = False) -> dict[str, Any
     return bridge_status
 
 
+def _documented_bridge_round_floor(repo_root: Path, wave_id: str, plan_path: str) -> int:
+    """Return the highest same-wave bridge remediation round recorded in repo truth."""
+    round_floor = 0
+    if plan_path and not plan_path.startswith("<"):
+        packet_path = repo_root / plan_path
+        try:
+            packet_text = packet_path.read_text(encoding="utf-8")
+        except OSError:
+            packet_text = ""
+        for match in re.finditer(
+            r"\bBridge\s+Round\s+(\d+)\s+Remediation\b",
+            packet_text,
+            flags=re.IGNORECASE,
+        ):
+            round_floor = max(round_floor, int(match.group(1)))
+
+    wave_date_match = re.search(r"(\d{4}-\d{2}-\d{2})$", str(wave_id or ""))
+    if wave_date_match:
+        wave_date = wave_date_match.group(1)
+        try:
+            tasks_text = (repo_root / "TASKS.md").read_text(encoding="utf-8")
+        except OSError:
+            tasks_text = ""
+        wave_index = tasks_text.find(str(wave_id or ""))
+        if wave_index != -1:
+            entry_start = tasks_text.rfind("\n  - Tracker sync note", 0, wave_index)
+            if entry_start == -1:
+                entry_start = tasks_text.rfind("\n- **[", 0, wave_index)
+            entry_start = 0 if entry_start == -1 else entry_start + 1
+            entry_end_candidates = [
+                pos for marker in ("\n  - Tracker sync note", "\n- **[", "\n## ")
+                if (pos := tasks_text.find(marker, wave_index + len(str(wave_id or "")))) != -1
+            ]
+            entry_end = min(entry_end_candidates) if entry_end_candidates else len(tasks_text)
+            tasks_window = tasks_text[entry_start:entry_end]
+            for match in re.finditer(
+                rf"\b{re.escape(wave_date)}\s+bridge\s+round\s+(\d+)\s+remediation\b",
+                tasks_window,
+                flags=re.IGNORECASE,
+            ):
+                round_floor = max(round_floor, int(match.group(1)))
+    return round_floor
+
+
+def _build_effective_bridge_status(
+    repo_root: Path,
+    wave_id: str,
+    plan_path: str,
+    rounds: Any,
+    *,
+    reentry: bool = False,
+) -> dict[str, Any]:
+    """Render bridge status without underreporting same-wave documented rounds."""
+    try:
+        executor_rounds = max(int(rounds or 0), 0)
+    except (TypeError, ValueError):
+        executor_rounds = 0
+    documented_rounds = _documented_bridge_round_floor(repo_root, wave_id, plan_path)
+    return _build_bridge_status(max(executor_rounds, documented_rounds), reentry=reentry)
+
+
 def _collect_changed_files(
     repo_root: Path,
     allowed_files: set[str] | None = None,
@@ -2502,6 +2563,7 @@ def prepare_commit_handoff(
     pr_title: str = "",
     pr_body: str = "",
     pre_commit_receipt_path: str = ".agent_bus/meta/pre_commit_receipt.json",
+    tracked_packet: str | None = None,
     supervisor_lane: str | None = None,
     deferred_items: list[str] | None = None,
     bridge_status: dict[str, Any] | None = None,
@@ -2539,6 +2601,7 @@ def prepare_commit_handoff(
         pr_title=pr_title,
         pr_body=pr_body,
         tracker_note_text=tracker_note_text or None,
+        tracked_packet=tracked_packet,
         supervisor_lane=supervisor_lane,
         deferred_items=deferred_items,
         bridge_status=bridge_status,
@@ -4077,7 +4140,10 @@ def run_phase_b(
             "scope_items": [plan_path],
             "fixes_implemented": ["Phase B implementation per locked plan (resumed from NEEDS_PHASE_B)"],
             "deferred_items": deferred_items,
-            "bridge_status": _build_bridge_status(
+            "bridge_status": _build_effective_bridge_status(
+                repo_root,
+                wave_id,
+                plan_path,
                 result.get("bridge_rounds", 0),
                 reentry=True,
             ),
@@ -4238,7 +4304,12 @@ def run_phase_b(
             "scope_items": [plan_path],
             "fixes_implemented": ["Phase B implementation per locked plan"],
             "deferred_items": deferred_items,
-            "bridge_status": _build_bridge_status(result.get("bridge_rounds", 0)),
+            "bridge_status": _build_effective_bridge_status(
+                repo_root,
+                wave_id,
+                plan_path,
+                result.get("bridge_rounds", 0),
+            ),
             "evidence_handles": _collect_supervisor_evidence_handles(repo_root, wave_id),
             "blocker_report_paths": blocker_paths,
             "current_judgment": "COMMIT_GO",
@@ -4870,7 +4941,10 @@ def run_phase_b(
             changed_files,
             deferred_packet_path,
         )
-        supervisor_package["bridge_status"] = _build_bridge_status(
+        supervisor_package["bridge_status"] = _build_effective_bridge_status(
+            repo_root,
+            wave_id,
+            plan_path,
             result.get("bridge_rounds", 0),
             reentry=True,
         )
@@ -5079,7 +5153,10 @@ def run_phase_b(
     handoff_deferred_items = _collect_supervisor_deferred_items(
         wave_owned_files, deferred_packet_path,
     )
-    handoff_bridge_status = _build_bridge_status(
+    handoff_bridge_status = _build_effective_bridge_status(
+        repo_root,
+        wave_id,
+        plan_path,
         result.get("bridge_rounds", 0),
         reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
     )
@@ -5136,6 +5213,7 @@ def run_phase_b(
         commit_message=f"feat: Phase B implementation for {wave_id}\n\nCo-Authored-By: Codex GPT-5.5 xhigh <noreply@openai.com>",
         pr_title=f"feat: Phase B - {wave_id}",
         pr_body=f"## Summary\nPhase B implementation per locked plan at {plan_path}",
+        tracked_packet=plan_path if not plan_path.startswith("<") else None,
         supervisor_lane="hooks/agents/bridge control-surface",
         deferred_items=handoff_deferred_items,
         bridge_status=handoff_bridge_status,

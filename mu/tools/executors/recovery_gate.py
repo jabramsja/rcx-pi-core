@@ -437,6 +437,17 @@ def _extract_result_candidates(result: dict[str, Any]) -> list[dict[str, Any]]:
     return candidates
 
 
+def _merge_result_candidates(result: dict[str, Any]) -> dict[str, Any]:
+    """Merge outer executor wrapper state with embedded structured payloads."""
+    merged: dict[str, Any] = {}
+    for candidate in _extract_result_candidates(result):
+        for key, value in candidate.items():
+            if value in (None, ""):
+                continue
+            merged[key] = value
+    return merged
+
+
 def _effective_result_step(result: dict[str, Any]) -> str:
     for candidate in _extract_result_candidates(result):
         step = str(candidate.get("step", "")).strip()
@@ -482,13 +493,33 @@ def _looks_like_feature_branch_mismatch(result: dict[str, Any]) -> bool:
     return "ensure_feature_branch" in steps or not steps
 
 def _looks_like_post_reentry_needs_phase_b(result: dict[str, Any]) -> bool:
-    reason_lower = _summarize_result_reason(result).lower()
+    candidates = _extract_result_candidates(result)
+    reason_lower = " ".join(
+        part
+        for part in (
+            _summarize_result_reason(result),
+            *(_summarize_json_value(candidate) for candidate in candidates),
+        )
+        if part
+    ).lower()
+    candidate_steps = {
+        str(candidate.get("step", "") or "").strip().lower()
+        for candidate in candidates
+        if str(candidate.get("step", "") or "").strip()
+    }
+    candidate_statuses = {
+        str(candidate.get("status", "") or "").strip().lower()
+        for candidate in candidates
+        if str(candidate.get("status", "") or "").strip()
+    }
     if "supervisor returned needs_phase_b" not in reason_lower:
-        return False
+        return (
+            "needs_phase_b" in candidate_statuses
+            and "post_reentry_supervisor" in candidate_steps
+        )
     if "after reentry convergence" in reason_lower:
         return True
-    step = _effective_result_step(result).lower()
-    return step == "post_reentry_supervisor"
+    return "post_reentry_supervisor" in candidate_steps
 
 
 def _looks_like_upstream_connectivity_failure(detail: str) -> bool:
@@ -1145,7 +1176,8 @@ def fix_feature_branch_mismatch(repo_root: Path, **kw: Any) -> dict[str, Any]:
 def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]:
     """Resume the deterministic Phase B re-entry path after a post-reentry veto."""
     result = kw.get("result", {})
-    plan_path = str(result.get("plan_path") or "").strip()
+    result_payload = _merge_result_candidates(result)
+    plan_path = _extract_plan_path(result_payload)
     if not plan_path:
         return _fix_result(
             False,
@@ -1153,15 +1185,16 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
             "post-reentry NEEDS_PHASE_B result missing plan_path",
         )
 
-    wave_hint = str(result.get("wave_id") or Path(plan_path).stem or "wave-unknown").strip()
-    bridge_rounds_raw = result.get("bridge_rounds", 0)
+    wave_hint = str(result_payload.get("wave_id") or Path(plan_path).stem or "wave-unknown").strip()
+    bridge_rounds_raw = result_payload.get("bridge_rounds", 0)
     try:
         bridge_rounds = int(bridge_rounds_raw or 0)
     except (TypeError, ValueError):
         bridge_rounds = 0
 
     findings = str(
-        result.get("pre_commit_summary")
+        result_payload.get("pre_commit_summary")
+        or _summarize_result_reason(result_payload)
         or _summarize_result_reason(result)
         or "Fix required"
     ).strip()
@@ -1173,8 +1206,8 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
         "bridge_rounds": bridge_rounds,
         "reentry_findings": findings,
     }
-    scope_files = _post_reentry_scope_files(repo_root, result, plan_path)
-    scope_fingerprint = str(result.get("bridge_scope_fingerprint") or "").strip()
+    scope_files = _post_reentry_scope_files(repo_root, result_payload, plan_path)
+    scope_fingerprint = str(result_payload.get("bridge_scope_fingerprint") or "").strip()
     if not scope_fingerprint:
         scope_fingerprint = _bridge_scope_fingerprint_for_files(repo_root, scope_files)
     resume_state["bridge_scope_fingerprint"] = scope_fingerprint
@@ -1182,19 +1215,19 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
         resume_state["changed_files"] = scope_files
 
     for list_key in ("implementer_changed", "executor_created", "baseline_wave_files"):
-        list_value = _coerce_string_list(result.get(list_key))
+        list_value = _coerce_string_list(result_payload.get(list_key))
         if list_value:
             resume_state[list_key] = list_value
     if scope_files and not resume_state.get("baseline_wave_files"):
         resume_state["baseline_wave_files"] = scope_files
-    all_non_blocking = result.get("all_non_blocking")
+    all_non_blocking = result_payload.get("all_non_blocking")
     if isinstance(all_non_blocking, list):
         resume_state["all_non_blocking"] = all_non_blocking
-    finding_history = result.get("finding_history")
+    finding_history = result_payload.get("finding_history")
     if isinstance(finding_history, dict):
         resume_state["finding_history"] = finding_history
 
-    deferred_packet_path = str(result.get("deferred_packet_path") or "").strip()
+    deferred_packet_path = str(result_payload.get("deferred_packet_path") or "").strip()
     if deferred_packet_path:
         resume_state["deferred_packet_path"] = deferred_packet_path
 
