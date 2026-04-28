@@ -368,6 +368,99 @@ def test_session_start_hook_valid_sessionstart_payload_is_accepted(tmp_path, mon
     assert result.status == "OK"
 
 
+def _write_post_tool_use_hook(
+    codex_home,
+    repo_root,
+    *,
+    matcher="Bash|Read|Grep|Edit|Write|MultiEdit",
+    omit_learning_md=False,
+):
+    hook_dir = codex_home / "hooks"
+    hook_dir.mkdir(parents=True)
+    hook_path = hook_dir / "post_tool_use_rcx_verify.py"
+    learning_md_line = "" if omit_learning_md else 'LEARNING_MD_REL = (".claude", "rules", "learning.md")\n'
+    hook_path.write_text(
+        "#!/usr/bin/env python3\n"
+        f"TARGET_REPO_RAW = {str(repo_root)!r}\n"
+        'LEARNED_PATTERNS_REL = (".agent_bus", "recovery", "learned_patterns.json")\n'
+        f"{learning_md_line}"
+        'MILESTONE_CONTEXT = "Extended tool-use reminder: after sustained shell exploration"\n'
+        'INSPECTION_CONTEXT = "Exploration reminder: search and read passes narrow candidates"\n'
+        'FAILURE_CONTEXT = "Failure capture: a non-zero tool result was fingerprinted"\n'
+        "def main():\n"
+        "    print('PostToolUse')\n"
+        "    return 0\n"
+        "if __name__ == '__main__':\n"
+        "    try:\n"
+        "        raise SystemExit(main())\n"
+        "    except Exception:\n"
+        "        raise SystemExit(0)\n",
+        encoding="utf-8",
+    )
+    (codex_home / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PostToolUse": [
+                        {
+                            "matcher": matcher,
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": f"/usr/bin/python3 {hook_path}",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return hook_path
+
+
+def test_post_tool_use_hook_accepts_matcher_and_try_wrapped_entrypoint(tmp_path, monkeypatch):
+    codex_home = tmp_path / ".codex"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_post_tool_use_hook(codex_home, repo_root)
+
+    monkeypatch.setattr(startup_mod, "_repo_anchor_candidates", lambda: [repo_root])
+    result = startup_mod._check_post_tool_use_hook(codex_home)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert "PostToolUse verification hook" in result.detail
+
+
+def test_post_tool_use_hook_missing_matcher_tools_fails(tmp_path, monkeypatch):
+    codex_home = tmp_path / ".codex"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_post_tool_use_hook(codex_home, repo_root, matcher="Bash|Read")
+
+    monkeypatch.setattr(startup_mod, "_repo_anchor_candidates", lambda: [repo_root])
+    result = startup_mod._check_post_tool_use_hook(codex_home)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "FAIL"
+    assert "matcher missing tools" in result.detail
+    assert "MultiEdit" in result.detail
+
+
+def test_post_tool_use_hook_requires_shared_learning_canaries(tmp_path, monkeypatch):
+    codex_home = tmp_path / ".codex"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_post_tool_use_hook(codex_home, repo_root, omit_learning_md=True)
+
+    monkeypatch.setattr(startup_mod, "_repo_anchor_candidates", lambda: [repo_root])
+    result = startup_mod._check_post_tool_use_hook(codex_home)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "FAIL"
+    assert "LEARNING_MD_REL" in result.detail
+
+
 def test_session_start_hook_requires_target_repo_anchor_for_linked_worktree(tmp_path, monkeypatch):
     codex_home = tmp_path / ".codex"
     hook_dir = codex_home / "hooks"

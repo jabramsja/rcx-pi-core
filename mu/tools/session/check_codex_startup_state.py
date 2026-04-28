@@ -53,6 +53,18 @@ PREFLIGHT_WRAPPER_REQUIRED_CANARIES = (
     "Codex pager:",
     "rev-parse --is-inside-work-tree",
 )
+POST_TOOL_USE_REQUIRED_TOOLS = frozenset(
+    {"Bash", "Read", "Grep", "Edit", "Write", "MultiEdit"}
+)
+POST_TOOL_USE_HOOK_REQUIRED_CANARIES = (
+    "TARGET_REPO_RAW",
+    "LEARNED_PATTERNS_REL",
+    "LEARNING_MD_REL",
+    "PostToolUse",
+    "Extended tool-use reminder",
+    "Exploration reminder",
+    "Failure capture",
+)
 ALLOWED_SESSION_START_PRE_EMIT_ENV_VARS = frozenset({"CODEX_RCX_PREFLIGHT_DISABLE"})
 
 PROMPT_HOOK_REQUIRED_CANARIES = (
@@ -1995,6 +2007,137 @@ def _check_session_start_hook(codex_home: Path) -> CheckResult:
     )
 
 
+def _post_tool_use_matcher_tools(matcher: str) -> set[str]:
+    if matcher.strip() == "*":
+        return set(POST_TOOL_USE_REQUIRED_TOOLS)
+    return {part for part in re.split(r"[|\s,]+", matcher) if part}
+
+
+def _check_post_tool_use_hook(codex_home: Path) -> CheckResult:
+    hook_path = codex_home / "hooks" / "post_tool_use_rcx_verify.py"
+    text = _read_text(hook_path)
+    if text is None:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            f"missing: {hook_path}",
+        )
+
+    missing_canaries = [
+        needle for needle in POST_TOOL_USE_HOOK_REQUIRED_CANARIES if needle not in text
+    ]
+    if missing_canaries:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "missing canaries: " + ", ".join(missing_canaries),
+        )
+
+    literals = _python_string_literals(text)
+    if literals is None:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "hook source is not valid Python",
+        )
+
+    if _module_has_unsafe_top_level_execution(text):
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "unsafe top-level execution outside main guard",
+        )
+
+    if "raise SystemExit(main())" not in text:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "missing main guard SystemExit handoff",
+        )
+
+    target_repo = _session_start_target_repo(text)
+    if target_repo is None:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "missing TARGET_REPO_RAW literal",
+        )
+    expected_repos = _repo_anchor_candidates()
+    if not any(_paths_resolve_equal(target_repo, expected_repo) for expected_repo in expected_repos):
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            f"{target_repo} not in {[str(path) for path in expected_repos]}",
+        )
+
+    hooks_json_path = codex_home / "hooks.json"
+    hooks_text = _read_text(hooks_json_path)
+    if hooks_text is None:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            f"missing hooks.json: {hooks_json_path}",
+        )
+    try:
+        hooks_payload = json.loads(hooks_text)
+    except json.JSONDecodeError as exc:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            f"hooks.json invalid JSON: {exc}",
+        )
+
+    post_tool_entries = (
+        hooks_payload.get("hooks", {}).get("PostToolUse")
+        if isinstance(hooks_payload, dict)
+        else None
+    )
+    if not isinstance(post_tool_entries, list) or not post_tool_entries:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "hooks.json missing PostToolUse entries",
+        )
+
+    covered_tools: set[str] = set()
+    matching_command = False
+    for entry in post_tool_entries:
+        if not isinstance(entry, dict):
+            continue
+        matcher = entry.get("matcher")
+        if isinstance(matcher, str):
+            covered_tools.update(_post_tool_use_matcher_tools(matcher))
+        hooks = entry.get("hooks")
+        if not isinstance(hooks, list):
+            continue
+        for hook in hooks:
+            if not isinstance(hook, dict):
+                continue
+            command = hook.get("command")
+            if isinstance(command, str) and str(hook_path) in command:
+                matching_command = True
+
+    missing_tools = sorted(POST_TOOL_USE_REQUIRED_TOOLS - covered_tools)
+    if missing_tools:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "hooks.json matcher missing tools: " + ", ".join(missing_tools),
+        )
+    if not matching_command:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            f"hooks.json PostToolUse does not call {hook_path}",
+        )
+
+    return CheckResult(
+        "post_tool_use_hook",
+        "OK",
+        "PostToolUse verification hook covers shared-learning and inspection reminders",
+    )
+
+
 def _check_prompt_hook(codex_home: Path) -> CheckResult:
     hook_path = codex_home / "hooks" / "user_prompt_submit_rcx_identity.py"
     text = _read_text(hook_path)
@@ -2803,6 +2946,7 @@ def gather_results(repo_root: Path, codex_home: Path) -> tuple[list[CheckResult]
             _audit_binary_guard(codex_home, repo_root),
             _check_preflight_wrapper(codex_home, repo_root),
             _check_session_start_hook(codex_home),
+            _check_post_tool_use_hook(codex_home),
             _check_prompt_hook(codex_home),
             _check_default_rules(codex_home),
             _check_models_cache(codex_home),
