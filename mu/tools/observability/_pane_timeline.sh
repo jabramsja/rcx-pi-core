@@ -573,11 +573,13 @@ PY
 }
 
 print_observability_status() {
+  local autoping_latest="" pager_latest=""
   autoping_status="$(render_autoping_status)"
   if [ -n "$autoping_status" ]; then
     while IFS=$'\t' read -r tag value; do
       case "$tag" in
         AUTOPING)
+          autoping_latest="$value"
           echo -e "  ${DIM}Autoping:${RESET} $value"
           ;;
         AUTOPING_DETAIL)
@@ -606,6 +608,7 @@ print_observability_status() {
           echo -e "  ${DIM}Pager:${RESET} $value"
           ;;
         PAGER_WAKE)
+          pager_latest="$value"
           echo -e "  ${DIM}Last pager wake:${RESET} $value"
           ;;
         PAGER_DETAIL)
@@ -640,6 +643,12 @@ print_observability_status() {
           ;;
       esac
     done <<< "$pager_status"
+  fi
+  if [ -n "$autoping_latest" ] || [ -n "$pager_latest" ]; then
+    echo ""
+    echo -e "  ${BOLD}Wake status pinned:${RESET}"
+    [ -n "$autoping_latest" ] && echo -e "  ${DIM}Autoping latest:${RESET} $autoping_latest"
+    [ -n "$pager_latest" ] && echo -e "  ${DIM}Pager latest:${RESET} $pager_latest"
   fi
 }
 
@@ -799,13 +808,13 @@ PY
     echo -e "  ${DIM}${now}${RESET}  ${DIM}← idle${RESET}"
   fi
   echo ""
-  print_observability_status
 
   # Helpful reference
-  echo ""
   echo -e "${DIM}Typical durations:${RESET}"
   echo -e "${DIM}  ${IMPLEMENTER_SHORT} impl: 5-15m | Agents: 3-5m | ${REVIEWER_SHORT} review: 10-20m${RESET}"
   echo -e "${DIM}  NO_GO is normal — usually 2-3 rounds to converge${RESET}"
+  echo ""
+  print_observability_status
 
   } > "$TMPOUT" 2>/dev/null
 
@@ -817,7 +826,7 @@ PY
     LAST_HASH="$NEW_HASH"
   else
     # Data unchanged — just update timestamp so user knows it's alive
-    tput cup 0 0 2>/dev/null
+    printf '\033[H\033[2K'
     echo -e "${BOLD}Pane 4: session timeline${RESET}  $(date '+%H:%M:%S')"
   fi
 
