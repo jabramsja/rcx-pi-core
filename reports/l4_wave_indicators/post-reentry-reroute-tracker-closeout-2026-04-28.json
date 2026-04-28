@@ -1,24 +1,24 @@
 {
   "wave_id": "post-reentry-reroute-tracker-closeout-2026-04-28",
-  "repeat_run_speedup_ratio": 1.00354,
+  "repeat_run_speedup_ratio": 1.252526,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.444033,
+  "step_growth_slope": 0.436628,
   "repeat_run_raw_seconds": [
-    0.445605,
-    0.444033
+    0.546888,
+    0.436628
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.445605
+      "elapsed_seconds": 0.546888
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.889638
+      "elapsed_seconds": 0.983516
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-28T16:52:50Z",
+  "collection_timestamp_utc": "2026-04-28T17:10:03Z",
   "collector_version": "2.2.0"
 }
