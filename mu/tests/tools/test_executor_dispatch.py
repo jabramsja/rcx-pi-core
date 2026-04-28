@@ -8788,8 +8788,9 @@ class TestCommitExecutorRoutingRecordAcceptance:
 class TestDispatcherPlanlessPhaseB:
     """Dispatcher falls back to planless mode when no tracked_packet in candidates."""
 
-    def test_phase_b_planless_passes_routing_record(self, tmp_path):
+    def test_phase_b_planless_passes_routing_record(self, tmp_path, monkeypatch):
         """When no tracked_packet in candidates, dispatcher passes --routing-record."""
+        monkeypatch.delenv(dispatch_mod.PHASE_B_RECOVERY_PLAN_ENV, raising=False)
         record = {
             "decision": "ROUTE_PHASE_B",
             "summary": "test",
