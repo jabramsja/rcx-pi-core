@@ -416,6 +416,82 @@ def _packet_declares_same_wave_id(packet_text: str, normalized_wave_id: str) -> 
     return False
 
 
+_CONTROL_SURFACE_TOKEN_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])control-surface(?![A-Za-z0-9_-])"
+)
+_NEGATED_CONTROL_SURFACE_RE = re.compile(
+    r"(?i)\b(?:anti|no|non|not|without)[-\s]+control-surface\b"
+)
+_PACKET_LANE_RE = re.compile(
+    r"(?i)^\s*(?:[-*]\s*)?(?:\*\*)?Lane(?:\*\*)?\s*:\s*(.+?)\s*$"
+)
+_PACKET_AUTHORIZATION_RE = re.compile(
+    r"(?i)^\s*(?:[-*]\s*)?(?:\*\*)?(?:Founder authorization|Authorization|Authority)"
+    r"(?:\*\*)?\s*:\s*(.+?)\s*$"
+)
+_NEGATED_AUTHORIZATION_RE = re.compile(
+    r"(?i)\b(?:authorization\s+(?:is\s+)?(?:denied|not|rejected|revoked)|"
+    r"denied|not\s+(?:authorized|approved|granted)|no\s+(?:standing\s+pipeline-bug-fix\s+)?"
+    r"authorization|rejected|revoked|without\s+authorization)\b"
+)
+_STANDING_PIPELINE_BUG_FIX_AUTHORIZATION_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])standing pipeline-bug-fix authorization(?![A-Za-z0-9_-])"
+)
+_AUTHORIZED_CONTROL_SURFACE_L4_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])authorized\s+control-surface\s+l4[_ -]?enabler"
+    r"(?![A-Za-z0-9_-])"
+)
+
+
+def _packet_declares_positive_control_surface_lane(packet_text: str) -> bool:
+    for line in packet_text.splitlines():
+        lane_match = _PACKET_LANE_RE.match(line)
+        if not lane_match:
+            continue
+        lane = lane_match.group(1)
+        if _NEGATED_CONTROL_SURFACE_RE.search(lane):
+            continue
+        if _CONTROL_SURFACE_TOKEN_RE.search(lane):
+            return True
+    return False
+
+
+def _packet_contains_negative_authorization(packet_text: str) -> bool:
+    return any(_NEGATED_AUTHORIZATION_RE.search(line) for line in packet_text.splitlines())
+
+
+def _packet_declares_explicit_control_surface_l4_authorization(packet_text: str) -> bool:
+    for line in packet_text.splitlines():
+        if _NEGATED_AUTHORIZATION_RE.search(line):
+            continue
+        if _AUTHORIZED_CONTROL_SURFACE_L4_RE.search(line):
+            return True
+    return False
+
+
+def _packet_declares_positive_standing_authorization(packet_text: str) -> bool:
+    for line in packet_text.splitlines():
+        if _NEGATED_AUTHORIZATION_RE.search(line):
+            continue
+        auth_match = _PACKET_AUTHORIZATION_RE.match(line)
+        if not auth_match:
+            continue
+        if _STANDING_PIPELINE_BUG_FIX_AUTHORIZATION_RE.search(auth_match.group(1)):
+            return True
+    return False
+
+
+def _packet_authorizes_control_surface_l4(packet_text: str) -> bool:
+    if _packet_contains_negative_authorization(packet_text):
+        return False
+    if _packet_declares_explicit_control_surface_l4_authorization(packet_text):
+        return True
+    return (
+        _packet_declares_positive_control_surface_lane(packet_text)
+        and _packet_declares_positive_standing_authorization(packet_text)
+    )
+
+
 def _control_surface_packet_authorized(
     record: dict[str, Any],
     repo_root: Path,
@@ -446,12 +522,7 @@ def _control_surface_packet_authorized(
             continue
         if not _packet_declares_same_wave_id(packet_text, normalized_wave_id):
             continue
-        if re.search(r"(?im)^\s*(?:\*\*)?Lane(?:\*\*)?:\s*.*control-surface", packet_text):
-            return True
-        packet_text_lower = packet_text.lower()
-        if "authorized control-surface l4_enabler" in packet_text_lower:
-            return True
-        if "standing pipeline-bug-fix authorization" in packet_text_lower:
+        if _packet_authorizes_control_surface_l4(packet_text):
             return True
     return False
 
