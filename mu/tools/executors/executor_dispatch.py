@@ -327,6 +327,78 @@ def _routing_record_tracked_packet(record: dict[str, Any]) -> str:
     return ""
 
 
+def _phase_b_plan_wave_id(repo_root: Path, plan_path: str) -> str:
+    """Resolve the wave id Phase B will use for an explicit plan path."""
+    clean_path = str(plan_path or "").strip()
+    if not clean_path:
+        return ""
+    fallback = normalize_wave_id(Path(clean_path).stem)
+    candidate = Path(clean_path)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        return fallback
+    try:
+        full_path = (repo_root / clean_path).resolve()
+        if not full_path.is_relative_to(repo_root.resolve()):
+            return fallback
+        content = full_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return fallback
+    for raw_line in content.splitlines():
+        clean = raw_line.strip()
+        lower = clean.lower()
+        if lower.startswith("wave id:") or lower.startswith("wave_id:"):
+            value = clean.split(":", 1)[1].strip()
+            if value:
+                return normalize_wave_id(value)
+    return fallback
+
+
+def _surface_record_for_chain(
+    args: argparse.Namespace,
+    repo_root: Path,
+) -> dict[str, Any]:
+    """Build the identity record used for surface retry handoff validation."""
+    decision = _surface_decision(args)
+    canonical_task_id = _canonicalize_surface_task_id(getattr(args, "task_id", ""))
+    record: dict[str, Any] = {
+        "decision": decision,
+        "wave_name": _surface_wave_id(args, repo_root),
+        "task_id": canonical_task_id,
+    }
+    if args.surface != "phase-b":
+        return record
+
+    routing_payload = _load_routing_record_payload(
+        path_value=args.routing_record_path,
+        json_value=args.routing_record_json,
+    )
+    if routing_payload:
+        try:
+            parsed = json.loads(routing_payload)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            record.update(parsed)
+            record["decision"] = str(record.get("decision") or decision)
+            if canonical_task_id:
+                record["task_id"] = canonical_task_id
+
+    plan_path = (
+        getattr(args, "plan", None)
+        or _surface_phase_b_plan_from_routing_payload(routing_payload)
+        or os.environ.get(PHASE_B_RECOVERY_PLAN_ENV, "").strip()
+    )
+    if plan_path:
+        if not _routing_record_tracked_packet(record):
+            record["next_candidates"] = [{"tracked_packet": plan_path}]
+        wave_name = str(record.get("wave_name") or record.get("wave_id") or "").strip()
+        if not wave_name or normalize_wave_id(wave_name) == "wave-unknown":
+            plan_wave_id = _phase_b_plan_wave_id(repo_root, plan_path)
+            if plan_wave_id:
+                record["wave_name"] = plan_wave_id
+    return record
+
+
 def build_surface_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Modular control-plane entrypoint for executors and supervisors",
@@ -570,13 +642,13 @@ def run_recoverable_surface_command(
         "commit": "commit_executor",
     }[args.surface]
     decision = _surface_decision(args)
-    wave_id = _surface_wave_id(args, repo_root)
+    surface_record = _surface_record_for_chain(args, repo_root)
+    wave_id = normalize_wave_id(
+        str(surface_record.get("wave_name") or surface_record.get("wave_id") or "")
+    )
+    if not wave_id:
+        wave_id = _surface_wave_id(args, repo_root)
     original_timeouts = None
-    surface_record = {
-        "decision": decision,
-        "wave_name": wave_id,
-        "task_id": _canonicalize_surface_task_id(getattr(args, "task_id", "")),
-    }
     result: dict[str, Any] | None = None
 
     try:
@@ -595,6 +667,11 @@ def run_recoverable_surface_command(
                     return 0
                 result = retried
             else:
+                surface_record = _surface_record_for_chain(args, repo_root)
+                decision = str(surface_record.get("decision") or decision)
+                wave_id = normalize_wave_id(
+                    str(surface_record.get("wave_name") or surface_record.get("wave_id") or wave_id)
+                )
                 cmd = build_surface_command(args)
                 _default_timeout = DEFAULT_EXECUTOR_CONFIG["timeouts"].get(executor_name, 600)
                 timeout = config.get("timeouts", {}).get(executor_name, _default_timeout)
@@ -736,6 +813,21 @@ def _validate_phase_b_handoff_identity(handoff_path: Path, record: dict[str, Any
         return False, (
             f"Phase B handoff task_id mismatch: expected {expected_task_id}, got {actual_task_id}"
         )
+
+    expected_packet = _routing_record_tracked_packet(record)
+    if expected_packet:
+        scope_items = handoff.get("scope_items")
+        actual_packet = handoff.get("tracked_packet")
+        if not actual_packet and isinstance(scope_items, list):
+            for item in scope_items:
+                if isinstance(item, str) and item.strip() == expected_packet:
+                    actual_packet = item.strip()
+                    break
+        if actual_packet != expected_packet:
+            return False, (
+                "Phase B handoff tracked_packet mismatch: "
+                f"expected {expected_packet}, got {actual_packet}"
+            )
 
     return True, "ok"
 
@@ -1147,6 +1239,29 @@ def _continue_successful_executor_chain(
                     "phase_a_executor" if origin == "phase_a_executor" else None
                 ),
             }
+
+        if record and (
+            record.get("wave_name")
+            or record.get("wave_id")
+            or record.get("task_id")
+            or _routing_record_tracked_packet(record)
+        ):
+            valid_handoff, handoff_msg = _validate_phase_b_handoff_identity(
+                handoff_path, record
+            )
+            if not valid_handoff:
+                origin = chain_origin or "phase_b_executor"
+                return {
+                    "status": "error",
+                    "decision": "COMMIT_GO",
+                    "executor": "commit_executor",
+                    "message": f"Phase B handoff validation failed: {handoff_msg}",
+                    "chained_from": (
+                        "phase_a_executor → phase_b_executor"
+                        if origin == "phase_a_executor"
+                        else "phase_b_executor"
+                    ),
+                }
 
         if verbose:
             print("[dispatch] Phase B converged → chaining to commit executor")

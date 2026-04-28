@@ -420,6 +420,290 @@ class TestReceiptChainEndToEnd:
             f"Step 7 should succeed reading supervisor receipt. Got: {result}"
         )
 
+    def test_commit_packet_truth_refresh_rebinds_packet_and_handoff_before_supervisor(self, tmp_path):
+        from collections import namedtuple
+        import types
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "packet-truth-wave"
+        packet_path = "reports/control_plane/packet_truth_wave.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Packet Truth Wave\n\n"
+            "Status: Phase B ready\n"
+            "Wave ID: packet-truth-wave\n"
+            "Wave class: L4_ENABLER\n"
+            "Target gate: G8\n"
+            "Lane: control-surface\n",
+            encoding="utf-8",
+        )
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(
+            json.dumps(
+                {
+                    "decision": "COMMIT_GO",
+                    "staged_sha": "fresh_sha_from_step6",
+                    "timestamp_utc": "2026-03-24T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        captured_package = {}
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+
+        def mock_supervisor(package_path, *a, **kw):
+            captured_package.update(json.loads(Path(package_path).read_text(encoding="utf-8")))
+            return SupervisorResult(
+                decision="COMMIT_GO",
+                summary="test",
+                receipt_path=sup_receipt_path,
+            )
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+            evidence_handles={"phase_b_receipt": ".agent_bus/meta/pre_commit_receipt.json"},
+        )
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = mock_supervisor
+        mock_client.MetaBridgeClientError = Exception
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_run_post_commit_pipeline",
+            side_effect=lambda **kwargs: {
+                "status": "success",
+                "steps_completed": kwargs["result"]["steps_completed"],
+            },
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "success", f"Unexpected commit pipeline result: {result}"
+        assert "refresh_commit_packet_truth" in result["steps_completed"]
+        changed_files = set(captured_package["changed_files"])
+        assert "TASKS.md" in changed_files
+        assert packet_path in changed_files
+        assert f"reports/l4_wave_indicators/{wave_id}.json" in changed_files
+        assert packet_path in captured_package["scope_items"]
+        assert f"reports/l4_wave_indicators/{wave_id}.json" in captured_package["scope_items"]
+        assert captured_package["evidence_handles"]["indicator"] == (
+            f"reports/l4_wave_indicators/{wave_id}.json"
+        )
+        packet_text = packet_file.read_text(encoding="utf-8")
+        assert "## Commit Path Truth Refresh" in packet_text
+        assert f"- Active packet: `{packet_path}`" in packet_text
+        assert "- Commit status: `pre_commit_supervisor_pending`" in packet_text
+        assert f"  - `reports/l4_wave_indicators/{wave_id}.json`" in packet_text
+        assert "  - `TASKS.md`" in packet_text
+
+    def test_commit_packet_truth_refresh_keeps_continuation_bound_to_original_handoff(self, tmp_path):
+        from collections import namedtuple
+        import subprocess
+        import types
+
+        repo = _setup_repo(tmp_path)
+        subprocess.run(
+            ["git", "add", "--", "mu/tools/metrics/collect_l4_wave_indicators.py"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "test fixture indicator collector"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        wave_id = "packet-continuation-wave"
+        packet_path = "reports/control_plane/packet_continuation_wave.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Packet Continuation Wave\n\n"
+            "Status: Phase B ready\n"
+            "Wave ID: packet-continuation-wave\n"
+            "Wave class: L4_ENABLER\n"
+            "Target gate: G8\n",
+            encoding="utf-8",
+        )
+        (repo / "file.py").write_text("# changed for continuation binding\n", encoding="utf-8")
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(
+            json.dumps(
+                {
+                    "decision": "COMMIT_GO",
+                    "staged_sha": "fresh_sha_from_step6",
+                    "timestamp_utc": "2026-03-24T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = lambda *a, **kw: SupervisorResult(
+            decision="COMMIT_GO",
+            summary="test",
+            receipt_path=sup_receipt_path,
+        )
+        mock_client.MetaBridgeClientError = Exception
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+        original_handoff_sha = commit_mod._handoff_sha(handoff)  # ANTICHEAT_OK: locks continuation key identity
+        post_commit_results = []
+
+        def fake_post_commit_pipeline(**kwargs):
+            post_commit_results.append(dict(kwargs["result"]))
+            return {**kwargs["result"], "status": "continued"}
+
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_run_post_commit_pipeline",
+            side_effect=fake_post_commit_pipeline,
+        ):
+            first = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+            second = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        continuation_path = (
+            repo / ".agent_bus" / "executors" / f"commit_executor_{wave_id}.json"
+        )
+        continuation = json.loads(continuation_path.read_text(encoding="utf-8"))
+
+        assert first["status"] == "continued", first
+        assert second["status"] == "continued", second
+        assert len(post_commit_results) == 2
+        assert first["handoff_sha"] == original_handoff_sha
+        assert first["refreshed_handoff_sha"] != original_handoff_sha
+        assert continuation["handoff_sha"] == original_handoff_sha
+        assert post_commit_results[-1]["handoff_sha"] == original_handoff_sha
+        assert post_commit_results[-1]["commit_sha"] == continuation["commit_sha"]
+        assert "git_commit" in post_commit_results[-1]["steps_completed"]
+
+    def test_commit_packet_truth_refresh_missing_packet_names_root_input(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "missing-packet-wave"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        indicator_file = repo / indicator_path
+        indicator_file.parent.mkdir(parents=True, exist_ok=True)
+        indicator_file.write_text(json.dumps({"wave_id": wave_id}), encoding="utf-8")
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "file.py"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "-f", "--", indicator_path], cwd=repo, check=True)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            tracked_packet="reports/control_plane/missing_packet.md",
+            scope_items=["reports/control_plane/missing_packet.md"],
+        )
+
+        _refreshed, _staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+        assert error == (
+            "active packet not found for commit packet truth refresh: "
+            "reports/control_plane/missing_packet.md"
+        )
+
+    def test_commit_packet_truth_refresh_ignores_scope_only_packet(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "scope-only-packet-wave"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        indicator_file = repo / indicator_path
+        indicator_file.parent.mkdir(parents=True, exist_ok=True)
+        indicator_file.write_text(json.dumps({"wave_id": wave_id}), encoding="utf-8")
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "file.py"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "-f", "--", indicator_path], cwd=repo, check=True)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            scope_items=["reports/control_plane/missing_scope_only_packet.md"],
+        )
+
+        refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+        assert error is None
+        assert refreshed is handoff
+        assert "reports/control_plane/missing_scope_only_packet.md" not in staged
+
+    def test_commit_packet_truth_refresh_is_idempotent(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "idempotent-packet-wave"
+        packet_path = "reports/control_plane/idempotent_packet_wave.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Idempotent Packet Wave\n\n"
+            "Wave ID: idempotent-packet-wave\n"
+            "Wave class: L4_ENABLER\n"
+            "Target gate: G8\n"
+            "Lane: control-surface\n",
+            encoding="utf-8",
+        )
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        indicator_file = repo / indicator_path
+        indicator_file.parent.mkdir(parents=True, exist_ok=True)
+        indicator_file.write_text(json.dumps({"wave_id": wave_id}), encoding="utf-8")
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "file.py"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "-f", "--", indicator_path], cwd=repo, check=True)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+
+        refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+        assert error is None
+        assert packet_path in staged
+        first_text = packet_file.read_text(encoding="utf-8")
+
+        refreshed_again, staged_again, error_again = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=refreshed,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+        assert error_again is None
+        assert packet_file.read_text(encoding="utf-8") == first_text
+        assert refreshed_again["tracked_packet"] == packet_path
+        assert staged_again == staged
+
     def test_same_wave_followup_touches_tasks_when_tracker_relevant_files_change(self, tmp_path):
         from collections import namedtuple
 

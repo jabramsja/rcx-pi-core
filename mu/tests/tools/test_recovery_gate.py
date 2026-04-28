@@ -5873,6 +5873,7 @@ printf 'n{repo_root}\\n'
 
         assert result.returncode == 0
         clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        visible_tail = "\n".join(clean_stdout.splitlines()[-24:])
         assert "Autoping: last ping" in clean_stdout
         assert "last done" in clean_stdout
         assert "state updated" in clean_stdout
@@ -5892,6 +5893,13 @@ printf 'n{repo_root}\\n'
         assert "Pager events log:" not in clean_stdout
         assert "Pager receipts:" not in clean_stdout
         assert "Last pager event: Recovery moved to tier3_waiting_on_agent and woke dispatcher." in clean_stdout
+        assert "Autoping: last ping" in visible_tail
+        assert "Autoping detail: thread 019dc06c-863" in visible_tail
+        assert "Autoping summary: bridge shows reviewer GO; pager wake commit_ready reached COMMIT_GO; no intervention" in visible_tail
+        assert "Last pager wake:" in visible_tail
+        assert "Pager detail: event evt-1" in visible_tail
+        assert "Pager state: route codex | pending codex | requested codex | attempts codex:1" in visible_tail
+        assert "Last pager event: Recovery moved to tier3_waiting_on_agent and woke dispatcher." in visible_tail
 
     def test_pane_timeline_executor_pointer_checks_keywords_individually(self, tmp_path):
         repo_root = tmp_path / "repo"
@@ -6688,6 +6696,46 @@ class TestNeedsPhaseB_Tier3:
         )
         assert fc == FailureClass.POST_REENTRY_NEEDS_PHASE_B
         assert rg_mod.tier_for(fc) == 1
+
+    def test_post_reentry_needs_phase_b_embedded_stdout_classified_as_tier1_resume(self, tmp_path):
+        payload = {
+            "status": "needs_phase_b",
+            "step": "post_reentry_supervisor",
+            "plan_path": "reports/control_plane/pager.md",
+            "wave_id": "wave-post-reentry",
+            "bridge_rounds": 3,
+            "changed_files": ["mu/tools/executors/phase_b_executor.py"],
+            "bridge_scope_fingerprint": "scope-fingerprint",
+            "deferred_packet_path": "reports/deferred/non_blocking/pager.md",
+            "errors": [
+                "Supervisor returned NEEDS_PHASE_B after reentry convergence. bridge_status drifted"
+            ],
+        }
+        result = {
+            "status": "failed",
+            "executor": "phase_b_executor",
+            "step": "phase_b",
+            "stdout": json.dumps(payload),
+            "stderr": "",
+        }
+
+        fc = rg_mod.classify_failure(result)
+        recovery = rg_mod.attempt_recovery(tmp_path, result, "wave-post-reentry")
+
+        assert fc == FailureClass.POST_REENTRY_NEEDS_PHASE_B
+        assert recovery["recovered"] is True
+        assert recovery["tier"] == 1
+        checkpoint = json.loads(
+            (tmp_path / ".agent_bus" / "executors" / "phase_b_state.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert checkpoint["completed_step"] == "needs_phase_b_reentry"
+        assert checkpoint["plan_path"] == "reports/control_plane/pager.md"
+        assert checkpoint["bridge_rounds"] == 3
+        assert checkpoint["changed_files"] == ["mu/tools/executors/phase_b_executor.py"]
+        assert checkpoint["bridge_scope_fingerprint"] == "scope-fingerprint"
+        assert checkpoint["deferred_packet_path"] == "reports/deferred/non_blocking/pager.md"
 
     def test_attempt_recovery_seeds_phase_b_reentry_checkpoint_for_post_reentry_veto(self, tmp_path):
         result = {
