@@ -1,7 +1,7 @@
 # Codex Startup Hardening
 
 Date: 2026-04-14
-Status: Phase B (implementation complete, governance sync applied)
+Status: Phase B follow-up (PostToolUse startup audit mechanization)
 Task: [CODEX-STARTUP-HARDENING]
 Phase-A-Lock: LOCKED
 Phase: B
@@ -195,6 +195,19 @@ targets in this phase:
   `tests/tools/test_executor_config_alignment.py` only far enough to remove the
   hardcoded adapter and lock the binding with regression coverage.
 
+**G. PostToolUse shared-learning verification audit**
+
+- Fold the stale PR #811 startup residue into this startup-state audit instead
+  of leaving it as an open local-hook cleanup.
+- Verify the Codex-local `~/.codex/hooks/post_tool_use_rcx_verify.py` source as
+  an observed startup surface: target repo anchor, shared-learning canaries,
+  `PostToolUse` output contract, and safe main-guard execution.
+- Verify `~/.codex/hooks.json` routes `PostToolUse` for Bash/Read/Grep/Edit/
+  Write/MultiEdit to the verification hook.
+- Preserve the current try-wrapped `if __name__ == "__main__": raise
+  SystemExit(main())` entrypoint shape as valid; the startup audit should prove
+  the live hook contract, not a narrower source formatting preference.
+
 ## Constraints
 
 1. Do not add tracker-truth cleanup, `pr711-landed-marker` cleanup, or
@@ -270,6 +283,8 @@ targets in this phase:
 10. The packet's markdown-bulleted `unblocks_wave_id` and
     `unblocks_runtime_blocker` lines parse into Phase B tracker-note metadata
     without trailing backticks or dropped values.
+11. The startup-state audit verifies the live PostToolUse verification hook and
+    hooks.json matcher coverage without editing Codex-local hook files.
 
 ## Re-entry Findings
 

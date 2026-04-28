@@ -53,6 +53,21 @@ PREFLIGHT_WRAPPER_REQUIRED_CANARIES = (
     "Codex pager:",
     "rev-parse --is-inside-work-tree",
 )
+POST_TOOL_USE_REQUIRED_TOOLS = frozenset(
+    {"Bash", "Read", "Grep", "Edit", "Write", "MultiEdit"}
+)
+POST_TOOL_USE_HOOK_REQUIRED_CANARIES = (
+    "TARGET_REPO_RAW",
+    "LEARNED_PATTERNS_REL",
+    "LEARNING_MD_REL",
+    "PostToolUse",
+    "Extended tool-use reminder",
+    "Exploration reminder",
+    "Failure capture",
+)
+POST_TOOL_USE_HOOK_REQUIRED_BINDINGS = frozenset(
+    {"TARGET_REPO_RAW", "LEARNED_PATTERNS_REL", "LEARNING_MD_REL"}
+)
 ALLOWED_SESSION_START_PRE_EMIT_ENV_VARS = frozenset({"CODEX_RCX_PREFLIGHT_DISABLE"})
 
 PROMPT_HOOK_REQUIRED_CANARIES = (
@@ -1295,6 +1310,41 @@ def _prompt_hook_code_anchors(text: str) -> set[str]:
     )
 
 
+def _python_code_canary_anchors(text: str) -> set[str] | None:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None
+
+    anchors: set[str] = set()
+
+    class CanaryVisitor(ast.NodeVisitor):
+        def _visit_body_without_docstring(self, body: list[ast.stmt]) -> None:
+            for index, statement in enumerate(body):
+                if index == 0 and _is_docstring_statement(statement):
+                    continue
+                self.visit(statement)
+
+        def visit_Module(self, node: ast.Module) -> None:
+            self._visit_body_without_docstring(node.body)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self._visit_body_without_docstring(node.body)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            self._visit_body_without_docstring(node.body)
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            self._visit_body_without_docstring(node.body)
+
+        def visit_Constant(self, node: ast.Constant) -> None:
+            if isinstance(node.value, str):
+                anchors.add(node.value)
+
+    CanaryVisitor().visit(tree)
+    return anchors
+
+
 def _session_start_payload_anchors(text: str) -> set[str]:
     main_function = _python_function_def(text, "main")
     if main_function is None or not _main_joins_lines_via_emit(main_function):
@@ -1992,6 +2042,207 @@ def _check_session_start_hook(codex_home: Path) -> CheckResult:
         "session_start_hook",
         "OK",
         "startup hook statically anchors preflight, binary guard, drift memory, and target repo",
+    )
+
+
+def _post_tool_use_matcher_tools(matcher: str) -> set[str]:
+    if matcher.strip() == "*":
+        return set(POST_TOOL_USE_REQUIRED_TOOLS)
+    return {part for part in re.split(r"[|\s,]+", matcher) if part}
+
+
+def _path_token_resolves_to(token: str, target_path: Path) -> bool:
+    candidate = Path(token).expanduser()
+    if not candidate.is_absolute():
+        return False
+    try:
+        return candidate.resolve() == target_path.expanduser().resolve()
+    except OSError:
+        return False
+
+
+def _python_command_invokes_path(tokens: list[str], target_path: Path) -> bool:
+    if not tokens:
+        return False
+    command = _command_name(tokens[0])
+    if PYTHON_INTERPRETER_RE.fullmatch(command) is None:
+        return False
+
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            index += 1
+            break
+        if token in {"-c", "-m"}:
+            return False
+        if token.startswith("-c") or token.startswith("-m"):
+            return False
+        if token in {"-W", "-X"}:
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        break
+
+    return index < len(tokens) and _path_token_resolves_to(tokens[index], target_path)
+
+
+def _command_tokens_invoke_path(tokens: list[str], target_path: Path) -> bool:
+    unwrapped = _strip_leading_assignments(_unwrap_env_command(tokens))
+    if not unwrapped:
+        return False
+    if _path_token_resolves_to(unwrapped[0], target_path):
+        return True
+    if _python_command_invokes_path(unwrapped, target_path):
+        return True
+
+    shell_command = _shell_wrapped_command(unwrapped)
+    if shell_command is None:
+        return False
+    return _shell_command_invokes_path(shell_command, target_path)
+
+
+def _shell_command_invokes_path(command: str, target_path: Path) -> bool:
+    commands = _split_shell_commands(command)
+    if commands is None:
+        return False
+    return any(_command_tokens_invoke_path(tokens, target_path) for tokens in commands)
+
+
+def _check_post_tool_use_hook(codex_home: Path) -> CheckResult:
+    hook_path = codex_home / "hooks" / "post_tool_use_rcx_verify.py"
+    text = _read_text(hook_path)
+    if text is None:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            f"missing: {hook_path}",
+        )
+
+    code_anchors = _python_code_canary_anchors(text)
+    if code_anchors is None:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "hook source is not valid Python",
+        )
+
+    module_bindings, _ = _module_bindings(text)
+    missing_bindings = [
+        needle
+        for needle in POST_TOOL_USE_HOOK_REQUIRED_CANARIES
+        if needle in POST_TOOL_USE_HOOK_REQUIRED_BINDINGS
+        and needle not in module_bindings
+    ]
+    missing_canaries = missing_bindings + [
+        needle
+        for needle in POST_TOOL_USE_HOOK_REQUIRED_CANARIES
+        if needle not in POST_TOOL_USE_HOOK_REQUIRED_BINDINGS
+        if not any(needle in anchor for anchor in code_anchors)
+    ]
+    if missing_canaries:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "missing code-bound canaries: " + ", ".join(missing_canaries),
+        )
+
+    if _module_has_unsafe_top_level_execution(text):
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "unsafe top-level execution outside main guard",
+        )
+
+    if "raise SystemExit(main())" not in text:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "missing main guard SystemExit handoff",
+        )
+
+    target_repo = _session_start_target_repo(text)
+    if target_repo is None:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "missing TARGET_REPO_RAW literal",
+        )
+    expected_repos = _repo_anchor_candidates()
+    if not any(_paths_resolve_equal(target_repo, expected_repo) for expected_repo in expected_repos):
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            f"{target_repo} not in {[str(path) for path in expected_repos]}",
+        )
+
+    hooks_json_path = codex_home / "hooks.json"
+    hooks_text = _read_text(hooks_json_path)
+    if hooks_text is None:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            f"missing hooks.json: {hooks_json_path}",
+        )
+    try:
+        hooks_payload = json.loads(hooks_text)
+    except json.JSONDecodeError as exc:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            f"hooks.json invalid JSON: {exc}",
+        )
+
+    post_tool_entries = (
+        hooks_payload.get("hooks", {}).get("PostToolUse")
+        if isinstance(hooks_payload, dict)
+        else None
+    )
+    if not isinstance(post_tool_entries, list) or not post_tool_entries:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "hooks.json missing PostToolUse entries",
+        )
+
+    covered_tools: set[str] = set()
+    matching_command = False
+    for entry in post_tool_entries:
+        if not isinstance(entry, dict):
+            continue
+        matcher = entry.get("matcher")
+        if isinstance(matcher, str):
+            covered_tools.update(_post_tool_use_matcher_tools(matcher))
+        hooks = entry.get("hooks")
+        if not isinstance(hooks, list):
+            continue
+        for hook in hooks:
+            if not isinstance(hook, dict):
+                continue
+            command = hook.get("command")
+            if isinstance(command, str) and _shell_command_invokes_path(command, hook_path):
+                matching_command = True
+
+    missing_tools = sorted(POST_TOOL_USE_REQUIRED_TOOLS - covered_tools)
+    if missing_tools:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            "hooks.json matcher missing tools: " + ", ".join(missing_tools),
+        )
+    if not matching_command:
+        return CheckResult(
+            "post_tool_use_hook",
+            "FAIL",
+            f"hooks.json PostToolUse does not call {hook_path}",
+        )
+
+    return CheckResult(
+        "post_tool_use_hook",
+        "OK",
+        "PostToolUse verification hook covers shared-learning and inspection reminders",
     )
 
 
@@ -2803,6 +3054,7 @@ def gather_results(repo_root: Path, codex_home: Path) -> tuple[list[CheckResult]
             _audit_binary_guard(codex_home, repo_root),
             _check_preflight_wrapper(codex_home, repo_root),
             _check_session_start_hook(codex_home),
+            _check_post_tool_use_hook(codex_home),
             _check_prompt_hook(codex_home),
             _check_default_rules(codex_home),
             _check_models_cache(codex_home),
