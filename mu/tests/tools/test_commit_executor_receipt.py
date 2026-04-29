@@ -1562,6 +1562,96 @@ class TestCommitExecutorPytestGate:
         assert mock_run.call_args.kwargs["timeout"] == 300
 
 
+class TestReviewFindingExtraction:
+    def _base_pr_data(self, *, head_sha="abc123", latest_reviews=None, review_threads=None, comments=None):
+        return {
+            "headRefOid": head_sha,
+            "reviewDecision": "",
+            "latestReviews": {"nodes": latest_reviews or []},
+            "reviewThreads": {"nodes": review_threads or []},
+            "comments": {"nodes": comments or []},
+        }
+
+    def test_pr_review_query_fetches_top_level_review_body(self):
+        assert "latestReviews(first: 20)" in commit_mod.PR_REVIEW_QUERY
+        latest_reviews_section = commit_mod.PR_REVIEW_QUERY.split("latestReviews(first: 20)", 1)[1]
+        latest_reviews_section = latest_reviews_section.split("reviewThreads(first: 100)", 1)[0]
+        assert "body" in latest_reviews_section
+
+    @pytest.mark.parametrize("priority", ["P1", "P2"])
+    def test_commented_current_head_connector_review_badge_blocks_merge(self, priority):
+        head_sha = "abc123"
+        pr_data = self._base_pr_data(
+            head_sha=head_sha,
+            latest_reviews=[{
+                "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                "body": (
+                    f"**<sub><sub>![{priority} Badge](https://img.shields.io/badge/"
+                    f"{priority}-orange?style=flat)</sub></sub> Restrict unsafe path**"
+                ),
+                "state": "COMMENTED",
+                "submittedAt": "2026-04-29T00:00:00Z",
+                "commit": {"oid": head_sha},
+            }],
+        )
+
+        outcome = commit_mod._extract_review_findings(  # ANTICHEAT_OK: tests Step 15 review classifier
+            pr_data,
+            head_sha,
+            result={"steps_completed": ["ensure_pr"]},
+            pr_number="829",
+        )
+
+        assert outcome["outcome"] == "bot_findings"
+        assert outcome["bot_findings"][0]["author"] == commit_mod.BOT_REVIEW_LOGIN
+        assert "Restrict unsafe path" in outcome["bot_findings"][0]["body"]
+        assert outcome["bot_findings"][0]["path"] == ""
+        assert outcome["bot_findings"][0]["line"] is None
+
+    def test_commented_connector_review_without_blocking_badge_stays_clean(self):
+        head_sha = "abc123"
+        pr_data = self._base_pr_data(
+            head_sha=head_sha,
+            latest_reviews=[{
+                "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                "body": "Codex Review: didn't find any major issues.",
+                "state": "COMMENTED",
+                "submittedAt": "2026-04-29T00:00:00Z",
+                "commit": {"oid": head_sha},
+            }],
+        )
+
+        outcome = commit_mod._extract_review_findings(  # ANTICHEAT_OK: tests non-blocking Step 15 review body
+            pr_data,
+            head_sha,
+            result={"steps_completed": ["ensure_pr"]},
+            pr_number="829",
+        )
+
+        assert outcome == {"outcome": "clean"}
+
+    def test_stale_connector_review_badge_on_old_head_is_ignored(self):
+        pr_data = self._base_pr_data(
+            head_sha="new-head",
+            latest_reviews=[{
+                "author": {"login": commit_mod.BOT_REVIEW_LOGIN},
+                "body": "![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat) old finding",
+                "state": "COMMENTED",
+                "submittedAt": "2026-04-29T00:00:00Z",
+                "commit": {"oid": "old-head"},
+            }],
+        )
+
+        outcome = commit_mod._extract_review_findings(  # ANTICHEAT_OK: tests current-head review gating
+            pr_data,
+            "new-head",
+            result={"steps_completed": ["ensure_pr"]},
+            pr_number="829",
+        )
+
+        assert outcome == {"outcome": "clean"}
+
+
 class TestCIPollFallbackTimeout:
     """Regression: _poll_ci_checks_fallback 900s budget tolerates observed green-gate wall time.
 

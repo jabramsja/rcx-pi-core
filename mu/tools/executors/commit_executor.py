@@ -169,6 +169,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
       latestReviews(first: 20) {
         nodes {
           author { login }
+          body
           state
           submittedAt
           commit { oid }
@@ -222,6 +223,10 @@ BOT_NO_ISSUES_COMMENT_RE = re.compile(
 )
 BOT_USAGE_LIMIT_COMMENT_RE = re.compile(
     r"reached your Codex usage limits",
+    re.IGNORECASE,
+)
+BOT_BLOCKING_REVIEW_BADGE_RE = re.compile(
+    r"!\[\s*P[0-2]\s+Badge\s*\]\(|badge/P[0-2]-",
     re.IGNORECASE,
 )
 COMMIT_CONTINUATION_VERSION = 1
@@ -2256,6 +2261,10 @@ def _is_bot_no_issues_issue_comment(body: str) -> bool:
     return bool(BOT_NO_ISSUES_COMMENT_RE.search(body or ""))
 
 
+def _is_blocking_connector_review_body(body: str) -> bool:
+    return bool(BOT_BLOCKING_REVIEW_BADGE_RE.search(body or ""))
+
+
 def _latest_relevant_thread_comment(
     thread: dict[str, Any],
     *,
@@ -2582,16 +2591,27 @@ def _extract_review_findings(
             "pr_number": pr_number}}
 
     latest_reviews = pr_data.get("latestReviews", {}).get("nodes", [])
+    bot_review_findings: list[dict[str, Any]] = []
     for review in latest_reviews:
         author = review.get("author", {}).get("login", "")
         state = review.get("state", "")
         is_bot = _is_bot_review_author(author)
+        commit_oid = review.get("commit", {}).get("oid", "")
+        body = str(review.get("body") or "")
+        if is_bot and commit_oid == head_sha and _is_blocking_connector_review_body(body):
+            bot_review_findings.append({
+                "author": author,
+                "body": body[:500],
+                "path": "", "line": None,
+            })
         if not is_bot and state == "CHANGES_REQUESTED":
             return {"outcome": "error", "response": {
                 "status": "error", "step": "ensure_review_clear_and_merge",
                 "errors": [f"Human reviewer {author} requested changes"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}}
+    if bot_review_findings:
+        return {"outcome": "bot_findings", "bot_findings": bot_review_findings}
 
     threads = pr_data.get("reviewThreads", {}).get("nodes", [])
     current_review_cycle_floor = _current_review_cycle_floor_timestamp(
