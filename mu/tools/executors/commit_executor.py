@@ -118,6 +118,32 @@ VALID_CALLERS = {"phase_b", "phase_a", "update_tracker_only", "standalone"}
 
 # Fields that may be empty/missing when caller is "standalone"
 STANDALONE_OPTIONAL_FIELDS = {"pre_commit_receipt_path"}
+_STANDALONE_RECOVERY_TERMINAL_STATUSES = frozenset({
+    "success",
+    "held",
+    "question_for_founder",
+    "max_rounds_reached",
+    "supervisor_rejected",
+})
+_STANDALONE_RECOVERY_STATUSES = frozenset({
+    "bot_findings_pending",
+    "pre_push_failed",
+    "stage_failed",
+    "implementer_error",
+    "bridge_error",
+    "l4_contract_violation",
+})
+_STANDALONE_RECOVERY_ERROR_STEPS = frozenset({
+    "run_pre_push_script",
+    "run_pre_commit_script",
+    "stage_files",
+    "implementer",
+    "implementer_bridge_fix",
+    "implementer_reentry",
+    "pytest_fix",
+    "bridge_subprocess",
+    "reentry_bridge_subprocess",
+})
 
 
 @contextmanager
@@ -158,6 +184,19 @@ def _load_repo_recovery_symbols(repo_root: Path) -> tuple[Any, Any]:
             from mu.tools.executors.recovery_gate import attempt_recovery
             from mu.tools.executors.executor_common import normalize_wave_id
     return attempt_recovery, normalize_wave_id
+
+
+def _should_attempt_standalone_recovery(result: dict[str, Any]) -> bool:
+    """Return true when a standalone non-success result is recoverable."""
+    status = str(result.get("status", "") or "").strip().lower()
+    if status in _STANDALONE_RECOVERY_TERMINAL_STATUSES:
+        return False
+    if status in _STANDALONE_RECOVERY_STATUSES:
+        return True
+    step = str(result.get("step", "") or "").strip().lower()
+    return status in {"error", "failed", "timeout", "stale"} and (
+        step in _STANDALONE_RECOVERY_ERROR_STEPS
+    )
 
 # GraphQL query for PR review state
 PR_REVIEW_QUERY = """
@@ -368,19 +407,32 @@ def _git_index_text_for_repo_path(repo_root: Path, relpath: str) -> str | None:
     return result.stdout
 
 
-def _tracked_packet_text_from_record(record: dict[str, Any], repo_root: Path) -> str:
+def _tracked_packet_paths_from_record(record: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+
+    def add_candidate(raw_path: Any) -> None:
+        tracked_packet = _normalize_repo_relpath(str(raw_path or ""))
+        if not tracked_packet:
+            return
+        if _is_absolute_untrusted_path(tracked_packet) or _has_path_traversal(tracked_packet):
+            return
+        if tracked_packet not in paths:
+            paths.append(tracked_packet)
+
+    add_candidate(record.get("tracked_packet"))
     candidates = record.get("next_candidates")
     if not isinstance(candidates, list):
-        return ""
-    repo_root_resolved = repo_root.resolve()
+        return paths
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
-        tracked_packet = _normalize_repo_relpath(str(candidate.get("tracked_packet") or ""))
-        if not tracked_packet:
-            continue
-        if _is_absolute_untrusted_path(tracked_packet) or _has_path_traversal(tracked_packet):
-            continue
+        add_candidate(candidate.get("tracked_packet"))
+    return paths
+
+
+def _tracked_packet_text_from_record(record: dict[str, Any], repo_root: Path) -> str:
+    repo_root_resolved = repo_root.resolve()
+    for tracked_packet in _tracked_packet_paths_from_record(record):
         packet_path = (repo_root / tracked_packet).resolve()
         if repo_root_resolved not in packet_path.parents:
             continue
@@ -391,16 +443,8 @@ def _tracked_packet_text_from_record(record: dict[str, Any], repo_root: Path) ->
 
 
 def _tracked_packet_path_from_record(record: dict[str, Any]) -> str:
-    candidates = record.get("next_candidates")
-    if not isinstance(candidates, list):
-        return ""
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
-        tracked_packet = _normalize_repo_relpath(str(candidate.get("tracked_packet") or ""))
-        if tracked_packet:
-            return tracked_packet
-    return ""
+    paths = _tracked_packet_paths_from_record(record)
+    return paths[0] if paths else ""
 
 
 def _extract_founder_override_from_routing_record(
@@ -524,19 +568,11 @@ def _control_surface_packet_authorized(
     wave_id: str,
 ) -> bool:
     """Return true only when packet content declares control-surface authority."""
-    candidates = record.get("next_candidates")
-    if not isinstance(candidates, list):
-        return False
     normalized_wave_id = normalize_wave_id(wave_id or str(record.get("wave_name") or record.get("wave_id") or ""))
     if not normalized_wave_id:
         return False
     repo_resolved = repo_root.resolve()
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
-        tracked_packet = _normalize_repo_relpath(str(candidate.get("tracked_packet") or ""))
-        if not tracked_packet or _is_absolute_untrusted_path(tracked_packet) or _has_path_traversal(tracked_packet):
-            continue
+    for tracked_packet in _tracked_packet_paths_from_record(record):
         if not tracked_packet.startswith("reports/control_plane/"):
             continue
         packet_path = (repo_root / tracked_packet).resolve()
@@ -566,6 +602,32 @@ def _is_authorized_control_surface_l4_enabler(
     return _control_surface_packet_authorized(record, repo_root, wave_id=str(wave_id or ""))
 
 
+def _resolve_control_surface_founder_override_token(
+    record: dict[str, Any],
+    repo_root: Path,
+    *,
+    embedded_handoff: dict[str, Any] | None = None,
+    wave_id: str,
+    wave_class: str,
+) -> str:
+    token = _extract_founder_override_from_routing_record(
+        record,
+        repo_root,
+        embedded_handoff=embedded_handoff,
+    )
+    if token:
+        return token
+    if _is_authorized_control_surface_l4_enabler(
+        record,
+        embedded_handoff=embedded_handoff,
+        wave_id=wave_id,
+        wave_class=wave_class,
+        repo_root=repo_root,
+    ):
+        return normalize_wave_id(wave_id)
+    return ""
+
+
 def _missing_founder_override_error(wave_id: str) -> str:
     return (
         "Missing FOUNDER_OVERRIDE token for standalone L4_ENABLER commit handoff "
@@ -585,21 +647,15 @@ def _resolve_standalone_founder_override_token(
     wave_id: str,
     wave_class: str,
 ) -> tuple[str, str | None]:
-    token = _extract_founder_override_from_routing_record(
+    token = _resolve_control_surface_founder_override_token(
         record,
         repo_root,
         embedded_handoff=embedded_handoff,
+        wave_id=wave_id,
+        wave_class=wave_class,
     )
     if token:
         return token, None
-    if _is_authorized_control_surface_l4_enabler(
-        record,
-        embedded_handoff=embedded_handoff,
-        wave_id=wave_id,
-        wave_class=wave_class,
-        repo_root=repo_root,
-    ):
-        return normalize_wave_id(wave_id), None
     if str(wave_class or "").strip() == "L4_ENABLER":
         return "", _missing_founder_override_error(wave_id)
     return "", None
@@ -4131,6 +4187,23 @@ def build_commit_handoff(
         effective_founder_override_token = _extract_founder_override_from_tracker_note(
             tracker_note_text
         )
+    if (
+        not effective_founder_override_token
+        and tracked_packet
+        and repo_root is not None
+        and str(wave_class or "").strip() == "L4_ENABLER"
+    ):
+        effective_founder_override_token = _resolve_control_surface_founder_override_token(
+            {
+                "wave_id": wave_id,
+                "wave_name": wave_id,
+                "tracked_packet": tracked_packet,
+                "tracker_note_text": tracker_note_text or "",
+            },
+            repo_root,
+            wave_id=wave_id,
+            wave_class=wave_class,
+        )
 
     if (
         caller == "standalone"
@@ -5081,6 +5154,32 @@ def _run_commit_pipeline_impl(
 
     wave_id = handoff["wave_id"]
     branch_prefix = handoff["branch_prefix"]
+    founder_override_token = _resolve_control_surface_founder_override_token(
+        {
+            "wave_id": wave_id,
+            "wave_name": wave_id,
+            "tracked_packet": handoff.get("tracked_packet", ""),
+            "tracker_note_text": handoff.get("tracker_note_text", ""),
+        },
+        repo_root,
+        embedded_handoff=handoff,
+        wave_id=wave_id,
+        wave_class=str(handoff.get("wave_class") or ""),
+    )
+    if founder_override_token:
+        tracker_note_text = _append_founder_override_to_tracker_note(
+            handoff.get("tracker_note_text", ""),
+            founder_override_token,
+        )
+        if tracker_note_text != handoff.get("tracker_note_text", ""):
+            handoff = {**handoff, "tracker_note_text": tracker_note_text}
+            valid, errors = validate_handoff(handoff)
+            if not valid:
+                return {"status": "error", "step": "validate_inputs", "errors": errors}
+            log(
+                "Step 1b: founder override derived from authorized tracked packet "
+                f"for {wave_id}"
+            )
     explicit_target_branch = handoff.get("target_branch")
     if isinstance(explicit_target_branch, str) and explicit_target_branch.strip():
         target_branch = explicit_target_branch.strip()
@@ -6090,10 +6189,9 @@ def main() -> int:
             for bf in result["bot_findings"]:
                 print(f"  - {bf['author']}: {bf['body'][:100]}...")
 
-    # Fix 2: standalone recovery — when --standalone hits bot_findings_pending,
-    # invoke recovery gate directly so P1 findings reach Tier 3 diagnosis
-    # instead of silently exiting.
-    if result.get("status") == "bot_findings_pending" and args.standalone:
+    # Standalone recovery: route recoverable non-success standalone exits
+    # through recovery_gate so bounded repairs can be diagnosed and retried.
+    if args.standalone and _should_attempt_standalone_recovery(result):
         try:
             attempt_recovery, normalize_wave_id = _load_repo_recovery_symbols(repo_root)
             wave_id = normalize_wave_id(handoff.get("wave_id", "unknown"))

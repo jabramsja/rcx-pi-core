@@ -2243,13 +2243,14 @@ _WAVE_OWNED_PREFIXES = (
     "STATUS.md",
     "CHANGELOG.md",
     "CLAUDE.md",
+    ".gitignore",
 )
 
 
 _DECLARED_PATH_EXTENSIONS = (".py", ".json", ".md", ".txt", ".sh")
-_DECLARED_ROOT_FILES = {"CLAUDE.md", "TASKS.md", "STATUS.md", "CHANGELOG.md"}
+_DECLARED_ROOT_FILES = {".gitignore", "CLAUDE.md", "TASKS.md", "STATUS.md", "CHANGELOG.md"}
 _LINE_REF_RE = re.compile(r"^(?P<path>.+?):(?P<line>\d+)(?::(?P<col>\d+))?$")
-_INLINE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./-])([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+|(?:CLAUDE|TASKS|STATUS|CHANGELOG)\.md)(?![A-Za-z0-9_./-])")
+_INLINE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./-])([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+|(?:CLAUDE|TASKS|STATUS|CHANGELOG)\.md|\.gitignore)(?![A-Za-z0-9_./-])")
 
 
 def _normalize_declared_path_token(token: str) -> str | None:
@@ -2830,6 +2831,34 @@ def _derive_planless_context(
     }
 
 
+_IMPLEMENTER_DIAGNOSTIC_FIELDS = ("error_subtype", "stop_reason", "num_turns")
+
+
+def _copy_implementer_diagnostics(
+    target: dict[str, Any],
+    impl_result: dict[str, Any],
+) -> None:
+    for field in _IMPLEMENTER_DIAGNOSTIC_FIELDS:
+        if field in impl_result and impl_result[field] not in (None, ""):
+            target[field] = impl_result[field]
+
+
+def _implementer_failure_result(
+    *,
+    step: str,
+    message: str,
+    impl_result: dict[str, Any],
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "status": "error",
+        "step": step,
+        "errors": [message],
+        "implementer_status": impl_result.get("status"),
+    }
+    _copy_implementer_diagnostics(result, impl_result)
+    return result
+
+
 def run_phase_b(
     repo_root: Path,
     plan_path: str | None = None,
@@ -3126,14 +3155,14 @@ def run_phase_b(
         log(f"Implementer fix result: {fix_result['status']}")
 
         if fix_result["status"] != "success":
-            return {
-                "status": "error",
-                "step": "implementer_bridge_fix",
-                "errors": [
+            return _implementer_failure_result(
+                step="implementer_bridge_fix",
+                message=(
                     f"Implementer failed during bridge fix round {round_num}: "
                     f"{fix_result['status']} (exit={fix_result['exit_code']})"
-                ],
-            }
+                ),
+                impl_result=fix_result,
+            )
 
         # Track what the fix round changed. The local pytest pass should only
         # exercise tests introduced or edited by this fix round, not every
@@ -3237,11 +3266,14 @@ def run_phase_b(
                         ],
                     }
                 if pytest_fix["status"] != "success":
-                    return {
-                        "status": "error",
-                        "step": "pytest_fix",
-                        "errors": [f"Implementer failed fixing pytest failures: {pytest_fix['status']}"],
-                    }
+                    return _implementer_failure_result(
+                        step="pytest_fix",
+                        message=(
+                            "Implementer failed fixing pytest failures: "
+                            f"{pytest_fix['status']}"
+                        ),
+                        impl_result=pytest_fix,
+                    )
                 post_pytest_fix_files = set(_collect_changed_files(repo_root))
                 implementer_changed |= (post_pytest_fix_files - pre_pytest_fix_files)
                 changed_files = _collect_wave_owned_files(
@@ -3329,11 +3361,11 @@ def run_phase_b(
         log(f"Implementer re-entry: {impl_result['status']}")
         if impl_result["status"] != "success":
             _clear_state(repo_root)
-            return {
-                "status": "error",
-                "step": "implementer_reentry",
-                "errors": [f"Implementer re-entry failed: {impl_result['status']}"],
-            }
+            return _implementer_failure_result(
+                step="implementer_reentry",
+                message=f"Implementer re-entry failed: {impl_result['status']}",
+                impl_result=impl_result,
+            )
 
         post_reentry_files = set(_collect_changed_files(repo_root))
         implementer_changed |= (post_reentry_files - pre_reentry_files)
@@ -3489,16 +3521,16 @@ def run_phase_b(
 
         # FAIL CLOSED: any implementer failure is fatal, not just timeout
         if impl_result["status"] != "success":
-            result.update({
-                "status": "error",
-                "step": "implementer",
-                "errors": [
+            result.update(_implementer_failure_result(
+                step="implementer",
+                message=(
                     f"Implementer failed: {impl_result['status']} "
                     f"(exit={impl_result['exit_code']}): {impl_result.get('stderr', '')[:500]}"
-                ],
-                "implementer_invoked": True,
-                "implementer_status": impl_result["status"],
-            })
+                ),
+                impl_result=impl_result,
+            ))
+            result["implementer_invoked"] = True
+            result["implementer_status"] = impl_result["status"]
             return result
 
         # Collect changed files after implementer ran — track what implementer actually changed

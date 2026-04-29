@@ -62,6 +62,69 @@ class ImplementerError(RuntimeError):
     """Raised when the implementer cannot proceed."""
 
 
+def _extract_adapter_result_envelope(output: Any) -> dict[str, Any]:
+    """Extract the final adapter result event from JSON or JSONL output."""
+    if not isinstance(output, str):
+        return {}
+    text = output.strip()
+    if not text:
+        return {}
+    payloads: list[dict[str, Any]] = []
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        parsed = None
+    if isinstance(parsed, dict):
+        payloads.append(parsed)
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            parsed_line = json.loads(line)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if isinstance(parsed_line, dict):
+            payloads.append(parsed_line)
+    for payload in reversed(payloads):
+        if payload.get("type") == "result":
+            return payload
+    return {}
+
+
+def _adapter_result_diagnostics(output: Any) -> dict[str, Any]:
+    envelope = _extract_adapter_result_envelope(output)
+    subtype = str(envelope.get("subtype") or "").strip()
+    if not subtype or subtype == "success":
+        return {}
+    diagnostics: dict[str, Any] = {
+        "error_subtype": subtype,
+        "adapter_result": envelope,
+    }
+    stop_reason = envelope.get("stop_reason")
+    if stop_reason not in (None, ""):
+        diagnostics["stop_reason"] = stop_reason
+    num_turns = envelope.get("num_turns")
+    if num_turns not in (None, ""):
+        diagnostics["num_turns"] = num_turns
+    return diagnostics
+
+
+def _read_adapter_raw_output(raw_output_path: Path) -> str:
+    try:
+        return raw_output_path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _adapter_result_diagnostics_from_outputs(*outputs: Any) -> dict[str, Any]:
+    for output in outputs:
+        diagnostics = _adapter_result_diagnostics(output)
+        if diagnostics:
+            return diagnostics
+    return {}
+
+
 def build_implementation_prompt(
     plan_content: str,
     *,
@@ -322,6 +385,23 @@ def invoke_implementer(
             zero_output_timeout_s=zero_output_timeout_s,
             stale_timeout_s=stale_timeout_s,
         )
+        diagnostics = _adapter_result_diagnostics_from_outputs(
+            _read_adapter_raw_output(raw_output_path),
+            output,
+        )
+        if diagnostics:
+            return {
+                "status": "error",
+                "output": output,
+                "stderr": (
+                    "Adapter result subtype: "
+                    f"{diagnostics.get('error_subtype')}"
+                ),
+                "exit_code": 1,
+                "job_id": job_id,
+                "model_override_applied": model_applied,
+                **diagnostics,
+            }
         return {
             "status": "success",
             "output": output,
@@ -332,14 +412,24 @@ def invoke_implementer(
         }
     except BridgeAdapterError as exc:
         error_str = str(exc)
+        adapter_output = str(getattr(exc, "output", "") or "")
+        diagnostics = _adapter_result_diagnostics_from_outputs(
+            _read_adapter_raw_output(raw_output_path),
+            adapter_output,
+        )
         lowered = error_str.lower()
         is_timeout = "timed out" in lowered
         is_stale = "stalled after" in lowered
         return {
             "status": "timeout" if is_timeout else ("stale" if is_stale else "error"),
-            "output": "",
+            "output": adapter_output,
             "stderr": error_str,
-            "exit_code": -1 if is_timeout else (-2 if is_stale else 1),
+            "exit_code": (
+                getattr(exc, "returncode", None)
+                if getattr(exc, "returncode", None) is not None
+                else (-1 if is_timeout else (-2 if is_stale else 1))
+            ),
             "job_id": job_id,
             "model_override_applied": model_applied,
+            **diagnostics,
         }

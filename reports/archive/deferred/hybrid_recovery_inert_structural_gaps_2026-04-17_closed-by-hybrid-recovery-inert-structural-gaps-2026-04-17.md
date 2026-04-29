@@ -1,8 +1,13 @@
 # BLOCKING: hybrid recovery is inert — 3 remaining structural gaps
 
 **Date filed**: 2026-04-17
+**Status**: CLOSED (2026-04-29; closed by `hybrid-recovery-inert-structural-gaps-2026-04-17`)
 **Observed on**: commit-executor-ci-poll-timeout-fix wave (PR #787) phase_b attempts
 **Severity**: BLOCKING (hybrid recovery flag enabled in PR #786 but has never productively delegated)
+
+**Archive note**: The remaining three structural gaps were closed by the
+bounded Phase B implementation recorded in
+`reports/control_plane/hybrid_recovery_inert_structural_gaps_2026-04-17.md`.
 
 ## Summary
 

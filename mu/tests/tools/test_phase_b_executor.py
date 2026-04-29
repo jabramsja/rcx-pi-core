@@ -388,6 +388,88 @@ class TestInvokeImplementer:
             assert result["status"] == "error"
             assert result["exit_code"] == 1
 
+    def test_adapter_error_result_envelope_is_preserved(self, tmp_path):
+        self._setup_bridge_config(tmp_path)
+        from bridge_adapters import BridgeAdapterError
+        output = json.dumps({
+            "type": "result",
+            "subtype": "error_max_turns",
+            "num_turns": 51,
+            "stop_reason": "tool_use",
+        })
+        mock_ba = self._patch_bridge_adapters()
+        mock_ba.run_adapter.side_effect = BridgeAdapterError(
+            "Adapter 'claude' exited 1",
+            output=output,
+            returncode=1,
+        )
+
+        with patch.object(impl_mod, "_bridge_adapters", mock_ba):
+            result = impl_mod.invoke_implementer(
+                tmp_path,
+                "test prompt",
+                backend="claude",
+                timeout=10,
+            )
+
+        assert result["status"] == "error"
+        assert result["error_subtype"] == "error_max_turns"
+        assert result["stop_reason"] == "tool_use"
+        assert result["num_turns"] == 51
+
+    def test_adapter_error_result_envelope_is_preserved_from_raw_transcript(self, tmp_path):
+        self._setup_bridge_config(tmp_path)
+        from bridge_adapters import AdapterSpec, BridgeAdapterError
+        raw_jsonl = "\n".join([
+            json.dumps({
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "partial work completed"}
+                    ]
+                },
+            }),
+            json.dumps({
+                "type": "result",
+                "subtype": "error_max_turns",
+                "num_turns": 51,
+                "stop_reason": "tool_use",
+            }),
+        ])
+
+        def raise_with_normalized_output(*_args, **kwargs):
+            kwargs["raw_output_path"].write_text(raw_jsonl, encoding="utf-8")
+            raise BridgeAdapterError(
+                "Adapter 'claude' exited 1",
+                output="partial work completed",
+                returncode=1,
+            )
+
+        mock_ba = self._patch_bridge_adapters()
+        mock_ba.get_adapter.return_value = AdapterSpec(
+            name="claude",
+            cmd=["claude", "--output-format", "stream-json"],
+            timeout_s=10,
+            prompt_via_stdin=True,
+            env=None,
+            mode="live",
+        )
+        mock_ba.run_adapter.side_effect = raise_with_normalized_output
+
+        with patch.object(impl_mod, "_bridge_adapters", mock_ba):
+            result = impl_mod.invoke_implementer(
+                tmp_path,
+                "test prompt",
+                backend="claude",
+                timeout=10,
+            )
+
+        assert result["status"] == "error"
+        assert result["output"] == "partial work completed"
+        assert result["error_subtype"] == "error_max_turns"
+        assert result["stop_reason"] == "tool_use"
+        assert result["num_turns"] == 51
+
     def test_model_override_reported_in_result(self, tmp_path):
         """Result includes whether model override was actually applied."""
         self._setup_bridge_config(tmp_path)
@@ -2091,6 +2173,37 @@ class TestPhaseBFailClosed:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/test_plan.md")
             assert result["status"] == "error"
             assert result.get("step") == "implementer"
+
+    def test_implementer_max_turns_diagnostics_propagate(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        plan = repo / "reports" / "control_plane" / "test_plan.md"
+        plan.write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        impl_error = {
+            "status": "error",
+            "output": "",
+            "stderr": "Adapter result subtype: error_max_turns",
+            "exit_code": 1,
+            "job_id": "impl-test",
+            "model_override_applied": False,
+            "error_subtype": "error_max_turns",
+            "stop_reason": "tool_use",
+            "num_turns": 51,
+        }
+
+        mock_impl = _make_mock_impl()
+        mock_impl.invoke_implementer.return_value = impl_error
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/test_plan.md")
+
+        assert result["status"] == "error"
+        assert result["step"] == "implementer"
+        assert result["error_subtype"] == "error_max_turns"
+        assert result["stop_reason"] == "tool_use"
+        assert result["num_turns"] == 51
 
     def test_agent_review_hard_failure_is_fatal(self, tmp_path):
         """Hard-gate/compliance SDK review exits must stop the pipeline."""
@@ -5040,12 +5153,14 @@ Files:
 - `mu/tools/executors/phase_b_executor.py`
 - `mu/tools/runners/run_review.py:123`
 - `reports/control_plane/commit_pipeline_automation_plan_2026-03-25.md`,
+- `.gitignore`
 - `CHANGELOG.md`
 """
         parsed = pb_mod._parse_plan_declared_files(content)  # ANTICHEAT_OK: testing internal executor functions
         assert "mu/tools/executors/phase_b_executor.py" in parsed
         assert "mu/tools/runners/run_review.py" in parsed
         assert "reports/control_plane/commit_pipeline_automation_plan_2026-03-25.md" in parsed
+        assert ".gitignore" in parsed
         assert "CHANGELOG.md" in parsed
 
 
