@@ -113,6 +113,96 @@ def _setup_repo(tmp_path):
     return repo
 
 
+class TestStandaloneRecoveryTrigger:
+    def _run_main_with_pipeline_result(self, tmp_path, result):
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        handoff_path = tmp_path / "handoff.json"
+        handoff_path.write_text(
+            json.dumps(_make_new_schema_handoff(wave_id="standalone-recovery")),
+            encoding="utf-8",
+        )
+        recovery_calls = []
+
+        def fake_run(args, **kwargs):
+            if list(args) == ["git", "rev-parse", "--show-toplevel"]:
+                return subprocess.CompletedProcess(args, 0, f"{repo}\n", "")
+            raise AssertionError(f"unexpected subprocess.run call: {args}")
+
+        def fake_attempt(repo_root, failed_result, wave_id):
+            recovery_calls.append({
+                "repo_root": repo_root,
+                "result": dict(failed_result),
+                "wave_id": wave_id,
+            })
+            return {
+                "recovered": False,
+                "action": "recovery_loop",
+                "tier": 3,
+                "failure_class": failed_result.get("status", "unknown"),
+                "detail": "test recovery",
+                "exhausted": False,
+            }
+
+        with patch.object(commit_mod.subprocess, "run", side_effect=fake_run), \
+             patch.object(commit_mod, "run_commit_pipeline", return_value=dict(result)), \
+             patch.object(
+                 commit_mod,
+                 "_load_repo_recovery_symbols",
+                 return_value=(fake_attempt, lambda value: value),
+             ), \
+             patch.object(
+                 sys,
+                 "argv",
+                 [
+                     "commit_executor.py",
+                     "--handoff",
+                     str(handoff_path),
+                     "--standalone",
+                 ],
+             ):
+            exit_code = commit_mod.main()
+
+        return exit_code, recovery_calls
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            "pre_push_failed",
+            "stage_failed",
+            "implementer_error",
+            "bridge_error",
+            "l4_contract_violation",
+        ],
+    )
+    def test_standalone_invokes_recovery_for_widened_failure_statuses(
+        self,
+        tmp_path,
+        status,
+    ):
+        exit_code, recovery_calls = self._run_main_with_pipeline_result(
+            tmp_path,
+            {"status": status, "step": "commit_executor"},
+        )
+
+        assert exit_code == 1
+        assert len(recovery_calls) == 1
+        assert recovery_calls[0]["result"]["status"] == status
+        assert recovery_calls[0]["wave_id"] == "standalone-recovery"
+
+    @pytest.mark.parametrize("status", ["success", "held"])
+    def test_standalone_does_not_recover_success_or_held(self, tmp_path, status):
+        exit_code, recovery_calls = self._run_main_with_pipeline_result(
+            tmp_path,
+            {"status": status, "step": "commit_executor"},
+        )
+
+        assert exit_code == 0
+        assert recovery_calls == []
+
+
 class TestSupervisorReceiptIsAuthority:
     """Step 7 preserves the handoff receipt chain and uses step 6 for final authority.
 

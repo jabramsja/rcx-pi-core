@@ -60,6 +60,13 @@ reports/*
 !reports/control_plane/**
 # But deferred findings ARE tracked (policy decisions)
 !reports/deferred/
+# Canonical deferred closeout snapshots ARE tracked evidence.
+# Keep the historical archive backlog ignored unless a future wave admits it.
+!reports/archive/
+reports/archive/*
+!reports/archive/deferred/
+reports/archive/deferred/*
+!reports/archive/deferred/*_closed-by-*.md
 # L4 wave indicator artifacts ARE tracked (evidence)
 !reports/l4_wave_indicators/
 

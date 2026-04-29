@@ -2874,29 +2874,47 @@ class TestRecoveryPagerEvents:
 
 
 class TestHybridDelegatePayload:
-    def test_valid_payload_accepts_exact_runtime_scope(self):
+    def test_valid_payload_accepts_widened_control_surface_scope(self):
         ok, payload, detail = rg_mod._validate_delegate_implementer_payload(  # ANTICHEAT_OK: validates closed hybrid payload schema
             make_delegate_response(
-                files_in_scope=["mu/tools/executors/recovery_gate.py"],
+                files_in_scope=[
+                    "mu/tools/executors/commit_executor.py",
+                    "mu/tools/executors/recovery_gate.py",
+                    "mu/tests/tools/test_commit_executor_receipt.py",
+                    "reports/deferred/blocking/hybrid_recovery_inert_structural_gaps_2026-04-17.md",
+                    "reports/control_plane/hybrid_recovery_inert_structural_gaps_2026-04-17.md",
+                ],
                 validation_spec=[{
                     "validator": "pytest_targeted",
-                    "targets": ["mu/tests/tools/test_recovery_gate.py"],
+                    "targets": [
+                        "mu/tests/tools/test_recovery_gate.py",
+                        "mu/tests/tools/test_commit_executor_receipt.py",
+                    ],
                 }],
             )
         )
         assert ok is True
         assert detail == ""
-        assert payload["files_in_scope"] == ["mu/tools/executors/recovery_gate.py"]
+        assert payload["files_in_scope"] == [
+            "mu/tools/executors/commit_executor.py",
+            "mu/tools/executors/recovery_gate.py",
+            "mu/tests/tools/test_commit_executor_receipt.py",
+            "reports/deferred/blocking/hybrid_recovery_inert_structural_gaps_2026-04-17.md",
+            "reports/control_plane/hybrid_recovery_inert_structural_gaps_2026-04-17.md",
+        ]
 
     @pytest.mark.parametrize(
         "files_in_scope",
         [
             ["mu/tools/executors/executor_config.json"],
-            ["mu/tests/tools/test_recovery_gate.py"],
             ["mu/tools/executors/phase_b_implementer.py"],
             ["mu/host/python/x.py"],
+            ["rcx_pi/runtime.py"],
             [".git/index"],
+            [".agent_bus/bridge_config.json"],
+            [".agent_bus/state.json"],
             [".claude/rules/test.md"],
+            ["archive/old.md"],
             ["../escape.py"],
         ],
     )
@@ -6847,6 +6865,55 @@ class TestNeedsPhaseB_Tier3:
         assert recovery["action"] == "retry_phase_b_with_plan"
         assert "--plan reports/control_plane/pager.md" in recovery["detail"]
         assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/pager.md"
+
+
+class TestMaxTurnsClassification:
+    def test_top_level_error_max_turns_is_tier3(self):
+        fc = rg_mod.classify_failure({
+            "status": "error",
+            "step": "implementer",
+            "error_subtype": "error_max_turns",
+            "stop_reason": "tool_use",
+            "num_turns": 51,
+        })
+        assert fc == FailureClass.MAX_TURNS_REACHED
+        assert rg_mod.tier_for(fc) == 3
+
+    def test_embedded_adapter_error_max_turns_is_tier3(self):
+        stdout = json.dumps({
+            "type": "result",
+            "subtype": "error_max_turns",
+            "num_turns": 51,
+            "stop_reason": "tool_use",
+        })
+        fc = rg_mod.classify_failure({
+            "status": "failed",
+            "step": "phase_b_executor",
+            "stdout": stdout,
+        })
+        assert fc == FailureClass.MAX_TURNS_REACHED
+        assert rg_mod.tier_for(fc) == 3
+
+
+class TestStandaloneCommitFailureClassification:
+    @pytest.mark.parametrize(
+        ("status", "expected"),
+        [
+            ("pre_push_failed", FailureClass.PRE_PUSH_FAILED),
+            ("stage_failed", FailureClass.STAGE_FAILED),
+            ("implementer_error", FailureClass.IMPLEMENTER_ERROR),
+            ("bridge_error", FailureClass.BRIDGE_ERROR),
+            ("l4_contract_violation", FailureClass.L4_CONTRACT_VIOLATION),
+        ],
+    )
+    def test_named_standalone_failure_statuses_have_explicit_classes(
+        self,
+        status,
+        expected,
+    ):
+        fc = rg_mod.classify_failure({"status": status, "step": "commit_executor"})
+        assert fc == expected
+        assert rg_mod.tier_for(fc) == 3
 
 
 class TestDangerousGitPatterns:

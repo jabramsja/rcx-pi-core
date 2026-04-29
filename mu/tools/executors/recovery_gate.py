@@ -83,6 +83,12 @@ class FailureClass(Enum):
     UNKNOWN_ERROR = "unknown_error"
     NEEDS_PHASE_B = "needs_phase_b"
     BOT_FINDINGS_PENDING = "bot_findings_pending"
+    MAX_TURNS_REACHED = "max_turns_reached"
+    PRE_PUSH_FAILED = "pre_push_failed"
+    STAGE_FAILED = "stage_failed"
+    IMPLEMENTER_ERROR = "implementer_error"
+    BRIDGE_ERROR = "bridge_error"
+    L4_CONTRACT_VIOLATION = "l4_contract_violation"
     # Tier 4 -- escalate (never recover)
     TERMINAL_POLICY = "terminal_policy"
     UNCLASSIFIED = "unclassified"
@@ -105,6 +111,12 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.AGENT_REVIEW_CRASH: 3, FailureClass.UNKNOWN_ERROR: 3,
     FailureClass.NEEDS_PHASE_B: 3,
     FailureClass.BOT_FINDINGS_PENDING: 3,
+    FailureClass.MAX_TURNS_REACHED: 3,
+    FailureClass.PRE_PUSH_FAILED: 3,
+    FailureClass.STAGE_FAILED: 3,
+    FailureClass.IMPLEMENTER_ERROR: 3,
+    FailureClass.BRIDGE_ERROR: 3,
+    FailureClass.L4_CONTRACT_VIOLATION: 3,
     FailureClass.TERMINAL_POLICY: 4, FailureClass.UNCLASSIFIED: 4,
 }
 
@@ -112,6 +124,13 @@ _TERMINAL_STATUSES = frozenset({
     "question_for_founder", "max_rounds_reached",
     "supervisor_rejected",
 })
+_STANDALONE_STATUS_FAILURE_CLASSES: dict[str, FailureClass] = {
+    "pre_push_failed": FailureClass.PRE_PUSH_FAILED,
+    "stage_failed": FailureClass.STAGE_FAILED,
+    "implementer_error": FailureClass.IMPLEMENTER_ERROR,
+    "bridge_error": FailureClass.BRIDGE_ERROR,
+    "l4_contract_violation": FailureClass.L4_CONTRACT_VIOLATION,
+}
 _TRANSIENT_KILL_CODES = frozenset({-9, -15, 137})
 PHASE_B_RECOVERY_PLAN_ENV = "RCX_RECOVERY_PHASE_B_PLAN_PATH"
 STALE_BRIDGE_LOCK_WAIT_TIMEOUT_S = 30.0
@@ -125,6 +144,19 @@ _FEATURE_BRANCH_RE = re.compile(
 def tier_for(fc: FailureClass) -> int:
     """Return the recovery tier (1-4) for a failure class."""
     return _TIER_MAP[fc]
+
+
+def _json_field_equals(value: Any, field_names: frozenset[str], expected: str) -> bool:
+    """Return true when a nested JSON-like payload carries field == expected."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in field_names and str(item).strip() == expected:
+                return True
+            if _json_field_equals(item, field_names, expected):
+                return True
+    if isinstance(value, list):
+        return any(_json_field_equals(item, field_names, expected) for item in value)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +206,16 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.TERMINAL_POLICY
     if embedded_status in _TERMINAL_STATUSES:
         return FailureClass.TERMINAL_POLICY
+
+    if any(
+        _json_field_equals(candidate, frozenset({"error_subtype", "subtype"}), "error_max_turns")
+        for candidate in (result, embedded_stdout, embedded_stderr)
+    ):
+        return FailureClass.MAX_TURNS_REACHED
+
+    status_key = str(status or embedded_status or "").strip().lower()
+    if status_key in _STANDALONE_STATUS_FAILURE_CLASSES:
+        return _STANDALONE_STATUS_FAILURE_CLASSES[status_key]
 
     # Tier 1: a post-reentry supervisor NEEDS_PHASE_B veto can deterministically
     # seed the in-branch re-entry checkpoint and retry Phase B without Tier 3.
@@ -2195,11 +2237,12 @@ _DANGEROUS_COPY_MOVE_KILL_COMMANDS: frozenset[str] = frozenset({
 MAX_RECOVERY_ITERATIONS = 3
 _SHELL_TIMEOUT = 30
 _TRIVIAL_EXCERPTS = frozenset({"{", "}", "[", "]", ",", '"', '",', "{}", "[]"})
-_HYBRID_RUNTIME_SCOPE: frozenset[str] = frozenset({
-    "mu/tools/executors/recovery_gate.py",
-    "mu/tools/executors/executor_common.py",
-})
-_HYBRID_SCOPE_PREFIXES: tuple[str, ...] = ("mu/tools/executors/",)
+_HYBRID_SCOPE_PATTERNS: tuple[str, ...] = (
+    "mu/tools/executors/**/*.py",
+    "mu/tests/tools/test_*.py",
+    "reports/deferred/**/*.md",
+    "reports/control_plane/**/*.md",
+)
 _HYBRID_HARD_DENY_PREFIXES: tuple[str, ...] = (
     "mu/host/",
     "rcx_pi/",
@@ -2211,10 +2254,6 @@ _HYBRID_HARD_DENY_PREFIXES: tuple[str, ...] = (
 _HYBRID_BOOTSTRAP_SURFACES: frozenset[str] = frozenset({
     "mu/tools/executors/phase_b_implementer.py",
     ".agent_bus/bridge_config.json",
-})
-_HYBRID_VALIDATOR_TARGETS: frozenset[str] = frozenset({
-    "mu/tests/tools/test_recovery_gate.py",
-    "mu/tests/tools/test_phase_b_executor.py",
 })
 _HYBRID_TOP_LEVEL_KEYS: frozenset[str] = frozenset({
     "action",
@@ -2231,6 +2270,27 @@ _HYBRID_VALIDATION_KEYS: frozenset[str] = frozenset({
     "validator",
     "targets",
 })
+
+
+def _is_hybrid_test_tool_path(rel_path: str) -> bool:
+    prefix = "mu/tests/tools/"
+    if not rel_path.startswith(prefix):
+        return False
+    leaf = rel_path[len(prefix):]
+    return "/" not in leaf and leaf.startswith("test_") and leaf.endswith(".py")
+
+
+def _is_hybrid_allowed_scope_path(rel_path: str) -> bool:
+    return (
+        (rel_path.startswith("mu/tools/executors/") and rel_path.endswith(".py"))
+        or _is_hybrid_test_tool_path(rel_path)
+        or (rel_path.startswith("reports/deferred/") and rel_path.endswith(".md"))
+        or (rel_path.startswith("reports/control_plane/") and rel_path.endswith(".md"))
+    )
+
+
+def _is_hybrid_validator_target(rel_path: str) -> bool:
+    return _is_hybrid_test_tool_path(rel_path)
 
 
 def _strip_shell_quotes(text: str) -> str:
@@ -2905,14 +2965,16 @@ For "delegate_implementer", "commands" must contain exactly one object:
 }}
 
 delegate_implementer rules:
-- files_in_scope may include ONLY:
-  - mu/tools/executors/recovery_gate.py
-  - mu/tools/executors/executor_common.py
+- files_in_scope may include ONLY these bounded control-surface patterns:
+  - mu/tools/executors/**/*.py
+  - mu/tests/tools/test_*.py
+  - reports/deferred/**/*.md
+  - reports/control_plane/**/*.md
+- files_in_scope must still avoid host/runtime/bootstrap/config surfaces.
 - Do NOT target bridge / adapter / implementer bootstrap surfaces.
 - Do NOT return raw validation shell, validation_commands, args, or unsupported fields.
-- validation_spec may use ONLY pytest_targeted with targets drawn from:
-  - mu/tests/tools/test_recovery_gate.py
-  - mu/tests/tools/test_phase_b_executor.py
+- validation_spec may use ONLY pytest_targeted with targets matching:
+  - mu/tests/tools/test_*.py
 
 Safety: no rm -rf, no git push, no git reset --hard. Max 30s per command."""
 
@@ -3103,7 +3165,8 @@ def _hybrid_scope_contract(files_in_scope: list[str], validation_spec: list[dict
         "- .scratch/recovery_agent_<token>.txt",
         "- .scratch/phase_b_implementer_prompt.md",
         "- .scratch/phase_b_implementer_output_<job>.txt",
-        "Do not modify validator modules, executor config, bridge config, implementer bootstrap files, .git state, or any other path.",
+        "Do not modify validator modules unless they are explicitly listed in the allowed product writes above.",
+        "Do not modify executor config, bridge config, implementer bootstrap files, .git state, or any other path.",
         "Validators recovery will run after your change:",
         *validation_lines,
     ])
@@ -3534,7 +3597,7 @@ def _validate_hybrid_validation_spec(spec: Any) -> tuple[bool, list[dict[str, An
             normalized = _normalize_hybrid_repo_relative(raw_target)
             if normalized is None:
                 return False, None, f"invalid validator target: {raw_target!r}"
-            if normalized not in _HYBRID_VALIDATOR_TARGETS:
+            if not _is_hybrid_validator_target(normalized):
                 return False, None, f"validator target outside hybrid allowlist: {normalized}"
             normalized_targets.append(normalized)
         if len(set(normalized_targets)) != len(normalized_targets):
@@ -3579,10 +3642,8 @@ def _validate_delegate_implementer_payload(
             return False, None, f"hybrid files_in_scope targets denied prefix: {normalized}"
         if normalized in _HYBRID_BOOTSTRAP_SURFACES:
             return False, None, f"hybrid files_in_scope targets bootstrap surface: {normalized}"
-        if normalized not in _HYBRID_RUNTIME_SCOPE:
-            return False, None, f"hybrid files_in_scope is outside the exact runtime allowlist: {normalized}"
-        if not any(normalized.startswith(prefix) for prefix in _HYBRID_SCOPE_PREFIXES):
-            return False, None, f"hybrid files_in_scope is outside the control-surface prefix allowlist: {normalized}"
+        if not _is_hybrid_allowed_scope_path(normalized):
+            return False, None, f"hybrid files_in_scope is outside the bounded control-surface allowlist: {normalized}"
         files_in_scope.append(normalized)
     if len(set(files_in_scope)) != len(files_in_scope):
         return False, None, "delegate_implementer files_in_scope entries must be unique"
@@ -3703,7 +3764,8 @@ def _build_delegate_implementer_prompt(
         ],
         "",
         "Do not modify any file outside the writable scope above.",
-        "Do not modify validator modules, executor config, bridge config, or .git state.",
+        "Do not modify validator modules unless explicitly listed in writable scope.",
+        "Do not modify executor config, bridge config, implementer bootstrap files, or .git state.",
         "Recovery will audit surviving drift and local git-control immutability after your run.",
     ])
     return module.build_implementation_prompt(
@@ -6843,7 +6905,10 @@ _AGENT_FAILURE_CLASS_MAP: dict[str, list[str] | None] = {
     # Implementation agents — pipeline-subset: only failure classes
     # that produce actionable learnings for build/test execution
     "implementer":      ["test_failure", "git_staging_conflict", "process_timeout",
-                         "implementer_stale", "needs_phase_b", "mixed_staging"],
+                         "implementer_stale", "needs_phase_b", "mixed_staging",
+                         "max_turns_reached", "pre_push_failed", "stage_failed",
+                         "implementer_error", "bridge_error",
+                         "l4_contract_violation"],
     # Depth agents — pipeline-subset: test/edge-case execution focus
     "grounding":        ["test_failure", "needs_phase_b", "unknown_error"],
     "fuzzer":           ["test_failure", "unknown_error", "process_timeout"],

@@ -118,6 +118,32 @@ VALID_CALLERS = {"phase_b", "phase_a", "update_tracker_only", "standalone"}
 
 # Fields that may be empty/missing when caller is "standalone"
 STANDALONE_OPTIONAL_FIELDS = {"pre_commit_receipt_path"}
+_STANDALONE_RECOVERY_TERMINAL_STATUSES = frozenset({
+    "success",
+    "held",
+    "question_for_founder",
+    "max_rounds_reached",
+    "supervisor_rejected",
+})
+_STANDALONE_RECOVERY_STATUSES = frozenset({
+    "bot_findings_pending",
+    "pre_push_failed",
+    "stage_failed",
+    "implementer_error",
+    "bridge_error",
+    "l4_contract_violation",
+})
+_STANDALONE_RECOVERY_ERROR_STEPS = frozenset({
+    "run_pre_push_script",
+    "run_pre_commit_script",
+    "stage_files",
+    "implementer",
+    "implementer_bridge_fix",
+    "implementer_reentry",
+    "pytest_fix",
+    "bridge_subprocess",
+    "reentry_bridge_subprocess",
+})
 
 
 @contextmanager
@@ -158,6 +184,19 @@ def _load_repo_recovery_symbols(repo_root: Path) -> tuple[Any, Any]:
             from mu.tools.executors.recovery_gate import attempt_recovery
             from mu.tools.executors.executor_common import normalize_wave_id
     return attempt_recovery, normalize_wave_id
+
+
+def _should_attempt_standalone_recovery(result: dict[str, Any]) -> bool:
+    """Return true when a standalone non-success result is recoverable."""
+    status = str(result.get("status", "") or "").strip().lower()
+    if status in _STANDALONE_RECOVERY_TERMINAL_STATUSES:
+        return False
+    if status in _STANDALONE_RECOVERY_STATUSES:
+        return True
+    step = str(result.get("step", "") or "").strip().lower()
+    return status in {"error", "failed", "timeout", "stale"} and (
+        step in _STANDALONE_RECOVERY_ERROR_STEPS
+    )
 
 # GraphQL query for PR review state
 PR_REVIEW_QUERY = """
@@ -6090,10 +6129,9 @@ def main() -> int:
             for bf in result["bot_findings"]:
                 print(f"  - {bf['author']}: {bf['body'][:100]}...")
 
-    # Fix 2: standalone recovery — when --standalone hits bot_findings_pending,
-    # invoke recovery gate directly so P1 findings reach Tier 3 diagnosis
-    # instead of silently exiting.
-    if result.get("status") == "bot_findings_pending" and args.standalone:
+    # Standalone recovery: route recoverable non-success standalone exits
+    # through recovery_gate so bounded repairs can be diagnosed and retried.
+    if args.standalone and _should_attempt_standalone_recovery(result):
         try:
             attempt_recovery, normalize_wave_id = _load_repo_recovery_symbols(repo_root)
             wave_id = normalize_wave_id(handoff.get("wave_id", "unknown"))
