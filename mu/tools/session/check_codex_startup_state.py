@@ -27,6 +27,9 @@ CODEX_AUTOPING_MAX_STATE_AGE_S = 180
 CODEX_AUTOPING_CONTEXT_EXHAUSTED_STATUSES = frozenset(
     {"context_exhausted", "context_exhausted_paused"}
 )
+CODEX_AUTOPING_CONTEXT_RECOVERY_STATUSES = frozenset(
+    {"context_exhausted_recovering", "fresh_exec_ping_dispatched"}
+)
 
 STALE_MODELS_CACHE_CANARIES = (
     "team morale and being a supportive teammate as much as code quality",
@@ -2648,15 +2651,28 @@ def _codex_autoping_health(codex_home: Path, thread_id: str) -> tuple[bool, str]
     if last_exit_code not in (None, 0, "0"):
         if normalized_status in CODEX_AUTOPING_CONTEXT_EXHAUSTED_STATUSES:
             return (
-                True,
-                "Codex autoping degraded "
+                False,
+                "Codex autoping primary thread context exhausted "
                 f"pid={watcher_pid} thread={thread_id} status={normalized_status} "
-                f"last_exit={last_exit_code}: current thread context exhausted; "
-                "watcher paused repeated resume attempts and pager remains primary",
+                f"last_exit={last_exit_code}: launcher must restart watcher or watcher must "
+                "enter fresh exec diagnostic recovery",
             )
         return False, f"Codex autoping last ping failed: exit={last_exit_code}"
 
-    return True, f"Codex autoping active pid={watcher_pid} thread={thread_id} status={status}"
+    mode = str(payload.get("active_mode") or payload.get("recovery_mode") or "resume")
+    if payload.get("primary_thread_context_exhausted") is True:
+        mode = "fresh_exec_after_context_exhaustion"
+    recovery = (
+        " recovery=fresh_exec"
+        if normalized_status in CODEX_AUTOPING_CONTEXT_RECOVERY_STATUSES
+        or payload.get("primary_thread_context_exhausted") is True
+        else ""
+    )
+    return (
+        True,
+        f"Codex autoping active pid={watcher_pid} thread={thread_id} "
+        f"status={status} mode={mode}{recovery}",
+    )
 
 
 def _strip_ansi(text: str) -> str:

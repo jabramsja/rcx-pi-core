@@ -134,14 +134,15 @@ if [ -n "$existing_pid" ] && ps -p "$existing_pid" > /dev/null 2>&1; then
     sleep 1
 fi
 
-cleanup_orphaned_resumes() {
-    python3 - <<'PY' "$THREAD_ID"
+cleanup_orphaned_autoping_execs() {
+    python3 - <<'PY' "$THREAD_ID" "$THREAD_SLUG"
 import os
 import signal
 import subprocess
 import sys
 
 thread_id = sys.argv[1]
+thread_slug = sys.argv[2]
 try:
     proc = subprocess.run(
         ["ps", "-Ao", "pid=,ppid=,command="],
@@ -163,9 +164,9 @@ for raw_line in proc.stdout.splitlines():
     if len(parts) != 3:
         continue
     pid_text, ppid_text, command = parts
-    if thread_id not in command:
+    if thread_id not in command and thread_slug not in command:
         continue
-    if "codex exec resume" not in command:
+    if "codex exec" not in command:
         continue
     if "Autonomous WorkingRCX pipeline watchdog tick." not in command:
         continue
@@ -177,14 +178,20 @@ for raw_line in proc.stdout.splitlines():
     if ppid != 1:
         continue
     try:
-        os.kill(pid, signal.SIGTERM)
-        print(f"Codex autoping: cleaned orphaned resume pid={pid}")
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+        print(f"Codex autoping: cleaned orphaned exec process group pid={pid}")
+    except PermissionError:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            print(f"Codex autoping: cleaned orphaned exec pid={pid}")
+        except ProcessLookupError:
+            continue
     except ProcessLookupError:
         continue
 PY
 }
 
-cleanup_orphaned_resumes
+cleanup_orphaned_autoping_execs
 
 CMD=(python3 "$WATCH_SCRIPT" --repo-root "$REPO" --thread-id "$THREAD_ID" --interval "$INTERVAL" --initial-delay "$INITIAL_DELAY" --ping-timeout "$PING_TIMEOUT")
 WINDOW_CMD=("$WINDOW_SCRIPT" --repo "$REPO" --thread-id "$THREAD_ID" --interval "$INTERVAL" --initial-delay "$INITIAL_DELAY" --ping-timeout "$PING_TIMEOUT")

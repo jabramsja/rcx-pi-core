@@ -20,7 +20,10 @@ DEFAULT_INTERVAL_S = 20.0
 DEFAULT_INITIAL_DELAY_S = 30.0
 DEFAULT_PING_TIMEOUT_S = 120.0
 SUMMARY_PREFIX = "Autoping summary:"
-CONTEXT_EXHAUSTED_STATUSES = frozenset({"context_exhausted", "context_exhausted_paused"})
+CONTEXT_EXHAUSTED_STATUSES = frozenset(
+    {"context_exhausted", "context_exhausted_paused", "context_exhausted_recovering"}
+)
+FRESH_EXEC_CONTEXT_RECOVERY_MODE = "fresh_exec_after_context_exhaustion"
 CODEX_NO_TOOLS_DISABLED_FEATURES = (
     "apps",
     "apply_patch_freeform",
@@ -107,6 +110,22 @@ def _codex_resume_command(thread_id: str, prompt: str) -> list[str]:
         thread_id,
         prompt,
     ]
+
+
+def _codex_fresh_exec_command(prompt: str) -> list[str]:
+    return [
+        "codex",
+        "exec",
+        *CODEX_DIAGNOSTIC_RESUME_CONFIG,
+        "--json",
+        prompt,
+    ]
+
+
+def _codex_ping_command(thread_id: str, prompt: str, *, fresh_exec: bool) -> list[str]:
+    if fresh_exec:
+        return _codex_fresh_exec_command(prompt)
+    return _codex_resume_command(thread_id, prompt)
 
 
 def _ping_timed_out(
@@ -447,8 +466,8 @@ def _extract_ping_error_summary(log_path: Path) -> str | None:
         return None
     if "context window" in last_error.lower() or "ran out of room" in last_error.lower():
         return (
-            "autoping wake failed: current Codex thread context window is exhausted; "
-            "pager remains the primary wake surface until a fresh thread is established"
+            "autoping primary Codex thread context window is exhausted; "
+            "switching future watchdog ticks to fresh exec diagnostic mode"
         )
     return _clip_summary(f"autoping wake failed: {last_error}")
 
@@ -465,9 +484,19 @@ def _state_context_exhausted_for_thread(state: dict[str, object], thread_id: str
     return status in CONTEXT_EXHAUSTED_STATUSES
 
 
+def _state_requires_fresh_exec_for_thread(state: dict[str, object], thread_id: str) -> bool:
+    recorded_thread = str(state.get("thread_id") or "").strip()
+    if recorded_thread != thread_id:
+        return False
+    return (
+        _state_context_exhausted_for_thread(state, thread_id)
+        or state.get("primary_thread_context_exhausted") is True
+    )
+
+
 def _initial_status_for_state(state: dict[str, object], thread_id: str) -> str:
-    if _state_context_exhausted_for_thread(state, thread_id):
-        return "context_exhausted_paused"
+    if _state_requires_fresh_exec_for_thread(state, thread_id):
+        return "context_exhausted_recovering"
     return "initial_delay"
 
 
@@ -507,6 +536,19 @@ def _status_for_ping_summary(summary: str | None, *, timed_out: bool = False) ->
     if timed_out:
         return "context_exhausted_paused"
     return "context_exhausted"
+
+
+def _should_suppress_unchanged_state(
+    state: dict[str, object],
+    bridge_signature: str,
+    *,
+    recovering_context_now: bool,
+) -> bool:
+    return (
+        not recovering_context_now
+        and state.get("last_bridge_signature") == bridge_signature
+        and bool(state.get("last_summary"))
+    )
 
 
 def _render_prompt(
@@ -578,9 +620,14 @@ def main() -> int:
             "status": initial_status,
             "active_pid": None,
             "active_log": None,
+            "active_mode": None,
+            "last_exit_code": None,
+            "primary_thread_context_exhausted": (
+                initial_status == "context_exhausted_recovering"
+            ),
             "pause_reason": (
-                "current Codex thread context window is exhausted"
-                if initial_status == "context_exhausted_paused"
+                "current Codex thread context window is exhausted; using fresh exec diagnostics"
+                if initial_status == "context_exhausted_recovering"
                 else ""
             ),
             "summary_path": str(summary_path),
@@ -590,6 +637,7 @@ def main() -> int:
 
     active_proc: subprocess.Popen[str] | None = None
     active_log: Path | None = None
+    active_mode: str | None = None
     active_started_monotonic: float | None = None
 
     while True:
@@ -617,6 +665,7 @@ def main() -> int:
                             "status": status,
                             "active_pid": None,
                             "active_log": None,
+                            "active_mode": active_mode,
                             "last_exit_code": 0,
                             "last_completed_at": _now(),
                             "last_completed_pid": completed_pid,
@@ -635,9 +684,21 @@ def main() -> int:
                     )
                     active_proc = None
                     active_log = None
+                    active_mode = None
                     active_started_monotonic = None
                     if status == "context_exhausted":
-                        time.sleep(max(args.interval, 300.0))
+                        _write_state(
+                            state_path,
+                            {
+                                "primary_thread_context_exhausted": True,
+                                "recovery_mode": FRESH_EXEC_CONTEXT_RECOVERY_MODE,
+                                "pause_reason": (
+                                    "current Codex thread context window is exhausted; "
+                                    "using fresh exec diagnostics"
+                                ),
+                            },
+                        )
+                        time.sleep(args.interval)
                         continue
                     time.sleep(args.interval)
                     continue
@@ -668,6 +729,7 @@ def main() -> int:
                         "status": status,
                         "active_pid": None,
                         "active_log": None,
+                        "active_mode": active_mode,
                         "last_exit_code": exit_code if exit_code is not None else 124,
                         "last_completed_at": _now(),
                         "last_completed_pid": timed_out_pid,
@@ -679,8 +741,13 @@ def main() -> int:
                     if status == "context_exhausted_paused":
                         state_update.update(
                             {
+                                "primary_thread_context_exhausted": True,
+                                "recovery_mode": FRESH_EXEC_CONTEXT_RECOVERY_MODE,
                                 "last_paused_at": _now(),
-                                "pause_reason": "current Codex thread context window is exhausted",
+                                "pause_reason": (
+                                    "current Codex thread context window is exhausted; "
+                                    "using fresh exec diagnostics"
+                                ),
                             }
                         )
                     _write_state(
@@ -695,9 +762,10 @@ def main() -> int:
                     )
                     active_proc = None
                     active_log = None
+                    active_mode = None
                     active_started_monotonic = None
                     if status == "context_exhausted_paused":
-                        time.sleep(max(args.interval, 300.0))
+                        time.sleep(args.interval)
                         continue
                     time.sleep(args.interval)
                     continue
@@ -711,6 +779,8 @@ def main() -> int:
                         "status": "waiting_for_prior_ping",
                         "active_pid": active_proc.pid,
                         "active_log": str(active_log or ""),
+                        "active_mode": active_mode,
+                        "last_exit_code": None,
                         "active_elapsed_s": round(elapsed_s, 1),
                         "summary_path": str(summary_path),
                     },
@@ -739,6 +809,7 @@ def main() -> int:
                     "status": status,
                     "active_pid": None,
                     "active_log": None,
+                    "active_mode": active_mode,
                     "last_exit_code": exit_code,
                     "last_completed_at": _now(),
                     "last_completed_pid": active_proc.pid,
@@ -753,34 +824,26 @@ def main() -> int:
             )
             active_proc = None
             active_log = None
+            active_mode = None
             active_started_monotonic = None
             if status == "context_exhausted":
-                time.sleep(max(args.interval, 300.0))
+                _write_state(
+                    state_path,
+                    {
+                        "primary_thread_context_exhausted": True,
+                        "recovery_mode": FRESH_EXEC_CONTEXT_RECOVERY_MODE,
+                        "pause_reason": (
+                            "current Codex thread context window is exhausted; "
+                            "using fresh exec diagnostics"
+                        ),
+                    },
+                )
+                time.sleep(args.interval)
                 continue
 
         state = _read_state(state_path)
-        if _state_context_exhausted_for_thread(state, args.thread_id):
-            _write_state(
-                state_path,
-                {
-                    "updated_at": _now(),
-                    "watcher_pid": os.getpid(),
-                    "thread_id": args.thread_id,
-                    "status": "context_exhausted_paused",
-                    "active_pid": None,
-                    "active_log": None,
-                    "last_paused_at": _now(),
-                    "pause_reason": "current Codex thread context window is exhausted",
-                    "summary_path": str(summary_path),
-                },
-            )
-            print(
-                "[autoping] context_exhausted_paused "
-                f"thread_id={args.thread_id} summary={summary_path}",
-                flush=True,
-            )
-            time.sleep(max(args.interval, 300.0))
-            continue
+        use_fresh_exec = _state_requires_fresh_exec_for_thread(state, args.thread_id)
+        recovering_context_now = _state_context_exhausted_for_thread(state, args.thread_id)
 
         wave_root = _discover_active_wave_root(repo_root)
         bridge_state = _read_bridge_state(wave_root)
@@ -797,6 +860,8 @@ def main() -> int:
                     "status": "idle_no_wave",
                     "active_pid": None,
                     "active_log": None,
+                    "active_mode": None,
+                    "last_exit_code": None,
                     "wave_root": str(wave_root) if wave_root else None,
                     "summary_path": str(summary_path),
                     "bridge_state": bridge_state,
@@ -818,6 +883,8 @@ def main() -> int:
                     "status": "attention_required",
                     "active_pid": None,
                     "active_log": None,
+                    "active_mode": None,
+                    "last_exit_code": None,
                     "last_attention_at": _now(),
                     "last_bridge_signature": bridge_signature,
                     "last_summary": attention_summary,
@@ -836,7 +903,11 @@ def main() -> int:
             continue
 
         state = _read_state(state_path)
-        if state.get("last_bridge_signature") == bridge_signature and state.get("last_summary"):
+        if _should_suppress_unchanged_state(
+            state,
+            bridge_signature,
+            recovering_context_now=recovering_context_now,
+        ):
             _write_state(
                 state_path,
                 {
@@ -846,6 +917,8 @@ def main() -> int:
                     "status": "idle_unchanged_state",
                     "active_pid": None,
                     "active_log": None,
+                    "active_mode": None,
+                    "last_exit_code": None,
                     "last_skipped_at": _now(),
                     "last_bridge_signature": bridge_signature,
                     "summary_path": str(summary_path),
@@ -868,10 +941,11 @@ def main() -> int:
             summary_path=summary_path,
         )
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        active_log = log_dir / f"autoping_{stamp}.jsonl"
+        active_mode = FRESH_EXEC_CONTEXT_RECOVERY_MODE if use_fresh_exec else "resume"
+        active_log = log_dir / f"autoping_{active_mode}_{stamp}.jsonl"
         with active_log.open("w", encoding="utf-8") as sink:
             active_proc = subprocess.Popen(
-                _codex_resume_command(args.thread_id, prompt),
+                _codex_ping_command(args.thread_id, prompt, fresh_exec=use_fresh_exec),
                 cwd=str(repo_root),
                 stdin=subprocess.DEVNULL,
                 stdout=sink,
@@ -887,20 +961,24 @@ def main() -> int:
                 "updated_at": _now(),
                 "watcher_pid": os.getpid(),
                 "thread_id": args.thread_id,
-                "status": "ping_dispatched",
+                "status": "fresh_exec_ping_dispatched" if use_fresh_exec else "ping_dispatched",
                 "active_pid": active_proc.pid,
                 "active_log": str(active_log),
+                "active_mode": active_mode,
+                "last_exit_code": None,
                 "last_dispatched_at": _now(),
                 "last_dispatched_pid": active_proc.pid,
                 "summary_path": str(summary_path),
                 "bridge_state": bridge_state,
                 "last_bridge_signature": bridge_signature,
                 "tmux_tail": tmux_tail,
+                "primary_thread_context_exhausted": bool(use_fresh_exec),
+                "recovery_mode": active_mode if use_fresh_exec else "",
             },
         )
         print(
             "[autoping] dispatched "
-            f"pid={active_proc.pid} wave_root={wave_root} job={bridge_state.get('job')} "
+            f"mode={active_mode} pid={active_proc.pid} wave_root={wave_root} job={bridge_state.get('job')} "
             f"turn={bridge_state.get('turn')} log={active_log} summary={summary_path}",
             flush=True,
         )
