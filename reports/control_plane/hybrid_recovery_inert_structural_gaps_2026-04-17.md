@@ -7,6 +7,8 @@ Task: [PIPELINE-RECOVERY]
 Wave ID: hybrid-recovery-inert-structural-gaps-2026-04-17
 Wave class: L4_ENABLER
 Target gate: G8
+Lane: control-surface
+Authorization: standing pipeline-bug-fix authorization for bounded pipeline recovery hardening; commit automation may derive `FOUNDER_OVERRIDE:hybrid-recovery-inert-structural-gaps-2026-04-17` for L4 adjacency/rolling-cap clearance.
 
 ## Purpose
 
@@ -201,7 +203,7 @@ files are in scope.
 - Refresh wave: `hybrid-recovery-inert-structural-gaps-2026-04-17`
 - Active packet: `reports/control_plane/hybrid_recovery_inert_structural_gaps_2026-04-17.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `55ec35e53ed6872c239ad4c2ce794d758a8a7964e3dfde1a445026203279f7ef`
+- Tracker note sha256: `90859543113515aea291b6821cb2fec73433b38b340336bcbfdc7fa35d7f5e57`
 - Indicator artifact: `reports/l4_wave_indicators/hybrid-recovery-inert-structural-gaps-2026-04-17.json`
 - Pre-commit receipt handle: `.agent_bus/meta/pre_commit_receipts/receipt_2026-04-29T07-28-26p00-00_191171d9.json`
 - Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/docs/test_doc_placement_rules.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_recovery_gate.py`.
@@ -210,18 +212,9 @@ files are in scope.
   - `indicator`: `reports/l4_wave_indicators/hybrid-recovery-inert-structural-gaps-2026-04-17.json`
   - `pre_commit_receipt`: `.agent_bus/meta/pre_commit_receipts/receipt_2026-04-29T07-28-26p00-00_191171d9.json`
 - Current staged files:
-  - `.gitignore`
   - `TASKS.md`
-  - `mu/tests/docs/test_doc_placement_rules.py`
   - `mu/tests/tools/test_commit_executor_receipt.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
-  - `mu/tests/tools/test_recovery_gate.py`
   - `mu/tools/executors/commit_executor.py`
-  - `mu/tools/executors/phase_b_executor.py`
-  - `mu/tools/executors/phase_b_implementer.py`
-  - `mu/tools/executors/recovery_gate.py`
-  - `reports/archive/deferred/hybrid_recovery_inert_structural_gaps_2026-04-17_closed-by-hybrid-recovery-inert-structural-gaps-2026-04-17.md`
   - `reports/control_plane/hybrid_recovery_inert_structural_gaps_2026-04-17.md`
-  - `reports/deferred/non_blocking/hybrid-recovery-inert-structural-gaps-2026-04-17_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/hybrid-recovery-inert-structural-gaps-2026-04-17.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

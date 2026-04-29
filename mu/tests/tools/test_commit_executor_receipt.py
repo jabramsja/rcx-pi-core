@@ -1011,6 +1011,121 @@ class TestWaveIdBounds:
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
+    def test_build_commit_handoff_derives_founder_override_from_authorized_packet(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "authorized-control-wave"
+        packet_path = "reports/control_plane/authorized_control_wave.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Authorized Control Wave\n"
+            "Wave ID: authorized-control-wave\n"
+            "Wave class: L4_ENABLER\n"
+            "Lane: control-surface\n"
+            "Authorization: standing pipeline-bug-fix authorization\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "add", "--", packet_path],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+
+        handoff, errors = commit_mod.build_commit_handoff(
+            wave_id=wave_id,
+            task_id="[PIPELINE-RECOVERY]",
+            files_to_stage=["file.py", packet_path],
+            commit_message="chore: authorized control wave",
+            fixes_implemented=["authorized packet drives override derivation"],
+            caller="phase_b",
+            tracked_packet=packet_path,
+            repo_root=repo,
+        )
+
+        assert errors == []
+        assert handoff is not None
+        assert f"FOUNDER_OVERRIDE:{wave_id}" in handoff["tracker_note_text"]
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
+    def test_run_commit_pipeline_derives_founder_override_for_existing_phase_b_handoff(self, tmp_path):
+        from collections import namedtuple
+        import subprocess
+        import types
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "existing-phase-b-authorized-wave"
+        packet_path = "reports/control_plane/existing_phase_b_authorized_wave.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Existing Phase B Authorized Wave\n"
+            "Wave ID: existing-phase-b-authorized-wave\n"
+            "Wave class: L4_ENABLER\n"
+            "Lane: control-surface\n"
+            "Authorization: standing pipeline-bug-fix authorization\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "add", "--", packet_path],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(
+            json.dumps(
+                {
+                    "decision": "COMMIT_GO",
+                    "staged_sha": "fresh_sha_from_step6",
+                    "timestamp_utc": "2026-03-24T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        captured_package = {}
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+
+        def mock_supervisor(package_path, *a, **kw):
+            captured_package.update(json.loads(Path(package_path).read_text(encoding="utf-8")))
+            return SupervisorResult(
+                decision="COMMIT_GO",
+                summary="test",
+                receipt_path=sup_receipt_path,
+            )
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+        assert "FOUNDER_OVERRIDE:" not in handoff["tracker_note_text"]
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = mock_supervisor
+        mock_client.MetaBridgeClientError = Exception
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_run_post_commit_pipeline",
+            side_effect=lambda **kwargs: {
+                "status": "success",
+                "steps_completed": kwargs["result"]["steps_completed"],
+            },
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "success", result
+        assert captured_package["founder_override_token"] == f"FOUNDER_OVERRIDE:{wave_id}"
+        assert f"FOUNDER_OVERRIDE:{wave_id}" in (repo / "TASKS.md").read_text(encoding="utf-8")
+
     def test_prepare_handoff_from_routing_record_standalone_narrows_to_staged_diff(self, tmp_path):
         import subprocess
 
