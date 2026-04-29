@@ -1698,9 +1698,15 @@ def test_codex_autoping_accepts_live_state(monkeypatch, tmp_path):
     assert f"pid={os.getpid()}" in result.detail
 
 
-def test_codex_autoping_context_exhausted_degrades_without_recovery(monkeypatch, tmp_path):
+def test_codex_autoping_context_exhausted_restarts_recovery(monkeypatch, tmp_path):
     thread_id = "thread-exhausted"
     codex_home = tmp_path / ".codex"
+    repo_root = tmp_path / "repo"
+    launcher = repo_root / "tools" / "session" / "ensure_codex_autoping.sh"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o755)
+    calls: list[list[str]] = []
     monkeypatch.delenv("RCX_PIPELINE_SESSION", raising=False)
     monkeypatch.setenv("CODEX_THREAD_ID", thread_id)
     _write_autoping_state(
@@ -1711,17 +1717,35 @@ def test_codex_autoping_context_exhausted_degrades_without_recovery(monkeypatch,
         last_summary="autoping wake failed: current Codex thread context window is exhausted",
     )
 
-    def fail_if_recovery_runs(*args, **kwargs):
-        raise AssertionError("context-exhausted autoping must not restart recovery")
+    def fake_run(cmd, *, cwd=None, timeout=60):
+        calls.append(cmd)
+        _write_autoping_state(
+            codex_home,
+            thread_id,
+            status="fresh_exec_ping_dispatched",
+            last_exit_code=None,
+            active_mode="fresh_exec_after_context_exhaustion",
+            primary_thread_context_exhausted=True,
+        )
+        return subprocess.CompletedProcess(cmd, 0, "Codex autoping: ACTIVE\n", "")
 
-    monkeypatch.setattr(startup_mod, "_run", fail_if_recovery_runs)
+    monkeypatch.setattr(startup_mod, "_run", fake_run)
 
-    result = startup_mod._ensure_codex_autoping(tmp_path, codex_home)  # ANTICHEAT_OK: tool unit test
+    result = startup_mod._ensure_codex_autoping(repo_root, codex_home)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "OK"
-    assert "degraded" in result.detail
-    assert "context exhausted" in result.detail
-    assert "pager remains primary" in result.detail
+    assert "started Codex autoping" in result.detail
+    assert "recovery=fresh_exec" in result.detail
+    assert calls == [
+        [
+            str(launcher),
+            "--repo",
+            str(repo_root),
+            "--thread-id",
+            thread_id,
+            "--force-restart",
+        ]
+    ]
 
 
 def test_codex_autoping_recovers_missing_state(monkeypatch, tmp_path):

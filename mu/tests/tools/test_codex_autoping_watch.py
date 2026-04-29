@@ -197,11 +197,38 @@ def test_context_exhausted_state_matches_current_thread_only():
     ) is False
 
 
-def test_initial_status_preserves_context_exhausted_pause():
+def test_state_requires_fresh_exec_after_primary_thread_context_exhaustion():
+    assert watch_mod._state_requires_fresh_exec_for_thread(  # ANTICHEAT_OK: tool unit test
+        {
+            "thread_id": "thread-live",
+            "status": "prior_ping_finished",
+            "primary_thread_context_exhausted": True,
+        },
+        "thread-live",
+    ) is True
+    assert watch_mod._state_requires_fresh_exec_for_thread(  # ANTICHEAT_OK: tool unit test
+        {
+            "thread_id": "thread-live",
+            "status": "prior_ping_finished",
+            "primary_thread_context_exhausted": True,
+        },
+        "thread-other",
+    ) is False
+
+
+def test_initial_status_recovers_context_exhausted_thread_with_fresh_exec():
     assert watch_mod._initial_status_for_state(  # ANTICHEAT_OK: tool unit test
         {"thread_id": "thread-live", "status": "context_exhausted"},
         "thread-live",
-    ) == "context_exhausted_paused"
+    ) == "context_exhausted_recovering"
+    assert watch_mod._initial_status_for_state(  # ANTICHEAT_OK: tool unit test
+        {
+            "thread_id": "thread-live",
+            "status": "prior_ping_finished",
+            "primary_thread_context_exhausted": True,
+        },
+        "thread-live",
+    ) == "context_exhausted_recovering"
     assert watch_mod._initial_status_for_state(  # ANTICHEAT_OK: tool unit test
         {"thread_id": "thread-live", "status": "initial_delay"},
         "thread-live",
@@ -244,6 +271,26 @@ def test_bridge_state_signature_is_stable_for_unchanged_visible_state():
     )
 
     assert first == second
+
+
+def test_unchanged_state_suppression_allows_only_first_context_recovery_tick():
+    state = {
+        "last_bridge_signature": "sig-1",
+        "last_summary": "checked bridge state; no intervention.",
+        "primary_thread_context_exhausted": True,
+        "status": "prior_ping_finished",
+    }
+
+    assert watch_mod._should_suppress_unchanged_state(  # ANTICHEAT_OK: tool unit test
+        state,
+        "sig-1",
+        recovering_context_now=False,
+    ) is True
+    assert watch_mod._should_suppress_unchanged_state(  # ANTICHEAT_OK: tool unit test
+        state,
+        "sig-1",
+        recovering_context_now=True,
+    ) is False
 
 
 def test_attention_required_summary_flags_failed_reviewer_turn():
@@ -361,6 +408,28 @@ def test_codex_resume_command_uses_read_only_sandbox_without_bypass():
     assert 'sandbox_mode="read-only"' in command
     assert 'approval_policy="never"' in command
     assert command[-3:] == ["--json", "thread-live", "watch prompt"]
+    assert "--dangerously-bypass-approvals-and-sandbox" not in command
+
+
+def test_codex_fresh_exec_command_starts_new_diagnostic_session():
+    command = watch_mod._codex_ping_command(  # ANTICHEAT_OK: autoping argv contract test
+        "thread-live",
+        "watch prompt",
+        fresh_exec=True,
+    )
+
+    assert command[:2] == ["codex", "exec"]
+    assert command[2] != "resume"
+    assert "--ignore-user-config" in command
+    assert "--ignore-rules" in command
+    disabled_features = {
+        command[index + 1]
+        for index, value in enumerate(command[:-1])
+        if value == "--disable"
+    }
+    assert disabled_features == set(watch_mod.CODEX_NO_TOOLS_DISABLED_FEATURES)
+    assert command[-2:] == ["--json", "watch prompt"]
+    assert "thread-live" not in command
     assert "--dangerously-bypass-approvals-and-sandbox" not in command
 
 
