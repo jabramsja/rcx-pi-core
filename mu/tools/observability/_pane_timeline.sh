@@ -257,13 +257,16 @@ render_autoping_status() {
 from __future__ import annotations
 
 import json
+import os
 import textwrap
 from datetime import datetime
 from pathlib import Path
 import sys
 
 repo_root = Path(sys.argv[1]).resolve()
-state_dir = Path.home() / ".codex" / "state"
+codex_home_raw = os.environ.get("RCX_CODEX_HOME") or os.environ.get("CODEX_HOME")
+codex_home = Path(codex_home_raw).expanduser() if codex_home_raw else Path.home() / ".codex"
+state_dir = codex_home / "state"
 if not state_dir.is_dir():
     raise SystemExit(0)
 
