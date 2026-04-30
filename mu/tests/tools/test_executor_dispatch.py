@@ -499,6 +499,34 @@ def _write_phase_b_handoff(
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _write_teammate_monitor_config(
+    path: Path,
+    lane: str = "alpha",
+    *,
+    bus_dir: str = ".agent_bus-alpha",
+    dashboard_port: int = 18101,
+    tmux_session: str = "rcx-pipeline-alpha",
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "pipeline_monitor": {
+                    "lanes": {
+                        lane: {
+                            "bus_dir": bus_dir,
+                            "dashboard_port": dashboard_port,
+                            "tmux_session": tmux_session,
+                        }
+                    }
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _init_git_repo(tmp_path):
     """Create a git repo with initial commit and TASKS.md with Ra section."""
     repo = tmp_path / "repo"
@@ -7281,6 +7309,188 @@ class TestModularSurfaceEntrypoints:
         assert phase_a_record["summary"] == "Agent teams worktree integration."
         assert "item 4" in phase_a_record["request_for_claude"]
         assert "monitor identity" not in phase_a_record["request_for_claude"]
+
+    def test_phase_a_teammate_lane_creates_worktree_and_binds_namespaced_bus(self, tmp_path, monkeypatch):
+        repo, _env = _init_git_repo(tmp_path)
+        config_path = tmp_path / "monitor_config.json"
+        _write_teammate_monitor_config(config_path)
+        monkeypatch.setenv("RCX_PIPELINE_MONITOR_CONFIG", str(config_path))
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-a",
+                "--plan-name",
+                "parallel_pipeline_agent_teams",
+                "--task-id",
+                "PARALLEL-PIPELINE",
+                "--teammate-lane",
+                "alpha",
+                "--json",
+            ]
+        )
+
+        target = dispatch_mod.prepare_phase_a_teammate_lane(args, repo)  # ANTICHEAT_OK: teammate worktree selection is the regression target
+        record = dispatch_mod._surface_record_for_chain(args, target)  # ANTICHEAT_OK: routing record must carry teammate lane identity
+        cmd = dispatch_mod.build_surface_command(
+            args,
+            routing_record=record,
+            script_repo_root=target,
+        )
+
+        assert target == repo.parent / f"{repo.name}-alpha"
+        assert target.exists()
+        assert args.bus_dir == ".agent_bus-alpha"
+        assert record["teammate_lane"] == "alpha"
+        assert record["bus_dir"] == ".agent_bus-alpha"
+        assert record["dashboard_port"] == 18101
+        assert record["tmux_session"] == "rcx-pipeline-alpha"
+        assert record["teammate_worktree"] == str(target)
+        assert cmd[:2] == [
+            dispatch_mod.sys.executable,
+            str(target / "mu" / "tools" / "executors" / "phase_a_executor.py"),
+        ]
+        assert cmd[cmd.index("--bus-dir") + 1] == ".agent_bus-alpha"
+
+        selected_again = dispatch_mod.prepare_phase_a_teammate_lane(args, repo)  # ANTICHEAT_OK: existing teammate worktree selection stays idempotent
+        assert selected_again == target
+
+    def test_phase_a_teammate_lane_rejects_stale_existing_worktree(self, tmp_path, monkeypatch):
+        repo, env = _init_git_repo(tmp_path)
+        target = repo.parent / f"{repo.name}-alpha"
+        subprocess.run(
+            ["git", "worktree", "add", "--detach", str(target), "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
+        )
+        (repo / "fresh.txt").write_text("new caller head\n", encoding="utf-8")
+        subprocess.run(["git", "add", "fresh.txt"], cwd=repo, capture_output=True, env=env, check=True)
+        subprocess.run(["git", "commit", "-m", "advance caller"], cwd=repo, capture_output=True, env=env, check=True)
+        config_path = tmp_path / "monitor_config.json"
+        _write_teammate_monitor_config(config_path)
+        monkeypatch.setenv("RCX_PIPELINE_MONITOR_CONFIG", str(config_path))
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-a",
+                "--plan-name",
+                "parallel_pipeline_agent_teams",
+                "--teammate-lane",
+                "alpha",
+            ]
+        )
+
+        with pytest.raises(
+            dispatch_mod.DispatchError,
+            match="stale bridge retries after state changes:.*does not match caller HEAD",
+        ):
+            dispatch_mod.prepare_phase_a_teammate_lane(args, repo)
+
+    def test_phase_a_teammate_lane_rejects_dirty_caller_worktree(self, tmp_path, monkeypatch):
+        repo, _env = _init_git_repo(tmp_path)
+        config_path = tmp_path / "monitor_config.json"
+        _write_teammate_monitor_config(config_path)
+        monkeypatch.setenv("RCX_PIPELINE_MONITOR_CONFIG", str(config_path))
+        (repo / "dirty.txt").write_text("untracked\n", encoding="utf-8")
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-a",
+                "--plan-name",
+                "parallel_pipeline_agent_teams",
+                "--teammate-lane",
+                "alpha",
+            ]
+        )
+
+        with pytest.raises(dispatch_mod.DispatchError, match="dirty-worktree scope creep"):
+            dispatch_mod.prepare_phase_a_teammate_lane(args, repo)
+
+    def test_phase_a_teammate_lane_rejects_default_bus_shared_state(self, tmp_path, monkeypatch):
+        repo, _env = _init_git_repo(tmp_path)
+        config_path = tmp_path / "monitor_config.json"
+        _write_teammate_monitor_config(config_path)
+        monkeypatch.setenv("RCX_PIPELINE_MONITOR_CONFIG", str(config_path))
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-a",
+                "--plan-name",
+                "parallel_pipeline_agent_teams",
+                "--teammate-lane",
+                "alpha",
+                "--bus-dir",
+                ".agent_bus",
+            ]
+        )
+
+        with pytest.raises(dispatch_mod.DispatchError, match="stale bridge retries from shared state"):
+            dispatch_mod.prepare_phase_a_teammate_lane(args, repo)
+
+    def test_phase_a_teammate_lane_rejects_default_lane_before_worktree_create(self, tmp_path, monkeypatch):
+        repo, _env = _init_git_repo(tmp_path)
+        monkeypatch.delenv("RCX_PIPELINE_MONITOR_CONFIG", raising=False)
+        monkeypatch.delenv("RCX_PIPELINE_MONITOR_LANE", raising=False)
+        monkeypatch.delenv("RCX_AGENT_BUS_DIR", raising=False)
+        target = repo.parent / f"{repo.name}-default"
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-a",
+                "--plan-name",
+                "parallel_pipeline_agent_teams",
+                "--teammate-lane",
+                "default",
+            ]
+        )
+
+        with pytest.raises(dispatch_mod.DispatchError, match="stale bridge retries from shared state"):
+            dispatch_mod.prepare_phase_a_teammate_lane(args, repo)
+
+        assert not target.exists()
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert str(target) not in result.stdout
+
+    def test_phase_a_teammate_lane_rejects_existing_shared_lock(self, tmp_path, monkeypatch):
+        repo, env = _init_git_repo(tmp_path)
+        (repo / ".gitignore").write_text(".agent_bus-*/\n", encoding="utf-8")
+        subprocess.run(["git", "add", ".gitignore"], cwd=repo, capture_output=True, env=env, check=True)
+        subprocess.run(["git", "commit", "-m", "ignore bus"], cwd=repo, capture_output=True, env=env, check=True)
+        target = repo.parent / f"{repo.name}-alpha"
+        subprocess.run(
+            ["git", "worktree", "add", "--detach", str(target), "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        lock = target / ".agent_bus-alpha" / "meta" / "meta_bridge.lock"
+        lock.parent.mkdir(parents=True)
+        lock.write_text("pid=123\n", encoding="utf-8")
+        config_path = tmp_path / "monitor_config.json"
+        _write_teammate_monitor_config(config_path)
+        monkeypatch.setenv("RCX_PIPELINE_MONITOR_CONFIG", str(config_path))
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-a",
+                "--plan-name",
+                "parallel_pipeline_agent_teams",
+                "--teammate-lane",
+                "alpha",
+            ]
+        )
+
+        with pytest.raises(dispatch_mod.DispatchError, match="shared lock contention"):
+            dispatch_mod.prepare_phase_a_teammate_lane(args, repo)
 
     def test_phase_a_surface_chain_uses_plan_wave_id_for_phase_b_routing(self, tmp_path):
         plan_path = (

@@ -35,6 +35,10 @@ monitor_identity = load_module(
     "pipeline_monitor_identity_bus_namespacing",
     OBSERVABILITY_DIR / "pipeline_monitor_identity.py",
 )
+dashboard_web = load_module(
+    "pipeline_dashboard_web_bus_namespacing",
+    OBSERVABILITY_DIR / "pipeline_dashboard_web.py",
+)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -263,6 +267,21 @@ def test_monitor_identity_defaults_and_two_named_lanes_are_distinct(tmp_path):
                 },
             },
             "duplicate tmux session",
+        ),
+        (
+            {
+                "alpha": {
+                    "bus_dir": ".agent_bus-shared",
+                    "dashboard_port": 8108,
+                    "tmux_session": "rcx-pipeline-alpha",
+                },
+                "beta": {
+                    "bus_dir": ".agent_bus-shared",
+                    "dashboard_port": 8109,
+                    "tmux_session": "rcx-pipeline-beta",
+                },
+            },
+            "shared lock contention",
         ),
     ],
 )
@@ -558,11 +577,42 @@ def test_pipeline_monitor_exec_exports_namespaced_bus_to_child_command(tmp_path)
 def test_pipeline_monitor_start_passes_namespaced_bus_to_tmux_panes():
     source = (OBSERVABILITY_DIR / "pipeline_monitor.sh").read_text(encoding="utf-8")
 
-    assert "BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q" in source
+    assert "BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q" in source
     assert "bash $watcher_q" in source
     assert "bash $obs_q/_pane_findings.sh" in source
     assert "bash $obs_q/_pane_processes.sh" in source
     assert "bash $obs_q/_pane_timeline.sh" in source
+
+
+def test_pipeline_dashboard_web_reports_dashboard_port_collision(monkeypatch, capsys, tmp_path):
+    identity = SimpleNamespace(
+        lane="alpha",
+        bus_dir=".agent_bus-alpha",
+        active_bus_root=tmp_path / ".agent_bus-alpha",
+        dashboard_port=18123,
+        tmux_session="rcx-pipeline-alpha",
+        configured=True,
+        named=True,
+        as_dict=lambda: {
+            "lane": "alpha",
+            "bus_dir": ".agent_bus-alpha",
+            "active_bus_root": str(tmp_path / ".agent_bus-alpha"),
+            "dashboard_port": 18123,
+            "tmux_session": "rcx-pipeline-alpha",
+            "configured": True,
+            "named": True,
+        },
+    )
+
+    monkeypatch.setattr(dashboard_web, "_resolve_dashboard_identity", lambda _args: identity)
+
+    def fail_bind(*_args, **_kwargs):
+        raise OSError("address already in use")
+
+    monkeypatch.setattr(dashboard_web.http.server, "HTTPServer", fail_bind)
+
+    assert dashboard_web.main(["--lane", "alpha"]) == 2
+    assert "dashboard port collision" in capsys.readouterr().err
 
 
 def test_commit_bot_remediation_adapter_receives_active_bus_dir(monkeypatch, tmp_path):
