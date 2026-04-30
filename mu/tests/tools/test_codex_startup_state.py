@@ -40,6 +40,15 @@ def _write_executor_config(tmp_path, *, enabled: bool = True, route: str = "code
     )
 
 
+def _write_monitor_identity_config(repo_root, lanes):
+    config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps({"pipeline_monitor": {"lanes": lanes}}) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _write_autoping_state(codex_home, thread_id: str, **overrides):
     state_path = (
         codex_home
@@ -1519,6 +1528,95 @@ def test_web_dashboard_recovery_starts_requested_port(monkeypatch, tmp_path):
     assert result.detail == "started RCX dashboard on http://127.0.0.1:8123/api/state"
 
 
+def test_startup_monitor_identity_propagates_named_bus_session_and_dashboard_port(monkeypatch, tmp_path):
+    monitor_script = tmp_path / "tools" / "observability" / "pipeline_monitor.sh"
+    web_script = tmp_path / "tools" / "observability" / "pipeline_dashboard_web.py"
+    monitor_script.parent.mkdir(parents=True)
+    monitor_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    web_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    _write_monitor_identity_config(
+        tmp_path,
+        {
+            "alpha": {
+                "bus_dir": ".agent_bus-alpha",
+                "dashboard_port": 8101,
+                "tmux_session": "rcx-pipeline-alpha",
+            }
+        },
+    )
+    monkeypatch.setenv("RCX_AGENT_BUS_DIR", ".agent_bus-alpha")
+
+    tmux_states = iter(
+        [
+            (False, "session missing"),
+            (True, "session rcx-pipeline-alpha active"),
+        ]
+    )
+    tmux_calls: list[object] = []
+
+    def fake_tmux_stable(repo_root, session, **kwargs):
+        tmux_calls.append(session)
+        return next(tmux_states)
+
+    run_calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        run_calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    health_calls: list[tuple[int, dict[str, object]]] = []
+    health_results = iter(
+        [
+            (False, "http://127.0.0.1:8101/api/state unavailable: URLError"),
+            (True, f"serving RCX dashboard on http://127.0.0.1:8101/api/state active_bus_root={tmp_path / '.agent_bus-alpha'}"),
+        ]
+    )
+
+    def fake_health(port: int, **kwargs):
+        health_calls.append((port, kwargs))
+        return next(health_results)
+
+    popen_calls: list[list[str]] = []
+
+    class DummyProcess:
+        pass
+
+    monkeypatch.setattr(startup_mod, "_tmux_session_stable", fake_tmux_stable)
+    monkeypatch.setattr(startup_mod, "_run", fake_run)
+    monkeypatch.setattr(startup_mod, "_dashboard_health", fake_health)
+    monkeypatch.setattr(
+        startup_mod.subprocess,
+        "Popen",
+        lambda cmd, **kwargs: popen_calls.append(cmd) or DummyProcess(),
+    )
+
+    tmux_result = startup_mod._ensure_tmux_monitor(tmp_path)  # ANTICHEAT_OK: tool unit test
+    web_result = startup_mod._ensure_web_dashboard(tmp_path)  # ANTICHEAT_OK: tool unit test
+
+    assert tmux_result.status == "OK"
+    assert "rcx-pipeline-alpha" in tmux_result.detail
+    assert str(tmp_path / ".agent_bus-alpha") in tmux_result.detail
+    assert tmux_calls == ["rcx-pipeline-alpha", "rcx-pipeline-alpha"]
+    assert run_calls == [
+        [str(monitor_script), "--bus-dir", ".agent_bus-alpha", "start", "--detach"]
+    ]
+    assert web_result.status == "OK"
+    assert health_calls == [
+        (8101, {"expected_bus_root": tmp_path / ".agent_bus-alpha"}),
+        (8101, {"expected_bus_root": tmp_path / ".agent_bus-alpha"}),
+    ]
+    assert popen_calls == [
+        [
+            startup_mod.sys.executable,
+            str(web_script),
+            "--bus-dir",
+            ".agent_bus-alpha",
+            "--port",
+            "8101",
+        ]
+    ]
+
+
 def test_web_dashboard_recovery_spawn_failure_fails_closed(monkeypatch, tmp_path):
     web_script = tmp_path / "tools" / "observability" / "pipeline_dashboard_web.py"
     web_script.parent.mkdir(parents=True)
@@ -1698,6 +1796,72 @@ def test_codex_autoping_accepts_live_state(monkeypatch, tmp_path):
     assert f"pid={os.getpid()}" in result.detail
 
 
+def test_codex_autoping_restarts_named_lane_when_live_state_lacks_identity(monkeypatch, tmp_path):
+    thread_id = "thread-alpha"
+    codex_home = tmp_path / ".codex"
+    repo_root = tmp_path / "repo"
+    launcher = repo_root / "tools" / "session" / "ensure_codex_autoping.sh"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o755)
+    _write_monitor_identity_config(
+        repo_root,
+        {
+            "alpha": {
+                "bus_dir": ".agent_bus-alpha",
+                "dashboard_port": 8101,
+                "tmux_session": "rcx-pipeline-alpha",
+            }
+        },
+    )
+    monkeypatch.delenv("RCX_PIPELINE_SESSION", raising=False)
+    monkeypatch.setenv("CODEX_THREAD_ID", thread_id)
+    monkeypatch.setenv("RCX_AGENT_BUS_DIR", ".agent_bus-alpha")
+    _write_autoping_state(
+        codex_home,
+        thread_id,
+        status="idle_unchanged_state",
+        active_mode="resume",
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, *, cwd=None, timeout=60):
+        calls.append(cmd)
+        _write_autoping_state(
+            codex_home,
+            thread_id,
+            status="idle_unchanged_state",
+            active_mode="resume",
+            bus_dir=".agent_bus-alpha",
+            tmux_session="rcx-pipeline-alpha",
+            tmux_pane="rcx-pipeline-alpha:1.3",
+        )
+        return subprocess.CompletedProcess(cmd, 0, "Codex autoping: ACTIVE\n", "")
+
+    monkeypatch.setattr(startup_mod, "_run", fake_run)
+
+    result = startup_mod._ensure_codex_autoping(repo_root, codex_home)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "OK"
+    assert "started Codex autoping" in result.detail
+    assert calls == [
+        [
+            str(launcher),
+            "--repo",
+            str(repo_root),
+            "--thread-id",
+            thread_id,
+            "--bus-dir",
+            ".agent_bus-alpha",
+            "--tmux-session",
+            "rcx-pipeline-alpha",
+            "--tmux-pane",
+            "rcx-pipeline-alpha:1.3",
+            "--force-restart",
+        ]
+    ]
+
+
 def test_codex_autoping_context_exhausted_restarts_recovery(monkeypatch, tmp_path):
     thread_id = "thread-exhausted"
     codex_home = tmp_path / ".codex"
@@ -1743,6 +1907,12 @@ def test_codex_autoping_context_exhausted_restarts_recovery(monkeypatch, tmp_pat
             str(repo_root),
             "--thread-id",
             thread_id,
+            "--bus-dir",
+            ".agent_bus",
+            "--tmux-session",
+            "rcx-pipeline",
+            "--tmux-pane",
+            "rcx-pipeline:1.3",
             "--force-restart",
         ]
     ]
@@ -1778,6 +1948,12 @@ def test_codex_autoping_recovers_missing_state(monkeypatch, tmp_path):
             str(repo_root),
             "--thread-id",
             thread_id,
+            "--bus-dir",
+            ".agent_bus",
+            "--tmux-session",
+            "rcx-pipeline",
+            "--tmux-pane",
+            "rcx-pipeline:1.3",
             "--force-restart",
         ]
     ]
@@ -2098,12 +2274,12 @@ def test_gather_results_fails_closed_when_codex_home_is_missing(monkeypatch, tmp
     monkeypatch.setattr(
         startup_mod,
         "_ensure_tmux_monitor",
-        lambda repo_root: startup_mod.CheckResult("tmux_monitor", "OK", "session active"),
+        lambda repo_root, identity=None: startup_mod.CheckResult("tmux_monitor", "OK", "session active"),
     )
     monkeypatch.setattr(
         startup_mod,
         "_ensure_web_dashboard",
-        lambda repo_root: startup_mod.CheckResult("web_dashboard", "OK", "dashboard active"),
+        lambda repo_root, identity=None: startup_mod.CheckResult("web_dashboard", "OK", "dashboard active"),
     )
     monkeypatch.setattr(
         startup_mod,
@@ -2113,7 +2289,7 @@ def test_gather_results_fails_closed_when_codex_home_is_missing(monkeypatch, tmp
     monkeypatch.setattr(
         startup_mod,
         "_ensure_codex_autoping",
-        lambda repo_root, codex_home: startup_mod.CheckResult("codex_autoping", "OK", "autoping active"),
+        lambda repo_root, codex_home, identity=None: startup_mod.CheckResult("codex_autoping", "OK", "autoping active"),
     )
 
     local_results, observability_results = startup_mod.gather_results(

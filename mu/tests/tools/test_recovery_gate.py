@@ -4368,6 +4368,14 @@ esac
         script.write_text((_OBSERVABILITY_DIR / name).read_text(encoding="utf-8"), encoding="utf-8")
         script.chmod(script.stat().st_mode | 0o111)
 
+    def _write_monitor_identity_config(self, repo_root: Path, lanes: dict[str, dict[str, object]]) -> None:
+        config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            json.dumps({"pipeline_monitor": {"lanes": lanes}}) + "\n",
+            encoding="utf-8",
+        )
+
     def _fake_tmux_dir(self, tmp_path: Path, *, log_path: Path) -> Path:
         bin_dir = tmp_path / "tmux-bin"
         bin_dir.mkdir(exist_ok=True)
@@ -5079,6 +5087,53 @@ esac
         assert "display-message -p -t @1 #{pane_id}" in log_lines
         assert not any("display-message -p -t rcx-pipeline:1.1 #{pane_id}" in line for line in log_lines)
 
+    def test_pipeline_monitor_start_uses_configured_named_lane_identity(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        self._install_observability_script(repo_root, "pipeline_monitor_identity.py")
+        self._write_monitor_identity_config(
+            repo_root,
+            {
+                "alpha": {
+                    "bus_dir": ".agent_bus-alpha",
+                    "dashboard_port": 8101,
+                    "tmux_session": "rcx-pipeline-alpha",
+                }
+            },
+        )
+        git_bin = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/test-wave",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        env = os.environ | {"PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}"}
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"),
+                "--bus-dir",
+                ".agent_bus-alpha",
+                "start",
+                "--detach",
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        assert result.returncode == 0, result.stderr
+        log_text = tmux_log.read_text(encoding="utf-8")
+        assert "kill-session -t rcx-pipeline-alpha" in log_text
+        assert "new-session -d -x 240 -y 70 -s rcx-pipeline-alpha" in log_text
+        assert "Pipeline monitor started (session: rcx-pipeline-alpha)" in result.stdout
+        assert f"bus={repo_root / '.agent_bus-alpha'}" in result.stdout
+        assert "dashboard=http://127.0.0.1:8101" in result.stdout
+
     def test_pipeline_monitor_start_does_not_pin_panes_to_launcher_worktree(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -5146,7 +5201,98 @@ esac
         assert "--repo" in marker_text
         assert str(repo_root) in marker_text
         assert "--thread-id thread-123" in marker_text
+        assert "--bus-dir .agent_bus" in marker_text
+        assert "--tmux-session rcx-pipeline" in marker_text
         assert "--force-restart" in marker_text
+
+    def test_pipeline_dashboard_web_reads_named_lane_bus_sources(self, tmp_path, monkeypatch):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._write_monitor_identity_config(
+            repo_root,
+            {
+                "alpha": {
+                    "bus_dir": ".agent_bus-alpha",
+                    "dashboard_port": 8101,
+                    "tmux_session": "rcx-pipeline-alpha",
+                }
+            },
+        )
+        default_raw = repo_root / ".agent_bus" / "raw" / "phase-b-r1-default"
+        default_raw.mkdir(parents=True)
+        (default_raw / "phase-b-r1-default--r1-reviewer.txt").write_text(
+            "BEGIN_AGENT_ENVELOPE\n"
+            '{"decision": "NO_GO", "summary": "default bus", "findings": []}\n'
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+        named_raw = repo_root / ".agent_bus-alpha" / "raw" / "phase-b-r1-named"
+        named_raw.mkdir(parents=True)
+        (named_raw / "phase-b-r1-named--r1-reviewer.txt").write_text(
+            "BEGIN_AGENT_ENVELOPE\n"
+            '{"decision": "GO", "summary": "named bus", "findings": []}\n'
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+        (repo_root / ".agent_bus" / "executors").mkdir(parents=True)
+        (repo_root / ".agent_bus" / "executors" / "phase_b_state.json").write_text(
+            json.dumps({"wave_id": "default-wave"}) + "\n",
+            encoding="utf-8",
+        )
+        named_exec = repo_root / ".agent_bus-alpha" / "executors"
+        named_exec.mkdir(parents=True)
+        (named_exec / "phase_b_state.json").write_text(
+            json.dumps({"wave_id": "named-wave", "task_id": "[NAMED]"}) + "\n",
+            encoding="utf-8",
+        )
+        named_recovery = repo_root / ".agent_bus-alpha" / "recovery"
+        named_recovery.mkdir(parents=True)
+        (named_recovery / "recovery_status.json").write_text(
+            json.dumps(
+                {
+                    "active": False,
+                    "tier": 3,
+                    "failure_class": "needs_phase_b",
+                    "wave_id": "named-recovery",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (repo_root / ".agent_bus-alpha" / "bridge.lock").write_text(
+            json.dumps({"holder": "named-lock", "pid": 999999}) + "\n",
+            encoding="utf-8",
+        )
+        db_path = repo_root / ".agent_bus-alpha" / "bridge.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "CREATE TABLE jobs ("
+                "job_id TEXT, status TEXT, terminal_decision TEXT, "
+                "reviewer_agent TEXT, current_round INTEGER, created_at TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?)",
+                ("named-job", "DONE", "GO", "codex", 1, "2026-04-30T00:00:00+00:00"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        old_identity = web_mod.ACTIVE_IDENTITY
+        monkeypatch.setattr(web_mod, "REPO_ROOT", repo_root)
+        try:
+            identity = web_mod.resolve_monitor_identity(repo_root, bus_dir=".agent_bus-alpha")
+            web_mod.configure_dashboard_identity(identity)
+
+            assert web_mod.bridge_round_history()[-1]["decision"] == "GO"
+            assert web_mod.db_latest_jobs()[0]["job_id"] == "named-job"
+            assert web_mod.wave_context()["wave_id"] == "named-wave"
+            assert web_mod.lock_status()["holder"] == "named-lock"
+            assert web_mod.recovery_snapshot()["wave_id"] == "named-recovery"
+        finally:
+            web_mod.configure_dashboard_identity(old_identity)
 
     def test_ensure_codex_autoping_skips_pipeline_worker_sessions(self, tmp_path):
         repo_root = tmp_path / "repo"

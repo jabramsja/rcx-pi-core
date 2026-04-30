@@ -3,6 +3,8 @@ set -euo pipefail
 
 DEFAULT_REPO="/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX"
 TMUX_SESSION="rcx-pipeline"
+TMUX_PANE=""
+BUS_DIR="${RCX_AGENT_BUS_DIR:-.agent_bus}"
 REPO=""
 THREAD_ID="${CODEX_THREAD_ID:-}"
 INTERVAL="20"
@@ -21,6 +23,9 @@ Options:
   --interval <seconds>     Poll interval (default: 20)
   --initial-delay <sec>    Initial delay before first tick (default: 30)
   --ping-timeout <sec>     Kill a stale ping subprocess after this many seconds (default: 120)
+  --bus-dir <dir>          Active repo-root agent bus (.agent_bus or .agent_bus-<id>)
+  --tmux-session <name>    Target monitor tmux session (default: rcx-pipeline)
+  --tmux-pane <target>     Target monitor pane for tail reads (default: <session>:1.3)
   --force-restart          Restart an existing watcher for this thread
   -h, --help               Show this help
 EOF
@@ -53,6 +58,21 @@ while [ $# -gt 0 ]; do
             PING_TIMEOUT="$2"
             shift 2
             ;;
+        --bus-dir)
+            [ $# -ge 2 ] || { echo "ERROR: --bus-dir requires a value" >&2; exit 2; }
+            BUS_DIR="$2"
+            shift 2
+            ;;
+        --tmux-session)
+            [ $# -ge 2 ] || { echo "ERROR: --tmux-session requires a value" >&2; exit 2; }
+            TMUX_SESSION="$2"
+            shift 2
+            ;;
+        --tmux-pane)
+            [ $# -ge 2 ] || { echo "ERROR: --tmux-pane requires a value" >&2; exit 2; }
+            TMUX_PANE="$2"
+            shift 2
+            ;;
         --force-restart)
             FORCE_RESTART=1
             shift
@@ -68,6 +88,24 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+
+case "$BUS_DIR" in
+    /*|*/*|*\\*|*..*|"")
+        echo "ERROR: invalid --bus-dir: $BUS_DIR" >&2
+        exit 2
+        ;;
+esac
+if [[ "$BUS_DIR" != ".agent_bus" && ! "$BUS_DIR" =~ ^\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+    echo "ERROR: --bus-dir must be .agent_bus or .agent_bus-<id>" >&2
+    exit 2
+fi
+if [[ ! "$TMUX_SESSION" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$ ]]; then
+    echo "ERROR: invalid --tmux-session: $TMUX_SESSION" >&2
+    exit 2
+fi
+if [ -z "$TMUX_PANE" ]; then
+    TMUX_PANE="$TMUX_SESSION:1.3"
+fi
 
 if [ -z "$REPO" ]; then
     if git_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
@@ -193,8 +231,8 @@ PY
 
 cleanup_orphaned_autoping_execs
 
-CMD=(python3 "$WATCH_SCRIPT" --repo-root "$REPO" --thread-id "$THREAD_ID" --interval "$INTERVAL" --initial-delay "$INITIAL_DELAY" --ping-timeout "$PING_TIMEOUT")
-WINDOW_CMD=("$WINDOW_SCRIPT" --repo "$REPO" --thread-id "$THREAD_ID" --interval "$INTERVAL" --initial-delay "$INITIAL_DELAY" --ping-timeout "$PING_TIMEOUT")
+CMD=(python3 "$WATCH_SCRIPT" --repo-root "$REPO" --thread-id "$THREAD_ID" --interval "$INTERVAL" --initial-delay "$INITIAL_DELAY" --ping-timeout "$PING_TIMEOUT" --bus-dir "$BUS_DIR" --tmux-session "$TMUX_SESSION" --tmux-pane "$TMUX_PANE")
+WINDOW_CMD=("$WINDOW_SCRIPT" --repo "$REPO" --thread-id "$THREAD_ID" --interval "$INTERVAL" --initial-delay "$INITIAL_DELAY" --ping-timeout "$PING_TIMEOUT" --bus-dir "$BUS_DIR" --tmux-session "$TMUX_SESSION" --tmux-pane "$TMUX_PANE")
 WINDOW_CMD_STRING="$(printf '%q ' "${WINDOW_CMD[@]}")"
 WINDOW_CMD_STRING="${WINDOW_CMD_STRING% }"
 

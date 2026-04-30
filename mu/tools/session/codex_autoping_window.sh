@@ -6,11 +6,14 @@ THREAD_ID=""
 INTERVAL="20"
 INITIAL_DELAY="30"
 PING_TIMEOUT="120"
+BUS_DIR="${RCX_AGENT_BUS_DIR:-.agent_bus}"
+TMUX_SESSION="rcx-pipeline"
+TMUX_PANE=""
 
 usage() {
     cat <<'EOF'
 Usage:
-  ./tools/session/codex_autoping_window.sh --repo <path> --thread-id <id> [--interval N] [--initial-delay N] [--ping-timeout N]
+  ./tools/session/codex_autoping_window.sh --repo <path> --thread-id <id> [--interval N] [--initial-delay N] [--ping-timeout N] [--bus-dir DIR] [--tmux-session NAME] [--tmux-pane TARGET]
 EOF
 }
 
@@ -41,6 +44,21 @@ while [ $# -gt 0 ]; do
             PING_TIMEOUT="$2"
             shift 2
             ;;
+        --bus-dir)
+            [ $# -ge 2 ] || { echo "ERROR: --bus-dir requires a value" >&2; exit 2; }
+            BUS_DIR="$2"
+            shift 2
+            ;;
+        --tmux-session)
+            [ $# -ge 2 ] || { echo "ERROR: --tmux-session requires a value" >&2; exit 2; }
+            TMUX_SESSION="$2"
+            shift 2
+            ;;
+        --tmux-pane)
+            [ $# -ge 2 ] || { echo "ERROR: --tmux-pane requires a value" >&2; exit 2; }
+            TMUX_PANE="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -55,6 +73,23 @@ done
 
 [ -n "$REPO" ] || { echo "ERROR: --repo is required" >&2; exit 2; }
 [ -n "$THREAD_ID" ] || { echo "ERROR: --thread-id is required" >&2; exit 2; }
+case "$BUS_DIR" in
+    /*|*/*|*\\*|*..*|"")
+        echo "ERROR: invalid --bus-dir: $BUS_DIR" >&2
+        exit 2
+        ;;
+esac
+if [[ "$BUS_DIR" != ".agent_bus" && ! "$BUS_DIR" =~ ^\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+    echo "ERROR: --bus-dir must be .agent_bus or .agent_bus-<id>" >&2
+    exit 2
+fi
+if [[ ! "$TMUX_SESSION" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$ ]]; then
+    echo "ERROR: invalid --tmux-session: $TMUX_SESSION" >&2
+    exit 2
+fi
+if [ -z "$TMUX_PANE" ]; then
+    TMUX_PANE="$TMUX_SESSION:1.3"
+fi
 
 THREAD_SLUG="$(printf '%s' "$THREAD_ID" | tr -c 'A-Za-z0-9_.-' '_')"
 STATE_DIR="${RCX_CODEX_HOME:-$HOME/.codex}/state"
@@ -74,6 +109,9 @@ python3 "$WATCH_SCRIPT" \
     --interval "$INTERVAL" \
     --initial-delay "$INITIAL_DELAY" \
     --ping-timeout "$PING_TIMEOUT" \
+    --bus-dir "$BUS_DIR" \
+    --tmux-session "$TMUX_SESSION" \
+    --tmux-pane "$TMUX_PANE" \
     >"$RUNNER_LOG" 2>&1 &
 WATCHER_PID="$!"
 

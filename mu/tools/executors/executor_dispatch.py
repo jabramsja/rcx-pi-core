@@ -343,22 +343,24 @@ def _routing_record_tracked_packet(record: dict[str, Any]) -> str:
     return ""
 
 
-def _phase_b_plan_wave_id(repo_root: Path, plan_path: str) -> str:
-    """Resolve the wave id Phase B will use for an explicit plan path."""
+def _phase_b_plan_declared_wave_id(repo_root: Path, plan_path: str) -> str:
+    """Read an explicit Wave ID from a Phase B plan, without stem fallback."""
     clean_path = str(plan_path or "").strip()
     if not clean_path:
         return ""
-    fallback = normalize_wave_id(Path(clean_path).stem)
     candidate = Path(clean_path)
-    if candidate.is_absolute() or ".." in candidate.parts:
-        return fallback
     try:
-        full_path = (repo_root / clean_path).resolve()
+        if candidate.is_absolute():
+            full_path = candidate.resolve()
+        else:
+            if ".." in candidate.parts:
+                return ""
+            full_path = (repo_root / clean_path).resolve()
         if not full_path.is_relative_to(repo_root.resolve()):
-            return fallback
+            return ""
         content = full_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return fallback
+        return ""
     for raw_line in content.splitlines():
         clean = raw_line.strip()
         lower = clean.lower()
@@ -366,7 +368,40 @@ def _phase_b_plan_wave_id(repo_root: Path, plan_path: str) -> str:
             value = clean.split(":", 1)[1].strip()
             if value:
                 return normalize_wave_id(value)
+    return ""
+
+
+def _phase_b_plan_wave_id(repo_root: Path, plan_path: str) -> str:
+    """Resolve the wave id Phase B will use for an explicit plan path."""
+    clean_path = str(plan_path or "").strip()
+    if not clean_path:
+        return ""
+    declared = _phase_b_plan_declared_wave_id(repo_root, clean_path)
+    if declared:
+        return declared
+    fallback = normalize_wave_id(Path(clean_path).stem)
     return fallback
+
+
+def _phase_b_plan_routing_packet(repo_root: Path, plan_path: str) -> str:
+    """Return the repo-relative tracked packet path for chained routing."""
+    clean_path = str(plan_path or "").strip()
+    if not clean_path:
+        return ""
+    candidate = Path(clean_path)
+    try:
+        if candidate.is_absolute():
+            full_path = candidate.resolve()
+        else:
+            if ".." in candidate.parts:
+                return clean_path
+            full_path = (repo_root / clean_path).resolve()
+        repo_resolved = repo_root.resolve()
+        if full_path.is_relative_to(repo_resolved):
+            return full_path.relative_to(repo_resolved).as_posix()
+    except OSError:
+        return clean_path
+    return clean_path
 
 
 def _surface_record_for_chain(
@@ -1163,13 +1198,27 @@ def _continue_successful_executor_chain(
         if verbose:
             print(f"[dispatch] Phase A converged → chaining to Phase B with plan: {plan_path}")
 
+        phase_b_wave_name = (record or {}).get("wave_name", "")
+        plan_wave_id = _phase_b_plan_declared_wave_id(repo_root, plan_path)
+        if plan_wave_id:
+            # The surface plan name can omit the dated wave suffix; commit
+            # identity must follow the converged locked packet Phase B uses.
+            phase_b_wave_name = plan_wave_id
+        phase_b_candidates = list((record or {}).get("next_candidates", []))
+        if plan_wave_id and not _routing_record_tracked_packet(
+            {"next_candidates": phase_b_candidates}
+        ):
+            phase_b_candidates = [
+                {"tracked_packet": _phase_b_plan_routing_packet(repo_root, plan_path)}
+            ]
+
         phase_b_timeout = config.get("timeouts", {}).get("phase_b_executor", DEFAULT_EXECUTOR_CONFIG["timeouts"]["phase_b_executor"])
         phase_b_routing = {
             "decision": "ROUTE_PHASE_B",
-            "wave_name": (record or {}).get("wave_name", ""),
+            "wave_name": phase_b_wave_name,
             "task_id": (record or {}).get("task_id", ""),
             "summary": "Chained from Phase A convergence",
-            "next_candidates": (record or {}).get("next_candidates", []),
+            "next_candidates": phase_b_candidates,
         }
         phase_b_args = [
             sys.executable,
