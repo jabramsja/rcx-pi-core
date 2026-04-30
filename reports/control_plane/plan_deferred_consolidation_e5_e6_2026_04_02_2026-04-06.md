@@ -1,7 +1,7 @@
 # Plan Deferred Consolidation E5 E6 2026 04 02
 
 Date: 2026-04-06
-Status: COMPLETED (commit-ready, supervisor COMMIT_GO)
+Status: COMPLETED (merged PR #843; C1 sanitizer closeout in deferred-consolidation-e5-e6-closeout-2026-04-30)
 Task: [DEFERRED-CONSOLIDATION]
 Wave ID: plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06
 Phase-A-Lock: LOCKED
@@ -20,7 +20,7 @@ Files and directories in scope:
 
 Governing references:
 
-- `TASKS.md` `[DEFERRED-CONSOLIDATION]` entry, especially the 2026-04-29 current code-truth note that keeps E5/E6 open for code-backed residue in `mu/tools/observability/_pane_prci.sh`.
+- `TASKS.md` `[DEFERRED-CONSOLIDATION]` entry, including the 2026-04-30 code-truth refresh that keeps D1 open while closing E5/E6 against current source and tests.
 - Upstream Wave 1B cleanup plan listed by TASKS.md: `reports/control_plane/wave1b_pipeline_cleanup_2026-03-31.md`.
 
 ## Work Items
@@ -59,7 +59,7 @@ Governing references:
 
 ## Grounding / Authorization
 
-TASKS.md authorization: `[DEFERRED-CONSOLIDATION]` is OPEN under NEXT as of the 2026-04-29 code-truth reconciliation. TASKS.md states that Wave 1B remains open only for code-backed residue and names E5/E6 in `mu/tools/observability/_pane_prci.sh` because the pane still uses jq `last(3)` plus an unguarded `gh api "repos/{owner}/{repo}/pulls/$PR/comments"` path.
+TASKS.md authorization: `[DEFERRED-CONSOLIDATION]` remains OPEN under NEXT for D1 only after the 2026-04-30 code-truth reconciliation. This E5/E6 packet is closed against current source and tests: `mu/tools/observability/_pane_prci.sh` no longer uses jq `last(3)`, validates numeric PR identifiers before the review-comments API path, and sanitizes displayed bot comment text before pane rendering.
 
 Governing packet refs:
 
@@ -84,21 +84,22 @@ After Phase B completed the E5/E6 implementation, the commit path exposed two di
 
 - Refresh wave: `plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06`
 - Active packet: `reports/control_plane/plan_deferred_consolidation_e5_e6_2026_04_02_2026-04-06.md`
-- Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `d6931a172cf43f5e80376bd37c265bb5ecf0086c1729c54d23bad500e75cc90e`
-- Indicator artifact: `reports/l4_wave_indicators/plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06.json`
+- Commit status: merged PR #843 (`92049ef014b130b9596aafb1e1b94b4c22fee632`) plus `deferred-consolidation-e5-e6-closeout-2026-04-30` C1 sanitizer follow-up.
+- Tracker note sha256: refreshed by `deferred-consolidation-e5-e6-closeout-2026-04-30`
+- Indicator artifact: `reports/l4_wave_indicators/plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06.json`; closeout indicator: `reports/l4_wave_indicators/deferred-consolidation-e5-e6-closeout-2026-04-30.json`
 - Pre-commit receipt handle: `.agent_bus/meta/pre_commit_receipts/receipt_2026-04-30T16-34-15p00-00_885a864b.json`
 - Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_pane_prci_observability.py mu/tests/docs/test_growth_caps.py::TestGrowthCaps::test_test_file_count_within_cap mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_recovery_gate.py::TestClassifyFailure mu/tests/tools/test_recovery_gate.py::TestStagePathSymlinkAliasRecovery mu/tests/tools/test_recovery_gate.py::TestTierMapping mu/tests/tools/test_executor_dispatch.py::TestModularSurfaceEntrypoints::test_phase_b_surface_rebuilds_command_after_recovery_updates_routing mu/tests/tools/test_executor_dispatch.py::TestModularSurfaceEntrypoints::test_phase_b_surface_plan_required_recovery_affects_no_routing_retry mu/tests/tools/test_executor_dispatch.py::TestDispatcherPlanlessPhaseB::test_phase_b_recovery_plan_env_retries_with_plan mu/tests/tools/test_executor_dispatch.py::TestDispatcherPlanlessPhaseB::test_phase_b_recovery_plan_env_ignored_without_wave_marker mu/tests/tools/test_executor_dispatch.py::TestDispatcherPlanlessPhaseB::test_phase_b_recovery_plan_env_ignored_without_record_wave mu/tests/tools/test_recovery_gate.py::TestNeedsPhaseB_Tier3::test_attempt_recovery_retries_phase_b_with_plan_after_planless_stop mu/tests/tools/test_recovery_gate.py::TestNeedsPhaseB_Tier3::test_plan_required_recovery_derives_wave_binding_from_plan_path mu/tests/tools/test_recovery_gate.py::TestNeedsPhaseB_Tier3::test_plan_required_fallback_reads_namespaced_routing_record`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/plan_deferred_consolidation_e5_e6_2026_04_02_2026-04-06.md. (2) Final pytest gate covers the E5/E6 pane test, the growth-cap guard, the commit-executor receipt module, recovery classifier/fixer/tier slices, and dispatcher recovery-env isolation. (3) Commit handoff carries explicit receipt authority at .agent_bus/meta/pre_commit_receipts/receipt_2026-04-30T16-34-15p00-00_885a864b.json. (4) Commit path canonicalizes symlink stage aliases in the builder and Step 4, re-stages refreshed packet scope before supervisor packaging, and has Tier 1 recovery for pathspec aliases beyond repo symlinks. (5) Dispatcher now requires matching real wave ids for recovery-seeded Phase B plan env hints, and recovery binds plan-required retries either to the active wave or the existing control-plane plan path, so stale recovery env cannot force unrelated planless Phase B runs into --plan mode.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/plan_deferred_consolidation_e5_e6_2026_04_02_2026-04-06.md and merged as PR #843. (2) Final PR #843 pytest gate covered the E5/E6 pane test, the growth-cap guard, the commit-executor receipt module, recovery classifier/fixer/tier slices, and dispatcher recovery-env isolation. (3) The closeout follow-up extends `sanitize_pane_text()` to strip C1 controls (`U+0080..U+009F`) and adds targeted regression coverage for the deferred non-blocking finding. (4) Commit path canonicalizes symlink stage aliases in the builder and Step 4, re-stages refreshed packet scope before supervisor packaging, and has Tier 1 recovery for pathspec aliases beyond repo symlinks. (5) Dispatcher now requires matching real wave ids for recovery-seeded Phase B plan env hints, and recovery binds plan-required retries either to the active wave or the existing control-plane plan path, so stale recovery env cannot force unrelated planless Phase B runs into --plan mode.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06.json`
+  - `closeout_indicator`: `reports/l4_wave_indicators/deferred-consolidation-e5-e6-closeout-2026-04-30.json`
   - `pre_commit_receipt`: `.agent_bus/meta/pre_commit_receipts/receipt_2026-04-30T16-34-15p00-00_885a864b.json`
-- Current staged files:
+- Closed implementation and closeout files:
   - `TASKS.md`
-  - `mu/tests/tools/test_executor_dispatch.py`
-  - `mu/tests/tools/test_recovery_gate.py`
-  - `mu/tools/executors/executor_dispatch.py`
-  - `mu/tools/executors/recovery_gate.py`
+  - `mu/tests/tools/test_pane_prci_observability.py`
+  - `mu/tools/observability/_pane_prci.sh`
   - `reports/control_plane/plan_deferred_consolidation_e5_e6_2026_04_02_2026-04-06.md`
+  - `reports/deferred/archive/plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06_bridge_nonblockers_CLOSED_by_deferred-consolidation-e5-e6-closeout-2026-04-30.md`
   - `reports/l4_wave_indicators/plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06.json`
+  - `reports/l4_wave_indicators/deferred-consolidation-e5-e6-closeout-2026-04-30.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

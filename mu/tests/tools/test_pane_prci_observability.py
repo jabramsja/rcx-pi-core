@@ -237,6 +237,21 @@ def test_displayed_bot_comment_text_is_escape_sanitized(tmp_path: Path) -> None:
     assert "github-actions[bot]: safe red text badrewrite tail" in stdout
 
 
+def test_displayed_bot_comment_text_strips_c1_controls(tmp_path: Path) -> None:
+    stdout, _, _ = _run_pane_once(
+        tmp_path,
+        [
+            _comment(
+                "github-actions[bot]",
+                "safe \u009b31mred\u009b0m tail",
+            )
+        ],
+    )
+
+    assert "\u009b" not in stdout
+    assert "github-actions[bot]: safe 31mred0m tail" in stdout
+
+
 def test_nonnumeric_pr_does_not_invoke_review_comments_api(tmp_path: Path) -> None:
     stdout, gh_log, gh_api_log = _run_pane_once(
         tmp_path,
