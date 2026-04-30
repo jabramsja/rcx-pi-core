@@ -855,11 +855,11 @@ def fix_missing_phase_a_lock(repo_root: Path, **kw: Any) -> dict[str, Any]:
 def _extract_missing_plan_task_id_from_errors(result: dict[str, Any]) -> str:
     for text in _extract_validation_errors(result):
         match = re.search(
-            r"routing task_id\s+(?P<task_id>\S+)",
+            r"routing task_id\s+(?P<task_id>[^\s;]+)",
             str(text or ""),
         )
         if match:
-            return match.group("task_id").strip()
+            return match.group("task_id").strip().rstrip(".,;")
     return ""
 
 

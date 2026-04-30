@@ -971,17 +971,31 @@ def _ensure_phase_a_identity_header(
 
     header, body = _split_plan_header(content)
     hdr_lines = header.splitlines()
-    has_task = any(line.strip().startswith("Task:") for line in hdr_lines)
+    has_task = False
+    blank_task_line: int | None = None
+    for i, line in enumerate(hdr_lines):
+        stripped = line.strip()
+        if not stripped.startswith("Task:"):
+            continue
+        if stripped.split(":", 1)[1].strip():
+            has_task = True
+            break
+        if blank_task_line is None:
+            blank_task_line = i
     has_wave = any(
         line.strip().startswith(("Wave ID:", "wave_id:"))
         for line in hdr_lines
     )
     insertions: list[str] = []
-    if task_id and not has_task:
+    header_changed = False
+    if task_id and not has_task and blank_task_line is not None:
+        hdr_lines[blank_task_line] = f"Task: {task_id}"
+        header_changed = True
+    elif task_id and not has_task:
         insertions.append(f"Task: {task_id}")
     if wave_id and not has_wave:
         insertions.append(f"Wave ID: {wave_id}")
-    if not insertions:
+    if not insertions and not header_changed:
         return content
 
     insert_after = 0
