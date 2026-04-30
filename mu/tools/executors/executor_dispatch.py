@@ -416,6 +416,19 @@ def _surface_record_for_chain(
         "wave_name": _surface_wave_id(args, repo_root),
         "task_id": canonical_task_id,
     }
+    if args.surface == "phase-a":
+        summary = str(getattr(args, "summary", "") or "").strip()
+        request = str(getattr(args, "request_for_claude", "") or "").strip()
+        if summary:
+            record["summary"] = summary
+        if request:
+            record["request_for_claude"] = request
+        record["next_candidates"] = [
+            {
+                "candidate": record["wave_name"],
+                "bounded": True,
+            }
+        ]
     if args.surface != "phase-b":
         return record
 
@@ -463,6 +476,16 @@ def build_surface_parser() -> argparse.ArgumentParser:
         default="",
         help="TASKS.md task ID (e.g. [PIPELINE-RECOVERY] or PIPELINE-RECOVERY). Propagated to Phase B and commit handoff.",
     )
+    phase_a.add_argument(
+        "--summary",
+        default="",
+        help="Short Phase A scope summary. Used to seed the routing context passed to phase_a_executor.",
+    )
+    phase_a.add_argument(
+        "--request-for-claude",
+        default="",
+        help="Detailed Phase A request. Used to seed the routing context passed to phase_a_executor.",
+    )
     phase_a.add_argument("--max-rounds", type=int, default=15)
     phase_a.add_argument("--bus-dir", default=None, help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)")
     phase_a.add_argument("-v", "--verbose", action="store_true")
@@ -507,7 +530,11 @@ def build_surface_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def build_surface_command(args: argparse.Namespace) -> list[str]:
+def build_surface_command(
+    args: argparse.Namespace,
+    *,
+    routing_record: dict[str, Any] | None = None,
+) -> list[str]:
     canonical_task_id = _canonicalize_surface_task_id(getattr(args, "task_id", ""))
     if args.surface == "phase-a":
         cmd = [
@@ -518,6 +545,8 @@ def build_surface_command(args: argparse.Namespace) -> list[str]:
             "--max-rounds",
             str(args.max_rounds),
         ]
+        if routing_record is not None:
+            cmd.extend(["--routing-record", json.dumps(routing_record)])
     elif args.surface == "phase-b":
         cmd = [
             sys.executable,
@@ -734,7 +763,7 @@ def run_recoverable_surface_command(
                 wave_id = normalize_wave_id(
                     str(surface_record.get("wave_name") or surface_record.get("wave_id") or wave_id)
                 )
-                cmd = build_surface_command(args)
+                cmd = build_surface_command(args, routing_record=surface_record)
                 _default_timeout = DEFAULT_EXECUTOR_CONFIG["timeouts"].get(executor_name, 600)
                 timeout = config.get("timeouts", {}).get(executor_name, _default_timeout)
                 try:
