@@ -1,0 +1,24 @@
+{
+  "wave_id": "pipeline-dashboard-recovery-agent-label-2026-04-30",
+  "repeat_run_speedup_ratio": 1.015707,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.422052,
+  "repeat_run_raw_seconds": [
+    0.428681,
+    0.422052
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.428681
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.850733
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-04-30T21:56:32Z",
+  "collector_version": "2.2.0"
+}
