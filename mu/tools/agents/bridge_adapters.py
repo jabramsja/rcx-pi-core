@@ -95,6 +95,7 @@ _META_ENVELOPE_RE = re.compile(
     r"BEGIN_META_ENVELOPE\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?END_META_ENVELOPE",
     re.DOTALL,
 )
+_AGENT_BUS_NAMESPACE_RE = re.compile(r"^\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$")
 _AUTHORIZED_META_DECISIONS = frozenset(
     {
         "COMMIT_GO",
@@ -118,6 +119,27 @@ _AUTHORIZED_META_DECISIONS = frozenset(
         "RETRY_SUGGESTED",
     }
 )
+
+
+def _validated_bus_dir_name(raw_bus_dir: str | Path | None) -> str:
+    raw = str(raw_bus_dir or ".agent_bus").strip().rstrip("/")
+    if not raw:
+        raw = ".agent_bus"
+    if (
+        raw.startswith("/")
+        or "/" in raw
+        or "\\" in raw
+        or raw in {".", ".."}
+        or ".." in raw
+    ):
+        raise BridgeAdapterError(
+            f"Invalid adapter bus_dir {raw!r}: expected .agent_bus or .agent_bus-<id>"
+        )
+    if raw == ".agent_bus" or _AGENT_BUS_NAMESPACE_RE.fullmatch(raw):
+        return raw
+    raise BridgeAdapterError(
+        f"Invalid adapter bus_dir {raw!r}: expected .agent_bus or .agent_bus-<id>"
+    )
 
 
 def _extract_text_from_stream_content(block: Any) -> str:
@@ -468,7 +490,10 @@ def _expand_value(value: str, context: dict[str, str]) -> str:
 
 def _repo_root_from_bridge_config_path(config_path: Path) -> Path | None:
     resolved = config_path.expanduser().resolve()
-    if resolved.name != "bridge_config.json" or resolved.parent.name != ".agent_bus":
+    bus_name = resolved.parent.name
+    if resolved.name != "bridge_config.json":
+        return None
+    if bus_name != ".agent_bus" and not _AGENT_BUS_NAMESPACE_RE.fullmatch(bus_name):
         return None
     return resolved.parent.parent
 
@@ -672,7 +697,8 @@ def _prepare_adapter_env(spec: AdapterSpec, context: dict[str, str]) -> tuple[li
             else:
                 repo_root_text = str(context.get("repo_root") or "").strip()
                 if repo_root_text:
-                    runtime_home = Path(repo_root_text) / ".agent_bus" / "codex_runtime_home"
+                    bus_dir_name = _validated_bus_dir_name(context.get("bus_dir"))
+                    runtime_home = Path(repo_root_text) / bus_dir_name / "codex_runtime_home"
                     _seed_codex_runtime_home(runtime_home)
                     env["HOME"] = str(runtime_home)
                     env["CODEX_HOME"] = str(runtime_home)
@@ -1182,6 +1208,7 @@ def run_adapter(
     zero_output_timeout_s: float | None = None,
     stale_timeout_s: float | None = None,
     stop_after_envelope: bool = False,
+    bus_dir: str | Path | None = None,
 ) -> str:
     if timeout_override_s is not None:
         if timeout_override_s <= 0:
@@ -1196,6 +1223,7 @@ def run_adapter(
         "job_id": job_id,
         "turn_id": turn_id,
         "agent_role": agent_role,
+        "bus_dir": _validated_bus_dir_name(bus_dir),
     }
     cmd, env = _prepare_adapter_env(spec, context)
 

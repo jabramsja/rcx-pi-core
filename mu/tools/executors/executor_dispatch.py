@@ -23,13 +23,14 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent  # mu/tools/executors -> repo root
 AGENTS_DIR = SCRIPT_DIR.parent / "agents"
-META_BUS_DIR = ".agent_bus/meta"
 POST_MERGE_PACKAGE_NAME = "post_merge_package.json"
 
 # Import canonical load_routing_record from shared module
 try:
     from executor_common import (
         DEFAULT_EXECUTOR_CONFIG,
+        agent_bus_path,
+        agent_bus_relpath,
         load_executor_config as _common_load_executor_config,
         load_routing_record as _common_load_routing_record,
         build_and_write_routing_record as _common_build_and_write_routing_record,
@@ -40,6 +41,8 @@ try:
         emit_pipeline_agent_event,
         normalize_wave_id,
         process_descendants,
+        resolve_agent_bus_dir,
+        routing_record_path as _common_routing_record_path,
         terminate_process_tree,
     )
 except ImportError:
@@ -49,6 +52,8 @@ except ImportError:
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     DEFAULT_EXECUTOR_CONFIG = _mod.DEFAULT_EXECUTOR_CONFIG
+    agent_bus_path = _mod.agent_bus_path
+    agent_bus_relpath = _mod.agent_bus_relpath
     _common_load_executor_config = _mod.load_executor_config
     _common_load_routing_record = _mod.load_routing_record
     _common_build_and_write_routing_record = _mod.build_and_write_routing_record
@@ -59,6 +64,8 @@ except ImportError:
     emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
     normalize_wave_id = _mod.normalize_wave_id
     process_descendants = _mod.process_descendants
+    resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
+    _common_routing_record_path = _mod.routing_record_path
     terminate_process_tree = _mod.terminate_process_tree
 
 try:
@@ -137,6 +144,7 @@ def _emit_executor_hard_fail_event(
     result: dict[str, Any],
     wave_id: str,
     record: dict[str, Any] | None = None,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Emit the dispatcher-owned terminal failure event from recovery facts."""
     record = record or {}
@@ -162,6 +170,7 @@ def _emit_executor_hard_fail_event(
     ])
     return emit_pipeline_agent_event(
         repo_root,
+        bus_dir=bus_dir,
         event_type="executor_hard_fail",
         wave_id=normalized_wave_id,
         task_id=str(
@@ -201,14 +210,17 @@ def load_config(config_path: Path | None = None) -> dict[str, Any]:
     return merge_executor_config_overrides(loaded)
 
 
-def load_routing_record(repo_root: Path) -> dict[str, Any]:
+def load_routing_record(
+    repo_root: Path,
+    bus_dir: str | Path | None = None,
+) -> dict[str, Any]:
     """Load and validate the post-merge routing record.
 
     Delegates to executor_common.load_routing_record (canonical implementation).
     Wraps ExecutorCommonError as DispatchError for backward compatibility.
     """
     try:
-        return _common_load_routing_record(repo_root)
+        return _common_load_routing_record(repo_root, bus_dir=bus_dir)
     except ExecutorCommonError as exc:
         raise DispatchError(str(exc)) from exc
 
@@ -233,8 +245,8 @@ def validate_routing_record_freshness(record: dict[str, Any], repo_root: Path) -
     return True, "fresh"
 
 
-def _canonical_routing_record_path(repo_root: Path) -> Path:
-    return (repo_root / _COMMON_ROUTING_RECORD_PATH).resolve()
+def _canonical_routing_record_path(repo_root: Path, bus_dir: str | Path | None = None) -> Path:
+    return _common_routing_record_path(repo_root, bus_dir).resolve()
 
 
 def _load_routing_record_json(path: Path) -> dict[str, Any] | None:
@@ -246,9 +258,13 @@ def _load_routing_record_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _matches_canonical_routing_record(record: dict[str, Any], repo_root: Path) -> bool:
+def _matches_canonical_routing_record(
+    record: dict[str, Any],
+    repo_root: Path,
+    bus_dir: str | Path | None = None,
+) -> bool:
     """Return True when the inline record still matches the canonical routing file."""
-    canonical_record = _load_routing_record_json(_canonical_routing_record_path(repo_root))
+    canonical_record = _load_routing_record_json(_canonical_routing_record_path(repo_root, bus_dir))
     return canonical_record == record
 
 
@@ -413,6 +429,7 @@ def build_surface_parser() -> argparse.ArgumentParser:
         help="TASKS.md task ID (e.g. [PIPELINE-RECOVERY] or PIPELINE-RECOVERY). Propagated to Phase B and commit handoff.",
     )
     phase_a.add_argument("--max-rounds", type=int, default=15)
+    phase_a.add_argument("--bus-dir", default=None, help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)")
     phase_a.add_argument("-v", "--verbose", action="store_true")
     phase_a.add_argument("--json", action="store_true")
 
@@ -427,12 +444,14 @@ def build_surface_parser() -> argparse.ArgumentParser:
     phase_b.add_argument("--routing-record-json", help="Routing record JSON string")
     phase_b.add_argument("--max-rounds", type=int, default=10)
     phase_b.add_argument("--bootstrap-exception", action="store_true")
+    phase_b.add_argument("--bus-dir", default=None, help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)")
     phase_b.add_argument("-v", "--verbose", action="store_true")
     phase_b.add_argument("--json", action="store_true")
 
     pre_commit = sub.add_parser("pre-commit-supervisor", help="Run pre-commit supervisor")
     pre_commit.add_argument("--package", type=Path, required=True)
     pre_commit.add_argument("--dry-run", action="store_true")
+    pre_commit.add_argument("--bus-dir", default=None, help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)")
     pre_commit.add_argument("-v", "--verbose", action="store_true")
     pre_commit.add_argument("--json", action="store_true")
 
@@ -440,11 +459,13 @@ def build_surface_parser() -> argparse.ArgumentParser:
     commit.add_argument("--handoff", type=Path, help="Path to handoff JSON")
     commit.add_argument("--routing-record-path", type=Path, help="Path to routing record JSON")
     commit.add_argument("--routing-record-json", help="Routing record JSON string")
+    commit.add_argument("--bus-dir", default=None, help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)")
     commit.add_argument("-v", "--verbose", action="store_true")
     commit.add_argument("--json", action="store_true")
 
     post_merge = sub.add_parser("post-merge-supervisor", help="Run post-merge supervisor")
     post_merge.add_argument("--package", type=Path, required=True)
+    post_merge.add_argument("--bus-dir", default=None, help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)")
     post_merge.add_argument("-v", "--verbose", action="store_true")
     post_merge.add_argument("--json", action="store_true")
 
@@ -526,6 +547,8 @@ def build_surface_command(args: argparse.Namespace) -> list[str]:
     else:
         raise ControlSurfaceError(f"Unsupported surface: {args.surface}")
 
+    if getattr(args, "bus_dir", None):
+        cmd.extend(["--bus-dir", str(args.bus_dir)])
     if getattr(args, "verbose", False):
         cmd.append("--verbose")
     if getattr(args, "json", False):
@@ -636,6 +659,9 @@ def run_recoverable_surface_command(
     config: dict[str, Any],
 ) -> int:
     """Run recoverable control surfaces through the dispatcher recovery gate."""
+    bus_dir = getattr(args, "bus_dir", None)
+    if bus_dir is not None:
+        resolve_agent_bus_dir(repo_root, bus_dir)
     executor_name = {
         "phase-a": "phase_a_executor",
         "phase-b": "phase_b_executor",
@@ -658,6 +684,7 @@ def run_recoverable_surface_command(
                     repo_root,
                     config,
                     verbose=getattr(args, "verbose", False),
+                    bus_dir=bus_dir,
                 )
                 if retried.get("stdout"):
                     sys.stdout.write(retried["stdout"])
@@ -711,6 +738,7 @@ def run_recoverable_surface_command(
                             record=surface_record,
                             verbose=getattr(args, "verbose", False),
                             emit_output=True,
+                            bus_dir=bus_dir,
                         )
                         if result.get("status") in {"success", "held"}:
                             return 0
@@ -743,15 +771,15 @@ def run_recoverable_surface_command(
                         "retrying before commit chain"
                     )
                 _clear_phase_b_state_for_retry(
-                    repo_root, result, verbose=getattr(args, "verbose", False)
+                    repo_root, result, verbose=getattr(args, "verbose", False), bus_dir=bus_dir
                 )
                 continue
 
             if result.get("status") == "failed" and _is_terminal_executor_outcome(result):
-                _emit_executor_hard_fail_event(repo_root, result, wave_id, surface_record)
+                _emit_executor_hard_fail_event(repo_root, result, wave_id, surface_record, bus_dir=bus_dir)
                 break
 
-            recovery = attempt_recovery(repo_root, result, wave_id)
+            recovery = attempt_recovery(repo_root, result, wave_id, bus_dir=bus_dir)
             result["recovery"] = recovery
             if getattr(args, "verbose", False):
                 print(
@@ -759,14 +787,14 @@ def run_recoverable_surface_command(
                     f"tier={recovery.get('tier')} recovered={recovery.get('recovered')}"
                 )
             if not recovery.get("recovered"):
-                _emit_executor_hard_fail_event(repo_root, result, wave_id, surface_record)
+                _emit_executor_hard_fail_event(repo_root, result, wave_id, surface_record, bus_dir=bus_dir)
                 break
 
             new_orig = _apply_recovery_overrides(
                 config, repo_root=repo_root, verbose=getattr(args, "verbose", False))
             if original_timeouts is None:
                 original_timeouts = new_orig
-            _clear_phase_b_state_for_retry(repo_root, result, verbose=getattr(args, "verbose", False))
+            _clear_phase_b_state_for_retry(repo_root, result, verbose=getattr(args, "verbose", False), bus_dir=bus_dir)
 
         return 1
     finally:
@@ -1116,6 +1144,7 @@ def _continue_successful_executor_chain(
     verbose: bool = False,
     emit_output: bool = False,
     chain_origin: str | None = None,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Continue the A→B→commit chain after a successful executor leg."""
     if executor_name == "phase_a_executor":
@@ -1150,6 +1179,8 @@ def _continue_successful_executor_chain(
             "--dispatcher-owned-recovery",
             "--json",
         ]
+        if bus_dir is not None:
+            phase_b_args.extend(["--bus-dir", str(bus_dir)])
         try:
             phase_b_result = _run_executor_in_group(
                 phase_b_args, cwd=repo_root, timeout=phase_b_timeout,
@@ -1183,10 +1214,11 @@ def _continue_successful_executor_chain(
             verbose=verbose,
             emit_output=emit_output,
             chain_origin="phase_a_executor",
+            bus_dir=bus_dir,
         )
 
     if executor_name == "phase_b_executor":
-        handoff_path = repo_root / ".agent_bus" / "executors" / "phase_b_handoff.json"
+        handoff_path = agent_bus_path(repo_root, bus_dir, "executors", "phase_b_handoff.json")
         if not handoff_path.exists():
             origin = chain_origin or "phase_b_executor"
             payload = _extract_structured_stdout_payload(completed.stdout or "")
@@ -1273,6 +1305,8 @@ def _continue_successful_executor_chain(
             "--handoff", str(handoff_path),
             "--json",
         ]
+        if bus_dir is not None:
+            commit_args.extend(["--bus-dir", str(bus_dir)])
         try:
             commit_result = _run_executor_in_group(
                 commit_args, cwd=repo_root, timeout=commit_timeout,
@@ -1414,12 +1448,13 @@ def _retry_commit_only(
     config: dict[str, Any],
     *,
     verbose: bool = False,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Retry only the commit executor using the existing Phase B handoff.
 
     Used when a chained commit fails — avoids re-running Phase A/B.
     """
-    handoff_path = repo / ".agent_bus" / "executors" / "phase_b_handoff.json"
+    handoff_path = agent_bus_path(repo, bus_dir, "executors", "phase_b_handoff.json")
     if not handoff_path.exists():
         return {
             "status": "error",
@@ -1437,6 +1472,8 @@ def _retry_commit_only(
         str(SCRIPT_DIR / "commit_executor.py"),
         "--handoff", str(handoff_path),
     ]
+    if bus_dir is not None:
+        commit_args.extend(["--bus-dir", str(bus_dir)])
     try:
         commit_result = _run_executor_in_group(
             commit_args, cwd=repo, timeout=commit_timeout,
@@ -1458,10 +1495,6 @@ def _retry_commit_only(
             "executor": "commit_executor",
             "message": f"Commit executor timed out after {commit_timeout}s",
         }
-
-
-# Phase B state file path — must match phase_b_executor.py constants.
-_PHASE_B_STATE_PATH = Path(".agent_bus") / "executors" / "phase_b_state.json"
 
 
 def _apply_recovery_overrides(
@@ -1608,6 +1641,7 @@ def _clear_phase_b_state_for_retry(
     result: dict[str, Any],
     *,
     verbose: bool = False,
+    bus_dir: str | Path | None = None,
 ) -> None:
     """Clear Phase B persisted state before a dispatcher retry.
 
@@ -1629,7 +1663,7 @@ def _clear_phase_b_state_for_retry(
         if verbose:
             print("[dispatch] Preserved recovery-seeded Phase B re-entry state before retry")
         return
-    state_path = repo_root / _PHASE_B_STATE_PATH
+    state_path = agent_bus_path(repo_root, bus_dir, "executors", "phase_b_state.json")
     if state_path.exists():
         state_path.unlink()
         if verbose:
@@ -1640,13 +1674,14 @@ def _auto_refresh_routing(
     repo_root: Path,
     *,
     verbose: bool = False,
+    bus_dir: str | Path | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Re-run the post-merge supervisor to refresh a stale routing record.
 
     Looks for the canonical post-merge package at .agent_bus/meta/post_merge_package.json.
     Returns (success, refreshed_record) — record is None on failure.
     """
-    package_path = repo_root / META_BUS_DIR / POST_MERGE_PACKAGE_NAME
+    package_path = agent_bus_path(repo_root, bus_dir, "meta", POST_MERGE_PACKAGE_NAME)
     if not package_path.exists():
         if verbose:
             print(f"[dispatch] No post-merge package at {package_path} — cannot auto-refresh")
@@ -1665,6 +1700,8 @@ def _auto_refresh_routing(
         "--package", str(package_path),
         "--json",
     ]
+    if bus_dir is not None:
+        cmd.extend(["--bus-dir", str(bus_dir)])
     if verbose:
         cmd.append("--verbose")
         print(f"[dispatch] Running: {' '.join(cmd)}")
@@ -1692,7 +1729,7 @@ def _auto_refresh_routing(
 
     # Reload the routing record
     try:
-        refreshed = _common_load_routing_record(repo_root)
+        refreshed = _common_load_routing_record(repo_root, bus_dir=bus_dir)
     except ExecutorCommonError as exc:
         if verbose:
             print(f"[dispatch] Failed to reload routing record after refresh: {exc}")
@@ -1716,6 +1753,7 @@ def _refresh_canonical_routing_record_state(
     *,
     output_path: Path | None = None,
     verbose: bool = False,
+    bus_dir: str | Path | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Rebind the canonical packet-owned routing record to the current repo state."""
     tracked_packet = _routing_record_tracked_packet(record)
@@ -1734,7 +1772,8 @@ def _refresh_canonical_routing_record_state(
         merged_pr=record.get("merged_pr") if isinstance(record.get("merged_pr"), int) else None,
         merge_sha=record.get("merge_sha") if isinstance(record.get("merge_sha"), str) else None,
         repo_root=repo_root,
-        output_path=output_path or _canonical_routing_record_path(repo_root),
+        output_path=output_path or _canonical_routing_record_path(repo_root, bus_dir),
+        bus_dir=bus_dir,
     )
     if errors:
         if verbose:
@@ -1794,6 +1833,7 @@ def dispatch(
     routing_record_path: Path | None = None,
     skip_freshness: bool = False,
     verbose: bool = False,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Dispatch a routing decision to the appropriate executor.
 
@@ -1809,6 +1849,14 @@ def dispatch(
         }
 
     repo = repo_root or REPO_ROOT
+    try:
+        resolve_agent_bus_dir(repo, bus_dir)
+    except ExecutorCommonError as exc:
+        return {
+            "status": "error",
+            "decision": record.get("decision", ""),
+            "message": str(exc),
+        }
     cfg = config or load_config()
     decision = record.get("decision", "")
 
@@ -1847,15 +1895,15 @@ def dispatch(
         if not fresh:
             is_inline_caller_owned = (
                 routing_record_path is None
-                and not _matches_canonical_routing_record(record, repo)
+                and not _matches_canonical_routing_record(record, repo, bus_dir)
             )
             is_noncanonical_explicit = (
                 routing_record_path is not None
-                and routing_record_path.resolve() != _canonical_routing_record_path(repo)
+                and routing_record_path.resolve() != _canonical_routing_record_path(repo, bus_dir)
             )
             is_canonical_explicit = (
                 routing_record_path is not None
-                and routing_record_path.resolve() == _canonical_routing_record_path(repo)
+                and routing_record_path.resolve() == _canonical_routing_record_path(repo, bus_dir)
             )
             if verbose:
                 print(f"[dispatch] Routing record stale: {msg}")
@@ -1901,9 +1949,10 @@ def dispatch(
                     record,
                     output_path=routing_record_path,
                     verbose=verbose,
+                    bus_dir=bus_dir,
                 )
             else:
-                refreshed, refresh_record = _auto_refresh_routing(repo, verbose=verbose)
+                refreshed, refresh_record = _auto_refresh_routing(repo, verbose=verbose, bus_dir=bus_dir)
             if not refreshed or refresh_record is None:
                 refresh_message = (
                     "Explicit routing record rebind failed — refresh the packet-owned routing file."
@@ -1964,7 +2013,7 @@ def dispatch(
             # must always go through --routing-record so the commit executor
             # builds a tracker-only handoff from the live routing decision
             # instead of replaying a stale Phase B handoff file.
-            handoff_path = repo / ".agent_bus" / "executors" / "phase_b_handoff.json"
+            handoff_path = agent_bus_path(repo, bus_dir, "executors", "phase_b_handoff.json")
             if decision in ("COMMIT_GO", "COMMIT_GO_HOLD_PUSH"):
                 # COMMIT_GO/COMMIT_GO_HOLD_PUSH require a pre-prepared Phase B
                 # handoff.  Without one, the commit executor would synthesize a
@@ -2053,6 +2102,8 @@ def dispatch(
             executor_args.extend(["--routing-record", json.dumps(record)])
         if executor_name in _JSON_EXECUTORS:
             executor_args.append("--json")
+        if bus_dir is not None:
+            executor_args.extend(["--bus-dir", str(bus_dir)])
 
         result = _run_executor_in_group(
             executor_args, cwd=repo, timeout=timeout,
@@ -2073,6 +2124,7 @@ def dispatch(
             config=cfg,
             record=record,
             verbose=verbose,
+            bus_dir=bus_dir,
         )
     except subprocess.TimeoutExpired:
         return {
@@ -2158,6 +2210,11 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="Retry failed executor up to N times before giving up (default: 0)",
     )
+    parser.add_argument(
+        "--bus-dir",
+        default=None,
+        help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -2167,6 +2224,11 @@ def main(argv: list[str] | None = None) -> int:
         ).stdout.strip())
     except subprocess.CalledProcessError:
         print("[error] Not in a git repository", file=sys.stderr)
+        return 1
+    try:
+        resolve_agent_bus_dir(repo_root, args.bus_dir)
+    except ExecutorCommonError as exc:
+        print(f"[error] Invalid --bus-dir: {exc}", file=sys.stderr)
         return 1
 
     # Enforce linked-worktree execution: the dispatcher must NOT run in the
@@ -2228,12 +2290,12 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
         else:
             try:
-                record = load_routing_record(repo_root)
+                record = load_routing_record(repo_root, bus_dir=args.bus_dir)
             except DispatchError:
                 # No routing record — try to create one via post-merge supervisor
                 if args.verbose:
                     print("[dispatch] No routing record — running post-merge supervisor...")
-                refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose)
+                refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose, bus_dir=args.bus_dir)
                 if not refreshed or refresh_record is None:
                     print("[error] No routing record and auto-refresh failed", file=sys.stderr)
                     return 1
@@ -2252,6 +2314,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = _retry_commit_only(
                     repo_root, config,
                     verbose=args.verbose,
+                    bus_dir=args.bus_dir,
                 )
             else:
                 result = dispatch(
@@ -2261,6 +2324,7 @@ def main(argv: list[str] | None = None) -> int:
                     routing_record_path=args.routing_record if args.routing_record else None,
                     skip_freshness=args.skip_freshness,
                     verbose=args.verbose,
+                    bus_dir=args.bus_dir,
                 )
             embedded_recovery = result.get("recovery")
             if isinstance(embedded_recovery, dict) and embedded_recovery.get("recovered"):
@@ -2269,7 +2333,7 @@ def main(argv: list[str] | None = None) -> int:
                         "[dispatch] Phase B recovered in-process — retrying "
                         "before commit chain"
                     )
-                _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose)
+                _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
                 if not _is_chained_commit_failure(result):
                     if args.routing_record:
                         explicit_record = _reload_explicit_routing_record(
@@ -2280,7 +2344,7 @@ def main(argv: list[str] | None = None) -> int:
                             record = explicit_record
                     else:
                         refreshed, refresh_record = _auto_refresh_routing(
-                            repo_root, verbose=args.verbose
+                            repo_root, verbose=args.verbose, bus_dir=args.bus_dir
                         )
                         if refreshed and refresh_record is not None:
                             record = refresh_record
@@ -2298,6 +2362,7 @@ def main(argv: list[str] | None = None) -> int:
                     result,
                     str(record.get("wave_name") or record.get("wave_id") or ""),
                     record,
+                    bus_dir=args.bus_dir,
                 )
                 break
             # Recovery gate: classify failure and attempt Tier 1/2 auto-fix
@@ -2309,7 +2374,7 @@ def main(argv: list[str] | None = None) -> int:
             if result.get("status") in ("failed", "timeout"):
                 _wave_id = normalize_wave_id(
                     record.get("wave_name") or record.get("wave_id", ""))
-                recovery = attempt_recovery(repo_root, result, _wave_id)
+                recovery = attempt_recovery(repo_root, result, _wave_id, bus_dir=args.bus_dir)
                 result["recovery"] = recovery
                 if args.verbose:
                     tier = recovery.get('tier')
@@ -2329,7 +2394,7 @@ def main(argv: list[str] | None = None) -> int:
                     if _recovery_original_timeouts is None:
                         _recovery_original_timeouts = new_orig
                     # Recovery succeeded — grant one extra attempt (don't increment counter)
-                    _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose)
+                    _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
                     if not _is_chained_commit_failure(result):
                         if args.routing_record:
                             explicit_record = _reload_explicit_routing_record(
@@ -2340,14 +2405,14 @@ def main(argv: list[str] | None = None) -> int:
                                 record = explicit_record
                         else:
                             refreshed, refresh_record = _auto_refresh_routing(
-                                repo_root, verbose=args.verbose)
+                                repo_root, verbose=args.verbose, bus_dir=args.bus_dir)
                             if refreshed and refresh_record is not None:
                                 record = refresh_record
                     continue  # retry dispatch without counting against budget
                 elif recovery.get("exhausted"):
                     if args.verbose:
                         print("[dispatch] Recovery exhausted — not retrying")
-                    _emit_executor_hard_fail_event(repo_root, result, _wave_id, record)
+                    _emit_executor_hard_fail_event(repo_root, result, _wave_id, record, bus_dir=args.bus_dir)
                     break
                 else:
                     # Tier 3/4 non-recovery: fail closed instead of falling
@@ -2357,7 +2422,7 @@ def main(argv: list[str] | None = None) -> int:
                         if args.verbose:
                             print(f"[dispatch] Tier {_rec_tier} recovery not "
                                   f"available — failing closed")
-                        _emit_executor_hard_fail_event(repo_root, result, _wave_id, record)
+                        _emit_executor_hard_fail_event(repo_root, result, _wave_id, record, bus_dir=args.bus_dir)
                         break
             if attempt >= max_attempts:
                 if result.get("status") in ("failed", "timeout"):
@@ -2366,6 +2431,7 @@ def main(argv: list[str] | None = None) -> int:
                         result,
                         str(record.get("wave_name") or record.get("wave_id") or ""),
                         record,
+                        bus_dir=args.bus_dir,
                     )
                 break
             if args.verbose:
@@ -2373,7 +2439,7 @@ def main(argv: list[str] | None = None) -> int:
             # Clear Phase B persisted state before retry to prevent stale
             # resume from skipping required implementer re-entry after a
             # bridge-fix cycle failure.
-            _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose)
+            _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
             # Only refresh routing if no explicit --routing-record was provided
             # and this was NOT a chained commit retry (routing is irrelevant
             # when retrying only the commit step).
@@ -2389,7 +2455,7 @@ def main(argv: list[str] | None = None) -> int:
                     if explicit_record is not None:
                         record = explicit_record
                 else:
-                    refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose)
+                    refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose, bus_dir=args.bus_dir)
                     if refreshed and refresh_record is not None:
                         record = refresh_record
             attempt += 1
@@ -2425,6 +2491,7 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root,
                 wave_id=_wave_id,
                 success_target=result.get("executor") or result.get("step", ""),
+                bus_dir=args.bus_dir,
             )
 
         if args.json:
@@ -2460,12 +2527,12 @@ def main(argv: list[str] | None = None) -> int:
         # Post-merge: refresh routing for next wave
         if args.verbose:
             print("[dispatch] Wave succeeded — running post-merge supervisor for next wave...")
-        package_path = repo_root / META_BUS_DIR / POST_MERGE_PACKAGE_NAME
+        package_path = agent_bus_path(repo_root, args.bus_dir, "meta", POST_MERGE_PACKAGE_NAME)
         if not package_path.exists():
             if args.verbose:
                 print("[dispatch] No post-merge package — cannot loop to next wave")
             break
-        refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose)
+        refreshed, refresh_record = _auto_refresh_routing(repo_root, verbose=args.verbose, bus_dir=args.bus_dir)
         if not refreshed or refresh_record is None:
             if args.verbose:
                 print("[dispatch] Post-merge supervisor failed — stopping loop")

@@ -34,12 +34,12 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
 import unicodedata
 import uuid
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -51,8 +51,14 @@ try:
         DEFAULT_EXECUTOR_CONFIG,
         MAX_WAVE_ID_LEN,
         WAVE_ID_RE,
+        agent_bus_path,
+        agent_bus_relpath,
+        bridge_config_path,
+        ensure_bridge_config_path,
+        is_agent_bus_runtime_path,
         load_executor_config,
         normalize_wave_id,
+        resolve_agent_bus_dir,
         ensure_not_agent_review_mode,
         ExecutorCommonError,
         emit_pipeline_agent_event,
@@ -67,11 +73,23 @@ except ImportError:
     DEFAULT_EXECUTOR_CONFIG = _mod.DEFAULT_EXECUTOR_CONFIG
     MAX_WAVE_ID_LEN = _mod.MAX_WAVE_ID_LEN
     WAVE_ID_RE = _mod.WAVE_ID_RE
+    agent_bus_path = _mod.agent_bus_path
+    agent_bus_relpath = _mod.agent_bus_relpath
+    bridge_config_path = _mod.bridge_config_path
+    ensure_bridge_config_path = _mod.ensure_bridge_config_path
+    is_agent_bus_runtime_path = _mod.is_agent_bus_runtime_path
     load_executor_config = _mod.load_executor_config
     normalize_wave_id = _mod.normalize_wave_id
+    resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
     emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
+
+_ACTIVE_BUS_DIR: ContextVar[Path | None] = ContextVar("commit_executor_bus_dir", default=None)
+
+
+def _active_bus_dir() -> Path | None:
+    return _ACTIVE_BUS_DIR.get()
 
 _bridge_adapters = None
 _bridge_import_error = None
@@ -281,6 +299,17 @@ BOT_REMEDIATION_ADAPTER = _COMMIT_EXECUTOR_BACKENDS.get(
 )
 BOT_REMEDIATION_TIMEOUT_S = _COMMIT_EXECUTOR_TIMEOUTS.get("bot_remediation", 600)
 BOT_REMEDIATION_STALE_TIMEOUT_S = 300.0
+
+
+def _is_transient_status_path(path: str) -> bool:
+    return bool(path) and (
+        is_agent_bus_runtime_path(path)
+        or any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+    )
+
+
+def _runtime_bus_artifact_match(path: str) -> str | None:
+    return ".agent_bus*" if is_agent_bus_runtime_path(path) else None
 
 # Validate sub-timeouts fit within outer budget at import time
 for _sub_name, _sub_val in [
@@ -1024,6 +1053,7 @@ def _emit_commit_ready_event(
 ) -> dict[str, Any]:
     return emit_pipeline_agent_event(
         repo_root,
+        bus_dir=_active_bus_dir(),
         event_type="commit_ready",
         wave_id=str(handoff.get("wave_id") or "").strip(),
         task_id=str(handoff.get("task_id") or "[COMMIT-EXECUTOR]").strip(),
@@ -1052,6 +1082,7 @@ def _emit_commit_lifecycle_event(
 ) -> dict[str, Any]:
     return emit_pipeline_agent_event(
         repo_root,
+        bus_dir=_active_bus_dir(),
         event_type=event_type,
         wave_id=str(handoff.get("wave_id") or "").strip(),
         task_id=str(handoff.get("task_id") or "[COMMIT-EXECUTOR]").strip(),
@@ -1102,6 +1133,7 @@ def _emit_pre_commit_supervisor_lifecycle_event(
     )
     return emit_pipeline_agent_event(
         repo_root,
+        bus_dir=_active_bus_dir(),
         event_type=event_type,
         wave_id=wave_id,
         task_id=task_id,
@@ -1169,6 +1201,19 @@ def _run(
         args, cwd=cwd, capture_output=True, text=True, check=check,
         timeout=timeout, env=run_env,
     )
+
+
+def _commit_subprocess_env(*, skip_receipt_check: bool = False) -> dict[str, str] | None:
+    """Build subprocess env for commit hooks while preserving active bus authority."""
+    active_bus_dir = _active_bus_dir()
+    if active_bus_dir is None and not skip_receipt_check:
+        return None
+    run_env = {k: v for k, v in os.environ.items() if not k.startswith("RCX_SKIP_")}
+    if active_bus_dir is not None:
+        run_env["RCX_AGENT_BUS_DIR"] = str(active_bus_dir)
+    if skip_receipt_check:
+        run_env["RCX_SKIP_RECEIPT_CHECK"] = "1"
+    return run_env
 
 
 def _tail_failure_excerpt(text: str, *, limit: int = 1000, max_lines: int = 20) -> str:
@@ -1381,11 +1426,11 @@ def _collect_branch_rebind_dirty_scope(
     ]
     tracked_dirty = {
         path for path in _tracked_dirty_paths(repo_root)
-        if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+        if not _is_transient_status_path(path)
     }
     untracked_dirty = {
         path for path in _untracked_worktree_paths(repo_root)
-        if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+        if not _is_transient_status_path(path)
     }
     dirty_paths = tracked_dirty | untracked_dirty
     # Handoff scope entries are Git pathspecs, not just literal file paths.
@@ -1398,7 +1443,7 @@ def _collect_branch_rebind_dirty_scope(
                 _tracked_dirty_paths(repo_root, pathspecs=allowed_pathspecs)
                 | _untracked_worktree_paths(repo_root, pathspecs=allowed_pathspecs)
             )
-            if not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+            if not _is_transient_status_path(path)
         }
     outside_scope = sorted(dirty_paths - scoped_dirty)
     return tracked_dirty, untracked_dirty, outside_scope
@@ -1457,7 +1502,7 @@ def _dirty_worktree_paths(repo_root: Path) -> set[str]:
     dirty = _tracked_dirty_paths(repo_root) | _untracked_worktree_paths(repo_root)
     return {
         path for path in dirty
-        if path and not any(path.startswith(prefix) for prefix in TRANSIENT_STATUS_PREFIXES)
+        if path and not _is_transient_status_path(path)
     }
 
 
@@ -1798,7 +1843,7 @@ def _validate_tracker_note_text(
 
 
 def _continuation_record_path(repo_root: Path, wave_id: str) -> Path:
-    return repo_root / ".agent_bus" / "executors" / f"commit_executor_{wave_id}.json"
+    return agent_bus_path(repo_root, _active_bus_dir(), "executors", f"commit_executor_{wave_id}.json")
 
 
 def _write_continuation_record(
@@ -1910,6 +1955,11 @@ def _load_post_commit_continuation(
             if merge_base.returncode != 0:
                 return None
             payload["commit_sha"] = head_sha
+            reset_steps = _continuation_steps_for_new_commit(steps_completed)
+            if reset_steps is None:
+                return None
+            payload["steps_completed"] = reset_steps
+            payload.pop("bot_review_request_sha", None)
         except subprocess.CalledProcessError:
             return None
     non_transient_status = []
@@ -1917,7 +1967,7 @@ def _load_post_commit_continuation(
         path_text = line[3:] if len(line) > 3 else line
         if " -> " in path_text:
             path_text = path_text.split(" -> ", 1)[1]
-        if path_text.startswith(TRANSIENT_STATUS_PREFIXES):
+        if _is_transient_status_path(path_text):
             continue
         non_transient_status.append(line)
     if non_transient_status:
@@ -2150,6 +2200,8 @@ def _force_add_denied_match(path_str: str) -> str | None:
         return ".env*"
     if ".agent_bus" in parts:
         return ".agent_bus/"
+    if is_agent_bus_runtime_path(normalized):
+        return ".agent_bus-*"
     for denied in FORCE_ADD_DENYLIST:
         if lowered.startswith(denied):
             return denied
@@ -2588,7 +2640,7 @@ def _mint_bot_remediation_receipt(
         "scoped_files": scoped_files,
     }
 
-    meta_dir = repo_root / ".agent_bus" / "meta"
+    meta_dir = agent_bus_path(repo_root, _active_bus_dir(), "meta")
     meta_dir.mkdir(parents=True, exist_ok=True)
 
     # Write canonical hook-compatible receipt
@@ -3348,30 +3400,19 @@ def _attempt_bot_finding_remediation(
             "steps_completed": result["steps_completed"],
         }
 
-    config_path = repo_root / ".agent_bus" / "bridge_config.json"
-    # Auto-heal: fresh worktrees created by `git worktree add` lack `.agent_bus/`
-    # because .gitignore excludes the whole tree. When the config is missing,
-    # locate the main worktree via `git worktree list --porcelain` (first entry)
-    # and copy its bridge_config.json here. Preserves load_bridge_config's
-    # fail-closed contract: if main also lacks the file, load_bridge_config
-    # raises BridgeAdapterError unchanged.
+    config_path = bridge_config_path(repo_root, _active_bus_dir())
+    # Auto-heal: fresh worktrees created by `git worktree add` lack bus runtime
+    # directories because .gitignore excludes them. Seed the active bus from a
+    # trusted bridge_config.json source, including the canonical default bus for
+    # namespaced runs. Preserves load_bridge_config's fail-closed contract: if
+    # no trusted source exists, load_bridge_config raises BridgeAdapterError
+    # unchanged.
     if not config_path.exists():
         try:
-            wt_out = subprocess.check_output(
-                ["git", "worktree", "list", "--porcelain"],
-                cwd=str(repo_root), text=True, timeout=10,
-            )
-            main_path: Path | None = None
-            for line in wt_out.splitlines():
-                if line.startswith("worktree "):
-                    main_path = Path(line[len("worktree "):].strip())
-                    break
-            if main_path is not None and main_path.resolve() != repo_root.resolve():
-                src = main_path / ".agent_bus" / "bridge_config.json"
-                if src.exists():
-                    config_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src, config_path)
-                    log(f"Step 15: auto-copied bridge_config.json from main worktree ({main_path})")
+            config_path = ensure_bridge_config_path(repo_root, _active_bus_dir())
+            if config_path.exists():
+                relpath = agent_bus_relpath(_active_bus_dir(), "bridge_config.json")
+                log(f"Step 15: auto-copied bridge_config.json into {relpath}")
         except Exception as heal_exc:
             log(f"Step 15: bridge_config.json auto-heal failed: {heal_exc}")
     try:
@@ -3426,6 +3467,7 @@ def _attempt_bot_finding_remediation(
                 agent_role="bot_remediation",
                 raw_output_path=raw_output_path,
                 stale_timeout_s=BOT_REMEDIATION_STALE_TIMEOUT_S,
+                bus_dir=_active_bus_dir(),
             )
         except _bridge_adapters.BridgeAdapterError as exc:
             log(f"Step 15: adapter error in round {round_num}: {exc}")
@@ -3537,7 +3579,7 @@ def _attempt_bot_finding_remediation(
             status_code, file_path = parsed_line
             if file_path in allowed_paths or _is_same_dir_helper(file_path):
                 scoped_entries.append((status_code, file_path))
-            elif not file_path.startswith(TRANSIENT_STATUS_PREFIXES):
+            elif not _is_transient_status_path(file_path):
                 out_of_scope_entries.append((status_code, file_path))
         scoped_files = [file_path for _, file_path in scoped_entries]
         out_of_scope = [file_path for _, file_path in out_of_scope_entries]
@@ -3879,6 +3921,7 @@ def prepare_handoff_from_routing_record(
     repo_root: Path,
     *,
     standalone: bool = False,
+    bus_dir: str | Path | None = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     """Prepare a commit handoff from a routing record.
 
@@ -4020,6 +4063,7 @@ def prepare_handoff_from_routing_record(
                 else None
             ),
             repo_root=repo_root,
+            bus_dir=bus_dir,
             founder_override_token=founder_override_token,
             unblocks_wave_id=unblocks_wave_id,
             unblocks_runtime_blocker=unblocks_runtime_blocker,
@@ -4060,8 +4104,9 @@ def prepare_handoff_from_routing_record(
         pr_body=record.get("pr_body", f"## Summary\n\n- {summary}"),
         tracker_note_text=tracker_note or None,
         tracked_packet=_tracked_packet_path_from_record(record) or None,
-        pre_commit_receipt_path=".agent_bus/meta/pre_commit_receipt.json",
+        pre_commit_receipt_path=str(agent_bus_relpath(bus_dir, "meta", "pre_commit_receipt.json")),
         repo_root=repo_root,
+        bus_dir=bus_dir,
         founder_override_token=founder_override_token or None,
         unblocks_wave_id=unblocks_wave_id,
         unblocks_runtime_blocker=unblocks_runtime_blocker,
@@ -4099,6 +4144,7 @@ def build_commit_handoff(
     founder_override_token: str | None = None,
     unblocks_wave_id: str = "",
     unblocks_runtime_blocker: str = "",
+    bus_dir: str | Path | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Build a validated commit handoff from essential fields.
 
@@ -4180,7 +4226,9 @@ def build_commit_handoff(
     if caller == "standalone" and pre_commit_receipt_path == "":
         effective_receipt = ""
     else:
-        effective_receipt = pre_commit_receipt_path or ".agent_bus/meta/pre_commit_receipt.json"
+        effective_receipt = pre_commit_receipt_path or str(
+            agent_bus_relpath(bus_dir, "meta", "pre_commit_receipt.json")
+        )
 
     effective_founder_override_token = _normalize_founder_override_token(founder_override_token)
     if not effective_founder_override_token and isinstance(tracker_note_text, str):
@@ -4348,6 +4396,9 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
                 errors.append(f"Absolute path in files_to_stage: {f}")
             if _has_path_traversal(f):
                 errors.append(f"Path traversal in files_to_stage: {f}")
+            denied = _runtime_bus_artifact_match(f)
+            if denied:
+                errors.append(f"files_to_stage denied: {f} (matches {denied})")
 
     # force_add_files validation + denylist (case-insensitive for macOS)
     faf = handoff.get("force_add_files", [])
@@ -4917,7 +4968,7 @@ def _run_post_commit_pipeline(
 
     # Inject sweep findings from prior merged PRs (merge_pr.sh --sweep writes
     # .agent_bus/meta/sweep_findings.json with unresolved bot finding content).
-    sweep_file = repo_root / ".agent_bus" / "meta" / "sweep_findings.json"
+    sweep_file = agent_bus_path(repo_root, _active_bus_dir(), "meta", "sweep_findings.json")
     if sweep_file.exists():
         try:
             sweep_lines = [ln.strip() for ln in sweep_file.read_text().splitlines() if ln.strip()]
@@ -5532,6 +5583,21 @@ def _run_commit_pipeline_impl(
     if tasks_modified and "TASKS.md" not in files_to_stage:
         files_to_stage.append("TASKS.md")
 
+    runtime_bus_paths = [
+        path for path in [*files_to_stage, *force_files]
+        if isinstance(path, str) and is_agent_bus_runtime_path(path)
+    ]
+    if runtime_bus_paths:
+        return {
+            "status": "error",
+            "step": "stage_files",
+            "errors": [
+                "Runtime agent bus paths cannot be staged or force-added: "
+                + ", ".join(sorted(runtime_bus_paths))
+            ],
+            "steps_completed": result["steps_completed"],
+        }
+
     try:
         if files_to_stage:
             _run(["git", "add", "--", *files_to_stage], cwd=repo_root)
@@ -5552,6 +5618,20 @@ def _run_commit_pipeline_impl(
         return {"status": "error", "step": "stage_files",
                 "errors": ["Nothing staged after git add (nothing to commit)"],
                 "steps_completed": result["steps_completed"]}
+    staged_runtime_bus = [
+        path for path in staged_output.splitlines()
+        if is_agent_bus_runtime_path(path)
+    ]
+    if staged_runtime_bus:
+        return {
+            "status": "error",
+            "step": "stage_files",
+            "errors": [
+                "Runtime agent bus paths are staged and cannot be committed: "
+                + ", ".join(sorted(staged_runtime_bus))
+            ],
+            "steps_completed": result["steps_completed"],
+        }
 
     result["steps_completed"].append("stage_files")
     log(f"Step 4: staged {len(staged_output.splitlines())} files")
@@ -5716,7 +5796,12 @@ def _run_commit_pipeline_impl(
         )
         try:
             run_meta_bridge_package, MetaBridgeClientError = _load_repo_meta_bridge_client(repo_root)
-            sup_result = run_meta_bridge_package(pkg_path, wait_for_lock_seconds=30, verbose=verbose)
+            sup_result = run_meta_bridge_package(
+                pkg_path,
+                wait_for_lock_seconds=30,
+                verbose=verbose,
+                bus_dir=_active_bus_dir(),
+            )
             _safe_emit_pre_commit_supervisor_lifecycle_event(
                 repo_root,
                 pkg_path,
@@ -5879,11 +5964,10 @@ def _run_commit_pipeline_impl(
     # ── Step 8: run_pre_commit_script ─────────────────────────────────
     pre_commit_script = repo_root / "mu" / "tools" / "hooks" / "pre-commit-doc-check"
     if pre_commit_script.exists():
-        # When supervisor is skipped, propagate RCX_SKIP_RECEIPT_CHECK
-        # through the _run env filter (which strips RCX_SKIP_* by default).
-        step8_env = None
-        if skip_supervisor:
-            step8_env = {**os.environ, "RCX_SKIP_RECEIPT_CHECK": "1"}
+        # Propagate active bus authority to the hook verifier; when supervisor
+        # is skipped, also propagate RCX_SKIP_RECEIPT_CHECK through the _run env
+        # filter, which strips RCX_SKIP_* by default.
+        step8_env = _commit_subprocess_env(skip_receipt_check=skip_supervisor)
         try:
             _run(["bash", str(pre_commit_script)], cwd=repo_root, timeout=30, env=step8_env)
         except subprocess.CalledProcessError as exc:
@@ -5927,9 +6011,7 @@ def _run_commit_pipeline_impl(
     log("Step 8: pre-commit script passed")
 
     # ── Step 9: git_commit ────────────────────────────────────────────
-    step9_env = None
-    if skip_supervisor:
-        step9_env = {**os.environ, "RCX_SKIP_RECEIPT_CHECK": "1"}
+    step9_env = _commit_subprocess_env(skip_receipt_check=skip_supervisor)
     try:
         commit_out = _run(
             ["git", "commit", "-m", handoff["commit_message"]],
@@ -5999,8 +6081,24 @@ def run_commit_pipeline(
     repo_root: Path,
     verbose: bool = False,
     skip_supervisor: bool = False,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Execute the commit pipeline with pager lifecycle edges around the run."""
+    if bus_dir is not None:
+        try:
+            resolve_agent_bus_dir(repo_root, bus_dir)
+        except ExecutorCommonError as exc:
+            return {"status": "error", "step": "bus_dir", "errors": [str(exc)], "steps_completed": []}
+        token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(bus_dir))
+        try:
+            return run_commit_pipeline(
+                handoff,
+                repo_root=repo_root,
+                verbose=verbose,
+                skip_supervisor=skip_supervisor,
+            )
+        finally:
+            _ACTIVE_BUS_DIR.reset(token)
     try:
         ensure_not_agent_review_mode("commit_executor.run_commit_pipeline")
     except ExecutorCommonError as exc:
@@ -6111,6 +6209,11 @@ def main() -> int:
         default=None,
         help="Override task_id in handoff (e.g., [TASK-NAME])",
     )
+    parser.add_argument(
+        "--bus-dir",
+        default=None,
+        help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)",
+    )
     args = parser.parse_args()
 
     # Block bypass flags when called from dispatch (safety guard)
@@ -6148,6 +6251,7 @@ def main() -> int:
             record,
             repo_root,
             standalone=args.standalone,
+            bus_dir=args.bus_dir,
         )
         if prep_errors or handoff is None:
             print(f"[error] Cannot prepare handoff from routing record: {prep_errors}", file=sys.stderr)
@@ -6166,6 +6270,7 @@ def main() -> int:
         repo_root=repo_root,
         verbose=args.verbose,
         skip_supervisor=args.skip_supervisor,
+        bus_dir=args.bus_dir,
     )
 
     if args.json:
@@ -6195,7 +6300,7 @@ def main() -> int:
         try:
             attempt_recovery, normalize_wave_id = _load_repo_recovery_symbols(repo_root)
             wave_id = normalize_wave_id(handoff.get("wave_id", "unknown"))
-            recovery = attempt_recovery(repo_root, result, wave_id)
+            recovery = attempt_recovery(repo_root, result, wave_id, bus_dir=args.bus_dir)
             result["recovery"] = recovery
             if args.verbose or not args.json:
                 print(f"[commit-executor] Recovery: class={recovery.get('failure_class')} "

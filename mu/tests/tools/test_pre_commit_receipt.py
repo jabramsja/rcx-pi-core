@@ -44,8 +44,7 @@ class TestReceiptWriting:
         pkg_path = tmp_path / "pkg.json"
         pkg_path.write_text("{}", encoding="utf-8")
 
-        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-             patch.object(meta, "compute_staged_sha", return_value="abc123"):
+        with patch.object(meta, "compute_staged_sha", return_value="abc123"):
             path = meta.write_pre_commit_receipt(response, pkg_path, repo_root=tmp_path)
 
         assert path.exists()
@@ -64,8 +63,7 @@ class TestReceiptWriting:
         pkg_path = tmp_path / "pkg.json"
         pkg_path.write_text("{}", encoding="utf-8")
 
-        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-             patch.object(meta, "compute_staged_sha", return_value="def456"):
+        with patch.object(meta, "compute_staged_sha", return_value="def456"):
             path = meta.write_pre_commit_receipt(response, pkg_path, repo_root=tmp_path)
 
         data = json.loads(path.read_text())
@@ -101,8 +99,7 @@ class TestReceiptWriting:
         pkg_path.write_text("{}", encoding="utf-8")
 
         # Current staged SHA differs from what was reviewed
-        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-             patch.object(meta, "compute_staged_sha", return_value="different_sha_xyz789"):
+        with patch.object(meta, "compute_staged_sha", return_value="different_sha_xyz789"):
             with pytest.raises(meta.MetaBridgeError, match="Receipt authority violation"):
                 meta.write_pre_commit_receipt(response, pkg_path, repo_root=tmp_path)
 
@@ -117,8 +114,7 @@ class TestReceiptWriting:
         pkg_path = tmp_path / "pkg.json"
         pkg_path.write_text("{}", encoding="utf-8")
 
-        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-             patch.object(meta, "compute_staged_sha", return_value="matching_sha"):
+        with patch.object(meta, "compute_staged_sha", return_value="matching_sha"):
             path = meta.write_pre_commit_receipt(response, pkg_path, repo_root=tmp_path)
 
         assert path.exists()
@@ -135,8 +131,7 @@ class TestReceiptWriting:
         pkg_path = tmp_path / "pkg.json"
         pkg_path.write_text("{}", encoding="utf-8")
 
-        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-             patch.object(meta, "compute_staged_sha", return_value="any_sha"):
+        with patch.object(meta, "compute_staged_sha", return_value="any_sha"):
             path = meta.write_pre_commit_receipt(response, pkg_path, repo_root=tmp_path)
 
         assert path.exists()
@@ -159,30 +154,26 @@ class TestReceiptVerification:
 
     def test_accepts_matching_state(self, tmp_path):
         self._write_receipt(tmp_path, staged_sha="abc123")
-        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-             patch.object(meta, "compute_staged_sha", return_value="abc123"):
+        with patch.object(meta, "compute_staged_sha", return_value="abc123"):
             passed, msg = meta.verify_pre_commit_receipt(tmp_path)
         assert passed
         assert "valid" in msg.lower()
 
     def test_rejects_missing_receipt(self, tmp_path):
-        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"):
-            passed, msg = meta.verify_pre_commit_receipt(tmp_path)
+        passed, msg = meta.verify_pre_commit_receipt(tmp_path)
         assert not passed
         assert "No pre-commit receipt" in msg
 
     def test_rejects_stale_staged_state(self, tmp_path):
         self._write_receipt(tmp_path, staged_sha="abc123")
-        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-             patch.object(meta, "compute_staged_sha", return_value="DIFFERENT"):
+        with patch.object(meta, "compute_staged_sha", return_value="DIFFERENT"):
             passed, msg = meta.verify_pre_commit_receipt(tmp_path)
         assert not passed
         assert "stale" in msg.lower()
 
     def test_rejects_non_commit_decision_in_receipt(self, tmp_path):
         self._write_receipt(tmp_path, decision="NEEDS_PHASE_B")
-        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-             patch.object(meta, "compute_staged_sha", return_value="abc123"):
+        with patch.object(meta, "compute_staged_sha", return_value="abc123"):
             passed, msg = meta.verify_pre_commit_receipt(tmp_path)
         assert not passed
         assert "does not authorize" in msg.lower()
@@ -196,8 +187,7 @@ class TestReceiptVerification:
             "timestamp_utc": "2020-01-01T00:00:00+00:00",
         }
         (receipt_dir / meta.PRE_COMMIT_RECEIPT_NAME).write_text(json.dumps(receipt))
-        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-             patch.object(meta, "compute_staged_sha", return_value="abc123"):
+        with patch.object(meta, "compute_staged_sha", return_value="abc123"):
             passed, msg = meta.verify_pre_commit_receipt(tmp_path)
         assert not passed
         assert "too old" in msg.lower()
@@ -207,8 +197,7 @@ class TestReceiptVerification:
         receipt_dir.mkdir(parents=True, exist_ok=True)
         receipt = {"decision": "COMMIT_GO", "staged_sha": "abc123"}
         (receipt_dir / meta.PRE_COMMIT_RECEIPT_NAME).write_text(json.dumps(receipt))
-        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-             patch.object(meta, "compute_staged_sha", return_value="abc123"):
+        with patch.object(meta, "compute_staged_sha", return_value="abc123"):
             passed, msg = meta.verify_pre_commit_receipt(tmp_path)
         assert not passed
         assert "no timestamp" in msg.lower()
@@ -218,8 +207,7 @@ class TestReceiptVerification:
         receipt_dir.mkdir(parents=True, exist_ok=True)
         receipt = {"decision": "COMMIT_GO", "staged_sha": "abc123", "timestamp_utc": "NOT_A_TIMESTAMP"}
         (receipt_dir / meta.PRE_COMMIT_RECEIPT_NAME).write_text(json.dumps(receipt))
-        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-             patch.object(meta, "compute_staged_sha", return_value="abc123"):
+        with patch.object(meta, "compute_staged_sha", return_value="abc123"):
             passed, msg = meta.verify_pre_commit_receipt(tmp_path)
         assert not passed
         assert "unparseable" in msg.lower()
@@ -229,8 +217,7 @@ class TestReceiptVerification:
         receipt_dir.mkdir(parents=True, exist_ok=True)
         receipt = {"decision": "COMMIT_GO", "staged_sha": "abc123", "timestamp_utc": "2099-01-01T00:00:00+00:00"}
         (receipt_dir / meta.PRE_COMMIT_RECEIPT_NAME).write_text(json.dumps(receipt))
-        with patch.object(meta, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-             patch.object(meta, "compute_staged_sha", return_value="abc123"):
+        with patch.object(meta, "compute_staged_sha", return_value="abc123"):
             passed, msg = meta.verify_pre_commit_receipt(tmp_path)
         assert not passed
         assert "future" in msg.lower()

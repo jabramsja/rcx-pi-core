@@ -144,7 +144,7 @@ class TestPreCommitSupervisorLifecyclePager:
         repo.mkdir()
         package_path = repo / "pre_commit_package.json"
         package_path.write_text("{}", encoding="utf-8")
-        receipt_dir = repo / meta.META_BUS_DIR_NAME
+        receipt_dir = repo / ".agent_bus" / "meta"
         receipt_dir.mkdir(parents=True)
         (receipt_dir / "pre_commit_receipts").write_text("not a directory", encoding="utf-8")
         response = meta.MetaBridgeResponse(

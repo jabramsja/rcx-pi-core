@@ -148,6 +148,23 @@ class TestRunMetaBridgePackage:
         assert "lock held" in str(err).lower()
         assert "30s" in str(err)
 
+    def test_refreshes_stale_executor_common_before_supervisor_import(self, monkeypatch):
+        """Long-lived executors refresh executor_common before importing supervisor."""
+        executor_common_path = _AGENTS_DIR.parent / "executors" / "executor_common.py"
+        spec = importlib.util.spec_from_file_location("executor_common", executor_common_path)
+        assert spec and spec.loader
+        stale_mod = importlib.util.module_from_spec(spec)
+        monkeypatch.setitem(sys.modules, "executor_common", stale_mod)
+        spec.loader.exec_module(stale_mod)
+        delattr(stale_mod, "ensure_bridge_config_path")
+        assert not hasattr(stale_mod, "ensure_bridge_config_path")
+
+        client_mod._refresh_executor_common_before_supervisor_import(_AGENTS_DIR)  # ANTICHEAT_OK: stale-module refresh helper is the regression target
+
+        refreshed = sys.modules["executor_common"]
+        assert Path(refreshed.__file__).resolve() == executor_common_path.resolve()
+        assert hasattr(refreshed, "ensure_bridge_config_path")
+
 
 class TestReceiptUniqueness:
     """Per-invocation receipt paths must be unique even within the same second."""
@@ -173,8 +190,7 @@ class TestReceiptUniqueness:
 
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
-            with _p.object(mod, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-                 _p.object(mod, "compute_staged_sha", return_value="abc"):
+            with _p.object(mod, "compute_staged_sha", return_value="abc"):
                 path1 = mod.write_pre_commit_receipt(response, pkg, repo_root=repo)
                 path2 = mod.write_pre_commit_receipt(response, pkg, repo_root=repo)
 

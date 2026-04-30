@@ -36,6 +36,7 @@ import subprocess
 import sys
 import time
 import uuid
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -45,6 +46,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # Import canonical load_routing_record from shared module
 try:
     from executor_common import (
+        agent_bus_path,
+        agent_bus_relpath,
         load_executor_config,
         DEFAULT_EXECUTOR_CONFIG,
         load_routing_record, ExecutorCommonError,
@@ -57,6 +60,7 @@ try:
         terminate_process_tree,
         ensure_not_agent_review_mode,
         run_bridge_subprocess,
+        resolve_agent_bus_dir,
         emit_pipeline_agent_event,
     )
 except ImportError:
@@ -66,6 +70,8 @@ except ImportError:
     _spec = _ilu.spec_from_file_location("executor_common", str(_common_path))
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
+    agent_bus_path = _mod.agent_bus_path
+    agent_bus_relpath = _mod.agent_bus_relpath
     load_executor_config = _mod.load_executor_config
     DEFAULT_EXECUTOR_CONFIG = _mod.DEFAULT_EXECUTOR_CONFIG
     load_routing_record = _mod.load_routing_record
@@ -81,7 +87,14 @@ except ImportError:
     terminate_process_tree = _mod.terminate_process_tree
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     run_bridge_subprocess = _mod.run_bridge_subprocess
+    resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
+
+_ACTIVE_BUS_DIR: ContextVar[Path | None] = ContextVar("phase_b_executor_bus_dir", default=None)
+
+
+def _active_bus_dir() -> Path | None:
+    return _ACTIVE_BUS_DIR.get()
 
 try:
     from tracker_sync_note import TrackerSyncNoteFields, render_tracker_sync_note
@@ -590,7 +603,7 @@ def _iter_bridge_raw_texts(
     seen_paths: set[str] = set()
 
     if BRIDGE_JOB_ID_RE.fullmatch(job_id or ""):
-        raw_dir = repo_root / ".agent_bus" / "raw" / job_id
+        raw_dir = agent_bus_path(repo_root, _active_bus_dir(), "raw", job_id)
         if raw_dir.is_dir():
             reviewer_files = sorted(
                 (
@@ -858,12 +871,11 @@ def _summarize_pytest_failure(result: dict[str, Any], *, stdout_limit: int = 100
 # State persistence for resume
 # ---------------------------------------------------------------------------
 
-STATE_DIR_NAME = ".agent_bus/executors"
 STATE_FILE_NAME = "phase_b_state.json"
 
 
 def _state_file_path(repo_root: Path) -> Path:
-    return repo_root / STATE_DIR_NAME / STATE_FILE_NAME
+    return agent_bus_path(repo_root, _active_bus_dir(), "executors", STATE_FILE_NAME)
 
 
 def _save_state(repo_root: Path, state: dict[str, Any]) -> Path:
@@ -1240,6 +1252,7 @@ def _emit_phase_b_event(
         derived_wave_id = "phase_b_unknown_wave"
     return emit_pipeline_agent_event(
         repo_root,
+        bus_dir=_active_bus_dir(),
         event_type=event_type,
         wave_id=derived_wave_id,
         task_id=_phase_b_task_id(routing_record, plan),
@@ -1562,8 +1575,8 @@ def _bridge_artifact_fingerprint(
     stdout_path: Path,
     stderr_path: Path,
 ) -> tuple[Any, ...]:
-    rendered_path = repo_root / ".agent_bus" / "rendered" / f"{job_id}.md"
-    raw_dir = repo_root / ".agent_bus" / "raw" / job_id
+    rendered_path = agent_bus_path(repo_root, _active_bus_dir(), "rendered", f"{job_id}.md")
+    raw_dir = agent_bus_path(repo_root, _active_bus_dir(), "raw", job_id)
     raw_files: tuple[tuple[str, tuple[bool, int, int | None]], ...] = ()
     if raw_dir.exists():
         raw_files = tuple(
@@ -1826,6 +1839,8 @@ def run_bridge_review(
     ]
     if job_id:
         cmd.extend(["--job-id", job_id])
+    if _active_bus_dir() is not None:
+        cmd.extend(["--bus-dir", str(_active_bus_dir())])
     if verbose:
         cmd.append("-v")
 
@@ -1863,11 +1878,11 @@ def _read_bridge_render(repo_root: Path, job_id: str) -> str:
     """Read the rendered bridge output for a specific job_id.
 
     Returns the rendered content, or empty string if not found.
-    The rendered file is at .agent_bus/rendered/{job_id}.md.
+    The rendered file is under the active agent bus rendered directory.
     """
     if not BRIDGE_JOB_ID_RE.fullmatch(job_id or ""):
         return ""
-    rendered_path = repo_root / ".agent_bus" / "rendered" / f"{job_id}.md"
+    rendered_path = agent_bus_path(repo_root, _active_bus_dir(), "rendered", f"{job_id}.md")
     if rendered_path.exists():
         return rendered_path.read_text(encoding="utf-8")
     return ""
@@ -2495,6 +2510,7 @@ def run_pre_commit_supervisor(
     *,
     verbose: bool = False,
     timeout: int = 1200,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run pre-commit supervisor via structured meta_bridge_client.
 
@@ -2518,6 +2534,7 @@ def run_pre_commit_supervisor(
             package_path,
             wait_for_lock_seconds=30,
             verbose=verbose,
+            bus_dir=bus_dir,
         )
         return {
             "exit_code": 0 if not result.is_error else 1,
@@ -2563,13 +2580,14 @@ def prepare_commit_handoff(
     commit_message: str = "",
     pr_title: str = "",
     pr_body: str = "",
-    pre_commit_receipt_path: str = ".agent_bus/meta/pre_commit_receipt.json",
+    pre_commit_receipt_path: str | None = None,
     tracked_packet: str | None = None,
     supervisor_lane: str | None = None,
     deferred_items: list[str] | None = None,
     bridge_status: dict[str, Any] | None = None,
     scope_items: list[str] | None = None,
     evidence_handles: dict[str, str] | None = None,
+    bus_dir: str | Path | None = None,
 ) -> Path:
     """Prepare a commit executor handoff file (new schema).
 
@@ -2586,6 +2604,10 @@ def prepare_commit_handoff(
         _commit_spec.loader.exec_module(_commit_mod)
         build_commit_handoff = _commit_mod.build_commit_handoff
 
+    if pre_commit_receipt_path is None:
+        pre_commit_receipt_path = str(
+            agent_bus_relpath(bus_dir, "meta", "pre_commit_receipt.json")
+        )
     handoff, errors = build_commit_handoff(
         wave_id=wave_id,
         task_id=task_id,
@@ -2617,7 +2639,7 @@ def prepare_commit_handoff(
             + "; ".join(errors)
         )
 
-    handoff_dir = repo_root / ".agent_bus" / "executors"
+    handoff_dir = agent_bus_path(repo_root, bus_dir, "executors")
     handoff_dir.mkdir(parents=True, exist_ok=True)
     handoff_path = handoff_dir / "phase_b_handoff.json"
     handoff_path.write_text(json.dumps(handoff, indent=2) + "\n", encoding="utf-8")
@@ -2867,6 +2889,7 @@ def run_phase_b(
     verbose: bool = False,
     force: bool = False,
     routing_record_override: dict[str, Any] | None = None,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Execute the Phase B loop.
 
@@ -2885,6 +2908,23 @@ def run_phase_b(
 
     Returns a result dict with status and details.
     """
+    if bus_dir is not None:
+        try:
+            resolve_agent_bus_dir(repo_root, bus_dir)
+        except ExecutorCommonError as exc:
+            return {"status": "error", "step": "bus_dir", "errors": [str(exc)]}
+        token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(bus_dir))
+        try:
+            return run_phase_b(
+                repo_root,
+                plan_path,
+                max_bridge_rounds=max_bridge_rounds,
+                verbose=verbose,
+                force=force,
+                routing_record_override=routing_record_override,
+            )
+        finally:
+            _ACTIVE_BUS_DIR.reset(token)
     try:
         ensure_not_agent_review_mode("phase_b_executor.run_phase_b")
     except ExecutorCommonError as exc:
@@ -2949,7 +2989,7 @@ def run_phase_b(
                 raise PhaseBExecutorError("routing_record_override must be a JSON object")
             routing_record = routing_record_override
         else:
-            routing_record = load_routing_record(repo_root)
+            routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
         if merge_task_id:
             routing_record["task_id"] = merge_task_id
         if routing_record.get("decision") != "ROUTE_PHASE_B":
@@ -3236,6 +3276,7 @@ def run_phase_b(
                     repo_root, pytest_prompt,
                     backend=backend, model_override=model,
                     timeout=timeout, verbose=verbose,
+                    bus_dir=_active_bus_dir(),
                 )
                 try:
                     _emit_phase_b_event(
@@ -3327,6 +3368,7 @@ def run_phase_b(
             repo_root, fix_prompt,
             backend=backend, model_override=model,
             timeout=timeout, verbose=verbose,
+            bus_dir=_active_bus_dir(),
         )
         try:
             _emit_phase_b_event(
@@ -3496,6 +3538,7 @@ def run_phase_b(
             model_override=model,
             timeout=timeout,
             verbose=verbose,
+            bus_dir=_active_bus_dir(),
         )
         result["implementer_invoked"] = True
         result["implementer_status"] = impl_result["status"]
@@ -4303,6 +4346,20 @@ def run_phase_b(
                         stage_detail,
                     ],
                 }
+            refreshed_changed_files = _collect_wave_owned_files(
+                repo_root,
+                plan_path,
+                plan_declared_files,
+                implementer_changed or None,
+                executor_created or None,
+                baseline_wave_files or None,
+            )
+            if refreshed_changed_files != changed_files:
+                log(
+                    "Post-stage package scope refreshed from "
+                    f"{len(changed_files)} to {len(refreshed_changed_files)} file(s)"
+                )
+                changed_files = refreshed_changed_files
 
         # Step 7: Build and run pre-commit supervisor via structured client
         log("Building supervisor package...")
@@ -4368,7 +4425,7 @@ def run_phase_b(
             _clear_state(repo_root)
             return result
         supervisor_result = run_pre_commit_supervisor(
-            repo_root, package_path, verbose=verbose,
+            repo_root, package_path, verbose=verbose, bus_dir=_active_bus_dir(),
         )
         supervisor_parsed = supervisor_result.get("parsed", {})
         result["pre_commit_decision"] = supervisor_parsed.get("decision")
@@ -4478,6 +4535,7 @@ def run_phase_b(
                     repo_root, reentry_prompt,
                     backend=backend, model_override=model,
                     timeout=timeout, verbose=verbose,
+                    bus_dir=_active_bus_dir(),
                 )
                 try:
                     _emit_phase_b_event(
@@ -4811,6 +4869,7 @@ def run_phase_b(
                     repo_root, reentry_prompt,
                     backend=backend, model_override=model,
                     timeout=timeout, verbose=verbose,
+                    bus_dir=_active_bus_dir(),
                 )
                 try:
                     _emit_phase_b_event(
@@ -4964,6 +5023,20 @@ def run_phase_b(
                         stage_detail,
                     ],
                 }
+            refreshed_changed_files = _collect_wave_owned_files(
+                repo_root,
+                plan_path,
+                plan_declared_files,
+                implementer_changed or None,
+                executor_created or None,
+                baseline_wave_files or None,
+            )
+            if refreshed_changed_files != changed_files:
+                log(
+                    "Re-entry: post-stage package scope refreshed from "
+                    f"{len(changed_files)} to {len(refreshed_changed_files)} file(s)"
+                )
+                changed_files = refreshed_changed_files
 
         # Refresh ALL supervisor package truth for re-entry
         supervisor_package["changed_files"] = changed_files
@@ -5014,7 +5087,7 @@ def run_phase_b(
                 "errors": [f"Phase B pager emission failed before re-entry supervisor: {exc}"],
             }
         supervisor_result = run_pre_commit_supervisor(
-            repo_root, package_path, verbose=verbose,
+            repo_root, package_path, verbose=verbose, bus_dir=_active_bus_dir(),
         )
         supervisor_parsed = supervisor_result.get("parsed", {})
         decision = supervisor_parsed.get("decision")
@@ -5251,6 +5324,7 @@ def run_phase_b(
         bridge_status=handoff_bridge_status,
         scope_items=[plan_path],
         evidence_handles={"indicator": f"reports/l4_wave_indicators/{wave_id}.json"},
+        bus_dir=_active_bus_dir(),
     )
     result["status"] = "commit_ready"
     result["handoff_path"] = str(handoff_path)
@@ -5355,6 +5429,11 @@ def main() -> int:
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument(
+        "--bus-dir",
+        default=None,
+        help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)",
+    )
     # Keep --force as hidden alias for backward compatibility in tests
     parser.add_argument(
         "--force",
@@ -5408,6 +5487,7 @@ def main() -> int:
         verbose=args.verbose,
         force=args.bootstrap_exception,
         routing_record_override=routing_record_override,
+        bus_dir=args.bus_dir,
     )
 
     if (
@@ -5431,7 +5511,12 @@ def main() -> int:
                 or (routing_record_override or {}).get("wave_id", "")
                 or (Path(args.plan).stem if args.plan else "wave-unknown")
             ).strip() or "wave-unknown"
-            recovery = attempt_recovery(repo_root, result, normalize_wave_id(recovery_wave))
+            recovery = attempt_recovery(
+                repo_root,
+                result,
+                normalize_wave_id(recovery_wave),
+                bus_dir=args.bus_dir,
+            )
             result["recovery"] = recovery
         except Exception as exc:
             if args.verbose or not args.json:

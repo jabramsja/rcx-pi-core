@@ -51,6 +51,7 @@ except ImportError:
 # Import canonical load_routing_record from shared module
 try:
     from executor_common import (
+        agent_bus_path,
         load_executor_config,
         load_routing_record,
         ensure_not_agent_review_mode,
@@ -59,6 +60,7 @@ try:
         normalize_wave_id,
         artifact_size_mtime_ns,
         process_descendants,
+        resolve_agent_bus_dir,
         terminate_process_tree,
     )
 except ImportError:
@@ -67,12 +69,14 @@ except ImportError:
     _spec = _ilu.spec_from_file_location("executor_common", str(_common_path))
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
+    agent_bus_path = _mod.agent_bus_path
     load_executor_config = _mod.load_executor_config
     load_routing_record = _mod.load_routing_record
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
     emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
     normalize_wave_id = _mod.normalize_wave_id
+    resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     artifact_size_mtime_ns = _mod.artifact_size_mtime_ns
     process_descendants = _mod.process_descendants
     terminate_process_tree = _mod.terminate_process_tree
@@ -575,6 +579,7 @@ def run_bridge_design_review(
     job_id: str | None = None,
     timeout: int = 1200,
     agent_review_context: str = "",
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run bridge packet review (--no-diff, non-design) on a plan packet."""
     config = load_executor_config(repo_root)
@@ -638,6 +643,8 @@ def run_bridge_design_review(
         "--reviewer", reviewer,
         "-v", "--no-diff",
     ]
+    if bus_dir is not None:
+        cmd.extend(["--bus-dir", str(bus_dir)])
     if job_id:
         cmd.extend(["--job-id", job_id])
 
@@ -652,8 +659,8 @@ def run_bridge_design_review(
         )
 
     def _artifact_fingerprint() -> tuple[Any, ...]:
-        rendered_path = repo_root / ".agent_bus" / "rendered" / f"{run_id}.md"
-        raw_dir = repo_root / ".agent_bus" / "raw" / run_id
+        rendered_path = agent_bus_path(repo_root, bus_dir, "rendered", f"{run_id}.md")
+        raw_dir = agent_bus_path(repo_root, bus_dir, "raw", run_id)
         raw_files: tuple[tuple[str, tuple[int, int | None]], ...] = ()
         if raw_dir.exists():
             raw_files = tuple(
@@ -1054,6 +1061,7 @@ def _emit_phase_a_event(
     transition_key: str,
     summary: str,
     artifact_paths: dict[str, str] | None = None,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     plan_content = ""
     try:
@@ -1062,6 +1070,7 @@ def _emit_phase_a_event(
         pass
     return emit_pipeline_agent_event(
         repo_root,
+        bus_dir=bus_dir,
         event_type=event_type,
         wave_id=_phase_a_wave_id(
             routing_record,
@@ -1128,6 +1137,7 @@ def run_phase_a(
     *,
     max_bridge_rounds: int = 15,
     verbose: bool = False,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Execute the Phase A planning loop.
 
@@ -1135,6 +1145,18 @@ def run_phase_a(
     """
     try:
         ensure_not_agent_review_mode("phase_a_executor.run_phase_a")
+    except ExecutorCommonError as exc:
+        return {
+            "status": "error",
+            "plan_name": plan_name,
+            "plan_path": None,
+            "bridge_rounds": 0,
+            "agent_review_ran": False,
+            "error": str(exc),
+        }
+
+    try:
+        resolve_agent_bus_dir(repo_root, bus_dir)
     except ExecutorCommonError as exc:
         return {
             "status": "error",
@@ -1178,7 +1200,7 @@ def run_phase_a(
 
     # Load routing record for scope context
     try:
-        routing_record = load_routing_record(repo_root)
+        routing_record = load_routing_record(repo_root, bus_dir=bus_dir)
         scope = extract_plan_scope(routing_record)
     except (PhaseAExecutorError, ExecutorCommonError):
         routing_record = {}
@@ -1205,6 +1227,7 @@ def run_phase_a(
             transition_key=f"{rel_plan_path}:entered",
             summary=f"Phase A entered for {rel_plan_path}",
             artifact_paths={"plan": rel_plan_path},
+            bus_dir=bus_dir,
         )
     except Exception as exc:
         result["status"] = "error"
@@ -1304,6 +1327,7 @@ def run_phase_a(
                     transition_key=f"{bridge_job_id}:reviewer_started",
                     summary=f"Phase A reviewer started for round {round_num}",
                     artifact_paths={"plan": rel_plan_path},
+                    bus_dir=bus_dir,
                 )
             except Exception as exc:
                 result["status"] = "error"
@@ -1314,10 +1338,11 @@ def run_phase_a(
                 repo_root, rel_plan_path, round_num,
                 job_id=bridge_job_id,
                 agent_review_context=agent_review_context,
+                bus_dir=bus_dir,
             )
             log(f"Bridge exit code: {bridge_result['exit_code']}")
 
-            rendered_path = repo_root / ".agent_bus" / "rendered" / f"{bridge_job_id}.md"
+            rendered_path = agent_bus_path(repo_root, bus_dir, "rendered", f"{bridge_job_id}.md")
             if rendered_path.exists():
                 render_content = rendered_path.read_text(encoding="utf-8")
                 bridge_decision = _extract_bridge_decision(render_content)
@@ -1332,6 +1357,7 @@ def run_phase_a(
                         transition_key=f"{bridge_job_id}:reviewer_completed:{bridge_decision or 'unknown'}",
                         summary=f"Phase A reviewer completed round {round_num} with {bridge_decision or 'unknown'}",
                         artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                        bus_dir=bus_dir,
                     )
                 except Exception as exc:
                     result["status"] = "error"
@@ -1364,6 +1390,7 @@ def run_phase_a(
                             transition_key=f"{bridge_job_id}:go",
                             summary=f"Phase A bridge GO for round {round_num}",
                             artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                            bus_dir=bus_dir,
                         )
                     except Exception as exc:
                         result["status"] = "error"
@@ -1394,7 +1421,7 @@ def run_phase_a(
                     # Read raw reviewer output for finding parsing — the JSON
                     # envelope (BEGIN_AGENT_ENVELOPE) is in the raw output,
                     # not in the rendered markdown.
-                    raw_dir = repo_root / ".agent_bus" / "raw" / bridge_job_id
+                    raw_dir = agent_bus_path(repo_root, bus_dir, "raw", bridge_job_id)
                     raw_content = ""
                     if raw_dir.is_dir():
                         for raw_file in sorted(raw_dir.iterdir()):
@@ -1453,6 +1480,7 @@ def run_phase_a(
                                     f"{bridge_decision} as GO for round {round_num}"
                                 ),
                                 artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                                bus_dir=bus_dir,
                             )
                         except Exception as exc:
                             result["status"] = "error"
@@ -1530,6 +1558,7 @@ def run_phase_a(
                                 transition_key=f"{bridge_job_id}:implementer_started",
                                 summary=f"Phase A implementer started after {bridge_decision} round {round_num}",
                                 artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                                bus_dir=bus_dir,
                             )
                         except Exception as exc:
                             result["status"] = "error"
@@ -1540,6 +1569,7 @@ def run_phase_a(
                             backend=implementer_backend,
                             timeout=900,
                             verbose=verbose,
+                            bus_dir=bus_dir,
                         )
                         try:
                             _emit_phase_a_event(
@@ -1555,6 +1585,7 @@ def run_phase_a(
                                     f"{impl_result.get('status', 'unknown')} after round {round_num}"
                                 ),
                                 artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                                bus_dir=bus_dir,
                             )
                         except Exception as exc:
                             result["status"] = "error"
@@ -1618,6 +1649,7 @@ def run_phase_a(
                                 transition_key=f"{bridge_job_id}:no_go",
                                 summary=f"Phase A bridge NO_GO for round {round_num}",
                                 artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                                bus_dir=bus_dir,
                             )
                         except Exception as exc:
                             result["status"] = "error"
@@ -1653,6 +1685,7 @@ def run_phase_a(
                             transition_key=f"{bridge_job_id}:question",
                             summary="Phase A bridge QUESTION requires human resolution",
                             artifact_paths={"rendered": str(rendered_path.relative_to(repo_root))},
+                            bus_dir=bus_dir,
                         )
                     except Exception as exc:
                         result["error"] = f"Phase A pager emission failed on QUESTION: {exc}"
@@ -1818,6 +1851,11 @@ def main() -> int:
         "--json",
         action="store_true",
     )
+    parser.add_argument(
+        "--bus-dir",
+        default=None,
+        help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)",
+    )
     args = parser.parse_args()
 
     try:
@@ -1833,6 +1871,7 @@ def main() -> int:
         repo_root, args.plan_name,
         max_bridge_rounds=args.max_rounds,
         verbose=args.verbose,
+        bus_dir=args.bus_dir,
     )
 
     if args.json:

@@ -1,9 +1,45 @@
 #!/usr/bin/env bash
 # pipeline_status.sh — One-shot pipeline state summary
-# Read-only: never modifies state, only reads .agent_bus/ and process info.
+# Read-only: never modifies state, only reads active agent-bus state and process info.
 set -uo pipefail
 
 LIVE_STATE_MAX_AGE_SECONDS=21600
+BUS_DIR="${RCX_AGENT_BUS_DIR:-.agent_bus}"
+
+validate_bus_dir() {
+  local raw="${1:-}"
+  raw="${raw%/}"
+  if [ -z "$raw" ]; then
+    raw=".agent_bus"
+  fi
+  case "$raw" in
+    /*|*/*|*\\*|*..*|"."|"..")
+      echo "ERROR: invalid --bus-dir: $raw" >&2
+      return 1
+      ;;
+  esac
+  if [[ "$raw" != ".agent_bus" && ! "$raw" =~ ^\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+    echo "ERROR: --bus-dir must be .agent_bus or .agent_bus-<id>" >&2
+    return 1
+  fi
+  printf '%s\n' "$raw"
+}
+
+if [ "${1:-}" = "--bus-dir" ]; then
+  if [ $# -lt 2 ]; then
+    echo "ERROR: --bus-dir requires a value" >&2
+    exit 2
+  fi
+  BUS_DIR="${2:-}"
+  shift 2
+fi
+if ! BUS_DIR="$(validate_bus_dir "$BUS_DIR")"; then
+  exit 2
+fi
+
+bus_path_for_worktree() {
+  printf '%s/%s\n' "$1" "$BUS_DIR"
+}
 
 file_mtime_seconds() {
   local path="$1"
@@ -214,6 +250,7 @@ find_worktree_for_branch() {
 
 worktree_activity_timestamp() {
   local path="$1"
+  local bus_path=""
   local lock=""
   local best=0
   local signal=""
@@ -226,7 +263,9 @@ worktree_activity_timestamp() {
     best=$(( $(date +%s) + LIVE_STATE_MAX_AGE_SECONDS + 1 ))
   fi
 
-  for lock in "$path/.agent_bus/meta/meta_bridge.lock" "$path/.agent_bus/bridge.lock"; do
+  bus_path="$(bus_path_for_worktree "$path")"
+
+  for lock in "$bus_path/meta/meta_bridge.lock" "$bus_path/bridge.lock"; do
     if lock_file_is_live "$lock"; then
       mtime=$(file_mtime_seconds "$lock")
       if [ -n "$mtime" ] && [ "$mtime" -gt "$best" ]; then
@@ -235,14 +274,14 @@ worktree_activity_timestamp() {
     fi
   done
 
-  if [ -s "$path/.agent_bus/meta/continuation.json" ] && file_is_recent "$path/.agent_bus/meta/continuation.json"; then
-    mtime=$(file_mtime_seconds "$path/.agent_bus/meta/continuation.json")
+  if [ -s "$bus_path/meta/continuation.json" ] && file_is_recent "$bus_path/meta/continuation.json"; then
+    mtime=$(file_mtime_seconds "$bus_path/meta/continuation.json")
     if [ -n "$mtime" ] && [ "$mtime" -gt "$best" ]; then
       best="$mtime"
     fi
   fi
 
-  commit_state=$(ls -t "$path"/.agent_bus/executors/commit_executor_*.json 2>/dev/null | head -1) || true
+  commit_state=$(ls -t "$bus_path"/executors/commit_executor_*.json 2>/dev/null | head -1) || true
   if [ -n "$commit_state" ]; then
     status=$(jq -r '.status // ""' "$commit_state" 2>/dev/null || true)
     case "$status" in
@@ -260,8 +299,8 @@ worktree_activity_timestamp() {
   fi
 
   for signal in \
-    "$path/.agent_bus/executors/phase_b_state.json" \
-    "$path/.agent_bus/recovery/recovery_status.json" \
+    "$bus_path/executors/phase_b_state.json" \
+    "$bus_path/recovery/recovery_status.json" \
     "$path/.scratch/phase_a_executor_live.log" \
     "$path/.scratch/phase_b_executor_live.log" \
     "$path/.scratch/commit_executor_live.log"
@@ -275,8 +314,8 @@ worktree_activity_timestamp() {
   done
 
   reviewer=$(ls -t \
-    "$path"/.agent_bus/raw/phase-?-r[0-9]*/*reviewer*.txt \
-    "$path"/.agent_bus/raw/phase-?-reentry-r[0-9]*/*reviewer*.txt \
+    "$bus_path"/raw/phase-?-r[0-9]*/*reviewer*.txt \
+    "$bus_path"/raw/phase-?-reentry-r[0-9]*/*reviewer*.txt \
     2>/dev/null | head -1) || true
   if [ -n "$reviewer" ] && file_is_recent "$reviewer"; then
     mtime=$(file_mtime_seconds "$reviewer")
@@ -440,7 +479,7 @@ if [ "${1:-}" = "--print-branch" ]; then
   exit 0
 fi
 
-BUS="$REPO_ROOT/.agent_bus"
+BUS="$(bus_path_for_worktree "$REPO_ROOT")"
 CURRENT_BRANCH="$(print_branch_for_root "$REPO_ROOT")"
 
 # Colors (disable if not tty)
@@ -627,7 +666,8 @@ if [ -f "$REPO_ROOT/mu/tools/observability/pipeline_dashboard.py" ]; then
   echo ""
   python3 "$REPO_ROOT/mu/tools/observability/pipeline_dashboard.py" \
     --render-recovery \
-    --repo-root "$REPO_ROOT" 2>/dev/null || true
+    --repo-root "$REPO_ROOT" \
+    --bus-dir "$BUS_DIR" 2>/dev/null || true
 fi
 
 # ── PR / CI Status ──

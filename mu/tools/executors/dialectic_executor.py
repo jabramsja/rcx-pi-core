@@ -9,7 +9,7 @@ Control flow:
 1. Read routing record with unbounded proposal
 2. Send proposal + repo context to Codex for dialectic narrowing
 3. Codex proposes a bounded scope with explicit files, constraints, stop conditions
-4. Write narrowed proposal to .agent_bus/executors/dialectic_result.json
+4. Write narrowed proposal to the active agent bus executor result path
 5. Trigger post-merge supervisor with narrowed proposal
 
 See: reports/archive/control_plane/executor_surfaces_plan_2026-03-22.md Section B.1
@@ -29,15 +29,23 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 # Import canonical load_routing_record from shared module
 try:
-    from executor_common import load_routing_record, ExecutorCommonError, run_bridge_subprocess
+    from executor_common import (
+        agent_bus_path,
+        load_routing_record,
+        ExecutorCommonError,
+        resolve_agent_bus_dir,
+        run_bridge_subprocess,
+    )
 except ImportError:
     import importlib.util as _ilu
     _common_path = SCRIPT_DIR / "executor_common.py"
     _spec = _ilu.spec_from_file_location("executor_common", str(_common_path))
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
+    agent_bus_path = _mod.agent_bus_path
     load_routing_record = _mod.load_routing_record
     ExecutorCommonError = _mod.ExecutorCommonError
+    resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     run_bridge_subprocess = _mod.run_bridge_subprocess
 
 
@@ -140,6 +148,8 @@ def run_dialectic(
     max_rounds: int = 1,  # Currently single-pass; multi-round narrowing not yet implemented
     verbose: bool = False,
     timeout: int = 600,
+    bus_dir: str | Path | None = None,
+    routing_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute dialectic narrowing.
 
@@ -155,9 +165,11 @@ def run_dialectic(
         if verbose:
             print(f"[dialectic] {msg}")
 
-    # Load routing record
+    # Validate the active bus before any bus-owned files are read or written.
     try:
-        routing_record = load_routing_record(repo_root)
+        resolve_agent_bus_dir(repo_root, bus_dir)
+        if routing_record is None:
+            routing_record = load_routing_record(repo_root, bus_dir=bus_dir)
     except (DialecticExecutorError, ExecutorCommonError) as exc:
         return {"status": "error", "errors": [str(exc)]}
 
@@ -190,6 +202,8 @@ def run_dialectic(
         "-v", "--no-diff",
         "--job-id", dialectic_job_id,
     ]
+    if bus_dir is not None:
+        cmd.extend(["--bus-dir", str(bus_dir)])
 
     log("Sending to Codex for dialectic narrowing...")
     try:
@@ -200,7 +214,7 @@ def run_dialectic(
     result["rounds"] = 1
 
     # Try to find and parse the rendered output — bound to exact job_id
-    rendered_path = repo_root / ".agent_bus" / "rendered" / f"{dialectic_job_id}.md"
+    rendered_path = agent_bus_path(repo_root, bus_dir, "rendered", f"{dialectic_job_id}.md")
     if rendered_path.exists():
         content = rendered_path.read_text(encoding="utf-8")
         try:
@@ -213,7 +227,7 @@ def run_dialectic(
 
     if result["status"] != "narrowed":
         # Check raw output for this job_id
-        raw_job_dir = repo_root / ".agent_bus" / "raw" / dialectic_job_id
+        raw_job_dir = agent_bus_path(repo_root, bus_dir, "raw", dialectic_job_id)
         if raw_job_dir.is_dir():
             for raw_file in raw_job_dir.iterdir():
                 try:
@@ -231,7 +245,7 @@ def run_dialectic(
         result["errors"] = ["Could not parse dialectic envelope from Codex output"]
 
     # Write result
-    result_dir = repo_root / ".agent_bus" / "executors"
+    result_dir = agent_bus_path(repo_root, bus_dir, "executors")
     result_dir.mkdir(parents=True, exist_ok=True)
     result_path = result_dir / "dialectic_result.json"
     result_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
@@ -248,6 +262,11 @@ def main() -> int:
         "--routing-record",
         type=str,
         help="Routing record JSON string (from dispatcher)",
+    )
+    parser.add_argument(
+        "--bus-dir",
+        default=None,
+        help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)",
     )
     parser.add_argument(
         "--max-rounds",
@@ -274,10 +293,24 @@ def main() -> int:
         print("[error] Not in a git repository", file=sys.stderr)
         return 1
 
+    routing_record = None
+    if args.routing_record:
+        try:
+            parsed_record = json.loads(args.routing_record)
+        except json.JSONDecodeError as exc:
+            print(f"[error] --routing-record is not valid JSON: {exc}", file=sys.stderr)
+            return 1
+        if not isinstance(parsed_record, dict):
+            print("[error] --routing-record must decode to a JSON object", file=sys.stderr)
+            return 1
+        routing_record = parsed_record
+
     result = run_dialectic(
         repo_root,
         max_rounds=args.max_rounds,
         verbose=args.verbose,
+        bus_dir=args.bus_dir,
+        routing_record=routing_record,
     )
 
     if args.json:

@@ -3097,8 +3097,7 @@ class TestExactReceiptAuthority:
         import tempfile
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
-            with _p.object(meta_mod, "META_BUS_DIR_NAME", ".agent_bus/meta"), \
-                 _p.object(meta_mod, "compute_staged_sha", return_value="abc"):
+            with _p.object(meta_mod, "compute_staged_sha", return_value="abc"):
                 result_path = meta_mod.write_pre_commit_receipt(response, pkg_path, repo_root=repo)
 
             # Must return per-invocation path, not canonical
@@ -5119,6 +5118,53 @@ class TestWaveOwnedFilesIncludesDeferredPackets:
                 executor_created_files=set(),
             )
             assert files == ["mu/tools/foo.py"]
+
+    def test_post_stage_recollection_drops_cleared_deferred_packet(self, tmp_path):
+        """A cleared AD deferred packet must not survive into supervisor package scope."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+
+        plan_rel = "reports/control_plane/plan.md"
+        source_rel = "mu/tools/executors/foo.py"
+        deferred_rel = "reports/deferred/non_blocking/wave_bridge_nonblockers.md"
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "mu" / "tools" / "executors").mkdir(parents=True)
+        (repo / plan_rel).write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+        (repo / source_rel).write_text("print('old')\n")
+        subprocess.run(["git", "add", "--", plan_rel, source_rel], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True)
+
+        (repo / source_rel).write_text("print('new')\n")
+        (repo / "reports" / "deferred" / "non_blocking").mkdir(parents=True)
+        (repo / deferred_rel).write_text("# Deferred\n")
+        subprocess.run(["git", "add", "--", deferred_rel], cwd=repo, check=True)
+        (repo / deferred_rel).unlink()
+
+        changed_files = pb_mod._collect_wave_owned_files(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            plan_rel,
+            plan_declared_files=[source_rel],
+            implementer_changed_files={source_rel},
+            executor_created_files={deferred_rel},
+        )
+        assert deferred_rel in changed_files
+
+        staged_ok, stage_detail = pb_mod._stage_files_for_pipeline(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            changed_files,
+        )
+        assert staged_ok, stage_detail
+
+        refreshed_changed_files = pb_mod._collect_wave_owned_files(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            plan_rel,
+            plan_declared_files=[source_rel],
+            implementer_changed_files={source_rel},
+            executor_created_files={deferred_rel},
+        )
+        assert source_rel in refreshed_changed_files
+        assert deferred_rel not in refreshed_changed_files
 
     def test_baseline_wave_files_preserved_when_tracking_active(self, tmp_path):
         """Dirty-wave baseline files remain in scope even if the last implementer delta is narrow."""
@@ -7352,10 +7398,11 @@ class TestPlanlessPhaseB:
         def fake_run_phase_b(repo_root, plan_path, **kwargs):
             return {"status": "error", "step": "implementer_bridge_fix", "wave_id": "standalone-wave"}
 
-        def fake_attempt_recovery(repo_root, result, wave_id):
+        def fake_attempt_recovery(repo_root, result, wave_id, bus_dir=None):
             recovery_calls["repo_root"] = repo_root
             recovery_calls["status"] = result["status"]
             recovery_calls["wave_id"] = wave_id
+            recovery_calls["bus_dir"] = bus_dir
             return {"recovered": True, "failure_class": "unknown_error", "tier": 3}
 
         monkeypatch.setattr(pb_mod.subprocess, "run", fake_git_rev_parse)
@@ -7381,7 +7428,7 @@ class TestPlanlessPhaseB:
         def fake_run_phase_b(repo_root, plan_path, **kwargs):
             return {"status": "error", "step": "derive_planless_context", "wave_id": "dispatch-wave"}
 
-        def fake_attempt_recovery(repo_root, result, wave_id):
+        def fake_attempt_recovery(repo_root, result, wave_id, bus_dir=None):
             recovery_calls["count"] += 1
             return {"recovered": False, "failure_class": "phase_b_plan_required", "tier": 1}
 

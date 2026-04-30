@@ -131,11 +131,12 @@ class TestStandaloneRecoveryTrigger:
                 return subprocess.CompletedProcess(args, 0, f"{repo}\n", "")
             raise AssertionError(f"unexpected subprocess.run call: {args}")
 
-        def fake_attempt(repo_root, failed_result, wave_id):
+        def fake_attempt(repo_root, failed_result, wave_id, bus_dir=None):
             recovery_calls.append({
                 "repo_root": repo_root,
                 "result": dict(failed_result),
                 "wave_id": wave_id,
+                "bus_dir": bus_dir,
             })
             return {
                 "recovered": False,
@@ -681,6 +682,74 @@ class TestReceiptChainEndToEnd:
         assert post_commit_results[-1]["handoff_sha"] == original_handoff_sha
         assert post_commit_results[-1]["commit_sha"] == continuation["commit_sha"]
         assert "git_commit" in post_commit_results[-1]["steps_completed"]
+
+    def test_post_commit_continuation_resets_push_steps_when_head_advances(self, tmp_path, monkeypatch):
+        import subprocess
+
+        old_sha = "a" * 40
+        new_sha = "b" * 40
+        target_branch = "jabramsja/test-wave-id"
+        continuation_path = tmp_path / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(
+            json.dumps(
+                {
+                    "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                    "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                    "handoff_sha": "handoff-sha",
+                    "target_branch": target_branch,
+                    "commit_sha": old_sha,
+                    "receipt_decision": "COMMIT_GO",
+                    "steps_completed": [
+                        "validate_inputs",
+                        "ensure_feature_branch",
+                        "git_commit",
+                        "run_pre_push_script",
+                        "git_push",
+                        "ensure_pr",
+                        "wait_ci",
+                    ],
+                    "pr_number": "833",
+                    "bot_review_request_sha": old_sha,
+                    "updated_at_unix": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        def completed(cmd, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, check=True, timeout=None, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout=f"{new_sha}\n")
+            if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return completed(cmd, stdout=f"{target_branch}\n")
+            if cmd[:3] == ["git", "status", "--short"]:
+                return completed(cmd, stdout="")
+            if cmd[:3] == ["git", "merge-base", "--is-ancestor"]:
+                assert cmd[-2:] == [old_sha, new_sha]
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        loaded = commit_mod._load_post_commit_continuation(  # ANTICHEAT_OK: direct continuation loader regression
+            continuation_path,
+            repo_root=tmp_path,
+            handoff_sha="handoff-sha",
+            target_branch=target_branch,
+        )
+
+        assert loaded is not None
+        assert loaded["commit_sha"] == new_sha
+        assert loaded["steps_completed"] == [
+            "validate_inputs",
+            "ensure_feature_branch",
+            "git_commit",
+        ]
+        assert loaded["pr_number"] == "833"
+        assert "bot_review_request_sha" not in loaded
 
     def test_commit_packet_truth_refresh_missing_packet_names_root_input(self, tmp_path):
         import subprocess
@@ -1480,6 +1549,29 @@ class TestNewSchemaValidation:
         )
         assert not valid
         assert any(".agent_bus/" in e for e in errors)
+
+    def test_force_add_files_rejects_namespaced_agent_bus_runtime_state(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_schema_handoff(
+                force_add_files=[".agent_bus-test/executors/phase_b_handoff.json"]
+            )
+        )
+        assert not valid
+        assert any(".agent_bus-*" in e for e in errors)
+
+    def test_files_to_stage_rejects_namespaced_agent_bus_runtime_state(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_schema_handoff(
+                files_to_stage=[".agent_bus-test/foo.txt"],
+                force_add_files=[],
+            )
+        )
+        assert not valid
+        assert any("files_to_stage denied" in e and ".agent_bus*" in e for e in errors)
+
+    def test_namespaced_agent_bus_paths_are_transient_status_artifacts(self):
+        assert commit_mod._is_transient_status_path(".agent_bus-test/foo.txt")  # ANTICHEAT_OK: status artifact classifier is the regression target
+        assert commit_mod._runtime_bus_artifact_match(".agent_bus-test/foo.txt") == ".agent_bus*"  # ANTICHEAT_OK: runtime-bus matcher is the regression target
 
 
 class TestHandoffReceiptContainment:

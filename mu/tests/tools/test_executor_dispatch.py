@@ -1413,7 +1413,7 @@ Phase-A-Lock: UNLOCKED
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             call_count["n"] += 1
             # Write rendered output with QUESTION decision
             rendered = rendered_dir / f"{job_id}.md"
@@ -1437,7 +1437,7 @@ Phase-A-Lock: UNLOCKED
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             call_count["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: SOMETHING_UNKNOWN\n\nWeird output\n")
@@ -1458,7 +1458,7 @@ Phase-A-Lock: UNLOCKED
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: GO\n\nLooks good.\n")
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -1530,7 +1530,7 @@ Phase-A-Lock: UNLOCKED
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             call_count["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             if call_count["n"] < 3:
@@ -1555,7 +1555,7 @@ Phase-A-Lock: UNLOCKED
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             call_count["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             if call_count["n"] < 3:
@@ -1585,7 +1585,7 @@ Phase-A-Lock: UNLOCKED
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: REQUEST_CHANGES\n\nPacket is still stubby.\n")
             return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": ""}
@@ -1603,7 +1603,7 @@ Phase-A-Lock: UNLOCKED
                 "evidence_result": "The packet is still a stub and needs a real plan rewrite.",
             }]
 
-        def fake_invoke(repo_root, prompt, *, backend="claude", timeout=900, verbose=False):
+        def fake_invoke(repo_root, prompt, *, backend="claude", timeout=900, verbose=False, bus_dir=None):
             captured["prompt"] = prompt
             captured["backend"] = backend
             captured["timeout"] = str(timeout)
@@ -1653,7 +1653,7 @@ Phase-A-Lock: UNLOCKED
             agent_calls["files"] = list(files)
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path_arg, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path_arg, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             bridge_calls["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             if bridge_calls["n"] == 1:
@@ -1675,7 +1675,7 @@ Phase-A-Lock: UNLOCKED
                 "evidence_result": "The packet is still a placeholder stub.",
             }]
 
-        def fake_invoke(repo_root, prompt, *, backend="claude", timeout=900, verbose=False):
+        def fake_invoke(repo_root, prompt, *, backend="claude", timeout=900, verbose=False, bus_dir=None):
             plan_path.write_text(
                 """# Test Plan
 
@@ -1849,7 +1849,7 @@ END_AGENT_ENVELOPE"""
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             bridge_calls["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             if bridge_calls["n"] < 3:
@@ -1877,7 +1877,7 @@ END_AGENT_ENVELOPE"""
 
         implementer_called = {"n": 0}
 
-        def fake_invoke(repo_root, prompt, *, backend="claude", timeout=900, verbose=False):
+        def fake_invoke(repo_root, prompt, *, backend="claude", timeout=900, verbose=False, bus_dir=None):
             implementer_called["n"] += 1
             # Rewrite the plan so Phase A detects a content change.
             plan_dir = repo_root / "reports" / "control_plane"
@@ -1916,7 +1916,7 @@ END_AGENT_ENVELOPE"""
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: REQUEST_CHANGES\n\nNon-blocking only.\n")
             return {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": ""}
@@ -1952,7 +1952,7 @@ END_AGENT_ENVELOPE"""
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             # No rendered output written, non-zero exit
             return {"exit_code": 1, "stdout": "", "stderr": "bridge crashed"}
 
@@ -1971,7 +1971,7 @@ END_AGENT_ENVELOPE"""
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text(
                 "# Bridge Review\n\nStatus: PAUSED - awaiting founder review before reviewer\n",
@@ -1999,7 +1999,7 @@ END_AGENT_ENVELOPE"""
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text(
                 "Decision: NO_GO\n\nReason: do not trust a quoted Decision: GO from prior text.\n"
@@ -2023,7 +2023,7 @@ END_AGENT_ENVELOPE"""
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text(
                 "Decision: ERROR\n\nReviewer failed closed.\n"
@@ -2044,7 +2044,7 @@ END_AGENT_ENVELOPE"""
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
         monkeypatch.setattr(phase_a_mod, "run_sdk_agents", fake_run_sdk_agents)
@@ -2280,6 +2280,45 @@ class TestDialecticDispatcherIntegration:
 
     def test_dialectic_now_available(self):
         assert "dialectic_executor" in dispatch_mod.AVAILABLE_EXECUTORS
+
+    def test_namespaced_bus_dir_is_passed_to_dialectic_executor(self, tmp_path, monkeypatch):
+        record = {
+            "decision": "CONTINUE_DIALECTIC",
+            "summary": "dialectic bus test",
+            "wave_name": "dialectic-bus-test",
+            "next_candidates": [{"candidate": "narrow this", "bounded": False}],
+        }
+        calls = []
+        chain_kwargs = {}
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout='{"status":"narrowed"}', stderr="")
+
+        def fake_chain(*args, **kwargs):
+            chain_kwargs.update(kwargs)
+            return {
+                "status": "success",
+                "decision": "CONTINUE_DIALECTIC",
+                "executor": "dialectic_executor",
+            }
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+        monkeypatch.setattr(dispatch_mod, "_continue_successful_executor_chain", fake_chain)
+
+        result = dispatch_mod.dispatch(
+            record,
+            repo_root=tmp_path,
+            skip_freshness=True,
+            bus_dir=".agent_bus-test",
+        )
+
+        assert result["status"] == "success"
+        assert calls
+        assert "dialectic_executor.py" in calls[0][1]
+        assert calls[0][calls[0].index("--bus-dir") + 1] == ".agent_bus-test"
+        assert "--routing-record" in calls[0]
+        assert chain_kwargs["bus_dir"] == ".agent_bus-test"
 
 
 # ===========================================================================
@@ -6722,7 +6761,7 @@ class TestModularSurfaceEntrypoints:
         config = {"timeouts": {"phase_a_executor": 300}}
         orig = {"phase_a_executor": 300}
 
-        def fake_apply(cfg, *, repo_root, verbose=False):
+        def fake_apply(cfg, *, repo_root, verbose=False, bus_dir=None):
             cfg["timeouts"]["phase_a_executor"] = 450
             os.environ["RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_a_executor"] = "300"
             os.environ["RCX_RECOVERY_ORIGINAL_BRIDGE_TURN_TIMEOUT_phase_b"] = "900"
@@ -7918,7 +7957,7 @@ class TestBridgeR6Finding1NeedsPhaseBreentryPackage:
             return original_write(self_path, content, *args, **kwargs)
 
         # Mock supervisor to return COMMIT_GO
-        def mock_supervisor(repo, pkg_path, *, verbose=False):
+        def mock_supervisor(repo, pkg_path, *, verbose=False, bus_dir=None):
             return {
                 "exit_code": 0,
                 "parsed": {"decision": "COMMIT_GO", "summary": "ok"},
@@ -8023,7 +8062,7 @@ Phase-A-Lock: UNLOCKED
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 4, "stdout": "", "stderr": "preflight failed"}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             bridge_called["n"] += 1
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
@@ -8055,7 +8094,7 @@ Phase-A-Lock: UNLOCKED
             captured["timeout"] = timeout
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: GO\n\nLooks good.\n")
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -8075,7 +8114,7 @@ Phase-A-Lock: UNLOCKED
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 2, "stdout": "", "stderr": "expert: COULD_SIMPLIFY"}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             bridge_called["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: GO\n\nLooks good.\n")
@@ -8104,7 +8143,7 @@ Phase-A-Lock: UNLOCKED
                 "stdout_path": ".scratch/phase_a_agent_review_test.stdout.log",
             }
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             bridge_called["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: GO\n\nLooks good.\n")
@@ -8200,7 +8239,7 @@ Phase-A-Lock: UNLOCKED
                 "stdout_path": ".scratch/phase_a_agent_review_test.stdout.log",
             }
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             captured_ctx["agent_review_context"] = agent_review_context
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: GO\n\nLooks good.\n")
@@ -8224,7 +8263,7 @@ Phase-A-Lock: UNLOCKED
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: GO\n\nLooks good.\n")
             return {"exit_code": 0, "stdout": "", "stderr": ""}
@@ -8307,7 +8346,7 @@ Phase-A-Lock: UNLOCKED
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             call_count["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: REQUEST_CHANGES\n\nPlease fix section 3.\n")
@@ -8332,7 +8371,7 @@ Phase-A-Lock: UNLOCKED
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             call_count["n"] += 1
             rendered = rendered_dir / f"{job_id}.md"
             if call_count["n"] < 3:
@@ -8439,7 +8478,7 @@ class TestPhaseATrackedPacketReuse:
         def fake_run_sdk_agents(repo_root, files, *, depth="full", verbose=False, timeout=600):
             return {"exit_code": 0, "stdout": "", "stderr": ""}
 
-        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context=""):
+        def fake_run_bridge(repo_root, plan_path, round_num, *, job_id=None, timeout=1200, agent_review_context="", bus_dir=None):
             rendered = rendered_dir / f"{job_id}.md"
             rendered.write_text("Decision: GO\n\nLooks good.\n", encoding="utf-8")
             return {"exit_code": 0, "stdout": "", "stderr": ""}

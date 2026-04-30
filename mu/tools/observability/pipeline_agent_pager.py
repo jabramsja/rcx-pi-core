@@ -18,6 +18,7 @@ import sys
 import tempfile
 import threading
 import time
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,13 @@ from urllib import parse as urllib_parse
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 try:
-    from executor_common import DEFAULT_EXECUTOR_CONFIG, load_executor_config
+    from executor_common import (
+        DEFAULT_EXECUTOR_CONFIG,
+        agent_bus_path,
+        agent_bus_relpath,
+        load_executor_config,
+        resolve_agent_bus_dir,
+    )
 except ImportError:
     import importlib.util as _ilu
 
@@ -36,9 +43,12 @@ except ImportError:
     assert _spec.loader is not None
     _spec.loader.exec_module(_mod)
     DEFAULT_EXECUTOR_CONFIG = _mod.DEFAULT_EXECUTOR_CONFIG
+    agent_bus_path = _mod.agent_bus_path
+    agent_bus_relpath = _mod.agent_bus_relpath
     load_executor_config = _mod.load_executor_config
+    resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
 
-OBSERVABILITY_DIR = Path(".agent_bus/observability")
+OBSERVABILITY_DIR = agent_bus_relpath(None, "observability")
 EVENT_LOG_PATH = OBSERVABILITY_DIR / "pipeline_agent_events.jsonl"
 DELIVERY_LOG_PATH = OBSERVABILITY_DIR / "pipeline_agent_delivery_receipts.jsonl"
 STATE_PATH = OBSERVABILITY_DIR / "pipeline_agent_pager_state.json"
@@ -93,6 +103,7 @@ ALLOWED_ROUTES = frozenset({"codex", "claude", "both", NOTIFY_ONLY_TARGET})
 
 _PROCESS_LOCKS_GUARD = threading.Lock()
 _PROCESS_LOCKS: dict[str, threading.Lock] = {}
+_ACTIVE_BUS_DIR: ContextVar[Path | None] = ContextVar("pipeline_agent_pager_bus_dir", default=None)
 
 
 class PipelineAgentPagerError(RuntimeError):
@@ -101,6 +112,18 @@ class PipelineAgentPagerError(RuntimeError):
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _active_bus_dir(bus_dir: str | Path | None = None) -> str | Path | None:
+    return bus_dir if bus_dir is not None else _ACTIVE_BUS_DIR.get()
+
+
+def _observability_path(repo_root: Path, *parts: str, bus_dir: str | Path | None = None) -> Path:
+    return agent_bus_path(repo_root, _active_bus_dir(bus_dir), "observability", *parts)
+
+
+def _observability_relpath(*parts: str, bus_dir: str | Path | None = None) -> Path:
+    return agent_bus_relpath(_active_bus_dir(bus_dir), "observability", *parts)
 
 
 def _parse_timestamp_rank(value: Any) -> float:
@@ -240,7 +263,7 @@ def _autoping_thread_is_paused(repo_root: Path, thread_id: str) -> bool:
 
 
 def _repo_lock(repo_root: Path) -> threading.Lock:
-    key = str(repo_root.resolve())
+    key = f"{repo_root.resolve()}::{agent_bus_relpath(_active_bus_dir()).as_posix()}"
     with _PROCESS_LOCKS_GUARD:
         lock = _PROCESS_LOCKS.get(key)
         if lock is None:
@@ -257,7 +280,7 @@ class _PagerLock:
 
     def __enter__(self) -> "_PagerLock":
         self._thread_lock.acquire()
-        lock_path = self._repo_root / LOCK_PATH
+        lock_path = _observability_path(self._repo_root, "pipeline_agent_pager.lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         self._fp = open(lock_path, "a+", encoding="utf-8")
         fcntl.flock(self._fp.fileno(), fcntl.LOCK_EX)
@@ -321,7 +344,7 @@ def _coerce_positive_timeout(value: Any, fallback: float) -> float:
 
 
 def _load_state(repo_root: Path) -> dict[str, Any]:
-    state_path = repo_root / STATE_PATH
+    state_path = _observability_path(repo_root, "pipeline_agent_pager_state.json")
     if not state_path.exists():
         return _default_state()
     try:
@@ -375,7 +398,7 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _save_state(repo_root: Path, state: dict[str, Any]) -> None:
     state["updated_at"] = _utcnow()
-    _atomic_write_json(repo_root / STATE_PATH, state)
+    _atomic_write_json(_observability_path(repo_root, "pipeline_agent_pager_state.json"), state)
 
 
 def _serialize_jsonl_records(records: list[dict[str, Any]]) -> str:
@@ -420,11 +443,17 @@ def _load_jsonl_records(path: Path, *, label: str) -> list[dict[str, Any]]:
 
 
 def _load_events_from_log(repo_root: Path) -> list[dict[str, Any]]:
-    return _load_jsonl_records(repo_root / EVENT_LOG_PATH, label="pager event log")
+    return _load_jsonl_records(
+        _observability_path(repo_root, "pipeline_agent_events.jsonl"),
+        label="pager event log",
+    )
 
 
 def _load_delivery_receipts(repo_root: Path) -> list[dict[str, Any]]:
-    return _load_jsonl_records(repo_root / DELIVERY_LOG_PATH, label="pager delivery log")
+    return _load_jsonl_records(
+        _observability_path(repo_root, "pipeline_agent_delivery_receipts.jsonl"),
+        label="pager delivery log",
+    )
 
 
 def _append_jsonl_record(path: Path, payload: dict[str, Any], *, label: str) -> None:
@@ -434,7 +463,11 @@ def _append_jsonl_record(path: Path, payload: dict[str, Any], *, label: str) -> 
 
 
 def _append_event_record(repo_root: Path, event: dict[str, Any]) -> None:
-    _append_jsonl_record(repo_root / EVENT_LOG_PATH, event, label="pager event log")
+    _append_jsonl_record(
+        _observability_path(repo_root, "pipeline_agent_events.jsonl"),
+        event,
+        label="pager event log",
+    )
 
 
 def _append_delivery_receipt(
@@ -455,7 +488,7 @@ def _append_delivery_receipt(
     if thread_id:
         receipt["codex_thread_id"] = thread_id
     _append_jsonl_record(
-        repo_root / DELIVERY_LOG_PATH,
+        _observability_path(repo_root, "pipeline_agent_delivery_receipts.jsonl"),
         receipt,
         label="pager delivery log",
     )
@@ -1075,7 +1108,7 @@ def _dispatch_codex_exec_resume(
     timeout_s: float,
 ) -> dict[str, Any]:
     codex_bin = os.environ.get("RCX_PIPELINE_AGENT_PAGER_CODEX_BIN", "codex")
-    log_dir = repo_root / OBSERVABILITY_DIR / "codex_pager_dispatch"
+    log_dir = _observability_path(repo_root, "codex_pager_dispatch")
     log_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     log_path = log_dir / f"codex_pager_{stamp}_{event['event_id'][:8]}.jsonl"
@@ -1361,7 +1394,7 @@ def _dispatch_codex(
 def _read_orchestrator_session_id(repo_root: Path) -> str | None:
     """Return the orchestrator session id for pager ``--resume`` dispatch.
 
-    The file at ``ORCHESTRATOR_SESSION_ID_PATH`` is authored by the
+    The orchestrator-session-id file is authored by the
     SessionStart hook writer in ``.claude/hooks/session-start.sh``. The
     pager is read-only here and tolerates every absent/malformed case so
     that a missing, stale, or corrupt file never crashes the orchestrator:
@@ -1371,7 +1404,7 @@ def _read_orchestrator_session_id(repo_root: Path) -> str | None:
     malformed: a single fallback note is emitted to stderr and ``None`` is
     returned so the caller falls back to plain ``claude -p`` dispatch.
     """
-    session_path = repo_root / ORCHESTRATOR_SESSION_ID_PATH
+    session_path = _observability_path(repo_root, "orchestrator_session_id")
     try:
         raw = session_path.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
@@ -1602,35 +1635,45 @@ def _dispatch_pending_locked(
     return report
 
 
-def dispatch_pending_events(repo_root: Path) -> dict[str, Any]:
+def dispatch_pending_events(
+    repo_root: Path,
+    *,
+    bus_dir: str | Path | None = None,
+) -> dict[str, Any]:
     repo_root = repo_root.resolve()
-    config = load_executor_config(repo_root)
-    if not _pager_enabled(config):
-        return {
-            "enabled": False,
-            "attempted": [],
-            "budget_exhausted": False,
-        }
-    with _PagerLock(repo_root):
-        state = _load_state(repo_root)
-        events = _load_events_from_log(repo_root)
-        _reconcile_delivery_state(repo_root, state, events)
-        _set_dispatcher(state, active=True)
-        _save_state(repo_root, state)
-        try:
-            report = _dispatch_pending_locked(repo_root, state, events, config)
-        finally:
-            _set_dispatcher(state, active=False)
+    resolve_agent_bus_dir(repo_root, bus_dir)
+    token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(bus_dir))
+    try:
+        config = load_executor_config(repo_root)
+        if not _pager_enabled(config):
+            return {
+                "enabled": False,
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+        with _PagerLock(repo_root):
+            state = _load_state(repo_root)
+            events = _load_events_from_log(repo_root)
+            _reconcile_delivery_state(repo_root, state, events)
+            _set_dispatcher(state, active=True)
             _save_state(repo_root, state)
-        return {
-            "enabled": True,
-            **report,
-        }
+            try:
+                report = _dispatch_pending_locked(repo_root, state, events, config)
+            finally:
+                _set_dispatcher(state, active=False)
+                _save_state(repo_root, state)
+            return {
+                "enabled": True,
+                **report,
+            }
+    finally:
+        _ACTIVE_BUS_DIR.reset(token)
 
 
 def emit_transition_event(
     repo_root: Path,
     *,
+    bus_dir: str | Path | None = None,
     event_type: str,
     wave_id: str,
     task_id: str,
@@ -1645,51 +1688,56 @@ def emit_transition_event(
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     repo_root = repo_root.resolve()
-    config = load_executor_config(repo_root)
-    if not _pager_enabled(config):
-        return {
-            "enabled": False,
-            "route": _configured_route_text(config, route),
-            "event_id": None,
-            "attempted": [],
-            "budget_exhausted": False,
-        }
-    resolved_route = _resolve_route(config, route)
-    event = _build_event_record(
-        event_type=event_type,
-        wave_id=wave_id,
-        task_id=task_id,
-        plan_path=plan_path,
-        phase=phase,
-        state=state,
-        transition_key=transition_key,
-        summary=summary,
-        reason=reason,
-        artifact_paths=_normalize_artifact_paths(artifact_paths),
-        route=resolved_route,
-        metadata=metadata,
-    )
-    with _PagerLock(repo_root):
-        state = _load_state(repo_root)
-        events = _load_events_from_log(repo_root)
-        _reconcile_delivery_state(repo_root, state, events)
-        if _should_append_event_record(state, event):
-            _append_event_record(repo_root, event)
-            events.append(event)
-        _ensure_event_state(state, event)
-        _set_dispatcher(state, active=True)
-        _save_state(repo_root, state)
-        try:
-            report = _dispatch_pending_locked(repo_root, state, events, config)
-        finally:
-            _set_dispatcher(state, active=False)
+    resolve_agent_bus_dir(repo_root, bus_dir)
+    token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(bus_dir))
+    try:
+        config = load_executor_config(repo_root)
+        if not _pager_enabled(config):
+            return {
+                "enabled": False,
+                "route": _configured_route_text(config, route),
+                "event_id": None,
+                "attempted": [],
+                "budget_exhausted": False,
+            }
+        resolved_route = _resolve_route(config, route)
+        event = _build_event_record(
+            event_type=event_type,
+            wave_id=wave_id,
+            task_id=task_id,
+            plan_path=plan_path,
+            phase=phase,
+            state=state,
+            transition_key=transition_key,
+            summary=summary,
+            reason=reason,
+            artifact_paths=_normalize_artifact_paths(artifact_paths),
+            route=resolved_route,
+            metadata=metadata,
+        )
+        with _PagerLock(repo_root):
+            state = _load_state(repo_root)
+            events = _load_events_from_log(repo_root)
+            _reconcile_delivery_state(repo_root, state, events)
+            if _should_append_event_record(state, event):
+                _append_event_record(repo_root, event)
+                events.append(event)
+            _ensure_event_state(state, event)
+            _set_dispatcher(state, active=True)
             _save_state(repo_root, state)
-        return {
-            "enabled": True,
-            "event_id": event["event_id"],
-            "route": resolved_route,
-            **report,
-        }
+            try:
+                report = _dispatch_pending_locked(repo_root, state, events, config)
+            finally:
+                _set_dispatcher(state, active=False)
+                _save_state(repo_root, state)
+            return {
+                "enabled": True,
+                "event_id": event["event_id"],
+                "route": resolved_route,
+                **report,
+            }
+    finally:
+        _ACTIVE_BUS_DIR.reset(token)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1705,10 +1753,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Dispatch pending pager targets from the append-only event log.",
     )
+    parser.add_argument(
+        "--bus-dir",
+        default=None,
+        help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)",
+    )
     args = parser.parse_args(argv)
     if not args.dispatch_pending:
         parser.error("specify --dispatch-pending")
-    result = dispatch_pending_events(args.repo_root)
+    result = dispatch_pending_events(args.repo_root, bus_dir=args.bus_dir)
     json.dump(result, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
     return 0

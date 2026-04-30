@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+BUS_DIR="${RCX_AGENT_BUS_DIR:-${BUS_DIR:-.agent_bus}}"
+if [[ "$BUS_DIR" == /* || "$BUS_DIR" == *"/"* || "$BUS_DIR" == *"\\"* || "$BUS_DIR" == *".."* ]]; then
+  echo "ERROR: invalid RCX_AGENT_BUS_DIR: $BUS_DIR" >&2
+  exit 2
+fi
+if [[ "$BUS_DIR" != ".agent_bus" && ! "$BUS_DIR" =~ ^\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+  echo "ERROR: RCX_AGENT_BUS_DIR must be .agent_bus or .agent_bus-<id>" >&2
+  exit 2
+fi
+
 file_mtime_seconds() {
   local path="$1"
   stat -f%m "$path" 2>/dev/null || stat -c%Y "$path" 2>/dev/null || echo 0
@@ -45,8 +55,8 @@ worktree_score() {
     "$root/.scratch/phase_a_executor_live.log" \
     "$root/.scratch/phase_b_executor_live.log" \
     "$root/.scratch/commit_executor_live.log" \
-    "$root/.agent_bus/recovery/recovery_status.json" \
-    "$root/.agent_bus/executors/phase_b_state.json"
+    "$root/$BUS_DIR/recovery/recovery_status.json" \
+    "$root/$BUS_DIR/executors/phase_b_state.json"
   do
     [ -f "$candidate" ] || continue
     mtime=$(file_mtime_seconds "$candidate")
@@ -54,8 +64,8 @@ worktree_score() {
   done
 
   candidate=$(ls -t \
-    "$root"/.agent_bus/raw/phase-?-r[0-9]*/*reviewer*.txt \
-    "$root"/.agent_bus/raw/phase-?-reentry-r[0-9]*/*reviewer*.txt \
+    "$root"/"$BUS_DIR"/raw/phase-?-r[0-9]*/*reviewer*.txt \
+    "$root"/"$BUS_DIR"/raw/phase-?-reentry-r[0-9]*/*reviewer*.txt \
     "$root"/.scratch/phase_a_agent_review_*.status.json \
     "$root"/.scratch/phase_b_agent_review_*.status.json \
     2>/dev/null | head -1) || true

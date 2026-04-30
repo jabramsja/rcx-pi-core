@@ -3,6 +3,15 @@
 # Shows chronological history of what happened this pipeline run.
 set +e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BUS_DIR="${RCX_AGENT_BUS_DIR:-${BUS_DIR:-.agent_bus}}"
+if [[ "$BUS_DIR" == /* || "$BUS_DIR" == *"/"* || "$BUS_DIR" == *"\\"* || "$BUS_DIR" == *".."* ]]; then
+  echo "ERROR: invalid RCX_AGENT_BUS_DIR: $BUS_DIR" >&2
+  exit 2
+fi
+if [[ "$BUS_DIR" != ".agent_bus" && ! "$BUS_DIR" =~ ^\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+  echo "ERROR: RCX_AGENT_BUS_DIR must be .agent_bus or .agent_bus-<id>" >&2
+  exit 2
+fi
 resolve_repo_root() {
   local helper="$SCRIPT_DIR/_resolve_live_root.sh"
   local root=""
@@ -419,7 +428,7 @@ PY
 }
 
 render_pager_status() {
-  python3 - "$REPO_ROOT" <<'PY' 2>/dev/null
+  python3 - "$REPO_ROOT" "$BUS_DIR" <<'PY' 2>/dev/null
 from __future__ import annotations
 
 import json
@@ -429,7 +438,8 @@ from pathlib import Path
 import sys
 
 repo_root = Path(sys.argv[1]).resolve()
-state_path = repo_root / ".agent_bus" / "observability" / "pipeline_agent_pager_state.json"
+bus_dir = sys.argv[2]
+state_path = repo_root / bus_dir / "observability" / "pipeline_agent_pager_state.json"
 if not state_path.is_file():
     raise SystemExit(0)
 
@@ -564,9 +574,9 @@ if state_parts:
 error = str(last_dispatch.get("error") or "").strip()
 if error:
     print_wrapped("PAGER_ERROR", error)
-print("PAGER_STATE_PATH\t.agent_bus/observability/pipeline_agent_pager_state.json")
-print("PAGER_EVENTS_PATH\t.agent_bus/observability/pipeline_agent_events.jsonl")
-print("PAGER_RECEIPTS_PATH\t.agent_bus/observability/pipeline_agent_delivery_receipts.jsonl")
+print(f"PAGER_STATE_PATH\t{bus_dir}/observability/pipeline_agent_pager_state.json")
+print(f"PAGER_EVENTS_PATH\t{bus_dir}/observability/pipeline_agent_events.jsonl")
+print(f"PAGER_RECEIPTS_PATH\t{bus_dir}/observability/pipeline_agent_delivery_receipts.jsonl")
 if summary:
     print_wrapped("PAGER_SUMMARY", summary)
 PY
@@ -706,7 +716,7 @@ else:
   done
 
   # 3. Bridge review rounds
-  RAW_DIR="$REPO_ROOT/.agent_bus/raw"
+  RAW_DIR="$REPO_ROOT/$BUS_DIR/raw"
   if [ -d "$RAW_DIR" ]; then
     for dir in $(ls -dt "$RAW_DIR"/phase-?-r[0-9]* 2>/dev/null | head -8); do
       round_name=$(basename "$dir")
