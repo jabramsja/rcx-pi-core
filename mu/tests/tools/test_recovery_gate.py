@@ -312,7 +312,7 @@ class TestClassifyFailure:
             }),
             "stderr": "",
         }
-        assert rg_mod.classify_failure(result) == FailureClass.GIT_STAGING_CONFLICT
+        assert rg_mod.classify_failure(result) == FailureClass.STAGE_PATH_SYMLINK_ALIAS
 
     def test_git_index_permission_failure_is_terminal_not_tier3(self):
         result = {
@@ -339,6 +339,94 @@ class TestClassifyFailure:
         assert rg_mod.classify_failure(
             {"status": "stale_state", "stderr": "", "step": "phase_b"}
         ) == FailureClass.STALE_EXECUTOR_STATE
+
+
+class TestStagePathSymlinkAliasRecovery:
+    def test_rewrites_handoff_and_current_wave_tracker_line(self, tmp_path, monkeypatch):
+        wave_id = "symlink-alias-wave"
+        (tmp_path / "mu" / "tests" / "docs").mkdir(parents=True)
+        (tmp_path / "mu" / "tests" / "docs" / "test_growth_caps.py").write_text(
+            "def test_growth_caps():\n    assert True\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "tests").symlink_to("mu/tests", target_is_directory=True)
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+
+        tracker_note = (
+            f"- Tracker sync note (2026-04-30, {wave_id}): **Test note.** "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            "evidence_command: `pytest tests/docs/test_growth_caps.py`. "
+            "evidence_delta: tests/docs/test_growth_caps.py covers the path alias. "
+            "progress_proof_before: alias blocked git add. "
+            "progress_proof_after: canonical path can be staged. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: reports/l4_wave_indicators/{wave_id}.json. "
+            f"indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} --output reports/l4_wave_indicators/{wave_id}.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD. "
+            f"FOUNDER_OVERRIDE:{wave_id}"
+        )
+        handoff = {
+            "caller": "phase_b",
+            "wave_id": wave_id,
+            "task_id": "[TEST]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+            "files_to_stage": ["tests/docs/test_growth_caps.py"],
+            "force_add_files": [],
+            "pre_commit_receipt_path": ".agent_bus/meta/pre_commit_receipts/receipt_test.json",
+            "tracker_note_text": tracker_note,
+            "scope_items": ["reports/control_plane/test.md"],
+            "bridge_status": {"rounds": 1},
+            "fixes_implemented": ["repair tests/docs/test_growth_caps.py"],
+            "branch_prefix": "jabramsja",
+            "base_branch": "dev",
+            "commit_message": "test",
+            "pr_title": "test",
+            "pr_body": "test tests/docs/test_growth_caps.py",
+        }
+        handoff_path = handoff_dir / "phase_b_handoff.json"
+        handoff_path.write_text(json.dumps(handoff), encoding="utf-8")
+        (tmp_path / "TASKS.md").write_text(f"## Ra\n\n{tracker_note}\n", encoding="utf-8")
+        result = {
+            "status": "failed",
+            "stdout": json.dumps({
+                "status": "error",
+                "step": "stage_files",
+                "errors": [
+                    "git add failed: fatal: pathspec "
+                    "'tests/docs/test_growth_caps.py' is beyond a symbolic link"
+                ],
+            }),
+        }
+
+        class _CommitExecutorStub:
+            @staticmethod
+            def _canonicalize_stage_path(repo_root, raw_path):  # ANTICHEAT_OK: test stub mirrors commit_executor helper boundary
+                return (repo_root / raw_path).resolve(strict=False).relative_to(repo_root.resolve()).as_posix()
+
+            @staticmethod
+            def validate_handoff(_handoff):
+                return True, []
+
+        monkeypatch.setattr(
+            rg_mod,
+            "_load_executor_module_from_repo",
+            lambda repo_root, module_name: _CommitExecutorStub,
+        )
+
+        fixed = rg_mod.fix_stage_path_symlink_alias(tmp_path, wave_id=wave_id, result=result)
+
+        assert fixed["fixed"] is True, fixed
+        repaired = json.loads(handoff_path.read_text(encoding="utf-8"))
+        assert repaired["files_to_stage"] == ["mu/tests/docs/test_growth_caps.py"]
+        assert "pytest tests/docs/test_growth_caps.py" not in repaired["tracker_note_text"]
+        assert "mu/tests/docs/test_growth_caps.py" in repaired["tracker_note_text"]
+        tasks_text = (tmp_path / "TASKS.md").read_text(encoding="utf-8")
+        assert "pytest tests/docs/test_growth_caps.py" not in tasks_text
+        assert "mu/tests/docs/test_growth_caps.py" in tasks_text
 
     def test_stale_continuation(self):
         assert rg_mod.classify_failure(
@@ -672,7 +760,8 @@ class TestTierMapping:
                          FailureClass.POST_REENTRY_NEEDS_PHASE_B,
                          FailureClass.PHASE_B_PLAN_REQUIRED,
                          FailureClass.MISSING_PHASE_A_LOCK,
-                         FailureClass.MISSING_PLAN_TASK_HEADER}
+                         FailureClass.MISSING_PLAN_TASK_HEADER,
+                         FailureClass.STAGE_PATH_SYMLINK_ALIAS}
         # STALE_GIT_INDEX_LOCK demoted to Tier 2 (no sound ownership check)
         assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
         tier4 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 4}
@@ -7130,6 +7219,30 @@ class TestNeedsPhaseB_Tier3:
         assert recovery["action"] == "retry_phase_b_with_plan"
         assert "--plan reports/control_plane/pager.md" in recovery["detail"]
         assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/pager.md"
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV] == "wave-plan-required"
+
+    def test_plan_required_recovery_derives_wave_binding_from_plan_path(self, tmp_path, monkeypatch):
+        plan_path = tmp_path / "reports" / "control_plane" / "pager.md"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text("Status: LOCKED\n", encoding="utf-8")
+        monkeypatch.setenv(rg_mod.PHASE_B_RECOVERY_PLAN_ENV, "reports/control_plane/stale.md")
+        monkeypatch.setenv(rg_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV, "stale-wave")
+        result = {
+            "status": "error",
+            "step": "derive_planless_context",
+            "errors": [
+                "Routing record references tracked packet 'reports/control_plane/pager.md' which exists. "
+                "Use --plan reports/control_plane/pager.md instead of planless mode."
+            ],
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, "")
+
+        assert recovery["recovered"] is True
+        assert recovery["failure_class"] == "phase_b_plan_required"
+        assert recovery["action"] == "retry_phase_b_with_plan"
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/pager.md"
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV] == "pager"
 
     def test_plan_required_fallback_reads_namespaced_routing_record(self, tmp_path, monkeypatch):
         reports_dir = tmp_path / "reports" / "control_plane"
@@ -7178,6 +7291,7 @@ class TestNeedsPhaseB_Tier3:
         assert recovery["action"] == "retry_phase_b_with_plan"
         assert "--plan reports/control_plane/namespaced.md" in recovery["detail"]
         assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/namespaced.md"
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV] == "wave-plan-required"
 
 
 class TestMaxTurnsClassification:

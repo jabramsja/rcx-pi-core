@@ -1489,6 +1489,31 @@ class TestWaveIdBounds:
             f"files_to_stage + empty force_add_files, got errors: {errors}"
         )
 
+    def test_build_commit_handoff_canonicalizes_symlink_stage_aliases(self, tmp_path):
+        repo = _setup_repo(tmp_path)
+        real_file = repo / "mu" / "tests" / "docs" / "test_growth_caps.py"
+        real_file.parent.mkdir(parents=True, exist_ok=True)
+        real_file.write_text("def test_growth_cap():\n    assert True\n", encoding="utf-8")
+        (repo / "tests").symlink_to("mu/tests", target_is_directory=True)
+
+        note = _with_founder_override(
+            _make_new_schema_handoff(wave_id="symlink-alias")["tracker_note_text"],
+            "symlink-alias",
+        )
+
+        handoff, errors = commit_mod.build_commit_handoff(
+            wave_id="symlink-alias",
+            task_id="[TEST]",
+            files_to_stage=["tests/docs/test_growth_caps.py"],
+            commit_message="test: canonicalize symlink path",
+            fixes_implemented=["canonicalize symlink path aliases"],
+            tracker_note_text=note,
+            repo_root=repo,
+        )
+
+        assert not errors
+        assert handoff["files_to_stage"] == ["mu/tests/docs/test_growth_caps.py"]
+
     def test_missing_supervisor_receipt_blocks_pipeline(self, tmp_path):
         """When supervisor receipt path doesn't exist on disk, step 7 fails closed."""
         from collections import namedtuple

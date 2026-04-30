@@ -98,6 +98,7 @@ class FailureClass(Enum):
     PHASE_B_PLAN_REQUIRED = "phase_b_plan_required"
     MISSING_PHASE_A_LOCK = "missing_phase_a_lock"
     MISSING_PLAN_TASK_HEADER = "missing_plan_task_header"
+    STAGE_PATH_SYMLINK_ALIAS = "stage_path_symlink_alias"
     # Tier 2 -- auto-retry with adjustment (zero tokens)
     PROCESS_TIMEOUT = "process_timeout"
     TRANSIENT_KILL = "transient_kill"
@@ -133,6 +134,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.PHASE_B_PLAN_REQUIRED: 1,
     FailureClass.MISSING_PHASE_A_LOCK: 1,
     FailureClass.MISSING_PLAN_TASK_HEADER: 1,
+    FailureClass.STAGE_PATH_SYMLINK_ALIAS: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
     FailureClass.UPSTREAM_CONNECTIVITY: 2,
     FailureClass.AGGREGATION_HANG: 2, FailureClass.IMPLEMENTER_STALE: 2,
@@ -164,6 +166,7 @@ _STANDALONE_STATUS_FAILURE_CLASSES: dict[str, FailureClass] = {
 }
 _TRANSIENT_KILL_CODES = frozenset({-9, -15, 137})
 PHASE_B_RECOVERY_PLAN_ENV = "RCX_RECOVERY_PHASE_B_PLAN_PATH"
+PHASE_B_RECOVERY_PLAN_WAVE_ENV = "RCX_RECOVERY_PHASE_B_PLAN_WAVE_ID"
 STALE_BRIDGE_LOCK_WAIT_TIMEOUT_S = 30.0
 STALE_BRIDGE_LOCK_WAIT_POLL_S = 0.5
 CONTROL_PLANE_PACKET_PREFIX = "reports/control_plane/"
@@ -338,6 +341,8 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.MIXED_STAGING
     if _looks_like_tracker_note_contract_mismatch(result):
         return FailureClass.TRACKER_NOTE_CONTRACT
+    if _extract_stage_path_symlink_aliases(result):
+        return FailureClass.STAGE_PATH_SYMLINK_ALIAS
     if _looks_like_feature_branch_mismatch(result):
         return FailureClass.FEATURE_BRANCH_MISMATCH
     if _looks_like_missing_phase_a_lock(result):
@@ -484,6 +489,30 @@ def _extract_validation_errors(result: dict[str, Any]) -> list[str]:
             if text:
                 errors.append(text)
     return errors
+
+
+_STAGE_PATH_SYMLINK_ALIAS_RE = re.compile(
+    r"fatal:\s+pathspec\s+['\"](?P<path>[^'\"]+)['\"]\s+is\s+beyond\s+a\s+symbolic\s+link",
+    re.IGNORECASE,
+)
+
+
+def _extract_stage_path_symlink_aliases(result: dict[str, Any]) -> list[str]:
+    aliases: list[str] = []
+    seen: set[str] = set()
+    haystacks = list(_extract_validation_errors(result))
+    for candidate in _extract_result_candidates(result):
+        for key in ("stderr", "stdout", "reason", "detail"):
+            value = candidate.get(key)
+            if isinstance(value, str) and value.strip():
+                haystacks.append(value)
+    for text in haystacks:
+        for match in _STAGE_PATH_SYMLINK_ALIAS_RE.finditer(text):
+            alias = match.group("path").strip()
+            if alias and alias not in seen:
+                seen.add(alias)
+                aliases.append(alias)
+    return aliases
 
 
 def _looks_like_tracker_note_contract_mismatch(result: dict[str, Any]) -> bool:
@@ -1134,6 +1163,121 @@ def _load_executor_module_from_repo(repo_root: Path, module_name: str) -> Any:
     return module
 
 
+def _replace_stage_aliases_in_text(text: str, replacements: dict[str, str]) -> tuple[str, bool]:
+    updated = text
+    for alias, canonical in sorted(replacements.items(), key=lambda item: len(item[0]), reverse=True):
+        updated = updated.replace(alias, canonical)
+    return updated, updated != text
+
+
+def _replace_stage_aliases_in_string_list(
+    values: Any,
+    replacements: dict[str, str],
+) -> tuple[list[str], bool]:
+    if not isinstance(values, list):
+        return [], False
+    changed = False
+    updated: list[str] = []
+    for item in values:
+        text = str(item).strip()
+        if not text:
+            continue
+        replaced, item_changed = _replace_stage_aliases_in_text(text, replacements)
+        changed = changed or item_changed
+        updated.append(replaced)
+    return updated, changed
+
+
+def fix_stage_path_symlink_alias(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Repair handoff path aliases that make git add fail beyond repo symlinks."""
+    result = kw.get("result", {})
+    aliases = _extract_stage_path_symlink_aliases(result)
+    if not aliases:
+        return _fix_result(False, "alias_not_found", "no symbolic-link pathspec alias found in failure result")
+
+    try:
+        commit_mod = _load_executor_module_from_repo(repo_root, "commit_executor")
+    except Exception as exc:
+        return _fix_result(False, "module_load_failed", f"could not load commit_executor: {exc}")
+
+    replacements: dict[str, str] = {}
+    for alias in aliases:
+        canonical = commit_mod._canonicalize_stage_path(  # ANTICHEAT_OK: recovery reuses commit_executor's stage-path canonicalizer
+            repo_root,
+            alias,
+        )
+        if canonical and canonical != alias:
+            replacements[alias] = canonical
+    if not replacements:
+        return _fix_result(False, "alias_unresolved", f"could not canonicalize aliases: {aliases}")
+
+    handoff_path = _bus_path(repo_root, "executors", "phase_b_handoff.json")
+    if not handoff_path.exists():
+        return _fix_result(False, "handoff_missing", f"handoff file missing at {handoff_path}")
+    try:
+        handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return _fix_result(False, "handoff_invalid", f"could not read handoff JSON: {exc}")
+    if not isinstance(handoff, dict):
+        return _fix_result(False, "handoff_invalid", "handoff payload was not a JSON object")
+
+    changed = False
+    repaired = dict(handoff)
+    for field in ("files_to_stage", "force_add_files", "scope_items", "fixes_implemented", "deferred_items"):
+        updated, field_changed = _replace_stage_aliases_in_string_list(repaired.get(field), replacements)
+        if field_changed:
+            repaired[field] = updated
+            changed = True
+    for field in ("tracker_note_text", "pr_body"):
+        value = repaired.get(field)
+        if isinstance(value, str):
+            updated, field_changed = _replace_stage_aliases_in_text(value, replacements)
+            if field_changed:
+                repaired[field] = updated
+                changed = True
+
+    valid, errors = commit_mod.validate_handoff(repaired)
+    if not valid:
+        return _fix_result(
+            False,
+            "repaired_handoff_invalid",
+            "canonicalized handoff failed validation: " + "; ".join(errors[:5]),
+        )
+
+    tasks_changed = False
+    wave_id = str(kw.get("wave_id") or repaired.get("wave_id") or "").strip()
+    tasks_path = repo_root / "TASKS.md"
+    if wave_id and tasks_path.exists():
+        try:
+            task_lines = tasks_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        except OSError:
+            task_lines = []
+        if task_lines:
+            updated_lines: list[str] = []
+            for line in task_lines:
+                if wave_id in line:
+                    updated_line, line_changed = _replace_stage_aliases_in_text(line, replacements)
+                    tasks_changed = tasks_changed or line_changed
+                    updated_lines.append(updated_line)
+                else:
+                    updated_lines.append(line)
+            if tasks_changed:
+                tasks_path.write_text("".join(updated_lines), encoding="utf-8")
+
+    if not changed and not tasks_changed:
+        return _fix_result(False, "noop", f"aliases not present in handoff or TASKS.md: {sorted(replacements)}")
+
+    try:
+        handoff_path.write_text(json.dumps(repaired, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        return _fix_result(False, "handoff_write_failed", f"could not rewrite handoff JSON: {exc}")
+
+    detail = ", ".join(f"{alias}->{canonical}" for alias, canonical in sorted(replacements.items()))
+    if tasks_changed:
+        detail += "; updated current-wave TASKS.md tracker line"
+    return _fix_result(True, "canonicalize_symlink_stage_paths", detail)
+
+
 def _coerce_string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -1507,7 +1651,22 @@ def fix_phase_b_plan_required(repo_root: Path, **kw: Any) -> dict[str, Any]:
             "missing_plan_file",
             f"tracked packet {plan_path} does not exist for dispatcher retry",
         )
+    recovery_wave_raw = str(kw.get("wave_id") or "").strip()
+    recovery_wave = normalize_wave_id(recovery_wave_raw) if recovery_wave_raw else ""
+    if not recovery_wave or recovery_wave == "wave-unknown":
+        plan_wave = normalize_wave_id(Path(plan_path).stem)
+        if plan_wave != "wave-unknown":
+            recovery_wave = plan_wave
+    if not recovery_wave or recovery_wave == "wave-unknown":
+        os.environ.pop(PHASE_B_RECOVERY_PLAN_ENV, None)
+        os.environ.pop(PHASE_B_RECOVERY_PLAN_WAVE_ENV, None)
+        return _fix_result(
+            False,
+            "missing_wave_id",
+            "phase_b plan-required recovery could not bind retry to a real wave_id",
+        )
     os.environ[PHASE_B_RECOVERY_PLAN_ENV] = plan_path
+    os.environ[PHASE_B_RECOVERY_PLAN_WAVE_ENV] = recovery_wave
     return _fix_result(
         True,
         "retry_phase_b_with_plan",
@@ -1532,6 +1691,7 @@ _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.PHASE_B_PLAN_REQUIRED: fix_phase_b_plan_required,
     FailureClass.MISSING_PHASE_A_LOCK: fix_missing_phase_a_lock,
     FailureClass.MISSING_PLAN_TASK_HEADER: fix_missing_plan_task_header,
+    FailureClass.STAGE_PATH_SYMLINK_ALIAS: fix_stage_path_symlink_alias,
 }
 
 

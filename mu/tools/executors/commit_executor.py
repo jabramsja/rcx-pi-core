@@ -398,6 +398,44 @@ def _current_staged_diff_paths(repo_root: Path) -> list[str]:
     return _dedupe_repo_paths(proc.stdout.splitlines())
 
 
+def _canonicalize_stage_path(repo_root: Path, raw_path: str) -> str:
+    """Resolve repo-local symlink aliases before passing paths to git add."""
+    normalized = _normalize_repo_relpath(raw_path)
+    if not normalized:
+        return normalized
+    if _is_absolute_untrusted_path(normalized) or _has_path_traversal(normalized):
+        return normalized
+    try:
+        repo_resolved = repo_root.resolve()
+        resolved = (repo_root / normalized).resolve(strict=False)
+        return resolved.relative_to(repo_resolved).as_posix()
+    except (OSError, RuntimeError, ValueError):
+        return normalized
+
+
+def _canonicalize_stage_paths(repo_root: Path, paths: list[str]) -> list[str]:
+    return _dedupe_repo_paths([
+        _canonicalize_stage_path(repo_root, path)
+        for path in paths
+        if isinstance(path, str)
+    ])
+
+
+def _stage_handoff_paths(
+    repo_root: Path,
+    *,
+    files_to_stage: list[str],
+    force_files: list[str],
+) -> tuple[list[str], list[str]]:
+    canonical_files = _canonicalize_stage_paths(repo_root, files_to_stage)
+    canonical_force = _canonicalize_stage_paths(repo_root, force_files)
+    if canonical_files:
+        _run(["git", "add", "--", *canonical_files], cwd=repo_root)
+    if canonical_force:
+        _run(["git", "add", "-f", "--", *canonical_force], cwd=repo_root)
+    return canonical_files, canonical_force
+
+
 def _git_index_contains_repo_path(repo_root: Path, relpath: str) -> bool:
     """Return true when relpath is bound to Git's tracked/staged index."""
     normalized = _normalize_repo_relpath(str(relpath or ""))
@@ -4173,6 +4211,8 @@ def build_commit_handoff(
     effective_files = list(files_to_stage)
     effective_force = list(force_add_files or [])
     if repo_root:
+        effective_files = _canonicalize_stage_paths(repo_root, effective_files)
+        effective_force = _canonicalize_stage_paths(repo_root, effective_force)
         for f in list(effective_files):
             try:
                 result = subprocess.run(
@@ -4218,6 +4258,8 @@ def build_commit_handoff(
             effective_files.remove(f)
             if f not in effective_force:
                 effective_force.append(f)
+    effective_files = _dedupe_repo_paths(effective_files)
+    effective_force = _dedupe_repo_paths(effective_force)
 
     # Auto-find latest COMMIT_GO receipt if not provided
     # Use the canonical receipt path — no directory-sort discovery.
@@ -5576,12 +5618,18 @@ def _run_commit_pipeline_impl(
     result["steps_completed"].append("ensure_tracker_note")
 
     # ── Step 4: stage_files ──────────────────────────────────────────
-    files_to_stage = list(handoff["files_to_stage"])
-    force_files = list(handoff.get("force_add_files", []))
+    files_to_stage = _canonicalize_stage_paths(repo_root, list(handoff["files_to_stage"]))
+    force_files = _canonicalize_stage_paths(repo_root, list(handoff.get("force_add_files", [])))
+    handoff = {
+        **handoff,
+        "files_to_stage": files_to_stage,
+        "force_add_files": force_files,
+    }
 
     # Auto-add TASKS.md if modified in step 3
     if tasks_modified and "TASKS.md" not in files_to_stage:
         files_to_stage.append("TASKS.md")
+        handoff["files_to_stage"] = files_to_stage
 
     runtime_bus_paths = [
         path for path in [*files_to_stage, *force_files]
@@ -5599,10 +5647,16 @@ def _run_commit_pipeline_impl(
         }
 
     try:
-        if files_to_stage:
-            _run(["git", "add", "--", *files_to_stage], cwd=repo_root)
-        if force_files:
-            _run(["git", "add", "-f", "--", *force_files], cwd=repo_root)
+        files_to_stage, force_files = _stage_handoff_paths(
+            repo_root,
+            files_to_stage=files_to_stage,
+            force_files=force_files,
+        )
+        handoff = {
+            **handoff,
+            "files_to_stage": files_to_stage,
+            "force_add_files": force_files,
+        }
     except subprocess.CalledProcessError as exc:
         return {"status": "error", "step": "stage_files",
                 "errors": [f"git add failed: {exc.stderr.strip()}"],
@@ -5708,10 +5762,32 @@ def _run_commit_pipeline_impl(
     if refreshed_handoff is not handoff:
         handoff = refreshed_handoff
         result["refreshed_handoff_sha"] = _handoff_sha(handoff)
+        try:
+            refreshed_files, refreshed_force = _stage_handoff_paths(
+                repo_root,
+                files_to_stage=list(handoff["files_to_stage"]),
+                force_files=list(handoff.get("force_add_files", [])),
+            )
+            handoff = {
+                **handoff,
+                "files_to_stage": refreshed_files,
+                "force_add_files": refreshed_force,
+            }
+            refreshed_staged_paths = _current_staged_diff_paths(repo_root)
+        except subprocess.CalledProcessError as exc:
+            return {
+                "status": "error",
+                "step": "refresh_commit_packet_truth",
+                "errors": [f"git add failed after commit packet truth refresh: {exc.stderr.strip()}"],
+                "steps_completed": result["steps_completed"],
+            }
         result["steps_completed"].append("refresh_commit_packet_truth")
         log(f"Step 5c: refreshed commit packet truth for {handoff.get('tracked_packet')}")
         if refreshed_staged_paths:
-            log(f"Step 5c: rebound staged handoff scope to {len(refreshed_staged_paths)} file(s)")
+            log(
+                "Step 5c: rebound and re-staged handoff scope to "
+                f"{len(refreshed_staged_paths)} file(s)"
+            )
 
     # ── Steps 6-7 skip (--skip-supervisor) ──────────────────────────
     if skip_supervisor:
