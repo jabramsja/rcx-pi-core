@@ -97,6 +97,7 @@ class FailureClass(Enum):
     POST_REENTRY_NEEDS_PHASE_B = "post_reentry_needs_phase_b"
     PHASE_B_PLAN_REQUIRED = "phase_b_plan_required"
     MISSING_PHASE_A_LOCK = "missing_phase_a_lock"
+    MISSING_PLAN_TASK_HEADER = "missing_plan_task_header"
     # Tier 2 -- auto-retry with adjustment (zero tokens)
     PROCESS_TIMEOUT = "process_timeout"
     TRANSIENT_KILL = "transient_kill"
@@ -131,6 +132,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.POST_REENTRY_NEEDS_PHASE_B: 1,
     FailureClass.PHASE_B_PLAN_REQUIRED: 1,
     FailureClass.MISSING_PHASE_A_LOCK: 1,
+    FailureClass.MISSING_PLAN_TASK_HEADER: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
     FailureClass.UPSTREAM_CONNECTIVITY: 2,
     FailureClass.AGGREGATION_HANG: 2, FailureClass.IMPLEMENTER_STALE: 2,
@@ -340,6 +342,8 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.FEATURE_BRANCH_MISMATCH
     if _looks_like_missing_phase_a_lock(result):
         return FailureClass.MISSING_PHASE_A_LOCK
+    if _looks_like_missing_plan_task_header(result):
+        return FailureClass.MISSING_PLAN_TASK_HEADER
 
     # Tier 2: transient / timeout issues
     if (
@@ -668,6 +672,28 @@ def _looks_like_missing_phase_a_lock(result: dict[str, Any]) -> bool:
     return "validate_inputs" in steps or not steps
 
 
+def _looks_like_missing_plan_task_header(result: dict[str, Any]) -> bool:
+    errors = _extract_validation_errors(result)
+    if not errors:
+        return False
+    missing_task = any(
+        re.search(
+            r"validate_inputs fatal: Plan is missing authoritative Task "
+            r"header required to match routing task_id\s+\S+",
+            text,
+        )
+        for text in errors
+    )
+    if not missing_task:
+        return False
+    steps = {
+        str(candidate.get("step", "")).strip()
+        for candidate in _extract_result_candidates(result)
+        if candidate.get("step")
+    }
+    return "validate_inputs" in steps or not steps
+
+
 def _extract_plan_path(result: dict[str, Any]) -> str:
     for candidate in _extract_result_candidates(result):
         plan_path = str(candidate.get("plan_path", "") or "").strip()
@@ -823,6 +849,102 @@ def fix_missing_phase_a_lock(repo_root: Path, **kw: Any) -> dict[str, Any]:
         True,
         "repair_missing_phase_a_lock",
         f"inserted and locked missing Phase-A-Lock in {plan_path}{lock_detail}",
+    )
+
+
+def _extract_missing_plan_task_id_from_errors(result: dict[str, Any]) -> str:
+    for text in _extract_validation_errors(result):
+        match = re.search(
+            r"routing task_id\s+(?P<task_id>[^\s;]+)",
+            str(text or ""),
+        )
+        if match:
+            return match.group("task_id").strip().rstrip(".,;")
+    return ""
+
+
+def fix_missing_plan_task_header(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Repair a locked Phase A packet missing its authoritative Task header."""
+    result = kw.get("result", {}) or {}
+    plan_path = _extract_plan_path(result)
+    if not plan_path:
+        return _fix_result(
+            False,
+            "plan_path_missing",
+            "missing Task header repair needs plan_path from the executor result",
+        )
+
+    repo_root_resolved = repo_root.resolve()
+    normalized_plan_path = _normalize_phase_a_lock_repair_packet_path(plan_path)
+    if normalized_plan_path is None:
+        return _fix_result(
+            False,
+            "non_packet_plan_path",
+            "missing Task header repair only applies to "
+            f"{CONTROL_PLANE_PACKET_PREFIX}*.md packets: {plan_path}",
+        )
+    plan_path = normalized_plan_path
+
+    try:
+        plan_file = (repo_root / plan_path).resolve()
+        plan_file.relative_to(repo_root_resolved)
+        plan_file.relative_to((repo_root / CONTROL_PLANE_PACKET_PREFIX).resolve())
+    except ValueError:
+        return _fix_result(False, "unsafe_plan_path", f"unsafe plan_path outside repo: {plan_path}")
+    if not plan_file.is_file():
+        return _fix_result(False, "plan_missing", f"plan packet not found: {plan_path}")
+
+    try:
+        phase_a_mod = _load_executor_module_from_repo(repo_root, "phase_a_executor")
+        phase_b_mod = _load_executor_module_from_repo(repo_root, "phase_b_executor")
+    except Exception as exc:
+        return _fix_result(False, "module_load_failed", f"could not load plan helpers: {exc}")
+
+    try:
+        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+    except Exception:
+        routing_record = {}
+    routing_task_id = (
+        str(routing_record.get("task_id", "") or "").strip()
+        or _extract_missing_plan_task_id_from_errors(result)
+    )
+    if not routing_task_id:
+        return _fix_result(
+            False,
+            "routing_task_missing",
+            "missing Task header repair requires routing task_id from routing record or validation error",
+        )
+    routing_record["task_id"] = routing_task_id
+
+    lock_path = _bus_path(repo_root, "bridge.lock")
+    lock_detail = ""
+    if lock_path.exists():
+        if not _claim_and_remove_bridge_lock(lock_path):
+            return _fix_result(
+                False,
+                "bridge_lock_live",
+                "bridge.lock is still held by a live flock — cannot safely retry after repairing Task header",
+            )
+        lock_detail = " + cleared stale bridge.lock"
+
+    try:
+        phase_a_mod.lock_plan(repo_root, plan_path, routing_record=routing_record)
+        repaired = phase_b_mod.load_plan_packet(repo_root, plan_path)
+    except Exception as exc:
+        return _fix_result(False, "task_header_repair_failed", f"could not repair Task header: {exc}")
+
+    repaired_task_id = str(repaired.get("task_id", "") or "").strip()
+    if repaired_task_id != routing_task_id:
+        return _fix_result(
+            False,
+            "task_header_repair_failed",
+            f"{plan_path} has Task: {repaired_task_id or '(missing)'} after repair, expected {routing_task_id}",
+        )
+
+    return _fix_result(
+        True,
+        "repair_missing_plan_task_header",
+        f"inserted authoritative Task header in {plan_path}{lock_detail}",
     )
 
 
@@ -1409,6 +1531,7 @@ _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.POST_REENTRY_NEEDS_PHASE_B: fix_post_reentry_needs_phase_b,
     FailureClass.PHASE_B_PLAN_REQUIRED: fix_phase_b_plan_required,
     FailureClass.MISSING_PHASE_A_LOCK: fix_missing_phase_a_lock,
+    FailureClass.MISSING_PLAN_TASK_HEADER: fix_missing_plan_task_header,
 }
 
 
