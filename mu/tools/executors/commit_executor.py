@@ -463,6 +463,17 @@ def _stage_handoff_paths(
         if deleted.returncode == 0 and deleted.stdout.strip():
             _run(["git", "add", "-u", "--", relpath], cwd=repo_root)
         else:
+            committed_delete = _run(
+                [
+                    "git", "diff", "--name-only", "--diff-filter=D",
+                    "HEAD^..HEAD", "--", relpath,
+                ],
+                cwd=repo_root,
+                check=False,
+                timeout=30,
+            )
+            if committed_delete.returncode == 0 and committed_delete.stdout.strip():
+                continue
             _run(["git", "add", "--", relpath], cwd=repo_root)
     if canonical_force:
         _run(["git", "add", "-f", "--", *canonical_force], cwd=repo_root)
