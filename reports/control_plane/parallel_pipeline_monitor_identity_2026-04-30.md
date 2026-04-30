@@ -237,8 +237,10 @@ the handoff.
 - `mu/tests/tools/test_recovery_gate.py` covers named-lane monitor startup,
   dashboard active-bus reads, invalid/duplicate monitor identity config, and
   autoping reseed propagation.
-- Remaining `[PARALLEL-PIPELINE]` residue is outside this packet: recovery Tier
-  2 transient-kill auto-retry and teammate worktree integration.
+- Remaining `[PARALLEL-PIPELINE]` residue is outside this packet: teammate
+  worktree integration. Recovery Tier 2 transient-kill retry is already
+  implemented on current `dev` by `recovery_gate.py` classifier/fixer
+  registration and `executor_dispatch.py` recovered-Tier-2 retry handling.
 - Post-Phase-B root-cause evidence from
   `.agent_bus/observability/pipeline_agent_events.jsonl` recorded
   `event_type="executor_hard_fail"` with reason
