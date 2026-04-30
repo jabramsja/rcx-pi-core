@@ -174,6 +174,8 @@ def pid_has_ancestor_matching(pid, pattern, max_depth=8):
 
 
 def bridge_role_for_pid(pid):
+    if pid_has_ancestor_matching(pid, r"recovery_gate\.py"):
+        return "recovery"
     if pid_has_ancestor_matching(pid, r"bridge_supervisor\.py review|meta_bridge_supervisor"):
         return "review"
     if pid_has_ancestor_matching(pid, r"phase_b_executor\.py|phase_a_executor\.py|commit_executor\.py"):
@@ -1235,13 +1237,16 @@ def render():
                 label = f"{YEL}SDK agents{R} running"
             else:
                 agent_name, _, role = name.partition("-")
-                display_name = bridge_agent_display_name(REPO_ROOT, agent_name, bus_dir=ACTIVE_BUS_DIR)
-                color, activity = {
-                    "review": (CYN, "reviewing"),
-                    "implement": (MAG, "implementing"),
-                    "unknown": (CYN, "working"),
-                }.get(role, (CYN, role or "working"))
-                label = f"{color}{display_name}{R} {activity}"
+                if role == "recovery":
+                    label = f"{YEL}Recovery agent{R} diagnosing"
+                else:
+                    display_name = bridge_agent_display_name(REPO_ROOT, agent_name, bus_dir=ACTIVE_BUS_DIR)
+                    color, activity = {
+                        "review": (CYN, "reviewing"),
+                        "implement": (MAG, "implementing"),
+                        "unknown": (CYN, "working"),
+                    }.get(role, (CYN, role or "working"))
+                    label = f"{color}{display_name}{R} {activity}"
             out.append(box_line(f"  {label}  PID {spid}  {elapsed(sstart)}"))
     else:
         out.append(box_line(f"  {GRY}(no active subprocess){R}"))

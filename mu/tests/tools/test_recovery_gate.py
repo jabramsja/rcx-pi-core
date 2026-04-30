@@ -4445,6 +4445,46 @@ class TestObservabilityNoiseFilters:
         assert phase["pid"] == 20002
         assert phase["started"] == 456.0
 
+    def test_terminal_dashboard_labels_recovery_agent_subprocess_generically(self):
+        lines = [
+            "jeff 20003 0.0 0.0 ?? Ss 0:00.00 claude --print -p fix",
+            "jeff 20004 0.0 0.0 ?? Ss 0:00.00 codex exec -m gpt-5.5 -c reasoning_effort=xhigh -",
+        ]
+
+        def fake_ancestor(_pid, pattern, max_depth=8):
+            return pattern == r"recovery_gate\.py"
+
+        with (
+            patch.object(dash_mod, "ps_lines", return_value=lines),
+            patch.object(dash_mod, "pid_start", return_value=123.0),
+            patch.object(dash_mod, "pid_has_ancestor_matching", side_effect=fake_ancestor),
+        ):
+            rendered = dash_mod.render()
+
+        clean_rendered = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", rendered)
+        assert clean_rendered.count("Recovery agent diagnosing") == 2
+        assert "Claude Opus" not in clean_rendered
+        assert "Codex 5.5" not in clean_rendered
+
+    def test_web_dashboard_labels_recovery_agent_subprocess_generically(self):
+        lines = [
+            "jeff 20005 0.0 0.0 ?? Ss 0:00.00 claude --print -p fix",
+            "jeff 20006 0.0 0.0 ?? Ss 0:00.00 codex exec -m gpt-5.5 -c reasoning_effort=xhigh -",
+        ]
+
+        def fake_ancestor(_pid, pattern, max_depth=8):
+            return pattern == r"recovery_gate\.py"
+
+        with (
+            patch.object(web_mod, "pid_start", return_value=456.0),
+            patch.object(web_mod, "pid_has_ancestor_matching", side_effect=fake_ancestor),
+        ):
+            subs = web_mod.detect_subs(lines)
+
+        assert [sub["role"] for sub in subs] == ["recovery", "recovery"]
+        assert [sub["name"] for sub in subs] == ["Recovery agent", "Recovery agent"]
+        assert [sub["agent"] for sub in subs] == ["claude", "codex"]
+
     def test_only_watcher_noise_reports_idle(self):
         lines = [
             "jeff 15571 0.0 0.0 ?? Ss 0:00.00 tail -f /repo/.scratch/phase_a_executor_live.log",

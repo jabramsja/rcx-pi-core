@@ -234,6 +234,8 @@ def pid_has_ancestor_matching(pid, pattern, max_depth=8):
 
 
 def bridge_role_for_pid(pid):
+    if pid_has_ancestor_matching(pid, r"recovery_gate\.py"):
+        return "recovery"
     if pid_has_ancestor_matching(pid, r"bridge_supervisor\.py review|meta_bridge_supervisor"):
         return "reviewer"
     if pid_has_ancestor_matching(pid, r"phase_b_executor\.py|phase_a_executor\.py|commit_executor\.py"):
@@ -288,10 +290,11 @@ def detect_subs(lines):
         agent_name = _bridge_agent_name_for_command(l)
         if agent_name:
             pid = int(l.split()[1])
+            role = bridge_role_for_pid(pid)
             subs.append({
                 "agent": agent_name,
-                "name": _display_name(agent_name),
-                "role": bridge_role_for_pid(pid),
+                "name": "Recovery agent" if role == "recovery" else _display_name(agent_name),
+                "role": role,
                 "pid": pid,
                 "started": pid_start(pid),
             })
@@ -1222,12 +1225,14 @@ body { font-family: var(--mono); background: var(--bg-0); color: var(--text); fo
 .model-avatar { width: 36px; height: 36px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800; }
 .model-avatar.reviewer { background: linear-gradient(135deg, #2a1f0a, #3a2f1a); color: var(--yellow); }
 .model-avatar.implementer { background: linear-gradient(135deg, #241a30, #342a40); color: var(--purple); }
+.model-avatar.recovery { background: linear-gradient(135deg, #2a1f0a, #3a2f1a); color: var(--yellow); }
 .model-avatar.agents { background: linear-gradient(135deg, #1a2a2a, #2a3a3a); color: var(--cyan); }
 .model-info { flex: 1; }
 .model-name { font-weight: 700; font-size: 12px; }
 .model-role { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
 .model-role.reviewing { color: var(--yellow); }
 .model-role.implementing { color: var(--purple); }
+.model-role.recovering { color: var(--yellow); }
 .model-role.auditing { color: var(--cyan); }
 .model-meta { color: var(--text-muted); font-size: 10px; }
 
@@ -1452,6 +1457,7 @@ function renderSidebar(data) {
   // Deduplicate subs by role
   const reviewerSubs = subs.filter(s => s.role === 'reviewer');
   const implSubs = subs.filter(s => s.role === 'implementer');
+  const recoverySubs = subs.filter(s => s.role === 'recovery');
   const auditorSubs = subs.filter(s => s.role === 'auditor');
 
   if (reviewerSubs.length) {
@@ -1473,6 +1479,17 @@ function renderSidebar(data) {
         <div class="model-role implementing">IMPLEMENTING</div>
         <div class="model-name">${esc(implementerAgent.display_name)}</div>
         <div class="model-meta">${implSubs.length} process${implSubs.length>1?'es':''} &middot; ${elapsed(oldest.started)}</div>
+      </div>
+    </div>`;
+  }
+  if (recoverySubs.length) {
+    const oldest = recoverySubs.reduce((a,b) => (a.started||Infinity) < (b.started||Infinity) ? a : b);
+    html += `<div class="model-card active">
+      <div class="model-avatar recovery">Rx</div>
+      <div class="model-info">
+        <div class="model-role recovering">RECOVERING</div>
+        <div class="model-name">Recovery agent</div>
+        <div class="model-meta">${recoverySubs.length} process${recoverySubs.length>1?'es':''} &middot; ${elapsed(oldest.started)}</div>
       </div>
     </div>`;
   }
