@@ -1129,11 +1129,28 @@ def refresh_commit_path_packet_truth(
     )
     if tracker_refresh_error:
         return handoff, [], tracker_refresh_error
+    # TASKS.md may have been staged by the tracker refresh; render from
+    # the settled scope.
+    staged_paths_before = sorted(_current_staged_diff_paths(repo_root))
+    staged_paths_for_block = sorted(_dedupe_repo_paths([*staged_paths_before, active_packet_path]))
+    tracker_note_after_staging = _refresh_tracker_note_wave_file_count(
+        refreshed_tracker_note_text,
+        len(staged_paths_for_block),
+    )
+    if tracker_note_after_staging != refreshed_tracker_note_text:
+        refreshed_tracker_note_text = tracker_note_after_staging
+        tracker_refresh_error = _refresh_tasks_tracker_note_after_packet_truth(
+            repo_root,
+            wave_id=wave_id,
+            tracker_note_text=refreshed_tracker_note_text,
+        )
+        if tracker_refresh_error:
+            return handoff, [], tracker_refresh_error
+        staged_paths_before = sorted(_current_staged_diff_paths(repo_root))
+        staged_paths_for_block = sorted(_dedupe_repo_paths([*staged_paths_before, active_packet_path]))
     if refreshed_tracker_note_text != tracker_note_text:
         handoff = {**handoff, "tracker_note_text": refreshed_tracker_note_text}
         tracker_note_text = refreshed_tracker_note_text
-        staged_paths_before = sorted(_current_staged_diff_paths(repo_root))
-        staged_paths_for_block = sorted(_dedupe_repo_paths([*staged_paths_before, active_packet_path]))
     evidence_handles = _commit_refresh_evidence_handles(handoff, indicator_path=indicator_path)
     block = _render_commit_path_truth_refresh_block(
         wave_id=wave_id,
