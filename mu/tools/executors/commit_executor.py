@@ -268,6 +268,12 @@ BOT_REVIEW_POLL_SECONDS = 5
 BOT_REVIEW_ACK_REACTION = "eyes"
 CI_CHECK_REGISTRATION_WAIT_SECONDS = 120
 CI_CHECK_REGISTRATION_POLL_SECONDS = 5
+CI_REQUIRED_PASSING_BUCKETS = {"pass", "skipping"}
+CI_REQUIRED_FAILING_BUCKETS = {"fail", "cancel"}
+CI_REQUIRED_PENDING_BUCKETS = {"pending"}
+CI_REQUIRED_PASSING_STATES = {"SUCCESS", "SKIPPED", "NEUTRAL"}
+CI_REQUIRED_FAILING_STATES = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"}
+CI_REQUIRED_PENDING_STATES = {"PENDING", "IN_PROGRESS", "QUEUED", "REQUESTED", "WAITING", "EXPECTED"}
 _COMMIT_EXECUTOR_CONFIG = load_executor_config(SCRIPT_DIR.parent.parent.parent)
 _COMMIT_EXECUTOR_TIMEOUTS = _COMMIT_EXECUTOR_CONFIG.get("timeouts", {})
 COMMIT_EXECUTOR_OUTER_BUDGET_S = _COMMIT_EXECUTOR_TIMEOUTS.get(
@@ -3328,6 +3334,14 @@ def _wait_for_pr_ci(
             ["gh", "pr", "checks", pr_number, "--watch", "--required"],
             cwd=repo_root, timeout=600,
         )
+        if not _wait_for_required_checks_to_pass(repo_root, pr_number, timeout=900, log=log):
+            return {
+                "status": "error",
+                "step": "wait_ci",
+                "errors": ["Required CI checks did not reach green after gh watch returned"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number,
+            }
         if "wait_ci" not in result["steps_completed"]:
             result["steps_completed"].append("wait_ci")
             _checkpoint_post_commit_progress(
@@ -3349,6 +3363,14 @@ def _wait_for_pr_ci(
                 "status": "error",
                 "step": "wait_ci",
                 "errors": [f"CI checks failed (confirmed by polling): {exc}"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number,
+            }
+        if not _wait_for_required_checks_to_pass(repo_root, pr_number, timeout=900, log=log):
+            return {
+                "status": "error",
+                "step": "wait_ci",
+                "errors": [f"Required CI checks did not reach green after fallback polling: {exc}"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number,
             }
@@ -3441,6 +3463,98 @@ def _poll_ci_checks_fallback(
     if log:
         log(f"CI poll timed out after {timeout}s")
     return False
+
+
+def _required_check_label(check: dict[str, Any]) -> str:
+    name = str(check.get("name") or check.get("workflow") or "unknown")
+    state = str(check.get("state") or "").upper()
+    bucket = str(check.get("bucket") or "").lower()
+    status = state or bucket or "unknown"
+    return f"{name}={status}"
+
+
+def _required_checks_green_snapshot(repo_root: Path, pr_number: str) -> tuple[bool, str, str]:
+    result = _run(
+        [
+            "gh", "pr", "checks", pr_number,
+            "--required",
+            "--json", "name,state,bucket",
+        ],
+        cwd=repo_root,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode not in (0, 8):
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+    try:
+        checks = json.loads(result.stdout or "[]")
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"required-check JSON decode failed: {exc}") from exc
+    if not isinstance(checks, list):
+        raise ValueError("required-check JSON was not a list")
+    if not checks:
+        return False, "pending", "no required checks reported"
+
+    pending: list[str] = []
+    failing: list[str] = []
+    for check in checks:
+        if not isinstance(check, dict):
+            pending.append(str(check))
+            continue
+        bucket = str(check.get("bucket") or "").lower()
+        state = str(check.get("state") or "").upper()
+        label = _required_check_label(check)
+        if bucket in CI_REQUIRED_FAILING_BUCKETS or state in CI_REQUIRED_FAILING_STATES:
+            failing.append(label)
+        elif bucket in CI_REQUIRED_PASSING_BUCKETS or state in CI_REQUIRED_PASSING_STATES:
+            continue
+        elif bucket in CI_REQUIRED_PENDING_BUCKETS or state in CI_REQUIRED_PENDING_STATES or not state:
+            pending.append(label)
+        else:
+            pending.append(label)
+
+    if failing:
+        return False, "failed", "failing required check(s): " + ", ".join(failing)
+    if pending:
+        return False, "pending", "pending required check(s): " + ", ".join(pending)
+    return True, "passed", "all required checks green"
+
+
+def _wait_for_required_checks_to_pass(
+    repo_root: Path,
+    pr_number: str,
+    *,
+    timeout: int = 900,
+    poll_interval: int = 15,
+    log: Any = None,
+) -> bool:
+    """Verify current required PR checks are green after gh's watch command exits."""
+    deadline = time.monotonic() + timeout
+    last_detail = ""
+    while True:
+        green, status, detail = _required_checks_green_snapshot(repo_root, pr_number)
+        last_detail = detail
+        if green:
+            return True
+        if status == "failed":
+            if log:
+                log(f"Required checks failed for PR #{pr_number}: {detail}")
+            return False
+        if time.monotonic() >= deadline:
+            if log:
+                log(
+                    f"Required checks did not pass for PR #{pr_number} "
+                    f"within {timeout}s: {last_detail}"
+                )
+            return False
+        if log:
+            log(f"Waiting for required checks to pass on PR #{pr_number}: {detail}")
+        time.sleep(poll_interval)
 
 
 def _auto_defer_bot_findings(
@@ -3825,29 +3939,26 @@ def _attempt_bot_finding_remediation(
 
         log(f"Step 15: remediation round {round_num} pushed ({current_head[:8]})")
 
-        # Wait for CI to pass on the new HEAD before proceeding
-        try:
-            _wait_for_required_checks_to_register(
-                repo_root, pr_number=pr_number, log=log,
-            )
-            _run(
-                ["gh", "pr", "checks", pr_number, "--watch", "--required"],
-                cwd=repo_root, timeout=600,
-            )
-            log(f"Step 15: CI passed on remediation commit {current_head[:8]}")
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, TimeoutError) as exc:
-            # gh pr checks --watch exits 1 on pending checks (not failed).
-            # Fallback to polling before giving up.
-            log(f"Step 15: gh pr checks exited ({exc.__class__.__name__}), polling CI as fallback")
-            if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=900, log=log):
-                log(f"Step 15: CI failed after remediation round {round_num}")
-                return {
-                    "status": "bot_findings_pending",
-                    "bot_findings": current_findings,
-                    "pr_number": pr_number,
-                    "steps_completed": result["steps_completed"],
-                    "remediation_rounds_attempted": round_num,
-                }
+        ci_response = _wait_for_pr_ci(
+            repo_root,
+            pr_number=pr_number,
+            result=result,
+            continuation_path=continuation_path,
+            target_branch=target_branch,
+            log=log,
+            step_label=f"Step 15 remediation round {round_num}",
+        )
+        if ci_response is not None:
+            log(f"Step 15: CI did not pass after remediation round {round_num}: {ci_response.get('errors', [])}")
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": current_findings,
+                "pr_number": pr_number,
+                "steps_completed": result["steps_completed"],
+                "remediation_rounds_attempted": round_num,
+                "ci_failure": ci_response.get("errors", []),
+            }
+        log(f"Step 15: CI passed on remediation commit {current_head[:8]}")
 
         # Request fresh bot review and wait
         try:
@@ -5163,6 +5274,18 @@ def _run_post_commit_pipeline(
         )
         if remediation_response is not None:
             return remediation_response
+
+    pre_merge_ci_response = _wait_for_pr_ci(
+        repo_root,
+        pr_number=pr_number,
+        result=result,
+        continuation_path=continuation_path,
+        target_branch=target_branch,
+        log=log,
+        step_label="Step 15 pre-merge",
+    )
+    if pre_merge_ci_response is not None:
+        return pre_merge_ci_response
 
     merge_script = repo_root / "mu" / "tools" / "hooks" / "merge_pr.sh"
     if not merge_script.exists():

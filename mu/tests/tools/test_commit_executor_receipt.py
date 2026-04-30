@@ -2149,3 +2149,91 @@ class TestCIPollFallbackTimeout:
         assert final_clock >= 900, (
             f"Simulated clock should have exhausted the 900s budget, got {final_clock}s"
         )
+
+
+class TestRequiredCIGreenGuard:
+    def test_required_check_guard_waits_after_watch_reports_success(self, tmp_path):
+        import subprocess
+
+        clock = [0.0]
+        json_calls = []
+        logs = []
+
+        def fake_monotonic():
+            return clock[0]
+
+        def fake_sleep(seconds):
+            clock[0] += seconds
+
+        def completed(cmd, *, stdout="", returncode=0):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr="")
+
+        def fake_run(cmd, **kwargs):
+            assert cmd[:4] == ["gh", "pr", "checks", "844"], cmd
+            assert "--required" in cmd, cmd
+            assert "--json" in cmd, cmd
+            json_calls.append(cmd)
+            if len(json_calls) == 1:
+                return completed(cmd, stdout=json.dumps([
+                    {"name": "test", "state": "IN_PROGRESS", "bucket": "pending"},
+                    {"name": "green-gate", "state": "SUCCESS", "bucket": "pass"},
+                ]))
+            return completed(cmd, stdout=json.dumps([
+                {"name": "test", "state": "SUCCESS", "bucket": "pass"},
+                {"name": "green-gate", "state": "SUCCESS", "bucket": "pass"},
+            ]))
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod.time, "monotonic", fake_monotonic), \
+             patch.object(commit_mod.time, "sleep", fake_sleep):
+            result = commit_mod._wait_for_required_checks_to_pass(  # ANTICHEAT_OK: regression guard for gh-watch premature success
+                tmp_path,
+                "844",
+                timeout=30,
+                poll_interval=15,
+                log=logs.append,
+            )
+
+        assert result is True
+        assert len(json_calls) == 2
+        assert clock[0] == 15
+        assert any("pending required check(s): test=IN_PROGRESS" in line for line in logs)
+
+    def test_wait_for_pr_ci_rejects_watch_success_until_required_checks_green(self, tmp_path):
+        import subprocess
+
+        def completed(cmd, *, stdout="", stderr="", returncode=0):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, **kwargs):
+            if cmd == ["gh", "pr", "checks", "844", "--required"]:
+                return completed(cmd, stdout="test\tpending\n", returncode=8)
+            if cmd == ["gh", "pr", "checks", "844", "--watch", "--required"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        result = {
+            "commit_sha": "a" * 40,
+            "handoff_sha": "handoff-sha",
+            "receipt_decision": "COMMIT_GO",
+            "steps_completed": ["git_commit"],
+        }
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod, "_wait_for_required_checks_to_pass", return_value=False):
+            response = commit_mod._wait_for_pr_ci(  # ANTICHEAT_OK: ensures gh-watch zero exit is not sufficient for wait_ci
+                tmp_path,
+                pr_number="844",
+                result=result,
+                continuation_path=tmp_path / "continuation.json",
+                target_branch="jabramsja/test",
+                log=lambda _msg: None,
+            )
+
+        assert response is not None
+        assert response["status"] == "error"
+        assert response["step"] == "wait_ci"
+        assert response["errors"] == [
+            "Required CI checks did not reach green after gh watch returned"
+        ]
+        assert result["steps_completed"] == ["git_commit"]

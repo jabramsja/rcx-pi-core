@@ -28,6 +28,11 @@ packet-bound handoff after Step 5 adds generated scope such as the L4 indicator
 and tracked packet, the rebuilt handoff must carry tracker-note file counts that
 match the actual refreshed staged scope.
 
+This wave also hardens the post-remediation merge path observed while landing
+this patch: `gh pr checks --watch --required` returned before GitHub branch
+protection considered required checks complete, so the executor now performs a
+separate required-check green verification before merge.
+
 This is control-surface hardening only. It does not change runtime, substrate,
 seed, Stage0, or Mu semantics.
 
@@ -46,6 +51,11 @@ seed, Stage0, or Mu semantics.
   `_build_default_tracker_note_text()` and are consumed by Gate 8 tracker-note
   validation. Leaving those phrases stale after a packet refresh makes the
   refreshed packet block accurate while the tracker note remains false.
+- While landing this wave on PR #844, `commit_executor` reached merge after
+  logging remediation CI green, but `merge_pr.sh` failed with
+  `GraphQL: 2 of 2 required status checks are in progress`; direct
+  `gh pr checks 844 --required --json name,state,link,bucket,startedAt,completedAt`
+  showed `test` and `green-gate` as `IN_PROGRESS`.
 
 ## Scope
 
@@ -66,6 +76,11 @@ Admitted files:
    packet truth refresh path, and proves the rebuilt handoff count matches the
    refreshed staged set.
 4. Preserve existing idempotence and packet refresh behavior for other fields.
+5. Add a required-check green guard that parses
+   `gh pr checks --required --json name,state,bucket` after `gh --watch`
+   returns.
+6. Reuse the guard in remediation CI waits and immediately before merge so a
+   stale/premature watch result cannot advance to `merge_pr.sh`.
 
 ## Constraints
 
@@ -82,6 +97,8 @@ Admitted files:
 2. Existing packet truth refresh tests remain green.
 3. The implementation is validated by `py_compile` and focused
    `test_commit_executor_receipt.py` packet-refresh tests.
+4. The remediation/pre-merge CI path waits until required checks are green and
+   has regression coverage for a watch-zero/pending-required-check state.
 
 ## Validation Evidence
 
@@ -90,6 +107,8 @@ Admitted files:
 - `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py::TestReceiptChainEndToEnd::test_commit_packet_truth_refresh_updates_rebuilt_handoff_file_count mu/tests/tools/test_commit_executor_receipt.py::TestReceiptChainEndToEnd::test_commit_packet_truth_refresh_rebinds_packet_and_handoff_before_supervisor` passed: 2 passed in 1.61s after the supervisor-requested TASKS/packet evidence follow-up.
 - `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py -k "commit_packet_truth_refresh"` passed: 6 passed, 73 deselected in 3.89s.
 - `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py` passed: 79 passed in 13.59s.
+- `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py -k "RequiredCIGreenGuard or CIPollFallbackTimeout or commit_packet_truth_refresh"` passed: 10 passed, 71 deselected in 4.08s.
+- `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py` passed: 81 passed in 13.79s.
 
 <!-- COMMIT_PATH_TRUTH_REFRESH:start -->
 ## Commit Path Truth Refresh
@@ -97,7 +116,7 @@ Admitted files:
 - Refresh wave: `commit-packet-tracker-count-refresh-2026-04-30`
 - Active packet: `reports/control_plane/commit_packet_tracker_count_refresh_2026-04-30.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `e7c22f1b3f90a8c14c0c10fe890a03004564df5beeb8cf2aacdc5c507bf7dc33`
+- Tracker note sha256: `a7cea83da16ad3372065a902106812ddfc8aece78ac34fa140912c5e4f4100ce`
 - Indicator artifact: `reports/l4_wave_indicators/commit-packet-tracker-count-refresh-2026-04-30.json`
 - Pre-commit receipt handle: `.agent_bus/meta/pre_commit_receipt.json`
 - Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py`.
