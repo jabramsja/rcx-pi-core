@@ -166,6 +166,7 @@ _STANDALONE_STATUS_FAILURE_CLASSES: dict[str, FailureClass] = {
 }
 _TRANSIENT_KILL_CODES = frozenset({-9, -15, 137})
 PHASE_B_RECOVERY_PLAN_ENV = "RCX_RECOVERY_PHASE_B_PLAN_PATH"
+PHASE_B_RECOVERY_PLAN_WAVE_ENV = "RCX_RECOVERY_PHASE_B_PLAN_WAVE_ID"
 STALE_BRIDGE_LOCK_WAIT_TIMEOUT_S = 30.0
 STALE_BRIDGE_LOCK_WAIT_POLL_S = 0.5
 CONTROL_PLANE_PACKET_PREFIX = "reports/control_plane/"
@@ -1650,7 +1651,22 @@ def fix_phase_b_plan_required(repo_root: Path, **kw: Any) -> dict[str, Any]:
             "missing_plan_file",
             f"tracked packet {plan_path} does not exist for dispatcher retry",
         )
+    recovery_wave_raw = str(kw.get("wave_id") or "").strip()
+    recovery_wave = normalize_wave_id(recovery_wave_raw) if recovery_wave_raw else ""
+    if not recovery_wave or recovery_wave == "wave-unknown":
+        plan_wave = normalize_wave_id(Path(plan_path).stem)
+        if plan_wave != "wave-unknown":
+            recovery_wave = plan_wave
+    if not recovery_wave or recovery_wave == "wave-unknown":
+        os.environ.pop(PHASE_B_RECOVERY_PLAN_ENV, None)
+        os.environ.pop(PHASE_B_RECOVERY_PLAN_WAVE_ENV, None)
+        return _fix_result(
+            False,
+            "missing_wave_id",
+            "phase_b plan-required recovery could not bind retry to a real wave_id",
+        )
     os.environ[PHASE_B_RECOVERY_PLAN_ENV] = plan_path
+    os.environ[PHASE_B_RECOVERY_PLAN_WAVE_ENV] = recovery_wave
     return _fix_result(
         True,
         "retry_phase_b_with_plan",

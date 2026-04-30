@@ -7027,7 +7027,15 @@ class TestModularSurfaceEntrypoints:
 
         assert json.loads(state_path.read_text(encoding="utf-8"))["completed_step"] == "needs_phase_b_reentry"
 
-    def test_phase_b_surface_rebuilds_command_after_recovery_updates_routing(self, tmp_path):
+    def test_phase_b_surface_rebuilds_command_after_recovery_updates_routing(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(
+            dispatch_mod.PHASE_B_RECOVERY_PLAN_ENV,
+            "reports/control_plane/stale.md",
+        )
+        monkeypatch.setenv(
+            dispatch_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV,
+            "different-wave",
+        )
         routing_path = tmp_path / "routing.json"
         routing_path.write_text(
             json.dumps(
@@ -7182,6 +7190,7 @@ class TestModularSurfaceEntrypoints:
         assert "--plan" in calls[1]
         assert calls[1][calls[1].index("--plan") + 1] == "reports/control_plane/example.md"
         assert dispatch_mod.PHASE_B_RECOVERY_PLAN_ENV not in os.environ
+        assert dispatch_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV not in os.environ
 
     def test_phase_a_surface_chain_normalizes_bare_task_id_for_phase_b_routing(self, tmp_path):
         plan_path = tmp_path / "reports" / "control_plane" / "plan.md"
@@ -9484,6 +9493,7 @@ class TestDispatcherPlanlessPhaseB:
             dispatch_mod.PHASE_B_RECOVERY_PLAN_ENV,
             "reports/control_plane/recovered.md",
         )
+        monkeypatch.setenv(dispatch_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV, "w")
         record = {
             "decision": "ROUTE_PHASE_B",
             "summary": "test",
@@ -9501,6 +9511,55 @@ class TestDispatcherPlanlessPhaseB:
         call_args = mock_run.call_args[0][0]
         assert "--plan" in call_args
         assert call_args[call_args.index("--plan") + 1] == "reports/control_plane/recovered.md"
+        assert "--routing-record" in call_args
+
+    def test_phase_b_recovery_plan_env_ignored_without_wave_marker(self, tmp_path, monkeypatch):
+        """A recovery-seeded plan must carry its matching wave marker."""
+        monkeypatch.setenv(
+            dispatch_mod.PHASE_B_RECOVERY_PLAN_ENV,
+            "reports/control_plane/recovered.md",
+        )
+        monkeypatch.delenv(dispatch_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV, raising=False)
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "wave_name": "w",
+            "next_candidates": [{"candidate": "do it"}],
+        }
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="ok", stderr=""
+            )
+            dispatch_mod.dispatch(
+                record, repo_root=tmp_path, skip_freshness=True
+            )
+
+        call_args = mock_run.call_args[0][0]
+        assert "--plan" not in call_args
+        assert "--routing-record" in call_args
+
+    def test_phase_b_recovery_plan_env_ignored_without_record_wave(self, tmp_path, monkeypatch):
+        """A recovery-seeded plan cannot attach to a wave-unknown routing record."""
+        monkeypatch.setenv(
+            dispatch_mod.PHASE_B_RECOVERY_PLAN_ENV,
+            "reports/control_plane/recovered.md",
+        )
+        monkeypatch.setenv(dispatch_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV, "w")
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "test",
+            "next_candidates": [{"candidate": "do it"}],
+        }
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="ok", stderr=""
+            )
+            dispatch_mod.dispatch(
+                record, repo_root=tmp_path, skip_freshness=True
+            )
+
+        call_args = mock_run.call_args[0][0]
+        assert "--plan" not in call_args
         assert "--routing-record" in call_args
 
     def test_phase_b_with_tracked_packet_passes_plan_and_routing_record(self, tmp_path):

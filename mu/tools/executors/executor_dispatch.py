@@ -208,6 +208,7 @@ def _emit_executor_hard_fail_event(
 
 DEFAULT_CONFIG_PATH = SCRIPT_DIR / "executor_config.json"
 PHASE_B_RECOVERY_PLAN_ENV = "RCX_RECOVERY_PHASE_B_PLAN_PATH"
+PHASE_B_RECOVERY_PLAN_WAVE_ENV = "RCX_RECOVERY_PHASE_B_PLAN_WAVE_ID"
 
 
 class DispatchError(RuntimeError):
@@ -216,6 +217,44 @@ class DispatchError(RuntimeError):
 
 class ControlSurfaceError(RuntimeError):
     """Raised when a modular surface invocation is malformed."""
+
+
+def _phase_b_recovery_plan_from_env(record: dict[str, Any]) -> str:
+    """Return a recovery-seeded Phase B plan only when it is wave-bound."""
+    plan_path = os.environ.get(PHASE_B_RECOVERY_PLAN_ENV, "").strip()
+    if not plan_path:
+        return ""
+    expected_wave_raw = str(record.get("wave_name") or record.get("wave_id") or "").strip()
+    env_wave_raw = os.environ.get(PHASE_B_RECOVERY_PLAN_WAVE_ENV, "").strip()
+    expected_wave = normalize_wave_id(expected_wave_raw) if expected_wave_raw else ""
+    env_wave = normalize_wave_id(env_wave_raw) if env_wave_raw else ""
+    if (
+        not expected_wave
+        or expected_wave == "wave-unknown"
+        or not env_wave
+        or env_wave == "wave-unknown"
+        or env_wave != expected_wave
+    ):
+        return ""
+    return plan_path
+
+
+def _bind_phase_b_recovery_plan_wave(record: dict[str, Any], repo_root: Path) -> None:
+    """Bind a recovery plan hint to record identity using the plan path itself."""
+    plan_path = os.environ.get(PHASE_B_RECOVERY_PLAN_ENV, "").strip()
+    env_wave_raw = os.environ.get(PHASE_B_RECOVERY_PLAN_WAVE_ENV, "").strip()
+    if not plan_path or not env_wave_raw:
+        return
+    env_wave = normalize_wave_id(env_wave_raw)
+    if env_wave == "wave-unknown":
+        return
+    current_wave_raw = str(record.get("wave_name") or record.get("wave_id") or "").strip()
+    current_wave = normalize_wave_id(current_wave_raw) if current_wave_raw else ""
+    if current_wave and current_wave != "wave-unknown":
+        return
+    plan_wave = _phase_b_plan_wave_id(repo_root, plan_path)
+    if plan_wave and plan_wave == env_wave:
+        record["wave_name"] = env_wave
 
 
 def load_config(config_path: Path | None = None) -> dict[str, Any]:
@@ -473,10 +512,11 @@ def _surface_record_for_chain(
             if canonical_task_id:
                 record["task_id"] = canonical_task_id
 
+    _bind_phase_b_recovery_plan_wave(record, repo_root)
     plan_path = (
         getattr(args, "plan", None)
         or _surface_phase_b_plan_from_routing_payload(routing_payload)
-        or os.environ.get(PHASE_B_RECOVERY_PLAN_ENV, "").strip()
+        or _phase_b_recovery_plan_from_env(record)
     )
     if plan_path:
         if not _routing_record_tracked_packet(record):
@@ -642,7 +682,15 @@ def build_surface_command(
                 json_value=args.routing_record_json,
             )
         )
-        recovery_plan_path = os.environ.get(PHASE_B_RECOVERY_PLAN_ENV, "").strip()
+        recovery_record: dict[str, Any] = routing_record or {}
+        if not recovery_record and routing_payload:
+            try:
+                parsed_record = json.loads(routing_payload)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                parsed_record = None
+            if isinstance(parsed_record, dict):
+                recovery_record = parsed_record
+        recovery_plan_path = _phase_b_recovery_plan_from_env(recovery_record)
         plan_path = (
             args.plan
             or _surface_phase_b_plan_from_routing_payload(routing_payload)
@@ -973,6 +1021,7 @@ def run_recoverable_surface_command(
                 "RCX_RECOVERY_ORIGINAL_TIMEOUT_",
                 "RCX_RECOVERY_ORIGINAL_BRIDGE_TURN_TIMEOUT_",
                 PHASE_B_RECOVERY_PLAN_ENV,
+                PHASE_B_RECOVERY_PLAN_WAVE_ENV,
             )):
                 os.environ.pop(env_key, None)
 
@@ -1039,7 +1088,7 @@ def _phase_b_tracked_plan_or_error(
         plan_path = None
 
     if not plan_path and include_recovery_env:
-        plan_path = os.environ.get(PHASE_B_RECOVERY_PLAN_ENV, "").strip() or None
+        plan_path = _phase_b_recovery_plan_from_env(record) or None
     if not plan_path:
         return None, None
 
@@ -2919,6 +2968,7 @@ def main(argv: list[str] | None = None) -> int:
                 "RCX_RECOVERY_ORIGINAL_TIMEOUT_",
                 "RCX_RECOVERY_ORIGINAL_BRIDGE_TURN_TIMEOUT_",
                 PHASE_B_RECOVERY_PLAN_ENV,
+                PHASE_B_RECOVERY_PLAN_WAVE_ENV,
             )):
                 os.environ.pop(_env_key, None)
 

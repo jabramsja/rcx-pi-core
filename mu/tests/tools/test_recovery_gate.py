@@ -7219,6 +7219,30 @@ class TestNeedsPhaseB_Tier3:
         assert recovery["action"] == "retry_phase_b_with_plan"
         assert "--plan reports/control_plane/pager.md" in recovery["detail"]
         assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/pager.md"
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV] == "wave-plan-required"
+
+    def test_plan_required_recovery_derives_wave_binding_from_plan_path(self, tmp_path, monkeypatch):
+        plan_path = tmp_path / "reports" / "control_plane" / "pager.md"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text("Status: LOCKED\n", encoding="utf-8")
+        monkeypatch.setenv(rg_mod.PHASE_B_RECOVERY_PLAN_ENV, "reports/control_plane/stale.md")
+        monkeypatch.setenv(rg_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV, "stale-wave")
+        result = {
+            "status": "error",
+            "step": "derive_planless_context",
+            "errors": [
+                "Routing record references tracked packet 'reports/control_plane/pager.md' which exists. "
+                "Use --plan reports/control_plane/pager.md instead of planless mode."
+            ],
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, "")
+
+        assert recovery["recovered"] is True
+        assert recovery["failure_class"] == "phase_b_plan_required"
+        assert recovery["action"] == "retry_phase_b_with_plan"
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/pager.md"
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV] == "pager"
 
     def test_plan_required_fallback_reads_namespaced_routing_record(self, tmp_path, monkeypatch):
         reports_dir = tmp_path / "reports" / "control_plane"
@@ -7267,6 +7291,7 @@ class TestNeedsPhaseB_Tier3:
         assert recovery["action"] == "retry_phase_b_with_plan"
         assert "--plan reports/control_plane/namespaced.md" in recovery["detail"]
         assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/namespaced.md"
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV] == "wave-plan-required"
 
 
 class TestMaxTurnsClassification:
