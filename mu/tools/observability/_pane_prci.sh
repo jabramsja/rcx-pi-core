@@ -27,6 +27,22 @@ resolve_branch_name_for_root() {
   fi
   git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
 }
+is_numeric_pr() {
+  case "${1:-}" in
+    ""|*[!0-9]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+sanitize_pane_text() {
+  # Strip terminal escape/control sequences before rendering untrusted comments.
+  perl -CSDA -pe '
+    s/\e\][^\a]*(?:\a|\e\\)//g;
+    s/\e[P^_].*?(?:\e\\|\a)//g;
+    s/\e\[[0-?]*[ -\/]*[@-~]//g;
+    s/\e[ -\/]*[@-~]//g;
+    s/[\x00-\x09\x0B-\x1F\x7F]//g;
+  '
+}
 REPO_ROOT=""
 BRANCH=""
 while true; do
@@ -54,7 +70,9 @@ while true; do
     fi
   fi
 
-  if [ -n "$PR" ]; then
+  if [ -n "$PR" ] && ! is_numeric_pr "$PR"; then
+    echo "PR status unavailable: invalid PR identifier"
+  elif [ -n "$PR" ]; then
     echo "PR #$PR"
     echo ""
 
@@ -70,7 +88,7 @@ while true; do
     fi
 
     # Bot comments (last 3)
-    BOT_COMMENTS=$(gh pr view "$PR" --json comments --jq '[.comments[] | select(.author.login == "github-actions" or .author.login == "bot" or (.author.login | test("\\[bot\\]$"))) | .author.login + ": " + (.body | split("\n")[0])[:80]] | last(3) | .[]' 2>/dev/null | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g') || BOT_COMMENTS=""
+    BOT_COMMENTS=$(gh pr view "$PR" --json comments --jq '[.comments[] | select(.author.login == "github-actions" or .author.login == "bot" or (.author.login | test("\\[bot\\]$"))) | .author.login + ": " + (.body | split("\n")[0])[:80]] | .[-3:][]' 2>/dev/null | sanitize_pane_text) || BOT_COMMENTS=""
     if [ -n "$BOT_COMMENTS" ]; then
       echo ""
       echo "Bot comments:"
@@ -87,5 +105,8 @@ while true; do
     echo "No active PR for this worktree"
   fi
 
+  if [ "${RCX_PANE_PRCI_ONCE:-0}" = "1" ]; then
+    break
+  fi
   sleep 15
 done

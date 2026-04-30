@@ -1,14 +1,106 @@
 # Plan Deferred Consolidation E5 E6 2026 04 02
 
 Date: 2026-04-06
-Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
-Phase-A-Lock: UNLOCKED
-Purpose: Create a bounded Phase A plan for the Wave 1B E5+E6 observability/hooks slice under [DEFERRED-CONSOLIDATION]. The slice is limited to the tmux PR/CI pane and adjacent observability helpers needed to fix jq last(3) misuse, sanitize terminal escape sequences in displayed bot comment text, and add defense-in-depth numeric validation before gh API PR comment calls. Do not expand into broader Cluster C or D items unless Phase A proves a direct dependency. Use the pipeline packet plus TASKS.md as governing scope.
-
+Status: COMPLETED (commit-ready, supervisor COMMIT_GO)
+Task: [DEFERRED-CONSOLIDATION]
+Wave ID: plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06
+Phase-A-Lock: LOCKED
+Task-ID: [DEFERRED-CONSOLIDATION]
+Wave-ID: deferred-consolidation-e5-e6-2026-04-02
+Class: L4_ENABLER
+Lane: control-surface (deferred cleanup)
+Purpose: Create a bounded Phase A plan for the Wave 1B E5/E6 observability/hooks slice under [DEFERRED-CONSOLIDATION]. The slice is limited to the tmux PR/CI pane and adjacent observability behavior needed to fix jq tail selection, sanitize terminal escape sequences in displayed bot comment text, and add defense-in-depth numeric validation before gh API PR comment calls. Do not expand into broader Cluster C or D items unless Phase A proves a direct dependency.
 ## Scope
 
-DEFERRED-CONSOLIDATION Wave 1B follow-on slice: E5 jq tail logic plus terminal escape sanitization, and E6 PR number numeric validation in the gh API path for tmux PR/CI observability.
+Files and directories in scope:
 
-## Request from Post-Merge Supervisor
+- `reports/control_plane/plan_deferred_consolidation_e5_e6_2026_04_02_2026-04-06.md`: governing Phase A packet for this E5/E6 slice.
+- `mu/tools/observability/_pane_prci.sh`: only implementation target named by current TASKS.md code truth for E5/E6 residue; scope is limited to the tmux PR/CI observability path that selects recent bot comments and calls `gh api "repos/{owner}/{repo}/pulls/$PR/comments"`.
+- `mu/tests/tools/`: targeted tests for the tmux PR/CI observability behavior, including jq tail selection, terminal escape sanitization in displayed bot comment text, and numeric PR validation before PR comment API calls.
 
-Create a bounded Phase A plan for the Wave 1B E5+E6 observability/hooks slice under [DEFERRED-CONSOLIDATION]. The slice is limited to the tmux PR/CI pane and adjacent observability helpers needed to fix jq last(3) misuse, sanitize terminal escape sequences in displayed bot comment text, and add defense-in-depth numeric validation before gh API PR comment calls. Do not expand into broader Cluster C or D items unless Phase A proves a direct dependency. Use the pipeline packet plus TASKS.md as governing scope.
+Governing references:
+
+- `TASKS.md` `[DEFERRED-CONSOLIDATION]` entry, especially the 2026-04-29 current code-truth note that keeps E5/E6 open for code-backed residue in `mu/tools/observability/_pane_prci.sh`.
+- Upstream Wave 1B cleanup plan listed by TASKS.md: `reports/control_plane/wave1b_pipeline_cleanup_2026-03-31.md`.
+
+## Work Items
+
+1. E5 jq tail selection: replace the jq `last(3)` misuse in `mu/tools/observability/_pane_prci.sh` with deterministic selection of the last three relevant PR comment records. The fix must handle empty, one-item, two-item, and three-or-more-item inputs without relying on unsupported jq arity.
+2. E5 terminal display sanitization: sanitize terminal escape and control sequences from displayed bot comment text before rendering it in the tmux PR/CI pane. Preserve readable comment content while preventing escape sequences from affecting the operator terminal.
+3. E6 PR number validation: add a numeric guard before the `gh api "repos/{owner}/{repo}/pulls/$PR/comments"` path in `mu/tools/observability/_pane_prci.sh`. Non-numeric or empty PR values must not reach `gh api`; the pane should degrade with a bounded visible status instead of building an unsafe request path.
+4. Test coverage: add or update targeted `mu/tests/tools/` coverage for the three behaviors above. Tests must prove that jq tail selection no longer depends on `last(3)`, displayed comment text is escape-sanitized, and non-numeric PR values do not invoke the PR comments API path.
+
+## Constraints
+
+- Do not include D1 in this packet. TASKS.md keeps D1 open separately for `mu/tools/executors/dialectic_executor.py` max-rounds documentation, but this E5/E6 packet does not authorize that work.
+- Do not reopen items TASKS.md marks landed by current code truth: C1/C2, C3, C6, or D2.
+- Do not expand into broader Cluster C or D cleanup, bridge reviewer policy, executor routing, recovery, commit handoff, pager, or runtime/substrate semantics unless a stop condition proves a direct dependency.
+- Do not edit outside `mu/tools/observability/_pane_prci.sh` and targeted `mu/tests/tools/` tests during the implementation phase without returning to Phase A for scope revision.
+- Do not treat TASKS.md as proof that every historical Wave 1B item remains unlanded. Future implementation must prefer current code truth over stale packet wording and remove already-landed items from pending work instead of duplicating them.
+- This Phase A rewrite itself changes only this packet.
+
+## Stop Conditions
+
+- Stop if code inspection during implementation proves any E5/E6 work item is already implemented in current code; update the pending list and acceptance criteria instead of re-listing that item as unresolved.
+- Stop if the jq tail, terminal sanitization, or PR validation fix requires edits outside `mu/tools/observability/_pane_prci.sh` plus targeted tests under `mu/tests/tools/`.
+- Stop if terminal escape sanitization requires a global pane-rendering policy or shared sanitizer used by other observability panes; split that into a separate plan instead of widening this packet.
+- Stop if the PR identifier source cannot be validated locally in the pane script without changing executor, dispatcher, bridge, or routing-record contracts.
+- Stop if the necessary test harness change is broader than targeted observability tests or needs a separate growth-cap/governance exception.
+
+## Acceptance Criteria
+
+- This packet contains explicit Scope, Work Items, Constraints, Stop Conditions, Acceptance Criteria, and Grounding / Authorization sections.
+- Scope lists the concrete implementation file, governing packet, upstream plan reference, and test directory instead of describing only a general feature area.
+- `mu/tools/observability/_pane_prci.sh` no longer uses jq `last(3)` for recent comment selection; targeted tests cover empty, short, and three-or-more comment inputs.
+- Displayed bot comment text is sanitized before pane rendering; targeted tests include at least one terminal escape/control-sequence payload.
+- PR comment API calls are guarded by numeric PR validation; targeted tests prove non-numeric and empty PR values do not invoke `gh api "repos/{owner}/{repo}/pulls/$PR/comments"`.
+- The implementation remains bounded to E5/E6 tmux PR/CI observability and does not claim closure for D1 or any broader [DEFERRED-CONSOLIDATION] residue.
+- Reviewer required-section search finds every required section plus a control-surface authorization token or line in this packet.
+
+## Grounding / Authorization
+
+TASKS.md authorization: `[DEFERRED-CONSOLIDATION]` is OPEN under NEXT as of the 2026-04-29 code-truth reconciliation. TASKS.md states that Wave 1B remains open only for code-backed residue and names E5/E6 in `mu/tools/observability/_pane_prci.sh` because the pane still uses jq `last(3)` plus an unguarded `gh api "repos/{owner}/{repo}/pulls/$PR/comments"` path.
+
+Governing packet refs:
+
+- This packet: `reports/control_plane/plan_deferred_consolidation_e5_e6_2026_04_02_2026-04-06.md`.
+- Upstream plan listed in TASKS.md: `reports/control_plane/wave1b_pipeline_cleanup_2026-03-31.md`.
+
+FOUNDER_OVERRIDE:deferred-consolidation-e5-e6-2026-04-02
+Authorization: standing pipeline-bug-fix authorization for the [DEFERRED-CONSOLIDATION] Wave 1B E5/E6 control-surface L4_ENABLER slice. This authorization is bounded to tmux PR/CI observability jq tail selection, displayed-comment terminal escape sanitization, and numeric PR validation before gh API PR comment calls; it does not authorize D1, broader Cluster C/D cleanup, or runtime/substrate semantic changes.
+
+## Authorized Commit-Path Structural Follow-On
+
+After Phase B completed the E5/E6 implementation, the commit path exposed two direct dependencies covered by the stop-condition escape in this packet's Constraints section: `git add` failed on the symlink alias `tests/docs/test_growth_caps.py`, and the pre-commit supervisor saw stale staged tracker truth after commit packet refresh. The bounded follow-on scope is limited to the commit-path mechanics needed to make the same failure class recover automatically:
+
+- `mu/tools/executors/commit_executor.py`: canonicalize symlink stage aliases in the handoff builder and Step 4, then re-stage the refreshed handoff scope after packet truth refresh before supervisor packaging.
+- `mu/tools/executors/recovery_gate.py`: classify `pathspec ... is beyond a symbolic link` as a Tier 1 deterministic recovery case and rewrite the active handoff/current-wave tracker line to canonical repo paths.
+- `mu/tests/tools/test_commit_executor_receipt.py` and `mu/tests/tools/test_recovery_gate.py`: cover the builder canonicalization and Tier 1 recovery behavior.
+
+<!-- COMMIT_PATH_TRUTH_REFRESH:start -->
+## Commit Path Truth Refresh
+
+- Refresh wave: `plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06`
+- Active packet: `reports/control_plane/plan_deferred_consolidation_e5_e6_2026_04_02_2026-04-06.md`
+- Commit status: `pre_commit_supervisor_pending`
+- Tracker note sha256: `07156afa8e40300bb18549015d006ebccaa2c7c3e93ffb209eba6928a3b3e7ef`
+- Indicator artifact: `reports/l4_wave_indicators/plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06.json`
+- Pre-commit receipt handle: `.agent_bus/meta/pre_commit_receipts/receipt_2026-04-30T16-34-15p00-00_885a864b.json`
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_pane_prci_observability.py mu/tests/docs/test_growth_caps.py::TestGrowthCaps::test_test_file_count_within_cap mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_recovery_gate.py::TestClassifyFailure mu/tests/tools/test_recovery_gate.py::TestStagePathSymlinkAliasRecovery mu/tests/tools/test_recovery_gate.py::TestTierMapping`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/plan_deferred_consolidation_e5_e6_2026_04_02_2026-04-06.md. (2) Final pytest gate covers the E5/E6 pane test, the growth-cap guard, the commit-executor receipt module, and the recovery classifier/fixer/tier slices. (3) Commit handoff carries explicit receipt authority at .agent_bus/meta/pre_commit_receipts/receipt_2026-04-30T16-34-15p00-00_885a864b.json. (4) Commit path now canonicalizes symlink stage aliases in the builder and Step 4, re-stages refreshed packet scope before supervisor packaging, and has Tier 1 recovery for pathspec aliases beyond repo symlinks.
+- Evidence handles:
+  - `indicator`: `reports/l4_wave_indicators/plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06.json`
+  - `pre_commit_receipt`: `.agent_bus/meta/pre_commit_receipts/receipt_2026-04-30T16-34-15p00-00_885a864b.json`
+- Current staged files:
+  - `TASKS.md`
+  - `mu/tests/docs/test_growth_caps.py`
+  - `mu/tests/tools/test_commit_executor_receipt.py`
+  - `mu/tests/tools/test_pane_prci_observability.py`
+  - `mu/tests/tools/test_recovery_gate.py`
+  - `mu/tools/executors/commit_executor.py`
+  - `mu/tools/executors/recovery_gate.py`
+  - `mu/tools/observability/_pane_prci.sh`
+  - `reports/control_plane/plan_deferred_consolidation_e5_e6_2026_04_02_2026-04-06.md`
+  - `reports/deferred/non_blocking/plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06_bridge_nonblockers.md`
+  - `reports/l4_wave_indicators/plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06.json`
+<!-- COMMIT_PATH_TRUTH_REFRESH:end -->
