@@ -29,6 +29,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 try:
     from executor_common import (
+        ensure_bridge_config_path,
         ensure_not_agent_review_mode,
         ExecutorCommonError,
         load_executor_config,
@@ -40,6 +41,7 @@ except ImportError:
     _mod = _ilu.module_from_spec(_spec)
     assert _spec.loader is not None
     _spec.loader.exec_module(_mod)
+    ensure_bridge_config_path = _mod.ensure_bridge_config_path
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
     load_executor_config = _mod.load_executor_config
@@ -239,6 +241,7 @@ def invoke_implementer(
     model_override: str | None = None,
     timeout: int = 1200,
     verbose: bool = False,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Invoke the implementer agent via bridge adapter infrastructure.
 
@@ -313,12 +316,12 @@ def invoke_implementer(
     AdapterSpec = _bridge_adapters.AdapterSpec
     BridgeAdapterError = _bridge_adapters.BridgeAdapterError
 
-    # Load bridge config
-    config_path = repo_root / ".agent_bus" / "bridge_config.json"
+    # Load bridge config from the active invocation bus.
     try:
+        config_path = ensure_bridge_config_path(repo_root, bus_dir)
         config = _bridge_adapters.load_bridge_config(config_path)
         adapter = _bridge_adapters.get_adapter(config, backend)
-    except BridgeAdapterError as exc:
+    except (BridgeAdapterError, ExecutorCommonError) as exc:
         return {
             "status": "error",
             "output": "",
@@ -381,6 +384,7 @@ def invoke_implementer(
             job_id=job_id,
             turn_id="impl",
             agent_role="implementer",
+            bus_dir=bus_dir,
             raw_output_path=raw_output_path,
             zero_output_timeout_s=zero_output_timeout_s,
             stale_timeout_s=stale_timeout_s,

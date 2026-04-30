@@ -3,6 +3,15 @@
 # Shows blocking/non-blocking findings from latest bridge rounds.
 set +e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BUS_DIR="${RCX_AGENT_BUS_DIR:-${BUS_DIR:-.agent_bus}}"
+if [[ "$BUS_DIR" == /* || "$BUS_DIR" == *"/"* || "$BUS_DIR" == *"\\"* || "$BUS_DIR" == *".."* ]]; then
+  echo "ERROR: invalid RCX_AGENT_BUS_DIR: $BUS_DIR" >&2
+  exit 2
+fi
+if [[ "$BUS_DIR" != ".agent_bus" && ! "$BUS_DIR" =~ ^\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+  echo "ERROR: RCX_AGENT_BUS_DIR must be .agent_bus or .agent_bus-<id>" >&2
+  exit 2
+fi
 resolve_repo_root() {
   local helper="$SCRIPT_DIR/_resolve_live_root.sh"
   local root=""
@@ -28,7 +37,7 @@ refresh_context() {
     LAST_HASH=""
   fi
   REPO_ROOT="$next_root"
-  RAW_DIR="$REPO_ROOT/.agent_bus/raw"
+  RAW_DIR="$REPO_ROOT/$BUS_DIR/raw"
   BRANCH_NAME="$next_branch"
 }
 REPO_ROOT=""
@@ -120,7 +129,7 @@ meta_next_fix() {
 
 bridge_reviewer_state_for_round() {
   local round="$1"
-  local db="$REPO_ROOT/.agent_bus/bridge.db"
+  local db="$REPO_ROOT/$BUS_DIR/bridge.db"
   [ -s "$db" ] || return 1
   python3 - "$db" "$round" <<'PY' 2>/dev/null
 import sqlite3
@@ -224,7 +233,7 @@ while true; do
 
     # Parse the AGENT_ENVELOPE for decision and findings
     REVIEW_SOURCE="$REVIEWER_FILE"
-    RENDERED_FILE="$REPO_ROOT/.agent_bus/rendered/$ROUND_NAME.md"
+    RENDERED_FILE="$REPO_ROOT/$BUS_DIR/rendered/$ROUND_NAME.md"
     if [ -s "$RENDERED_FILE" ]; then
       REVIEW_SOURCE="$RENDERED_FILE"
     fi
@@ -483,7 +492,7 @@ for f in nb:
   if [ "$found_any" = false ]; then
     echo -e "  ${DIM}No active Phase A/Phase B bridge rounds${RESET}"
 
-    META_DIR="$REPO_ROOT/.agent_bus/meta/raw"
+    META_DIR="$REPO_ROOT/$BUS_DIR/meta/raw"
     META_FILE=$(ls -t "$META_DIR"/meta-*.txt 2>/dev/null | head -1) || true
     if [ -n "$META_FILE" ] && [ -s "$META_FILE" ]; then
       meta_age=$(( $(date +%s) - $(stat -f%m "$META_FILE" 2>/dev/null || stat -c%Y "$META_FILE" 2>/dev/null || echo 0) ))

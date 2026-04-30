@@ -23,6 +23,7 @@ import sys
 import tempfile
 import time
 import uuid
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -33,10 +34,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 try:
     from executor_common import (
+        agent_bus_path,
+        agent_bus_relpath,
         emit_pipeline_agent_event,
         load_executor_config,
         load_routing_record,
         normalize_wave_id,
+        resolve_agent_bus_dir,
     )
 except ImportError:
     import importlib.util as _ilu
@@ -45,10 +49,35 @@ except ImportError:
     _mod = _ilu.module_from_spec(_spec)
     assert _spec.loader is not None
     _spec.loader.exec_module(_mod)
+    agent_bus_path = _mod.agent_bus_path
+    agent_bus_relpath = _mod.agent_bus_relpath
     emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
     load_executor_config = _mod.load_executor_config
     load_routing_record = _mod.load_routing_record
     normalize_wave_id = _mod.normalize_wave_id
+    resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
+
+_ACTIVE_BUS_DIR: ContextVar[Path | None] = ContextVar("recovery_gate_bus_dir", default=None)
+
+
+def _active_bus_dir() -> Path | None:
+    return _ACTIVE_BUS_DIR.get()
+
+
+def _bus_path(repo_root: Path, *parts: str) -> Path:
+    return agent_bus_path(repo_root, _active_bus_dir(), *parts)
+
+
+def _bus_relpath(*parts: str) -> Path:
+    return agent_bus_relpath(_active_bus_dir(), *parts)
+
+
+def _recovery_path(repo_root: Path, *parts: str) -> Path:
+    return agent_bus_path(repo_root, _active_bus_dir(), "recovery", *parts)
+
+
+def _recovery_relpath(*parts: str) -> Path:
+    return agent_bus_relpath(_active_bus_dir(), "recovery", *parts)
 
 # ---------------------------------------------------------------------------
 # Failure classification taxonomy
@@ -679,7 +708,7 @@ def fix_stale_bridge_lock(repo_root: Path) -> dict[str, Any]:
     PID-only check which false-positived recovery when the PID was dead but
     the flock was still held by a live fd (Bridge R4 Finding).
     """
-    lock_path = repo_root / ".agent_bus" / "bridge.lock"
+    lock_path = _bus_path(repo_root, "bridge.lock")
     if not lock_path.exists():
         return _fix_result(False, "noop", "bridge.lock not found")
     if _claim_and_remove_bridge_lock(lock_path):
@@ -753,7 +782,7 @@ def fix_missing_phase_a_lock(repo_root: Path, **kw: Any) -> dict[str, Any]:
             f"{plan_path} already declares Phase-A-Lock: {phase_a_lock}; requires explicit Phase A or packet repair",
         )
 
-    lock_path = repo_root / ".agent_bus" / "bridge.lock"
+    lock_path = _bus_path(repo_root, "bridge.lock")
     lock_detail = ""
     if lock_path.exists():
         if not _claim_and_remove_bridge_lock(lock_path):
@@ -821,7 +850,7 @@ def fix_missing_bridge_config(repo_root: Path) -> dict[str, Any]:
     """
     import shutil
 
-    dst = repo_root / ".agent_bus" / "bridge_config.json"
+    dst = _bus_path(repo_root, "bridge_config.json")
     if dst.exists():
         return _fix_result(False, "noop", f"bridge_config.json already present at {dst}")
 
@@ -859,11 +888,11 @@ def fix_missing_bridge_config(repo_root: Path) -> dict[str, Any]:
     except Exception as exc:
         return _fix_result(False, "error", f"failed to resolve main repo from .git pointer: {exc}")
 
-    src = main_repo / ".agent_bus" / "bridge_config.json"
+    src = agent_bus_path(main_repo, _active_bus_dir(), "bridge_config.json")
     if not src.exists():
         return _fix_result(
             False, "error",
-            f"main repo at {main_repo} has no .agent_bus/bridge_config.json to copy",
+            f"main repo at {main_repo} has no {_bus_relpath('bridge_config.json')} to copy",
         )
 
     try:
@@ -880,7 +909,7 @@ def fix_missing_bridge_config(repo_root: Path) -> dict[str, Any]:
 
 def fix_stale_executor_state(repo_root: Path, wave_id: str = "") -> dict[str, Any]:
     """Remove phase_b_state.json if wave_id mismatches current routing."""
-    state_path = repo_root / ".agent_bus" / "executors" / "phase_b_state.json"
+    state_path = _bus_path(repo_root, "executors", "phase_b_state.json")
     if not state_path.exists():
         return _fix_result(False, "noop", "phase_b_state.json not found")
     try:
@@ -1014,7 +1043,7 @@ def _post_reentry_scope_files(repo_root: Path, result: dict[str, Any], plan_path
 
 def fix_tracker_note_contract(repo_root: Path, **kw: Any) -> dict[str, Any]:
     """Regenerate a canonical MAINTENANCE tracker note for a Phase B handoff."""
-    handoff_path = repo_root / ".agent_bus" / "executors" / "phase_b_handoff.json"
+    handoff_path = _bus_path(repo_root, "executors", "phase_b_handoff.json")
     if not handoff_path.exists():
         return _fix_result(False, "handoff_missing", f"handoff file missing at {handoff_path}")
 
@@ -1104,7 +1133,7 @@ def fix_feature_branch_mismatch(repo_root: Path, **kw: Any) -> dict[str, Any]:
     """Move the worktree onto the canonical target branch for the active handoff."""
     result = kw.get("result", {})
     expectation = _extract_feature_branch_expectation(result)
-    handoff_path = repo_root / ".agent_bus" / "executors" / "phase_b_handoff.json"
+    handoff_path = _bus_path(repo_root, "executors", "phase_b_handoff.json")
     if not handoff_path.exists():
         return _fix_result(False, "handoff_missing", f"handoff file missing at {handoff_path}")
     try:
@@ -1273,7 +1302,7 @@ def fix_post_reentry_needs_phase_b(repo_root: Path, **kw: Any) -> dict[str, Any]
     if deferred_packet_path:
         resume_state["deferred_packet_path"] = deferred_packet_path
 
-    state_path = repo_root / ".agent_bus" / "executors" / "phase_b_state.json"
+    state_path = _bus_path(repo_root, "executors", "phase_b_state.json")
     try:
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps(resume_state, indent=2) + "\n", encoding="utf-8")
@@ -1316,7 +1345,9 @@ def fix_phase_b_plan_required(repo_root: Path, **kw: Any) -> dict[str, Any]:
     plan_path = _phase_b_plan_required_path(result)
     if not plan_path:
         try:
-            plan_path = _routing_plan_path(load_routing_record(repo_root))
+            plan_path = _routing_plan_path(
+                load_routing_record(repo_root, bus_dir=_active_bus_dir())
+            )
         except Exception:
             plan_path = ""
     if not plan_path:
@@ -1517,7 +1548,7 @@ def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     # Bridge R3 fix: uses _claim_and_remove_bridge_lock for atomic
     # probe+remove (LOCK_EX held across unlink + inode identity check).
     # The prior probe-then-unlink pattern had a TOCTOU window.
-    lock_path = repo_root / ".agent_bus" / "bridge.lock"
+    lock_path = _bus_path(repo_root, "bridge.lock")
     lock_cleared = False
     if executor == "phase_b_executor" and lock_path.exists():
         lock_cleared = _claim_and_remove_bridge_lock(lock_path)
@@ -1596,7 +1627,7 @@ def fix_aggregation_hang(repo_root: Path, **kw: Any) -> dict[str, Any]:
     # Clear bridge.lock — atomic claim+remove (LOCK_EX held across unlink).
     # Bridge R3 fix: closes the TOCTOU window from the prior
     # probe-then-unlink pattern.
-    lock_path = repo_root / ".agent_bus" / "bridge.lock"
+    lock_path = _bus_path(repo_root, "bridge.lock")
     if lock_path.exists() and _claim_and_remove_bridge_lock(lock_path):
         cleared.append(str(lock_path.relative_to(repo_root)))
     # Mark stale/stuck jobs in bridge.db as failed (preserve the DB itself).
@@ -1604,7 +1635,7 @@ def fix_aggregation_hang(repo_root: Path, **kw: Any) -> dict[str, Any]:
     # NULL/empty scope_hint rows are left untouched — they may belong to
     # other waves that didn't set scope_hint (Bridge R7 fix: NULL-scoped
     # rows must not be treated as current-wave work).
-    bridge_db = repo_root / ".agent_bus" / "bridge.db"
+    bridge_db = _bus_path(repo_root, "bridge.db")
     if bridge_db.exists():
         try:
             conn = sqlite3.connect(str(bridge_db), timeout=5)
@@ -2248,6 +2279,7 @@ _HYBRID_HARD_DENY_PREFIXES: tuple[str, ...] = (
     "rcx_pi/",
     ".git/",
     ".agent_bus/",
+    ".agent_bus-",
     ".claude/",
     "archive/",
 )
@@ -2333,7 +2365,7 @@ def _resolve_recovery_agent_invocation(
     ).strip() or "codex"
 
     bridge_adapters = _load_bridge_adapters_module(repo_root)
-    bridge_config_path = repo_root / ".agent_bus" / "bridge_config.json"
+    bridge_config_path = _bus_path(repo_root, "bridge_config.json")
     bridge_config = bridge_adapters.load_bridge_config(bridge_config_path)
     spec = bridge_adapters.get_adapter(bridge_config, backend)
 
@@ -2348,6 +2380,7 @@ def _resolve_recovery_agent_invocation(
         {
             "prompt_file": str(prompt_path),
             "repo_root": str(repo_root),
+            "bus_dir": str(_bus_relpath()),
             "job_id": f"recovery-{prompt_token}",
             "turn_id": f"tier3-{iteration + 1}",
             "agent_role": "recovery",
@@ -3993,12 +4026,27 @@ def run_recovery_loop(
     max_iterations: int = MAX_RECOVERY_ITERATIONS,
     verify_command: list[str] | None = None,
     invocation_id: str = "",
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Tier 3 LLM recovery loop: diagnose → fix → verify.
 
     Returns dict with: recovered, exhausted, iterations, log.
     All iterations are durably logged to recovery_log.json.
     """
+    if bus_dir is not None:
+        resolve_agent_bus_dir(repo_root, bus_dir)
+        token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(bus_dir))
+        try:
+            return run_recovery_loop(
+                repo_root,
+                result,
+                wave_id,
+                max_iterations=max_iterations,
+                verify_command=verify_command,
+                invocation_id=invocation_id,
+            )
+        finally:
+            _ACTIVE_BUS_DIR.reset(token)
     loop_log: list[dict[str, Any]] = []
     fc = result.get("failure_class", result.get("recovery", {}).get("failure_class", "unknown"))
     step = _effective_result_step(result)
@@ -4598,9 +4646,6 @@ def run_recovery_loop(
 # Recovery log
 # ---------------------------------------------------------------------------
 
-RECOVERY_LOG_DIR = Path(".agent_bus") / "recovery"
-RECOVERY_LOG_FILE = RECOVERY_LOG_DIR / "recovery_log.json"
-RECOVERY_STATUS_FILE = RECOVERY_LOG_DIR / "recovery_status.json"
 MAX_LOG_ENTRIES = 500
 
 # ---------------------------------------------------------------------------
@@ -6117,7 +6162,7 @@ def _summarize_result_reason(result: dict[str, Any]) -> str:
 
 
 def _load_recovery_status(repo_root: Path) -> dict[str, Any]:
-    status_path = repo_root / RECOVERY_STATUS_FILE
+    status_path = _recovery_path(repo_root, "recovery_status.json")
     if not status_path.exists():
         return {}
     try:
@@ -6145,19 +6190,19 @@ def _atomic_write_text(path: Path, text: str) -> None:
 
 
 def _save_recovery_status(repo_root: Path, status: dict[str, Any]) -> None:
-    status_path = repo_root / RECOVERY_STATUS_FILE
+    status_path = _recovery_path(repo_root, "recovery_status.json")
     _atomic_write_text(status_path, json.dumps(status, indent=2) + "\n")
 
 
 def _snapshot_recovery_status(repo_root: Path) -> tuple[bool, str]:
-    status_path = repo_root / RECOVERY_STATUS_FILE
+    status_path = _recovery_path(repo_root, "recovery_status.json")
     if not status_path.exists():
         return False, ""
     return True, status_path.read_text(encoding="utf-8")
 
 
 def _restore_recovery_status(repo_root: Path, *, existed: bool, raw_text: str) -> None:
-    status_path = repo_root / RECOVERY_STATUS_FILE
+    status_path = _recovery_path(repo_root, "recovery_status.json")
     if existed:
         _atomic_write_text(status_path, raw_text)
         return
@@ -6243,7 +6288,7 @@ def _recovery_event_context(
     ).strip()
     if not task_id or not plan_path:
         try:
-            routing_record = load_routing_record(repo_root)
+            routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
         except Exception:
             routing_record = {}
         if not task_id:
@@ -6267,6 +6312,7 @@ def _emit_recovery_event(
     task_id, plan_path = _recovery_event_context(repo_root, status=status)
     emit_pipeline_agent_event(
         repo_root,
+        bus_dir=_active_bus_dir(),
         event_type=event_type,
         wave_id=str(status.get("wave_id") or "").strip(),
         task_id=task_id,
@@ -6336,7 +6382,7 @@ def _begin_recovery_status(
                 transition_key=f"{invocation_id}:recovery_started",
                 summary=f"Recovery started for {wave_id}",
                 reason=str(status.get("reason") or "recovery started"),
-                artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+                artifact_paths={"recovery_status": str(_recovery_relpath("recovery_status.json"))},
             )
         ],
     )
@@ -6371,7 +6417,7 @@ def _update_recovery_status(repo_root: Path, **updates: Any) -> dict[str, Any]:
                 transition_key=transition_key,
                 summary=f"Recovery state changed to {new_state}",
                 reason=str(status.get("detail") or status.get("reason") or new_state),
-                artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+                artifact_paths={"recovery_status": str(_recovery_relpath("recovery_status.json"))},
             )
         )
         if new_state == "resolved_by_later_success":
@@ -6387,7 +6433,7 @@ def _update_recovery_status(repo_root: Path, **updates: Any) -> dict[str, Any]:
                     ),
                     summary="Recovery returned to normal pipeline execution",
                     reason=str(status.get("detail") or status.get("reason") or new_state),
-                    artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+                    artifact_paths={"recovery_status": str(_recovery_relpath("recovery_status.json"))},
                 )
             )
     return _commit_recovery_status(repo_root, status, event_actions=event_actions)
@@ -6435,7 +6481,7 @@ def _finish_recovery_status(
                 transition_key=transition_key,
                 summary=f"Recovery state changed to {new_state}",
                 reason=str(status.get("detail") or status.get("reason") or new_state),
-                artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+                artifact_paths={"recovery_status": str(_recovery_relpath("recovery_status.json"))},
             )
         )
     if not recovered:
@@ -6452,7 +6498,7 @@ def _finish_recovery_status(
                 transition_key=transition_key,
                 summary=f"Recovery failed with outcome {outcome or state}",
                 reason=_excerpt(detail),
-                artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+                artifact_paths={"recovery_status": str(_recovery_relpath("recovery_status.json"))},
                 )
             )
         if outcome == "escalated" or "escalated" in state:
@@ -6468,7 +6514,7 @@ def _finish_recovery_status(
                     ),
                     summary=f"Recovery escalated with outcome {outcome or state}",
                     reason=_excerpt(detail),
-                    artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+                    artifact_paths={"recovery_status": str(_recovery_relpath("recovery_status.json"))},
                 )
             )
         if exhausted:
@@ -6484,7 +6530,7 @@ def _finish_recovery_status(
                     ),
                     summary=f"Pipeline hard-failed after recovery {outcome or state}",
                     reason=_excerpt(detail),
-                    artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+                    artifact_paths={"recovery_status": str(_recovery_relpath("recovery_status.json"))},
                 )
             )
     else:
@@ -6501,7 +6547,7 @@ def _finish_recovery_status(
                 transition_key=transition_key,
                 summary=f"Recovery succeeded with outcome {outcome or state}",
                 reason=_excerpt(detail),
-                artifact_paths={"recovery_status": str(RECOVERY_STATUS_FILE)},
+                artifact_paths={"recovery_status": str(_recovery_relpath("recovery_status.json"))},
             )
         )
     return _commit_recovery_status(repo_root, status, event_actions=event_actions)
@@ -6529,6 +6575,7 @@ def clear_stale_recovery_status_on_success(
     *,
     wave_id: str = "",
     success_target: str = "",
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Mark an old inactive recovery record as cleared by a later success.
 
@@ -6536,6 +6583,17 @@ def clear_stale_recovery_status_on_success(
     observability keeps showing the last exhausted recovery tuple even though
     the pipeline has already moved on and succeeded.
     """
+    if bus_dir is not None:
+        resolve_agent_bus_dir(repo_root, bus_dir)
+        token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(bus_dir))
+        try:
+            return clear_stale_recovery_status_on_success(
+                repo_root,
+                wave_id=wave_id,
+                success_target=success_target,
+            )
+        finally:
+            _ACTIVE_BUS_DIR.reset(token)
     status = _load_recovery_status(repo_root)
     if not status or bool(status.get("active")):
         return status
@@ -6580,7 +6638,7 @@ def clear_stale_recovery_status_on_success(
 
 def _load_recovery_log(repo_root: Path) -> list[dict[str, Any]]:
     """Load recovery log, returning empty list on missing/corrupt file."""
-    log_path = repo_root / RECOVERY_LOG_FILE
+    log_path = _recovery_path(repo_root, "recovery_log.json")
     if not log_path.exists():
         return []
     try:
@@ -6592,7 +6650,7 @@ def _load_recovery_log(repo_root: Path) -> list[dict[str, Any]]:
 
 def _save_recovery_log(repo_root: Path, attempts: list[dict[str, Any]]) -> None:
     """Save recovery log, capped at MAX_LOG_ENTRIES."""
-    log_path = repo_root / RECOVERY_LOG_FILE
+    log_path = _recovery_path(repo_root, "recovery_log.json")
     log_path.parent.mkdir(parents=True, exist_ok=True)
     if len(attempts) > MAX_LOG_ENTRIES:
         attempts = attempts[-MAX_LOG_ENTRIES:]
@@ -6644,11 +6702,19 @@ def _make_result(recovered: bool, action: str, tier: int,
 
 def attempt_recovery(
     repo_root: Path, result: dict[str, Any], wave_id: str,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Attempt recovery for a failed executor result.
 
     Returns dict with: recovered, action, tier, failure_class, detail, exhausted.
     """
+    if bus_dir is not None:
+        resolve_agent_bus_dir(repo_root, bus_dir)
+        token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(bus_dir))
+        try:
+            return attempt_recovery(repo_root, result, wave_id)
+        finally:
+            _ACTIVE_BUS_DIR.reset(token)
     t0 = time.monotonic()
     # Learning store pre-classification override (before static classifier)
     learned = check_learned_patterns(repo_root, result)

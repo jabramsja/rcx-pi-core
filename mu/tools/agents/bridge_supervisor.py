@@ -23,11 +23,19 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
+EXECUTOR_DIR = SCRIPT_DIR.parent / "executors"
+if str(EXECUTOR_DIR) not in sys.path:
+    sys.path.insert(0, str(EXECUTOR_DIR))
 
 from bridge_adapters import BridgeAdapterError, _prepare_adapter_env, get_adapter, load_bridge_config, run_adapter
 from bridge_migrations import MIGRATIONS, MigrationVersionError, run_pending_migrations
+from executor_common import (
+    ExecutorCommonError,
+    ensure_bridge_config_path,
+    is_agent_bus_runtime_path,
+    resolve_agent_bus_dir,
+)
 
-BUS_DIR_NAME = ".agent_bus"
 DB_NAME = "bridge.db"
 CONFIG_NAME = "bridge_config.json"
 PROMPTS_DIR = "prompts"
@@ -35,7 +43,6 @@ RAW_DIR = "raw"
 RENDERED_DIR = "rendered"
 VALIDATIONS_DIR = "validations"
 STATE_IGNORE_PREFIXES = (
-    ".agent_bus/",
     ".git/",
     ".scratch/",
     "__pycache__/",
@@ -364,8 +371,8 @@ def slugify(value: str) -> str:
     return text or "job"
 
 
-def bridge_paths(repo_root: Path) -> BridgePaths:
-    bus_dir = repo_root / BUS_DIR_NAME
+def bridge_paths(repo_root: Path, bus_dir: str | Path | None = None) -> BridgePaths:
+    bus_dir = resolve_agent_bus_dir(repo_root, bus_dir)
     return BridgePaths(
         repo_root=repo_root,
         bus_dir=bus_dir,
@@ -381,6 +388,10 @@ def bridge_paths(repo_root: Path) -> BridgePaths:
 def ensure_runtime_dirs(paths: BridgePaths) -> None:
     for path in (paths.bus_dir, paths.prompts_dir, paths.raw_dir, paths.rendered_dir, paths.validations_dir):
         path.mkdir(parents=True, exist_ok=True)
+
+
+def _bridge_paths_bus_rel(paths: BridgePaths) -> Path:
+    return paths.bus_dir.relative_to(paths.repo_root)
 
 
 def open_db(paths: BridgePaths) -> sqlite3.Connection:
@@ -441,6 +452,7 @@ def init_db(paths: BridgePaths, *, verbose: bool = False) -> None:
         applied = run_pending_migrations(conn, verbose=verbose)
         if applied and verbose:
             print(f"  applied {applied} migration(s)")
+    ensure_bridge_config_path(paths.repo_root, _bridge_paths_bus_rel(paths))
     example = SCRIPT_DIR / "bridge_config.example.json"
     if example.exists() and not paths.config_path.exists():
         shutil.copyfile(example, paths.config_path)
@@ -468,7 +480,10 @@ def _iter_untracked_files(repo_root: Path) -> list[Path]:
         if not raw:
             continue
         normalized = raw.replace("\\", "/")
-        if any(normalized == prefix.rstrip("/") or normalized.startswith(prefix) for prefix in STATE_IGNORE_PREFIXES):
+        if is_agent_bus_runtime_path(normalized) or any(
+            normalized == prefix.rstrip("/") or normalized.startswith(prefix)
+            for prefix in STATE_IGNORE_PREFIXES
+        ):
             continue
         path = repo_root / raw
         if path.is_file():
@@ -1261,6 +1276,7 @@ def execute_agent_turn(
             timeout_override_s=turn_timeout_s,
             zero_output_timeout_s=zero_output_timeout_s,
             stop_after_envelope=True,
+            bus_dir=_bridge_paths_bus_rel(paths),
         )
     except (BridgeAdapterError, Exception) as exc:
         # Update turn to FAILED on adapter error
@@ -2473,6 +2489,7 @@ def read_task_text(task: str | None, task_file: str | None) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Turn-based bridge supervisor for Claude/Codex workflows")
     parser.add_argument("--repo-root", default=os.getcwd(), help="Repo root (default: cwd)")
+    parser.add_argument("--bus-dir", default=None, help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init", help="Create bridge runtime directories and SQLite DB")
@@ -2532,9 +2549,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     repo_root = Path(args.repo_root).resolve()
-    paths = bridge_paths(repo_root)
 
     try:
+        paths = bridge_paths(repo_root, bus_dir=args.bus_dir)
         if args.command == "init":
             init_db(paths)
             print(f"Initialized bridge runtime at {paths.bus_dir}")
@@ -2628,7 +2645,7 @@ def main(argv: list[str] | None = None) -> int:
                 output = render_job(paths, conn, args.job_id)
             print(output)
             return 0
-    except (BridgeError, BridgeAdapterError, MigrationVersionError) as exc:
+    except (BridgeError, BridgeAdapterError, MigrationVersionError, ExecutorCommonError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     return 1

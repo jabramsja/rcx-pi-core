@@ -42,23 +42,25 @@ from bridge_adapters import BridgeAdapterError, get_adapter, load_bridge_config,
 from enforce_l4_execution_contract import parse_tracker_notes
 from executor_common import (
     ensure_not_agent_review_mode,
+    ensure_bridge_config_path,
     ExecutorCommonError,
+    agent_bus_path,
     bridge_agent_display_name,
+    bridge_config_path,
     emit_pipeline_agent_event,
+    is_agent_bus_runtime_path,
     load_executor_config,
     normalize_wave_id,
+    resolve_agent_bus_dir,
     resolve_role_agent,
 )
 
-# Namespace isolation: meta-bridge uses .agent_bus/meta/ subdirectory
-META_BUS_DIR_NAME = ".agent_bus/meta"
 META_DB_NAME = "meta_bridge.db"
 META_LOCK_NAME = "meta_bridge.lock"
 
 # Transient path prefixes — ignored in dirty-state comparison and repo state hashing.
 # Consolidated from two near-duplicate constants (expert finding, bridge R7).
 TRANSIENT_PATH_PREFIXES = (
-    ".agent_bus/",
     ".git/",
     ".scratch/",
     "__pycache__/",
@@ -135,8 +137,20 @@ def _filesystem_safe_token(value: Any) -> str:
 
 def load_bridge_config_with_worktree_heal(repo_root: Path) -> dict[str, Any]:
     """Load bridge config, auto-copying it into linked worktrees when missing."""
-    config_path = repo_root / ".agent_bus" / "bridge_config.json"
+    config_path = bridge_config_path(repo_root)
+    return load_bridge_config_with_worktree_heal_at(repo_root, config_path)
+
+
+def load_bridge_config_with_worktree_heal_at(repo_root: Path, config_path: Path) -> dict[str, Any]:
+    """Load bridge config from an explicit bus path, with linked-worktree seeding."""
     if not config_path.exists():
+        try:
+            bus_rel = config_path.parent.resolve(strict=False).relative_to(repo_root.resolve())
+            seeded_path = ensure_bridge_config_path(repo_root, bus_rel)
+            if seeded_path == config_path and seeded_path.exists():
+                return load_bridge_config(config_path)
+        except Exception:
+            pass
         git_pointer = repo_root / ".git"
         try:
             if git_pointer.is_file():
@@ -149,7 +163,11 @@ def load_bridge_config_with_worktree_heal(repo_root: Path) -> dict[str, Any]:
                             gitdir = repo_root / gitdir
                         gitdir = gitdir.resolve()
                         main_repo = gitdir.parent.parent.parent
-                        src = main_repo / ".agent_bus" / "bridge_config.json"
+                        try:
+                            bus_rel = config_path.parent.resolve().relative_to(repo_root.resolve())
+                        except ValueError:
+                            bus_rel = Path(config_path.parent.name)
+                        src = main_repo / bus_rel / "bridge_config.json"
                         if src.exists():
                             config_path.parent.mkdir(parents=True, exist_ok=True)
                             shutil.copy2(src, config_path)
@@ -227,6 +245,7 @@ def _emit_pre_commit_supervisor_lifecycle_event(
     event_type: str,
     state: str,
     response: "MetaBridgeResponse | None" = None,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Emit pre-commit supervisor lifecycle from the package and response."""
     package: dict[str, Any] = {}
@@ -271,6 +290,7 @@ def _emit_pre_commit_supervisor_lifecycle_event(
     )
     return emit_pipeline_agent_event(
         repo_root,
+        bus_dir=bus_dir,
         event_type=event_type,
         wave_id=wave_id,
         task_id=task_id,
@@ -290,6 +310,7 @@ def _safe_emit_pre_commit_supervisor_lifecycle_event(
     event_type: str,
     state: str,
     response: "MetaBridgeResponse | None" = None,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     try:
         return _emit_pre_commit_supervisor_lifecycle_event(
@@ -297,6 +318,7 @@ def _safe_emit_pre_commit_supervisor_lifecycle_event(
             event_type=event_type,
             state=state,
             response=response,
+            bus_dir=bus_dir,
         )
     except Exception as exc:
         return {"enabled": False, "error": str(exc)}
@@ -488,8 +510,8 @@ def _extract_task_authorization_context(repo_root: Path, task_id: str) -> str:
     return f"(no matching NOW/NEXT excerpt found for {task_id})"
 
 
-def meta_bridge_paths(repo_root: Path) -> MetaBridgePaths:
-    bus_dir = repo_root / META_BUS_DIR_NAME
+def meta_bridge_paths(repo_root: Path, bus_dir: str | Path | None = None) -> MetaBridgePaths:
+    bus_dir = agent_bus_path(repo_root, bus_dir, "meta")
     return MetaBridgePaths(
         repo_root=repo_root,
         bus_dir=bus_dir,
@@ -500,6 +522,13 @@ def meta_bridge_paths(repo_root: Path) -> MetaBridgePaths:
 
 def ensure_runtime_dirs(paths: MetaBridgePaths) -> None:
     paths.bus_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _meta_paths_bus_rel(paths: MetaBridgePaths) -> Path | None:
+    try:
+        return paths.bus_dir.parent.relative_to(paths.repo_root)
+    except ValueError:
+        return None
 
 
 def _decode_process_text(payload: Any) -> str:
@@ -546,7 +575,10 @@ def _iter_untracked_files(repo_root: Path) -> list[Path]:
         if not raw:
             continue
         normalized = raw.replace("\\", "/")
-        if any(normalized == prefix.rstrip("/") or normalized.startswith(prefix) for prefix in TRANSIENT_PATH_PREFIXES):
+        if is_agent_bus_runtime_path(normalized) or any(
+            normalized == prefix.rstrip("/") or normalized.startswith(prefix)
+            for prefix in TRANSIENT_PATH_PREFIXES
+        ):
             continue
         path = repo_root / raw
         if path.is_file():
@@ -609,7 +641,9 @@ def parse_dirty_state(repo_root: Path) -> dict[str, set[str]]:
 
         # Skip ignored paths
         normalized = path.replace("\\", "/")
-        if any(normalized.startswith(prefix) for prefix in TRANSIENT_PATH_PREFIXES):
+        if is_agent_bus_runtime_path(normalized) or any(
+            normalized.startswith(prefix) for prefix in TRANSIENT_PATH_PREFIXES
+        ):
             # For renames, also skip the next part (old path)
             if status.startswith("R"):
                 i += 2
@@ -991,8 +1025,10 @@ def check_dirty_state(repo_root: Path, claimed_files: list[str], *, fenced_files
         # filtering out real paths like .gitignore or .github/
         filtered_extra = set()
         for p in extra:
-            is_ignored = False
+            is_ignored = is_agent_bus_runtime_path(p)
             for prefix in TRANSIENT_PATH_PREFIXES:
+                if is_ignored:
+                    break
                 # Exact directory prefix match (e.g., ".agent_bus/" matches ".agent_bus/foo")
                 if p.startswith(prefix):
                     is_ignored = True
@@ -1677,6 +1713,7 @@ def write_pre_commit_receipt(
     response: MetaBridgeResponse,
     package_path: Path,
     repo_root: Path | None = None,
+    bus_dir: str | Path | None = None,
 ) -> Path:
     """Write a pre-commit receipt after a commit-capable decision.
 
@@ -1727,7 +1764,7 @@ def write_pre_commit_receipt(
         "package_path": str(package_path) if package_path else "",
     }
 
-    receipt_dir = repo_root / META_BUS_DIR_NAME
+    receipt_dir = agent_bus_path(repo_root, bus_dir, "meta")
     receipt_dir.mkdir(parents=True, exist_ok=True)
 
     # Write per-invocation receipt — this is the exact artifact for executor flow
@@ -1756,6 +1793,7 @@ def verify_pre_commit_receipt(
     *,
     receipt_path: Path | None = None,
     max_age_seconds: int = 1800,
+    bus_dir: str | Path | None = None,
 ) -> tuple[bool, str]:
     """Verify that a valid pre-commit receipt exists for current staged state.
 
@@ -1768,7 +1806,7 @@ def verify_pre_commit_receipt(
     Returns (passed, message). The hook calls this — it never runs the supervisor.
     """
     if receipt_path is None:
-        receipt_path = repo_root / META_BUS_DIR_NAME / PRE_COMMIT_RECEIPT_NAME
+        receipt_path = agent_bus_path(repo_root, bus_dir, "meta", PRE_COMMIT_RECEIPT_NAME)
     if not receipt_path.exists():
         return False, (
             "No pre-commit receipt found. Run the meta-bridge supervisor before commit:\n"
@@ -2522,6 +2560,7 @@ def write_post_merge_routing_record(
     response: MetaBridgeResponse,
     package: dict[str, Any],
     repo_root: Path,
+    bus_dir: str | Path | None = None,
 ) -> Path:
     """Write state-bound routing decision record (not a receipt — no blocking enforcement)."""
     state = compute_repo_state(repo_root)
@@ -2548,7 +2587,7 @@ def write_post_merge_routing_record(
     if package.get("next_candidates"):
         record["next_candidates"] = package["next_candidates"]
 
-    record_dir = repo_root / META_BUS_DIR_NAME
+    record_dir = agent_bus_path(repo_root, bus_dir, "meta")
     record_dir.mkdir(parents=True, exist_ok=True)
     record_path = record_dir / POST_MERGE_ROUTING_NAME
     record_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -2572,14 +2611,17 @@ def run_post_merge_review(
     )
 
     try:
-        config = load_bridge_config_with_worktree_heal(paths.repo_root)
+        config = load_bridge_config_with_worktree_heal_at(
+            paths.repo_root,
+            paths.bus_dir.parent / "bridge_config.json",
+        )
     except Exception as exc:
         raise MetaBridgeError(f"Bridge config load failed: {exc}") from exc
     adapter_name = resolve_role_agent(
         load_executor_config(paths.repo_root),
         "reviewer",
     )
-    reviewer_label = bridge_agent_display_name(paths.repo_root, adapter_name)
+    reviewer_label = bridge_agent_display_name(paths.repo_root, adapter_name, _meta_paths_bus_rel(paths))
 
     if verbose:
         print(f"[post-merge] Running {reviewer_label} post-merge review (timeout: {timeout_s}s)...")
@@ -2612,6 +2654,7 @@ def run_post_merge_review(
             timeout_override_s=timeout_s,
             stale_timeout_s=_bounded_watchdog_timeout(timeout_s, META_STALE_TIMEOUT_S),
             stop_after_envelope=True,
+            bus_dir=_meta_paths_bus_rel(paths),
         )
     except BridgeAdapterError as exc:
         return _recover_adapter_envelope(
@@ -2638,6 +2681,7 @@ def run_post_merge_bridge(
     package_path: Path,
     *,
     verbose: bool = False,
+    bus_dir: str | Path | None = None,
 ) -> MetaBridgeResponse:
     """Main entry point for post-merge mode."""
     try:
@@ -2684,7 +2728,7 @@ def run_post_merge_bridge(
             recovery_hint="Ensure package file is inside the RCX repository",
         )
 
-    paths = meta_bridge_paths(repo_root)
+    paths = meta_bridge_paths(repo_root, bus_dir)
     ensure_runtime_dirs(paths)
 
     # Load and validate package
@@ -2831,7 +2875,7 @@ def run_post_merge_bridge(
 
     # Write state-bound routing record — fail closed (invariant 5: state-binding)
     try:
-        record_path = write_post_merge_routing_record(response, package, repo_root)
+        record_path = write_post_merge_routing_record(response, package, repo_root, bus_dir=bus_dir)
         if verbose:
             print(f"[post-merge] Routing record written: {record_path}")
     except Exception as exc:
@@ -2860,12 +2904,15 @@ def run_meta_review(
     prompt = build_meta_reviewer_prompt(package, validation_results, paths.repo_root)
 
     # Load adapter config
-    config = load_bridge_config_with_worktree_heal(paths.repo_root)
+    config = load_bridge_config_with_worktree_heal_at(
+        paths.repo_root,
+        paths.bus_dir.parent / "bridge_config.json",
+    )
     adapter_name = resolve_role_agent(
         load_executor_config(paths.repo_root),
         "reviewer",
     )
-    reviewer_label = bridge_agent_display_name(paths.repo_root, adapter_name)
+    reviewer_label = bridge_agent_display_name(paths.repo_root, adapter_name, _meta_paths_bus_rel(paths))
 
     if verbose:
         print(f"[meta-bridge] Running {reviewer_label} meta-review (timeout: {timeout_s}s)...")
@@ -2902,6 +2949,7 @@ def run_meta_review(
             timeout_override_s=timeout_s,
             stale_timeout_s=_bounded_watchdog_timeout(timeout_s, META_STALE_TIMEOUT_S),
             stop_after_envelope=True,
+            bus_dir=_meta_paths_bus_rel(paths),
         )
     except BridgeAdapterError as exc:
         return _recover_adapter_envelope(
@@ -2929,6 +2977,7 @@ def run_meta_bridge(
     *,
     verbose: bool = False,
     dry_run: bool = False,
+    bus_dir: str | Path | None = None,
 ) -> MetaBridgeResponse:
     """Main entry point: run meta-bridge supervisor on a package file.
 
@@ -2982,7 +3031,7 @@ def run_meta_bridge(
             recovery_hint="Ensure package file is inside the RCX repository, not an unrelated git checkout",
         )
 
-    paths = meta_bridge_paths(repo_root)
+    paths = meta_bridge_paths(repo_root, bus_dir)
     ensure_runtime_dirs(paths)
 
     # Load and validate package
@@ -3177,6 +3226,11 @@ def main() -> int:
         action="store_true",
         help="Output as JSON",
     )
+    parser.add_argument(
+        "--bus-dir",
+        default=None,
+        help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)",
+    )
     args = parser.parse_args()
 
     # Helper to output error in JSON format when --json is set
@@ -3197,6 +3251,32 @@ def main() -> int:
 
     if not args.package.exists():
         return output_error("Package file not found", "FILE_NOT_FOUND")
+    if args.bus_dir is not None:
+        try:
+            package_repo_root = Path(
+                subprocess.run(
+                    ["git", "rev-parse", "--show-toplevel"],
+                    cwd=str(args.package.resolve().parent),
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.strip()
+            )
+            resolve_agent_bus_dir(package_repo_root, args.bus_dir)
+        except (subprocess.CalledProcessError, ExecutorCommonError) as exc:
+            error_response = MetaBridgeResponse(
+                status="error",
+                decision=Decision.ERROR_INTERNAL.value,
+                summary="Invalid agent bus configuration",
+                error_code="INVALID_BUS_DIR",
+                error_detail=str(exc),
+                recovery_hint="Use .agent_bus or a repo-root .agent_bus-<id> directory.",
+            )
+            if args.json:
+                print(json.dumps(error_response.to_dict(), indent=2))
+            else:
+                print(f"[error] Invalid --bus-dir: {exc}", file=sys.stderr)
+            return 1
 
     emit_pre_commit_lifecycle = args.mode != "post-merge" and not args.dry_run
 
@@ -3207,6 +3287,7 @@ def main() -> int:
             response = run_post_merge_bridge(
                 args.package,
                 verbose=args.verbose,
+                bus_dir=args.bus_dir,
             )
         else:
             if emit_pre_commit_lifecycle:
@@ -3219,11 +3300,13 @@ def main() -> int:
                         args.package,
                         event_type="pre_commit_supervisor_started",
                         state="started",
+                        bus_dir=args.bus_dir,
                     )
             response = run_meta_bridge(
                 args.package,
                 verbose=args.verbose,
                 dry_run=args.dry_run,
+                bus_dir=args.bus_dir,
             )
     except MetaBridgeError as exc:
         error_response = MetaBridgeResponse(
@@ -3244,6 +3327,7 @@ def main() -> int:
                 event_type="pre_commit_supervisor_completed",
                 state="error",
                 response=error_response,
+                bus_dir=args.bus_dir,
             )
         return 1
 
@@ -3251,7 +3335,7 @@ def main() -> int:
     receipt = None
     if args.mode != "post-merge" and not args.dry_run and response.decision in RECEIPT_CAPABLE_DECISIONS:
         try:
-            receipt = write_pre_commit_receipt(response, args.package)
+            receipt = write_pre_commit_receipt(response, args.package, bus_dir=args.bus_dir)
         except Exception as exc:
             error_response = MetaBridgeResponse(
                 status="error",
@@ -3267,6 +3351,7 @@ def main() -> int:
                     event_type="pre_commit_supervisor_completed",
                     state="error",
                     response=error_response,
+                    bus_dir=args.bus_dir,
                 )
             if args.json:
                 print(json.dumps(error_response.to_dict(), indent=2))
@@ -3297,6 +3382,7 @@ def main() -> int:
             event_type="pre_commit_supervisor_completed",
             state=response.status,
             response=response,
+            bus_dir=args.bus_dir,
         )
 
     # Exit code based on decision

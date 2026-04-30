@@ -5,6 +5,25 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STATUS_SCRIPT="$SCRIPT_DIR/pipeline_status.sh"
+BUS_DIR="${RCX_AGENT_BUS_DIR:-.agent_bus}"
+if [ "${1:-}" = "--bus-dir" ]; then
+  if [ $# -lt 2 ]; then
+    echo "ERROR: --bus-dir requires a value" >&2
+    exit 2
+  fi
+  BUS_DIR="${2:-}"
+  shift 2
+fi
+case "$BUS_DIR" in
+  /*|*/*|*\\*|*..*|"")
+    echo "ERROR: invalid --bus-dir: $BUS_DIR" >&2
+    exit 2
+    ;;
+esac
+if [[ "$BUS_DIR" != ".agent_bus" && ! "$BUS_DIR" =~ ^\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+  echo "ERROR: --bus-dir must be .agent_bus or .agent_bus-<id>" >&2
+  exit 2
+fi
 
 resolve_observability_repo_root() {
   local root="" current_root=""
@@ -14,7 +33,7 @@ resolve_observability_repo_root() {
     return 0
   fi
   if [ -f "$STATUS_SCRIPT" ]; then
-    root=$(bash "$STATUS_SCRIPT" --print-root 2>/dev/null || true)
+    root=$(RCX_AGENT_BUS_DIR="$BUS_DIR" bash "$STATUS_SCRIPT" --bus-dir "$BUS_DIR" --print-root 2>/dev/null || true)
   fi
   if [ -n "$root" ]; then
     printf '%s\n' "$root"
@@ -27,6 +46,7 @@ if ! REPO_ROOT="$(resolve_observability_repo_root)"; then
   echo "ERROR: cannot resolve repo root" >&2
   exit 1
 fi
+BUS_PATH="$REPO_ROOT/$BUS_DIR"
 SESSION="rcx-pipeline"
 LIVE_LOG_KEY="$(printf '%s' "$REPO_ROOT" | cksum | awk '{print $1}')"
 LIVE_LOG="${RCX_PIPELINE_LIVE_LOG:-/tmp/rcx_pipeline_live_${LIVE_LOG_KEY}.txt}"
@@ -35,7 +55,7 @@ SESSION_HEIGHT="${RCX_PIPELINE_TMUX_HEIGHT:-70}"
 
 usage() {
   cat <<'EOF'
-Usage: pipeline_monitor.sh <command> [options]
+Usage: pipeline_monitor.sh [--bus-dir .agent_bus[-id]] <command> [options]
 
 Dashboard:
   start [--detach]         Launch tmux monitoring session
@@ -74,6 +94,7 @@ set +e  # Do not exit on error
 IDLE_WINDOW_SECONDS=3600
 current_log=""
 tail_pid=""
+BUS_DIR="${RCX_AGENT_BUS_DIR:-${BUS_DIR:-.agent_bus}}"
 
 resolve_repo_root() {
   local root=""
@@ -169,8 +190,8 @@ find_newest_log() {
   [ -n "$repo_root" ] || return
   local newest=""
   newest="$(find_newest_recent_log \
-    "$repo_root"/.agent_bus/raw/phase-b-*/*reviewer*.txt \
-    "$repo_root"/.agent_bus/raw/phase-a-*/*reviewer*.txt \
+    "$repo_root"/"$BUS_DIR"/raw/phase-b-*/*reviewer*.txt \
+    "$repo_root"/"$BUS_DIR"/raw/phase-a-*/*reviewer*.txt \
     "$repo_root"/.scratch/commit_executor_live.log \
     "$repo_root"/.scratch/phase_a_executor_live.log \
     "$repo_root"/.scratch/phase_b_executor_live.log \
@@ -271,12 +292,13 @@ cmd_start() {
   chmod +x "$watcher"
 
   local OBS_DIR="$REPO_ROOT/mu/tools/observability"
-  local repo_q="" obs_q="" watcher_q="" status_q="" root_helper_q=""
+  local repo_q="" obs_q="" watcher_q="" status_q="" root_helper_q="" bus_q=""
   printf -v repo_q '%q' "$REPO_ROOT"
   printf -v obs_q '%q' "$OBS_DIR"
   printf -v watcher_q '%q' "$watcher"
   printf -v status_q '%q' "$OBS_DIR/pipeline_status.sh"
   printf -v root_helper_q '%q' "$OBS_DIR/_resolve_live_root.sh"
+  printf -v bus_q '%q' "$BUS_DIR"
 
   local pane1_cmd=""
   local pane2_cmd=""
@@ -285,10 +307,10 @@ cmd_start() {
   # Do not pin panes to the launcher worktree. Let each pane re-resolve the
   # freshest active pipeline worktree on every refresh so tmux stays honest
   # when the real run lives in a different linked worktree.
-  pane1_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $watcher_q"
-  pane2_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_findings.sh"
-  pane3_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_processes.sh"
-  pane4_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_timeline.sh"
+  pane1_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $watcher_q"
+  pane2_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_findings.sh"
+  pane3_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_processes.sh"
+  pane4_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_timeline.sh"
 
   # Create session
   tmux new-session -d -x "$SESSION_WIDTH" -y "$SESSION_HEIGHT" -s "$SESSION" "$pane1_cmd"
@@ -365,7 +387,7 @@ cmd_attach() {
 }
 
 cmd_status() {
-  exec env -u RCX_OBS_REPO_ROOT "$STATUS_SCRIPT"
+  exec env -u RCX_OBS_REPO_ROOT RCX_AGENT_BUS_DIR="$BUS_DIR" "$STATUS_SCRIPT" --bus-dir "$BUS_DIR"
 }
 
 # ── exec: Run a command with live tee to tmux ──
@@ -379,13 +401,13 @@ cmd_exec() {
   echo "Output streaming to tmux monitor via $LIVE_LOG"
   echo "───────────────────────────────────────────────"
   # Run with tee — output goes to both this terminal and the live log
-  "$@" 2>&1 | tee "$LIVE_LOG"
+  RCX_AGENT_BUS_DIR="$BUS_DIR" "$@" 2>&1 | tee "$LIVE_LOG"
 }
 
 # ── clear-lock: Remove stale bridge locks ──
 cmd_clear_lock() {
   local found=false
-  for lock in "$REPO_ROOT/.agent_bus/meta/meta_bridge.lock" "$REPO_ROOT/.agent_bus/bridge.lock"; do
+  for lock in "$BUS_PATH/meta/meta_bridge.lock" "$BUS_PATH/bridge.lock"; do
     if [ ! -f "$lock" ]; then
       continue
     fi
@@ -414,7 +436,7 @@ cmd_nudge() {
   local pr="${1:-}"
   if [ -z "$pr" ]; then
     # Auto-detect from executor state
-    pr=$(ls -t "$REPO_ROOT/.agent_bus/executors/commit_executor_"*.json 2>/dev/null | head -1 | xargs jq -r '.pr_number // empty' 2>/dev/null)
+    pr=$(ls -t "$BUS_PATH/executors/commit_executor_"*.json 2>/dev/null | head -1 | xargs jq -r '.pr_number // empty' 2>/dev/null)
     if [ -z "$pr" ]; then
       echo "Usage: pipeline_monitor.sh nudge <pr-number>"
       exit 1

@@ -43,8 +43,8 @@ def _write_phase_a_plan(repo: Path, *, plan_name: str = "pager_plan") -> Path:
 
 
 def _fake_bridge(repo: Path, *, decision: str, exit_code: int = 0):
-    def _run_bridge(repo_root, rel_plan_path, round_num, *, job_id, agent_review_context=""):
-        rendered = repo_root / ".agent_bus" / "rendered" / f"{job_id}.md"
+    def _run_bridge(repo_root, rel_plan_path, round_num, *, job_id, agent_review_context="", bus_dir=None):
+        rendered = phase_a_mod.agent_bus_path(repo_root, bus_dir, "rendered", f"{job_id}.md")
         rendered.parent.mkdir(parents=True, exist_ok=True)
         rendered.write_text(f"Decision: {decision}\n", encoding="utf-8")
         return {"exit_code": exit_code, "stdout": decision, "stderr": "", "job_id": job_id}
@@ -85,6 +85,35 @@ def test_run_phase_a_emits_entered_reviewer_and_go_events(tmp_path):
     assert pager_calls[-1]["state"] == "go"
 
 
+def test_run_phase_a_go_event_uses_namespaced_bus(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_phase_a_plan(repo)
+    pager_calls = []
+
+    def fake_emit(repo_root, **kwargs):
+        pager_calls.append(kwargs)
+        return {"enabled": True, "event_id": kwargs["event_type"], "attempted": []}
+
+    with patch.object(phase_a_mod, "load_routing_record", return_value={"decision": "ROUTE_PHASE_A"}), \
+         patch.object(phase_a_mod, "emit_pipeline_agent_event", side_effect=fake_emit), \
+         patch.object(phase_a_mod, "run_sdk_agents", return_value={"exit_code": 0}), \
+         patch.object(phase_a_mod, "run_bridge_design_review", side_effect=_fake_bridge(repo, decision="GO")), \
+         patch.object(phase_a_mod, "uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="bbbbccccddddeeee"))):
+        result = phase_a_mod.run_phase_a(
+            repo,
+            "pager_plan",
+            max_bridge_rounds=1,
+            bus_dir=".agent_bus-test",
+        )
+
+    assert result["status"] == "converged"
+    assert [call["event_type"] for call in pager_calls][-1] == "phase_a_go"
+    assert {call["bus_dir"] for call in pager_calls} == {".agent_bus-test"}
+    assert (repo / ".agent_bus-test" / "rendered" / "phase-a-r1-bbbbcccc.md").exists()
+    assert not (repo / ".agent_bus" / "rendered" / "phase-a-r1-bbbbcccc.md").exists()
+
+
 def test_run_phase_a_emits_question_fail_closed_event(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -118,12 +147,15 @@ def test_run_phase_a_emits_implementer_transition_and_no_go_event(tmp_path):
         pager_calls.append(kwargs)
         return {"enabled": True, "event_id": kwargs["event_type"], "attempted": []}
 
-    def fake_implementer(repo_root, prompt, *, backend, timeout, verbose):
+    implementer_bus_dirs = []
+
+    def fake_implementer(repo_root, prompt, *, backend, timeout, verbose, bus_dir=None):
+        implementer_bus_dirs.append(bus_dir)
         plan = repo_root / "reports" / "control_plane" / "pager_plan.md"
         plan.write_text(plan.read_text(encoding="utf-8") + "\nImplementation note.\n", encoding="utf-8")
         return {"status": "success", "exit_code": 0, "stderr": ""}
 
-    raw_dir = repo / ".agent_bus" / "raw" / "phase-a-r1-99990000"
+    raw_dir = repo / ".agent_bus-test" / "raw" / "phase-a-r1-99990000"
     raw_dir.mkdir(parents=True, exist_ok=True)
     (raw_dir / "reviewer.txt").write_text(
         "BEGIN_AGENT_ENVELOPE\n"
@@ -138,9 +170,11 @@ def test_run_phase_a_emits_implementer_transition_and_no_go_event(tmp_path):
          patch.object(phase_a_mod, "run_bridge_design_review", side_effect=_fake_bridge(repo, decision="NO_GO", exit_code=1)), \
          patch.object(phase_a_mod, "_invoke_implementer", side_effect=fake_implementer), \
          patch.object(phase_a_mod, "uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="99990000aaaabbbb"))):
-        result = phase_a_mod.run_phase_a(repo, "pager_plan", max_bridge_rounds=1)
+        result = phase_a_mod.run_phase_a(repo, "pager_plan", max_bridge_rounds=1, bus_dir=".agent_bus-test")
 
     assert result["status"] == "max_rounds_reached"
+    assert implementer_bus_dirs == [".agent_bus-test"]
     assert "phase_a_implementer_started" in [call["event_type"] for call in pager_calls]
     assert "phase_a_implementer_completed" in [call["event_type"] for call in pager_calls]
     assert [call["event_type"] for call in pager_calls][-1] == "phase_a_no_go"
+    assert {call["bus_dir"] for call in pager_calls} == {".agent_bus-test"}

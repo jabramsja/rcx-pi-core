@@ -13,14 +13,17 @@ import json
 import os
 import re
 import signal
+import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-ROUTING_RECORD_PATH = Path(".agent_bus/meta/post_merge_routing.json")
-BRIDGE_CONFIG_PATH = Path(".agent_bus/bridge_config.json")
+DEFAULT_AGENT_BUS_DIR = Path(".agent_bus")
+ROUTING_RECORD_PATH = DEFAULT_AGENT_BUS_DIR / "meta" / "post_merge_routing.json"
+BRIDGE_CONFIG_PATH = DEFAULT_AGENT_BUS_DIR / "bridge_config.json"
+AGENT_BUS_NAMESPACE_RE = re.compile(r"^\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$")
 MAX_WAVE_ID_LEN = 80
 WAVE_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$")
 REVIEW_MODE_ENV_VARS = ("RCX_AGENT_REVIEW_MODE", "RCX_REVIEW_MODE")
@@ -188,6 +191,163 @@ class ExecutorCommonError(RuntimeError):
     """Raised when a shared executor utility fails."""
 
 
+def normalize_agent_bus_dir(bus_dir: str | Path | None = None) -> Path:
+    """Return the repo-relative active agent bus directory.
+
+    The executor owns exactly two runtime bus shapes in this wave:
+    ``.agent_bus`` and repo-root namespaced buses like ``.agent_bus-test``.
+    Arbitrary in-repo directories, nested paths, absolute paths, traversal, and
+    symlink indirection are deliberately rejected by the resolver below.
+    """
+    if bus_dir is None:
+        return DEFAULT_AGENT_BUS_DIR
+    raw = str(bus_dir).strip()
+    if not raw:
+        return DEFAULT_AGENT_BUS_DIR
+    if "\\" in raw:
+        raise ExecutorCommonError(f"Invalid --bus-dir {raw!r}: backslashes are not allowed")
+    raw = raw.rstrip("/")
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        raise ExecutorCommonError(f"Invalid --bus-dir {raw!r}: absolute paths are not allowed")
+    parts = candidate.parts
+    if len(parts) != 1 or any(part in {"", ".", ".."} for part in parts):
+        raise ExecutorCommonError(
+            f"Invalid --bus-dir {raw!r}: only repo-root .agent_bus or .agent_bus-<id> is allowed"
+        )
+    name = parts[0]
+    if name == DEFAULT_AGENT_BUS_DIR.name:
+        return DEFAULT_AGENT_BUS_DIR
+    if AGENT_BUS_NAMESPACE_RE.fullmatch(name):
+        return Path(name)
+    raise ExecutorCommonError(
+        f"Invalid --bus-dir {raw!r}: expected .agent_bus or .agent_bus-<id>"
+    )
+
+
+def resolve_agent_bus_dir(repo_root: Path, bus_dir: str | Path | None = None) -> Path:
+    """Resolve and validate the active agent bus directory under repo_root."""
+    root = Path(repo_root).resolve()
+    rel = normalize_agent_bus_dir(bus_dir)
+    candidate = root / rel.name
+    if candidate.exists():
+        if candidate.is_symlink():
+            raise ExecutorCommonError(f"Invalid --bus-dir {rel}: bus directory must not be a symlink")
+        try:
+            resolved = candidate.resolve(strict=True)
+        except OSError as exc:
+            raise ExecutorCommonError(f"Invalid --bus-dir {rel}: cannot resolve bus directory: {exc}") from exc
+        if resolved != candidate:
+            raise ExecutorCommonError(f"Invalid --bus-dir {rel}: resolved path escapes repo-root bus directory")
+    else:
+        resolved = candidate.resolve(strict=False)
+        if resolved != candidate:
+            raise ExecutorCommonError(f"Invalid --bus-dir {rel}: resolved path escapes repo-root bus directory")
+    return candidate
+
+
+def agent_bus_relpath(bus_dir: str | Path | None = None, *parts: str | Path) -> Path:
+    """Build a repo-relative path under the active bus."""
+    rel = normalize_agent_bus_dir(bus_dir)
+    for part in parts:
+        rel = rel / part
+    return rel
+
+
+def agent_bus_path(repo_root: Path, bus_dir: str | Path | None = None, *parts: str | Path) -> Path:
+    """Build an absolute path under the active bus after resolver validation."""
+    path = resolve_agent_bus_dir(repo_root, bus_dir)
+    for part in parts:
+        path = path / part
+    return path
+
+
+def routing_record_path(repo_root: Path, bus_dir: str | Path | None = None) -> Path:
+    return agent_bus_path(repo_root, bus_dir, "meta", "post_merge_routing.json")
+
+
+def bridge_config_path(repo_root: Path, bus_dir: str | Path | None = None) -> Path:
+    return agent_bus_path(repo_root, bus_dir, "bridge_config.json")
+
+
+def _bridge_config_seed_candidates(repo_root: Path, bus_dir: str | Path | None = None) -> list[Path]:
+    """Return trusted bridge_config sources for seeding an active bus."""
+    root = Path(repo_root)
+    active_rel = agent_bus_relpath(bus_dir)
+    candidates: list[Path] = []
+
+    same_repo_default = root / DEFAULT_AGENT_BUS_DIR / "bridge_config.json"
+    if active_rel != DEFAULT_AGENT_BUS_DIR:
+        candidates.append(same_repo_default)
+
+    try:
+        wt_out = subprocess.check_output(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=str(root),
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        wt_out = ""
+    main_path: Path | None = None
+    for line in wt_out.splitlines():
+        if line.startswith("worktree "):
+            main_path = Path(line[len("worktree "):].strip())
+            break
+    if main_path is not None:
+        try:
+            same_worktree = main_path.resolve() == root.resolve()
+        except OSError:
+            same_worktree = False
+        if not same_worktree:
+            candidates.append(main_path / active_rel / "bridge_config.json")
+            if active_rel != DEFAULT_AGENT_BUS_DIR:
+                candidates.append(main_path / DEFAULT_AGENT_BUS_DIR / "bridge_config.json")
+
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        key = candidate.resolve(strict=False)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def ensure_bridge_config_path(repo_root: Path, bus_dir: str | Path | None = None) -> Path:
+    """Return the active bridge config path, seeding namespaced buses if needed.
+
+    The bridge config is invocation configuration, not pipeline runtime state.
+    A fresh namespaced bus may start empty because bus directories are ignored,
+    so copy the canonical default config into the active bus before adapter
+    loading. If no trusted source exists, the caller's normal config load still
+    fails closed with its existing error.
+    """
+    config_path = bridge_config_path(repo_root, bus_dir)
+    if config_path.exists():
+        return config_path
+    for source in _bridge_config_seed_candidates(repo_root, bus_dir):
+        if not source.exists() or source == config_path:
+            continue
+        if source.is_symlink() or source.parent.is_symlink():
+            continue
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, config_path)
+        break
+    return config_path
+
+
+def is_agent_bus_runtime_path(path: str | Path) -> bool:
+    """Return True for repo-root .agent_bus or .agent_bus-* runtime paths."""
+    raw = str(path).replace("\\", "/").strip()
+    if not raw:
+        return False
+    raw = raw[2:] if raw.startswith("./") else raw
+    first = raw.split("/", 1)[0]
+    return first == ".agent_bus" or first.startswith(".agent_bus-")
+
+
 def current_review_mode_reason() -> str | None:
     """Return the first active agent-review mode marker, if any."""
     for name in REVIEW_MODE_ENV_VARS:
@@ -345,9 +505,12 @@ def _materialize_role_agents(
     return config
 
 
-def load_bridge_agent_catalog(repo_root: Path) -> dict[str, dict[str, Any]]:
+def load_bridge_agent_catalog(
+    repo_root: Path,
+    bus_dir: str | Path | None = None,
+) -> dict[str, dict[str, Any]]:
     """Load optional display metadata for configured bridge agents."""
-    config_path = repo_root / BRIDGE_CONFIG_PATH
+    config_path = bridge_config_path(repo_root, bus_dir)
     payload: dict[str, Any] = {}
     if config_path.exists():
         try:
@@ -375,8 +538,12 @@ def load_bridge_agent_catalog(repo_root: Path) -> dict[str, dict[str, Any]]:
     return catalog
 
 
-def bridge_agent_display_name(repo_root: Path, agent_name: str) -> str:
-    catalog = load_bridge_agent_catalog(repo_root)
+def bridge_agent_display_name(
+    repo_root: Path,
+    agent_name: str,
+    bus_dir: str | Path | None = None,
+) -> str:
+    catalog = load_bridge_agent_catalog(repo_root, bus_dir)
     raw = catalog.get(agent_name, {})
     display_name = _nonempty_str(raw.get("display_name"))
     if display_name is not None:
@@ -384,8 +551,12 @@ def bridge_agent_display_name(repo_root: Path, agent_name: str) -> str:
     return DEFAULT_AGENT_DISPLAY_NAMES.get(agent_name, agent_name.replace("_", " ").title())
 
 
-def bridge_agent_status_name(repo_root: Path, agent_name: str) -> str:
-    display_name = bridge_agent_display_name(repo_root, agent_name)
+def bridge_agent_status_name(
+    repo_root: Path,
+    agent_name: str,
+    bus_dir: str | Path | None = None,
+) -> str:
+    display_name = bridge_agent_display_name(repo_root, agent_name, bus_dir)
     head = display_name.split()
     if head:
         return head[0]
@@ -395,6 +566,7 @@ def bridge_agent_status_name(repo_root: Path, agent_name: str) -> str:
 def configured_role_agents(
     repo_root: Path,
     config: dict[str, Any] | None = None,
+    bus_dir: str | Path | None = None,
 ) -> dict[str, dict[str, str]]:
     config = config or load_executor_config(repo_root)
     roles: dict[str, dict[str, str]] = {}
@@ -402,8 +574,8 @@ def configured_role_agents(
         agent = resolve_role_agent(config, role)
         roles[role] = {
             "agent": agent,
-            "display_name": bridge_agent_display_name(repo_root, agent),
-            "status_name": bridge_agent_status_name(repo_root, agent),
+            "display_name": bridge_agent_display_name(repo_root, agent, bus_dir),
+            "status_name": bridge_agent_status_name(repo_root, agent, bus_dir),
         }
     return roles
 
@@ -427,7 +599,12 @@ def load_executor_config(repo_root: Path) -> dict[str, Any]:
     return _materialize_role_agents(config, raw_overrides=raw_overrides)
 
 
-def emit_pipeline_agent_event(repo_root: Path, **kwargs: Any) -> dict[str, Any]:
+def emit_pipeline_agent_event(
+    repo_root: Path,
+    *,
+    bus_dir: str | Path | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
     """Emit a pipeline pager event through the shared observability entrypoint."""
     try:
         from pipeline_agent_pager import emit_transition_event
@@ -442,7 +619,7 @@ def emit_pipeline_agent_event(repo_root: Path, **kwargs: Any) -> dict[str, Any]:
         assert spec.loader is not None
         spec.loader.exec_module(module)
         emit_transition_event = module.emit_transition_event
-    return emit_transition_event(repo_root, **kwargs)
+    return emit_transition_event(repo_root, bus_dir=bus_dir, **kwargs)
 
 
 def normalize_wave_id(raw: str) -> str:
@@ -541,7 +718,10 @@ def terminate_process_tree(
             continue
 
 
-def load_routing_record(repo_root: Path) -> dict[str, Any]:
+def load_routing_record(
+    repo_root: Path,
+    bus_dir: str | Path | None = None,
+) -> dict[str, Any]:
     """Load and validate the post-merge routing record.
 
     This is the canonical implementation. All executors should import
@@ -551,7 +731,7 @@ def load_routing_record(repo_root: Path) -> dict[str, Any]:
     Raises ExecutorCommonError if the file is missing, invalid JSON,
     or missing required keys.
     """
-    record_path = repo_root / ROUTING_RECORD_PATH
+    record_path = routing_record_path(repo_root, bus_dir)
     if not record_path.exists():
         raise ExecutorCommonError(f"Routing record not found: {record_path}")
 
@@ -770,6 +950,7 @@ def build_and_write_routing_record(
     merge_sha: str | None = None,
     repo_root: Path | None = None,
     output_path: Path | None = None,
+    bus_dir: str | Path | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Build + persist a routing record. Returns (record, errors).
 
@@ -800,7 +981,7 @@ def build_and_write_routing_record(
     target_path = (
         output_path
         if output_path is not None
-        else effective_repo_root / ROUTING_RECORD_PATH
+        else routing_record_path(effective_repo_root, bus_dir)
     )
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")

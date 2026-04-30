@@ -2,6 +2,15 @@
 # _pane_processes.sh — Human-readable pipeline status pane for tmux
 # Shows what's happening in plain language, not just PIDs.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BUS_DIR="${RCX_AGENT_BUS_DIR:-${BUS_DIR:-.agent_bus}}"
+if [[ "$BUS_DIR" == /* || "$BUS_DIR" == *"/"* || "$BUS_DIR" == *"\\"* || "$BUS_DIR" == *".."* ]]; then
+  echo "ERROR: invalid RCX_AGENT_BUS_DIR: $BUS_DIR" >&2
+  exit 2
+fi
+if [[ "$BUS_DIR" != ".agent_bus" && ! "$BUS_DIR" =~ ^\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+  echo "ERROR: RCX_AGENT_BUS_DIR must be .agent_bus or .agent_bus-<id>" >&2
+  exit 2
+fi
 resolve_repo_root() {
   local helper="$SCRIPT_DIR/_resolve_live_root.sh"
   local root=""
@@ -27,7 +36,7 @@ refresh_context() {
     LAST_HASH=""
   fi
   REPO_ROOT="$next_root"
-  BUS="$REPO_ROOT/.agent_bus"
+  BUS="$REPO_ROOT/$BUS_DIR"
   BRANCH_NAME="$next_branch"
   load_role_agent_labels "$REPO_ROOT"
 }
@@ -280,7 +289,7 @@ bridge_agent_name_for_command() {
 }
 
 render_pager_dispatch_line() {
-  python3 - "$REPO_ROOT" <<'PY' 2>/dev/null
+  python3 - "$REPO_ROOT" "$BUS_DIR" <<'PY' 2>/dev/null
 from __future__ import annotations
 
 import json
@@ -289,7 +298,8 @@ from pathlib import Path
 import sys
 
 repo_root = Path(sys.argv[1]).resolve()
-state_path = repo_root / ".agent_bus" / "observability" / "pipeline_agent_pager_state.json"
+bus_dir = sys.argv[2]
+state_path = repo_root / bus_dir / "observability" / "pipeline_agent_pager_state.json"
 if not state_path.is_file():
     raise SystemExit(0)
 
@@ -729,11 +739,11 @@ else:
   DASHBOARD_PY="$SCRIPT_DIR/pipeline_dashboard.py"
   if [ -f "$DASHBOARD_PY" ]; then
     RECOVERY_TMP="/tmp/rcx_pane_processes_recovery_$$.txt"
-    python3 "$DASHBOARD_PY" --render-recovery --repo-root "$REPO_ROOT" > "$RECOVERY_TMP" 2>/dev/null || true
+    python3 "$DASHBOARD_PY" --render-recovery --repo-root "$REPO_ROOT" --bus-dir "$BUS_DIR" > "$RECOVERY_TMP" 2>/dev/null || true
     recovery_line_count=$(wc -l < "$RECOVERY_TMP" 2>/dev/null | xargs)
     if [[ "$recovery_line_count" =~ ^[0-9]+$ ]] && [ "$recovery_line_count" -gt 0 ]; then
       # Add staleness indicator to recovery header — check the status file age
-      recovery_status_file="$REPO_ROOT/.agent_bus/recovery/recovery_status.json"
+      recovery_status_file="$BUS/recovery/recovery_status.json"
       recovery_age_label=""
       if [ -f "$recovery_status_file" ]; then
         recovery_age=$(( $(date +%s) - $(stat -f%m "$recovery_status_file" 2>/dev/null || stat -c%Y "$recovery_status_file" 2>/dev/null || echo 0) ))
@@ -784,7 +794,7 @@ else:
   # Live activity — show whichever model is active (implementer OR reviewer)
   # Pick the most recently modified source
   IMPL=$(ls -t "$REPO_ROOT/.scratch/phase_b_implementer_output_"*.txt 2>/dev/null | head -1) || true
-  REVIEWER=$(ls -t "$REPO_ROOT/.agent_bus/raw"/phase-?-r[0-9]*/*reviewer*.txt 2>/dev/null | head -1) || true
+  REVIEWER=$(ls -t "$BUS/raw"/phase-?-r[0-9]*/*reviewer*.txt 2>/dev/null | head -1) || true
   # Find which source is freshest
   activity_source=""
   activity_label=""

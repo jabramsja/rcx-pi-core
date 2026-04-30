@@ -26,16 +26,50 @@ DEFAULT_AGENT_DISPLAY_NAMES = {
 try:
     from executor_common import (
         ExecutorCommonError,
+        agent_bus_path,
+        agent_bus_relpath,
         bridge_agent_display_name,
+        bridge_config_path,
         emit_pipeline_agent_event,
         load_routing_record,
+        resolve_agent_bus_dir,
     )
 except Exception:
     class ExecutorCommonError(RuntimeError):
         pass
 
-    def bridge_agent_display_name(repo_root: Path, agent_name: str) -> str:
-        config_path = repo_root / ".agent_bus" / "bridge_config.json"
+    def agent_bus_relpath(bus_dir: str | Path | None = None, *parts: str | Path) -> Path:
+        raw = str(bus_dir or ".agent_bus").strip().rstrip("/")
+        if (
+            not raw
+            or "\\" in raw
+            or "/" in raw
+            or raw.startswith("..")
+            or Path(raw).is_absolute()
+            or (raw != ".agent_bus" and re.fullmatch(r"\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*", raw) is None)
+        ):
+            raise ExecutorCommonError(f"Invalid --bus-dir: {raw}")
+        return Path(raw).joinpath(*parts)
+
+    def resolve_agent_bus_dir(repo_root: Path, bus_dir: str | Path | None = None) -> Path:
+        rel = agent_bus_relpath(bus_dir)
+        path = repo_root / rel
+        if path.exists() and path.is_symlink():
+            raise ExecutorCommonError(f"Invalid --bus-dir {rel}: bus directory must not be a symlink")
+        return path
+
+    def agent_bus_path(repo_root: Path, bus_dir: str | Path | None = None, *parts: str | Path) -> Path:
+        return resolve_agent_bus_dir(repo_root, bus_dir).joinpath(*parts)
+
+    def bridge_config_path(repo_root: Path, bus_dir: str | Path | None = None) -> Path:
+        return agent_bus_path(repo_root, bus_dir, "bridge_config.json")
+
+    def bridge_agent_display_name(
+        repo_root: Path,
+        agent_name: str,
+        bus_dir: str | Path | None = None,
+    ) -> str:
+        config_path = bridge_config_path(repo_root, bus_dir)
         try:
             payload = json.loads(config_path.read_text(encoding="utf-8"))
             display_name = (
@@ -50,14 +84,17 @@ except Exception:
             pass
         return DEFAULT_AGENT_DISPLAY_NAMES.get(agent_name, agent_name.replace("_", " ").title())
 
-    def load_routing_record(repo_root: Path) -> dict[str, Any]:
+    def load_routing_record(repo_root: Path, bus_dir: str | Path | None = None) -> dict[str, Any]:
         raise ExecutorCommonError(f"Routing record not available for {repo_root}")
 
-    def emit_pipeline_agent_event(repo_root: Path, **kwargs: Any) -> dict[str, Any]:
+    def emit_pipeline_agent_event(
+        repo_root: Path,
+        bus_dir: str | Path | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         raise RuntimeError(f"pipeline pager emit unavailable for {repo_root}: {kwargs.get('event_type')}")
 REFRESH_INTERVAL = 5
-RECOVERY_LOG_REL = Path(".agent_bus") / "recovery" / "recovery_log.json"
-RECOVERY_STATUS_REL = Path(".agent_bus") / "recovery" / "recovery_status.json"
+ACTIVE_BUS_DIR: Path | None = None
 _HUNG_THRESHOLD_SECONDS = 90
 IDLE_NON_GO_BRIDGE_DECISIONS = frozenset({"REQUEST_CHANGES"})
 IDLE_NON_GO_META_DECISIONS = frozenset({"NEEDS_PHASE_B"})
@@ -78,6 +115,14 @@ PHASE_C = {"post-merge": CYN, "phase-a": YEL, "phase-b": MAG, "commit": GRN, "di
 DEC_C = {"GO": GRN, "COMMIT_GO": GRN, "COMMIT_GO_HOLD_PUSH": YEL, "REQUEST_CHANGES": YEL, "NO_GO": RED,
          "NEEDS_PHASE_B": YEL, "NEEDS_PHASE_A": YEL, "QUESTION": MAG, "ERROR": RED, "STALE": RED}
 W = 72  # box width
+
+
+def _bus_path(repo_root: Path, *parts: str | Path) -> Path:
+    return agent_bus_path(repo_root, ACTIVE_BUS_DIR, *parts)
+
+
+def _bus_relpath(*parts: str | Path) -> Path:
+    return agent_bus_relpath(ACTIVE_BUS_DIR, *parts)
 
 
 def box_top():    return f"{B}╔{'═' * W}╗{R}"
@@ -150,7 +195,7 @@ def _bridge_agent_name_for_command(line: str) -> str | None:
 
 
 def _read_recovery_status(repo_root: Path) -> dict[str, Any]:
-    path = repo_root / RECOVERY_STATUS_REL
+    path = _bus_path(repo_root, "recovery", "recovery_status.json")
     if not path.exists():
         return {}
     try:
@@ -161,7 +206,7 @@ def _read_recovery_status(repo_root: Path) -> dict[str, Any]:
 
 
 def _read_recovery_attempts(repo_root: Path) -> list[dict[str, Any]]:
-    path = repo_root / RECOVERY_LOG_REL
+    path = _bus_path(repo_root, "recovery", "recovery_log.json")
     if not path.exists():
         return []
     try:
@@ -228,9 +273,9 @@ def _read_text(path: Path) -> str:
 def _routing_context_anchor_mtime(repo_root: Path) -> float:
     mtimes: list[float] = []
     for rel in (
-        Path(".agent_bus") / "meta" / "post_merge_routing.json",
-        Path(".agent_bus") / "executors" / "phase_b_state.json",
-        Path(".agent_bus") / "executors" / "phase_a_state.json",
+        _bus_relpath("meta", "post_merge_routing.json"),
+        _bus_relpath("executors", "phase_b_state.json"),
+        _bus_relpath("executors", "phase_a_state.json"),
     ):
         path = repo_root / rel
         try:
@@ -710,7 +755,7 @@ def bridge_round_history():
 
     Returns list of dicts with job_id, decision, blocking (list), non_blocking (list), timestamp.
     """
-    raw_dir = REPO_ROOT / ".agent_bus" / "raw"
+    raw_dir = _bus_path(REPO_ROOT, "raw")
     if not raw_dir.exists():
         return []
     rounds = []
@@ -747,7 +792,7 @@ def bridge_round_history():
 
 def latest_bridge_summary():
     """Return (job_id, decision, summary, blocking_findings, non_blocking_findings) from most recent reviewer."""
-    raw_dir = REPO_ROOT / ".agent_bus" / "raw"
+    raw_dir = _bus_path(REPO_ROOT, "raw")
     if not raw_dir.exists():
         return None
     latest = None
@@ -802,7 +847,7 @@ def _read_latest_envelope(path: Path, *, begin: str, end: str) -> dict[str, Any]
 def _bridge_turn_matches_plan(repo_root: Path, job_id: str, turn_name: str, plan_path: str) -> bool:
     if not plan_path:
         return False
-    prompt_path = repo_root / ".agent_bus" / "prompts" / job_id / turn_name
+    prompt_path = _bus_path(repo_root, "prompts", job_id, turn_name)
     prompt_text = _read_text(prompt_path)
     return bool(prompt_text) and plan_path in prompt_text
 
@@ -813,7 +858,7 @@ def _latest_bridge_non_go_candidate(
     plan_path: str = "",
     not_before: float = 0.0,
 ) -> dict[str, Any] | None:
-    raw_dir = repo_root / ".agent_bus" / "raw"
+    raw_dir = _bus_path(repo_root, "raw")
     if not raw_dir.exists():
         return None
     latest_path: Path | None = None
@@ -880,7 +925,7 @@ def _meta_turn_matches_context(
     wave_id: str = "",
     plan_path: str = "",
 ) -> bool:
-    prompt_path = repo_root / ".agent_bus" / "meta" / "prompts" / turn_name
+    prompt_path = _bus_path(repo_root, "meta", "prompts", turn_name)
     prompt_text = _read_text(prompt_path)
     if not prompt_text:
         return False
@@ -901,7 +946,7 @@ def _latest_meta_non_go_candidate(
     plan_path: str = "",
     not_before: float = 0.0,
 ) -> dict[str, Any] | None:
-    raw_dir = repo_root / ".agent_bus" / "meta" / "raw"
+    raw_dir = _bus_path(repo_root, "meta", "raw")
     if not raw_dir.exists():
         return None
     candidates: list[tuple[float, Path]] = []
@@ -987,7 +1032,7 @@ def _recovery_idle_non_go_candidate(repo_root: Path, *, wave_id: str = "") -> di
         "summary": f"tmux idle after {_human_failure_class(failure_class)}",
         "reason": reason or _human_failure_class(failure_class),
         "artifact_paths": {
-            "recovery_status": str(RECOVERY_STATUS_REL),
+            "recovery_status": str(_bus_relpath("recovery", "recovery_status.json")),
         },
         "transition_key": (
             "tmux-idle:"
@@ -1041,7 +1086,7 @@ def _routing_context(repo_root: Path, candidate: dict[str, Any]) -> tuple[str, s
     wave_id = ""
     plan_path = ""
     try:
-        routing = load_routing_record(repo_root)
+        routing = load_routing_record(repo_root, bus_dir=ACTIVE_BUS_DIR)
     except Exception:
         routing = {}
     if isinstance(routing, dict):
@@ -1050,8 +1095,8 @@ def _routing_context(repo_root: Path, candidate: dict[str, Any]) -> tuple[str, s
         plan_path = str(routing.get("tracked_packet") or routing.get("plan_path") or "").strip()
 
     for state_rel in (
-        Path(".agent_bus/executors/phase_b_state.json"),
-        Path(".agent_bus/executors/phase_a_state.json"),
+        _bus_relpath("executors", "phase_b_state.json"),
+        _bus_relpath("executors", "phase_a_state.json"),
     ):
         if task_id and wave_id and plan_path:
             break
@@ -1098,6 +1143,7 @@ def emit_idle_non_go_alert(repo_root: Path, *, phase: str | None = None) -> dict
 
     result = emit_pipeline_agent_event(
         repo_root,
+        bus_dir=ACTIVE_BUS_DIR,
         event_type="pipeline_hard_fail",
         wave_id=wave_id,
         task_id=task_id,
@@ -1133,7 +1179,7 @@ def agent_status():
 
 
 def db_latest_jobs(n=3):
-    db = REPO_ROOT / ".agent_bus" / "bridge.db"
+    db = _bus_path(REPO_ROOT, "bridge.db")
     if not db.exists():
         return []
     try:
@@ -1189,7 +1235,7 @@ def render():
                 label = f"{YEL}SDK agents{R} running"
             else:
                 agent_name, _, role = name.partition("-")
-                display_name = bridge_agent_display_name(REPO_ROOT, agent_name)
+                display_name = bridge_agent_display_name(REPO_ROOT, agent_name, bus_dir=ACTIVE_BUS_DIR)
                 color, activity = {
                     "review": (CYN, "reviewing"),
                     "implement": (MAG, "implementing"),
@@ -1210,7 +1256,7 @@ def render():
         out.append(box_mid())
 
     # Routing
-    routing = read_json(REPO_ROOT / ".agent_bus" / "meta" / "post_merge_routing.json")
+    routing = read_json(_bus_path(REPO_ROOT, "meta", "post_merge_routing.json"))
     if routing:
         out.append(section("ROUTING"))
         dec = routing.get("decision", "?")
@@ -1221,7 +1267,7 @@ def render():
         out.append(box_mid())
 
     # Phase B state
-    pb = read_json(REPO_ROOT / ".agent_bus" / "executors" / "phase_b_state.json")
+    pb = read_json(_bus_path(REPO_ROOT, "executors", "phase_b_state.json"))
     if pb:
         out.append(section("PHASE B STATE"))
         out.append(box_line(f"  Step: {B}{pb.get('completed_step', '?')}{R}"))
@@ -1339,10 +1385,11 @@ def render():
 
 
 def main(argv: list[str] | None = None):
-    global REPO_ROOT
+    global ACTIVE_BUS_DIR, REPO_ROOT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("interval", nargs="?", type=int, default=REFRESH_INTERVAL)
     parser.add_argument("--repo-root", default=str(REPO_ROOT), help="Repo root to inspect")
+    parser.add_argument("--bus-dir", default=None, help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)")
     parser.add_argument("--render-recovery", action="store_true", help="Print recovery lines once and exit")
     parser.add_argument(
         "--emit-idle-non-go-alert",
@@ -1351,6 +1398,12 @@ def main(argv: list[str] | None = None):
     )
     args = parser.parse_args(argv)
     REPO_ROOT = Path(args.repo_root).resolve()
+    try:
+        resolve_agent_bus_dir(REPO_ROOT, args.bus_dir)
+        ACTIVE_BUS_DIR = agent_bus_relpath(args.bus_dir)
+    except ExecutorCommonError as exc:
+        print(f"[error] Invalid --bus-dir: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
 
     if args.render_recovery:
         for line in render_recovery_lines(REPO_ROOT):

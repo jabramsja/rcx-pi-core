@@ -2771,7 +2771,7 @@ class TestRecoveryPagerEvents:
                     invocation_id="invoke-rollback",
                 )
 
-        assert not (tmp_path / rg_mod.RECOVERY_STATUS_FILE).exists()
+        assert not rg_mod._recovery_path(tmp_path, "recovery_status.json").exists()
 
     def test_update_recovery_status_rolls_back_and_raises_when_state_change_emit_fails(self, tmp_path):
         initial = {
@@ -6865,6 +6865,54 @@ class TestNeedsPhaseB_Tier3:
         assert recovery["action"] == "retry_phase_b_with_plan"
         assert "--plan reports/control_plane/pager.md" in recovery["detail"]
         assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/pager.md"
+
+    def test_plan_required_fallback_reads_namespaced_routing_record(self, tmp_path, monkeypatch):
+        reports_dir = tmp_path / "reports" / "control_plane"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        (reports_dir / "default.md").write_text("Status: LOCKED\n", encoding="utf-8")
+        (reports_dir / "namespaced.md").write_text("Status: LOCKED\n", encoding="utf-8")
+        default_meta = tmp_path / ".agent_bus" / "meta"
+        default_meta.mkdir(parents=True, exist_ok=True)
+        namespaced_meta = tmp_path / ".agent_bus-test" / "meta"
+        namespaced_meta.mkdir(parents=True, exist_ok=True)
+        (default_meta / "post_merge_routing.json").write_text(
+            json.dumps(
+                {
+                    "decision": "ROUTE_PHASE_B",
+                    "summary": "default routing must be ignored",
+                    "plan_path": "reports/control_plane/default.md",
+                }
+            ),
+            encoding="utf-8",
+        )
+        (namespaced_meta / "post_merge_routing.json").write_text(
+            json.dumps(
+                {
+                    "decision": "ROUTE_PHASE_B",
+                    "summary": "active namespaced routing",
+                    "plan_path": "reports/control_plane/namespaced.md",
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.delenv(rg_mod.PHASE_B_RECOVERY_PLAN_ENV, raising=False)
+        result = {
+            "status": "error",
+            "step": "derive_planless_context",
+            "errors": ["tracked packet exists for planless mode. Use --plan"],
+        }
+
+        recovery = rg_mod.attempt_recovery(
+            tmp_path,
+            result,
+            "wave-plan-required",
+            bus_dir=".agent_bus-test",
+        )
+
+        assert recovery["recovered"] is True
+        assert recovery["action"] == "retry_phase_b_with_plan"
+        assert "--plan reports/control_plane/namespaced.md" in recovery["detail"]
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/namespaced.md"
 
 
 class TestMaxTurnsClassification:

@@ -57,7 +57,14 @@ def main() -> int:
         print(f"   Blocking commit (fail-closed). Fix the import or set RCX_SKIP_RECEIPT_CHECK=1.", file=sys.stderr)
         return 1
 
-    passed, message = verify_pre_commit_receipt(repo_root)
+    bus_dir = os.environ.get("RCX_AGENT_BUS_DIR") or None
+    try:
+        passed, message = verify_pre_commit_receipt(repo_root, bus_dir=bus_dir)
+    except Exception as exc:
+        print(f"\n❌ PRE-COMMIT RECEIPT CHECK FAILED")
+        print(f"   Receipt verifier crashed: {exc}")
+        print()
+        return 1
     if passed:
         print(f"✅ {message}")
         return 0

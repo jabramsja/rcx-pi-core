@@ -131,11 +131,12 @@ class TestStandaloneRecoveryTrigger:
                 return subprocess.CompletedProcess(args, 0, f"{repo}\n", "")
             raise AssertionError(f"unexpected subprocess.run call: {args}")
 
-        def fake_attempt(repo_root, failed_result, wave_id):
+        def fake_attempt(repo_root, failed_result, wave_id, bus_dir=None):
             recovery_calls.append({
                 "repo_root": repo_root,
                 "result": dict(failed_result),
                 "wave_id": wave_id,
+                "bus_dir": bus_dir,
             })
             return {
                 "recovered": False,
@@ -1480,6 +1481,29 @@ class TestNewSchemaValidation:
         )
         assert not valid
         assert any(".agent_bus/" in e for e in errors)
+
+    def test_force_add_files_rejects_namespaced_agent_bus_runtime_state(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_schema_handoff(
+                force_add_files=[".agent_bus-test/executors/phase_b_handoff.json"]
+            )
+        )
+        assert not valid
+        assert any(".agent_bus-*" in e for e in errors)
+
+    def test_files_to_stage_rejects_namespaced_agent_bus_runtime_state(self):
+        valid, errors = commit_mod.validate_handoff(
+            _make_new_schema_handoff(
+                files_to_stage=[".agent_bus-test/foo.txt"],
+                force_add_files=[],
+            )
+        )
+        assert not valid
+        assert any("files_to_stage denied" in e and ".agent_bus*" in e for e in errors)
+
+    def test_namespaced_agent_bus_paths_are_transient_status_artifacts(self):
+        assert commit_mod._is_transient_status_path(".agent_bus-test/foo.txt")
+        assert commit_mod._runtime_bus_artifact_match(".agent_bus-test/foo.txt") == ".agent_bus*"
 
 
 class TestHandoffReceiptContainment:
