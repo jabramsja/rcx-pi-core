@@ -1,24 +1,24 @@
 {
   "wave_id": "parallel-pipeline-tracker-truth-cleanup-2026-04-30",
-  "repeat_run_speedup_ratio": 1.25465,
+  "repeat_run_speedup_ratio": 1.907258,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.39857,
+  "step_growth_slope": 0.423724,
   "repeat_run_raw_seconds": [
-    0.500066,
-    0.39857
+    0.808151,
+    0.423724
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.500066
+      "elapsed_seconds": 0.808151
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.898636
+      "elapsed_seconds": 1.231875
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-04-30T11:44:26Z",
+  "collection_timestamp_utc": "2026-04-30T11:48:43Z",
   "collector_version": "2.2.0"
 }
