@@ -92,8 +92,13 @@ set +e  # Do not exit on error
 # monitor still shows the last live failure/success instead of blanking almost
 # immediately.
 IDLE_WINDOW_SECONDS=3600
+LOG_WATCHER_HEARTBEAT_SECONDS="${RCX_LOG_WATCHER_HEARTBEAT_SECONDS:-300}"
+case "$LOG_WATCHER_HEARTBEAT_SECONDS" in
+  ""|*[!0-9]*) LOG_WATCHER_HEARTBEAT_SECONDS=300 ;;
+esac
 current_log=""
 tail_pid=""
+last_heartbeat_epoch=0
 BUS_DIR="${RCX_AGENT_BUS_DIR:-${BUS_DIR:-.agent_bus}}"
 
 resolve_repo_root() {
@@ -160,6 +165,22 @@ file_has_visible_content() {
   local path="$1"
   [ -s "$path" ] || return 1
   grep -q '[^[:space:]]' "$path" 2>/dev/null
+}
+
+now_seconds() {
+  date +%s
+}
+
+heartbeat_due() {
+  if [ "$LOG_WATCHER_HEARTBEAT_SECONDS" -le 0 ]; then
+    return 0
+  fi
+  local now=""
+  now="$(now_seconds)"
+  if [ "$last_heartbeat_epoch" -eq 0 ]; then
+    return 0
+  fi
+  [ $(( now - last_heartbeat_epoch )) -ge "$LOG_WATCHER_HEARTBEAT_SECONDS" ]
 }
 
 find_newest_recent_log() {
@@ -251,6 +272,15 @@ switch_tail() {
     tail -f "$new_log" &
     tail_pid=$!
     current_log="$new_log"
+    last_heartbeat_epoch="$(now_seconds)"
+  fi
+}
+
+refresh_tail_if_due() {
+  local active_log="$1"
+  [ -n "$active_log" ] || return 0
+  if heartbeat_due; then
+    switch_tail "$active_log"
   fi
 }
 
@@ -258,6 +288,8 @@ while true; do
   newest=$(find_newest_log) || newest=""
   if [ -n "$newest" ] && [ "$newest" != "$current_log" ]; then
     switch_tail "$newest"
+  elif [ -n "$newest" ] && [ "$newest" = "$current_log" ]; then
+    refresh_tail_if_due "$newest"
   elif [ -z "$newest" ]; then
     if [ -n "$current_log" ]; then
       stop_tail
