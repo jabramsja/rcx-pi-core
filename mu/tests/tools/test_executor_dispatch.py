@@ -2301,6 +2301,114 @@ class TestDialecticEnvelopeParsing:
             dialectic_mod.parse_dialectic_envelope("no envelope here")
 
 
+class TestDialecticMultiRound:
+    """Dialectic executor honors max_rounds instead of hardcoding one pass."""
+
+    def test_run_dialectic_reprompts_until_bounded(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        record = {
+            "decision": "CONTINUE_DIALECTIC",
+            "summary": "dialectic max rounds",
+            "next_candidates": [{"candidate": "narrow this", "bounded": False}],
+        }
+        calls = []
+        envelopes = [
+            {"candidate": "still broad", "bounded": False},
+            {"candidate": "bounded result", "bounded": True},
+        ]
+
+        def fake_bridge(cmd, cwd, timeout):
+            calls.append(cmd)
+            job_id = cmd[cmd.index("--job-id") + 1]
+            task_path = Path(cmd[cmd.index("--task-file") + 1])
+            prompt = task_path.read_text(encoding="utf-8")
+            if len(calls) == 1:
+                assert "Round 1 of 2" in prompt
+            else:
+                assert "Round 2 of 2" in prompt
+                assert "Round 1 returned bounded=false" in prompt
+            rendered = repo / ".agent_bus" / "rendered" / f"{job_id}.md"
+            rendered.parent.mkdir(parents=True, exist_ok=True)
+            rendered.write_text(
+                "BEGIN_DIALECTIC_ENVELOPE\n"
+                + json.dumps(envelopes[len(calls) - 1])
+                + "\nEND_DIALECTIC_ENVELOPE\n",
+                encoding="utf-8",
+            )
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(dialectic_mod, "run_bridge_subprocess", fake_bridge)
+
+        result = dialectic_mod.run_dialectic(  # ANTICHEAT_OK
+            repo,
+            max_rounds=2,
+            routing_record=record,
+        )
+
+        assert result["status"] == "narrowed"
+        assert result["rounds"] == 2
+        assert result["narrowed_proposal"]["candidate"] == "bounded result"
+        assert len(calls) == 2
+
+    def test_run_dialectic_reports_max_rounds_reached(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        record = {
+            "decision": "CONTINUE_DIALECTIC",
+            "summary": "dialectic max rounds",
+            "next_candidates": [{"candidate": "narrow this", "bounded": False}],
+        }
+        calls = []
+
+        def fake_bridge(cmd, cwd, timeout):
+            calls.append(cmd)
+            job_id = cmd[cmd.index("--job-id") + 1]
+            rendered = repo / ".agent_bus" / "rendered" / f"{job_id}.md"
+            rendered.parent.mkdir(parents=True, exist_ok=True)
+            rendered.write_text(
+                "BEGIN_DIALECTIC_ENVELOPE\n"
+                '{"candidate": "still broad", "bounded": false}\n'
+                "END_DIALECTIC_ENVELOPE\n",
+                encoding="utf-8",
+            )
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(dialectic_mod, "run_bridge_subprocess", fake_bridge)
+
+        result = dialectic_mod.run_dialectic(  # ANTICHEAT_OK
+            repo,
+            max_rounds=2,
+            routing_record=record,
+        )
+
+        assert result["status"] == "max_rounds_reached"
+        assert result["rounds"] == 2
+        assert result["errors"] == ["Round 2 returned bounded=false"]
+        assert len(calls) == 2
+
+    def test_run_dialectic_rejects_nonpositive_max_rounds(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        def fail_bridge(*args, **kwargs):
+            raise AssertionError("bridge should not be called")
+
+        monkeypatch.setattr(dialectic_mod, "run_bridge_subprocess", fail_bridge)
+
+        result = dialectic_mod.run_dialectic(  # ANTICHEAT_OK
+            repo,
+            max_rounds=0,
+            routing_record={
+                "decision": "CONTINUE_DIALECTIC",
+                "next_candidates": [{"candidate": "narrow this", "bounded": False}],
+            },
+        )
+
+        assert result["status"] == "error"
+        assert result["errors"] == ["max_rounds must be >= 1"]
+
+
 class TestDialecticDispatcherIntegration:
     """Dispatcher correctly routes to dialectic_executor."""
 
@@ -2348,6 +2456,36 @@ class TestDialecticDispatcherIntegration:
         assert calls[0][calls[0].index("--bus-dir") + 1] == ".agent_bus-test"
         assert "--routing-record" in calls[0]
         assert chain_kwargs["bus_dir"] == ".agent_bus-test"
+
+    def test_configured_dialectic_loop_limit_is_passed_to_executor(self, tmp_path, monkeypatch):
+        record = {
+            "decision": "CONTINUE_DIALECTIC",
+            "summary": "dialectic config test",
+            "wave_name": "dialectic-config-test",
+            "next_candidates": [{"candidate": "narrow this", "bounded": False}],
+        }
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout='{"status":"narrowed"}', stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+
+        result = dispatch_mod.dispatch(
+            record,
+            repo_root=tmp_path,
+            skip_freshness=True,
+            config={
+                "timeouts": {"dialectic_executor": 5},
+                "bridge_loop_limits": {"dialectic": 4},
+            },
+        )
+
+        assert result["status"] == "success"
+        assert calls
+        assert calls[0][calls[0].index("--max-rounds") + 1] == "4"
+        assert "--json" in calls[0]
 
 
 # ===========================================================================

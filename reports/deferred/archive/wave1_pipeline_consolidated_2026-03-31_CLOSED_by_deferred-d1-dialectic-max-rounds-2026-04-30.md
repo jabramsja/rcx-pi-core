@@ -1,9 +1,15 @@
 # Wave 1: Pipeline/Control-Surface Consolidated Findings
 
 Date: 2026-03-31
-Status: OPEN
+Status: CLOSED
+Closed-By: deferred-d1-dialectic-max-rounds-2026-04-30
 Surface: `mu/tools/executors/`, `mu/tools/agents/`, `mu/tools/checks/`, `mu/tools/observability/`, `mu/tools/hooks/`
 Supersedes: 6 files (see Archive section)
+
+Closeout note (2026-04-30): this packet is archived after code-truth
+reconciliation and the D1 closeout. The last code-backed open residue was D1;
+`dialectic_executor.py` now honors `max_rounds`, `executor_dispatch.py` passes
+`bridge_loop_limits.dialectic`, and targeted dialectic tests pass.
 
 ---
 
@@ -94,10 +100,10 @@ Supersedes: 6 files (see Archive section)
 
 ## Cluster D — Executor / Dispatcher — 4 items
 
-### D1. [MEDIUM] Dialectic executor max_rounds hard-stops after 1 attempt
+### D1. [MEDIUM] ~~Dialectic executor max_rounds hard-stops after 1 attempt~~ CLOSED 2026-04-30
 - **File:** `mu/tools/executors/dialectic_executor.py:137`
 - Advertises `max_rounds` config but always stops after one bridge attempt.
-- **Fix:** Implement actual round loop or remove dead config.
+- **Fix:** Implemented actual round loop in `deferred-d1-dialectic-max-rounds-2026-04-30`.
 
 ### D2. [MEDIUM] Re-entry refresh doesn't propagate deferred packet paths
 - **File:** `mu/tools/executors/phase_b_executor.py:1488`

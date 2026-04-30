@@ -1,6 +1,6 @@
 # Wave 1B: Pipeline Cleanup (MEDIUM + LOW)
 
-**Status:** IN PROGRESS (observability slices landed 2026-04-02 and 2026-04-30; remaining code-backed residue still queued)
+**Status:** COMMIT_READY (all code-backed Wave 1B residues addressed by the 2026-04-30 D1 closeout; merge pending)
 **Task:** NEXT-CODEX-POST-REDTEAM deferred cleanup
 **Surface:** `mu/tools/executors/`, `mu/tools/agents/`, `mu/tools/checks/`, `mu/tools/observability/`, `mu/tools/hooks/`
 **Classification:** MAINTENANCE (hardening, no runtime dirs)
@@ -20,7 +20,7 @@
 
 ## Cluster D — Executor Logic (4 items)
 
-### D1. [MEDIUM] Dialectic executor max_rounds — implement or remove dead config
+### D1. [MEDIUM] ~~Dialectic executor max_rounds — implement or remove dead config~~ **COMMIT_READY deferred-d1-dialectic-max-rounds-2026-04-30**
 ### D2. [MEDIUM] Phase B re-entry refresh propagate deferred packet paths
 ### D3. [MEDIUM] Phase B classification logs to stderr not stdout
 ### D4. [MEDIUM] Dispatcher retry surface regression tests
@@ -55,9 +55,16 @@
 - Closed the remaining E5 non-blocker in `deferred-consolidation-e5-e6-closeout-2026-04-30`: `sanitize_pane_text()` now strips C1 controls (`U+0080..U+009F`) in addition to ESC/C0/DEL, with a regression test for `U+009B`.
 - Remaining open from Wave 1B after this slice is the code-backed D1 dialectic `max_rounds` residue tracked in `TASKS.md`.
 
+### 2026-04-30 — D1 dialectic max_rounds closeout
+
+- Implemented D1 in `deferred-d1-dialectic-max-rounds-2026-04-30`: `dialectic_executor.py` now loops through `max_rounds`, carries `bounded=false` envelopes forward as feedback, and returns `max_rounds_reached` after configured exhaustion.
+- `executor_dispatch.py` now threads `bridge_loop_limits.dialectic` into the dialectic executor instead of allowing the CLI default to force one pass.
+- Targeted regression evidence: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_executor_dispatch.py -k 'Dialectic'` -> `17 passed, 400 deselected`.
+- Wave 1B has no remaining code-backed open residue after this D1 closeout.
+
 ---
 
 ## Acceptance Criteria
 
-- [ ] All C/D/E items addressed or explicitly deferred with rationale
+- [x] All C/D/E items addressed or explicitly deferred with rationale
 - [ ] All existing tests pass (`audit_fast.sh`)
