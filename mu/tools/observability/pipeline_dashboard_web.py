@@ -2,6 +2,7 @@
 """RCX Pipeline Web Dashboard v2. Read-only. No dependencies beyond stdlib."""
 
 import glob as _glob
+import argparse
 import http.server
 import json
 import os
@@ -23,14 +24,21 @@ if REPO_ROOT.name == "mu":
 EXECUTORS_DIR = REPO_ROOT / "mu" / "tools" / "executors"
 if str(EXECUTORS_DIR) not in sys.path:
     sys.path.insert(0, str(EXECUTORS_DIR))
+OBSERVABILITY_DIR = REPO_ROOT / "mu" / "tools" / "observability"
+if str(OBSERVABILITY_DIR) not in sys.path:
+    sys.path.insert(0, str(OBSERVABILITY_DIR))
 DEFAULT_AGENT_DISPLAY_NAMES = {
     "claude": "Claude Opus 4.7 max",
     "codex": "Codex 5.5 xhigh",
 }
 
 
-def _fallback_bridge_agent_display_name(repo_root: Path, agent_name: str) -> str:
-    config_path = repo_root / ".agent_bus" / "bridge_config.json"
+def _fallback_bridge_agent_display_name(
+    repo_root: Path,
+    agent_name: str,
+    bus_dir: str | Path | None = None,
+) -> str:
+    config_path = repo_root / Path(str(bus_dir or ".agent_bus")) / "bridge_config.json"
     try:
         payload = json.loads(config_path.read_text(encoding="utf-8"))
         display_name = (
@@ -46,7 +54,11 @@ def _fallback_bridge_agent_display_name(repo_root: Path, agent_name: str) -> str
     return DEFAULT_AGENT_DISPLAY_NAMES.get(agent_name, agent_name.replace("_", " ").title())
 
 
-def _fallback_configured_role_agents(repo_root: Path):
+def _fallback_configured_role_agents(
+    repo_root: Path,
+    config: dict | None = None,
+    bus_dir: str | Path | None = None,
+):
     role_agents = {"implementer": "codex", "reviewer": "codex"}
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
     try:
@@ -61,7 +73,7 @@ def _fallback_configured_role_agents(repo_root: Path):
         pass
     resolved = {}
     for role, agent in role_agents.items():
-        display_name = _fallback_bridge_agent_display_name(repo_root, agent)
+        display_name = _fallback_bridge_agent_display_name(repo_root, agent, bus_dir)
         status_name = display_name.split()[0] if display_name.split() else role.title()
         resolved[role] = {
             "agent": agent,
@@ -77,7 +89,100 @@ except Exception:
     configured_role_agents = _fallback_configured_role_agents
     bridge_agent_display_name = _fallback_bridge_agent_display_name
 
-PORT = 8099
+try:
+    from pipeline_monitor_identity import (
+        DEFAULT_BUS_DIR,
+        DEFAULT_DASHBOARD_PORT,
+        DEFAULT_TMUX_SESSION,
+        MonitorIdentity,
+        MonitorIdentityError,
+        resolve_monitor_identity,
+    )
+except Exception:
+    DEFAULT_BUS_DIR = ".agent_bus"
+    DEFAULT_DASHBOARD_PORT = 8099
+    DEFAULT_TMUX_SESSION = "rcx-pipeline"
+    MonitorIdentity = None
+
+    class MonitorIdentityError(ValueError):
+        pass
+
+    def resolve_monitor_identity(
+        repo_root: Path,
+        *,
+        lane=None,
+        bus_dir=None,
+        port=None,
+        require_configured_named=True,
+    ):
+        if bus_dir not in (None, "", DEFAULT_BUS_DIR) and require_configured_named:
+            raise MonitorIdentityError(
+                f"active bus root {bus_dir} has no configured monitor identity"
+            )
+        resolved_port = DEFAULT_DASHBOARD_PORT if port in (None, "") else int(port)
+        return type(
+            "FallbackMonitorIdentity",
+            (),
+            {
+                "lane": "default",
+                "bus_dir": DEFAULT_BUS_DIR,
+                "active_bus_root": repo_root / DEFAULT_BUS_DIR,
+                "dashboard_port": resolved_port,
+                "tmux_session": DEFAULT_TMUX_SESSION,
+                "configured": False,
+                "named": False,
+                "as_dict": lambda self: {
+                    "lane": self.lane,
+                    "bus_dir": self.bus_dir,
+                    "active_bus_root": str(self.active_bus_root),
+                    "dashboard_port": self.dashboard_port,
+                    "tmux_session": self.tmux_session,
+                    "configured": self.configured,
+                    "named": self.named,
+                },
+            },
+        )()
+
+PORT = DEFAULT_DASHBOARD_PORT
+ACTIVE_IDENTITY = resolve_monitor_identity(
+    REPO_ROOT,
+    bus_dir=DEFAULT_BUS_DIR,
+    require_configured_named=False,
+)
+ACTIVE_BUS_DIR = DEFAULT_BUS_DIR
+ACTIVE_BUS_ROOT = REPO_ROOT / DEFAULT_BUS_DIR
+
+
+def configure_dashboard_identity(identity) -> None:
+    global ACTIVE_IDENTITY, ACTIVE_BUS_DIR, ACTIVE_BUS_ROOT, PORT
+    ACTIVE_IDENTITY = identity
+    ACTIVE_BUS_DIR = identity.bus_dir
+    ACTIVE_BUS_ROOT = active_bus_root()
+    PORT = identity.dashboard_port
+
+
+def active_bus_root() -> Path:
+    return REPO_ROOT / ACTIVE_BUS_DIR
+
+
+def active_bus_path(*parts: str | Path) -> Path:
+    return active_bus_root().joinpath(*parts)
+
+
+def active_identity_dict() -> dict[str, object]:
+    identity = ACTIVE_IDENTITY.as_dict()
+    identity["bus_dir"] = ACTIVE_BUS_DIR
+    identity["active_bus_root"] = str(active_bus_root())
+    identity["dashboard_port"] = PORT
+    return identity
+
+
+def _role_agents():
+    return configured_role_agents(REPO_ROOT, bus_dir=ACTIVE_BUS_DIR)
+
+
+def _display_name(agent_name: str) -> str:
+    return bridge_agent_display_name(REPO_ROOT, agent_name, ACTIVE_BUS_DIR)
 
 
 def ps_lines():
@@ -185,7 +290,7 @@ def detect_subs(lines):
             pid = int(l.split()[1])
             subs.append({
                 "agent": agent_name,
-                "name": bridge_agent_display_name(REPO_ROOT, agent_name),
+                "name": _display_name(agent_name),
                 "role": bridge_role_for_pid(pid),
                 "pid": pid,
                 "started": pid_start(pid),
@@ -205,7 +310,7 @@ def read_json_safe(path):
 
 
 def bridge_round_history():
-    raw_dir = REPO_ROOT / ".agent_bus" / "raw"
+    raw_dir = active_bus_path("raw")
     if not raw_dir.exists():
         return []
     rounds = []
@@ -265,7 +370,7 @@ def agent_status():
 
 
 def db_latest_jobs(n=8):
-    db = REPO_ROOT / ".agent_bus" / "bridge.db"
+    db = active_bus_path("bridge.db")
     if not db.exists():
         return []
     try:
@@ -366,7 +471,7 @@ def model_activity():
     """Get real-time activity from all three model output streams."""
     now = time.time()
     feeds = []
-    role_agents = configured_role_agents(REPO_ROOT)
+    role_agents = _role_agents()
     reviewer_agent = role_agents["reviewer"]["agent"]
     reviewer_label = role_agents["reviewer"]["display_name"]
     implementer_label = role_agents["implementer"]["display_name"]
@@ -464,7 +569,7 @@ def model_activity():
         })
 
     # 2. Raw reviewer output from the configured reviewer backend
-    raw_dir = REPO_ROOT / ".agent_bus" / "raw"
+    raw_dir = active_bus_path("raw")
     if raw_dir.exists():
         reviewer_file, reviewer_mtime = _newest_file(
             p for d in sorted(raw_dir.iterdir(), reverse=True)[:3]
@@ -583,7 +688,7 @@ def _parse_implementer_output(path, tail=80):
 def wave_context():
     """Try to determine what wave/task is being worked on."""
     # Check phase_b_state
-    pb = read_json_safe(REPO_ROOT / ".agent_bus" / "executors" / "phase_b_state.json")
+    pb = read_json_safe(active_bus_path("executors", "phase_b_state.json"))
     if pb:
         return {
             "wave_id": pb.get("wave_id", ""),
@@ -594,7 +699,7 @@ def wave_context():
             "target_branch": pb.get("target_branch", ""),
         }
     # Check routing
-    routing = read_json_safe(REPO_ROOT / ".agent_bus" / "meta" / "post_merge_routing.json")
+    routing = read_json_safe(active_bus_path("meta", "post_merge_routing.json"))
     if routing:
         return {
             "wave_id": routing.get("wave_name", ""),
@@ -609,7 +714,7 @@ def wave_context():
 
 def build_narrative(phase, subs, wave, lock, history):
     """Build a plain-English explanation of what the pipeline is doing right now."""
-    role_agents = configured_role_agents(REPO_ROOT)
+    role_agents = _role_agents()
     reviewer_label = role_agents["reviewer"]["display_name"]
     implementer_label = role_agents["implementer"]["display_name"]
     ph = (phase or {}).get("phase", "idle")
@@ -714,7 +819,7 @@ def implementer_changes():
 
 def session_timeline():
     """Build a chronological timeline of pipeline events."""
-    role_agents = configured_role_agents(REPO_ROOT)
+    role_agents = _role_agents()
     reviewer_short = role_agents["reviewer"]["status_name"]
     implementer_short = role_agents["implementer"]["status_name"]
     events = []
@@ -754,7 +859,7 @@ def session_timeline():
             add(ts, f"Agents running: {', '.join(running)}", "active")
 
     # Bridge rounds
-    raw_dir = REPO_ROOT / ".agent_bus" / "raw"
+    raw_dir = active_bus_path("raw")
     if raw_dir.exists():
         for d in sorted(raw_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[:8]:
             if not d.is_dir():
@@ -821,8 +926,8 @@ def session_timeline():
 
 
 def lock_status():
-    for lock_path in [REPO_ROOT / ".agent_bus" / "bridge.lock",
-                      REPO_ROOT / ".agent_bus" / "meta" / "meta_bridge.lock"]:
+    for lock_path in [active_bus_path("bridge.lock"),
+                      active_bus_path("meta", "meta_bridge.lock")]:
         if lock_path.exists() and lock_path.stat().st_size > 0:
             data = read_json_safe(lock_path)
             if data:
@@ -930,7 +1035,7 @@ def _rendered_recovery_reason(status):
 
 
 def recovery_snapshot():
-    status = read_json_safe(REPO_ROOT / ".agent_bus" / "recovery" / "recovery_status.json")
+    status = read_json_safe(active_bus_path("recovery", "recovery_status.json"))
     if not isinstance(status, dict) or not status:
         return None
     active = bool(status.get("active"))
@@ -978,7 +1083,7 @@ def get_state():
     psl = ps_lines()
     phase = detect_phase(psl)
     subs = detect_subs(psl)
-    role_agents = configured_role_agents(REPO_ROOT)
+    role_agents = _role_agents()
     agents = agent_status()
     jobs = db_latest_jobs()
     gs = git_status()
@@ -1017,6 +1122,7 @@ def get_state():
 
     return {
         "timestamp": datetime.now().isoformat(),
+        "monitor_identity": active_identity_dict(),
         "phase": phase,
         "role_agents": role_agents,
         "subprocesses": subs,
@@ -1712,16 +1818,57 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def main():
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else PORT
+def _parse_args(argv):
+    parser = argparse.ArgumentParser(description="RCX Pipeline Web Dashboard")
+    parser.add_argument(
+        "legacy_port",
+        nargs="?",
+        help="Legacy default-lane port override",
+    )
+    parser.add_argument("--port", dest="port", default=None)
+    parser.add_argument("--bus-dir", default=os.environ.get("RCX_AGENT_BUS_DIR"))
+    parser.add_argument("--lane", default=os.environ.get("RCX_PIPELINE_MONITOR_LANE"))
+    return parser.parse_args(argv)
+
+
+def _resolve_dashboard_identity(args):
+    explicit_port = args.port if args.port not in (None, "") else args.legacy_port
+    if args.port not in (None, "") and args.legacy_port not in (None, ""):
+        if int(args.port) != int(args.legacy_port):
+            raise MonitorIdentityError(
+                f"conflicting dashboard ports: positional {args.legacy_port} and --port {args.port}"
+            )
+    return resolve_monitor_identity(
+        REPO_ROOT,
+        lane=args.lane,
+        bus_dir=args.bus_dir,
+        port=explicit_port,
+        require_configured_named=True,
+    )
+
+
+def main(argv=None):
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+    try:
+        identity = _resolve_dashboard_identity(args)
+    except (MonitorIdentityError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    configure_dashboard_identity(identity)
+    port = identity.dashboard_port
     server = http.server.HTTPServer(("127.0.0.1", port), Handler)
-    print(f"RCX Pipeline Dashboard: http://localhost:{port}")
+    print(
+        "RCX Pipeline Dashboard: "
+        f"http://localhost:{port} "
+        f"(lane={identity.lane} bus={identity.active_bus_root})"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nDashboard stopped.")
         server.server_close()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

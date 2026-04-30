@@ -7107,6 +7107,7 @@ class TestModularSurfaceEntrypoints:
         _write_phase_b_handoff(
             handoff_dir / "phase_b_handoff.json",
             task_id="[PIPELINE-RECOVERY]",
+            tracked_packet="reports/control_plane/plan.md",
         )
 
         args = dispatch_mod.build_surface_parser().parse_args(
@@ -7145,6 +7146,91 @@ class TestModularSurfaceEntrypoints:
         mock_recovery.assert_not_called()
         phase_b_record = json.loads(calls[1][calls[1].index("--routing-record") + 1])
         assert phase_b_record["task_id"] == "[PIPELINE-RECOVERY]"
+
+    def test_phase_a_surface_chain_uses_plan_wave_id_for_phase_b_routing(self, tmp_path):
+        plan_path = (
+            tmp_path
+            / "reports"
+            / "control_plane"
+            / "parallel_pipeline_monitor_identity_2026-04-30.md"
+        )
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text(
+            "# plan\nWave ID: parallel-pipeline-monitor-identity-2026-04-30\n",
+            encoding="utf-8",
+        )
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-a",
+                "--plan-name",
+                "parallel_pipeline_monitor_identity",
+                "--task-id",
+                "PARALLEL-PIPELINE",
+                "--json",
+            ]
+        )
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"],
+            0,
+            json.dumps(
+                {
+                    "plan_path": (
+                        "reports/control_plane/"
+                        "parallel_pipeline_monitor_identity_2026-04-30.md"
+                    )
+                }
+            ),
+            "",
+        )
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+        commit_ok = subprocess.CompletedProcess(
+            ["commit"], 0, "[commit-executor] Status: success\n", ""
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, *, cwd, timeout):
+            calls.append(cmd)
+            if len(calls) == 2:
+                _write_phase_b_handoff(
+                    handoff_dir / "phase_b_handoff.json",
+                    wave_id="parallel-pipeline-monitor-identity-2026-04-30",
+                    task_id="[PARALLEL-PIPELINE]",
+                    tracked_packet="reports/control_plane/parallel_pipeline_monitor_identity_2026-04-30.md",
+                )
+            return [phase_a_ok, phase_b_ok, commit_ok][len(calls) - 1]
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=fake_run), \
+             patch.object(dispatch_mod, "attempt_recovery") as mock_recovery:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={
+                    "timeouts": {
+                        "phase_a_executor": 300,
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+            )
+
+        assert exit_code == 0
+        mock_recovery.assert_not_called()
+        phase_b_record = json.loads(calls[1][calls[1].index("--routing-record") + 1])
+        assert phase_b_record["wave_name"] == "parallel-pipeline-monitor-identity-2026-04-30"
+        assert phase_b_record["task_id"] == "[PARALLEL-PIPELINE]"
+        assert phase_b_record["next_candidates"] == [
+            {
+                "tracked_packet": (
+                    "reports/control_plane/"
+                    "parallel_pipeline_monitor_identity_2026-04-30.md"
+                )
+            }
+        ]
 
     def test_phase_a_surface_success_chains_with_pretty_json_stdout(self, tmp_path):
         plan_path = tmp_path / "reports" / "control_plane" / "plan.md"

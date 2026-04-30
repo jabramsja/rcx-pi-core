@@ -31,6 +31,10 @@ bridge = load_module("bridge_supervisor_bus_namespacing", AGENTS_DIR / "bridge_s
 meta = load_module("meta_bridge_supervisor_bus_namespacing", AGENTS_DIR / "meta_bridge_supervisor.py")
 pager = load_module("pipeline_agent_pager_bus_namespacing", OBSERVABILITY_DIR / "pipeline_agent_pager.py")
 recovery = load_module("recovery_gate_bus_namespacing", EXECUTORS_DIR / "recovery_gate.py")
+monitor_identity = load_module(
+    "pipeline_monitor_identity_bus_namespacing",
+    OBSERVABILITY_DIR / "pipeline_monitor_identity.py",
+)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -60,6 +64,15 @@ def _write_pager_config(repo: Path) -> None:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         json.dumps({"pipeline_agent_pager": {"enabled": True, "route": "notify-only"}}) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_monitor_identity_config(repo: Path, lanes: dict[str, dict[str, object]]) -> None:
+    config_path = repo / "mu" / "tools" / "executors" / "executor_config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps({"pipeline_monitor": {"lanes": lanes}}) + "\n",
         encoding="utf-8",
     )
 
@@ -130,6 +143,136 @@ def test_agent_bus_resolver_defaults_namespaces_and_rejects_invalid_paths(tmp_pa
         with pytest.raises(executor_common.ExecutorCommonError):
             executor_common.resolve_agent_bus_dir(tmp_path, invalid)
     assert not (tmp_path / ".scratch").exists()
+
+
+def test_monitor_identity_defaults_and_two_named_lanes_are_distinct(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    default_identity = monitor_identity.resolve_monitor_identity(repo)
+    assert default_identity.bus_dir == ".agent_bus"
+    assert default_identity.active_bus_root == repo / ".agent_bus"
+    assert default_identity.dashboard_port == 8099
+    assert default_identity.tmux_session == "rcx-pipeline"
+
+    _write_monitor_identity_config(
+        repo,
+        {
+            "alpha": {
+                "bus_dir": ".agent_bus-alpha",
+                "dashboard_port": 8101,
+                "tmux_session": "rcx-pipeline-alpha",
+            },
+            "beta": {
+                "bus_dir": ".agent_bus-beta",
+                "dashboard_port": 8102,
+                "tmux_session": "rcx-pipeline-beta",
+            },
+        },
+    )
+
+    alpha = monitor_identity.resolve_monitor_identity(repo, bus_dir=".agent_bus-alpha")
+    beta = monitor_identity.resolve_monitor_identity(repo, lane="beta")
+
+    assert alpha.active_bus_root == repo / ".agent_bus-alpha"
+    assert beta.active_bus_root == repo / ".agent_bus-beta"
+    assert {alpha.dashboard_port, beta.dashboard_port} == {8101, 8102}
+    assert {alpha.tmux_session, beta.tmux_session} == {
+        "rcx-pipeline-alpha",
+        "rcx-pipeline-beta",
+    }
+
+
+@pytest.mark.parametrize(
+    ("lanes", "message"),
+    [
+        (
+            {
+                "port-only": {
+                    "dashboard_port": 8103,
+                    "tmux_session": "rcx-pipeline-port-only",
+                }
+            },
+            "missing active bus root",
+        ),
+        (
+            {
+                "missing-port": {
+                    "bus_dir": ".agent_bus-missing-port",
+                    "tmux_session": "rcx-pipeline-missing-port",
+                }
+            },
+            "missing dashboard_port",
+        ),
+        (
+            {
+                "bad-session": {
+                    "bus_dir": ".agent_bus-bad-session",
+                    "dashboard_port": 8104,
+                    "tmux_session": "bad:session",
+                }
+            },
+            "invalid tmux session",
+        ),
+        (
+            {
+                "bad-port": {
+                    "bus_dir": ".agent_bus-bad-port",
+                    "dashboard_port": 70000,
+                    "tmux_session": "rcx-pipeline-bad-port",
+                }
+            },
+            "invalid dashboard_port",
+        ),
+        (
+            {
+                "bad-fractional-port": {
+                    "bus_dir": ".agent_bus-bad-fractional-port",
+                    "dashboard_port": 8101.9,
+                    "tmux_session": "rcx-pipeline-bad-fractional-port",
+                }
+            },
+            "invalid dashboard_port",
+        ),
+        (
+            {
+                "alpha": {
+                    "bus_dir": ".agent_bus-alpha",
+                    "dashboard_port": 8105,
+                    "tmux_session": "rcx-pipeline-alpha",
+                },
+                "beta": {
+                    "bus_dir": ".agent_bus-beta",
+                    "dashboard_port": 8105,
+                    "tmux_session": "rcx-pipeline-beta",
+                },
+            },
+            "duplicate dashboard port",
+        ),
+        (
+            {
+                "alpha": {
+                    "bus_dir": ".agent_bus-alpha",
+                    "dashboard_port": 8106,
+                    "tmux_session": "rcx-pipeline-shared",
+                },
+                "beta": {
+                    "bus_dir": ".agent_bus-beta",
+                    "dashboard_port": 8107,
+                    "tmux_session": "rcx-pipeline-shared",
+                },
+            },
+            "duplicate tmux session",
+        ),
+    ],
+)
+def test_monitor_identity_config_fails_closed_for_invalid_named_lanes(tmp_path, lanes, message):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_monitor_identity_config(repo, lanes)
+
+    with pytest.raises(monitor_identity.MonitorIdentityError, match=message):
+        monitor_identity.resolve_monitor_identity(repo, bus_dir=".agent_bus-alpha")
 
 
 def test_bridge_receipt_and_phase_b_handoff_use_namespaced_bus(tmp_path):

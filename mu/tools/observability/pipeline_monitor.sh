@@ -6,14 +6,30 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STATUS_SCRIPT="$SCRIPT_DIR/pipeline_status.sh"
 BUS_DIR="${RCX_AGENT_BUS_DIR:-.agent_bus}"
-if [ "${1:-}" = "--bus-dir" ]; then
-  if [ $# -lt 2 ]; then
-    echo "ERROR: --bus-dir requires a value" >&2
-    exit 2
-  fi
-  BUS_DIR="${2:-}"
-  shift 2
-fi
+LANE="${RCX_PIPELINE_MONITOR_LANE:-}"
+while [ $# -gt 0 ]; do
+  case "${1:-}" in
+    --bus-dir)
+      if [ $# -lt 2 ]; then
+        echo "ERROR: --bus-dir requires a value" >&2
+        exit 2
+      fi
+      BUS_DIR="${2:-}"
+      shift 2
+      ;;
+    --lane)
+      if [ $# -lt 2 ]; then
+        echo "ERROR: --lane requires a value" >&2
+        exit 2
+      fi
+      LANE="${2:-}"
+      shift 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 case "$BUS_DIR" in
   /*|*/*|*\\*|*..*|"")
     echo "ERROR: invalid --bus-dir: $BUS_DIR" >&2
@@ -47,7 +63,55 @@ if ! REPO_ROOT="$(resolve_observability_repo_root)"; then
   exit 1
 fi
 BUS_PATH="$REPO_ROOT/$BUS_DIR"
+COMMAND="${1:-}"
 SESSION="rcx-pipeline"
+DASHBOARD_PORT="8099"
+IDENTITY_LANE="default"
+IDENTITY_HELPER="$SCRIPT_DIR/pipeline_monitor_identity.py"
+
+identity_requires_config() {
+  case "$COMMAND" in
+    start|stop|attach) return 0 ;;
+    *) [ -n "$LANE" ] ;;
+  esac
+}
+
+resolve_monitor_identity() {
+  local helper_args=(
+    python3 "$IDENTITY_HELPER"
+    --repo-root "$REPO_ROOT"
+    --bus-dir "$BUS_DIR"
+    --format shell
+  )
+  if [ -n "$LANE" ]; then
+    helper_args+=(--lane "$LANE")
+  fi
+  if ! identity_requires_config; then
+    helper_args+=(--allow-unconfigured-named-bus)
+  fi
+  local output="" error_file=""
+  error_file="$(mktemp "${TMPDIR:-/tmp}/rcx_monitor_identity.XXXXXX")"
+  if ! output="$("${helper_args[@]}" 2>"$error_file")"; then
+    cat "$error_file" >&2
+    rm -f "$error_file"
+    exit 2
+  fi
+  rm -f "$error_file"
+  eval "$output"
+  SESSION="$RCX_MONITOR_TMUX_SESSION"
+  DASHBOARD_PORT="$RCX_MONITOR_DASHBOARD_PORT"
+  BUS_DIR="$RCX_MONITOR_BUS_DIR"
+  BUS_PATH="$RCX_MONITOR_BUS_PATH"
+  IDENTITY_LANE="$RCX_MONITOR_LANE"
+}
+
+if [ -f "$IDENTITY_HELPER" ]; then
+  resolve_monitor_identity
+elif identity_requires_config && { [ "$BUS_DIR" != ".agent_bus" ] || [ -n "$LANE" ]; }; then
+  echo "ERROR: monitor identity helper missing: $IDENTITY_HELPER" >&2
+  exit 2
+fi
+
 LIVE_LOG_KEY="$(printf '%s' "$REPO_ROOT" | cksum | awk '{print $1}')"
 LIVE_LOG="${RCX_PIPELINE_LIVE_LOG:-/tmp/rcx_pipeline_live_${LIVE_LOG_KEY}.txt}"
 SESSION_WIDTH="${RCX_PIPELINE_TMUX_WIDTH:-240}"
@@ -55,7 +119,7 @@ SESSION_HEIGHT="${RCX_PIPELINE_TMUX_HEIGHT:-70}"
 
 usage() {
   cat <<'EOF'
-Usage: pipeline_monitor.sh [--bus-dir .agent_bus[-id]] <command> [options]
+Usage: pipeline_monitor.sh [--bus-dir .agent_bus[-id]] [--lane name] <command> [options]
 
 Dashboard:
   start [--detach]         Launch tmux monitoring session
@@ -386,12 +450,19 @@ cmd_start() {
 
   local autoping_launcher="$REPO_ROOT/tools/session/ensure_codex_autoping.sh"
   if [ -n "${CODEX_THREAD_ID:-}" ] && [ -x "$autoping_launcher" ]; then
-    if ! "$autoping_launcher" --repo "$REPO_ROOT" --thread-id "$CODEX_THREAD_ID" --force-restart >/dev/null 2>&1; then
+    if ! "$autoping_launcher" \
+      --repo "$REPO_ROOT" \
+      --thread-id "$CODEX_THREAD_ID" \
+      --bus-dir "$BUS_DIR" \
+      --tmux-session "$SESSION" \
+      --tmux-pane "$SESSION:1.3" \
+      --force-restart >/dev/null 2>&1; then
       echo "WARN: failed to restart Codex autoping after tmux session reset" >&2
     fi
   fi
 
   echo "Pipeline monitor started (session: $SESSION)"
+  echo "Lane identity: lane=$IDENTITY_LANE bus=$BUS_PATH dashboard=http://127.0.0.1:$DASHBOARD_PORT"
   if [ "$detach" = false ]; then
     echo "Attaching... (detach with Ctrl-b d)"
     tmux attach-session -t "$SESSION"

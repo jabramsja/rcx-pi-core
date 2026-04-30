@@ -16,6 +16,8 @@ from pathlib import Path
 
 TMUX_SESSION = "rcx-pipeline"
 TMUX_PANE = "rcx-pipeline:1.3"
+DEFAULT_BUS_DIR = ".agent_bus"
+BUS_DIR_RE = re.compile(r"^\.agent_bus-[A-Za-z0-9][A-Za-z0-9_-]*$")
 DEFAULT_INTERVAL_S = 20.0
 DEFAULT_INITIAL_DELAY_S = 30.0
 DEFAULT_PING_TIMEOUT_S = 120.0
@@ -92,6 +94,20 @@ def _now() -> str:
 
 def _slug(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+
+
+def _validate_bus_dir(value: str | None) -> str:
+    raw = (value or DEFAULT_BUS_DIR).strip().rstrip("/")
+    if (
+        not raw
+        or "\\" in raw
+        or "/" in raw
+        or ".." in raw
+        or raw.startswith("/")
+        or (raw != DEFAULT_BUS_DIR and BUS_DIR_RE.fullmatch(raw) is None)
+    ):
+        raise ValueError(f"invalid active bus root: {raw!r}")
+    return raw
 
 
 def _resume_env() -> dict[str, str]:
@@ -247,7 +263,11 @@ def _extract_worktree_candidates(ps_output: str) -> list[tuple[int, int, Path]]:
     return candidates
 
 
-def _discover_active_wave_root(repo_root: Path | None = None) -> Path | None:
+def _discover_active_wave_root(
+    repo_root: Path | None = None,
+    *,
+    bus_dir: str = DEFAULT_BUS_DIR,
+) -> Path | None:
     resolved_repo_root = repo_root.expanduser().resolve() if repo_root else None
     proc = _run(["ps", "-Ao", "pid=,command="], timeout=15)
     if proc.returncode == 0:
@@ -262,14 +282,14 @@ def _discover_active_wave_root(repo_root: Path | None = None) -> Path | None:
             return candidates[0][2]
 
     if resolved_repo_root is not None:
-        bridge_db = resolved_repo_root / ".agent_bus" / "bridge.db"
+        bridge_db = resolved_repo_root / bus_dir / "bridge.db"
         return resolved_repo_root if bridge_db.exists() else None
 
     fallback_roots: list[Path] = []
     for base in (Path("/private/tmp"), Path("/tmp")):
         if not base.exists():
             continue
-        fallback_roots.extend(base.glob("workingrcx*/.agent_bus/bridge.db"))
+        fallback_roots.extend(base.glob(f"workingrcx*/{bus_dir}/bridge.db"))
 
     if not fallback_roots:
         return None
@@ -281,20 +301,26 @@ def _discover_active_wave_root(repo_root: Path | None = None) -> Path | None:
     return fallback_roots[0].parents[1]
 
 
-def _read_bridge_state(wave_root: Path | None) -> dict[str, object]:
+def _read_bridge_state(
+    wave_root: Path | None,
+    *,
+    bus_dir: str = DEFAULT_BUS_DIR,
+) -> dict[str, object]:
     if wave_root is None:
         return {
             "wave_root": None,
             "bridge_db": None,
+            "bus_dir": bus_dir,
             "job": None,
             "turn": None,
             "wave_root_missing": True,
         }
 
-    bridge_db = wave_root / ".agent_bus" / "bridge.db"
+    bridge_db = wave_root / bus_dir / "bridge.db"
     result: dict[str, object] = {
         "wave_root": str(wave_root),
         "bridge_db": str(bridge_db),
+        "bus_dir": bus_dir,
         "job": None,
         "turn": None,
     }
@@ -556,6 +582,7 @@ def _render_prompt(
     bridge_state: dict[str, object],
     tmux_tail: list[str],
     summary_path: Path,
+    bus_dir: str = DEFAULT_BUS_DIR,
 ) -> str:
     return (
         "Autonomous WorkingRCX pipeline watchdog tick.\n"
@@ -570,6 +597,7 @@ def _render_prompt(
         "Do not interrupt an active healthy supervisor or reviewer just because it is still running.\n"
         f"Always end with one concise final summary sentence beginning '{SUMMARY_PREFIX}' "
         "that states what you checked and whether you intervened. The watcher will persist that final summary; do not write the summary file yourself.\n\n"
+        f"Active bus root: {bus_dir}\n"
         f"Latest bridge state: {json.dumps(bridge_state, ensure_ascii=True)}\n"
         f"Latest tmux tail: {json.dumps(tmux_tail, ensure_ascii=True)}\n"
         f"Watcher summary path: {summary_path}\n"
@@ -583,6 +611,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--interval", type=float, default=DEFAULT_INTERVAL_S)
     parser.add_argument("--initial-delay", type=float, default=DEFAULT_INITIAL_DELAY_S)
     parser.add_argument("--ping-timeout", type=float, default=DEFAULT_PING_TIMEOUT_S)
+    parser.add_argument("--bus-dir", default=os.environ.get("RCX_AGENT_BUS_DIR", DEFAULT_BUS_DIR))
     parser.add_argument("--tmux-session", default=TMUX_SESSION)
     parser.add_argument("--tmux-pane", default=TMUX_PANE)
     return parser.parse_args()
@@ -593,6 +622,14 @@ def main() -> int:
     if not args.thread_id:
         print("[autoping] CODEX_THREAD_ID is required", flush=True)
         return 2
+
+    try:
+        bus_dir = _validate_bus_dir(args.bus_dir)
+    except ValueError as exc:
+        print(f"[autoping] {exc}", flush=True)
+        return 2
+    if args.tmux_pane == TMUX_PANE and args.tmux_session != TMUX_SESSION:
+        args.tmux_pane = f"{args.tmux_session}:1.3"
 
     repo_root = Path(args.repo_root).resolve()
     codex_home = _codex_home()
@@ -607,7 +644,7 @@ def main() -> int:
 
     print(
         f"[autoping] initial_delay_s={args.initial_delay} "
-        f"thread_id={args.thread_id} repo_root={repo_root}",
+        f"thread_id={args.thread_id} repo_root={repo_root} bus_dir={bus_dir}",
         flush=True,
     )
     initial_status = _initial_status_for_state(_read_state(state_path), args.thread_id)
@@ -622,6 +659,10 @@ def main() -> int:
             "active_log": None,
             "active_mode": None,
             "last_exit_code": None,
+            "repo_root": str(repo_root),
+            "bus_dir": bus_dir,
+            "tmux_session": args.tmux_session,
+            "tmux_pane": args.tmux_pane,
             "primary_thread_context_exhausted": (
                 initial_status == "context_exhausted_recovering"
             ),
@@ -845,8 +886,8 @@ def main() -> int:
         use_fresh_exec = _state_requires_fresh_exec_for_thread(state, args.thread_id)
         recovering_context_now = _state_context_exhausted_for_thread(state, args.thread_id)
 
-        wave_root = _discover_active_wave_root(repo_root)
-        bridge_state = _read_bridge_state(wave_root)
+        wave_root = _discover_active_wave_root(repo_root, bus_dir=bus_dir)
+        bridge_state = _read_bridge_state(wave_root, bus_dir=bus_dir)
         tmux_tail = _read_tmux_tail(args.tmux_pane)
         bridge_signature = _bridge_state_signature(bridge_state, tmux_tail)
         attention_summary = _attention_required_summary(bridge_state)
@@ -939,6 +980,7 @@ def main() -> int:
             bridge_state=bridge_state,
             tmux_tail=tmux_tail,
             summary_path=summary_path,
+            bus_dir=bus_dir,
         )
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         active_mode = FRESH_EXEC_CONTEXT_RECOVERY_MODE if use_fresh_exec else "resume"

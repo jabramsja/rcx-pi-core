@@ -747,6 +747,62 @@ class TestPrepareCommitHandoff:
         assert "FOUNDER_OVERRIDE:codex-startup-hardening-2026-04-16-followup" in note
         assert "progress_proof_after: Phase B emitted a commit-ready handoff for codex-startup-hardening-2026-04-14 with 3 wave-owned file(s)" in note
 
+    def test_build_phase_b_tracker_note_derives_authorized_control_surface_override(self):
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            wave_id="parallel-pipeline-monitor-identity-2026-04-30",
+            task_id="[PARALLEL-PIPELINE]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/parallel_pipeline_monitor_identity_2026-04-30.md",
+            plan_content=(
+                "# Parallel Pipeline Monitor Identity\n"
+                "Wave ID: parallel-pipeline-monitor-identity-2026-04-30\n"
+                "Phase-A-Lock: LOCKED\n"
+                "Lane: control-surface\n"
+                "Authorization: standing pipeline-bug-fix authorization for bounded pipeline hardening.\n"
+                "\n"
+                "## Scope\n"
+                "Control-surface monitor identity.\n"
+            ),
+            changed_files=[
+                "mu/tools/observability/pipeline_monitor.sh",
+                "reports/control_plane/parallel_pipeline_monitor_identity_2026-04-30.md",
+            ],
+            test_files=["mu/tests/tools/test_phase_b_executor.py"],
+            receipt_path=".agent_bus/meta/pre_commit_receipts/r.json",
+            bridge_rounds=1,
+            reentry=False,
+        )
+
+        assert "Class: L4_ENABLER" in note
+        assert "FOUNDER_OVERRIDE:parallel-pipeline-monitor-identity-2026-04-30" in note
+
+    def test_build_phase_b_tracker_note_does_not_derive_from_control_surface_lane_only(self):
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            wave_id="unauthorized-control-surface-wave",
+            task_id="[PARALLEL-PIPELINE]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/unauthorized_control_surface_wave.md",
+            plan_content=(
+                "# Unauthorized Control Surface Wave\n"
+                "Wave ID: unauthorized-control-surface-wave\n"
+                "Phase-A-Lock: LOCKED\n"
+                "Lane: control-surface\n"
+                "\n"
+                "## Scope\n"
+                "Control-surface monitor identity.\n"
+            ),
+            changed_files=["mu/tools/observability/pipeline_monitor.sh"],
+            test_files=["mu/tests/tools/test_phase_b_executor.py"],
+            receipt_path=".agent_bus/meta/pre_commit_receipts/r.json",
+            bridge_rounds=1,
+            reentry=False,
+        )
+
+        assert "Class: L4_ENABLER" in note
+        assert "FOUNDER_OVERRIDE:" not in note
+
     def test_build_phase_b_tracker_note_maintenance_includes_plan_bypass_fields(self):
         note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing plan-driven maintenance bypass fields
             wave_id="codex-startup-hardening-2026-04-14",

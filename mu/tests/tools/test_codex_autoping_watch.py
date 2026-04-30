@@ -344,6 +344,48 @@ def test_read_bridge_state_degrades_when_bridge_db_tables_are_missing(tmp_path):
     assert "OperationalError: no such table" in state["bridge_db_error"]
 
 
+def test_read_bridge_state_uses_configured_bus_dir(tmp_path):
+    wave_root = tmp_path / "wave"
+    bridge_db = wave_root / ".agent_bus-alpha" / "bridge.db"
+    bridge_db.parent.mkdir(parents=True)
+    conn = sqlite3.connect(bridge_db)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE jobs (
+              job_id TEXT PRIMARY KEY,
+              status TEXT NOT NULL,
+              terminal_decision TEXT
+            );
+            CREATE TABLE turns (
+              turn_id TEXT PRIMARY KEY,
+              job_id TEXT NOT NULL,
+              agent_role TEXT NOT NULL,
+              status TEXT NOT NULL,
+              decision TEXT
+            );
+            """
+        )
+        conn.execute("INSERT INTO jobs VALUES (?, ?, ?)", ("job-alpha", "DONE", "GO"))
+        conn.execute(
+            "INSERT INTO turns VALUES (?, ?, ?, ?, ?)",
+            ("turn-alpha", "job-alpha", "reviewer", "DONE", "GO"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    state = watch_mod._read_bridge_state(  # ANTICHEAT_OK: tool unit test
+        wave_root,
+        bus_dir=".agent_bus-alpha",
+    )
+
+    assert state["bridge_db"] == str(bridge_db)
+    assert state["bus_dir"] == ".agent_bus-alpha"
+    assert state["job"]["job_id"] == "job-alpha"
+    assert state["turn"]["turn_id"] == "turn-alpha"
+
+
 def test_write_state_merges_existing_fields(tmp_path):
     state_path = tmp_path / "autoping_state.json"
     watch_mod._write_state(  # ANTICHEAT_OK: tool unit test

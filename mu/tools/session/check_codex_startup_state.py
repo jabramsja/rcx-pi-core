@@ -73,6 +73,49 @@ POST_TOOL_USE_HOOK_REQUIRED_BINDINGS = frozenset(
 )
 ALLOWED_SESSION_START_PRE_EMIT_ENV_VARS = frozenset({"CODEX_RCX_PREFLIGHT_DISABLE"})
 
+OBSERVABILITY_DIR = Path(__file__).resolve().parents[3] / "mu" / "tools" / "observability"
+if str(OBSERVABILITY_DIR) not in sys.path:
+    sys.path.insert(0, str(OBSERVABILITY_DIR))
+
+try:
+    from pipeline_monitor_identity import (
+        DEFAULT_BUS_DIR,
+        MonitorIdentityError,
+        resolve_monitor_identity,
+    )
+except Exception:
+    DEFAULT_BUS_DIR = ".agent_bus"
+
+    class MonitorIdentityError(ValueError):
+        pass
+
+    def resolve_monitor_identity(
+        repo_root: Path,
+        *,
+        lane=None,
+        bus_dir=None,
+        port=None,
+        require_configured_named=True,
+    ):
+        if bus_dir not in (None, "", DEFAULT_BUS_DIR) and require_configured_named:
+            raise MonitorIdentityError(
+                f"active bus root {bus_dir} has no configured monitor identity"
+            )
+        resolved_port = WEB_PORT if port in (None, "") else int(port)
+        return type(
+            "FallbackMonitorIdentity",
+            (),
+            {
+                "lane": "default",
+                "bus_dir": DEFAULT_BUS_DIR,
+                "active_bus_root": repo_root / DEFAULT_BUS_DIR,
+                "dashboard_port": resolved_port,
+                "tmux_session": TMUX_SESSION,
+                "configured": False,
+                "named": False,
+            },
+        )()
+
 PROMPT_HOOK_REQUIRED_CANARIES = (
     "FOUNDER_SESSION_BOOTSTRAP.md",
     "repo-tracked docs",
@@ -2425,6 +2468,7 @@ def _check_models_cache(codex_home: Path) -> CheckResult:
 def _dashboard_health(
     port: int = WEB_PORT,
     timeout_s: int = DASHBOARD_HEALTH_TIMEOUT_S,
+    expected_bus_root: Path | str | None = None,
 ) -> tuple[bool, str]:
     url = f"http://127.0.0.1:{port}/api/state"
     try:
@@ -2455,7 +2499,18 @@ def _dashboard_health(
     if not isinstance(payload.get("narrative"), list):
         return False, f"{url} has invalid narrative payload"
 
-    return True, f"serving RCX dashboard on {url}"
+    bus_detail = ""
+    if expected_bus_root is not None:
+        expected = str(expected_bus_root)
+        identity = payload.get("monitor_identity")
+        if not isinstance(identity, dict):
+            return False, f"{url} missing monitor identity payload"
+        actual = str(identity.get("active_bus_root") or "")
+        if actual != expected:
+            return False, f"{url} reports active_bus_root={actual or '<unset>'}, expected {expected}"
+        bus_detail = f" active_bus_root={expected}"
+
+    return True, f"serving RCX dashboard on {url}{bus_detail}"
 
 
 def _dashboard_healthy(port: int = WEB_PORT) -> bool:
@@ -2618,7 +2673,37 @@ def _codex_autoping_state_path(codex_home: Path, thread_id: str) -> Path:
     return codex_home / "state" / f"rcx_autoping_{_codex_autoping_thread_slug(thread_id)}.json"
 
 
-def _codex_autoping_health(codex_home: Path, thread_id: str) -> tuple[bool, str]:
+def _codex_autoping_identity_mismatch(payload: dict[str, object], identity) -> str | None:
+    if identity is None:
+        return None
+
+    strict = bool(getattr(identity, "named", False))
+    expected_bus_dir = str(getattr(identity, "bus_dir", "") or "").strip()
+    expected_tmux_session = str(getattr(identity, "tmux_session", "") or "").strip()
+    expected_fields = {
+        "bus_dir": expected_bus_dir,
+        "tmux_session": expected_tmux_session,
+        "tmux_pane": f"{expected_tmux_session}:1.3" if expected_tmux_session else "",
+    }
+
+    mismatches: list[str] = []
+    for field, expected in expected_fields.items():
+        if not expected:
+            continue
+        actual = str(payload.get(field) or "").strip()
+        if not actual:
+            if strict:
+                mismatches.append(f"{field}=<unset> expected {expected}")
+            continue
+        if actual != expected:
+            mismatches.append(f"{field}={actual} expected {expected}")
+
+    if not mismatches:
+        return None
+    return "Codex autoping identity mismatch: " + "; ".join(mismatches)
+
+
+def _codex_autoping_health(codex_home: Path, thread_id: str, identity=None) -> tuple[bool, str]:
     state_path = _codex_autoping_state_path(codex_home, thread_id)
     raw = _read_text(state_path)
     if raw is None:
@@ -2633,6 +2718,10 @@ def _codex_autoping_health(codex_home: Path, thread_id: str) -> tuple[bool, str]
     recorded_thread = str(payload.get("thread_id") or "").strip()
     if recorded_thread != thread_id:
         return False, f"Codex autoping state thread mismatch: {recorded_thread or 'unset'}"
+
+    identity_mismatch = _codex_autoping_identity_mismatch(payload, identity)
+    if identity_mismatch is not None:
+        return False, identity_mismatch
 
     watcher_pid = payload.get("watcher_pid")
     if not _pid_alive(watcher_pid):
@@ -2826,7 +2915,21 @@ def _tmux_session_stable(
     return False, last_detail or f"session {session} not stable"
 
 
-def _ensure_tmux_monitor(repo_root: Path, session: str = TMUX_SESSION) -> CheckResult:
+def _startup_monitor_identity(repo_root: Path, *, port: int | None = None):
+    return resolve_monitor_identity(
+        repo_root,
+        lane=os.environ.get("RCX_PIPELINE_MONITOR_LANE"),
+        bus_dir=os.environ.get("RCX_AGENT_BUS_DIR"),
+        port=port,
+        require_configured_named=True,
+    )
+
+
+def _ensure_tmux_monitor(
+    repo_root: Path,
+    session: str | None = None,
+    identity=None,
+) -> CheckResult:
     monitor_script = repo_root / "tools" / "observability" / "pipeline_monitor.sh"
     if not monitor_script.exists():
         return CheckResult(
@@ -2834,17 +2937,26 @@ def _ensure_tmux_monitor(repo_root: Path, session: str = TMUX_SESSION) -> CheckR
             "FAIL",
             f"missing monitor script: {monitor_script}",
         )
+    try:
+        identity = identity or _startup_monitor_identity(repo_root)
+    except MonitorIdentityError as exc:
+        return CheckResult(
+            "tmux_monitor",
+            "FAIL",
+            "monitor identity invalid: " + str(exc),
+        )
+    session = session or identity.tmux_session
 
     stable, detail = _tmux_session_stable(repo_root, session)
     if stable:
         return CheckResult(
             "tmux_monitor",
             "OK",
-            detail,
+            f"{detail}; lane={identity.lane} bus={identity.active_bus_root}",
         )
 
     start = _run(
-        [str(monitor_script), "start", "--detach"],
+        [str(monitor_script), "--bus-dir", identity.bus_dir, "start", "--detach"],
         cwd=repo_root,
         timeout=30,
     )
@@ -2864,7 +2976,7 @@ def _ensure_tmux_monitor(repo_root: Path, session: str = TMUX_SESSION) -> CheckR
         return CheckResult(
             "tmux_monitor",
             "OK",
-            f"started; {stable_detail}",
+            f"started; {stable_detail}; lane={identity.lane} bus={identity.active_bus_root}",
         )
 
     detail = (start.stderr or start.stdout or "").strip() or stable_detail or detail
@@ -2875,7 +2987,7 @@ def _ensure_tmux_monitor(repo_root: Path, session: str = TMUX_SESSION) -> CheckR
     )
 
 
-def _ensure_web_dashboard(repo_root: Path, port: int = WEB_PORT) -> CheckResult:
+def _ensure_web_dashboard(repo_root: Path, port: int = WEB_PORT, identity=None) -> CheckResult:
     web_script = repo_root / "tools" / "observability" / "pipeline_dashboard_web.py"
     if not web_script.exists():
         return CheckResult(
@@ -2883,8 +2995,23 @@ def _ensure_web_dashboard(repo_root: Path, port: int = WEB_PORT) -> CheckResult:
             "FAIL",
             f"missing dashboard script: {web_script}",
         )
+    try:
+        identity = identity or _startup_monitor_identity(
+            repo_root,
+            port=None if port == WEB_PORT else port,
+        )
+    except MonitorIdentityError as exc:
+        return CheckResult(
+            "web_dashboard",
+            "FAIL",
+            "monitor identity invalid: " + str(exc),
+        )
+    port = identity.dashboard_port
 
-    healthy, detail = _dashboard_health(port)
+    health_kwargs = {}
+    if identity.named:
+        health_kwargs["expected_bus_root"] = identity.active_bus_root
+    healthy, detail = _dashboard_health(port, **health_kwargs)
     if healthy:
         return CheckResult(
             "web_dashboard",
@@ -2894,8 +3021,13 @@ def _ensure_web_dashboard(repo_root: Path, port: int = WEB_PORT) -> CheckResult:
 
     try:
         with open(os.devnull, "wb") as sink:
+            cmd = [sys.executable, str(web_script)]
+            if identity.named:
+                cmd.extend(["--bus-dir", identity.bus_dir, "--port", str(port)])
+            else:
+                cmd.append(str(port))
             subprocess.Popen(
-                [sys.executable, str(web_script), str(port)],
+                cmd,
                 cwd=str(repo_root),
                 stdout=sink,
                 stderr=sink,
@@ -2911,7 +3043,7 @@ def _ensure_web_dashboard(repo_root: Path, port: int = WEB_PORT) -> CheckResult:
     deadline = time.time() + 8
     last_detail = detail
     while time.time() < deadline:
-        healthy, last_detail = _dashboard_health(port)
+        healthy, last_detail = _dashboard_health(port, **health_kwargs)
         if healthy:
             return CheckResult(
                 "web_dashboard",
@@ -2991,7 +3123,7 @@ def _ensure_codex_pager_target(
     )
 
 
-def _ensure_codex_autoping(repo_root: Path, codex_home: Path) -> CheckResult:
+def _ensure_codex_autoping(repo_root: Path, codex_home: Path, identity=None) -> CheckResult:
     if os.environ.get("RCX_PIPELINE_SESSION", "") == "1":
         return CheckResult(
             "codex_autoping",
@@ -3007,7 +3139,16 @@ def _ensure_codex_autoping(repo_root: Path, codex_home: Path) -> CheckResult:
             "CODEX_THREAD_ID unset; Codex autoping skipped outside an interactive Codex thread",
         )
 
-    healthy, detail = _codex_autoping_health(codex_home, thread_id)
+    try:
+        identity = identity or _startup_monitor_identity(repo_root)
+    except MonitorIdentityError as exc:
+        return CheckResult(
+            "codex_autoping",
+            "FAIL",
+            "monitor identity invalid: " + str(exc),
+        )
+
+    healthy, detail = _codex_autoping_health(codex_home, thread_id, identity=identity)
     if healthy:
         return CheckResult("codex_autoping", "OK", detail)
 
@@ -3032,6 +3173,12 @@ def _ensure_codex_autoping(repo_root: Path, codex_home: Path) -> CheckResult:
             str(repo_root),
             "--thread-id",
             thread_id,
+            "--bus-dir",
+            identity.bus_dir,
+            "--tmux-session",
+            identity.tmux_session,
+            "--tmux-pane",
+            f"{identity.tmux_session}:1.3",
             "--force-restart",
         ],
         cwd=repo_root,
@@ -3047,7 +3194,7 @@ def _ensure_codex_autoping(repo_root: Path, codex_home: Path) -> CheckResult:
     deadline = time.time() + 8
     last_detail = detail
     while time.time() < deadline:
-        healthy, last_detail = _codex_autoping_health(codex_home, thread_id)
+        healthy, last_detail = _codex_autoping_health(codex_home, thread_id, identity=identity)
         if healthy:
             return CheckResult(
                 "codex_autoping",
@@ -3084,11 +3231,17 @@ def gather_results(repo_root: Path, codex_home: Path) -> tuple[list[CheckResult]
             )
         ]
 
+    identity = None
+    try:
+        identity = _startup_monitor_identity(repo_root)
+    except MonitorIdentityError:
+        pass
+
     observability_results = [
-        _ensure_tmux_monitor(repo_root),
-        _ensure_web_dashboard(repo_root),
+        _ensure_tmux_monitor(repo_root, identity=identity),
+        _ensure_web_dashboard(repo_root, identity=identity),
         _ensure_codex_pager_target(repo_root, codex_home),
-        _ensure_codex_autoping(repo_root, codex_home),
+        _ensure_codex_autoping(repo_root, codex_home, identity=identity),
     ]
     return local_results, observability_results
 
