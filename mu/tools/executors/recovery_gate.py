@@ -888,11 +888,20 @@ def fix_missing_bridge_config(repo_root: Path) -> dict[str, Any]:
     except Exception as exc:
         return _fix_result(False, "error", f"failed to resolve main repo from .git pointer: {exc}")
 
-    src = agent_bus_path(main_repo, _active_bus_dir(), "bridge_config.json")
-    if not src.exists():
+    active_src = agent_bus_path(main_repo, _active_bus_dir(), "bridge_config.json")
+    default_src = agent_bus_path(main_repo, None, "bridge_config.json")
+    src_candidates = [active_src]
+    if default_src != active_src:
+        src_candidates.append(default_src)
+    src = next((candidate for candidate in src_candidates if candidate.exists()), None)
+    if src is None:
+        candidate_relpaths = ", ".join(
+            str(agent_bus_relpath(None if candidate == default_src else _active_bus_dir(), "bridge_config.json"))
+            for candidate in src_candidates
+        )
         return _fix_result(
             False, "error",
-            f"main repo at {main_repo} has no {_bus_relpath('bridge_config.json')} to copy",
+            f"main repo at {main_repo} has no {candidate_relpaths} to copy",
         )
 
     try:

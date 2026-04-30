@@ -34,7 +34,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -55,6 +54,7 @@ try:
         agent_bus_path,
         agent_bus_relpath,
         bridge_config_path,
+        ensure_bridge_config_path,
         is_agent_bus_runtime_path,
         load_executor_config,
         normalize_wave_id,
@@ -76,6 +76,7 @@ except ImportError:
     agent_bus_path = _mod.agent_bus_path
     agent_bus_relpath = _mod.agent_bus_relpath
     bridge_config_path = _mod.bridge_config_path
+    ensure_bridge_config_path = _mod.ensure_bridge_config_path
     is_agent_bus_runtime_path = _mod.is_agent_bus_runtime_path
     load_executor_config = _mod.load_executor_config
     normalize_wave_id = _mod.normalize_wave_id
@@ -3396,28 +3397,17 @@ def _attempt_bot_finding_remediation(
 
     config_path = bridge_config_path(repo_root, _active_bus_dir())
     # Auto-heal: fresh worktrees created by `git worktree add` lack bus runtime
-    # directories because .gitignore excludes them. When the config is missing,
-    # locate the main worktree via `git worktree list --porcelain` (first entry)
-    # and copy its bridge_config.json here. Preserves load_bridge_config's
-    # fail-closed contract: if main also lacks the file, load_bridge_config
-    # raises BridgeAdapterError unchanged.
+    # directories because .gitignore excludes them. Seed the active bus from a
+    # trusted bridge_config.json source, including the canonical default bus for
+    # namespaced runs. Preserves load_bridge_config's fail-closed contract: if
+    # no trusted source exists, load_bridge_config raises BridgeAdapterError
+    # unchanged.
     if not config_path.exists():
         try:
-            wt_out = subprocess.check_output(
-                ["git", "worktree", "list", "--porcelain"],
-                cwd=str(repo_root), text=True, timeout=10,
-            )
-            main_path: Path | None = None
-            for line in wt_out.splitlines():
-                if line.startswith("worktree "):
-                    main_path = Path(line[len("worktree "):].strip())
-                    break
-            if main_path is not None and main_path.resolve() != repo_root.resolve():
-                src = agent_bus_path(main_path, _active_bus_dir(), "bridge_config.json")
-                if src.exists():
-                    config_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src, config_path)
-                    log(f"Step 15: auto-copied bridge_config.json from main worktree ({main_path})")
+            config_path = ensure_bridge_config_path(repo_root, _active_bus_dir())
+            if config_path.exists():
+                relpath = agent_bus_relpath(_active_bus_dir(), "bridge_config.json")
+                log(f"Step 15: auto-copied bridge_config.json into {relpath}")
         except Exception as heal_exc:
             log(f"Step 15: bridge_config.json auto-heal failed: {heal_exc}")
     try:
