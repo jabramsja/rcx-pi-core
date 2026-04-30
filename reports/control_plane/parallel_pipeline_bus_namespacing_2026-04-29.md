@@ -5,6 +5,8 @@ Status: COMPLETED (commit-ready, supervisor COMMIT_GO)
 Phase-A-Lock: LOCKED
 Task: [PARALLEL-PIPELINE]
 Wave ID: parallel-pipeline-bus-namespacing-2026-04-29
+Lane: control-surface
+Authorization: standing pipeline-bug-fix authorization for this authorized control-surface L4_ENABLER wave; permits FOUNDER_OVERRIDE:parallel-pipeline-bus-namespacing-2026-04-29 for commit-gate/pre-push adjacency and rolling-window clearance only.
 Purpose: Plan the first parallel-pipeline slice: executor and bridge agent-bus namespacing without widening runtime/substrate semantics.
 
 ## Scope
