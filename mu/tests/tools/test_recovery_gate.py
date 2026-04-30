@@ -6279,6 +6279,78 @@ printf 'n{repo_root}\\n'
         assert "Pager latest:" in pinned_tail[2]
         assert "recovery_state_changed" in pinned_tail[2]
 
+    def test_pane_timeline_honors_rcx_codex_home_for_autoping_state(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_timeline.sh")
+        home_dir = tmp_path / "home-without-autoping-state"
+        home_dir.mkdir()
+        codex_home = tmp_path / "codex-home"
+        state_dir = codex_home / "state"
+        state_dir.mkdir(parents=True)
+        autoping_thread_id = "thread-rcx"
+        autoping_summary = state_dir / f"rcx_autoping_{autoping_thread_id}_summary.txt"
+        autoping_summary.write_text(
+            "read from RCX_CODEX_HOME state root\n",
+            encoding="utf-8",
+        )
+        (state_dir / f"rcx_autoping_{autoping_thread_id}.json").write_text(
+            json.dumps(
+                {
+                    "thread_id": autoping_thread_id,
+                    "status": "attention_required",
+                    "watcher_pid": 1234,
+                    "last_dispatched_pid": 2345,
+                    "updated_at": "2026-04-25T02:17:30+00:00",
+                    "last_dispatched_at": "2026-04-25T02:17:10+00:00",
+                    "last_completed_at": "2026-04-25T02:17:20+00:00",
+                    "summary_path": str(autoping_summary),
+                    "bridge_state": {
+                        "wave_root": str(repo_root),
+                        "bridge_db": str(repo_root / ".agent_bus" / "bridge.db"),
+                        "job": {"job_id": "phase-b-r3", "status": "DONE", "decision": "GO"},
+                        "turn": {"turn_id": "turn-1", "status": "completed", "decision": "GO"},
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\nHEAD 1111111111111111\nbranch refs/heads/jabramsja/repo-wave\n",
+        )
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "HOME": str(home_dir),
+            "RCX_CODEX_HOME": str(codex_home),
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Autoping: last ping" in clean_stdout
+        assert "last done" in clean_stdout
+        assert "state updated" in clean_stdout
+        assert "Autoping detail: thread thread-rcx" in clean_stdout
+        assert "watcher pid 1234" in clean_stdout
+        assert "last ping pid 2345" in clean_stdout
+        assert "Autoping summary: read from RCX_CODEX_HOME state root" in clean_stdout
+
     def test_pane_timeline_executor_pointer_checks_keywords_individually(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
