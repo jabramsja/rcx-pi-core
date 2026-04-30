@@ -6635,6 +6635,36 @@ class TestModularSurfaceEntrypoints:
         assert "--bootstrap-exception" in cmd
         assert "--verbose" in cmd
 
+    def test_phase_b_surface_forwards_dispatcher_owned_routing_record(self, tmp_path):
+        plan = tmp_path / "reports" / "control_plane" / "parallel_pipeline_agent_teams_2026-04-30.md"
+        plan.parent.mkdir(parents=True)
+        plan.write_text(
+            "# Parallel Pipeline Agent Teams\n"
+            "Task: [PARALLEL-PIPELINE]\n"
+            "Wave ID: parallel-pipeline-agent-teams\n"
+            "Phase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-b",
+                "--plan",
+                "reports/control_plane/parallel_pipeline_agent_teams_2026-04-30.md",
+                "--task-id",
+                "PARALLEL-PIPELINE",
+                "--json",
+            ]
+        )
+
+        record = dispatch_mod._surface_record_for_chain(args, tmp_path)  # ANTICHEAT_OK: regression for stale ROUTE_PHASE_A default routing
+        cmd = dispatch_mod.build_surface_command(args, routing_record=record)
+
+        payload = json.loads(cmd[cmd.index("--routing-record") + 1])
+        assert payload["decision"] == "ROUTE_PHASE_B"
+        assert payload["task_id"] == "[PARALLEL-PIPELINE]"
+        assert payload["wave_name"] == "parallel-pipeline-agent-teams"
+        assert "--dispatcher-owned-recovery" in cmd
+
     def test_phase_b_surface_derives_plan_from_tracked_packet(self, tmp_path):
         routing_path = tmp_path / "routing.json"
         routing_path.write_text(

@@ -597,9 +597,13 @@ def build_surface_command(
             str(args.max_rounds),
             "--dispatcher-owned-recovery",
         ]
-        routing_payload = _load_routing_record_payload(
-            path_value=args.routing_record_path,
-            json_value=args.routing_record_json,
+        routing_payload = (
+            json.dumps(routing_record)
+            if routing_record is not None
+            else _load_routing_record_payload(
+                path_value=args.routing_record_path,
+                json_value=args.routing_record_json,
+            )
         )
         recovery_plan_path = os.environ.get(PHASE_B_RECOVERY_PLAN_ENV, "").strip()
         plan_path = (
@@ -695,7 +699,7 @@ def _surface_wave_id(args: argparse.Namespace, repo_root: Path) -> str:
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass
         if args.plan:
-            return normalize_wave_id(Path(args.plan).stem)
+            return _phase_b_plan_wave_id(repo_root, args.plan)
     if args.surface == "commit":
         if args.handoff:
             try:
