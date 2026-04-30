@@ -1596,6 +1596,59 @@ class TestWaveIdBounds:
         assert not errors
         assert handoff["files_to_stage"] == ["mu/tests/docs/test_growth_caps.py"]
 
+    def test_stage_handoff_paths_is_idempotent_for_staged_deletion(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        target = repo / "obsolete.md"
+        target.write_text("remove me\n", encoding="utf-8")
+        subprocess.run(["git", "add", "obsolete.md"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "add obsolete"], cwd=repo, check=True)
+        target.unlink()
+
+        commit_mod._stage_handoff_paths(  # ANTICHEAT_OK: direct stage helper regression for deleted handoff paths
+            repo,
+            files_to_stage=["obsolete.md"],
+            force_files=[],
+        )
+        first = subprocess.run(
+            ["git", "diff", "--cached", "--name-status", "--", "obsolete.md"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert first.stdout.strip() == "D\tobsolete.md"
+
+        commit_mod._stage_handoff_paths(  # ANTICHEAT_OK: direct stage helper regression for deleted handoff paths
+            repo,
+            files_to_stage=["obsolete.md"],
+            force_files=[],
+        )
+        second = subprocess.run(
+            ["git", "diff", "--cached", "--name-status", "--", "obsolete.md"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert second.stdout.strip() == "D\tobsolete.md"
+
+        subprocess.run(["git", "commit", "-m", "delete obsolete"], cwd=repo, check=True)
+        commit_mod._stage_handoff_paths(  # ANTICHEAT_OK: direct stage helper regression for deleted handoff paths
+            repo,
+            files_to_stage=["obsolete.md"],
+            force_files=[],
+        )
+        third = subprocess.run(
+            ["git", "diff", "--cached", "--name-status", "--", "obsolete.md"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert third.stdout.strip() == ""
+
     def test_missing_supervisor_receipt_blocks_pipeline(self, tmp_path):
         """When supervisor receipt path doesn't exist on disk, step 7 fails closed."""
         from collections import namedtuple

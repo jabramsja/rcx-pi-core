@@ -1,6 +1,6 @@
 # Wave 1B: Pipeline Cleanup (MEDIUM + LOW)
 
-**Status:** IN PROGRESS (observability slice landed 2026-04-02; remaining items still queued)
+**Status:** IN PROGRESS (observability slices landed 2026-04-02 and 2026-04-30; remaining code-backed residue still queued)
 **Task:** NEXT-CODEX-POST-REDTEAM deferred cleanup
 **Surface:** `mu/tools/executors/`, `mu/tools/agents/`, `mu/tools/checks/`, `mu/tools/observability/`, `mu/tools/hooks/`
 **Classification:** MAINTENANCE (hardening, no runtime dirs)
@@ -31,8 +31,8 @@
 ### E2. [LOW] ~~Zero-output watchdog timing mismatch~~ **LANDED 2026-04-02**
 ### E3. [LOW] ~~Timeout override parser reject NaN/Inf~~ **LANDED 2026-04-02**
 ### E4. [LOW] ~~Dashboard pre-commit vs post-merge classification~~ **LANDED 2026-04-02**
-### E5. [LOW] jq last(3) dead logic + terminal escape sanitization
-### E6. [LOW] PR number numeric validation in gh API path
+### E5. [LOW] ~~jq last(3) dead logic + terminal escape sanitization~~ **LANDED PR #843 + deferred-consolidation-e5-e6-closeout-2026-04-30**
+### E6. [LOW] ~~PR number numeric validation in gh API path~~ **LANDED PR #843**
 ### E7. [LOW] ~~Hook test vacuous-pass guards~~ **LANDED 2026-04-02**
 ### E8. [LOW] ~~Phase B executor gitignore comment fix~~ **LANDED 2026-04-02**
 
@@ -46,8 +46,14 @@
 - Landed dashboard phase detection updates so `meta_bridge_supervisor.py` is classified as `commit` in pre-commit mode and `post-merge` only when `--mode post-merge` is actually present.
 - Landed rendered-transcript fallback parsing in `pipeline_dashboard.py`, `pipeline_dashboard_web.py`, and `_pane_findings.sh`, so Codex raw JSON transcripts no longer leave old reviewer rounds stuck as false `In progress...`.
 - Landed the two low-risk hygiene fixes from the packet: hook-test vacuous-pass guards removed, and the stale Phase B gitignore comment corrected.
-- Remaining open from Wave 1B after this slice: Cluster C items, Cluster D items, and E5-E6.
+- Remaining open from Wave 1B after the 2026-04-30 code-truth reconciliation: D1 dialectic `max_rounds` only.
 - Adjacent fix pulled in because it reproduced live in tmux: the findings pane now accepts reviewer markdown transcripts in addition to envelope JSON artifacts.
+
+### 2026-04-30 — E5/E6 pane PR/CI closeout
+
+- Landed E5/E6 through PR #843: `_pane_prci.sh` uses jq `.[-3:][]`, validates numeric PR identifiers before the review-comments API path, and has targeted coverage for empty/short/long bot comments plus empty/non-numeric PR guards.
+- Closed the remaining E5 non-blocker in `deferred-consolidation-e5-e6-closeout-2026-04-30`: `sanitize_pane_text()` now strips C1 controls (`U+0080..U+009F`) in addition to ESC/C0/DEL, with a regression test for `U+009B`.
+- Remaining open from Wave 1B after this slice is the code-backed D1 dialectic `max_rounds` residue tracked in `TASKS.md`.
 
 ---
 

@@ -435,8 +435,46 @@ def _stage_handoff_paths(
 ) -> tuple[list[str], list[str]]:
     canonical_files = _canonicalize_stage_paths(repo_root, files_to_stage)
     canonical_force = _canonicalize_stage_paths(repo_root, force_files)
-    if canonical_files:
-        _run(["git", "add", "--", *canonical_files], cwd=repo_root)
+    existing_files: list[str] = []
+    missing_files: list[str] = []
+    for relpath in canonical_files:
+        path = repo_root / relpath
+        if path.exists() or path.is_symlink():
+            existing_files.append(relpath)
+        else:
+            missing_files.append(relpath)
+    if existing_files:
+        _run(["git", "add", "--", *existing_files], cwd=repo_root)
+    for relpath in missing_files:
+        staged_delete = _run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=D", "--", relpath],
+            cwd=repo_root,
+            check=False,
+            timeout=30,
+        )
+        if staged_delete.returncode == 0 and staged_delete.stdout.strip():
+            continue
+        deleted = _run(
+            ["git", "ls-files", "--deleted", "--", relpath],
+            cwd=repo_root,
+            check=False,
+            timeout=30,
+        )
+        if deleted.returncode == 0 and deleted.stdout.strip():
+            _run(["git", "add", "-u", "--", relpath], cwd=repo_root)
+        else:
+            committed_delete = _run(
+                [
+                    "git", "diff", "--name-only", "--diff-filter=D",
+                    "HEAD^..HEAD", "--", relpath,
+                ],
+                cwd=repo_root,
+                check=False,
+                timeout=30,
+            )
+            if committed_delete.returncode == 0 and committed_delete.stdout.strip():
+                continue
+            _run(["git", "add", "--", relpath], cwd=repo_root)
     if canonical_force:
         _run(["git", "add", "-f", "--", *canonical_force], cwd=repo_root)
     return canonical_files, canonical_force

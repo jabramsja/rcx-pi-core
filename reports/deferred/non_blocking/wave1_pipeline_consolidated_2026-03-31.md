@@ -137,15 +137,15 @@ Supersedes: 6 files (see Archive section)
 - Source: PR #701 bot comment (P3). Phase detector treats all `meta_bridge_supervisor` as post-merge.
 - **Fix:** Distinguish by process args or context.
 
-### E5. [LOW] jq `last(3)` dead logic + terminal escape injection
-- **File:** `mu/tools/observability/_pane_prci.sh:47`
-- `last(3)` evaluates to integer 3 (jq semantics). Bot comment bodies unsanitized.
-- **Fix:** Use `last(3; .[])` or `[-3:]`. Sanitize terminal escapes.
+### E5. [LOW] ~~jq `last(3)` dead logic + terminal escape injection~~ **LANDED PR #843 + deferred-consolidation-e5-e6-closeout-2026-04-30**
+- **File:** `mu/tools/observability/_pane_prci.sh`
+- Current source uses jq `.[-3:][]` for recent bot comments and sanitizes displayed bot text for ESC/C0/DEL/C1 controls before pane rendering.
+- **Proof:** `mu/tests/tools/test_pane_prci_observability.py` covers empty/short/long comment selection, escape sanitization, and C1 control stripping.
 
-### E6. [LOW] PR number not validated as numeric in gh API path
-- **File:** `mu/tools/observability/_pane_prci.sh:14`
-- Defense-in-depth gap.
-- **Fix:** Add numeric guard.
+### E6. [LOW] ~~PR number not validated as numeric in gh API path~~ **LANDED PR #843**
+- **File:** `mu/tools/observability/_pane_prci.sh`
+- Current source rejects empty and non-numeric PR identifiers before the review-comments API path.
+- **Proof:** `mu/tests/tools/test_pane_prci_observability.py` covers both non-numeric and empty PR inputs without invoking `gh api`.
 
 ### E7. [LOW] Hook tests have vacuous-pass guards
 - **File:** `mu/tests/tools/test_validate_agent_compliance.py:1032`
