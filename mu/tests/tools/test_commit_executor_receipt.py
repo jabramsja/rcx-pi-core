@@ -863,6 +863,88 @@ class TestReceiptChainEndToEnd:
         assert refreshed_again["tracked_packet"] == packet_path
         assert staged_again == staged
 
+    def test_commit_packet_truth_refresh_updates_rebuilt_handoff_file_count(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "packet-count-refresh-wave"
+        packet_path = "reports/control_plane/packet_count_refresh_wave.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Packet Count Refresh Wave\n\n"
+            "Wave ID: packet-count-refresh-wave\n"
+            "Wave class: L4_ENABLER\n"
+            "Target gate: G8\n"
+            "Lane: control-surface\n",
+            encoding="utf-8",
+        )
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        indicator_file = repo / indicator_path
+        indicator_file.parent.mkdir(parents=True, exist_ok=True)
+        indicator_file.write_text(json.dumps({"wave_id": wave_id}), encoding="utf-8")
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "file.py"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "-f", "--", indicator_path], cwd=repo, check=True)
+        stale_note = (
+            f"- Tracker sync note (2026-04-30, {wave_id}): **TEST.**. "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py`. "
+            "evidence_delta: (1) Routed commit handoff scopes 11 wave-owned file(s). "
+            "(2) Evidence gate exercises 1 wave-owned test module(s). "
+            "(3) Indicator artifact binds the wave. "
+            "progress_proof_before: stale count. "
+            f"progress_proof_after: Phase B handoff for {wave_id} now carries 11 wave-owned file(s), "
+            "bridge rounds=1, explicit receipt authority, and an L4-compliant tracker note. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: {indicator_path}. "
+            f"indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} --output {indicator_path}. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        )
+        (repo / "TASKS.md").write_text(f"## Ra\n\n{stale_note}\n\n---\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "TASKS.md"], cwd=repo, check=True)
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=[
+                "file.py",
+                packet_path,
+                "old_a.py",
+                "old_b.py",
+                "old_c.py",
+                "old_d.py",
+                "old_e.py",
+                "old_f.py",
+                "old_g.py",
+                "old_h.py",
+                "old_i.py",
+            ],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+            tracker_note_text=stale_note,
+        )
+
+        refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+        assert error is None
+        assert len(staged) == 4
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        packet_text = packet_file.read_text(encoding="utf-8")
+        assert "Routed commit handoff scopes 4 wave-owned file(s)" in refreshed["tracker_note_text"]
+        assert "now carries 4 wave-owned file(s)" in refreshed["tracker_note_text"]
+        assert "11 wave-owned file(s)" not in refreshed["tracker_note_text"]
+        assert "Routed commit handoff scopes 4 wave-owned file(s)" in tasks_text
+        assert "now carries 4 wave-owned file(s)" in tasks_text
+        assert "Routed commit handoff scopes 4 wave-owned file(s)" in packet_text
+        assert "11 wave-owned file(s)" not in tasks_text
+        assert "11 wave-owned file(s)" not in packet_text
+
     def test_same_wave_followup_touches_tasks_when_tracker_relevant_files_change(self, tmp_path):
         from collections import namedtuple
 
@@ -2067,3 +2149,91 @@ class TestCIPollFallbackTimeout:
         assert final_clock >= 900, (
             f"Simulated clock should have exhausted the 900s budget, got {final_clock}s"
         )
+
+
+class TestRequiredCIGreenGuard:
+    def test_required_check_guard_waits_after_watch_reports_success(self, tmp_path):
+        import subprocess
+
+        clock = [0.0]
+        json_calls = []
+        logs = []
+
+        def fake_monotonic():
+            return clock[0]
+
+        def fake_sleep(seconds):
+            clock[0] += seconds
+
+        def completed(cmd, *, stdout="", returncode=0):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr="")
+
+        def fake_run(cmd, **kwargs):
+            assert cmd[:4] == ["gh", "pr", "checks", "844"], cmd
+            assert "--required" in cmd, cmd
+            assert "--json" in cmd, cmd
+            json_calls.append(cmd)
+            if len(json_calls) == 1:
+                return completed(cmd, stdout=json.dumps([
+                    {"name": "test", "state": "IN_PROGRESS", "bucket": "pending"},
+                    {"name": "green-gate", "state": "SUCCESS", "bucket": "pass"},
+                ]))
+            return completed(cmd, stdout=json.dumps([
+                {"name": "test", "state": "SUCCESS", "bucket": "pass"},
+                {"name": "green-gate", "state": "SUCCESS", "bucket": "pass"},
+            ]))
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod.time, "monotonic", fake_monotonic), \
+             patch.object(commit_mod.time, "sleep", fake_sleep):
+            result = commit_mod._wait_for_required_checks_to_pass(  # ANTICHEAT_OK: regression guard for gh-watch premature success
+                tmp_path,
+                "844",
+                timeout=30,
+                poll_interval=15,
+                log=logs.append,
+            )
+
+        assert result is True
+        assert len(json_calls) == 2
+        assert clock[0] == 15
+        assert any("pending required check(s): test=IN_PROGRESS" in line for line in logs)
+
+    def test_wait_for_pr_ci_rejects_watch_success_until_required_checks_green(self, tmp_path):
+        import subprocess
+
+        def completed(cmd, *, stdout="", stderr="", returncode=0):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, **kwargs):
+            if cmd == ["gh", "pr", "checks", "844", "--required"]:
+                return completed(cmd, stdout="test\tpending\n", returncode=8)
+            if cmd == ["gh", "pr", "checks", "844", "--watch", "--required"]:
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        result = {
+            "commit_sha": "a" * 40,
+            "handoff_sha": "handoff-sha",
+            "receipt_decision": "COMMIT_GO",
+            "steps_completed": ["git_commit"],
+        }
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod, "_wait_for_required_checks_to_pass", return_value=False):
+            response = commit_mod._wait_for_pr_ci(  # ANTICHEAT_OK: ensures gh-watch zero exit is not sufficient for wait_ci
+                tmp_path,
+                pr_number="844",
+                result=result,
+                continuation_path=tmp_path / "continuation.json",
+                target_branch="jabramsja/test",
+                log=lambda _msg: None,
+            )
+
+        assert response is not None
+        assert response["status"] == "error"
+        assert response["step"] == "wait_ci"
+        assert response["errors"] == [
+            "Required CI checks did not reach green after gh watch returned"
+        ]
+        assert result["steps_completed"] == ["git_commit"]

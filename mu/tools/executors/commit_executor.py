@@ -268,6 +268,12 @@ BOT_REVIEW_POLL_SECONDS = 5
 BOT_REVIEW_ACK_REACTION = "eyes"
 CI_CHECK_REGISTRATION_WAIT_SECONDS = 120
 CI_CHECK_REGISTRATION_POLL_SECONDS = 5
+CI_REQUIRED_PASSING_BUCKETS = {"pass", "skipping"}
+CI_REQUIRED_FAILING_BUCKETS = {"fail", "cancel"}
+CI_REQUIRED_PENDING_BUCKETS = {"pending"}
+CI_REQUIRED_PASSING_STATES = {"SUCCESS", "SKIPPED", "NEUTRAL"}
+CI_REQUIRED_FAILING_STATES = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"}
+CI_REQUIRED_PENDING_STATES = {"PENDING", "IN_PROGRESS", "QUEUED", "REQUESTED", "WAITING", "EXPECTED"}
 _COMMIT_EXECUTOR_CONFIG = load_executor_config(SCRIPT_DIR.parent.parent.parent)
 _COMMIT_EXECUTOR_TIMEOUTS = _COMMIT_EXECUTOR_CONFIG.get("timeouts", {})
 COMMIT_EXECUTOR_OUTER_BUDGET_S = _COMMIT_EXECUTOR_TIMEOUTS.get(
@@ -865,6 +871,35 @@ def _tracker_marker_value(note: str, marker: str) -> str:
     return match.group(1).strip().rstrip()
 
 
+def _refresh_tracker_note_wave_file_count(note: str, file_count: int) -> str:
+    """Align generated tracker-note file counts with the rebuilt staged scope."""
+    if file_count < 0:
+        return note
+
+    replacements = [
+        (
+            r"Routed commit handoff scopes \d+ wave-owned file\(s\)",
+            f"Routed commit handoff scopes {file_count} wave-owned file(s)",
+        ),
+        (
+            r"handoff for ([^.;]+?) is now bound to \d+ wave-owned file\(s\)",
+            rf"handoff for \1 is now bound to {file_count} wave-owned file(s)",
+        ),
+        (
+            r"handoff for ([^.;]+?) now carries \d+ wave-owned file\(s\)",
+            rf"handoff for \1 now carries {file_count} wave-owned file(s)",
+        ),
+        (
+            r"handoff now carries \d+ wave-owned file\(s\)",
+            f"handoff now carries {file_count} wave-owned file(s)",
+        ),
+    ]
+    refreshed = note
+    for pattern, replacement in replacements:
+        refreshed = re.sub(pattern, replacement, refreshed)
+    return refreshed
+
+
 def _render_commit_path_truth_refresh_block(
     *,
     wave_id: str,
@@ -966,7 +1001,10 @@ def _rebuild_handoff_after_packet_truth_refresh(
         force_add_files=[],
         pr_title=str(handoff.get("pr_title") or ""),
         pr_body=str(handoff.get("pr_body") or ""),
-        tracker_note_text=str(handoff.get("tracker_note_text") or ""),
+        tracker_note_text=_refresh_tracker_note_wave_file_count(
+            str(handoff.get("tracker_note_text") or ""),
+            len(staged_paths),
+        ),
         supervisor_lane=(
             str(handoff.get("supervisor_lane"))
             if isinstance(handoff.get("supervisor_lane"), str)
@@ -992,6 +1030,54 @@ def _rebuild_handoff_after_packet_truth_refresh(
         repo_root=repo_root,
         tracked_packet=active_packet_path,
     )
+
+
+def _refresh_tasks_tracker_note_after_packet_truth(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    tracker_note_text: str,
+) -> str | None:
+    tasks_path = repo_root / "TASKS.md"
+    if not tasks_path.exists():
+        return None
+
+    lines = tasks_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    ra_idx, ra_end_idx = _find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        return None
+
+    matching_tracker_indices = _matching_tracker_note_indices_in_range(
+        lines,
+        wave_id,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+    canonical_tracker_indices = [
+        idx
+        for idx in matching_tracker_indices
+        if _is_canonical_tracker_note_line(lines[idx].rstrip("\n"), wave_id)
+    ]
+    if len(canonical_tracker_indices) > 1:
+        return (
+            f"wave_id '{wave_id}' has {len(canonical_tracker_indices)} canonical "
+            "tracker notes in TASKS.md during commit packet truth refresh"
+        )
+    if not canonical_tracker_indices:
+        return None
+
+    note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
+    canonical_idx = canonical_tracker_indices[0]
+    if lines[canonical_idx] == note_line:
+        return None
+
+    lines[canonical_idx] = note_line
+    tasks_path.write_text("".join(lines), encoding="utf-8")
+    try:
+        _run(["git", "add", "--", "TASKS.md"], cwd=repo_root)
+    except subprocess.CalledProcessError as exc:
+        return f"git add failed for refreshed TASKS.md tracker note: {exc.stderr.strip()}"
+    return None
 
 
 def refresh_commit_path_packet_truth(
@@ -1038,6 +1124,39 @@ def refresh_commit_path_packet_truth(
             f"{indicator_path}"
         )
     staged_paths_for_block = sorted(_dedupe_repo_paths([*staged_paths_before, active_packet_path]))
+    refreshed_tracker_note_text = _refresh_tracker_note_wave_file_count(
+        tracker_note_text,
+        len(staged_paths_for_block),
+    )
+    tracker_refresh_error = _refresh_tasks_tracker_note_after_packet_truth(
+        repo_root,
+        wave_id=wave_id,
+        tracker_note_text=refreshed_tracker_note_text,
+    )
+    if tracker_refresh_error:
+        return handoff, [], tracker_refresh_error
+    # TASKS.md may have been staged by the tracker refresh; render from
+    # the settled scope.
+    staged_paths_before = sorted(_current_staged_diff_paths(repo_root))
+    staged_paths_for_block = sorted(_dedupe_repo_paths([*staged_paths_before, active_packet_path]))
+    tracker_note_after_staging = _refresh_tracker_note_wave_file_count(
+        refreshed_tracker_note_text,
+        len(staged_paths_for_block),
+    )
+    if tracker_note_after_staging != refreshed_tracker_note_text:
+        refreshed_tracker_note_text = tracker_note_after_staging
+        tracker_refresh_error = _refresh_tasks_tracker_note_after_packet_truth(
+            repo_root,
+            wave_id=wave_id,
+            tracker_note_text=refreshed_tracker_note_text,
+        )
+        if tracker_refresh_error:
+            return handoff, [], tracker_refresh_error
+        staged_paths_before = sorted(_current_staged_diff_paths(repo_root))
+        staged_paths_for_block = sorted(_dedupe_repo_paths([*staged_paths_before, active_packet_path]))
+    if refreshed_tracker_note_text != tracker_note_text:
+        handoff = {**handoff, "tracker_note_text": refreshed_tracker_note_text}
+        tracker_note_text = refreshed_tracker_note_text
     evidence_handles = _commit_refresh_evidence_handles(handoff, indicator_path=indicator_path)
     block = _render_commit_path_truth_refresh_block(
         wave_id=wave_id,
@@ -3215,6 +3334,14 @@ def _wait_for_pr_ci(
             ["gh", "pr", "checks", pr_number, "--watch", "--required"],
             cwd=repo_root, timeout=600,
         )
+        if not _wait_for_required_checks_to_pass(repo_root, pr_number, timeout=900, log=log):
+            return {
+                "status": "error",
+                "step": "wait_ci",
+                "errors": ["Required CI checks did not reach green after gh watch returned"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number,
+            }
         if "wait_ci" not in result["steps_completed"]:
             result["steps_completed"].append("wait_ci")
             _checkpoint_post_commit_progress(
@@ -3236,6 +3363,14 @@ def _wait_for_pr_ci(
                 "status": "error",
                 "step": "wait_ci",
                 "errors": [f"CI checks failed (confirmed by polling): {exc}"],
+                "steps_completed": result["steps_completed"],
+                "pr_number": pr_number,
+            }
+        if not _wait_for_required_checks_to_pass(repo_root, pr_number, timeout=900, log=log):
+            return {
+                "status": "error",
+                "step": "wait_ci",
+                "errors": [f"Required CI checks did not reach green after fallback polling: {exc}"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number,
             }
@@ -3328,6 +3463,98 @@ def _poll_ci_checks_fallback(
     if log:
         log(f"CI poll timed out after {timeout}s")
     return False
+
+
+def _required_check_label(check: dict[str, Any]) -> str:
+    name = str(check.get("name") or check.get("workflow") or "unknown")
+    state = str(check.get("state") or "").upper()
+    bucket = str(check.get("bucket") or "").lower()
+    status = state or bucket or "unknown"
+    return f"{name}={status}"
+
+
+def _required_checks_green_snapshot(repo_root: Path, pr_number: str) -> tuple[bool, str, str]:
+    result = _run(
+        [
+            "gh", "pr", "checks", pr_number,
+            "--required",
+            "--json", "name,state,bucket",
+        ],
+        cwd=repo_root,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode not in (0, 8):
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+    try:
+        checks = json.loads(result.stdout or "[]")
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"required-check JSON decode failed: {exc}") from exc
+    if not isinstance(checks, list):
+        raise ValueError("required-check JSON was not a list")
+    if not checks:
+        return False, "pending", "no required checks reported"
+
+    pending: list[str] = []
+    failing: list[str] = []
+    for check in checks:
+        if not isinstance(check, dict):
+            pending.append(str(check))
+            continue
+        bucket = str(check.get("bucket") or "").lower()
+        state = str(check.get("state") or "").upper()
+        label = _required_check_label(check)
+        if bucket in CI_REQUIRED_FAILING_BUCKETS or state in CI_REQUIRED_FAILING_STATES:
+            failing.append(label)
+        elif bucket in CI_REQUIRED_PASSING_BUCKETS or state in CI_REQUIRED_PASSING_STATES:
+            continue
+        elif bucket in CI_REQUIRED_PENDING_BUCKETS or state in CI_REQUIRED_PENDING_STATES or not state:
+            pending.append(label)
+        else:
+            pending.append(label)
+
+    if failing:
+        return False, "failed", "failing required check(s): " + ", ".join(failing)
+    if pending:
+        return False, "pending", "pending required check(s): " + ", ".join(pending)
+    return True, "passed", "all required checks green"
+
+
+def _wait_for_required_checks_to_pass(
+    repo_root: Path,
+    pr_number: str,
+    *,
+    timeout: int = 900,
+    poll_interval: int = 15,
+    log: Any = None,
+) -> bool:
+    """Verify current required PR checks are green after gh's watch command exits."""
+    deadline = time.monotonic() + timeout
+    last_detail = ""
+    while True:
+        green, status, detail = _required_checks_green_snapshot(repo_root, pr_number)
+        last_detail = detail
+        if green:
+            return True
+        if status == "failed":
+            if log:
+                log(f"Required checks failed for PR #{pr_number}: {detail}")
+            return False
+        if time.monotonic() >= deadline:
+            if log:
+                log(
+                    f"Required checks did not pass for PR #{pr_number} "
+                    f"within {timeout}s: {last_detail}"
+                )
+            return False
+        if log:
+            log(f"Waiting for required checks to pass on PR #{pr_number}: {detail}")
+        time.sleep(poll_interval)
 
 
 def _auto_defer_bot_findings(
@@ -3712,29 +3939,26 @@ def _attempt_bot_finding_remediation(
 
         log(f"Step 15: remediation round {round_num} pushed ({current_head[:8]})")
 
-        # Wait for CI to pass on the new HEAD before proceeding
-        try:
-            _wait_for_required_checks_to_register(
-                repo_root, pr_number=pr_number, log=log,
-            )
-            _run(
-                ["gh", "pr", "checks", pr_number, "--watch", "--required"],
-                cwd=repo_root, timeout=600,
-            )
-            log(f"Step 15: CI passed on remediation commit {current_head[:8]}")
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, TimeoutError) as exc:
-            # gh pr checks --watch exits 1 on pending checks (not failed).
-            # Fallback to polling before giving up.
-            log(f"Step 15: gh pr checks exited ({exc.__class__.__name__}), polling CI as fallback")
-            if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=900, log=log):
-                log(f"Step 15: CI failed after remediation round {round_num}")
-                return {
-                    "status": "bot_findings_pending",
-                    "bot_findings": current_findings,
-                    "pr_number": pr_number,
-                    "steps_completed": result["steps_completed"],
-                    "remediation_rounds_attempted": round_num,
-                }
+        ci_response = _wait_for_pr_ci(
+            repo_root,
+            pr_number=pr_number,
+            result=result,
+            continuation_path=continuation_path,
+            target_branch=target_branch,
+            log=log,
+            step_label=f"Step 15 remediation round {round_num}",
+        )
+        if ci_response is not None:
+            log(f"Step 15: CI did not pass after remediation round {round_num}: {ci_response.get('errors', [])}")
+            return {
+                "status": "bot_findings_pending",
+                "bot_findings": current_findings,
+                "pr_number": pr_number,
+                "steps_completed": result["steps_completed"],
+                "remediation_rounds_attempted": round_num,
+                "ci_failure": ci_response.get("errors", []),
+            }
+        log(f"Step 15: CI passed on remediation commit {current_head[:8]}")
 
         # Request fresh bot review and wait
         try:
@@ -5050,6 +5274,18 @@ def _run_post_commit_pipeline(
         )
         if remediation_response is not None:
             return remediation_response
+
+    pre_merge_ci_response = _wait_for_pr_ci(
+        repo_root,
+        pr_number=pr_number,
+        result=result,
+        continuation_path=continuation_path,
+        target_branch=target_branch,
+        log=log,
+        step_label="Step 15 pre-merge",
+    )
+    if pre_merge_ci_response is not None:
+        return pre_merge_ci_response
 
     merge_script = repo_root / "mu" / "tools" / "hooks" / "merge_pr.sh"
     if not merge_script.exists():
