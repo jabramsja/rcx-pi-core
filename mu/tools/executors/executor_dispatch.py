@@ -148,7 +148,12 @@ _TERMINAL_EXECUTOR_STATUSES = frozenset({
 
 # Available executor scripts
 AVAILABLE_EXECUTORS = {"commit_executor", "phase_b_executor", "phase_a_executor", "dialectic_executor"}
-_JSON_EXECUTORS = frozenset({"commit_executor", "phase_b_executor", "phase_a_executor"})
+_JSON_EXECUTORS = frozenset({
+    "commit_executor",
+    "phase_b_executor",
+    "phase_a_executor",
+    "dialectic_executor",
+})
 SURFACE_COMMANDS = {
     "phase-a",
     "phase-b",
@@ -205,6 +210,20 @@ def _emit_executor_hard_fail_event(
         reason=str(result.get("message") or result.get("summary") or failure_class),
         artifact_paths={},
     )
+
+
+def _configured_bridge_loop_limit(config: dict[str, Any], key: str) -> int:
+    """Return a positive configured bridge loop limit with default fallback."""
+    default_value = DEFAULT_EXECUTOR_CONFIG.get("bridge_loop_limits", {}).get(key, 1)
+    value = config.get("bridge_loop_limits", {}).get(key, default_value)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return int(default_value)
+    if parsed < 1:
+        return int(default_value)
+    return parsed
+
 
 DEFAULT_CONFIG_PATH = SCRIPT_DIR / "executor_config.json"
 PHASE_B_RECOVERY_PLAN_ENV = "RCX_RECOVERY_PHASE_B_PLAN_PATH"
@@ -2584,6 +2603,12 @@ def dispatch(
                 # The routing record must have wave_name, summary, and
                 # next_candidates for this to succeed (fail-closed in Phase B).
                 executor_args.extend(["--routing-record", json.dumps(record)])
+        elif executor_name == "dialectic_executor":
+            executor_args.extend(["--routing-record", json.dumps(record)])
+            executor_args.extend([
+                "--max-rounds",
+                str(_configured_bridge_loop_limit(cfg, "dialectic")),
+            ])
         else:
             executor_args.extend(["--routing-record", json.dumps(record)])
         if executor_name in _JSON_EXECUTORS:

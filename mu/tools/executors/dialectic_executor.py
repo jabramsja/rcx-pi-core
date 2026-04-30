@@ -67,6 +67,10 @@ def build_dialectic_prompt(
     proposal: dict[str, Any],
     routing_record: dict[str, Any],
     repo_root: Path,
+    *,
+    round_number: int = 1,
+    max_rounds: int = 1,
+    prior_feedback: list[str] | None = None,
 ) -> str:
     """Build the Codex dialectic narrowing prompt."""
     # Read rollout packet for context
@@ -79,9 +83,22 @@ def build_dialectic_prompt(
         except (OSError, UnicodeDecodeError):
             rollout_content = "(unreadable)"
 
+    feedback_block = ""
+    if prior_feedback:
+        feedback = "\n".join(f"- {item}" for item in prior_feedback)
+        feedback_block = f"""
+## Prior Round Feedback
+
+{feedback}
+"""
+
     return f"""REQUIRED PREFLIGHT: Read FOUNDER_SESSION_BOOTSTRAP.md first.
 
 You are the DIALECTIC NARROWING agent for RCX.
+
+## Round
+
+Round {round_number} of {max_rounds}.
 
 ## Unbounded Proposal
 
@@ -95,6 +112,7 @@ Request: {routing_record.get('request_for_claude', '')}
 ## Rollout Context (first 2000 chars)
 
 {rollout_content}
+{feedback_block}
 
 ## Your Task
 
@@ -142,10 +160,44 @@ def parse_dialectic_envelope(output: str) -> dict[str, Any]:
         raise DialecticExecutorError(f"Dialectic envelope not valid JSON: {exc}") from exc
 
 
+def _read_dialectic_envelope(
+    repo_root: Path,
+    bus_dir: str | Path | None,
+    dialectic_job_id: str,
+) -> dict[str, Any] | None:
+    """Read the dialectic envelope for one exact bridge job id."""
+    rendered_path = agent_bus_path(repo_root, bus_dir, "rendered", f"{dialectic_job_id}.md")
+    if rendered_path.exists():
+        try:
+            return parse_dialectic_envelope(rendered_path.read_text(encoding="utf-8"))
+        except (DialecticExecutorError, OSError):
+            pass
+
+    raw_job_dir = agent_bus_path(repo_root, bus_dir, "raw", dialectic_job_id)
+    if raw_job_dir.is_dir():
+        for raw_file in sorted(raw_job_dir.iterdir()):
+            try:
+                return parse_dialectic_envelope(raw_file.read_text(encoding="utf-8"))
+            except (DialecticExecutorError, OSError):
+                continue
+    return None
+
+
+def _proposal_for_next_round(
+    narrowed: dict[str, Any],
+    fallback: dict[str, Any],
+) -> dict[str, Any]:
+    """Carry the latest candidate forward without trusting malformed envelopes."""
+    candidate = narrowed.get("candidate")
+    if isinstance(candidate, str) and candidate.strip():
+        return narrowed
+    return fallback
+
+
 def run_dialectic(
     repo_root: Path,
     *,
-    max_rounds: int = 1,  # Currently single-pass; multi-round narrowing not yet implemented
+    max_rounds: int = 1,
     verbose: bool = False,
     timeout: int = 600,
     bus_dir: str | Path | None = None,
@@ -160,6 +212,10 @@ def run_dialectic(
         "rounds": 0,
         "narrowed_proposal": None,
     }
+    if max_rounds < 1:
+        result["status"] = "error"
+        result["errors"] = ["max_rounds must be >= 1"]
+        return result
 
     def log(msg: str) -> None:
         if verbose:
@@ -182,67 +238,74 @@ def run_dialectic(
     if not proposal.get("candidate"):
         return {"status": "error", "errors": ["No candidate found in routing record"]}
 
-    # Build prompt and send to Codex via bridge
-    prompt = build_dialectic_prompt(proposal, routing_record, repo_root)
-
     scratch_dir = repo_root / ".scratch"
     scratch_dir.mkdir(exist_ok=True)
-    task_path = scratch_dir / "dialectic_task.md"
-    task_path.write_text(prompt, encoding="utf-8")
-
-    dialectic_job_id = f"dialectic-{uuid.uuid4().hex[:8]}"
-
     bridge_script = repo_root / "tools" / "agents" / "bridge_supervisor.py"
-    cmd = [
-        sys.executable, str(bridge_script),
-        "review",
-        "--task-file", str(task_path),
-        "--summary", "Dialectic narrowing",
-        "--reviewer", "codex",
-        "-v", "--no-diff",
-        "--job-id", dialectic_job_id,
-    ]
-    if bus_dir is not None:
-        cmd.extend(["--bus-dir", str(bus_dir)])
+    current_proposal = proposal
+    round_feedback: list[str] = []
+    errors: list[str] = []
 
-    log("Sending to Codex for dialectic narrowing...")
-    try:
-        bridge_result = run_bridge_subprocess(cmd, cwd=repo_root, timeout=timeout)
-    except ExecutorCommonError:
-        return {"status": "timeout", "errors": ["Codex dialectic timed out"]}
+    for round_number in range(1, max_rounds + 1):
+        dialectic_job_id = f"dialectic-r{round_number}-{uuid.uuid4().hex[:8]}"
+        prompt = build_dialectic_prompt(
+            current_proposal,
+            routing_record,
+            repo_root,
+            round_number=round_number,
+            max_rounds=max_rounds,
+            prior_feedback=round_feedback,
+        )
+        task_path = scratch_dir / f"{dialectic_job_id}.md"
+        task_path.write_text(prompt, encoding="utf-8")
 
-    result["rounds"] = 1
+        cmd = [
+            sys.executable, str(bridge_script),
+            "review",
+            "--task-file", str(task_path),
+            "--summary", f"Dialectic narrowing round {round_number}/{max_rounds}",
+            "--reviewer", "codex",
+            "-v", "--no-diff",
+            "--job-id", dialectic_job_id,
+        ]
+        if bus_dir is not None:
+            cmd.extend(["--bus-dir", str(bus_dir)])
 
-    # Try to find and parse the rendered output — bound to exact job_id
-    rendered_path = agent_bus_path(repo_root, bus_dir, "rendered", f"{dialectic_job_id}.md")
-    if rendered_path.exists():
-        content = rendered_path.read_text(encoding="utf-8")
+        log(f"Sending to Codex for dialectic narrowing round {round_number}/{max_rounds}...")
         try:
-            narrowed = parse_dialectic_envelope(content)
-            result["narrowed_proposal"] = narrowed
+            run_bridge_subprocess(cmd, cwd=repo_root, timeout=timeout)
+        except ExecutorCommonError:
+            result["status"] = "timeout"
+            result["rounds"] = round_number
+            result["errors"] = [f"Codex dialectic timed out in round {round_number}"]
+            break
+
+        result["rounds"] = round_number
+        narrowed = _read_dialectic_envelope(repo_root, bus_dir, dialectic_job_id)
+        if narrowed is None:
+            errors = [
+                f"Round {round_number} did not produce a parseable dialectic envelope"
+            ]
+            round_feedback = errors
+            continue
+
+        result["narrowed_proposal"] = narrowed
+        if narrowed.get("bounded") is True:
             result["status"] = "narrowed"
             log(f"Narrowed: {narrowed.get('candidate', '(none)')}")
-        except DialecticExecutorError:
-            pass
+            break
 
-    if result["status"] != "narrowed":
-        # Check raw output for this job_id
-        raw_job_dir = agent_bus_path(repo_root, bus_dir, "raw", dialectic_job_id)
-        if raw_job_dir.is_dir():
-            for raw_file in raw_job_dir.iterdir():
-                try:
-                    content = raw_file.read_text(encoding="utf-8")
-                    narrowed = parse_dialectic_envelope(content)
-                    result["narrowed_proposal"] = narrowed
-                    result["status"] = "narrowed"
-                    log(f"Narrowed (from raw): {narrowed.get('candidate', '(none)')}")
-                    break
-                except (DialecticExecutorError, OSError):
-                    continue
+        current_proposal = _proposal_for_next_round(narrowed, current_proposal)
+        errors = [f"Round {round_number} returned bounded=false"]
+        round_feedback = errors
+        log(errors[0])
 
-    if result["status"] != "narrowed":
-        result["status"] = "no_envelope"
-        result["errors"] = ["Could not parse dialectic envelope from Codex output"]
+    if result["status"] == "success":
+        if result["rounds"] >= max_rounds:
+            result["status"] = "max_rounds_reached"
+            result["errors"] = errors or ["Dialectic narrowing exhausted max_rounds"]
+        else:
+            result["status"] = "no_envelope"
+            result["errors"] = errors or ["Could not parse dialectic envelope from Codex output"]
 
     # Write result
     result_dir = agent_bus_path(repo_root, bus_dir, "executors")
@@ -272,7 +335,7 @@ def main() -> int:
         "--max-rounds",
         type=int,
         default=1,
-        help="Max narrowing rounds (default: 1, multi-round not yet implemented)",
+        help="Max narrowing rounds (default: 1)",
     )
     parser.add_argument(
         "-v", "--verbose",
