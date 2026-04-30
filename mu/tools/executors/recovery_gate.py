@@ -303,6 +303,19 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     ):
         return FailureClass.PR_MERGE_CONFLICT
 
+    l4_signal = f"{reason_lower} {combined_lower}"
+    if status_failed and (
+        "l4 execution contract" in l4_signal
+        or "non-structural adjacency cap" in l4_signal
+        or "rolling structural quota" in l4_signal
+        or "founder_override" in l4_signal
+    ) and (
+        "violation" in l4_signal
+        or "use founder_override" in l4_signal
+        or "pre-push-fast failed" in l4_signal
+    ):
+        return FailureClass.L4_CONTRACT_VIOLATION
+
     # Tier 1: deterministic lock/state issues
     if _looks_like_git_index_permission_failure(f"{combined_text}\n{reason_text}"):
         return FailureClass.UNCLASSIFIED

@@ -1379,6 +1379,65 @@ def _extract_founder_override(plan_content: str) -> str:
     return ""
 
 
+_CONTROL_SURFACE_TOKEN_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])control-surface(?![A-Za-z0-9_-])"
+)
+_NEGATED_CONTROL_SURFACE_RE = re.compile(
+    r"(?i)\b(?:anti|no|non|not|without)[-\s]+control-surface\b"
+)
+_AUTHORIZED_CONTROL_SURFACE_L4_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])authorized\s+control-surface\s+l4[_ -]?enabler"
+    r"(?![A-Za-z0-9_-])"
+)
+_STANDING_PIPELINE_BUG_FIX_AUTHORIZATION_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])standing pipeline-bug-fix authorization(?![A-Za-z0-9_-])"
+)
+_NEGATED_AUTHORIZATION_RE = re.compile(
+    r"(?i)\b(?:authorization\s+(?:is\s+)?(?:denied|not|rejected|revoked)|"
+    r"denied|not\s+(?:authorized|approved|granted)|no\s+(?:standing\s+pipeline-bug-fix\s+)?"
+    r"authorization|rejected|revoked|without\s+authorization)\b"
+)
+
+
+def _extract_authorized_control_surface_founder_override(
+    plan_content: str,
+    *,
+    wave_id: str,
+    wave_class: str,
+) -> str:
+    """Derive same-wave override only from explicit control-surface authority."""
+    if str(wave_class or "").strip() != "L4_ENABLER":
+        return ""
+    normalized_wave_id = normalize_wave_id(wave_id)
+    if not plan_content or not normalized_wave_id:
+        return ""
+
+    has_control_surface_lane = False
+    has_authorization = False
+    for raw_line in _iter_authoritative_plan_header_lines(plan_content):
+        clean = raw_line.strip()
+        if _NEGATED_AUTHORIZATION_RE.search(clean):
+            return ""
+        if clean.lower().startswith("lane:"):
+            lane = clean.split(":", 1)[1]
+            if (
+                _CONTROL_SURFACE_TOKEN_RE.search(lane)
+                and not _NEGATED_CONTROL_SURFACE_RE.search(lane)
+            ):
+                has_control_surface_lane = True
+        if clean.lower().startswith(("authorization:", "founder authorization:", "authority:")):
+            auth = clean.split(":", 1)[1]
+            if (
+                _STANDING_PIPELINE_BUG_FIX_AUTHORIZATION_RE.search(auth)
+                or _AUTHORIZED_CONTROL_SURFACE_L4_RE.search(auth)
+            ):
+                has_authorization = True
+
+    if has_control_surface_lane and has_authorization:
+        return normalized_wave_id
+    return ""
+
+
 def _extract_maintenance_bypass_fields(plan_content: str) -> tuple[str, str]:
     """Read optional consecutive-maintenance bypass fields from the plan text."""
     if not plan_content:
@@ -2722,7 +2781,15 @@ def _build_phase_b_tracker_note(
     if reentry:
         progress_after += ", reentry=true"
     progress_after += ", explicit receipt authority, and an L4-compliant tracker note."
-    founder_override = founder_override or _extract_founder_override(plan_content)
+    founder_override = (
+        founder_override
+        or _extract_founder_override(plan_content)
+        or _extract_authorized_control_surface_founder_override(
+            plan_content,
+            wave_id=wave_id,
+            wave_class=wave_class,
+        )
+    )
 
     tracker_kwargs: dict[str, str] = {
         "evidence_command": evidence_command,

@@ -7,6 +7,7 @@ Task: [PARALLEL-PIPELINE]
 Wave ID: parallel-pipeline-monitor-identity-2026-04-30
 Phase-A-Lock: LOCKED
 Lane: control-surface
+Authorization: standing pipeline-bug-fix authorization for bounded control-surface L4_ENABLER pipeline hardening; commit automation may derive `FOUNDER_OVERRIDE:parallel-pipeline-monitor-identity-2026-04-30` for L4 adjacency/rolling-cap clearance.
 Purpose: Plan the next parallel-pipeline slice: per-worktree dashboard port
 allocation, tmux session naming, and dashboard active-bus identity from
 configuration, without widening executor runtime semantics.
@@ -259,31 +260,20 @@ the handoff.
 - Refresh wave: `parallel-pipeline-monitor-identity-2026-04-30`
 - Active packet: `reports/control_plane/parallel_pipeline_monitor_identity_2026-04-30.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `a07b27b630b325c7ce155742392aee44f5274705a9cf08380a93654094fc7cbf`
+- Tracker note sha256: `e593ec1b6121575c5a0fd37f5ab7281dcfcecba5645b7200359e329b604de400`
 - Indicator artifact: `reports/l4_wave_indicators/parallel-pipeline-monitor-identity-2026-04-30.json`
-- Pre-commit receipt handle: `.agent_bus/meta/pre_commit_receipts/receipt_2026-04-30T06-42-35p00-00_61b4d68f.json`
 - Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_agent_bus_namespacing.py mu/tests/tools/test_codex_autoping_watch.py mu/tests/tools/test_codex_startup_state.py mu/tests/tools/test_recovery_gate.py`.
 - Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/parallel_pipeline_monitor_identity_2026-04-30.md. (2) Final pytest gate covered 4 test file(s) from the wave-owned diff. (3) Commit handoff carries explicit receipt authority at .agent_bus/meta/pre_commit_receipts/receipt_2026-04-30T06-42-35p00-00_61b4d68f.json..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/parallel-pipeline-monitor-identity-2026-04-30.json`
-  - `pre_commit_receipt`: `.agent_bus/meta/pre_commit_receipts/receipt_2026-04-30T06-42-35p00-00_61b4d68f.json`
+  - `packet`: `reports/control_plane/parallel_pipeline_monitor_identity_2026-04-30.md`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/docs/test_growth_caps.py`
-  - `mu/tests/tools/test_agent_bus_namespacing.py`
-  - `mu/tests/tools/test_codex_autoping_watch.py`
-  - `mu/tests/tools/test_codex_startup_state.py`
-  - `mu/tests/tools/test_executor_dispatch.py`
+  - `mu/tests/tools/test_phase_b_executor.py`
   - `mu/tests/tools/test_recovery_gate.py`
-  - `mu/tools/executors/executor_dispatch.py`
-  - `mu/tools/observability/pipeline_dashboard_web.py`
-  - `mu/tools/observability/pipeline_monitor.sh`
-  - `mu/tools/observability/pipeline_monitor_identity.py`
-  - `mu/tools/session/check_codex_startup_state.py`
-  - `mu/tools/session/codex_autoping_watch.py`
-  - `mu/tools/session/codex_autoping_window.sh`
-  - `mu/tools/session/ensure_codex_autoping.sh`
+  - `mu/tools/executors/phase_a_executor.py`
+  - `mu/tools/executors/phase_b_executor.py`
+  - `mu/tools/executors/recovery_gate.py`
   - `reports/control_plane/parallel_pipeline_monitor_identity_2026-04-30.md`
-  - `reports/deferred/non_blocking/parallel-pipeline-monitor-identity-2026-04-30_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/parallel-pipeline-monitor-identity-2026-04-30.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

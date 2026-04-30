@@ -503,7 +503,7 @@ class TestClassifyFailure:
         )
         assert rg_mod.classify_failure(
             {"status": "failed", "executor": "commit_executor", "stdout": stdout}
-        ) == FailureClass.UNKNOWN_ERROR
+        ) == FailureClass.L4_CONTRACT_VIOLATION
 
     def test_tracker_note_contract_mismatch(self):
         payload = {
