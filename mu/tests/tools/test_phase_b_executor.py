@@ -5899,6 +5899,112 @@ class TestResumeNeedsPhaseB:
             repo / "reports" / "deferred" / "non_blocking" / "plan_bridge_nonblockers.md"
         ).exists()
 
+    def test_reentry_go_preserves_deferred_packet_wave_metadata(self, tmp_path):
+        """Re-entry non-blocking refresh must keep the wave class and target gate."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        initial_render = (
+            "BEGIN_AGENT_ENVELOPE\n"
+            + json.dumps({
+                "job_id": "j1",
+                "turn_id": "t1",
+                "agent_role": "reviewer",
+                "decision": "REQUEST_CHANGES",
+                "summary": "initial non-blocking packet",
+                "touched_files_claimed": [],
+                "validations_claimed": [],
+                "request_for_next_agent": "",
+                "findings": [
+                    {
+                        "title": "Initial doc drift",
+                        "class": "DOC_ACCURACY",
+                        "severity": "low",
+                        "file": "mu/tools/executors/dialectic_executor.py",
+                        "disposition": "non_blocking",
+                        "status": "new",
+                    },
+                ],
+            })
+            + "\nEND_AGENT_ENVELOPE"
+        )
+        reentry_render = (
+            "BEGIN_AGENT_ENVELOPE\n"
+            + json.dumps({
+                "job_id": "j2",
+                "turn_id": "t2",
+                "agent_role": "reviewer",
+                "decision": "GO",
+                "summary": "re-entry leaves non-blocking note",
+                "touched_files_claimed": [],
+                "validations_claimed": [],
+                "request_for_next_agent": "",
+                "findings": [
+                    {
+                        "title": "Re-entry doc drift",
+                        "class": "DOC_ACCURACY",
+                        "severity": "low",
+                        "file": "mu/tools/executors/phase_b_executor.py",
+                        "disposition": "non_blocking",
+                        "status": "new",
+                    },
+                ],
+            })
+            + "\nEND_AGENT_ENVELOPE"
+        )
+
+        supervisor_calls = {"count": 0}
+
+        def supervisor_side(_repo_root, _package_path, **_kw):
+            supervisor_calls["count"] += 1
+            if supervisor_calls["count"] == 1:
+                return {
+                    "exit_code": 0,
+                    "parsed": {
+                        "decision": "NEEDS_PHASE_B",
+                        "summary": "Refresh deferred packet.",
+                        "status": "success",
+                        "findings": [],
+                        "request_for_claude": "Refresh packet.",
+                    },
+                    "receipt_path": "",
+                }
+            return {
+                "exit_code": 0,
+                "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tools/executors/dialectic_executor.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=[
+                 "mu/tools/executors/dialectic_executor.py",
+                 "reports/control_plane/plan.md",
+             ]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=[
+                 {"exit_code": 1, "stdout": "REQUEST_CHANGES\n", "stderr": "", "decision": "REQUEST_CHANGES", "job_id": "j1"},
+                 {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j2"},
+             ]), \
+             patch.object(pb_mod, "_read_bridge_review_material", side_effect=[
+                 (initial_render, []),
+                 (reentry_render, []),
+             ]), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor_side):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        packet = repo / "reports" / "deferred" / "non_blocking" / "plan_bridge_nonblockers.md"
+        content = packet.read_text(encoding="utf-8")
+        assert "Class: L4_ENABLER" in content
+        assert "Target Gate: G8" in content
+        assert "Re-entry doc drift" in content
+        assert "Initial doc drift" not in content
+
     def test_resume_from_bridge_converged_reruns_sdk_and_bridge_when_scope_fingerprint_drifted(self, tmp_path):
         """A drifted bridge_converged checkpoint must not skip directly to supervisor."""
         repo = tmp_path / "repo"
