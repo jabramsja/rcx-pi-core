@@ -6584,7 +6584,34 @@ class TestModularSurfaceEntrypoints:
         assert "executor_surfaces_plan" in cmd
         assert "--max-rounds" in cmd
         assert "7" in cmd
+        assert "--routing-record" not in cmd
         assert "--json" in cmd
+
+    def test_phase_a_surface_forwards_explicit_routing_record_context(self, tmp_path):
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-a",
+                "--plan-name",
+                "parallel_pipeline_agent_teams",
+                "--task-id",
+                "PARALLEL-PIPELINE",
+                "--summary",
+                "Plan teammate worktree integration.",
+                "--request-for-claude",
+                "Create a Phase A packet for agent teams worktree creation.",
+                "--json",
+            ]
+        )
+        record = dispatch_mod._surface_record_for_chain(args, tmp_path)  # ANTICHEAT_OK: regression for explicit Phase A routing context
+
+        cmd = dispatch_mod.build_surface_command(args, routing_record=record)
+
+        assert "--routing-record" in cmd
+        payload = json.loads(cmd[cmd.index("--routing-record") + 1])
+        assert payload["wave_name"] == "parallel-pipeline-agent-teams"
+        assert payload["task_id"] == "[PARALLEL-PIPELINE]"
+        assert payload["summary"] == "Plan teammate worktree integration."
+        assert payload["request_for_claude"] == "Create a Phase A packet for agent teams worktree creation."
 
     def test_phase_b_surface_reads_routing_record_path(self, tmp_path):
         routing_path = tmp_path / "routing.json"
@@ -7146,6 +7173,84 @@ class TestModularSurfaceEntrypoints:
         mock_recovery.assert_not_called()
         phase_b_record = json.loads(calls[1][calls[1].index("--routing-record") + 1])
         assert phase_b_record["task_id"] == "[PIPELINE-RECOVERY]"
+
+    def test_phase_a_surface_uses_explicit_request_not_stale_default_routing(self, tmp_path):
+        stale_route = tmp_path / ".agent_bus" / "meta" / "post_merge_routing.json"
+        stale_route.parent.mkdir(parents=True)
+        stale_route.write_text(
+            json.dumps(
+                {
+                    "decision": "ROUTE_PHASE_A",
+                    "wave_name": "parallel-pipeline-monitor-identity-2026-04-30",
+                    "task_id": "[PARALLEL-PIPELINE]",
+                    "summary": "stale monitor identity summary",
+                    "request_for_claude": "stale monitor identity request",
+                }
+            ),
+            encoding="utf-8",
+        )
+        plan_path = tmp_path / "reports" / "control_plane" / "parallel_pipeline_agent_teams_2026-04-30.md"
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text("# plan\n", encoding="utf-8")
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        _write_phase_b_handoff(
+            handoff_dir / "phase_b_handoff.json",
+            wave_id="parallel-pipeline-agent-teams",
+            task_id="[PARALLEL-PIPELINE]",
+            tracked_packet="reports/control_plane/parallel_pipeline_agent_teams_2026-04-30.md",
+        )
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            [
+                "phase-a",
+                "--plan-name",
+                "parallel_pipeline_agent_teams",
+                "--task-id",
+                "PARALLEL-PIPELINE",
+                "--summary",
+                "Agent teams worktree integration.",
+                "--request-for-claude",
+                "Plan [PARALLEL-PIPELINE] item 4: teammates auto-create worktrees with namespaced buses.",
+                "--json",
+            ]
+        )
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"], 0, json.dumps({"plan_path": str(plan_path)}), ""
+        )
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+        commit_ok = subprocess.CompletedProcess(
+            ["commit"], 0, "[commit-executor] Status: success\n", ""
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, *, cwd, timeout):
+            calls.append(cmd)
+            return [phase_a_ok, phase_b_ok, commit_ok][len(calls) - 1]
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=fake_run), \
+             patch.object(dispatch_mod, "attempt_recovery") as mock_recovery:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={
+                    "timeouts": {
+                        "phase_a_executor": 300,
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+            )
+
+        assert exit_code == 0
+        mock_recovery.assert_not_called()
+        phase_a_record = json.loads(calls[0][calls[0].index("--routing-record") + 1])
+        assert phase_a_record["wave_name"] == "parallel-pipeline-agent-teams"
+        assert phase_a_record["summary"] == "Agent teams worktree integration."
+        assert "item 4" in phase_a_record["request_for_claude"]
+        assert "monitor identity" not in phase_a_record["request_for_claude"]
 
     def test_phase_a_surface_chain_uses_plan_wave_id_for_phase_b_routing(self, tmp_path):
         plan_path = (

@@ -416,6 +416,19 @@ def _surface_record_for_chain(
         "wave_name": _surface_wave_id(args, repo_root),
         "task_id": canonical_task_id,
     }
+    if args.surface == "phase-a":
+        summary = str(getattr(args, "summary", "") or "").strip()
+        request = str(getattr(args, "request_for_claude", "") or "").strip()
+        if summary:
+            record["summary"] = summary
+        if request:
+            record["request_for_claude"] = request
+        record["next_candidates"] = [
+            {
+                "candidate": record["wave_name"],
+                "bounded": True,
+            }
+        ]
     if args.surface != "phase-b":
         return record
 
@@ -450,6 +463,48 @@ def _surface_record_for_chain(
     return record
 
 
+def _phase_a_surface_record_for_persistence(
+    repo_root: Path,
+    record: dict[str, Any],
+) -> dict[str, Any]:
+    persisted = dict(record)
+    persisted["decision"] = str(persisted.get("decision") or "ROUTE_PHASE_A")
+    persisted["summary"] = str(persisted.get("summary") or "")
+    persisted["request_for_claude"] = str(persisted.get("request_for_claude") or "")
+    wave_name = str(persisted.get("wave_name") or persisted.get("wave_id") or "").strip()
+    if wave_name and not isinstance(persisted.get("next_candidates"), list):
+        persisted["next_candidates"] = [{"candidate": wave_name, "bounded": True}]
+
+    try:
+        repo_state = _compute_repo_state(repo_root)
+    except Exception:
+        return persisted
+    persisted.setdefault("head_sha", repo_state.head_sha)
+    persisted["state_sha"] = repo_state.state_sha
+    return persisted
+
+
+def _persist_phase_a_surface_routing_record(
+    repo_root: Path,
+    record: dict[str, Any],
+    *,
+    bus_dir: str | Path | None = None,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    persisted = _phase_a_surface_record_for_persistence(repo_root, record)
+    target_path = _canonical_routing_record_path(repo_root, bus_dir)
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(json.dumps(persisted, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise ControlSurfaceError(
+            f"Cannot persist Phase A routing context to {target_path}: {exc}"
+        ) from exc
+    if verbose:
+        print(f"[dispatch] Persisted Phase A routing context: {target_path}")
+    return persisted
+
+
 def build_surface_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Modular control-plane entrypoint for executors and supervisors",
@@ -462,6 +517,16 @@ def build_surface_parser() -> argparse.ArgumentParser:
         "--task-id",
         default="",
         help="TASKS.md task ID (e.g. [PIPELINE-RECOVERY] or PIPELINE-RECOVERY). Propagated to Phase B and commit handoff.",
+    )
+    phase_a.add_argument(
+        "--summary",
+        default="",
+        help="Short Phase A scope summary. Used to seed the routing context passed to phase_a_executor.",
+    )
+    phase_a.add_argument(
+        "--request-for-claude",
+        default="",
+        help="Detailed Phase A request. Used to seed the routing context passed to phase_a_executor.",
     )
     phase_a.add_argument("--max-rounds", type=int, default=15)
     phase_a.add_argument("--bus-dir", default=None, help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)")
@@ -507,7 +572,11 @@ def build_surface_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def build_surface_command(args: argparse.Namespace) -> list[str]:
+def build_surface_command(
+    args: argparse.Namespace,
+    *,
+    routing_record: dict[str, Any] | None = None,
+) -> list[str]:
     canonical_task_id = _canonicalize_surface_task_id(getattr(args, "task_id", ""))
     if args.surface == "phase-a":
         cmd = [
@@ -518,6 +587,8 @@ def build_surface_command(args: argparse.Namespace) -> list[str]:
             "--max-rounds",
             str(args.max_rounds),
         ]
+        if routing_record is not None:
+            cmd.extend(["--routing-record", json.dumps(routing_record)])
     elif args.surface == "phase-b":
         cmd = [
             sys.executable,
@@ -734,7 +805,14 @@ def run_recoverable_surface_command(
                 wave_id = normalize_wave_id(
                     str(surface_record.get("wave_name") or surface_record.get("wave_id") or wave_id)
                 )
-                cmd = build_surface_command(args)
+                if args.surface == "phase-a":
+                    surface_record = _persist_phase_a_surface_routing_record(
+                        repo_root,
+                        surface_record,
+                        bus_dir=bus_dir,
+                        verbose=getattr(args, "verbose", False),
+                    )
+                cmd = build_surface_command(args, routing_record=surface_record)
                 _default_timeout = DEFAULT_EXECUTOR_CONFIG["timeouts"].get(executor_name, 600)
                 timeout = config.get("timeouts", {}).get(executor_name, _default_timeout)
                 try:

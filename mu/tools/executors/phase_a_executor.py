@@ -1141,6 +1141,7 @@ def run_phase_a(
     max_bridge_rounds: int = 15,
     verbose: bool = False,
     bus_dir: str | Path | None = None,
+    routing_record_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute the Phase A planning loop.
 
@@ -1203,7 +1204,10 @@ def run_phase_a(
 
     # Load routing record for scope context
     try:
-        routing_record = load_routing_record(repo_root, bus_dir=bus_dir)
+        if routing_record_override is not None:
+            routing_record = dict(routing_record_override)
+        else:
+            routing_record = load_routing_record(repo_root, bus_dir=bus_dir)
         scope = extract_plan_scope(routing_record)
     except (PhaseAExecutorError, ExecutorCommonError):
         routing_record = {}
@@ -1865,6 +1869,18 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    routing_record_override: dict[str, Any] | None = None
+    if args.routing_record:
+        try:
+            parsed_record = json.loads(args.routing_record)
+        except json.JSONDecodeError as exc:
+            print(f"[error] --routing-record is not valid JSON: {exc}", file=sys.stderr)
+            return 1
+        if not isinstance(parsed_record, dict):
+            print("[error] --routing-record must decode to a JSON object", file=sys.stderr)
+            return 1
+        routing_record_override = parsed_record
+
     try:
         repo_root = Path(subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -1879,6 +1895,7 @@ def main() -> int:
         max_bridge_rounds=args.max_rounds,
         verbose=args.verbose,
         bus_dir=args.bus_dir,
+        routing_record_override=routing_record_override,
     )
 
     if args.json:
