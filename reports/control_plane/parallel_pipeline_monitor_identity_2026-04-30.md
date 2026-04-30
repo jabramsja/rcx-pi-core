@@ -214,32 +214,31 @@ the handoff.
 
 ## Grounding / Authorization
 
-- `TASKS.md:355-358` authorizes `[PARALLEL-PIPELINE]` as `OPEN / PARTIAL`,
-  records agent bus namespacing as landed in PR #833, and lists work item 2 as
-  open: per-worktree dashboard ports plus tmux session names from config.
-- `TASKS.md:359-361` states current code truth: bus namespacing is implemented,
-  `pipeline_monitor.sh` accepts and validates `--bus-dir`, and remaining
-  residue includes per-worktree dashboard port allocation and per-worktree tmux
-  session naming in the control-surface pipeline-scaling lane.
-- Bridge review blocked the prior version of this governing packet because the
-  former work item at this file's lines 59-61 only required
-  `pipeline_dashboard_web.py` to use the configured dashboard port, while the
-  former acceptance at lines 124-126 allowed distinct monitor lanes without
-  requiring dashboard active-bus selection.
-- `mu/tools/observability/pipeline_dashboard_web.py:80` defines default
-  dashboard port `8099`, and `mu/tools/observability/pipeline_dashboard_web.py:1716`
-  accepts only a positional port override at process startup.
-- Current dashboard code truth proves dashboard active-bus selection is still
-  pending: bus-backed reads are hardcoded to `REPO_ROOT / ".agent_bus"` for raw
-  round history at `mu/tools/observability/pipeline_dashboard_web.py:208`, the
-  bridge database at `mu/tools/observability/pipeline_dashboard_web.py:268`,
-  live raw reviewer output at
-  `mu/tools/observability/pipeline_dashboard_web.py:467`, executor state at
-  `mu/tools/observability/pipeline_dashboard_web.py:586`, routing metadata at
-  `mu/tools/observability/pipeline_dashboard_web.py:597`, bridge timeline raw
-  directories at `mu/tools/observability/pipeline_dashboard_web.py:757`, bridge
-  locks at `mu/tools/observability/pipeline_dashboard_web.py:824-825`, and
-  recovery status at `mu/tools/observability/pipeline_dashboard_web.py:933`.
+- `TASKS.md` authorizes `[PARALLEL-PIPELINE]` as `OPEN / PARTIAL`, records agent
+  bus namespacing as landed in PR #833, and records this packet's work item 2 as
+  landed in PR #836.
+- PR #836 merged this packet at `fc1a2a1d` on 2026-04-30. The implementation
+  commit `8bbdf0f3` added `mu/tools/observability/pipeline_monitor_identity.py`
+  and updated the monitor, dashboard, startup/autoping, and focused regression
+  surfaces for configured monitor identity.
+- `mu/tools/observability/pipeline_monitor_identity.py` defines the monitor
+  identity tuple: configured lane, active bus root, dashboard port, and tmux
+  session. It rejects invalid bus roots, unsafe tmux session names, invalid
+  ports, duplicate sessions, duplicate ports, duplicate bus roots, and
+  port-only named lanes.
+- `mu/tools/observability/pipeline_monitor.sh` resolves that identity before
+  launching tmux, uses the configured tmux session and dashboard port in the
+  founder-facing startup output, and passes the configured bus/session into
+  Codex autoping reseed.
+- `mu/tools/observability/pipeline_dashboard_web.py` resolves the same identity
+  at startup and uses the configured active bus root for dashboard-backed bus
+  reads through `active_bus_path()`, preserving default-lane compatibility with
+  `.agent_bus` and port `8099`.
+- `mu/tests/tools/test_recovery_gate.py` covers named-lane monitor startup,
+  dashboard active-bus reads, invalid/duplicate monitor identity config, and
+  autoping reseed propagation.
+- Remaining `[PARALLEL-PIPELINE]` residue is outside this packet: recovery Tier
+  2 transient-kill auto-retry and teammate worktree integration.
 - Post-Phase-B root-cause evidence from
   `.agent_bus/observability/pipeline_agent_events.jsonl` recorded
   `event_type="executor_hard_fail"` with reason
