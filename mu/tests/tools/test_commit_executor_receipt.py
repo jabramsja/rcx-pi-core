@@ -683,6 +683,74 @@ class TestReceiptChainEndToEnd:
         assert post_commit_results[-1]["commit_sha"] == continuation["commit_sha"]
         assert "git_commit" in post_commit_results[-1]["steps_completed"]
 
+    def test_post_commit_continuation_resets_push_steps_when_head_advances(self, tmp_path, monkeypatch):
+        import subprocess
+
+        old_sha = "a" * 40
+        new_sha = "b" * 40
+        target_branch = "jabramsja/test-wave-id"
+        continuation_path = tmp_path / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
+        continuation_path.parent.mkdir(parents=True, exist_ok=True)
+        continuation_path.write_text(
+            json.dumps(
+                {
+                    "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                    "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                    "handoff_sha": "handoff-sha",
+                    "target_branch": target_branch,
+                    "commit_sha": old_sha,
+                    "receipt_decision": "COMMIT_GO",
+                    "steps_completed": [
+                        "validate_inputs",
+                        "ensure_feature_branch",
+                        "git_commit",
+                        "run_pre_push_script",
+                        "git_push",
+                        "ensure_pr",
+                        "wait_ci",
+                    ],
+                    "pr_number": "833",
+                    "bot_review_request_sha": old_sha,
+                    "updated_at_unix": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        def completed(cmd, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, cwd=None, check=True, timeout=None, env=None):
+            if cmd[:3] == ["git", "rev-parse", "HEAD"]:
+                return completed(cmd, stdout=f"{new_sha}\n")
+            if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return completed(cmd, stdout=f"{target_branch}\n")
+            if cmd[:3] == ["git", "status", "--short"]:
+                return completed(cmd, stdout="")
+            if cmd[:3] == ["git", "merge-base", "--is-ancestor"]:
+                assert cmd[-2:] == [old_sha, new_sha]
+                return completed(cmd)
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        monkeypatch.setattr(commit_mod, "_run", fake_run)
+
+        loaded = commit_mod._load_post_commit_continuation(  # ANTICHEAT_OK: direct continuation loader regression
+            continuation_path,
+            repo_root=tmp_path,
+            handoff_sha="handoff-sha",
+            target_branch=target_branch,
+        )
+
+        assert loaded is not None
+        assert loaded["commit_sha"] == new_sha
+        assert loaded["steps_completed"] == [
+            "validate_inputs",
+            "ensure_feature_branch",
+            "git_commit",
+        ]
+        assert loaded["pr_number"] == "833"
+        assert "bot_review_request_sha" not in loaded
+
     def test_commit_packet_truth_refresh_missing_packet_names_root_input(self, tmp_path):
         import subprocess
 

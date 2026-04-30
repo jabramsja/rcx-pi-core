@@ -1955,6 +1955,11 @@ def _load_post_commit_continuation(
             if merge_base.returncode != 0:
                 return None
             payload["commit_sha"] = head_sha
+            reset_steps = _continuation_steps_for_new_commit(steps_completed)
+            if reset_steps is None:
+                return None
+            payload["steps_completed"] = reset_steps
+            payload.pop("bot_review_request_sha", None)
         except subprocess.CalledProcessError:
             return None
     non_transient_status = []
