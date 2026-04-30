@@ -159,7 +159,7 @@ class TestRunMetaBridgePackage:
         delattr(stale_mod, "ensure_bridge_config_path")
         assert not hasattr(stale_mod, "ensure_bridge_config_path")
 
-        client_mod._refresh_executor_common_before_supervisor_import(_AGENTS_DIR)
+        client_mod._refresh_executor_common_before_supervisor_import(_AGENTS_DIR)  # ANTICHEAT_OK: stale-module refresh helper is the regression target
 
         refreshed = sys.modules["executor_common"]
         assert Path(refreshed.__file__).resolve() == executor_common_path.resolve()

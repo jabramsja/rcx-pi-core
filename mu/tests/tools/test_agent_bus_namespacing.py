@@ -269,12 +269,12 @@ def test_bridge_init_db_seeds_namespaced_config_from_default_bus_before_example(
 
 def test_commit_executor_hook_env_carries_namespaced_bus_without_skip_bypass(monkeypatch):
     monkeypatch.setenv("RCX_SKIP_RECEIPT_CHECK", "1")
-    token = commit_executor._ACTIVE_BUS_DIR.set(Path(".agent_bus-test"))
+    token = commit_executor._ACTIVE_BUS_DIR.set(Path(".agent_bus-test"))  # ANTICHEAT_OK: context-var bus override is the regression target
     try:
-        env = commit_executor._commit_subprocess_env(skip_receipt_check=False)
-        skip_env = commit_executor._commit_subprocess_env(skip_receipt_check=True)
+        env = commit_executor._commit_subprocess_env(skip_receipt_check=False)  # ANTICHEAT_OK: hook env helper is the behavior under test
+        skip_env = commit_executor._commit_subprocess_env(skip_receipt_check=True)  # ANTICHEAT_OK: hook env helper is the behavior under test
     finally:
-        commit_executor._ACTIVE_BUS_DIR.reset(token)
+        commit_executor._ACTIVE_BUS_DIR.reset(token)  # ANTICHEAT_OK: reset paired context-var bus override
 
     assert env is not None
     assert env["RCX_AGENT_BUS_DIR"] == ".agent_bus-test"
@@ -334,9 +334,9 @@ def test_recovery_agent_invocation_threads_namespaced_bus_to_adapter(tmp_path, m
         lambda _repo_root: fake_adapters,
     )
 
-    token = recovery._ACTIVE_BUS_DIR.set(Path(".agent_bus-test"))
+    token = recovery._ACTIVE_BUS_DIR.set(Path(".agent_bus-test"))  # ANTICHEAT_OK: context-var bus override is the regression target
     try:
-        invocation = recovery._resolve_recovery_agent_invocation(
+        invocation = recovery._resolve_recovery_agent_invocation(  # ANTICHEAT_OK: invocation builder is the behavior under test
             repo,
             wave_id="wave-bus",
             step="phase-b",
@@ -344,7 +344,7 @@ def test_recovery_agent_invocation_threads_namespaced_bus_to_adapter(tmp_path, m
             prompt="recover",
         )
     finally:
-        recovery._ACTIVE_BUS_DIR.reset(token)
+        recovery._ACTIVE_BUS_DIR.reset(token)  # ANTICHEAT_OK: reset paired context-var bus override
 
     assert seen["bridge_config_path"] == repo / ".agent_bus-test" / "bridge_config.json"
     assert seen["backend"] == "codex"
@@ -461,9 +461,9 @@ def test_commit_bot_remediation_adapter_receives_active_bus_dir(monkeypatch, tmp
     monkeypatch.setattr(commit_executor, "_bridge_adapters", fake_adapters)
     monkeypatch.setattr(commit_executor, "_run", lambda *_args, **_kwargs: SimpleNamespace(stdout=""))
 
-    token = commit_executor._ACTIVE_BUS_DIR.set(Path(".agent_bus-test"))
+    token = commit_executor._ACTIVE_BUS_DIR.set(Path(".agent_bus-test"))  # ANTICHEAT_OK: context-var bus override is the regression target
     try:
-        result = commit_executor._attempt_bot_finding_remediation(
+        result = commit_executor._attempt_bot_finding_remediation(  # ANTICHEAT_OK: remediation path must receive active bus
             [{"severity": "P1", "body": "P1 finding", "path": "mu/tools/executors/commit_executor.py"}],
             repo_root=repo,
             repo_owner="owner",
@@ -477,7 +477,7 @@ def test_commit_bot_remediation_adapter_receives_active_bus_dir(monkeypatch, tmp
             log=lambda _message: None,
         )
     finally:
-        commit_executor._ACTIVE_BUS_DIR.reset(token)
+        commit_executor._ACTIVE_BUS_DIR.reset(token)  # ANTICHEAT_OK: reset paired context-var bus override
 
     assert result is not None
     assert seen["config_path"] == config_path
@@ -546,16 +546,16 @@ def test_invalid_bus_path_fails_before_runtime_files_are_created(tmp_path):
 def test_recovery_status_and_log_are_namespaced_but_learned_patterns_stay_default(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    token = recovery._ACTIVE_BUS_DIR.set(Path(".agent_bus-test"))
+    token = recovery._ACTIVE_BUS_DIR.set(Path(".agent_bus-test"))  # ANTICHEAT_OK: context-var bus override is the regression target
     try:
-        recovery._save_recovery_status(repo, {"active": True, "wave_id": "wave-bus"})
-        recovery._save_recovery_log(repo, [{"wave_id": "wave-bus", "step": "phase_b"}])
-        recovery._save_learning_store(repo, recovery._empty_store())
+        recovery._save_recovery_status(repo, {"active": True, "wave_id": "wave-bus"})  # ANTICHEAT_OK: persistence substrate is the behavior under test
+        recovery._save_recovery_log(repo, [{"wave_id": "wave-bus", "step": "phase_b"}])  # ANTICHEAT_OK: persistence substrate is the behavior under test
+        recovery._save_learning_store(repo, recovery._empty_store())  # ANTICHEAT_OK: learned-pattern default-bus exception is under test
 
-        assert recovery._load_recovery_status(repo)["wave_id"] == "wave-bus"
-        assert recovery._load_recovery_log(repo)[0]["step"] == "phase_b"
+        assert recovery._load_recovery_status(repo)["wave_id"] == "wave-bus"  # ANTICHEAT_OK: persisted status observation is the behavior under test
+        assert recovery._load_recovery_log(repo)[0]["step"] == "phase_b"  # ANTICHEAT_OK: persisted log observation is the behavior under test
     finally:
-        recovery._ACTIVE_BUS_DIR.reset(token)
+        recovery._ACTIVE_BUS_DIR.reset(token)  # ANTICHEAT_OK: reset paired context-var bus override
 
     assert (repo / ".agent_bus-test" / "recovery" / "recovery_status.json").exists()
     assert (repo / ".agent_bus-test" / "recovery" / "recovery_log.json").exists()

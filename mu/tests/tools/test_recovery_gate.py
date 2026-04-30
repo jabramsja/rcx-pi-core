@@ -2771,7 +2771,7 @@ class TestRecoveryPagerEvents:
                     invocation_id="invoke-rollback",
                 )
 
-        assert not rg_mod._recovery_path(tmp_path, "recovery_status.json").exists()
+        assert not rg_mod._recovery_path(tmp_path, "recovery_status.json").exists()  # ANTICHEAT_OK: recovery status path is the rollback proof target
 
     def test_update_recovery_status_rolls_back_and_raises_when_state_change_emit_fails(self, tmp_path):
         initial = {

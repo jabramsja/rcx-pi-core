@@ -1502,8 +1502,8 @@ class TestNewSchemaValidation:
         assert any("files_to_stage denied" in e and ".agent_bus*" in e for e in errors)
 
     def test_namespaced_agent_bus_paths_are_transient_status_artifacts(self):
-        assert commit_mod._is_transient_status_path(".agent_bus-test/foo.txt")
-        assert commit_mod._runtime_bus_artifact_match(".agent_bus-test/foo.txt") == ".agent_bus*"
+        assert commit_mod._is_transient_status_path(".agent_bus-test/foo.txt")  # ANTICHEAT_OK: status artifact classifier is the regression target
+        assert commit_mod._runtime_bus_artifact_match(".agent_bus-test/foo.txt") == ".agent_bus*"  # ANTICHEAT_OK: runtime-bus matcher is the regression target
 
 
 class TestHandoffReceiptContainment:
