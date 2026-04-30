@@ -98,7 +98,7 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
         "phase_b_executor": 18000,
         "phase_b_implementer_stale": 300,
         "commit_executor": 3600,
-        "pre_push_fast": 900,
+        "pre_push_fast": 2400,
         "bot_remediation": 600,
         "agent_review": 900,
         "pipeline_agent_pager_trigger": 30,

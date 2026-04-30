@@ -184,6 +184,7 @@ class TestDispatcherConfig:
         assert config["timeouts"]["phase_a_executor"] == 3600
         assert config["timeouts"]["phase_b_executor"] == 18000
         assert config["timeouts"]["commit_executor"] == 3600
+        assert config["timeouts"]["pre_push_fast"] >= 1800
 
     def test_bridge_reviewer_override_does_not_retarget_implementers(self, monkeypatch):
         monkeypatch.setenv("RCX_BRIDGE_REVIEWER_OVERRIDE", "claude")
@@ -4837,6 +4838,8 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "list", "--head"]:
                 return completed(cmd, stdout='[{"number":673}]')
+            if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
+                return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
             if cmd[:4] == ["gh", "pr", "checks", "673"]:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "edit", "673"]:
@@ -4880,6 +4883,8 @@ class TestCommitContinuationAndBotFreshness:
                     }
                 }
                 return completed(cmd, stdout=json.dumps(payload))
+            if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
+                return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
             if cmd[:2] == ["bash", str(merge_script)]:
                 return completed(cmd)
             if cmd[:2] == ["git", "fetch"]:
@@ -5075,6 +5080,12 @@ class TestCommitContinuationAndBotFreshness:
                     }
                 }
                 return completed(cmd, stdout=json.dumps(payload))
+            if cmd == ["gh", "pr", "checks", "673", "--required"]:
+                return completed(cmd)
+            if cmd == ["gh", "pr", "checks", "673", "--watch", "--required"]:
+                return completed(cmd)
+            if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
+                return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
             if cmd[:2] == ["bash", str(merge_script)]:
                 return completed(cmd)
             if cmd[:2] == ["git", "fetch"]:
@@ -5384,6 +5395,8 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "list", "--head"]:
                 return completed(cmd, stdout='[{"number":673}]')
+            if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
+                return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
             if cmd[:4] == ["gh", "pr", "checks", "673"]:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "edit", "673"]:
@@ -5513,6 +5526,8 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "list", "--head"]:
                 return completed(cmd, stdout='[{"number":673}]')
+            if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
+                return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
             if cmd[:4] == ["gh", "pr", "checks", "673"]:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "edit", "673"]:
@@ -5649,6 +5664,8 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "list", "--head"]:
                 return completed(cmd, stdout='[{"number":673}]')
+            if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
+                return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
             if cmd[:4] == ["gh", "pr", "checks", "673"]:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "edit", "673"]:
@@ -5769,6 +5786,8 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "list", "--head"]:
                 return completed(cmd, stdout='[{"number":673}]')
+            if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
+                return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
             if cmd[:4] == ["gh", "pr", "checks", "673"]:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "edit", "673"]:
@@ -5927,6 +5946,8 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd, stdout='[{"number":673}]')
             if cmd[:4] == ["gh", "pr", "edit", "673"]:
                 return completed(cmd)
+            if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
+                return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
             if cmd[:4] == ["gh", "pr", "checks", "673"] and "--required" in cmd and "--watch" not in cmd:
                 required_checks_calls["count"] += 1
                 if required_checks_calls["count"] == 1:
@@ -6000,7 +6021,7 @@ class TestCommitContinuationAndBotFreshness:
         assert post_commit["pr_number"] == "673"
         assert "wait_ci" in post_commit["steps_completed"]
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
-        assert required_checks_calls["count"] == 2
+        assert required_checks_calls["count"] == 3
 
     def test_post_commit_resume_skips_checkpointed_pre_push_and_checkpoints_git_push(self, tmp_path, monkeypatch):
         repo = tmp_path
@@ -6128,6 +6149,8 @@ class TestCommitContinuationAndBotFreshness:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "list", "--head"]:
                 return completed(cmd, stdout='[{"number":673}]')
+            if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
+                return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
             if cmd[:4] == ["gh", "pr", "checks", "673"]:
                 return completed(cmd)
             if cmd[:4] == ["gh", "pr", "edit", "673"]:
@@ -6239,6 +6262,10 @@ class TestCommitContinuationAndBotFreshness:
                 return subprocess.CompletedProcess(
                     args, 0, "https://github.com/jabramsja/rcx-pi-core/pull/671\n", ""
                 )
+            if args == ["gh", "pr", "checks", "671", "--required", "--json", "name,state,bucket"]:
+                return subprocess.CompletedProcess(
+                    args, 0, '[{"name":"test","state":"SUCCESS","bucket":"pass"}]', ""
+                )
             if args[:3] == ["gh", "pr", "checks"]:
                 return subprocess.CompletedProcess(args, 0, "", "")
             if args[:3] == ["git", "rev-parse", "HEAD"]:
@@ -6301,6 +6328,9 @@ class TestCommitContinuationAndBotFreshness:
         def fake_run(cmd, cwd=None, timeout=None, check=True, env=None):
             if cmd[:3] == ["git", "rev-parse", "HEAD"]:
                 return completed(cmd, stdout=next(head_reads))
+            if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
+                ci_watch_calls.append(cmd)
+                return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
             if cmd[:4] == ["gh", "pr", "checks", "673"]:
                 ci_watch_calls.append(cmd)
                 return completed(cmd)
@@ -6365,7 +6395,7 @@ class TestCommitContinuationAndBotFreshness:
         )
 
         assert auto_resolve_calls == [(repo, "673", "dev", "jabramsja/test-wave-id")]
-        assert len(ci_watch_calls) == 1
+        assert len(ci_watch_calls) == 6
         assert merge_attempts["count"] == 2
         assert post_commit["merge_sha"] == "merge789"
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
@@ -6423,6 +6453,12 @@ class TestCommitContinuationAndBotFreshness:
                     "branch refs/heads/dev\n\n"
                 )
                 return completed(cmd, stdout=stdout)
+            if cmd == ["gh", "pr", "checks", "673", "--required"]:
+                return completed(cmd)
+            if cmd == ["gh", "pr", "checks", "673", "--watch", "--required"]:
+                return completed(cmd)
+            if cmd == ["gh", "pr", "checks", "673", "--required", "--json", "name,state,bucket"]:
+                return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
             if cmd[:3] == ["gh", "api", "graphql"]:
                 payload = {
                     "data": {
@@ -6536,6 +6572,12 @@ class TestCommitContinuationAndBotFreshness:
                     "branch refs/heads/dev\n\n"
                 )
                 return completed(cmd, stdout=stdout)
+            if cmd == ["gh", "pr", "checks", "674", "--required"]:
+                return completed(cmd)
+            if cmd == ["gh", "pr", "checks", "674", "--watch", "--required"]:
+                return completed(cmd)
+            if cmd == ["gh", "pr", "checks", "674", "--required", "--json", "name,state,bucket"]:
+                return completed(cmd, stdout='[{"name":"test","state":"SUCCESS","bucket":"pass"}]')
             if cmd[:3] == ["gh", "api", "graphql"]:
                 payload = {
                     "data": {
