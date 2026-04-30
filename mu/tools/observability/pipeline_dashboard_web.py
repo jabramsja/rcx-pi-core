@@ -1856,7 +1856,15 @@ def main(argv=None):
         return 2
     configure_dashboard_identity(identity)
     port = identity.dashboard_port
-    server = http.server.HTTPServer(("127.0.0.1", port), Handler)
+    try:
+        server = http.server.HTTPServer(("127.0.0.1", port), Handler)
+    except OSError as exc:
+        print(
+            f"ERROR: dashboard port collision for lane {identity.lane!r}: "
+            f"127.0.0.1:{port} is unavailable ({exc})",
+            file=sys.stderr,
+        )
+        return 2
     print(
         "RCX Pipeline Dashboard: "
         f"http://localhost:{port} "

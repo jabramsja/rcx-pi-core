@@ -348,6 +348,39 @@ def is_agent_bus_runtime_path(path: str | Path) -> bool:
     return first == ".agent_bus" or first.startswith(".agent_bus-")
 
 
+def ensure_git_worktree_clean(repo_root: Path, *, context: str = "worktree") -> None:
+    """Fail closed when a git worktree has dirty non-runtime state."""
+    root = Path(repo_root)
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ExecutorCommonError(
+            f"Cannot inspect {context} dirty-worktree state: {exc}"
+        ) from exc
+    dirty = []
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        path_part = line[3:].strip()
+        if is_agent_bus_runtime_path(path_part):
+            continue
+        dirty.append(line)
+    if dirty:
+        sample = ", ".join(line[3:].strip() or line.strip() for line in dirty[:5])
+        suffix = "" if len(dirty) <= 5 else f", +{len(dirty) - 5} more"
+        raise ExecutorCommonError(
+            f"dirty-worktree scope creep: {context} has {len(dirty)} dirty path(s) "
+            f"({sample}{suffix}); teammate worktree dispatch refuses to hide local changes"
+        )
+
+
 def current_review_mode_reason() -> str | None:
     """Return the first active agent-review mode marker, if any."""
     for name in REVIEW_MODE_ENV_VARS:

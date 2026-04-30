@@ -23,6 +23,7 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent  # mu/tools/executors -> repo root
 AGENTS_DIR = SCRIPT_DIR.parent / "agents"
+OBSERVABILITY_DIR = SCRIPT_DIR.parent / "observability"
 POST_MERGE_PACKAGE_NAME = "post_merge_package.json"
 
 # Import canonical load_routing_record from shared module
@@ -36,6 +37,7 @@ try:
         build_and_write_routing_record as _common_build_and_write_routing_record,
         ROUTING_RECORD_PATH as _COMMON_ROUTING_RECORD_PATH,
         merge_executor_config_overrides,
+        ensure_git_worktree_clean,
         ensure_not_agent_review_mode,
         ExecutorCommonError,
         emit_pipeline_agent_event,
@@ -59,6 +61,7 @@ except ImportError:
     _common_build_and_write_routing_record = _mod.build_and_write_routing_record
     _COMMON_ROUTING_RECORD_PATH = _mod.ROUTING_RECORD_PATH
     merge_executor_config_overrides = _mod.merge_executor_config_overrides
+    ensure_git_worktree_clean = _mod.ensure_git_worktree_clean
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
     emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
@@ -67,6 +70,22 @@ except ImportError:
     resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     _common_routing_record_path = _mod.routing_record_path
     terminate_process_tree = _mod.terminate_process_tree
+
+try:
+    from pipeline_monitor_identity import (
+        MonitorIdentityError,
+        resolve_monitor_identity,
+    )
+except ImportError:
+    import importlib.util as _ilu
+    _identity_path = OBSERVABILITY_DIR / "pipeline_monitor_identity.py"
+    _identity_spec = _ilu.spec_from_file_location("pipeline_monitor_identity", str(_identity_path))
+    _identity_mod = _ilu.module_from_spec(_identity_spec)
+    assert _identity_spec.loader is not None
+    sys.modules["pipeline_monitor_identity"] = _identity_mod
+    _identity_spec.loader.exec_module(_identity_mod)
+    MonitorIdentityError = _identity_mod.MonitorIdentityError
+    resolve_monitor_identity = _identity_mod.resolve_monitor_identity
 
 try:
     from recovery_gate import attempt_recovery, clear_stale_recovery_status_on_success
@@ -429,6 +448,13 @@ def _surface_record_for_chain(
                 "bounded": True,
             }
         ]
+        teammate_identity = getattr(args, "_teammate_identity", None)
+        if isinstance(teammate_identity, dict):
+            record["teammate_lane"] = teammate_identity.get("lane", "")
+            record["bus_dir"] = teammate_identity.get("bus_dir", "")
+            record["dashboard_port"] = teammate_identity.get("dashboard_port")
+            record["tmux_session"] = teammate_identity.get("tmux_session", "")
+            record["teammate_worktree"] = str(getattr(args, "_teammate_worktree", ""))
     if args.surface != "phase-b":
         return record
 
@@ -530,6 +556,14 @@ def build_surface_parser() -> argparse.ArgumentParser:
     )
     phase_a.add_argument("--max-rounds", type=int, default=15)
     phase_a.add_argument("--bus-dir", default=None, help="Active repo-root agent bus (.agent_bus or .agent_bus-<id>)")
+    phase_a.add_argument(
+        "--teammate-lane",
+        default=None,
+        help=(
+            "Configured teammate lane to run from a dedicated git worktree with "
+            "that lane's namespaced agent bus"
+        ),
+    )
     phase_a.add_argument("-v", "--verbose", action="store_true")
     phase_a.add_argument("--json", action="store_true")
 
@@ -576,12 +610,15 @@ def build_surface_command(
     args: argparse.Namespace,
     *,
     routing_record: dict[str, Any] | None = None,
+    script_repo_root: Path | None = None,
 ) -> list[str]:
     canonical_task_id = _canonicalize_surface_task_id(getattr(args, "task_id", ""))
+    executor_script_dir = _script_dir_for_repo(script_repo_root)
+    agents_dir = _agents_dir_for_repo(script_repo_root)
     if args.surface == "phase-a":
         cmd = [
             sys.executable,
-            str(SCRIPT_DIR / "phase_a_executor.py"),
+            str(executor_script_dir / "phase_a_executor.py"),
             "--plan-name",
             args.plan_name,
             "--max-rounds",
@@ -592,7 +629,7 @@ def build_surface_command(
     elif args.surface == "phase-b":
         cmd = [
             sys.executable,
-            str(SCRIPT_DIR / "phase_b_executor.py"),
+            str(executor_script_dir / "phase_b_executor.py"),
             "--max-rounds",
             str(args.max_rounds),
             "--dispatcher-owned-recovery",
@@ -622,7 +659,7 @@ def build_surface_command(
     elif args.surface == "pre-commit-supervisor":
         cmd = [
             sys.executable,
-            str(AGENTS_DIR / "meta_bridge_supervisor.py"),
+            str(agents_dir / "meta_bridge_supervisor.py"),
             "--package",
             str(args.package),
         ]
@@ -631,7 +668,7 @@ def build_surface_command(
     elif args.surface == "commit":
         cmd = [
             sys.executable,
-            str(SCRIPT_DIR / "commit_executor.py"),
+            str(executor_script_dir / "commit_executor.py"),
         ]
         routing_payload = _load_routing_record_payload(
             path_value=args.routing_record_path,
@@ -648,7 +685,7 @@ def build_surface_command(
     elif args.surface == "post-merge-supervisor":
         cmd = [
             sys.executable,
-            str(AGENTS_DIR / "meta_bridge_supervisor.py"),
+            str(agents_dir / "meta_bridge_supervisor.py"),
             "--mode",
             "post-merge",
             "--package",
@@ -772,6 +809,7 @@ def run_recoverable_surface_command(
     bus_dir = getattr(args, "bus_dir", None)
     if bus_dir is not None:
         resolve_agent_bus_dir(repo_root, bus_dir)
+    script_repo_root = getattr(args, "_teammate_script_repo_root", None)
     executor_name = {
         "phase-a": "phase_a_executor",
         "phase-b": "phase_b_executor",
@@ -795,6 +833,7 @@ def run_recoverable_surface_command(
                     config,
                     verbose=getattr(args, "verbose", False),
                     bus_dir=bus_dir,
+                    script_repo_root=script_repo_root,
                 )
                 if retried.get("stdout"):
                     sys.stdout.write(retried["stdout"])
@@ -816,7 +855,11 @@ def run_recoverable_surface_command(
                         bus_dir=bus_dir,
                         verbose=getattr(args, "verbose", False),
                     )
-                cmd = build_surface_command(args, routing_record=surface_record)
+                cmd = build_surface_command(
+                    args,
+                    routing_record=surface_record,
+                    script_repo_root=script_repo_root,
+                )
                 _default_timeout = DEFAULT_EXECUTOR_CONFIG["timeouts"].get(executor_name, 600)
                 timeout = config.get("timeouts", {}).get(executor_name, _default_timeout)
                 try:
@@ -856,6 +899,7 @@ def run_recoverable_surface_command(
                             verbose=getattr(args, "verbose", False),
                             emit_output=True,
                             bus_dir=bus_dir,
+                            script_repo_root=script_repo_root,
                         )
                         if result.get("status") in {"success", "held"}:
                             return 0
@@ -1241,6 +1285,262 @@ def resolve_repo_root_for_dispatch(*, verbose: bool = False) -> Path:
         f"Multiple linked worktrees found for branch {branch!r}: {match_list}. "
         "Run the dispatcher from the intended linked worktree."
     )
+
+
+def _script_dir_for_repo(script_repo_root: Path | None) -> Path:
+    if script_repo_root is None:
+        return SCRIPT_DIR
+    return Path(script_repo_root) / "mu" / "tools" / "executors"
+
+
+def _agents_dir_for_repo(script_repo_root: Path | None) -> Path:
+    if script_repo_root is None:
+        return AGENTS_DIR
+    return Path(script_repo_root) / "mu" / "tools" / "agents"
+
+
+def _worktree_entries(repo_root: Path) -> list[dict[str, str]]:
+    try:
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise DispatchError(f"Cannot enumerate git worktrees for teammate lane: {exc}") from exc
+    return _parse_worktree_list(result.stdout)
+
+
+def _primary_worktree_root(repo_root: Path, entries: list[dict[str, str]]) -> Path:
+    for entry in entries:
+        raw_path = entry.get("worktree", "").strip()
+        if raw_path and entry.get("bare") != "true":
+            return Path(raw_path)
+    return Path(repo_root)
+
+
+def _teammate_worktree_path(repo_root: Path, lane: str, entries: list[dict[str, str]]) -> Path:
+    anchor = _primary_worktree_root(repo_root, entries)
+    return anchor.parent / f"{anchor.name}-{lane}"
+
+
+def _matching_worktree_entry(
+    entries: list[dict[str, str]],
+    target_path: Path,
+) -> dict[str, str] | None:
+    target_key = target_path.resolve(strict=False)
+    for entry in entries:
+        raw_path = entry.get("worktree", "").strip()
+        if not raw_path or entry.get("bare") == "true":
+            continue
+        if Path(raw_path).resolve(strict=False) == target_key:
+            return entry
+    return None
+
+
+def _git_head_sha(root: Path, *, context: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise DispatchError(
+            f"stale bridge retries after state changes: cannot determine {context} HEAD: {exc}"
+        ) from exc
+    return result.stdout.strip()
+
+
+def _ensure_teammate_worktree_head_matches_caller(
+    *,
+    caller_root: Path,
+    target_root: Path,
+    lane: str,
+) -> None:
+    caller_head = _git_head_sha(caller_root, context="caller worktree")
+    target_head = _git_head_sha(target_root, context=f"teammate lane {lane!r}")
+    if target_head != caller_head:
+        raise DispatchError(
+            f"stale bridge retries after state changes: teammate lane {lane!r} "
+            f"worktree HEAD {target_head[:12]} does not match caller HEAD "
+            f"{caller_head[:12]}; remove or rebind {target_root} before dispatch"
+        )
+
+
+def _is_default_agent_bus_dir(bus_dir: str | Path) -> bool:
+    return str(bus_dir).strip().rstrip("/") == ".agent_bus"
+
+
+def _reject_shared_teammate_bus(
+    *,
+    caller_root: Path,
+    target_root: Path,
+    bus_dir: str,
+    lane: str,
+) -> None:
+    if _is_default_agent_bus_dir(bus_dir):
+        raise DispatchError(
+            f"stale bridge retries from shared state: teammate lane {lane!r} "
+            "must use a namespaced bus, not the default .agent_bus"
+        )
+    target_bus = resolve_agent_bus_dir(target_root, bus_dir)
+    caller_default = (Path(caller_root) / ".agent_bus").resolve(strict=False)
+    target_resolved = target_bus.resolve(strict=False)
+    if target_resolved == caller_default:
+        raise DispatchError(
+            f"shared lock contention: teammate lane {lane!r} would share agent bus "
+            f"root {target_bus} with the caller worktree"
+        )
+    for rel_lock in ("meta/meta_bridge.lock", "bridge.lock"):
+        lock_path = target_bus / rel_lock
+        try:
+            if lock_path.exists() and lock_path.stat().st_size > 0:
+                raise DispatchError(
+                    f"shared lock contention: teammate lane {lane!r} has an "
+                    f"active bridge lock at {lock_path}"
+                )
+        except OSError as exc:
+            raise DispatchError(
+                f"shared lock contention: cannot inspect teammate bridge lock "
+                f"{lock_path}: {exc}"
+            ) from exc
+
+
+def _create_or_select_teammate_worktree(
+    repo_root: Path,
+    *,
+    lane: str,
+    bus_dir: str,
+    verbose: bool = False,
+) -> Path:
+    if _is_default_agent_bus_dir(bus_dir):
+        raise DispatchError(
+            f"stale bridge retries from shared state: teammate lane {lane!r} "
+            "must use a namespaced bus, not the default .agent_bus"
+        )
+
+    entries = _worktree_entries(repo_root)
+    target_path = _teammate_worktree_path(repo_root, lane, entries)
+    current_root = Path(repo_root).resolve(strict=False)
+    target_key = target_path.resolve(strict=False)
+    matching = _matching_worktree_entry(entries, target_path)
+
+    if current_root == target_key:
+        try:
+            ensure_git_worktree_clean(repo_root, context=f"teammate lane {lane!r}")
+        except ExecutorCommonError as exc:
+            raise DispatchError(str(exc)) from exc
+        _reject_shared_teammate_bus(
+            caller_root=repo_root,
+            target_root=repo_root,
+            bus_dir=bus_dir,
+            lane=lane,
+        )
+        return Path(repo_root)
+
+    try:
+        ensure_git_worktree_clean(repo_root, context="caller worktree")
+    except ExecutorCommonError as exc:
+        raise DispatchError(str(exc)) from exc
+
+    if matching is not None:
+        target_root = Path(matching["worktree"])
+        try:
+            ensure_git_worktree_clean(target_root, context=f"teammate lane {lane!r}")
+        except ExecutorCommonError as exc:
+            raise DispatchError(str(exc)) from exc
+        _reject_shared_teammate_bus(
+            caller_root=repo_root,
+            target_root=target_root,
+            bus_dir=bus_dir,
+            lane=lane,
+        )
+        _ensure_teammate_worktree_head_matches_caller(
+            caller_root=repo_root,
+            target_root=target_root,
+            lane=lane,
+        )
+        if verbose:
+            print(f"[dispatch] Selected teammate lane {lane}: {target_root}", file=sys.stderr)
+        return target_root
+
+    if target_path.exists():
+        raise DispatchError(
+            f"shared lock contention: teammate lane {lane!r} target {target_path} "
+            "exists but is not a registered git worktree"
+        )
+
+    try:
+        result = subprocess.run(
+            ["git", "worktree", "add", "--detach", str(target_path), "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise DispatchError(f"Cannot create teammate worktree {target_path}: {exc}") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise DispatchError(
+            f"Cannot create teammate worktree {target_path}: {detail or result.returncode}"
+        )
+
+    _reject_shared_teammate_bus(
+        caller_root=repo_root,
+        target_root=target_path,
+        bus_dir=bus_dir,
+        lane=lane,
+    )
+    resolve_agent_bus_dir(target_path, bus_dir).mkdir(parents=True, exist_ok=True)
+    if verbose:
+        print(f"[dispatch] Created teammate lane {lane}: {target_path}", file=sys.stderr)
+    return target_path
+
+
+def prepare_phase_a_teammate_lane(
+    args: argparse.Namespace,
+    repo_root: Path,
+) -> Path:
+    """Bind a phase-a teammate lane to a deterministic worktree and bus."""
+    raw_lane = str(getattr(args, "teammate_lane", "") or "").strip()
+    if not raw_lane:
+        return repo_root
+    if _is_default_agent_bus_dir(getattr(args, "bus_dir", "") or ""):
+        raise DispatchError(
+            f"stale bridge retries from shared state: teammate lane {raw_lane!r} "
+            "must not use the default .agent_bus"
+        )
+    try:
+        identity = resolve_monitor_identity(
+            repo_root,
+            lane=raw_lane,
+            bus_dir=getattr(args, "bus_dir", None),
+            require_configured_named=True,
+        )
+    except MonitorIdentityError as exc:
+        raise DispatchError(f"teammate lane identity rejected: {exc}") from exc
+    args.bus_dir = identity.bus_dir
+    setattr(args, "_teammate_identity", identity.as_dict())
+    target_root = _create_or_select_teammate_worktree(
+        repo_root,
+        lane=identity.lane,
+        bus_dir=identity.bus_dir,
+        verbose=getattr(args, "verbose", False),
+    )
+    setattr(args, "_teammate_worktree", str(target_root))
+    setattr(args, "_teammate_script_repo_root", target_root)
+    return target_root
+
+
 def _emit_completed_process_output(
     completed: subprocess.CompletedProcess[str],
 ) -> None:
@@ -1262,8 +1562,10 @@ def _continue_successful_executor_chain(
     emit_output: bool = False,
     chain_origin: str | None = None,
     bus_dir: str | Path | None = None,
+    script_repo_root: Path | None = None,
 ) -> dict[str, Any]:
     """Continue the A→B→commit chain after a successful executor leg."""
+    executor_script_dir = _script_dir_for_repo(script_repo_root)
     if executor_name == "phase_a_executor":
         plan_path = _extract_plan_path(completed.stdout, repo_root)
         if plan_path is None:
@@ -1304,7 +1606,7 @@ def _continue_successful_executor_chain(
         }
         phase_b_args = [
             sys.executable,
-            str(SCRIPT_DIR / "phase_b_executor.py"),
+            str(executor_script_dir / "phase_b_executor.py"),
             "--plan", plan_path,
             "--routing-record", json.dumps(phase_b_routing),
             "--dispatcher-owned-recovery",
@@ -1346,6 +1648,7 @@ def _continue_successful_executor_chain(
             emit_output=emit_output,
             chain_origin="phase_a_executor",
             bus_dir=bus_dir,
+            script_repo_root=script_repo_root,
         )
 
     if executor_name == "phase_b_executor":
@@ -1432,7 +1735,7 @@ def _continue_successful_executor_chain(
         commit_timeout = config.get("timeouts", {}).get("commit_executor", DEFAULT_EXECUTOR_CONFIG["timeouts"]["commit_executor"])
         commit_args = [
             sys.executable,
-            str(SCRIPT_DIR / "commit_executor.py"),
+            str(executor_script_dir / "commit_executor.py"),
             "--handoff", str(handoff_path),
             "--json",
         ]
@@ -1580,6 +1883,7 @@ def _retry_commit_only(
     *,
     verbose: bool = False,
     bus_dir: str | Path | None = None,
+    script_repo_root: Path | None = None,
 ) -> dict[str, Any]:
     """Retry only the commit executor using the existing Phase B handoff.
 
@@ -1598,9 +1902,10 @@ def _retry_commit_only(
         print("[dispatch] Retrying commit executor only (Phase A/B already succeeded)")
 
     commit_timeout = config.get("timeouts", {}).get("commit_executor", DEFAULT_EXECUTOR_CONFIG["timeouts"]["commit_executor"])
+    executor_script_dir = _script_dir_for_repo(script_repo_root)
     commit_args = [
         sys.executable,
-        str(SCRIPT_DIR / "commit_executor.py"),
+        str(executor_script_dir / "commit_executor.py"),
         "--handoff", str(handoff_path),
     ]
     if bus_dir is not None:
@@ -1806,6 +2111,7 @@ def _auto_refresh_routing(
     *,
     verbose: bool = False,
     bus_dir: str | Path | None = None,
+    script_repo_root: Path | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Re-run the post-merge supervisor to refresh a stale routing record.
 
@@ -1818,7 +2124,7 @@ def _auto_refresh_routing(
             print(f"[dispatch] No post-merge package at {package_path} — cannot auto-refresh")
         return False, None
 
-    supervisor_script = AGENTS_DIR / "meta_bridge_supervisor.py"
+    supervisor_script = _agents_dir_for_repo(script_repo_root) / "meta_bridge_supervisor.py"
     if not supervisor_script.exists():
         if verbose:
             print(f"[dispatch] Supervisor script not found: {supervisor_script}")
@@ -2284,6 +2590,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[error] {exc}", file=sys.stderr)
             return 1
         try:
+            if args.surface == "phase-a":
+                repo_root = prepare_phase_a_teammate_lane(args, repo_root)
             if args.surface in {"phase-a", "phase-b", "commit"}:
                 config = load_config()
                 return run_recoverable_surface_command(
@@ -2292,7 +2600,7 @@ def main(argv: list[str] | None = None) -> int:
                     config=config,
                 )
             cmd = build_surface_command(args)
-        except ControlSurfaceError as exc:
+        except (ControlSurfaceError, DispatchError) as exc:
             print(f"[executor-dispatch] Error: {exc}", file=sys.stderr)
             return 1
         return run_surface_command(cmd, repo_root=repo_root)

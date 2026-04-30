@@ -388,13 +388,14 @@ cmd_start() {
   chmod +x "$watcher"
 
   local OBS_DIR="$REPO_ROOT/mu/tools/observability"
-  local repo_q="" obs_q="" watcher_q="" status_q="" root_helper_q="" bus_q=""
+  local repo_q="" obs_q="" watcher_q="" status_q="" root_helper_q="" bus_q="" lane_q=""
   printf -v repo_q '%q' "$REPO_ROOT"
   printf -v obs_q '%q' "$OBS_DIR"
   printf -v watcher_q '%q' "$watcher"
   printf -v status_q '%q' "$OBS_DIR/pipeline_status.sh"
   printf -v root_helper_q '%q' "$OBS_DIR/_resolve_live_root.sh"
   printf -v bus_q '%q' "$BUS_DIR"
+  printf -v lane_q '%q' "$IDENTITY_LANE"
 
   local pane1_cmd=""
   local pane2_cmd=""
@@ -403,10 +404,10 @@ cmd_start() {
   # Do not pin panes to the launcher worktree. Let each pane re-resolve the
   # freshest active pipeline worktree on every refresh so tmux stays honest
   # when the real run lives in a different linked worktree.
-  pane1_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $watcher_q"
-  pane2_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_findings.sh"
-  pane3_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_processes.sh"
-  pane4_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_timeline.sh"
+  pane1_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $watcher_q"
+  pane2_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_findings.sh"
+  pane3_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_processes.sh"
+  pane4_cmd="cd $repo_q && unset RCX_OBS_REPO_ROOT && BUS_DIR=$bus_q RCX_AGENT_BUS_DIR=$bus_q RCX_PIPELINE_MONITOR_LANE=$lane_q RCX_OBS_STATUS_SCRIPT=$status_q RCX_OBS_ROOT_HELPER=$root_helper_q bash $obs_q/_pane_timeline.sh"
 
   # Create session
   tmux new-session -d -x "$SESSION_WIDTH" -y "$SESSION_HEIGHT" -s "$SESSION" "$pane1_cmd"

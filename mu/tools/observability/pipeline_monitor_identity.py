@@ -173,15 +173,18 @@ def load_monitor_lanes(repo_root: Path) -> dict[str, dict[str, object]]:
 
         if session in seen_sessions:
             raise MonitorIdentityError(
-                f"duplicate tmux session {session!r} for lanes {seen_sessions[session]!r} and {lane!r}"
+                f"tmux session collision: duplicate tmux session {session!r} "
+                f"for lanes {seen_sessions[session]!r} and {lane!r}"
             )
         if port in seen_ports:
             raise MonitorIdentityError(
-                f"duplicate dashboard port {port} for lanes {seen_ports[port]!r} and {lane!r}"
+                f"dashboard port collision: duplicate dashboard port {port} "
+                f"for lanes {seen_ports[port]!r} and {lane!r}"
             )
         if bus_dir in seen_buses:
             raise MonitorIdentityError(
-                f"duplicate active bus root {bus_dir!r} for lanes {seen_buses[bus_dir]!r} and {lane!r}"
+                f"shared lock contention: duplicate active bus root {bus_dir!r} "
+                f"for lanes {seen_buses[bus_dir]!r} and {lane!r}"
             )
 
         seen_sessions[session] = lane
