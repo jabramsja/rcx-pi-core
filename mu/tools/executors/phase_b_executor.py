@@ -4720,6 +4720,8 @@ def run_phase_b(
                         non_blocking_findings,
                         previous_packet_path=prior_deferred_packet_path,
                         executor_created=executor_created,
+                        wave_class=wave_class,
+                        target_gate_id=target_gate_id,
                     )
                     if deferred_packet_path is not None:
                         result["deferred_packet_path"] = deferred_packet_path
@@ -4851,6 +4853,8 @@ def run_phase_b(
                         non_blocking_findings,
                         previous_packet_path=prior_deferred_packet_path,
                         executor_created=executor_created,
+                        wave_class=wave_class,
+                        target_gate_id=target_gate_id,
                     )
                     if deferred_packet_path is not None:
                         result["deferred_packet_path"] = deferred_packet_path
