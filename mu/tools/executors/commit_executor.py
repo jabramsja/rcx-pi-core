@@ -865,6 +865,35 @@ def _tracker_marker_value(note: str, marker: str) -> str:
     return match.group(1).strip().rstrip()
 
 
+def _refresh_tracker_note_wave_file_count(note: str, file_count: int) -> str:
+    """Align generated tracker-note file counts with the rebuilt staged scope."""
+    if file_count < 0:
+        return note
+
+    replacements = [
+        (
+            r"Routed commit handoff scopes \d+ wave-owned file\(s\)",
+            f"Routed commit handoff scopes {file_count} wave-owned file(s)",
+        ),
+        (
+            r"handoff for ([^.;]+?) is now bound to \d+ wave-owned file\(s\)",
+            rf"handoff for \1 is now bound to {file_count} wave-owned file(s)",
+        ),
+        (
+            r"handoff for ([^.;]+?) now carries \d+ wave-owned file\(s\)",
+            rf"handoff for \1 now carries {file_count} wave-owned file(s)",
+        ),
+        (
+            r"handoff now carries \d+ wave-owned file\(s\)",
+            f"handoff now carries {file_count} wave-owned file(s)",
+        ),
+    ]
+    refreshed = note
+    for pattern, replacement in replacements:
+        refreshed = re.sub(pattern, replacement, refreshed)
+    return refreshed
+
+
 def _render_commit_path_truth_refresh_block(
     *,
     wave_id: str,
@@ -966,7 +995,10 @@ def _rebuild_handoff_after_packet_truth_refresh(
         force_add_files=[],
         pr_title=str(handoff.get("pr_title") or ""),
         pr_body=str(handoff.get("pr_body") or ""),
-        tracker_note_text=str(handoff.get("tracker_note_text") or ""),
+        tracker_note_text=_refresh_tracker_note_wave_file_count(
+            str(handoff.get("tracker_note_text") or ""),
+            len(staged_paths),
+        ),
         supervisor_lane=(
             str(handoff.get("supervisor_lane"))
             if isinstance(handoff.get("supervisor_lane"), str)
@@ -992,6 +1024,54 @@ def _rebuild_handoff_after_packet_truth_refresh(
         repo_root=repo_root,
         tracked_packet=active_packet_path,
     )
+
+
+def _refresh_tasks_tracker_note_after_packet_truth(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    tracker_note_text: str,
+) -> str | None:
+    tasks_path = repo_root / "TASKS.md"
+    if not tasks_path.exists():
+        return None
+
+    lines = tasks_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    ra_idx, ra_end_idx = _find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        return None
+
+    matching_tracker_indices = _matching_tracker_note_indices_in_range(
+        lines,
+        wave_id,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+    canonical_tracker_indices = [
+        idx
+        for idx in matching_tracker_indices
+        if _is_canonical_tracker_note_line(lines[idx].rstrip("\n"), wave_id)
+    ]
+    if len(canonical_tracker_indices) > 1:
+        return (
+            f"wave_id '{wave_id}' has {len(canonical_tracker_indices)} canonical "
+            "tracker notes in TASKS.md during commit packet truth refresh"
+        )
+    if not canonical_tracker_indices:
+        return None
+
+    note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
+    canonical_idx = canonical_tracker_indices[0]
+    if lines[canonical_idx] == note_line:
+        return None
+
+    lines[canonical_idx] = note_line
+    tasks_path.write_text("".join(lines), encoding="utf-8")
+    try:
+        _run(["git", "add", "--", "TASKS.md"], cwd=repo_root)
+    except subprocess.CalledProcessError as exc:
+        return f"git add failed for refreshed TASKS.md tracker note: {exc.stderr.strip()}"
+    return None
 
 
 def refresh_commit_path_packet_truth(
@@ -1038,6 +1118,22 @@ def refresh_commit_path_packet_truth(
             f"{indicator_path}"
         )
     staged_paths_for_block = sorted(_dedupe_repo_paths([*staged_paths_before, active_packet_path]))
+    refreshed_tracker_note_text = _refresh_tracker_note_wave_file_count(
+        tracker_note_text,
+        len(staged_paths_for_block),
+    )
+    tracker_refresh_error = _refresh_tasks_tracker_note_after_packet_truth(
+        repo_root,
+        wave_id=wave_id,
+        tracker_note_text=refreshed_tracker_note_text,
+    )
+    if tracker_refresh_error:
+        return handoff, [], tracker_refresh_error
+    if refreshed_tracker_note_text != tracker_note_text:
+        handoff = {**handoff, "tracker_note_text": refreshed_tracker_note_text}
+        tracker_note_text = refreshed_tracker_note_text
+        staged_paths_before = sorted(_current_staged_diff_paths(repo_root))
+        staged_paths_for_block = sorted(_dedupe_repo_paths([*staged_paths_before, active_packet_path]))
     evidence_handles = _commit_refresh_evidence_handles(handoff, indicator_path=indicator_path)
     block = _render_commit_path_truth_refresh_block(
         wave_id=wave_id,
