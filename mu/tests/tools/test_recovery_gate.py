@@ -5364,6 +5364,52 @@ esac
         assert result.returncode == 0
         assert result.stdout.strip() == str(reviewer)
 
+    def test_pipeline_monitor_restarts_same_log_tail_on_heartbeat(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        live_log = tmp_path / "rcx_pipeline_live.txt"
+        live_log.write_text("active log line\n", encoding="utf-8")
+        self._set_age_seconds(live_log, age_seconds=5)
+        script = repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+        env = os.environ | {
+            "RCX_OBS_REPO_ROOT": str(repo_root),
+            "RCX_PIPELINE_LIVE_LOG": str(live_log),
+            "RCX_LOG_WATCHER_HEARTBEAT_SECONDS": "0",
+        }
+
+        result = subprocess.run(
+            [
+                "bash",
+                "-lc",
+                "watcher=$(mktemp); "
+                + "sed -n \"/^  cat <<'WATCHER_EOF'$/,/^WATCHER_EOF$/p\" "
+                + _shell_quote(str(script))
+                + " | sed '1d;$d;/^while true; do/,$d' > \"$watcher\"; "
+                + "source \"$watcher\"; "
+                + "switch_tail \"$RCX_PIPELINE_LIVE_LOG\" >/dev/null; "
+                + "first=\"$tail_pid\"; "
+                + "refresh_tail_if_due \"$RCX_PIPELINE_LIVE_LOG\" >/dev/null; "
+                + "second=\"$tail_pid\"; "
+                + "if kill -0 \"$first\" 2>/dev/null; then first_alive=yes; else first_alive=no; fi; "
+                + "printf 'first=%s\\nsecond=%s\\nfirst_alive=%s\\ncurrent=%s\\n' "
+                + "\"$first\" \"$second\" \"$first_alive\" \"$current_log\"; "
+                + "stop_tail; "
+                + "rm -f \"$watcher\"",
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0, result.stderr
+        output = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        assert output["first"] != output["second"]
+        assert output["first_alive"] == "no"
+        assert output["current"] == str(live_log)
+
     def test_pane_findings_renders_fallback_when_no_bridge_rounds_exist(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
