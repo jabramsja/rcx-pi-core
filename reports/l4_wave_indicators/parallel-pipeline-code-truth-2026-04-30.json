@@ -1,0 +1,24 @@
+{
+  "wave_id": "parallel-pipeline-code-truth-2026-04-30",
+  "repeat_run_speedup_ratio": 1.122708,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.413583,
+  "repeat_run_raw_seconds": [
+    0.464333,
+    0.413583
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.464333
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.877916
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-04-30T22:19:57Z",
+  "collector_version": "2.2.0"
+}
