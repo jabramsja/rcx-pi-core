@@ -671,7 +671,8 @@ class TestTierMapping:
                          FailureClass.MISSING_BRIDGE_CONFIG,
                          FailureClass.POST_REENTRY_NEEDS_PHASE_B,
                          FailureClass.PHASE_B_PLAN_REQUIRED,
-                         FailureClass.MISSING_PHASE_A_LOCK}
+                         FailureClass.MISSING_PHASE_A_LOCK,
+                         FailureClass.MISSING_PLAN_TASK_HEADER}
         # STALE_GIT_INDEX_LOCK demoted to Tier 2 (no sound ownership check)
         assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
         tier4 = {fc for fc in FailureClass if rg_mod.tier_for(fc) == 4}
@@ -1804,6 +1805,21 @@ class TestFixProcessTimeout:
 
 
 class TestFixMissingPhaseALock:
+    def test_missing_plan_task_header_classifies_to_tier1(self):
+        result = {
+            "status": "error",
+            "step": "validate_inputs",
+            "plan_path": "reports/control_plane/plan.md",
+            "errors": [
+                "validate_inputs fatal: Plan is missing authoritative Task header required to match routing task_id [PARALLEL-PIPELINE]"
+            ],
+        }
+
+        fc = rg_mod.classify_failure(result)
+
+        assert fc == FailureClass.MISSING_PLAN_TASK_HEADER
+        assert rg_mod.tier_for(fc) == 1
+
     def test_missing_phase_a_lock_repaired_and_stale_bridge_lock_cleared(self, tmp_path, monkeypatch):
         reports = tmp_path / "reports" / "control_plane"
         reports.mkdir(parents=True)
@@ -1850,6 +1866,63 @@ class TestFixMissingPhaseALock:
         assert "Phase-A-Lock: LOCKED" in plan_text
         parsed = phase_b_mod.load_plan_packet(tmp_path, plan_path)
         assert parsed["phase_a_lock"] == "LOCKED"
+
+    def test_missing_plan_task_header_repaired_from_routing_record(self, tmp_path, monkeypatch):
+        reports = tmp_path / "reports" / "control_plane"
+        reports.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (tmp_path / plan_path).write_text(
+            "# Plan\n\n"
+            "Date: 2026-04-30\n"
+            "Status: Phase B\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\n"
+            "## Body\n"
+            "Task: narrative-only body value.\n",
+            encoding="utf-8",
+        )
+
+        phase_a_mod = load_module("phase_a_executor_fix_missing_plan_task_header", _EXECUTORS_DIR / "phase_a_executor.py")
+        phase_b_mod = load_module("phase_b_executor_fix_missing_plan_task_header", _EXECUTORS_DIR / "phase_b_executor.py")
+
+        def fake_loader(repo_root, module_name):
+            assert repo_root == tmp_path
+            if module_name == "phase_a_executor":
+                return phase_a_mod
+            if module_name == "phase_b_executor":
+                return phase_b_mod
+            raise AssertionError(f"unexpected module load: {module_name}")
+
+        monkeypatch.setattr(rg_mod, "_load_executor_module_from_repo", fake_loader)
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda repo_root, bus_dir=None: {
+                "task_id": "[PARALLEL-PIPELINE]",
+                "wave_name": "parallel-pipeline-agent-teams",
+            },
+        )
+
+        result = rg_mod.fix_missing_plan_task_header(
+            tmp_path,
+            result={
+                "status": "error",
+                "step": "validate_inputs",
+                "plan_path": plan_path,
+                "errors": [
+                    "validate_inputs fatal: Plan is missing authoritative Task header required to match routing task_id [PARALLEL-PIPELINE]"
+                ],
+            },
+        )
+
+        assert result["fixed"] is True
+        assert result["action"] == "repair_missing_plan_task_header"
+        plan_text = (tmp_path / plan_path).read_text(encoding="utf-8")
+        header = plan_text.split("## Body", 1)[0]
+        assert "Task: [PARALLEL-PIPELINE]\n" in header
+        assert "Wave ID: parallel-pipeline-agent-teams\n" in header
+        parsed = phase_b_mod.load_plan_packet(tmp_path, plan_path)
+        assert parsed["task_id"] == "[PARALLEL-PIPELINE]"
 
     def test_bridge_lock_preserved_when_flock_held(self, tmp_path, monkeypatch):
         """bridge.lock must NOT be cleared when a live process holds the flock.

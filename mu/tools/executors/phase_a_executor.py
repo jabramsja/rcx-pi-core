@@ -188,6 +188,8 @@ def extract_plan_scope(routing_record: dict[str, Any]) -> dict[str, str]:
         "request": routing_record.get("request_for_claude", ""),
         "summary": routing_record.get("summary", ""),
         "decision": routing_record.get("decision", ""),
+        "task_id": routing_record.get("task_id", ""),
+        "wave_name": routing_record.get("wave_name", ""),
     }
 
 
@@ -261,10 +263,22 @@ def create_plan_draft(
     if plan_path.exists():
         return plan_path  # Don't overwrite existing draft
 
+    task_id = str(scope.get("task_id", "") or "").strip()
+    wave_id = str(scope.get("wave_name", "") or scope.get("wave_id", "") or "").strip()
+    identity_lines = []
+    if task_id:
+        identity_lines.append(f"Task: {task_id}")
+    if wave_id:
+        identity_lines.append(f"Wave ID: {wave_id}")
+    identity_block = "\n".join(identity_lines)
+    if identity_block:
+        identity_block += "\n"
+
     content = f"""# {plan_name.replace('_', ' ').title()}
 
 Date: {date_str}
 Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
+{identity_block}\
 Phase-A-Lock: UNLOCKED
 Purpose: {scope.get('request', 'planning required')}
 
@@ -939,7 +953,57 @@ def _split_plan_header(content: str) -> tuple[str, str]:
     return content, ""
 
 
-def lock_plan(repo_root: Path, plan_path: str) -> None:
+def _ensure_phase_a_identity_header(
+    content: str,
+    routing_record: dict[str, Any] | None,
+) -> str:
+    """Insert missing authoritative Task/Wave headers from routing context."""
+    if not routing_record:
+        return content
+    task_id = str(routing_record.get("task_id", "") or "").strip()
+    wave_id = str(
+        routing_record.get("wave_name", "")
+        or routing_record.get("wave_id", "")
+        or ""
+    ).strip()
+    if not task_id and not wave_id:
+        return content
+
+    header, body = _split_plan_header(content)
+    hdr_lines = header.splitlines()
+    has_task = any(line.strip().startswith("Task:") for line in hdr_lines)
+    has_wave = any(
+        line.strip().startswith(("Wave ID:", "wave_id:"))
+        for line in hdr_lines
+    )
+    insertions: list[str] = []
+    if task_id and not has_task:
+        insertions.append(f"Task: {task_id}")
+    if wave_id and not has_wave:
+        insertions.append(f"Wave ID: {wave_id}")
+    if not insertions:
+        return content
+
+    insert_after = 0
+    for i, line in enumerate(hdr_lines):
+        stripped = line.strip()
+        if stripped.startswith(("#", "Date:", "Status:")):
+            insert_after = i + 1
+        if stripped.startswith("Phase-A-Lock:"):
+            break
+    hdr_lines[insert_after:insert_after] = insertions
+    header = "\n".join(hdr_lines)
+    if not header.endswith("\n"):
+        header += "\n"
+    return header + body
+
+
+def lock_plan(
+    repo_root: Path,
+    plan_path: str,
+    *,
+    routing_record: dict[str, Any] | None = None,
+) -> None:
     """Set Phase-A-Lock: LOCKED in a plan packet.
 
     Idempotent: if the packet is already LOCKED, applies status text cleanup
@@ -952,6 +1016,10 @@ def lock_plan(repo_root: Path, plan_path: str) -> None:
     """
     full_path = repo_root / plan_path
     content = full_path.read_text(encoding="utf-8")
+    content_with_identity = _ensure_phase_a_identity_header(content, routing_record)
+    if content_with_identity != content:
+        content = content_with_identity
+        full_path.write_text(content, encoding="utf-8")
 
     # Split at first ## heading — control lines live in the header only.
     header, body = _split_plan_header(content)
@@ -1819,7 +1887,7 @@ def run_phase_a(
 
     # Lock the plan
     try:
-        lock_plan(repo_root, rel_plan_path)
+        lock_plan(repo_root, rel_plan_path, routing_record=routing_record)
     except PhaseAExecutorError as exc:
         result["status"] = "error"
         result["error"] = str(exc)

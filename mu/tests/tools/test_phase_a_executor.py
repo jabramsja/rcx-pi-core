@@ -52,6 +52,60 @@ def _fake_bridge(repo: Path, *, decision: str, exit_code: int = 0):
     return _run_bridge
 
 
+def test_create_plan_draft_writes_authoritative_routing_identity(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plan = phase_a_mod.create_plan_draft(
+        repo,
+        "parallel_pipeline_agent_teams",
+        {
+            "request": "teammate worktrees",
+            "summary": "agent teams",
+            "task_id": "[PARALLEL-PIPELINE]",
+            "wave_name": "parallel-pipeline-agent-teams",
+        },
+    )
+
+    header = plan.read_text(encoding="utf-8").split("## Scope", 1)[0]
+    assert "Task: [PARALLEL-PIPELINE]\n" in header
+    assert "Wave ID: parallel-pipeline-agent-teams\n" in header
+    assert header.index("Task: [PARALLEL-PIPELINE]") < header.index("Phase-A-Lock: UNLOCKED")
+
+
+def test_lock_plan_inserts_missing_authoritative_routing_identity(tmp_path):
+    repo = tmp_path / "repo"
+    reports = repo / "reports" / "control_plane"
+    reports.mkdir(parents=True)
+    plan = reports / "parallel_pipeline_agent_teams.md"
+    plan.write_text(
+        "# Parallel Pipeline Agent Teams\n\n"
+        "Date: 2026-04-30\n"
+        "Status: Phase A\n"
+        "Phase-A-Lock: UNLOCKED\n"
+        "\n"
+        "## Scope\n"
+        "Task: narrative-only body value must not satisfy Phase B.\n",
+        encoding="utf-8",
+    )
+
+    phase_a_mod.lock_plan(
+        repo,
+        "reports/control_plane/parallel_pipeline_agent_teams.md",
+        routing_record={
+            "task_id": "[PARALLEL-PIPELINE]",
+            "wave_name": "parallel-pipeline-agent-teams",
+        },
+    )
+
+    content = plan.read_text(encoding="utf-8")
+    header = content.split("## Scope", 1)[0]
+    assert "Task: [PARALLEL-PIPELINE]\n" in header
+    assert "Wave ID: parallel-pipeline-agent-teams\n" in header
+    assert "Phase-A-Lock: LOCKED\n" in header
+    assert header.index("Wave ID: parallel-pipeline-agent-teams") < header.index("Phase-A-Lock: LOCKED")
+    assert "Task: narrative-only body value" in content
+
+
 def test_run_phase_a_emits_entered_reviewer_and_go_events(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
