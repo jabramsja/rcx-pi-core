@@ -1661,7 +1661,11 @@ def _continue_successful_executor_chain(
             {"next_candidates": phase_b_candidates}
         ):
             phase_b_candidates = [
-                {"tracked_packet": _phase_b_plan_routing_packet(repo_root, plan_path)}
+                {
+                    "candidate": plan_wave_id,
+                    "bounded": True,
+                    "tracked_packet": _phase_b_plan_routing_packet(repo_root, plan_path),
+                }
             ]
 
         phase_b_timeout = config.get("timeouts", {}).get("phase_b_executor", DEFAULT_EXECUTOR_CONFIG["timeouts"]["phase_b_executor"])

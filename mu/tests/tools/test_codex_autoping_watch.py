@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import os
 import sqlite3
+import subprocess
+import time
 from pathlib import Path
 
 from tests.repo_root import REPO_ROOT
@@ -514,6 +518,265 @@ def test_render_prompt_keeps_autoping_diagnostic_only(tmp_path):
     assert "The watcher will persist that final summary" in prompt
     assert "Persist your operator-facing summary" not in prompt
     assert "apply safe repo-local structural fixes" not in prompt
+
+
+def _wait_until(predicate, *, timeout_s: float = 8.0):
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        result = predicate()
+        if result:
+            return result
+        time.sleep(0.1)
+    return None
+
+
+def _read_launches(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _pgid_alive(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def test_autoping_window_restarts_dead_watcher_without_manual_preflight(tmp_path):
+    fake_repo = tmp_path / "repo"
+    session_dir = fake_repo / "tools" / "session"
+    session_dir.mkdir(parents=True)
+    codex_home = tmp_path / "codex-home"
+    launch_log = tmp_path / "watcher-launches.jsonl"
+    launch_count = tmp_path / "watcher-launch-count.txt"
+    active_pid_path = tmp_path / "active-ping.pid"
+    active_child_pid_path = tmp_path / "active-ping-child.pid"
+    active_term_marker = tmp_path / "active-ping-terminated.txt"
+    manual_preflight_marker = tmp_path / "manual-preflight-called.txt"
+
+    (session_dir / "codex_autoping_watch.py").write_text(
+        """
+import argparse
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--repo-root")
+parser.add_argument("--thread-id")
+parser.add_argument("--interval")
+parser.add_argument("--initial-delay")
+parser.add_argument("--ping-timeout")
+parser.add_argument("--bus-dir")
+parser.add_argument("--tmux-session")
+parser.add_argument("--tmux-pane")
+args = parser.parse_args()
+
+count_path = Path(os.environ["FAKE_WATCH_COUNT"])
+count = int(count_path.read_text(encoding="utf-8")) + 1 if count_path.exists() else 1
+count_path.write_text(str(count), encoding="utf-8")
+
+codex_home = Path(os.environ["RCX_CODEX_HOME"])
+state_dir = codex_home / "state"
+state_dir.mkdir(parents=True, exist_ok=True)
+thread_slug = args.thread_id
+state_path = state_dir / f"rcx_autoping_{thread_slug}.json"
+summary_path = state_dir / f"rcx_autoping_{thread_slug}_summary.txt"
+summary_path.write_text(f"fake launch {count}\\n", encoding="utf-8")
+
+active_pid = None
+if count == 1:
+    leader_code = r'''
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+child_code = r\"\"\"
+import os
+import signal
+import time
+from pathlib import Path
+
+term_marker = Path(os.environ["FAKE_ACTIVE_TERM_MARKER"])
+child_pid_path = Path(os.environ["FAKE_ACTIVE_CHILD_PID_PATH"])
+child_pid_path.write_text(str(os.getpid()), encoding="utf-8")
+
+def handle_term(signum, frame):
+    term_marker.write_text("terminated", encoding="utf-8")
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, handle_term)
+while True:
+    time.sleep(1)
+\"\"\"
+
+subprocess.Popen(
+    [sys.executable, "-c", child_code],
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    env=os.environ.copy(),
+)
+
+child_pid_path = Path(os.environ["FAKE_ACTIVE_CHILD_PID_PATH"])
+deadline = time.monotonic() + 5
+while time.monotonic() < deadline:
+    if child_pid_path.exists():
+        raise SystemExit(0)
+    time.sleep(0.05)
+raise SystemExit(3)
+'''
+    leader_proc = subprocess.Popen(
+        [sys.executable, "-c", leader_code],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        env=os.environ.copy(),
+    )
+    leader_proc.wait(timeout=5)
+    if leader_proc.returncode != 0:
+        raise SystemExit(leader_proc.returncode)
+    active_pid = leader_proc.pid
+    Path(os.environ["FAKE_ACTIVE_PID_PATH"]).write_text(
+        str(active_pid), encoding="utf-8"
+    )
+
+payload = {
+    "watcher_pid": os.getpid(),
+    "thread_id": args.thread_id,
+    "status": f"fake_launch_{count}",
+    "active_pid": active_pid,
+    "summary_path": str(summary_path),
+}
+state_path.write_text(json.dumps(payload, sort_keys=True) + "\\n", encoding="utf-8")
+with Path(os.environ["FAKE_WATCH_LAUNCH_LOG"]).open("a", encoding="utf-8") as sink:
+    sink.write(json.dumps({"count": count, "pid": os.getpid()}, sort_keys=True) + "\\n")
+
+if count == 1:
+    raise SystemExit(0)
+time.sleep(60)
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (session_dir / "render_codex_autoping_status.py").write_text(
+        """
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--thread-id")
+args = parser.parse_args()
+print(f"fake render {args.thread_id}")
+""".lstrip(),
+        encoding="utf-8",
+    )
+    guard = session_dir / "founder_session_guard.sh"
+    guard.write_text(
+        f"#!/usr/bin/env bash\nprintf called >> {manual_preflight_marker}\nexit 42\n",
+        encoding="utf-8",
+    )
+    guard.chmod(0o755)
+
+    trap_bin = tmp_path / "bin"
+    trap_bin.mkdir()
+    preflight = trap_bin / "codex-rcx-preflight"
+    preflight.write_text(
+        f"#!/usr/bin/env bash\nprintf called >> {manual_preflight_marker}\nexit 42\n",
+        encoding="utf-8",
+    )
+    preflight.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "RCX_CODEX_HOME": str(codex_home),
+            "FAKE_ACTIVE_PID_PATH": str(active_pid_path),
+            "FAKE_ACTIVE_CHILD_PID_PATH": str(active_child_pid_path),
+            "FAKE_ACTIVE_TERM_MARKER": str(active_term_marker),
+            "FAKE_WATCH_COUNT": str(launch_count),
+            "FAKE_WATCH_LAUNCH_LOG": str(launch_log),
+            "PATH": f"{trap_bin}:{env['PATH']}",
+        }
+    )
+    proc = subprocess.Popen(
+        [
+            "bash",
+            str(REPO_ROOT / "tools" / "session" / "codex_autoping_window.sh"),
+            "--repo",
+            str(fake_repo),
+            "--thread-id",
+            "thread-window",
+            "--initial-delay",
+            "0",
+            "--interval",
+            "999",
+            "--ping-timeout",
+            "1",
+        ],
+        cwd=str(REPO_ROOT),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    def ready_launches() -> list[dict[str, object]] | None:
+        records = _read_launches(launch_log)
+        return records if len(records) >= 2 else None
+
+    try:
+        launches = _wait_until(ready_launches)
+        assert launches is not None, "wrapper did not restart the fake watcher"
+
+        active_pid = int(active_pid_path.read_text(encoding="utf-8"))
+        active_child_pid = int(active_child_pid_path.read_text(encoding="utf-8"))
+        assert not _pid_alive(active_pid)
+        assert _wait_until(lambda: active_term_marker.exists()) is True
+        assert _wait_until(lambda: not _pid_alive(active_child_pid)) is True
+        assert _wait_until(lambda: not _pgid_alive(active_pid)) is True
+
+        state_path = codex_home / "state" / "rcx_autoping_thread-window.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert state["status"] == "fake_launch_2"
+        assert state["watcher_pid"] == launches[-1]["pid"]
+
+        runner_log = (
+            codex_home
+            / "log"
+            / "autoping"
+            / "rcx_autoping_thread-window.runner.log"
+        ).read_text(encoding="utf-8")
+        assert "[autoping-window] watcher exited pid=" in runner_log
+        assert "[autoping-window] watcher_pid=" in runner_log
+        assert "[autoping-window] terminated stale active ping pid=" in runner_log
+        assert not manual_preflight_marker.exists()
+    finally:
+        proc.terminate()
+        try:
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate(timeout=5)
 
 
 def test_resume_env_keeps_rcx_overlay_for_resumed_turns(monkeypatch):
