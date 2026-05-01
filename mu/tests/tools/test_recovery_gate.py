@@ -12098,6 +12098,32 @@ def test_prompt_via_stdin_uses_communicate_input_without_closed_pipe_error(tmp_p
     assert status["outcome"] == "skipped"
 
 
+def test_diagnosis_prompt_caps_megabyte_jsonl_lines(tmp_path):
+    huge_jsonl_line = (
+        '{"type":"item.completed","item":{"aggregated_output":"'
+        + ("x" * 1_100_000)
+        + '"}}'
+    )
+    result = {
+        "status": "error",
+        "step": "commit",
+        "failure_class": "l4_contract_violation",
+        "stdout": huge_jsonl_line,
+        "stderr": "",
+    }
+
+    prompt = rg_mod._build_diagnosis_prompt(  # ANTICHEAT_OK: prompt budget regression
+        result,
+        "wave-with-large-recovery-jsonl",
+        0,
+        tmp_path,
+    )
+
+    assert len(prompt) <= rg_mod._RECOVERY_AGENT_PROMPT_MAX_CHARS  # ANTICHEAT_OK
+    assert "[truncated " in prompt
+    assert "Respond with ONLY a JSON object" in prompt
+
+
 # ---------------------------------------------------------------------------
 # Regression tests for FailureClass.PR_CONFLICTING + fix_pr_conflicting
 # (Work Item E in the Phase A plan for recovery-gate-pr-conflicting-2026-04-20)

@@ -6,7 +6,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from rcx_pi.selfhost.engine_pipeline import _service_boundary_effect
+from rcx_pi.selfhost.engine_pipeline import _service_boundary_effect  # ANTICHEAT_OK: parity probe for boundary dispatch path
 from tests.repo_root import REPO_ROOT
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from rcx_pi.selfhost.engine_pipeline import _service_boundary_effect  # ANTICHEAT_OK: boundary dispatch regression test
 from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
 from tests.conftest import run_until_stable
 from tests.repo_root import REPO_ROOT
@@ -297,11 +298,20 @@ def test_python_run_algorithm_boundary_loads_scheduler_seed_path(monkeypatch):
     monkeypatch.setattr(engine_pipeline, "_run_sub_algorithm", fake_run_sub_algorithm)
     vector = _vector("select_lexicographic_head")
 
-    result = engine_pipeline._boundary_op_run_algorithm(
-        {"algorithm": SCHEDULER_SEED_NAME},
-        vector["input"],
+    result_context = _service_boundary_effect(
+        {
+            "operation": "run_algorithm",
+            "algorithm": SCHEDULER_SEED_NAME,
+            "input": vector["input"],
+            "context": {},
+            "inject_key": "result",
+        },
         7,
+        emit_fn=lambda *args, **kwargs: None,
+        step=0,
+        state={},
     )
+    result = result_context["result"]
 
     assert result == {"scheduler_result": {"action": "captured"}}
     assert captured["seed_path"].name == SCHEDULER_SEED_NAME

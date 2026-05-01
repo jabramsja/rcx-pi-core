@@ -2808,6 +2808,8 @@ _DANGEROUS_COPY_MOVE_KILL_COMMANDS: frozenset[str] = frozenset({
 })
 
 MAX_RECOVERY_ITERATIONS = 3
+_RECOVERY_AGENT_PROMPT_MAX_CHARS = 200_000
+_RECOVERY_AGENT_PROMPT_MAX_LINE_CHARS = 2_000
 _SHELL_TIMEOUT = 30
 _TRIVIAL_EXCERPTS = frozenset({"{", "}", "[", "]", ",", '"', '",', "{}", "[]"})
 _HYBRID_SCOPE_PATTERNS: tuple[str, ...] = (
@@ -3484,9 +3486,11 @@ def _build_diagnosis_prompt(
     step = _effective_result_step(result)
     stderr = result.get("stderr", "")
     stdout = result.get("stdout", "")
-    # Truncate to keep within token budget
-    stderr_lines = stderr.strip().splitlines()[-100:]
-    stdout_lines = stdout.strip().splitlines()[-50:]
+    # Truncate by line count and line length. Adapter JSONL can contain a
+    # single megabyte-scale aggregated_output line; line-count truncation alone
+    # is not enough to keep Codex recovery prompts under the input ceiling.
+    stderr_lines = _tail_recovery_prompt_lines(stderr, 100)
+    stdout_lines = _tail_recovery_prompt_lines(stdout, 50)
     # Get git status
     try:
         git_proc = subprocess.run(
@@ -3496,7 +3500,7 @@ def _build_diagnosis_prompt(
     except (subprocess.TimeoutExpired, OSError):
         git_status = "(unavailable)"
 
-    return f"""You are a pipeline recovery agent. A pipeline step has failed and you must diagnose and fix it.
+    prompt = f"""You are a pipeline recovery agent. A pipeline step has failed and you must diagnose and fix it.
 
 Failure class: {fc}
 Tier: {tier}
@@ -3552,6 +3556,41 @@ delegate_implementer rules:
   - mu/tests/tools/test_*.py
 
 Safety: no rm -rf, no git push, no git reset --hard. Max 30s per command."""
+    return _cap_recovery_agent_prompt(prompt)
+
+
+def _truncate_recovery_prompt_line(line: str) -> str:
+    if len(line) <= _RECOVERY_AGENT_PROMPT_MAX_LINE_CHARS:
+        return line
+    keep = _RECOVERY_AGENT_PROMPT_MAX_LINE_CHARS
+    head_len = keep // 2
+    tail_len = keep - head_len
+    omitted = len(line) - keep
+    return (
+        f"{line[:head_len].rstrip()} ... "
+        f"[truncated {omitted} chars] ... "
+        f"{line[-tail_len:].lstrip()}"
+    )
+
+
+def _tail_recovery_prompt_lines(text: Any, line_limit: int) -> list[str]:
+    if text is None:
+        return []
+    lines = str(text).strip().splitlines()[-line_limit:]
+    return [_truncate_recovery_prompt_line(line) for line in lines]
+
+
+def _cap_recovery_agent_prompt(prompt: str) -> str:
+    if len(prompt) <= _RECOVERY_AGENT_PROMPT_MAX_CHARS:
+        return prompt
+    marker = (
+        "\n\n[recovery prompt truncated to fit agent input limit; "
+        "middle omitted]\n\n"
+    )
+    budget = _RECOVERY_AGENT_PROMPT_MAX_CHARS - len(marker)
+    head_len = budget // 3
+    tail_len = budget - head_len
+    return prompt[:head_len].rstrip() + marker + prompt[-tail_len:].lstrip()
 
 
 _RECOVERY_AGENT_ACTIONS = frozenset({
