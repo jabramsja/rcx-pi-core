@@ -87,7 +87,7 @@ jobs:
           echo "Range: origin/dev...${{ github.sha }}"
           # Derive wave-id via shared script (deduped from ci.yml + green_gate.yml)
           # GH_HEAD_REF passed via env to prevent expression injection (CWE-78)
-          source tools/checks/derive_wave_id.sh "$GH_HEAD_REF" "$RANGE"
+          source tools/checks/derive_wave_id.sh "$GH_HEAD_REF" --range "$RANGE"
           python tools/checks/enforce_l4_execution_contract.py --range "$RANGE" $WAVE_ID_FLAG
 
       - name: Green gate (authoritative, python-only)

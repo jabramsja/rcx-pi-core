@@ -25,6 +25,14 @@ MODE="${2:-}"
 MODE_VALUE="${3:-}"
 WAVE_ID_FLAG=""
 
+# Backward compatibility for GitHub workflows that historically sourced this
+# helper as `derive_wave_id.sh "$BRANCH" "$RANGE"` before the mode argument was
+# added. Treat a non-option second argument with no third argument as --range.
+if [ -n "$MODE" ] && [[ "$MODE" != --* ]] && [ -z "$MODE_VALUE" ]; then
+  MODE_VALUE="$MODE"
+  MODE="--range"
+fi
+
 if [ -z "$BRANCH" ]; then
   echo "WAVE_ID_FLAG="
   return 0 2>/dev/null || exit 0
