@@ -855,6 +855,73 @@ def _resolve_pytest_gate_timeout(raw_timeout: Any) -> int:
     return max(DEFAULT_PYTEST_GATE_TIMEOUT_S, min(timeout_s, MAX_PYTEST_GATE_TIMEOUT_S))
 
 
+def _is_pytest_gate_file(path: str) -> bool:
+    if not path.endswith(".py"):
+        return False
+    return path.startswith("mu/tests/") or "/test_" in path or path.endswith("_test.py")
+
+
+def _select_pytest_gate_files(changed_files: list[str]) -> list[str]:
+    return [path for path in changed_files if _is_pytest_gate_file(path)]
+
+
+_NON_GATE_TEST_DOMAINS = (
+    "tests/engine/", "tests/parity/", "tests/structural/", "tests/tools/", "tests/docs/",
+    "mu/tests/engine/", "mu/tests/parity/", "mu/tests/structural/", "mu/tests/tools/", "mu/tests/docs/",
+)
+
+_STRUCTURAL_ARTIFACT_PREFIXES = (
+    "mu/host/",
+    "mu/programs/",
+    "mu/substrate/",
+    "mu/closures/",
+    "mu/tests/l4_gates/",
+    "tests/l4_gates/",
+)
+
+
+def _select_non_gate_test_files(paths: list[str]) -> list[str]:
+    return [
+        path for path in paths
+        if _is_pytest_gate_file(path) and path.startswith(_NON_GATE_TEST_DOMAINS)
+    ]
+
+
+def _infer_structural_workload_target(changed_files: list[str], plan_content: str) -> str:
+    """Infer the least-surprising L4 structural workload target from wave scope."""
+    scope_text = "\n".join(changed_files) + "\n" + (plan_content or "")
+    if "rcx_engine" in scope_text or "engine_pipeline" in scope_text:
+        return "host_debt_reduction"
+    if "recurrence" in scope_text or "exhaustion" in scope_text:
+        return "recurrence_exhaustion"
+    if "seed_auto_execution" in scope_text:
+        return "seed_auto_execution"
+    if "execution_layer_truth" in scope_text:
+        return "execution_layer_truth"
+    return "ontology_promotion"
+
+
+def _summarize_structural_artifacts(changed_files: list[str], *, limit: int = 8) -> str:
+    artifacts = [
+        path for path in changed_files
+        if path.startswith(_STRUCTURAL_ARTIFACT_PREFIXES)
+    ]
+    if not artifacts:
+        artifacts = list(changed_files)
+    visible = artifacts[:limit]
+    suffix = ""
+    if len(artifacts) > limit:
+        suffix = f"; +{len(artifacts) - limit} more structural artifact(s)"
+    return "; ".join(visible) + suffix
+
+
+def _build_structural_post_gate_sweep(test_files: list[str], changed_files: list[str]) -> str:
+    non_gate_tests = _select_non_gate_test_files(test_files) or _select_non_gate_test_files(changed_files)
+    if non_gate_tests:
+        return "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short " + " ".join(non_gate_tests)
+    return "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/structural/ mu/tests/parity/"
+
+
 def _summarize_pytest_failure(result: dict[str, Any], *, stdout_limit: int = 1000, stderr_limit: int = 1000) -> str:
     """Build a bounded pytest failure summary without dropping stderr-only failures."""
     stdout = (result.get("stdout") or "").strip()
@@ -872,10 +939,295 @@ def _summarize_pytest_failure(result: dict[str, Any], *, stdout_limit: int = 100
 # ---------------------------------------------------------------------------
 
 STATE_FILE_NAME = "phase_b_state.json"
+BRANCH_STASH_STATE_FILE_NAME = "phase_b_branch_stash.json"
 
 
 def _state_file_path(repo_root: Path) -> Path:
     return agent_bus_path(repo_root, _active_bus_dir(), "executors", STATE_FILE_NAME)
+
+
+def _branch_stash_state_file_path(repo_root: Path) -> Path:
+    return agent_bus_path(repo_root, _active_bus_dir(), "executors", BRANCH_STASH_STATE_FILE_NAME)
+
+
+def _write_branch_stash_state(repo_root: Path, state: dict[str, Any]) -> Path:
+    state_path = _branch_stash_state_file_path(repo_root)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return state_path
+
+
+def _load_branch_stash_state(repo_root: Path) -> dict[str, Any] | None:
+    state_path = _branch_stash_state_file_path(repo_root)
+    try:
+        raw = state_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    try:
+        state = json.loads(raw)
+    except json.JSONDecodeError:
+        return {
+            "status": "invalid",
+            "state_path": agent_bus_relpath(_active_bus_dir(), "executors", BRANCH_STASH_STATE_FILE_NAME),
+            "output": "branch-switch stash recovery state is not valid JSON",
+        }
+    if not isinstance(state, dict):
+        return {
+            "status": "invalid",
+            "state_path": agent_bus_relpath(_active_bus_dir(), "executors", BRANCH_STASH_STATE_FILE_NAME),
+            "output": "branch-switch stash recovery state must be a JSON object",
+        }
+    return state
+
+
+def _clear_branch_stash_state(repo_root: Path) -> None:
+    try:
+        _branch_stash_state_file_path(repo_root).unlink()
+    except FileNotFoundError:
+        return
+
+
+def _git_output(result: subprocess.CompletedProcess[str]) -> str:
+    return "\n".join(part.strip() for part in (result.stdout, result.stderr) if part and part.strip())
+
+
+def _find_stash_record_for_marker(repo_root: Path, marker: str) -> dict[str, str] | None:
+    list_result = subprocess.run(
+        ["git", "stash", "list", "--format=%gd%x00%H%x00%s"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if list_result.returncode != 0:
+        return None
+    for line in list_result.stdout.splitlines():
+        parts = line.split("\x00", 2)
+        if len(parts) != 3:
+            continue
+        stash_ref, stash_oid, subject = parts
+        if stash_ref and stash_oid and marker in subject:
+            return {
+                "stash_ref": stash_ref,
+                "stash_oid": stash_oid,
+                "stash_subject": subject,
+            }
+    return None
+
+
+def _resolve_branch_switch_stash_record(
+    repo_root: Path,
+    stash_state: dict[str, Any],
+) -> tuple[dict[str, str] | None, str | None]:
+    marker = str(stash_state.get("marker") or "").strip()
+    if not marker:
+        return None, "branch-switch stash recovery state is missing marker"
+
+    stash_record = _find_stash_record_for_marker(repo_root, marker)
+    if not stash_record:
+        return None, f"branch-switch stash recovery marker was not found in git stash list: {marker}"
+
+    expected_oid = str(stash_state.get("stash_oid") or "").strip()
+    if expected_oid and stash_record["stash_oid"] != expected_oid:
+        detail = (
+            "branch-switch stash recovery object id mismatch for marker "
+            f"{marker}: expected {expected_oid}, found {stash_record['stash_oid']}"
+        )
+        stash_state.update({
+            "status": "stash_oid_mismatch",
+            "output": detail,
+        })
+        _write_branch_stash_state(repo_root, stash_state)
+        return None, detail
+
+    stash_state.update({
+        "status": "stashed",
+        "stash_ref": stash_record["stash_ref"],
+        "stash_oid": stash_record["stash_oid"],
+        "stash_subject": stash_record["stash_subject"],
+    })
+    _write_branch_stash_state(repo_root, stash_state)
+    return stash_record, None
+
+
+def _pop_branch_switch_stash_record(
+    repo_root: Path,
+    stash_state: dict[str, Any],
+    stash_record: dict[str, str],
+) -> str | None:
+    stash_ref = stash_record["stash_ref"]
+    pop_cmd = ["git", "stash", "pop", "--index", stash_ref]
+    pop_result = subprocess.run(
+        pop_cmd,
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if pop_result.returncode != 0:
+        stash_state.update({
+            "status": "pop_failed",
+            "returncode": pop_result.returncode,
+            "stash_ref": stash_ref,
+            "stash_oid": stash_record["stash_oid"],
+            "stash_subject": stash_record["stash_subject"],
+            "output": _git_output(pop_result),
+        })
+        _write_branch_stash_state(repo_root, stash_state)
+        return (
+            f"{' '.join(pop_cmd)} failed; recovery state preserved at "
+            f"{agent_bus_relpath(_active_bus_dir(), 'executors', BRANCH_STASH_STATE_FILE_NAME)}: "
+            f"{_git_output(pop_result) or pop_result.returncode}"
+        )
+    _clear_branch_stash_state(repo_root)
+    return None
+
+
+def _stash_dirty_worktree_for_branch_switch(
+    repo_root: Path,
+    *,
+    current_branch: str,
+    feature_branch: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    marker = f"phase_b:{feature_branch}:{uuid.uuid4().hex}"
+    state = {
+        "status": "pending",
+        "marker": marker,
+        "current_branch": current_branch,
+        "feature_branch": feature_branch,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _write_branch_stash_state(repo_root, state)
+    stash_result = subprocess.run(
+        ["git", "stash", "push", "--include-untracked", "-m", marker],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    combined_output = _git_output(stash_result)
+    if stash_result.returncode != 0:
+        state.update({
+            "status": "stash_failed",
+            "returncode": stash_result.returncode,
+            "output": combined_output,
+        })
+        _write_branch_stash_state(repo_root, state)
+        return None, f"git stash push failed before branch checkout: {combined_output or stash_result.returncode}"
+    if "No local changes" in combined_output:
+        _clear_branch_stash_state(repo_root)
+        return None, None
+
+    stash_record = _find_stash_record_for_marker(repo_root, marker)
+    if not stash_record:
+        state.update({
+            "status": "stash_ref_missing",
+            "output": combined_output,
+        })
+        _write_branch_stash_state(repo_root, state)
+        return None, (
+            "git stash push reported saved changes, but the created stash ref could not be found; "
+            f"recovery marker: {marker}"
+        )
+    state.update({
+        "status": "stashed",
+        "stash_ref": stash_record["stash_ref"],
+        "stash_oid": stash_record["stash_oid"],
+        "stash_subject": stash_record["stash_subject"],
+        "output": combined_output,
+    })
+    _write_branch_stash_state(repo_root, state)
+    return state, None
+
+
+def _restore_branch_switch_stash(repo_root: Path, stash_state: dict[str, Any]) -> str | None:
+    stash_record, resolve_error = _resolve_branch_switch_stash_record(repo_root, stash_state)
+    if resolve_error:
+        return resolve_error
+    if stash_record is None:
+        return "branch-switch stash recovery record resolution failed"
+    return _pop_branch_switch_stash_record(repo_root, stash_state, stash_record)
+
+
+def _restore_pending_branch_switch_stash(repo_root: Path) -> str | None:
+    stash_state = _load_branch_stash_state(repo_root)
+    if stash_state is None:
+        return None
+
+    status = str(stash_state.get("status") or "").strip()
+    if status == "pop_failed":
+        return (
+            "branch-switch stash recovery previously failed; resolve the worktree conflict "
+            f"or restore the stash recorded in "
+            f"{agent_bus_relpath(_active_bus_dir(), 'executors', BRANCH_STASH_STATE_FILE_NAME)}"
+        )
+    if status in {"invalid", "stash_failed", "stash_oid_mismatch"}:
+        detail = str(stash_state.get("output") or status)
+        return (
+            "branch-switch stash recovery is blocked by persisted state at "
+            f"{agent_bus_relpath(_active_bus_dir(), 'executors', BRANCH_STASH_STATE_FILE_NAME)}: "
+            f"{detail}"
+        )
+
+    marker = str(stash_state.get("marker") or "").strip()
+    if status == "pending" and marker:
+        stash_record, resolve_error = _resolve_branch_switch_stash_record(repo_root, stash_state)
+        if stash_record:
+            return _pop_branch_switch_stash_record(repo_root, stash_state, stash_record)
+        if resolve_error and "was not found in git stash list" not in resolve_error:
+            return resolve_error
+        _clear_branch_stash_state(repo_root)
+        return None
+
+    if marker:
+        return _restore_branch_switch_stash(repo_root, stash_state)
+
+    if str(stash_state.get("stash_ref") or "").strip():
+        return "branch-switch stash recovery state has stash_ref but no marker; refusing to pop mutable stash ref"
+
+    return (
+        "branch-switch stash recovery state has no recoverable stash_ref or marker at "
+        f"{agent_bus_relpath(_active_bus_dir(), 'executors', BRANCH_STASH_STATE_FILE_NAME)}"
+    )
+
+
+def _checkout_feature_branch_from_protected_branch(
+    repo_root: Path,
+    *,
+    current_branch: str,
+    feature_branch: str,
+    branch_exists: bool,
+    log: Callable[[str], None],
+) -> str | None:
+    stash_state, stash_error = _stash_dirty_worktree_for_branch_switch(
+        repo_root,
+        current_branch=current_branch,
+        feature_branch=feature_branch,
+    )
+    if stash_error:
+        return stash_error
+
+    if branch_exists:
+        log(f"Step 2.5: Checking out existing feature branch {feature_branch}")
+        checkout_cmd = ["git", "checkout", feature_branch]
+    else:
+        log(f"Step 2.5: Creating feature branch {feature_branch}")
+        checkout_cmd = ["git", "checkout", "-b", feature_branch]
+    checkout_result = subprocess.run(
+        checkout_cmd,
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+    )
+    if checkout_result.returncode != 0:
+        restore_error = _restore_branch_switch_stash(repo_root, stash_state) if stash_state else None
+        checkout_error = _git_output(checkout_result) or str(checkout_result.returncode)
+        if restore_error:
+            return f"Branch checkout failed: {checkout_error}; additionally, {restore_error}"
+        return f"Branch checkout failed: {checkout_error}"
+
+    if stash_state:
+        restore_error = _restore_branch_switch_stash(repo_root, stash_state)
+        if restore_error:
+            return f"Branch checkout succeeded, but dirty worktree restore failed: {restore_error}"
+    return None
 
 
 def _save_state(repo_root: Path, state: dict[str, Any]) -> Path:
@@ -2304,6 +2656,38 @@ def _collect_changed_files(
     return changed
 
 
+def _collect_staged_files(repo_root: Path) -> list[str]:
+    """Collect files already staged in git."""
+    try:
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip().splitlines()
+    except subprocess.CalledProcessError:
+        return []
+    return sorted(set(f for f in staged if f))
+
+
+def _collect_commit_bound_files(repo_root: Path, changed_files: list[str]) -> list[str]:
+    """Return the supervisor/commit package truth for files bound to this commit.
+
+    Phase B stages wave-owned files before the pre-commit supervisor so the
+    receipt hash matches the later commit path. Once a file is staged, it is
+    commit-bound git truth; packaging it as fenced dirty work creates a false
+    package contradiction.
+    """
+    return sorted(set(changed_files) | set(_collect_staged_files(repo_root)))
+
+
+def _collect_fenced_dirty_files(repo_root: Path, commit_bound_files: list[str]) -> list[str]:
+    """Collect dirty files that are not currently commit-bound."""
+    commit_bound = set(commit_bound_files)
+    return [f for f in _collect_changed_files(repo_root) if f not in commit_bound]
+
+
 # Prefixes that are valid wave-owned output paths for Phase B handoff staging.
 _WAVE_OWNED_PREFIXES = (
     "mu/tools/",
@@ -2325,6 +2709,14 @@ _DECLARED_PATH_EXTENSIONS = (".py", ".json", ".md", ".txt", ".sh")
 _DECLARED_ROOT_FILES = {".gitignore", "CLAUDE.md", "TASKS.md", "STATUS.md", "CHANGELOG.md"}
 _LINE_REF_RE = re.compile(r"^(?P<path>.+?):(?P<line>\d+)(?::(?P<col>\d+))?$")
 _INLINE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./-])([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+|(?:CLAUDE|TASKS|STATUS|CHANGELOG)\.md|\.gitignore)(?![A-Za-z0-9_./-])")
+_PLAN_WAVE_CLASS_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?`?(?:wave[_ -]?class|class)\s*[:=]\s*`?(?P<value>[A-Za-z0-9_-]+)",
+    flags=re.IGNORECASE,
+)
+_PLAN_TARGET_GATE_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?`?(?:target[_ -]?gate(?:[_ -]?id)?)\s*[:=]\s*`?(?P<value>[A-Za-z0-9_-]+)",
+    flags=re.IGNORECASE,
+)
 
 
 def _normalize_declared_path_token(token: str) -> str | None:
@@ -2391,6 +2783,24 @@ def _parse_fenced_out_files(plan_content: str) -> list[str]:
                 parsed.append(normalized)
 
     return parsed
+
+
+def _parse_plan_wave_class(plan_content: str) -> str:
+    """Extract the locked packet's declared wave class when routing omits it."""
+    for line in plan_content.splitlines():
+        match = _PLAN_WAVE_CLASS_RE.match(line.strip())
+        if match:
+            return match.group("value").strip().strip("`.,;")
+    return ""
+
+
+def _parse_plan_target_gate_id(plan_content: str) -> str:
+    """Extract the locked packet's target gate id when routing omits it."""
+    for line in plan_content.splitlines():
+        match = _PLAN_TARGET_GATE_RE.match(line.strip())
+        if match:
+            return match.group("value").strip().strip("`.,;")
+    return ""
 
 
 def _collect_baseline_wave_files(repo_root: Path, plan_path: str) -> list[str]:
@@ -2798,10 +3208,22 @@ def _build_phase_b_tracker_note(
         "progress_proof_after": progress_after,
     }
     if wave_class == "L4_STRUCTURAL":
-        tracker_kwargs["post_gate_contract_sweep"] = (
-            post_gate_contract_sweep
-            or "python3 tools/checks/enforce_l4_execution_contract.py --staged"
-        )
+        tracker_kwargs.update({
+            "workload_target": _infer_structural_workload_target(changed_files, plan_content),
+            "host_semantics_delta_before": (
+                "host semantics ratchet baseline and authority inventory baseline before this wave; "
+                "the wave is allowed only parity-preserving seed registration and structural artifact wiring"
+            ),
+            "host_semantics_delta_after": (
+                "host semantics ratchet remains unchanged after this wave; indicator net_host_semantic_delta=0 "
+                "and authority inventory must remain at baseline for commit"
+            ),
+            "structural_artifact_ref": _summarize_structural_artifacts(changed_files),
+            "post_gate_contract_sweep": (
+                post_gate_contract_sweep
+                or _build_structural_post_gate_sweep(test_files, changed_files)
+            ),
+        })
     if wave_class == "MAINTENANCE":
         runtime_like = [
             path for path in changed_files
@@ -3016,6 +3438,14 @@ def run_phase_b(
         if verbose:
             print(f"[phase-b] {msg}")
 
+    branch_stash_error = _restore_pending_branch_switch_stash(repo_root)
+    if branch_stash_error:
+        return {
+            "status": "error",
+            "step": "restore_branch_switch_stash",
+            "errors": [branch_stash_error],
+        }
+
     # Check for resumable state
     saved_state = _load_state(repo_root)
     resume_after: str = ""
@@ -3181,15 +3611,25 @@ def run_phase_b(
     timeout = config.get("timeouts", {}).get("phase_b_executor", 1200)
     pytest_gate_timeout = _resolve_pytest_gate_timeout(timeout)
 
-    # Extract wave governance fields from routing record (not hardcoded)
-    wave_class = routing_record.get("wave_class", "L4_ENABLER")
-    target_gate_id = routing_record.get("target_gate_id", "G8")
+    plan_content = plan.get("content", "")
+
+    # Extract wave governance fields from routing first, then the locked packet.
+    wave_class = (
+        str(routing_record.get("wave_class") or "").strip()
+        or _parse_plan_wave_class(plan_content)
+        or "L4_ENABLER"
+    )
+    target_gate_id = (
+        str(routing_record.get("target_gate_id") or "").strip()
+        or _parse_plan_target_gate_id(plan_content)
+        or "G8"
+    )
 
     # Parse plan-declared files from markdown/body content.
-    fenced_out_files = set(_parse_fenced_out_files(plan.get("content", "")))
+    fenced_out_files = set(_parse_fenced_out_files(plan_content))
     plan_declared_files: list[str] | None = None
     _parsed = [
-        path for path in _parse_plan_declared_files(plan.get("content", ""))
+        path for path in _parse_plan_declared_files(plan_content)
         if path not in fenced_out_files
     ]
     # Only activate strict tracking when the plan actually declares files.
@@ -3290,10 +3730,7 @@ def run_phase_b(
             f"(current fix touched {len(current_fix_changed)})"
         )
 
-        test_files = [
-            f for f in current_fix_changed
-            if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")
-        ]
+        test_files = _select_pytest_gate_files(current_fix_changed)
         if test_files:
             log(f"Running pytest on {len(test_files)} newly changed test file(s)...")
             pytest_result = _run_pytest_on_files(repo_root, test_files, timeout=pytest_gate_timeout)
@@ -3519,42 +3956,18 @@ def run_phase_b(
                 ["git", "rev-parse", "--verify", f"refs/heads/{feature_branch}"],
                 cwd=str(repo_root), capture_output=True, text=True,
             ).returncode == 0
-            try:
-                # Stash any dirty working-tree files (e.g. reviewer config swaps)
-                # so branch checkout doesn't fail on conflicts. Pop after checkout.
-                stash_result = subprocess.run(
-                    ["git", "stash", "--include-untracked"],
-                    cwd=str(repo_root), capture_output=True, text=True,
-                )
-                stashed = stash_result.returncode == 0 and "No local changes" not in stash_result.stdout
-                if branch_exists:
-                    log(f"Step 2.5: Checking out existing feature branch {feature_branch}")
-                    subprocess.run(
-                        ["git", "checkout", feature_branch],
-                        cwd=str(repo_root), check=True, capture_output=True,
-                    )
-                else:
-                    log(f"Step 2.5: Creating feature branch {feature_branch}")
-                    subprocess.run(
-                        ["git", "checkout", "-b", feature_branch],
-                        cwd=str(repo_root), check=True, capture_output=True,
-                    )
-                result["feature_branch"] = feature_branch
-                if stashed:
-                    subprocess.run(
-                        ["git", "stash", "pop"],
-                        cwd=str(repo_root), capture_output=True,
-                    )
-            except subprocess.CalledProcessError as exc:
-                # Restore stash on failure
-                if stashed:
-                    subprocess.run(
-                        ["git", "stash", "pop"],
-                        cwd=str(repo_root), capture_output=True,
-                    )
+            branch_error = _checkout_feature_branch_from_protected_branch(
+                repo_root,
+                current_branch=current_branch,
+                feature_branch=feature_branch,
+                branch_exists=branch_exists,
+                log=log,
+            )
+            if branch_error:
                 return {"status": "error", "step": "ensure_feature_branch",
-                        "errors": [f"Branch checkout failed (fail-closed): {exc}. "
+                        "errors": [f"{branch_error}. "
                                    f"Cannot invoke implementer on protected branch '{current_branch}'."]}
+            result["feature_branch"] = feature_branch
         else:
             log(f"Step 2.5: Already on {current_branch} (OK)")
     else:
@@ -4276,6 +4689,7 @@ def run_phase_b(
         supervisor_package = {
             "task_id": routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
             "wave_name": wave_id,
+            "wave_class": wave_class,
             "lane": "hooks/agents/bridge control-surface",
             "changed_files": changed_files,
             "fenced_files": fenced_reentry,
@@ -4307,7 +4721,7 @@ def run_phase_b(
             executor_created or None,
             baseline_wave_files or None,
         )
-        final_test_files = [f for f in changed_files if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")]
+        final_test_files = _select_pytest_gate_files(changed_files)
         if final_test_files:
             log(f"Final pytest gate: running {len(final_test_files)} test file(s)...")
             bridge_job_for_pytest = str(result.get("bridge_job_id") or "").strip()
@@ -4427,6 +4841,13 @@ def run_phase_b(
                     f"{len(changed_files)} to {len(refreshed_changed_files)} file(s)"
                 )
                 changed_files = refreshed_changed_files
+        package_changed_files = _collect_commit_bound_files(repo_root, changed_files)
+        if package_changed_files != changed_files:
+            log(
+                "Supervisor package scope expanded to include "
+                f"{len(package_changed_files) - len(changed_files)} staged commit-bound file(s)"
+            )
+            changed_files = package_changed_files
 
         # Step 7: Build and run pre-commit supervisor via structured client
         log("Building supervisor package...")
@@ -4447,13 +4868,13 @@ def run_phase_b(
             log(f"Acknowledging {len(blocker_paths)} active blocking packet(s)")
         deferred_items = _collect_supervisor_deferred_items(changed_files, deferred_packet_path)
 
-        # Fenced files: dirty in git but not wave-owned (from other waves)
-        all_dirty = _collect_changed_files(repo_root)
-        fenced = [f for f in all_dirty if f not in set(changed_files)]
+        # Fenced files: dirty in git but not commit-bound (from other waves)
+        fenced = _collect_fenced_dirty_files(repo_root, changed_files)
 
         supervisor_package = {
             "task_id": routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
             "wave_name": wave_id,
+            "wave_class": wave_class,
             "lane": "hooks/agents/bridge control-surface",
             "changed_files": changed_files,
             "fenced_files": fenced,
@@ -5039,7 +5460,7 @@ def run_phase_b(
             executor_created or None,
             baseline_wave_files or None,
         )
-        reentry_test_files = [f for f in changed_files if f.startswith("mu/tests/") or "/test_" in f or f.endswith("_test.py")]
+        reentry_test_files = _select_pytest_gate_files(changed_files)
         if reentry_test_files:
             log(f"Re-entry pytest gate: running {len(reentry_test_files)} test file(s)...")
             reentry_pytest = _run_pytest_on_files(repo_root, reentry_test_files, timeout=pytest_gate_timeout)
@@ -5108,11 +5529,17 @@ def run_phase_b(
                     f"{len(changed_files)} to {len(refreshed_changed_files)} file(s)"
                 )
                 changed_files = refreshed_changed_files
+        reentry_package_changed_files = _collect_commit_bound_files(repo_root, changed_files)
+        if reentry_package_changed_files != changed_files:
+            log(
+                "Re-entry supervisor package scope expanded to include "
+                f"{len(reentry_package_changed_files) - len(changed_files)} staged commit-bound file(s)"
+            )
+            changed_files = reentry_package_changed_files
 
         # Refresh ALL supervisor package truth for re-entry
         supervisor_package["changed_files"] = changed_files
-        all_dirty_reentry2 = _collect_changed_files(repo_root)
-        supervisor_package["fenced_files"] = [f for f in all_dirty_reentry2 if f not in set(changed_files)]
+        supervisor_package["fenced_files"] = _collect_fenced_dirty_files(repo_root, changed_files)
         supervisor_package["deferred_items"] = _collect_supervisor_deferred_items(
             changed_files,
             deferred_packet_path,
@@ -5202,6 +5629,7 @@ def run_phase_b(
                 executor_created or None,
                 baseline_wave_files or None,
             )
+            changed_files = _collect_commit_bound_files(repo_root, changed_files)
             result["status"] = "needs_phase_b"
             result["step"] = "post_reentry_supervisor"
             detail = result.get("pre_commit_summary", "")
@@ -5320,6 +5748,7 @@ def run_phase_b(
         executor_created or None,
         baseline_wave_files or None,
     )
+    wave_owned_files = _collect_commit_bound_files(repo_root, wave_owned_files)
     if not wave_owned_files:
         return {
             "status": "error",

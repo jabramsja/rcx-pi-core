@@ -662,8 +662,14 @@ class TestFullLockConsistency:
         result = _run_js_expr(js_code)
         assert result.returncode == 0
         locked = set(json.loads(result.stdout))
-        # Expected: the 3 seeds in both CORE_SEED_CHECKSUMS and CORE_SEED_PROJECTION_IDS
-        expected = {"terminal_classify.v1.json", "hemispheres.v1.json", "rcx_engine.v1.json"}
+        # Expected: seeds in both CORE_SEED_CHECKSUMS and CORE_SEED_PROJECTION_IDS.
+        expected = {
+            "terminal_classify.v1.json",
+            "hemispheres.v1.json",
+            "rcx_engine.v1.json",
+            "rcx_engine_state.v1.json",
+            "rcx_engine_scheduler.v1.json",
+        }
         assert locked == expected, f"Fully-locked set differs: got {locked}, expected {expected}"
 
     def test_js_validator_rejects_unlocked_seed_typed(self):

@@ -165,6 +165,8 @@ _JS_CORE_SEED_REGISTRY_KEYS = frozenset({  # AST_OK: infra — JS CORE registry 
     "terminal_classify.v1.json",
     "hemispheres.v1.json",
     "rcx_engine.v1.json",
+    "rcx_engine_state.v1.json",
+    "rcx_engine_scheduler.v1.json",
 })
 
 
@@ -725,11 +727,13 @@ def _boundary_op_hash_trace(request, req_input, max_algorithm_iterations):
 
 # Authority: only these seeds are loadable through run_algorithm boundary dispatch.
 # Parity: matches JS seedProjectionMap keys (main.js:228-233).
+_SCHEDULER_ALGORITHM_SEED = "rcx_engine_scheduler.v1.json"
 _ALGORITHM_SEED_ALLOWLIST = frozenset({  # AST_OK: security allowlist — frozen constant
     "recurrence.v1.json",
     "recurrence.v2.json",
     "exhaustion.v1.json",
     "fix.v1.json",
+    _SCHEDULER_ALGORITHM_SEED,
 })
 
 

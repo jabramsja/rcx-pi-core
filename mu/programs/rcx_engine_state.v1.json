@@ -1,0 +1,252 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "name": "RCX_ENGINE_STATE",
+    "description": "Formal engine-state structural artifact for graph state, bookkeeping maps, rank, and NextID validation",
+    "doc": "reports/control_plane/post_redteam_engine_state_scheduler_reduction_2026-04-30_2026-04-30.md",
+    "spec_ref": "RCXEngineNew.pdf kernel state model: G=(V,E), Omega, L-map, Xi, rho, NextID(G)",
+    "status": "structural_specification",
+    "execution_layer": "APPLICATION",
+    "invariants": [
+      "Engine state is Mu data, not a Python-only or JavaScript-only object model",
+      "Graph state is explicit as G=(V,E)",
+      "Bookkeeping maps Omega, L-map, and Xi are explicit state fields",
+      "Rank rho is explicit state data",
+      "NextID(G) is represented with an allocation witness",
+      "Identity stability and monotone ID allocation are validated by projections"
+    ]
+  },
+  "projections": [
+    {
+      "id": "engine_state.shape_valid",
+      "description": "Validate the minimal formal engine-state envelope: graph G=(V,E), Omega/L-map/Xi maps, rank rho, and NextID(G)",
+      "pattern": {
+        "validate_engine_state": {
+          "state": {
+            "G": {
+              "V": {"var": "vertices"},
+              "E": {"var": "edges"}
+            },
+            "Omega": {"var": "omega"},
+            "Lambda": {"var": "l_map"},
+            "Xi": {"var": "xi"},
+            "rho": {"var": "rho"},
+            "NextID": {"var": "next_id"}
+          }
+        }
+      },
+      "body": {
+        "engine_state_validation": {
+          "valid": true,
+          "shape": "G=(V,E)+Omega+L-map+Xi+rho+NextID",
+          "graph_state": {
+            "V": {"var": "vertices"},
+            "E": {"var": "edges"}
+          },
+          "bookkeeping_maps": {
+            "Omega": {"var": "omega"},
+            "Lambda": {"var": "l_map"},
+            "Xi": {"var": "xi"}
+          },
+          "rho": {"var": "rho"},
+          "NextID": {"var": "next_id"}
+        }
+      }
+    },
+    {
+      "id": "engine_state.identity_stable",
+      "description": "Validate identity stability by requiring the same structural id before and after a state projection",
+      "pattern": {
+        "validate_engine_state_identity": {
+          "before": {
+            "id": {"var": "stable_id"}
+          },
+          "after": {
+            "id": {"var": "stable_id"}
+          }
+        }
+      },
+      "body": {
+        "engine_state_identity": {
+          "valid": true,
+          "identity_stable": true,
+          "id": {"var": "stable_id"}
+        }
+      }
+    },
+    {
+      "id": "engine_state.next_id_monotone",
+      "description": "Validate monotone ID allocation: allocated id equals previous NextID and the next state carries its structural successor",
+      "pattern": {
+        "validate_engine_state_next_id": {
+          "before": {
+            "NextID": {"var": "next_id"}
+          },
+          "allocated": {"var": "next_id"},
+          "after": {
+            "NextID": {
+              "succ": {"var": "next_id"}
+            }
+          }
+        }
+      },
+      "body": {
+        "engine_state_next_id": {
+          "valid": true,
+          "allocated": {"var": "next_id"},
+          "next": {
+            "succ": {"var": "next_id"}
+          },
+          "monotone_allocation": true
+        }
+      }
+    },
+    {
+      "id": "engine_state.shape_invalid_missing_graph",
+      "description": "Reject an engine-state envelope that omits graph state G=(V,E)",
+      "pattern": {
+        "validate_engine_state": {
+          "state": {
+            "Omega": {"var": "omega"},
+            "Lambda": {"var": "l_map"},
+            "Xi": {"var": "xi"},
+            "rho": {"var": "rho"},
+            "NextID": {"var": "next_id"}
+          }
+        }
+      },
+      "body": {
+        "engine_state_validation": {
+          "valid": false,
+          "reason": "missing_graph_state_G",
+          "required": "G=(V,E)"
+        }
+      }
+    },
+    {
+      "id": "engine_state.shape_invalid_missing_omega",
+      "description": "Reject an engine-state envelope that omits bookkeeping map Omega",
+      "pattern": {
+        "validate_engine_state": {
+          "state": {
+            "G": {
+              "V": {"var": "vertices"},
+              "E": {"var": "edges"}
+            },
+            "Lambda": {"var": "l_map"},
+            "Xi": {"var": "xi"},
+            "rho": {"var": "rho"},
+            "NextID": {"var": "next_id"}
+          }
+        }
+      },
+      "body": {
+        "engine_state_validation": {
+          "valid": false,
+          "reason": "missing_bookkeeping_map_Omega",
+          "required": "Omega"
+        }
+      }
+    },
+    {
+      "id": "engine_state.shape_invalid_missing_l_map",
+      "description": "Reject an engine-state envelope that omits bookkeeping map L-map",
+      "pattern": {
+        "validate_engine_state": {
+          "state": {
+            "G": {
+              "V": {"var": "vertices"},
+              "E": {"var": "edges"}
+            },
+            "Omega": {"var": "omega"},
+            "Xi": {"var": "xi"},
+            "rho": {"var": "rho"},
+            "NextID": {"var": "next_id"}
+          }
+        }
+      },
+      "body": {
+        "engine_state_validation": {
+          "valid": false,
+          "reason": "missing_bookkeeping_map_L",
+          "required": "L-map"
+        }
+      }
+    },
+    {
+      "id": "engine_state.shape_invalid_missing_xi",
+      "description": "Reject an engine-state envelope that omits bookkeeping map Xi",
+      "pattern": {
+        "validate_engine_state": {
+          "state": {
+            "G": {
+              "V": {"var": "vertices"},
+              "E": {"var": "edges"}
+            },
+            "Omega": {"var": "omega"},
+            "Lambda": {"var": "l_map"},
+            "rho": {"var": "rho"},
+            "NextID": {"var": "next_id"}
+          }
+        }
+      },
+      "body": {
+        "engine_state_validation": {
+          "valid": false,
+          "reason": "missing_bookkeeping_map_Xi",
+          "required": "Xi"
+        }
+      }
+    },
+    {
+      "id": "engine_state.shape_invalid_missing_rho",
+      "description": "Reject an engine-state envelope that omits rank rho",
+      "pattern": {
+        "validate_engine_state": {
+          "state": {
+            "G": {
+              "V": {"var": "vertices"},
+              "E": {"var": "edges"}
+            },
+            "Omega": {"var": "omega"},
+            "Lambda": {"var": "l_map"},
+            "Xi": {"var": "xi"},
+            "NextID": {"var": "next_id"}
+          }
+        }
+      },
+      "body": {
+        "engine_state_validation": {
+          "valid": false,
+          "reason": "missing_rank_rho",
+          "required": "rho"
+        }
+      }
+    },
+    {
+      "id": "engine_state.shape_invalid_missing_next_id",
+      "description": "Reject an engine-state envelope that omits NextID(G)",
+      "pattern": {
+        "validate_engine_state": {
+          "state": {
+            "G": {
+              "V": {"var": "vertices"},
+              "E": {"var": "edges"}
+            },
+            "Omega": {"var": "omega"},
+            "Lambda": {"var": "l_map"},
+            "Xi": {"var": "xi"},
+            "rho": {"var": "rho"}
+          }
+        }
+      },
+      "body": {
+        "engine_state_validation": {
+          "valid": false,
+          "reason": "missing_next_id",
+          "required": "NextID"
+        }
+      }
+    }
+  ]
+}

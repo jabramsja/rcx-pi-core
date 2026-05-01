@@ -1035,6 +1035,16 @@ class TestLoadPlanPacketPathTraversal:
         assert result["unblocks_wave_id"] == "wave-upstream-2026-04-14"
         assert result["unblocks_runtime_blocker"] == "INV_STRUCTURAL_FORWARD_MOTION"
 
+    def test_parse_plan_governance_metadata_from_packet_body(self):
+        content = (
+            "# Plan\n"
+            "Class: L4_STRUCTURAL\n"
+            "Target Gate: G9\n"
+        )
+
+        assert pb_mod._parse_plan_wave_class(content) == "L4_STRUCTURAL"  # ANTICHEAT_OK: testing packet metadata parser
+        assert pb_mod._parse_plan_target_gate_id(content) == "G9"  # ANTICHEAT_OK: testing packet metadata parser
+
     def test_header_metadata_wins_over_later_narrative_bullets(self, tmp_path):
         """Canonical header metadata must not be overwritten by later bullets."""
         repo = tmp_path / "repo"
@@ -1602,8 +1612,93 @@ class TestMaintenanceTrackerMetadataPropagation:
 
         expected_status = {"rounds": 3, "total_rounds": 3}
         assert result["status"] == "commit_ready"
+        assert captured_package["wave_class"] == "L4_ENABLER"
         assert captured_package["bridge_status"] == expected_status
         assert mock_handoff.call_args.kwargs["bridge_status"] == expected_status
+
+    def test_run_phase_b_package_uses_plan_class_and_staged_commit_bound_scope(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        plan_path = "reports/control_plane/structural-wave-2026-04-30.md"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            "Wave ID: structural-wave-2026-04-30\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [NEXT-CODEX-POST-REDTEAM]\n"
+            "Class: L4_STRUCTURAL\n"
+            "Target Gate: G8\n",
+            encoding="utf-8",
+        )
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "wave_name": "structural-wave-2026-04-30",
+        }
+        wave_owned = [plan_path, "mu/tools/executors/phase_b_executor.py"]
+        staged_extra = "mu/host/js/engine/pipeline.js"
+        unstaged_fenced = "scratch/outside.txt"
+        captured_package: dict[str, object] = {}
+
+        def _capture_supervisor_package(repo_root, package_path, **_kwargs):
+            captured_package.update(json.loads(package_path.read_text(encoding="utf-8")))
+            return {
+                "exit_code": 0,
+                "parsed": {
+                    "decision": "COMMIT_GO",
+                    "summary": "",
+                    "status": "success",
+                    "findings": [],
+                },
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=wave_owned + [staged_extra, unstaged_fenced]), \
+             patch.object(pb_mod, "_collect_staged_files", return_value=[staged_extra]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=wave_owned), \
+             patch.object(
+                 pb_mod,
+                 "_run_pytest_on_files",
+                 return_value={
+                     "exit_code": 0,
+                     "passed": True,
+                     "stdout": "",
+                     "stderr": "",
+                 },
+             ), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(
+                 pb_mod,
+                 "run_bridge_review",
+                 return_value={
+                     "exit_code": 0,
+                     "stdout": "GO\n",
+                     "stderr": "",
+                     "decision": "GO",
+                     "job_id": "j1",
+                 },
+             ), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=_capture_supervisor_package), \
+             patch.object(
+                 pb_mod,
+                 "prepare_commit_handoff",
+                 return_value=repo / ".agent_bus" / "handoff.json",
+             ) as mock_handoff:
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert captured_package["wave_class"] == "L4_STRUCTURAL"
+        assert staged_extra in captured_package["changed_files"]
+        assert staged_extra not in captured_package["fenced_files"]
+        assert unstaged_fenced in captured_package["fenced_files"]
+        assert staged_extra in mock_handoff.call_args.kwargs["files_to_stage"]
+        assert mock_handoff.call_args.kwargs["wave_class"] == "L4_STRUCTURAL"
 
     def test_packet_documented_bridge_round_floor_bounds_tasks_scan_to_current_entry(self, tmp_path):
         repo = tmp_path / "repo"
@@ -2351,6 +2446,61 @@ class TestFinalPytestGate:
         assert result["passed"] is True
         kwargs = mock_run.call_args.kwargs
         assert kwargs["env"]["PYTHONHASHSEED"] == "0"
+
+    def test_pytest_gate_ignores_non_python_test_fixtures(self):
+        selected = pb_mod._select_pytest_gate_files([  # ANTICHEAT_OK: regression for final pytest target selection
+            "mu/tests/fixtures/rcx_engine_state_minimal.json",
+            "mu/tests/fixtures/rcx_enginenew_scheduler_operator_pool.json",
+            "mu/tests/parity/test_rcx_engine_scheduler_parity.py",
+            "mu/tests/structural/test_rcx_enginenew_scheduler.py",
+            "mu/tools/executors/phase_b_executor.py",
+            "package/tests/test_cli.py",
+            "package/tests/cli_test.py",
+            "reports/test_plan.md",
+        ])
+
+        assert selected == [
+            "mu/tests/parity/test_rcx_engine_scheduler_parity.py",
+            "mu/tests/structural/test_rcx_enginenew_scheduler.py",
+            "package/tests/test_cli.py",
+            "package/tests/cli_test.py",
+        ]
+
+    def test_structural_tracker_note_includes_l4_required_proof_fields(self):
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: locks Phase B tracker-note generator contract
+            wave_id="post-redteam-engine-state-scheduler-reduction-2026-04-30",
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/post_redteam_engine_state_scheduler_reduction_2026-04-30_2026-04-30.md",
+            plan_content="Class: L4_STRUCTURAL\nrcx_engine_state rcx_engine_scheduler\n",
+            changed_files=[
+                "mu/host/python/rcx_pi/selfhost/engine_pipeline.py",
+                "mu/host/js/engine/pipeline.js",
+                "mu/programs/rcx_engine_state.v1.json",
+                "mu/programs/rcx_engine_scheduler.v1.json",
+                "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+                "mu/tests/structural/test_rcx_engine_state_seed.py",
+                "mu/tests/parity/test_rcx_engine_scheduler_parity.py",
+            ],
+            test_files=[
+                "mu/tests/l4_gates/test_ontology_promotion_runtime_gate.py",
+                "mu/tests/structural/test_rcx_engine_state_seed.py",
+                "mu/tests/parity/test_rcx_engine_scheduler_parity.py",
+            ],
+            receipt_path=".agent_bus/meta/pre_commit_receipts/r.json",
+            bridge_rounds=6,
+            reentry=True,
+        )
+
+        assert "workload_target: host_debt_reduction" in note
+        assert "host_semantics_delta_before:" in note
+        assert "host_semantics_delta_after:" in note
+        assert "structural_artifact_ref: mu/host/python/rcx_pi/selfhost/engine_pipeline.py" in note
+        assert "mu/programs/rcx_engine_scheduler.v1.json" in note
+        assert "post_gate_contract_sweep: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short" in note
+        assert "mu/tests/structural/test_rcx_engine_state_seed.py" in note
+        assert "tools/checks/enforce_l4_execution_contract.py --staged" not in note
 
     def test_pytest_failure_blocks_commit_ready(self, tmp_path):
         """If final pytest gate fails, status must be error, not commit_ready."""
@@ -3554,6 +3704,250 @@ class TestStageFiles:
         assert "ignored.txt" in detail
 
 
+class TestProtectedBranchCheckout:
+    def test_startup_restores_persisted_branch_switch_stash_by_marker(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        state_path = repo / ".agent_bus" / "executors" / "phase_b_branch_stash.json"
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text(
+            json.dumps({
+                "status": "pending",
+                "marker": "phase_b:jabramsja/example-wave:abc123",
+                "current_branch": "dev",
+                "feature_branch": "jabramsja/example-wave",
+            }),
+            encoding="utf-8",
+        )
+        commands: list[list[str]] = []
+
+        def completed(cmd, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, **kwargs):
+            commands.append(list(cmd))
+            assert kwargs["cwd"] == str(repo)
+            assert kwargs["capture_output"] is True
+            assert kwargs["text"] is True
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(cmd, stdout="stash@{1}\x00abc123\x00On dev: phase_b:jabramsja/example-wave:abc123\n")
+            if cmd[:3] == ["git", "stash", "pop"]:
+                return completed(cmd, stdout="Dropped refs/stash@{1}")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        with patch.object(pb_mod.subprocess, "run", side_effect=fake_run):
+            error = pb_mod._restore_pending_branch_switch_stash(repo)  # ANTICHEAT_OK: recovery helper regression
+
+        assert error is None
+        assert ["git", "stash", "list", "--format=%gd%x00%H%x00%s"] in commands
+        assert ["git", "stash", "pop", "--index", "stash@{1}"] in commands
+        assert not state_path.exists()
+
+    def test_startup_reresolves_persisted_mutable_branch_switch_stash_ref(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        state_path = repo / ".agent_bus" / "executors" / "phase_b_branch_stash.json"
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text(
+            json.dumps({
+                "status": "stashed",
+                "marker": "phase_b:jabramsja/example-wave:abc123",
+                "stash_ref": "stash@{0}",
+                "stash_oid": "marker-oid",
+                "current_branch": "dev",
+                "feature_branch": "jabramsja/example-wave",
+            }),
+            encoding="utf-8",
+        )
+        commands: list[list[str]] = []
+
+        def completed(cmd, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, **kwargs):
+            commands.append(list(cmd))
+            assert kwargs["cwd"] == str(repo)
+            assert kwargs["capture_output"] is True
+            assert kwargs["text"] is True
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(
+                    cmd,
+                    stdout=(
+                        "stash@{0}\x00other-oid\x00On dev: other-stash\n"
+                        "stash@{1}\x00marker-oid\x00On dev: phase_b:jabramsja/example-wave:abc123\n"
+                    ),
+                )
+            if cmd[:3] == ["git", "stash", "pop"]:
+                return completed(cmd, stdout=f"Dropped {cmd[-1]}")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        with patch.object(pb_mod.subprocess, "run", side_effect=fake_run):
+            error = pb_mod._restore_pending_branch_switch_stash(repo)  # ANTICHEAT_OK: recovery helper regression
+
+        assert error is None
+        assert ["git", "stash", "pop", "--index", "stash@{1}"] in commands
+        assert ["git", "stash", "pop", "--index", "stash@{0}"] not in commands
+        assert not state_path.exists()
+
+    def test_startup_rejects_branch_switch_stash_oid_mismatch(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        state_path = repo / ".agent_bus" / "executors" / "phase_b_branch_stash.json"
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text(
+            json.dumps({
+                "status": "stashed",
+                "marker": "phase_b:jabramsja/example-wave:abc123",
+                "stash_ref": "stash@{0}",
+                "stash_oid": "old-oid",
+                "current_branch": "dev",
+                "feature_branch": "jabramsja/example-wave",
+            }),
+            encoding="utf-8",
+        )
+        commands: list[list[str]] = []
+
+        def completed(cmd, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, **kwargs):
+            commands.append(list(cmd))
+            assert kwargs["cwd"] == str(repo)
+            assert kwargs["capture_output"] is True
+            assert kwargs["text"] is True
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(cmd, stdout="stash@{1}\x00new-oid\x00On dev: phase_b:jabramsja/example-wave:abc123\n")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        with patch.object(pb_mod.subprocess, "run", side_effect=fake_run):
+            error = pb_mod._restore_pending_branch_switch_stash(repo)  # ANTICHEAT_OK: recovery helper regression
+
+        assert error is not None
+        assert "object id mismatch" in error
+        assert all(cmd[:3] != ["git", "stash", "pop"] for cmd in commands)
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert state["status"] == "stash_oid_mismatch"
+
+    def test_run_phase_b_fails_closed_on_unresolved_branch_switch_stash(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        state_path = repo / ".agent_bus" / "executors" / "phase_b_branch_stash.json"
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text(
+            json.dumps({
+                "status": "pop_failed",
+                "stash_ref": "stash@{0}",
+                "current_branch": "dev",
+                "feature_branch": "jabramsja/example-wave",
+                "output": "CONFLICT (content): file",
+            }),
+            encoding="utf-8",
+        )
+
+        result = pb_mod.run_phase_b(repo, "reports/control_plane/example.md")
+
+        assert result["status"] == "error"
+        assert result["step"] == "restore_branch_switch_stash"
+        assert "previously failed" in result["errors"][0]
+        assert state_path.exists()
+
+    def test_branch_switch_stash_pop_failure_is_fail_closed_and_recoverable(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        commands: list[list[str]] = []
+        marker_holder: dict[str, str] = {}
+
+        def completed(cmd, returncode=0, stdout="", stderr=""):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, **kwargs):
+            commands.append(list(cmd))
+            assert kwargs["cwd"] == str(repo)
+            assert kwargs["capture_output"] is True
+            assert kwargs["text"] is True
+            if cmd[:4] == ["git", "stash", "push", "--include-untracked"]:
+                marker_holder["marker"] = cmd[-1]
+                return completed(cmd, stdout="Saved working directory and index state")
+            if cmd[:3] == ["git", "stash", "list"]:
+                return completed(cmd, stdout=f"stash@{{0}}\x00abc123\x00On dev: {marker_holder['marker']}\n")
+            if cmd[:2] == ["git", "checkout"]:
+                return completed(cmd, stdout="Switched to branch")
+            if cmd[:3] == ["git", "stash", "pop"]:
+                return completed(cmd, returncode=1, stderr="CONFLICT (content): file")
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        with patch.object(pb_mod.subprocess, "run", side_effect=fake_run):
+            error = pb_mod._checkout_feature_branch_from_protected_branch(  # ANTICHEAT_OK: regression for protected branch switch helper
+                repo,
+                current_branch="dev",
+                feature_branch="jabramsja/example-wave",
+                branch_exists=True,
+                log=lambda _msg: None,
+            )
+
+        assert error is not None
+        assert "dirty worktree restore failed" in error
+        assert "git stash pop --index stash@{0} failed" in error
+        assert ["git", "stash", "pop", "--index", "stash@{0}"] in commands
+
+        state_path = repo / ".agent_bus" / "executors" / "phase_b_branch_stash.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert state["status"] == "pop_failed"
+        assert state["stash_ref"] == "stash@{0}"
+        assert state["stash_oid"] == "abc123"
+        assert state["current_branch"] == "dev"
+        assert state["feature_branch"] == "jabramsja/example-wave"
+        assert "CONFLICT" in state["output"]
+
+    def test_branch_switch_stash_restore_preserves_staged_index_state(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / ".gitignore").write_text(".agent_bus/\n", encoding="utf-8")
+        (repo / "file.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "add", ".gitignore", "file.txt"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True)
+        (repo / "file.txt").write_text("changed\n", encoding="utf-8")
+        subprocess.run(["git", "add", "file.txt"], cwd=repo, check=True, capture_output=True)
+
+        before_cached = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+
+        error = pb_mod._checkout_feature_branch_from_protected_branch(  # ANTICHEAT_OK: real git regression for staged stash restore
+            repo,
+            current_branch="dev",
+            feature_branch="jabramsja/example-wave",
+            branch_exists=False,
+            log=lambda _msg: None,
+        )
+
+        after_cached = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        after_worktree = subprocess.run(
+            ["git", "diff", "--name-only"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+
+        assert error is None
+        assert before_cached == ["file.txt"]
+        assert after_cached == ["file.txt"]
+        assert after_worktree == []
+        assert not (repo / ".agent_bus" / "executors" / "phase_b_branch_stash.json").exists()
+
+
 class TestHighSeverityDetailHeuristic:
     """High severity no longer downgrades from prose-only detail/description text."""
 
@@ -4410,7 +4804,12 @@ class TestValidationRunsMechanically:
                 return []
             if changed_files_calls[0] <= 4:
                 return ["mu/tests/tools/test_baseline.py"]
-            return ["mu/tests/tools/test_baseline.py", "mu/tests/tools/test_fix_round.py"]
+            return [
+                "mu/tests/tools/test_baseline.py",
+                "mu/tests/tools/test_fix_round.py",
+                "mu/tests/fixtures/rcx_engine_state_minimal.json",
+                "mu/tests/fixtures/rcx_enginenew_scheduler_operator_pool.json",
+            ]
 
         wave_owned_calls = [0]
 

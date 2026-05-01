@@ -41,6 +41,21 @@ class TestWaveIdDerivation:
         )
         return result.stdout.strip()
 
+    def _derive_flag_legacy_range(self, repo: Path, branch: str, value: str) -> str:
+        cmd = (
+            f"source '{SCRIPT}' '{branch}' '{value}' >/dev/null 2>&1; "
+            "printf '%s' \"$WAVE_ID_FLAG\""
+        )
+        result = subprocess.run(
+            ["bash", "-lc", cmd],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+            timeout=20,
+            check=True,
+        )
+        return result.stdout.strip()
+
     def test_range_mode_ignores_restart_branch_suffix_when_tracker_note_uses_canonical_wave_id(
         self, tmp_path: Path
     ) -> None:
@@ -87,6 +102,30 @@ class TestWaveIdDerivation:
             repo,
             "jabramsja/test-wave",
             "--range",
+            "HEAD~1...HEAD",
+        )
+        assert flag == "--wave-id=test-wave"
+
+    def test_legacy_two_arg_range_call_uses_exact_branch_suffix_when_tracker_note_matches(
+        self, tmp_path: Path
+    ) -> None:
+        repo = self._init_repo(tmp_path)
+        (repo / "TASKS.md").write_text(
+            "## NOW\n\n## NEXT\n\n"
+            "- Tracker sync note (2026-04-21, test-wave): **TEST.** "
+            "Class: L4_STRUCTURAL. target_gate_id: G8. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/test-wave.json. "
+            "indicator_collection_command: python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id test-wave. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD.\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "tracker"], cwd=repo, check=True, capture_output=True)
+
+        flag = self._derive_flag_legacy_range(
+            repo,
+            "jabramsja/test-wave",
             "HEAD~1...HEAD",
         )
         assert flag == "--wave-id=test-wave"

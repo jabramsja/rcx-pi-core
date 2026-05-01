@@ -250,11 +250,13 @@ function boundaryOpHashTrace(kernelProjections, seedProjectionMap, request, reqI
 // AST_OK_JS: security allowlist — frozen constant (parity: engine_pipeline.py:680).
 // Authority allowlist for run_algorithm boundary dispatch.
 // Frozen null-prototype object: no prototype chain, no mutation, no .has() bypass.
+const SCHEDULER_ALGORITHM_SEED = 'rcx_engine_scheduler.v1.json';
 const _ALGORITHM_SEED_ALLOWLIST = Object.freeze(Object.assign(Object.create(null), {
   'recurrence.v1.json': true,
   'recurrence.v2.json': true,
   'exhaustion.v1.json': true,
   'fix.v1.json': true,
+  [SCHEDULER_ALGORITHM_SEED]: true,
 }));
 
 function boundaryOpRunAlgorithm(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations, vmConfig) {
@@ -271,7 +273,11 @@ function boundaryOpRunAlgorithm(kernelProjections, seedProjectionMap, request, r
     throw new RcxError('api.bad_request',
       `run_algorithm 'algorithm' must be an authorized algorithm seed, got '${algoName}'. Allowed: ${JSON.stringify(Object.keys(_ALGORITHM_SEED_ALLOWLIST).sort())}`);
   }
-  const algoProjs = seedProjectionMap[algoName];
+  let algoProjs = seedProjectionMap[algoName];
+  if (!algoProjs && algoName === SCHEDULER_ALGORITHM_SEED) {
+    const subdir = seedLoader.getSeedSubdir(algoName);
+    algoProjs = seedLoader.loadVerifiedSeed(algoName, subdir).projections;
+  }
   if (!algoProjs) {
     throw new RcxError('api.bad_request', `Unknown algorithm seed: ${algoName}`);
   }
