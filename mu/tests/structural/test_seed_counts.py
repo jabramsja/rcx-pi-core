@@ -26,7 +26,15 @@ MU_DIR = ROOT / "mu"
 MU_SEEDS = {
     "substrate": ["kernel.v1.json", "match.v1.json", "match.v2.json", "subst.v1.json", "subst.v2.json"],
     "closures": ["recurrence.v1.json", "recurrence.v2.json", "exhaustion.v1.json", "fix.v1.json"],
-    "programs": ["rcx_engine.v1.json", "hemispheres.v1.json", "paxos_demo.v1.json", "metabolization.v1.json", "metabolize_cycle.v1.json"],
+    "programs": [
+        "rcx_engine.v1.json",
+        "hemispheres.v1.json",
+        "paxos_demo.v1.json",
+        "metabolization.v1.json",
+        "metabolize_cycle.v1.json",
+        "rcx_engine_state.v1.json",
+        "rcx_engine_scheduler.v1.json",
+    ],
     "utilities": ["classify.v1.json", "eval.v1.json", "terminal_classify.v1.json", "evidence_walker.v1.json"],
     "bridge": ["bootstrap_structural.v1.json"],
 }
@@ -62,6 +70,8 @@ EXPECTED_COUNTS = {
     "paxos_demo.v1.json": 6,   # consensus demo (+ engine-output healer)
     "metabolization.v1.json": 6,  # hemisphere metabolization (sink re-expression cycle)
     "metabolize_cycle.v1.json": 15,  # structural walker for hemisphere metabolization (3 phases + reverse + exit)
+    "rcx_engine_state.v1.json": 9,  # explicit rcx engine state schema and fail-closed shape checks
+    "rcx_engine_scheduler.v1.json": 22,  # operator scheduler ordering, freeze, and rejection semantics
     # mu/bridge/
     "bootstrap_structural.v1.json": 5,  # non-linear pattern support
     # mu/utilities/ (structural displacement)
