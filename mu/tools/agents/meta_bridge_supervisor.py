@@ -1140,11 +1140,16 @@ def run_validation_gates(
     if enforcer.exists():
         changed = package.get("changed_files", [])
         if changed:
-            # Use --files with explicit file list from package
-            exit_code, output = run_validation_command(
-                repo_root,
-                ["python3", "tools/checks/enforce_l4_execution_contract.py", "--files"] + changed
-            )
+            cmd = ["python3", "tools/checks/enforce_l4_execution_contract.py"]
+            wave_class = str(package.get("wave_class") or "").strip()
+            wave_name = str(package.get("wave_name") or "").strip()
+            if wave_class:
+                cmd.extend(["--wave-class", wave_class])
+            if wave_name:
+                cmd.extend(["--wave-id", wave_name])
+            cmd.append("--files")
+            cmd.extend(changed)
+            exit_code, output = run_validation_command(repo_root, cmd)
             if exit_code == 0:
                 results.append(ValidationResult("L4 contract", True))
             else:

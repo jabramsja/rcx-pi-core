@@ -67,19 +67,25 @@ After merge, run the post-merge supervisor to route the next step:
 python3 mu/tools/agents/meta_bridge_supervisor.py --mode post-merge --package <path> --json -v
 ```
 
-## Fallback: Manual Protocol
+## Bootstrap Exception Boundary
 
-During transition (rollout step 5), the manual protocol is still available:
-1. Design the plan manually
-2. Run agents: `python tools/runners/run_review.py --pr --depth full`
-3. Bridge: `python3 tools/agents/bridge_supervisor.py review --task-file <file> --reviewer codex -v`
-4. Loop until converged
-5. Pre-commit supervisor → commit → push → PR → CI → merge_pr.sh --sweep
-6. Post-merge supervisor → next step
+The executor pipeline is the normal wave path. `BOOTSTRAP_PHASE_B_EXCEPTION`
+is the only exception, and only when a wave directly changes the
+executor/implementer surfaces that would otherwise validate or dispatch that
+same wave.
+
+When the exception applies:
+1. Cite the self-dependency that prevents normal executor validation.
+2. Keep the exception packet-bound to the named wave and touched surfaces.
+3. Use the narrowest repo-local executor or supervisor entrypoint still
+   available.
+4. Stop for founder direction if the exception cannot be proven from code
+   truth.
 
 ## Critical Rules
 - **Never collapse the loop**: Bridge loop must converge before commit.
 - **Bridge sees the diff**: Phase B bridge reviews get the actual diff.
 - **Pre-commit supervisor before every commit**: No skipping receipt check.
 - **Post-merge supervisor after every merge**: Route the next step.
-- **Use executors when available**: Manual fallback only when needed.
+- **Use executors as the wave path**: `BOOTSTRAP_PHASE_B_EXCEPTION` is narrow,
+  packet-bound, and limited to executor/implementer self-dependency cases.

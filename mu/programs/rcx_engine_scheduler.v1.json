@@ -1,0 +1,952 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "name": "RCX_ENGINE_SCHEDULER",
+    "description": "Structural scheduler/operator-pool seed for EngineNew operator selection",
+    "doc": "reports/control_plane/post_redteam_engine_state_scheduler_reduction_2026-04-30_2026-04-30.md",
+    "spec_ref": "RCXEngineNew.pdf scheduler model: seedOps, Godel-coded unary maps, finite pool, strict lexicographic order, identity-map safeguard, promotion/freeze lifecycle",
+    "status": "structural_specification",
+    "execution_layer": "META_CIRCULAR",
+    "requires_patterns": [
+      "non-linear"
+    ],
+    "ordering_policy": "strict_lexicographic_by_godel_code",
+    "invariants": [
+      "The scheduler seed decides control data only; it does not execute operators",
+      "seedOps is a finite linked-list operator pool for a single scheduler step",
+      "Operators use explicit Godel-coded unary-map identity data",
+      "The first slice recognizes bounded strict lexicographic witnesses without host sorting",
+      "Identity maps are rejected before operator selection",
+      "Frozen operators are skipped structurally by matching the frozen linked list",
+      "Promotion and freeze lifecycle hooks are returned as Mu data"
+    ]
+  },
+  "projections": [
+    {
+      "id": "scheduler.invalid_missing_godel_unary_map",
+      "description": "Reject an operator-pool head that carries no Godel-coded unary-map data",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"}
+            },
+            "tail": {"var": "remaining_pool"}
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_operator",
+          "reason": "non_godel_coded_unary_map",
+          "operator_id": {"var": "operator_id"},
+          "remaining_pool": {"var": "remaining_pool"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    },
+    {
+      "id": "scheduler.invalid_non_godel_head",
+      "description": "Reject an operator-pool head that lacks the Godel-coded unary-map wrapper",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "map": {"var": "map"}
+            },
+            "tail": {"var": "remaining_pool"}
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_operator",
+          "reason": "non_godel_coded_unary_map",
+          "operator_id": {"var": "operator_id"},
+          "remaining_pool": {"var": "remaining_pool"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    },
+    {
+      "id": "scheduler.invalid_godel_missing_code",
+      "description": "Reject a malformed Godel unary map that omits its code",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "godel_unary_map": {
+                "domain": {"var": "domain"},
+                "codomain": {"var": "codomain"},
+                "identity_map": {"var": "identity_map"}
+              }
+            },
+            "tail": {"var": "remaining_pool"}
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_operator",
+          "reason": "non_godel_coded_unary_map",
+          "operator_id": {"var": "operator_id"},
+          "remaining_pool": {"var": "remaining_pool"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    },
+    {
+      "id": "scheduler.invalid_godel_missing_domain",
+      "description": "Reject a malformed Godel unary map that omits its domain",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "godel_unary_map": {
+                "code": {"var": "code"},
+                "codomain": {"var": "codomain"},
+                "identity_map": {"var": "identity_map"}
+              }
+            },
+            "tail": {"var": "remaining_pool"}
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_operator",
+          "reason": "non_godel_coded_unary_map",
+          "operator_id": {"var": "operator_id"},
+          "remaining_pool": {"var": "remaining_pool"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    },
+    {
+      "id": "scheduler.invalid_godel_missing_codomain",
+      "description": "Reject a malformed Godel unary map that omits its codomain",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "godel_unary_map": {
+                "code": {"var": "code"},
+                "domain": {"var": "domain"},
+                "identity_map": {"var": "identity_map"}
+              }
+            },
+            "tail": {"var": "remaining_pool"}
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_operator",
+          "reason": "non_godel_coded_unary_map",
+          "operator_id": {"var": "operator_id"},
+          "remaining_pool": {"var": "remaining_pool"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    },
+    {
+      "id": "scheduler.invalid_godel_missing_identity_map",
+      "description": "Reject a malformed Godel unary map that omits the identity-map flag",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "godel_unary_map": {
+                "code": {"var": "code"},
+                "domain": {"var": "domain"},
+                "codomain": {"var": "codomain"}
+              }
+            },
+            "tail": {"var": "remaining_pool"}
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_operator",
+          "reason": "non_godel_coded_unary_map",
+          "operator_id": {"var": "operator_id"},
+          "remaining_pool": {"var": "remaining_pool"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    },
+    {
+      "id": "scheduler.reject_identity_map",
+      "description": "Reject identity maps before selection so identity-only steps cannot masquerade as progress",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "godel_unary_map": {
+                "code": {"var": "code"},
+                "domain": {"var": "domain"},
+                "codomain": {"var": "codomain"},
+                "identity_map": true
+              }
+            },
+            "tail": {"var": "remaining_pool"}
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_operator",
+          "reason": "identity_map_safeguard",
+          "operator_id": {"var": "operator_id"},
+          "godel_code": {"var": "code"},
+          "remaining_pool": {"var": "remaining_pool"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    },
+    {
+      "id": "scheduler.reject_tail_identity_map",
+      "description": "Reject a two-operator pool when the tail candidate is an identity unary map",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "first_id"},
+              "godel_unary_map": {
+                "code": {"var": "first_code"},
+                "domain": {"var": "first_domain"},
+                "codomain": {"var": "first_codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": {"var": "operator_id"},
+                "godel_unary_map": {
+                  "code": {"var": "code"},
+                  "domain": {"var": "domain"},
+                  "codomain": {"var": "codomain"},
+                  "identity_map": true
+                }
+              },
+              "tail": {"var": "rest"}
+            }
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_operator",
+          "reason": "identity_map_safeguard",
+          "operator_id": {"var": "operator_id"},
+          "godel_code": {"var": "code"},
+          "remaining_pool": {"var": "rest"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    },
+    {
+      "id": "scheduler.reject_third_identity_map",
+      "description": "Reject a longer pool when the third candidate is an identity unary map",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "first_id"},
+              "godel_unary_map": {
+                "code": {"var": "first_code"},
+                "domain": {"var": "first_domain"},
+                "codomain": {"var": "first_codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": {"var": "second_id"},
+                "godel_unary_map": {
+                  "code": {"var": "second_code"},
+                  "domain": {"var": "second_domain"},
+                  "codomain": {"var": "second_codomain"},
+                  "identity_map": false
+                }
+              },
+              "tail": {
+                "head": {
+                  "operator_id": {"var": "operator_id"},
+                  "godel_unary_map": {
+                    "code": {"var": "code"},
+                    "domain": {"var": "domain"},
+                    "codomain": {"var": "codomain"},
+                    "identity_map": true
+                  }
+                },
+                "tail": {"var": "rest"}
+              }
+            }
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_operator",
+          "reason": "identity_map_safeguard",
+          "operator_id": {"var": "operator_id"},
+          "godel_code": {"var": "code"},
+          "remaining_pool": {"var": "rest"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    },
+    {
+      "id": "scheduler.reject_unhandled_three_operator_pool",
+      "description": "Fail closed for longer finite Godel pools whose full strict lexicographic order is not structurally witnessed",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "first_id"},
+              "godel_unary_map": {
+                "code": {"var": "first_code"},
+                "domain": {"var": "first_domain"},
+                "codomain": {"var": "first_codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": {"var": "second_id"},
+                "godel_unary_map": {
+                  "code": {"var": "second_code"},
+                  "domain": {"var": "second_domain"},
+                  "codomain": {"var": "second_codomain"},
+                  "identity_map": false
+                }
+              },
+              "tail": {
+                "head": {
+                  "operator_id": {"var": "third_id"},
+                  "godel_unary_map": {
+                    "code": {"var": "third_code"},
+                    "domain": {"var": "third_domain"},
+                    "codomain": {"var": "third_codomain"},
+                    "identity_map": false
+                  }
+                },
+                "tail": {"var": "rest"}
+              }
+            }
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_pool",
+          "reason": "unhandled_operator_pool_width",
+          "observed_order": [
+            {"var": "first_code"},
+            {"var": "second_code"},
+            {"var": "third_code"}
+          ],
+          "operator_ids": [
+            {"var": "first_id"},
+            {"var": "second_id"},
+            {"var": "third_id"}
+          ],
+          "remaining_pool": {"var": "rest"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    },
+    {
+      "id": "scheduler.order_error_0010_before_0001",
+      "description": "Reject the known non-lexicographic two-operator witness: 0010 before 0001",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "first_id"},
+              "godel_unary_map": {
+                "code": "0010",
+                "domain": {"var": "first_domain"},
+                "codomain": {"var": "first_codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": {"var": "second_id"},
+                "godel_unary_map": {
+                  "code": "0001",
+                  "domain": {"var": "second_domain"},
+                  "codomain": {"var": "second_codomain"},
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_pool",
+          "reason": "non_lexicographic_operator_order",
+          "expected_order": ["0001", "0010"],
+          "observed_order": ["0010", "0001"],
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    },
+    {
+      "id": "scheduler.order_error_0100_before_0011",
+      "description": "Reject a second bounded non-lexicographic two-operator witness: 0100 before 0011",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "first_id"},
+              "godel_unary_map": {
+                "code": "0100",
+                "domain": {"var": "first_domain"},
+                "codomain": {"var": "first_codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": {"var": "second_id"},
+                "godel_unary_map": {
+                  "code": "0011",
+                  "domain": {"var": "second_domain"},
+                  "codomain": {"var": "second_codomain"},
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_pool",
+          "reason": "non_lexicographic_operator_order",
+          "expected_order": ["0011", "0100"],
+          "observed_order": ["0100", "0011"],
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    },
+    {
+      "id": "scheduler.skip_frozen_head",
+      "description": "Skip the pool head when exhaustion has already frozen that operator id",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "godel_unary_map": {
+                "code": {"var": "code"},
+                "domain": {"var": "domain"},
+                "codomain": {"var": "codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": {"var": "remaining_pool"}
+          },
+          "frozen": {
+            "head": {"var": "operator_id"},
+            "tail": {"var": "frozen_tail"}
+          },
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "skip_operator",
+          "operator_id": {"var": "operator_id"},
+          "godel_code": {"var": "code"},
+          "remaining_pool": {"var": "remaining_pool"},
+          "scheduler_state": {
+            "phase": "skip_frozen",
+            "previous": {"var": "scheduler_state"}
+          },
+          "lifecycle": {
+            "freeze_hook": {
+              "action": "skip_frozen",
+              "source": "exhaustion.v1.json",
+              "operator_id": {"var": "operator_id"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "scheduler.skip_frozen_tail_member",
+      "description": "Skip the pool head when its operator id appears in the frozen-list tail",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "godel_unary_map": {
+                "code": {"var": "code"},
+                "domain": {"var": "domain"},
+                "codomain": {"var": "codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": {"var": "remaining_pool"}
+          },
+          "frozen": {
+            "head": {"var": "frozen_head"},
+            "tail": {
+              "head": {"var": "operator_id"},
+              "tail": {"var": "frozen_tail"}
+            }
+          },
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "skip_operator",
+          "operator_id": {"var": "operator_id"},
+          "godel_code": {"var": "code"},
+          "remaining_pool": {"var": "remaining_pool"},
+          "scheduler_state": {
+            "phase": "skip_frozen",
+            "previous": {"var": "scheduler_state"}
+          },
+          "lifecycle": {
+            "freeze_hook": {
+              "action": "skip_frozen",
+              "source": "exhaustion.v1.json",
+              "operator_id": {"var": "operator_id"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "scheduler.skip_frozen_tail2_member",
+      "description": "Skip the pool head when its operator id appears deeper in the frozen-list tail",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "godel_unary_map": {
+                "code": {"var": "code"},
+                "domain": {"var": "domain"},
+                "codomain": {"var": "codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": {"var": "remaining_pool"}
+          },
+          "frozen": {
+            "head": {"var": "frozen_head"},
+            "tail": {
+              "head": {"var": "frozen_mid"},
+              "tail": {
+                "head": {"var": "operator_id"},
+                "tail": {"var": "frozen_tail"}
+              }
+            }
+          },
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "skip_operator",
+          "operator_id": {"var": "operator_id"},
+          "godel_code": {"var": "code"},
+          "remaining_pool": {"var": "remaining_pool"},
+          "scheduler_state": {
+            "phase": "skip_frozen",
+            "previous": {"var": "scheduler_state"}
+          },
+          "lifecycle": {
+            "freeze_hook": {
+              "action": "skip_frozen",
+              "source": "exhaustion.v1.json",
+              "operator_id": {"var": "operator_id"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "scheduler.scan_frozen_tail",
+      "description": "Advance the frozen linked-list scan structurally when the current frozen head is not the pool head",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "godel_unary_map": {
+                "code": {"var": "code"},
+                "domain": {"var": "domain"},
+                "codomain": {"var": "codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": {"var": "remaining_pool"}
+          },
+          "frozen": {
+            "head": {"var": "frozen_head"},
+            "tail": {"var": "frozen_tail"}
+          },
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "godel_unary_map": {
+                "code": {"var": "code"},
+                "domain": {"var": "domain"},
+                "codomain": {"var": "codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": {"var": "remaining_pool"}
+          },
+          "frozen": {"var": "frozen_tail"},
+          "scheduler_state": {
+            "phase": "scan_frozen",
+            "skipped_frozen_operator": {"var": "frozen_head"},
+            "previous": {"var": "scheduler_state"}
+          }
+        }
+      }
+    },
+    {
+      "id": "scheduler.select_single_operator",
+      "description": "Select a single valid Godel-coded unary-map operator from a finite one-operator pool",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "godel_unary_map": {
+                "code": {"var": "code"},
+                "domain": {"var": "domain"},
+                "codomain": {"var": "codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": null
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "run_operator",
+          "operator": {
+            "operator_id": {"var": "operator_id"},
+            "godel_unary_map": {
+              "code": {"var": "code"},
+              "domain": {"var": "domain"},
+              "codomain": {"var": "codomain"},
+              "identity_map": false
+            }
+          },
+          "remaining_pool": null,
+          "scheduler_state": {
+            "phase": "selected",
+            "ordering": "strict_lexicographic",
+            "pool_size_witness": "one",
+            "previous": {"var": "scheduler_state"}
+          },
+          "lifecycle": {
+            "promotion_hook": {
+              "action": "promote_candidate",
+              "operator_id": {"var": "operator_id"},
+              "source": "rcx_engine_scheduler.v1.json"
+            },
+            "freeze_hook": {
+              "action": "freeze_on_exhaustion",
+              "operator_id": {"var": "operator_id"},
+              "source": "exhaustion.v1.json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "scheduler.select_0001_before_0010",
+      "description": "Select the lexicographic head from a finite two-operator pool: 0001 before 0010",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "godel_unary_map": {
+                "code": "0001",
+                "domain": {"var": "domain"},
+                "codomain": {"var": "codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": {"var": "next_operator_id"},
+                "godel_unary_map": {
+                  "code": "0010",
+                  "domain": {"var": "next_domain"},
+                  "codomain": {"var": "next_codomain"},
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "run_operator",
+          "operator": {
+            "operator_id": {"var": "operator_id"},
+            "godel_unary_map": {
+              "code": "0001",
+              "domain": {"var": "domain"},
+              "codomain": {"var": "codomain"},
+              "identity_map": false
+            }
+          },
+          "remaining_pool": {
+            "head": {
+              "operator_id": {"var": "next_operator_id"},
+              "godel_unary_map": {
+                "code": "0010",
+                "domain": {"var": "next_domain"},
+                "codomain": {"var": "next_codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": null
+          },
+          "scheduler_state": {
+            "phase": "selected",
+            "ordering": "strict_lexicographic",
+            "pool_size_witness": "two",
+            "previous": {"var": "scheduler_state"}
+          },
+          "lifecycle": {
+            "promotion_hook": {
+              "action": "promote_candidate",
+              "operator_id": {"var": "operator_id"},
+              "source": "rcx_engine_scheduler.v1.json"
+            },
+            "freeze_hook": {
+              "action": "freeze_on_exhaustion",
+              "operator_id": {"var": "operator_id"},
+              "source": "exhaustion.v1.json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "scheduler.select_0011_before_0100",
+      "description": "Select the lexicographic head from a second finite two-operator pool: 0011 before 0100",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "operator_id"},
+              "godel_unary_map": {
+                "code": "0011",
+                "domain": {"var": "domain"},
+                "codomain": {"var": "codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": {"var": "next_operator_id"},
+                "godel_unary_map": {
+                  "code": "0100",
+                  "domain": {"var": "next_domain"},
+                  "codomain": {"var": "next_codomain"},
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "run_operator",
+          "operator": {
+            "operator_id": {"var": "operator_id"},
+            "godel_unary_map": {
+              "code": "0011",
+              "domain": {"var": "domain"},
+              "codomain": {"var": "codomain"},
+              "identity_map": false
+            }
+          },
+          "remaining_pool": {
+            "head": {
+              "operator_id": {"var": "next_operator_id"},
+              "godel_unary_map": {
+                "code": "0100",
+                "domain": {"var": "next_domain"},
+                "codomain": {"var": "next_codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": null
+          },
+          "scheduler_state": {
+            "phase": "selected",
+            "ordering": "strict_lexicographic",
+            "pool_size_witness": "two",
+            "previous": {"var": "scheduler_state"}
+          },
+          "lifecycle": {
+            "promotion_hook": {
+              "action": "promote_candidate",
+              "operator_id": {"var": "operator_id"},
+              "source": "rcx_engine_scheduler.v1.json"
+            },
+            "freeze_hook": {
+              "action": "freeze_on_exhaustion",
+              "operator_id": {"var": "operator_id"},
+              "source": "exhaustion.v1.json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "scheduler.reject_unhandled_two_operator_pool",
+      "description": "Fail closed for finite two-operator Godel pools not covered by explicit strict lexicographic witnesses",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": {"var": "first_id"},
+              "godel_unary_map": {
+                "code": {"var": "first_code"},
+                "domain": {"var": "first_domain"},
+                "codomain": {"var": "first_codomain"},
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": {"var": "second_id"},
+                "godel_unary_map": {
+                  "code": {"var": "second_code"},
+                  "domain": {"var": "second_domain"},
+                  "codomain": {"var": "second_codomain"},
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_pool",
+          "reason": "unhandled_lexicographic_operator_pair",
+          "observed_order": [{"var": "first_code"}, {"var": "second_code"}],
+          "operator_ids": [{"var": "first_id"}, {"var": "second_id"}],
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    },
+    {
+      "id": "scheduler.pool_exhausted",
+      "description": "Return explicit pool exhaustion when no finite operators remain",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": null,
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "pool_exhausted",
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {
+            "phase": "pool_exhausted",
+            "previous": {"var": "scheduler_state"}
+          }
+        }
+      }
+    },
+    {
+      "id": "scheduler.reject_unhandled_operator_pool_shape",
+      "description": "Fail closed for scheduler pool shapes not covered by explicit structural witnesses",
+      "pattern": {
+        "schedule_engine": {
+          "seedOps": {"var": "seedOps"},
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      },
+      "body": {
+        "scheduler_result": {
+          "action": "reject_pool",
+          "reason": "unhandled_operator_pool_shape",
+          "observed_pool": {"var": "seedOps"},
+          "frozen": {"var": "frozen"},
+          "scheduler_state": {"var": "scheduler_state"}
+        }
+      }
+    }
+  ]
+}

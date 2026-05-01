@@ -64,6 +64,10 @@ SEED_CHECKSUMS: dict[str, str] = {
     # RCX Engine: structural specification for pipeline orchestration (7 projections)
     # Status: structural_specification — host loop services boundary stalls (hash_trace, sub-algorithms)
     "rcx_engine.v1.json": "1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f",
+    # RCX Engine State: structural state schema for G=(V,E), maps, rank, and NextID
+    "rcx_engine_state.v1.json": "7e4d05fcdca90e5c374ce45e094ad73b2a1bec9599254bd457db194c00fc29d0",
+    # RCX Engine Scheduler: structural operator-pool scheduler seed
+    "rcx_engine_scheduler.v1.json": "2e10c737f8d1a8b2fcd1a2a22b5f51e855c51372d691fce2a05e435744d78f65",
     # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
     "bootstrap_structural.v1.json": "dfaa1ea9de000e344fee1e61be9666e2876091fa64aff524857265929a261964",
     # Utilities: eval.v1.json - deep evaluation projections (BOOTSTRAP execution layer)
@@ -222,6 +226,43 @@ EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
         "engine.exhaustion_done_terminal",  # Non-freeze -> final result
         "engine.unwrap",                    # Extract final result
     ],
+    # RCX Engine State: formal state artifact for graph/bookkeeping/rank/NextID
+    "rcx_engine_state.v1.json": [
+        "engine_state.shape_valid",
+        "engine_state.identity_stable",
+        "engine_state.next_id_monotone",
+        "engine_state.shape_invalid_missing_graph",
+        "engine_state.shape_invalid_missing_omega",
+        "engine_state.shape_invalid_missing_l_map",
+        "engine_state.shape_invalid_missing_xi",
+        "engine_state.shape_invalid_missing_rho",
+        "engine_state.shape_invalid_missing_next_id",
+    ],
+    # RCX Engine Scheduler: formal scheduler/operator-pool artifact
+    "rcx_engine_scheduler.v1.json": [
+        "scheduler.invalid_missing_godel_unary_map",
+        "scheduler.invalid_non_godel_head",
+        "scheduler.invalid_godel_missing_code",
+        "scheduler.invalid_godel_missing_domain",
+        "scheduler.invalid_godel_missing_codomain",
+        "scheduler.invalid_godel_missing_identity_map",
+        "scheduler.reject_identity_map",
+        "scheduler.reject_tail_identity_map",
+        "scheduler.reject_third_identity_map",
+        "scheduler.reject_unhandled_three_operator_pool",
+        "scheduler.order_error_0010_before_0001",
+        "scheduler.order_error_0100_before_0011",
+        "scheduler.skip_frozen_head",
+        "scheduler.skip_frozen_tail_member",
+        "scheduler.skip_frozen_tail2_member",
+        "scheduler.scan_frozen_tail",
+        "scheduler.select_single_operator",
+        "scheduler.select_0001_before_0010",
+        "scheduler.select_0011_before_0100",
+        "scheduler.reject_unhandled_two_operator_pool",
+        "scheduler.pool_exhausted",
+        "scheduler.reject_unhandled_operator_pool_shape",
+    ],
     # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
     "bootstrap_structural.v1.json": [
         "bridge.var.check_existing",    # Entry: start lookup for variable
@@ -342,6 +383,8 @@ MU_SEED_LOCATIONS: dict[str, str] = {
     "terminal_classify.v1.json": "utilities",
     # Programs
     "rcx_engine.v1.json": "programs",
+    "rcx_engine_state.v1.json": "programs",
+    "rcx_engine_scheduler.v1.json": "programs",
     "hemispheres.v1.json": "programs",
     "paxos_demo.v1.json": "programs",
     "metabolization.v1.json": "programs",

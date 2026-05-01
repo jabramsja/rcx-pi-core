@@ -1,0 +1,24 @@
+{
+  "wave_id": "post-redteam-engine-state-scheduler-reduction-2026-04-30",
+  "repeat_run_speedup_ratio": 1.136536,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.430715,
+  "repeat_run_raw_seconds": [
+    0.489523,
+    0.430715
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.489523
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.920238
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-01T07:39:23Z",
+  "collector_version": "2.2.0"
+}

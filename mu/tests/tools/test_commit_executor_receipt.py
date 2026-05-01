@@ -1277,6 +1277,68 @@ class TestWaveIdBounds:
         assert captured_package["founder_override_token"] == f"FOUNDER_OVERRIDE:{wave_id}"
         assert f"FOUNDER_OVERRIDE:{wave_id}" in (repo / "TASKS.md").read_text(encoding="utf-8")
 
+    def test_run_commit_pipeline_omits_founder_override_for_structural_handoff(self, tmp_path):
+        from collections import namedtuple
+        import types
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "structural-wave"
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(
+            json.dumps(
+                {
+                    "decision": "COMMIT_GO",
+                    "staged_sha": "fresh_sha_from_step6",
+                    "timestamp_utc": "2026-05-01T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        captured_package = {}
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+
+        def mock_supervisor(package_path, *a, **kw):
+            captured_package.update(json.loads(Path(package_path).read_text(encoding="utf-8")))
+            return SupervisorResult(
+                decision="COMMIT_GO",
+                summary="test",
+                receipt_path=sup_receipt_path,
+            )
+
+        base_handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py"],
+            wave_class="L4_STRUCTURAL",
+        )
+        handoff = {
+            **base_handoff,
+            "tracker_note_text": _with_founder_override(
+                base_handoff["tracker_note_text"].replace("Class: L4_ENABLER", "Class: L4_STRUCTURAL"),
+                wave_id,
+            ),
+        }
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = mock_supervisor
+        mock_client.MetaBridgeClientError = Exception
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_run_post_commit_pipeline",
+            side_effect=lambda **kwargs: {
+                "status": "success",
+                "steps_completed": kwargs["result"]["steps_completed"],
+            },
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "success", result
+        assert captured_package["wave_class"] == "L4_STRUCTURAL"
+        assert captured_package["founder_override_token"] == ""
+
     def test_prepare_handoff_from_routing_record_standalone_narrows_to_staged_diff(self, tmp_path):
         import subprocess
 

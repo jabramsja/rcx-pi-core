@@ -120,6 +120,9 @@ class FailureClass(Enum):
     IMPLEMENTER_ERROR = "implementer_error"
     BRIDGE_ERROR = "bridge_error"
     L4_CONTRACT_VIOLATION = "l4_contract_violation"
+    PHASE_B_WAVE_CLASS_PACKAGE_GAP = "phase_b_wave_class_package_gap"
+    COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP = "commit_supervisor_structural_override_package_gap"
+    PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP = "phase_b_l4_structural_tracker_note_gap"
     # Tier 4 -- escalate (never recover)
     TERMINAL_POLICY = "terminal_policy"
     UNCLASSIFIED = "unclassified"
@@ -150,6 +153,9 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.IMPLEMENTER_ERROR: 3,
     FailureClass.BRIDGE_ERROR: 3,
     FailureClass.L4_CONTRACT_VIOLATION: 3,
+    FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP: 2,
+    FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP: 2,
+    FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP: 2,
     FailureClass.TERMINAL_POLICY: 4, FailureClass.UNCLASSIFIED: 4,
 }
 
@@ -234,6 +240,16 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     reason_lower = reason_text.lower()
     step_lower = " ".join(part for part in (step, embedded_step) if part).lower()
     status_failed = status in ("error", "failed") or embedded_status in ("error", "failed")
+
+    # Narrow exception before terminal policy: a pre-commit supervisor rejection
+    # caused by package-local wave identity or staged-scope loss is recoverable
+    # once the package producer/consumer source supports that propagation.
+    if _looks_like_phase_b_wave_class_package_gap(result):
+        return FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP
+    if _looks_like_commit_supervisor_structural_override_package_gap(result):
+        return FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP
+    if _looks_like_phase_b_l4_structural_tracker_note_gap(result):
+        return FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP
 
     # Tier 4: terminal policy outcomes (check first, never recover)
     if status in _TERMINAL_STATUSES:
@@ -637,6 +653,97 @@ def _looks_like_post_reentry_needs_phase_b(result: dict[str, Any]) -> bool:
     if "after reentry convergence" in reason_lower:
         return True
     return "post_reentry_supervisor" in candidate_steps
+
+
+def _looks_like_phase_b_wave_class_package_gap(result: dict[str, Any]) -> bool:
+    candidates = _extract_result_candidates(result)
+    statuses = {
+        str(candidate.get("status", "") or "").strip().lower()
+        for candidate in candidates
+        if str(candidate.get("status", "") or "").strip()
+    }
+    steps = {
+        str(candidate.get("step", "") or "").strip().lower()
+        for candidate in candidates
+        if str(candidate.get("step", "") or "").strip()
+    }
+    if "supervisor_rejected" not in statuses and "pre_commit_supervisor" not in steps:
+        return False
+    text_parts = [
+        _summarize_result_reason(result),
+        *(_summarize_json_value(candidate) for candidate in candidates),
+    ]
+    signal = " ".join(part for part in text_parts if part).lower()
+    if (
+        "package-scope contradiction" in signal
+        or "staged files are not fully represented by changed_files" in signal
+        or "staged files absent from changed_files" in signal
+        or "wave class is inconsistent with repo truth" in signal
+        or "package declares wave_class" in signal
+    ):
+        return True
+    if "l4 execution contract" not in signal:
+        return False
+    return (
+        "no-class" in signal
+        or "wave class: (none)" in signal
+        or "wave class reported as (none)" in signal
+    )
+
+
+def _looks_like_commit_supervisor_structural_override_package_gap(result: dict[str, Any]) -> bool:
+    candidates = _extract_result_candidates(result)
+    steps = {
+        str(candidate.get("step", "") or "").strip().lower()
+        for candidate in candidates
+        if str(candidate.get("step", "") or "").strip()
+    }
+    if "build_and_run_supervisor" not in steps:
+        return False
+    text_parts = [
+        _summarize_result_reason(result),
+        *(_summarize_json_value(candidate) for candidate in candidates),
+    ]
+    signal = " ".join(part for part in text_parts if part).lower()
+    if "founder_override_token requires wave_class" in signal:
+        return True
+    return (
+        "error_package_invalid" in signal
+        and "package failed schema validation" in signal
+        and "founder_override_token" in signal
+        and "wave_class" in signal
+        and (
+            "l4_structural" in signal
+            or "not authorized" in signal
+            or "requires wave_class" in signal
+        )
+    )
+
+
+def _looks_like_phase_b_l4_structural_tracker_note_gap(result: dict[str, Any]) -> bool:
+    candidates = _extract_result_candidates(result)
+    steps = {
+        str(candidate.get("step", "") or "").strip().lower()
+        for candidate in candidates
+        if str(candidate.get("step", "") or "").strip()
+    }
+    if "build_and_run_supervisor" not in steps and "pre_commit_supervisor" not in steps:
+        return False
+    text_parts = [
+        _summarize_result_reason(result),
+        *(_summarize_json_value(candidate) for candidate in candidates),
+    ]
+    signal = " ".join(part for part in text_parts if part).lower()
+    if "l4_structural" not in signal or "l4 execution contract" not in signal:
+        return False
+    structural_note_markers = (
+        "missing host_semantics_delta_before",
+        "missing host_semantics_delta_after",
+        "missing structural_artifact_ref",
+        "missing workload_target",
+        "post_gate_contract_sweep must reference",
+    )
+    return any(marker in signal for marker in structural_note_markers)
 
 
 def _looks_like_upstream_connectivity_failure(detail: str) -> bool:
@@ -1674,6 +1781,133 @@ def fix_phase_b_plan_required(repo_root: Path, **kw: Any) -> dict[str, Any]:
     )
 
 
+def fix_phase_b_wave_class_package_gap(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Retry a Phase B package-truth failure only after source support exists."""
+    phase_b_path = repo_root / "mu" / "tools" / "executors" / "phase_b_executor.py"
+    meta_path = repo_root / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py"
+    try:
+        phase_b_text = phase_b_path.read_text(encoding="utf-8")
+        meta_text = meta_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return _fix_result(
+            False,
+            "wave_class_package_source_missing",
+            f"could not verify Phase B wave_class propagation source: {exc}",
+        )
+
+    phase_b_ready = all(
+        snippet in phase_b_text
+        for snippet in (
+            '"wave_class": wave_class',
+            "_parse_plan_wave_class",
+            "_collect_commit_bound_files",
+            "_collect_fenced_dirty_files",
+        )
+    )
+    meta_ready = (
+        '"--wave-class"' in meta_text
+        and '"--wave-id"' in meta_text
+        and "enforce_l4_execution_contract.py" in meta_text
+    )
+    if not (phase_b_ready and meta_ready):
+        return _fix_result(
+            False,
+            "wave_class_package_fix_missing",
+            "Phase B/meta-bridge source does not yet propagate package wave_class, "
+            "commit-bound staged scope, and wave_id into the supervisor gates",
+        )
+    return _fix_result(
+        True,
+        "retry_phase_b_after_wave_class_package_fix",
+        "Phase B/meta-bridge source now propagates package wave_class, commit-bound staged scope, and wave_id; retry Phase B",
+    )
+
+
+def fix_commit_supervisor_structural_override_package_gap(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Retry commit supervisor after structural packages stop carrying override tokens."""
+    package_path = repo_root / ".scratch" / "auto_supervisor_package.json"
+    try:
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return _fix_result(
+            False,
+            "commit_supervisor_package_missing",
+            f"could not inspect failed commit supervisor package at {package_path}: {exc}",
+        )
+    if (
+        str(package.get("wave_class") or "").strip() != "L4_STRUCTURAL"
+        or not str(package.get("founder_override_token") or "").strip()
+    ):
+        return _fix_result(
+            False,
+            "commit_supervisor_package_not_structural_override_gap",
+            "failed commit supervisor package does not show L4_STRUCTURAL plus a non-empty founder_override_token",
+        )
+
+    commit_path = repo_root / "mu" / "tools" / "executors" / "commit_executor.py"
+    try:
+        commit_text = commit_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return _fix_result(
+            False,
+            "commit_executor_source_missing",
+            f"could not verify commit_executor source: {exc}",
+        )
+    source_ready = all(
+        snippet in commit_text
+        for snippet in (
+            "_wave_class_allows_founder_override",
+            "supervisor_founder_override_token",
+            '"founder_override_token": supervisor_founder_override_token',
+        )
+    )
+    if not source_ready:
+        return _fix_result(
+            False,
+            "structural_override_package_fix_missing",
+            "commit_executor does not yet suppress founder_override_token for L4_STRUCTURAL supervisor packages",
+        )
+    return _fix_result(
+        True,
+        "retry_commit_after_structural_override_package_fix",
+        "commit_executor now suppresses founder_override_token for L4_STRUCTURAL supervisor packages; retry commit path",
+    )
+
+
+def fix_phase_b_l4_structural_tracker_note_gap(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Retry Phase B after its structural tracker-note generator is contract-complete."""
+    phase_b_path = repo_root / "mu" / "tools" / "executors" / "phase_b_executor.py"
+    try:
+        phase_b_text = phase_b_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return _fix_result(
+            False,
+            "phase_b_source_missing",
+            f"could not verify Phase B tracker-note source: {exc}",
+        )
+    required_snippets = (
+        "_infer_structural_workload_target",
+        "_summarize_structural_artifacts",
+        "_build_structural_post_gate_sweep",
+        '"host_semantics_delta_before"',
+        '"host_semantics_delta_after"',
+        '"structural_artifact_ref"',
+        '"workload_target"',
+    )
+    if not all(snippet in phase_b_text for snippet in required_snippets):
+        return _fix_result(
+            False,
+            "l4_structural_tracker_note_fix_missing",
+            "Phase B tracker-note generator does not yet emit complete L4_STRUCTURAL proof fields",
+        )
+    return _fix_result(
+        True,
+        "retry_phase_b_after_l4_structural_tracker_note_fix",
+        "Phase B tracker-note generator now emits L4_STRUCTURAL host semantics, structural artifact, "
+        "workload target, and non-gate sweep fields; retry Phase B",
+    )
+
+
 _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.STALE_BRIDGE_LOCK: lambda root, **kw: fix_stale_bridge_lock(root),
     # STALE_GIT_INDEX_LOCK demoted to Tier 2: no sound ownership check exists
@@ -2263,6 +2497,9 @@ _TIER2_FIXES: dict[FailureClass, Any] = {
     FailureClass.IMPLEMENTER_STALE: fix_implementer_stale,
     FailureClass.PR_MERGE_CONFLICT: fix_pr_merge_conflict,
     FailureClass.PR_CONFLICTING: fix_pr_conflicting,
+    FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP: fix_phase_b_wave_class_package_gap,
+    FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP: fix_commit_supervisor_structural_override_package_gap,
+    FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP: fix_phase_b_l4_structural_tracker_note_gap,
 }
 
 
@@ -3315,6 +3552,93 @@ delegate_implementer rules:
   - mu/tests/tools/test_*.py
 
 Safety: no rm -rf, no git push, no git reset --hard. Max 30s per command."""
+
+
+_RECOVERY_AGENT_ACTIONS = frozenset({
+    "shell",
+    "edit",
+    "delegate_implementer",
+    "skip",
+    "escalate",
+})
+
+
+def _looks_like_recovery_agent_response(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and str(value.get("action", "")).strip() in _RECOVERY_AGENT_ACTIONS
+    )
+
+
+def _strip_json_markdown_fences(text: str) -> str:
+    cleaned = text.strip()
+    if not cleaned.startswith("```"):
+        return cleaned
+    lines = [
+        line for line in cleaned.splitlines()
+        if not line.strip().startswith("```")
+    ]
+    return "\n".join(lines).strip()
+
+
+def _iter_recovery_agent_message_texts(text: str) -> list[str]:
+    messages: list[str] = []
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        try:
+            entry = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        if not isinstance(entry, dict):
+            continue
+        item = entry.get("item")
+        if (
+            entry.get("type") == "item.completed"
+            and isinstance(item, dict)
+            and item.get("type") == "agent_message"
+        ):
+            message_text = item.get("text")
+            if isinstance(message_text, str) and message_text.strip():
+                messages.append(message_text)
+            continue
+        if entry.get("type") == "agent_message":
+            message_text = entry.get("text") or entry.get("message")
+            if isinstance(message_text, str) and message_text.strip():
+                messages.append(message_text)
+    return messages
+
+
+def _parse_recovery_agent_response(raw_response: str) -> dict[str, Any] | None:
+    candidates = [
+        *_iter_recovery_agent_message_texts(raw_response),
+        raw_response,
+    ]
+    decoder = json.JSONDecoder()
+    for candidate in candidates:
+        cleaned = _strip_json_markdown_fences(candidate)
+        if not cleaned:
+            continue
+        try:
+            parsed = json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            parsed = None
+        if _looks_like_recovery_agent_response(parsed):
+            return parsed
+
+        parsed = _parse_json_object(cleaned)
+        if _looks_like_recovery_agent_response(parsed):
+            return parsed
+
+        for start in [idx for idx, ch in enumerate(cleaned) if ch == "{"]:
+            try:
+                parsed, _end = decoder.raw_decode(cleaned[start:])
+            except (json.JSONDecodeError, ValueError, TypeError):
+                continue
+            if _looks_like_recovery_agent_response(parsed):
+                return parsed
+    return None
 
 
 def _terminate_process_tree(proc: Any) -> None:
@@ -4549,16 +4873,8 @@ def run_recovery_loop(
             )
             continue
 
-        # Parse JSON response
-        try:
-            # Strip markdown fences if present
-            cleaned = raw_response
-            if cleaned.startswith("```"):
-                lines = cleaned.splitlines()
-                lines = [l for l in lines if not l.startswith("```")]
-                cleaned = "\n".join(lines)
-            response = json.loads(cleaned)
-        except (json.JSONDecodeError, ValueError):
+        response = _parse_recovery_agent_response(raw_response)
+        if response is None:
             dur = round(time.monotonic() - iteration_t0, 3)
             loop_log.append({
                 "iteration": i + 1, "action": "parse_error",

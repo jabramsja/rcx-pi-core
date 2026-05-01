@@ -3,7 +3,7 @@
  * RCX CLI Main — Seed loading, projection composition, self-tests, CLI output
  *
  * This is the runtime entrypoint. When executed directly or via eval_step.js shim:
- *   1. Loads and verifies 12 seeds at startup (+ terminal_classify lazy-loaded on demand)
+ *   1. Loads and verifies 12 seeds at startup (+ registered lazy/runtime seeds on demand)
  *   2. Composes projection arrays
  *   3. Runs self-tests (console output with "All tests passed: true")
  *   4. If --json-api in process.argv, delegates to api/json_handlers.js
@@ -30,6 +30,8 @@ const SEED_CHECKSUMS = {
   'bootstrap_structural.v1.json': 'dfaa1ea9de000e344fee1e61be9666e2876091fa64aff524857265929a261964',
   'hemispheres.v1.json': 'fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8',
   'rcx_engine.v1.json': '1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f',
+  'rcx_engine_state.v1.json': '7e4d05fcdca90e5c374ce45e094ad73b2a1bec9599254bd457db194c00fc29d0',
+  'rcx_engine_scheduler.v1.json': '2e10c737f8d1a8b2fcd1a2a22b5f51e855c51372d691fce2a05e435744d78f65',
   'fix.v1.json': 'd961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34',
   'metabolization.v1.json': 'a1f60ff55dc3e9f7c0c12e247a337d5d942cbfb74beffd001336d3a77de9a1e7',
   'terminal_classify.v1.json': '413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7',
@@ -91,6 +93,41 @@ const EXPECTED_PROJECTION_IDS = {
     'engine.fix_done_applied', 'engine.fix_done_none',
     'engine.recurrence_done', 'engine.exhaustion_done_freeze',
     'engine.exhaustion_done_terminal', 'engine.unwrap',
+  ],
+  'rcx_engine_state.v1.json': [
+    'engine_state.shape_valid',
+    'engine_state.identity_stable',
+    'engine_state.next_id_monotone',
+    'engine_state.shape_invalid_missing_graph',
+    'engine_state.shape_invalid_missing_omega',
+    'engine_state.shape_invalid_missing_l_map',
+    'engine_state.shape_invalid_missing_xi',
+    'engine_state.shape_invalid_missing_rho',
+    'engine_state.shape_invalid_missing_next_id',
+  ],
+  'rcx_engine_scheduler.v1.json': [
+    'scheduler.invalid_missing_godel_unary_map',
+    'scheduler.invalid_non_godel_head',
+    'scheduler.invalid_godel_missing_code',
+    'scheduler.invalid_godel_missing_domain',
+    'scheduler.invalid_godel_missing_codomain',
+    'scheduler.invalid_godel_missing_identity_map',
+    'scheduler.reject_identity_map',
+    'scheduler.reject_tail_identity_map',
+    'scheduler.reject_third_identity_map',
+    'scheduler.reject_unhandled_three_operator_pool',
+    'scheduler.order_error_0010_before_0001',
+    'scheduler.order_error_0100_before_0011',
+    'scheduler.skip_frozen_head',
+    'scheduler.skip_frozen_tail_member',
+    'scheduler.skip_frozen_tail2_member',
+    'scheduler.scan_frozen_tail',
+    'scheduler.select_single_operator',
+    'scheduler.select_0001_before_0010',
+    'scheduler.select_0011_before_0100',
+    'scheduler.reject_unhandled_two_operator_pool',
+    'scheduler.pool_exhausted',
+    'scheduler.reject_unhandled_operator_pool_shape',
   ],
   'fix.v1.json': [
     'fix.init', 'fix.edge_add_guard', 'fix.edge_add', 'fix.vertex_add_guard', 'fix.vertex_add', 'fix.pass_through',
@@ -286,6 +323,8 @@ const seedProjectionMap = Object.assign(Object.create(null), {
   'recurrence.v2.json': recurrenceV2Projections,
   'exhaustion.v1.json': exhaustionProjections,
   'fix.v1.json': fixProjections,
+  // Scheduler projections are verified and lazy-loaded by pipeline.js at the boundary.
+  'rcx_engine_scheduler.v1.json': null,
 });
 
 const allProjectionsWithBridge = [

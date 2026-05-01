@@ -357,6 +357,11 @@ def _normalize_founder_override_token(token: str | None) -> str:
     return clean.split()[0].strip().rstrip("`.,;")
 
 
+def _wave_class_allows_founder_override(wave_class: Any) -> bool:
+    """Return true only for wave classes allowed to carry founder override tokens."""
+    return str(wave_class or "").strip() in ("L4_ENABLER", "MAINTENANCE")
+
+
 def _extract_maintenance_bypass_fields_from_text(text: str) -> tuple[str, str]:
     """Extract optional consecutive-maintenance bypass fields from text."""
     if not text:
@@ -727,7 +732,7 @@ def _resolve_control_surface_founder_override_token(
         embedded_handoff=embedded_handoff,
     )
     if token:
-        return token
+        return token if _wave_class_allows_founder_override(wave_class) else ""
     if _is_authorized_control_surface_l4_enabler(
         record,
         embedded_handoff=embedded_handoff,
@@ -6109,6 +6114,13 @@ def _run_commit_pipeline_impl(
             evidence_handles.update(handoff_evidence_handles)
         if "collect_and_stage_indicator" in result["steps_completed"]:
             evidence_handles.setdefault("indicator", indicator_path)
+        supervisor_wave_class = str(handoff.get("wave_class", "") or "").strip()
+        supervisor_founder_override_token = ""
+        if _wave_class_allows_founder_override(supervisor_wave_class):
+            if tok := _extract_founder_override_from_tracker_note(
+                handoff.get("tracker_note_text", "")
+            ):
+                supervisor_founder_override_token = f"FOUNDER_OVERRIDE:{tok}"
 
         supervisor_package = {
             "task_id": handoff["task_id"],
@@ -6122,14 +6134,8 @@ def _run_commit_pipeline_impl(
             "evidence_handles": evidence_handles,
             "blocker_report_paths": blocker_paths,
             "current_judgment": "COMMIT_GO",
-            "founder_override_token": (
-                f"FOUNDER_OVERRIDE:{tok}"
-                if (tok := _extract_founder_override_from_tracker_note(
-                    handoff.get("tracker_note_text", "")
-                ))
-                else ""
-            ),
-            "wave_class": handoff.get("wave_class", ""),
+            "founder_override_token": supervisor_founder_override_token,
+            "wave_class": supervisor_wave_class,
         }
 
         scratch_dir = repo_root / ".scratch"

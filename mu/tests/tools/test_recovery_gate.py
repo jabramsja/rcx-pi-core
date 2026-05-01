@@ -207,6 +207,90 @@ class TestClassifyFailure:
         assert rg_mod.classify_failure(
             {"status": "failed", "stdout": inner, "stderr": ""}) == FailureClass.TERMINAL_POLICY
 
+    def test_phase_b_wave_class_no_class_supervisor_rejection_is_recoverable(self):
+        result = {
+            "status": "supervisor_rejected",
+            "step": "pre_commit_supervisor",
+            "errors": [
+                "Supervisor returned ERROR_VALIDATION_FAILED. "
+                "L4 contract FAIL with wave class reported as (none). "
+                "L4 Execution Contract v2 VIOLATION (no-class)."
+            ],
+        }
+
+        fc = rg_mod.classify_failure(result)
+
+        assert fc == FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP
+        assert rg_mod.tier_for(fc) == 2
+
+    def test_phase_b_supervisor_package_scope_rejection_is_recoverable(self):
+        result = {
+            "status": "supervisor_rejected",
+            "step": "pre_commit_supervisor",
+            "errors": [
+                "package reports L4 contract FAIL and closeout_attestation FAIL. "
+                "staged repo state adds a package-scope contradiction: staged files "
+                "are not fully represented by changed_files. Wave class is inconsistent "
+                "with repo truth: package declares wave_class L4_ENABLER while the packet "
+                "declares L4_STRUCTURAL."
+            ],
+        }
+
+        fc = rg_mod.classify_failure(result)
+
+        assert fc == FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP
+        assert rg_mod.tier_for(fc) == 2
+
+    def test_commit_supervisor_structural_override_schema_rejection_is_recoverable(self):
+        result = {
+            "status": "error",
+            "step": "build_and_run_supervisor",
+            "errors": [
+                "Supervisor returned ERROR_PACKAGE_INVALID: Package failed schema validation: "
+                "founder_override_token requires wave_class to be explicitly "
+                "'L4_ENABLER' or 'MAINTENANCE' (got: 'L4_STRUCTURAL'); "
+                "L4_STRUCTURAL, empty, and missing values are not authorized"
+            ],
+        }
+
+        fc = rg_mod.classify_failure(result)
+
+        assert fc == FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP
+        assert rg_mod.tier_for(fc) == 2
+
+    def test_commit_supervisor_generic_package_schema_rejection_needs_diagnosis(self):
+        result = {
+            "status": "error",
+            "step": "build_and_run_supervisor",
+            "errors": [
+                "Supervisor returned ERROR_PACKAGE_INVALID: Package failed schema validation: "
+                "Missing required field: changed_files"
+            ],
+        }
+
+        fc = rg_mod.classify_failure(result)
+
+        assert fc == FailureClass.UNKNOWN_ERROR
+        assert rg_mod.tier_for(fc) == 3
+
+    def test_phase_b_l4_structural_tracker_note_gap_is_recoverable(self):
+        result = {
+            "status": "error",
+            "step": "build_and_run_supervisor",
+            "errors": [
+                "Supervisor returned ERROR_VALIDATION_FAILED: L4 Execution Contract v2 VIOLATION "
+                "(L4_STRUCTURAL): missing host_semantics_delta_before; missing "
+                "host_semantics_delta_after; missing structural_artifact_ref; "
+                "post_gate_contract_sweep must reference at least one non-gate test domain; "
+                "missing workload_target"
+            ],
+        }
+
+        fc = rg_mod.classify_failure(result)
+
+        assert fc == FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP
+        assert rg_mod.tier_for(fc) == 2
+
     def test_stale_bridge_lock_in_stderr(self):
         assert rg_mod.classify_failure(
             {"status": "error", "stderr": "cannot acquire bridge.lock",
@@ -1360,6 +1444,106 @@ class TestAttemptRecovery:
         assert os.environ["RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY"] == "1"
         monkeypatch.delenv("RCX_RECOVERY_UPSTREAM_CONNECTIVITY_RETRY", raising=False)
 
+    def test_tier2_phase_b_wave_class_package_gap_retries_when_source_fixed(self, tmp_path):
+        phase_b_path = tmp_path / "mu" / "tools" / "executors" / "phase_b_executor.py"
+        meta_path = tmp_path / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py"
+        phase_b_path.parent.mkdir(parents=True)
+        meta_path.parent.mkdir(parents=True)
+        phase_b_path.write_text(
+            'def _parse_plan_wave_class(content):\n    return "L4_STRUCTURAL"\n'
+            'def _collect_commit_bound_files(repo_root, changed_files):\n    return changed_files\n'
+            'def _collect_fenced_dirty_files(repo_root, changed_files):\n    return []\n'
+            'supervisor_package = {"wave_class": wave_class}\n',
+            encoding="utf-8",
+        )
+        meta_path.write_text(
+            'cmd = ["python3", "tools/checks/enforce_l4_execution_contract.py"]\n'
+            'cmd.extend(["--wave-class", wave_class])\n'
+            'cmd.extend(["--wave-id", wave_name])\n',
+            encoding="utf-8",
+        )
+        result = {
+            "status": "supervisor_rejected",
+            "step": "pre_commit_supervisor",
+            "errors": [
+                "staged repo state adds a package-scope contradiction: staged files "
+                "are not fully represented by changed_files"
+            ],
+        }
+
+        r = rg_mod.attempt_recovery(tmp_path, result, "w1")
+
+        assert r["recovered"] is True
+        assert r["tier"] == 2
+        assert r["failure_class"] == FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP.value
+        assert r["action"] == "retry_phase_b_after_wave_class_package_fix"
+
+    def test_tier2_commit_supervisor_structural_override_package_gap_retries_when_source_fixed(self, tmp_path):
+        package_path = tmp_path / ".scratch" / "auto_supervisor_package.json"
+        commit_path = tmp_path / "mu" / "tools" / "executors" / "commit_executor.py"
+        package_path.parent.mkdir(parents=True)
+        commit_path.parent.mkdir(parents=True)
+        package_path.write_text(
+            json.dumps({
+                "wave_class": "L4_STRUCTURAL",
+                "founder_override_token": "FOUNDER_OVERRIDE:structural-wave",
+            }),
+            encoding="utf-8",
+        )
+        commit_path.write_text(
+            "def _wave_class_allows_founder_override(wave_class):\n    return False\n"
+            "supervisor_founder_override_token = ''\n"
+            'pkg = {"founder_override_token": supervisor_founder_override_token}\n',
+            encoding="utf-8",
+        )
+        result = {
+            "status": "error",
+            "step": "build_and_run_supervisor",
+            "errors": [
+                "Supervisor returned ERROR_PACKAGE_INVALID: Package failed schema validation: "
+                "founder_override_token requires wave_class to be explicitly "
+                "'L4_ENABLER' or 'MAINTENANCE' (got: 'L4_STRUCTURAL'); "
+                "L4_STRUCTURAL, empty, and missing values are not authorized"
+            ],
+        }
+
+        r = rg_mod.attempt_recovery(tmp_path, result, "w1")
+
+        assert r["recovered"] is True
+        assert r["tier"] == 2
+        assert r["failure_class"] == (
+            FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP.value
+        )
+        assert r["action"] == "retry_commit_after_structural_override_package_fix"
+
+    def test_tier2_phase_b_l4_structural_tracker_note_gap_retries_when_source_fixed(self, tmp_path):
+        phase_b_path = tmp_path / "mu" / "tools" / "executors" / "phase_b_executor.py"
+        phase_b_path.parent.mkdir(parents=True)
+        phase_b_path.write_text(
+            "def _infer_structural_workload_target(changed_files, plan_content):\n    return 'host_debt_reduction'\n"
+            "def _summarize_structural_artifacts(changed_files):\n    return 'mu/programs/seed.json'\n"
+            "def _build_structural_post_gate_sweep(test_files, changed_files):\n    return 'pytest mu/tests/structural/'\n"
+            'fields = {"host_semantics_delta_before": "before", "host_semantics_delta_after": "after", '
+            '"structural_artifact_ref": "ref", "workload_target": "host_debt_reduction"}\n',
+            encoding="utf-8",
+        )
+        result = {
+            "status": "error",
+            "step": "build_and_run_supervisor",
+            "errors": [
+                "Supervisor returned ERROR_VALIDATION_FAILED: L4 Execution Contract v2 VIOLATION "
+                "(L4_STRUCTURAL): missing host_semantics_delta_before; missing "
+                "host_semantics_delta_after; missing structural_artifact_ref; missing workload_target"
+            ],
+        }
+
+        r = rg_mod.attempt_recovery(tmp_path, result, "w1")
+
+        assert r["recovered"] is True
+        assert r["tier"] == 2
+        assert r["failure_class"] == FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP.value
+        assert r["action"] == "retry_phase_b_after_l4_structural_tracker_note_fix"
+
     def test_tier2_pr_merge_conflict_recovers_via_branch_sync(self, tmp_path, monkeypatch):
         calls: list[list[str]] = []
 
@@ -2268,8 +2452,8 @@ class TestFixImplementerStale:
 
 
 class TestTier2FixesMap:
-    def test_all_eight_registered(self):
-        """All 8 Tier 2 failure classes have registered fix functions."""
+    def test_all_tier2_registered(self):
+        """All Tier 2 failure classes have registered fix functions."""
         expected = {
             rg_mod.FailureClass.STALE_GIT_INDEX_LOCK,
             rg_mod.FailureClass.PROCESS_TIMEOUT,
@@ -2279,6 +2463,9 @@ class TestTier2FixesMap:
             rg_mod.FailureClass.PR_MERGE_CONFLICT,
             rg_mod.FailureClass.PR_CONFLICTING,
             rg_mod.FailureClass.UPSTREAM_CONNECTIVITY,
+            rg_mod.FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP,
+            rg_mod.FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP,
+            rg_mod.FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP,
         }
         assert set(rg_mod._TIER2_FIXES.keys()) == expected  # ANTICHEAT_OK
 
@@ -2414,6 +2601,64 @@ class TestRecoveryLoop:
         assert status["retry_target"] == "phase_b_executor"
         entries = rg_mod._load_recovery_log(tmp_path)  # ANTICHEAT_OK
         assert entries[-1]["outcome"] == "retry_requested"
+
+    def test_recovery_response_json_with_trailing_prose_still_runs(self, tmp_path):
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stderr": "",
+            "stdout": "Pre-commit checks failed. Use --no-verify to bypass (not recommended).",
+        }
+        claude_response = json.dumps({
+            "action": "shell",
+            "commands": ["echo fixed"],
+            "explanation": "diagnosed from pre-commit output",
+        }) + "\n\nThe pre-commit output points at a bounded docs check."
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *args, **kwargs: MagicMock(stdout="ok", stderr="", returncode=0)
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=claude_response, pid=5152)
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(tmp_path, result, "w-trailing-json")
+
+        assert r["recovered"] is True
+        assert r["log"][0]["action"] == "shell"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["state"] == "tier3_retry_requested"
+        assert status["last_action"] == "shell"
+
+    def test_recovery_response_extracts_codex_jsonl_agent_message(self, tmp_path):
+        result = {
+            "status": "failed",
+            "step": "commit_executor",
+            "stderr": "",
+            "stdout": "Pre-commit checks failed. Use --no-verify to bypass (not recommended).",
+        }
+        agent_text = json.dumps({
+            "action": "shell",
+            "commands": ["echo fixed"],
+            "explanation": "codex jsonl message carried the action",
+        }) + "\n\nextra text after JSON"
+        codex_jsonl = "\n".join([
+            json.dumps({"type": "thread.started", "thread_id": "t"}),
+            json.dumps({
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": agent_text},
+            }),
+        ])
+
+        with patch.object(rg_mod, "subprocess") as mock_sp:
+            mock_sp.run = lambda *args, **kwargs: MagicMock(stdout="ok", stderr="", returncode=0)
+            mock_sp.Popen = lambda *args, **kwargs: FakePopen(stdout=codex_jsonl, pid=5153)
+            mock_sp.PIPE = subprocess.PIPE
+            mock_sp.TimeoutExpired = subprocess.TimeoutExpired
+            r = rg_mod.run_recovery_loop(tmp_path, result, "w-codex-jsonl")
+
+        assert r["recovered"] is True
+        assert r["log"][0]["action"] == "shell"
+        status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+        assert status["state"] == "tier3_retry_requested"
 
     def test_prompt_via_stdin_uses_communicate_input(self, tmp_path):
         result = {"status": "failed", "step": "pre_commit", "stderr": "test_x failed", "stdout": ""}

@@ -1,0 +1,672 @@
+{
+  "vectors": [
+    {
+      "id": "select_lexicographic_head",
+      "description": "Two Godel-coded unary-map operators in strict lexicographic order select 0001",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.alpha",
+              "godel_unary_map": {
+                "code": "0001",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": "op.beta",
+                "godel_unary_map": {
+                  "code": "0010",
+                  "domain": "engine_state",
+                  "codomain": "engine_state",
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "run_operator",
+      "expected_operator_id": "op.alpha",
+      "expected_godel_code": "0001"
+    },
+    {
+      "id": "single_valid_operator",
+      "description": "A single Godel-coded unary-map operator is a valid finite pool",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.solo",
+              "godel_unary_map": {
+                "code": "0011",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": null
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "run_operator",
+      "expected_operator_id": "op.solo",
+      "expected_godel_code": "0011"
+    },
+    {
+      "id": "valid_order_other_codes",
+      "description": "A second bounded strict lexicographic witness selects 0011 before 0100",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.gamma",
+              "godel_unary_map": {
+                "code": "0011",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": "op.delta",
+                "godel_unary_map": {
+                  "code": "0100",
+                  "domain": "engine_state",
+                  "codomain": "engine_state",
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "run_operator",
+      "expected_operator_id": "op.gamma",
+      "expected_godel_code": "0011"
+    },
+    {
+      "id": "skip_frozen_head",
+      "description": "A frozen head operator is skipped structurally and the remaining finite pool is preserved",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.alpha",
+              "godel_unary_map": {
+                "code": "0001",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": "op.beta",
+                "godel_unary_map": {
+                  "code": "0010",
+                  "domain": "engine_state",
+                  "codomain": "engine_state",
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": {
+            "head": "op.alpha",
+            "tail": null
+          },
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "skip_operator",
+      "expected_operator_id": "op.alpha"
+    },
+    {
+      "id": "skip_frozen_tail_member",
+      "description": "A frozen-list tail member is skipped rather than selected",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.alpha",
+              "godel_unary_map": {
+                "code": "0001",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": "op.beta",
+                "godel_unary_map": {
+                  "code": "0010",
+                  "domain": "engine_state",
+                  "codomain": "engine_state",
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": {
+            "head": "op.other",
+            "tail": {
+              "head": "op.alpha",
+              "tail": null
+            }
+          },
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "skip_operator",
+      "expected_operator_id": "op.alpha"
+    },
+    {
+      "id": "skip_frozen_deep_tail_member",
+      "description": "A frozen-list member beyond the second node is skipped rather than selected",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.alpha",
+              "godel_unary_map": {
+                "code": "0001",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": "op.beta",
+                "godel_unary_map": {
+                  "code": "0010",
+                  "domain": "engine_state",
+                  "codomain": "engine_state",
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": {
+            "head": "op.other1",
+            "tail": {
+              "head": "op.other2",
+              "tail": {
+                "head": "op.alpha",
+                "tail": null
+              }
+            }
+          },
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "skip_operator",
+      "expected_operator_id": "op.alpha"
+    },
+    {
+      "id": "skip_frozen_fourth_tail_member",
+      "description": "A frozen-list member beyond the seed's fixed prefix is reached by structural scan",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.alpha",
+              "godel_unary_map": {
+                "code": "0001",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": "op.beta",
+                "godel_unary_map": {
+                  "code": "0010",
+                  "domain": "engine_state",
+                  "codomain": "engine_state",
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": {
+            "head": "op.other1",
+            "tail": {
+              "head": "op.other2",
+              "tail": {
+                "head": "op.other3",
+                "tail": {
+                  "head": "op.alpha",
+                  "tail": null
+                }
+              }
+            }
+          },
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "skip_operator",
+      "expected_operator_id": "op.alpha"
+    },
+    {
+      "id": "reject_identity_map",
+      "description": "The identity-map safeguard rejects an identity unary map before selection",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.identity",
+              "godel_unary_map": {
+                "code": "0000",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": true
+              }
+            },
+            "tail": null
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "reject_operator",
+      "expected_reason": "identity_map_safeguard"
+    },
+    {
+      "id": "reject_tail_identity_map",
+      "description": "A tail identity-map operator is rejected instead of leaving the scheduler unchanged",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.alpha",
+              "godel_unary_map": {
+                "code": "0001",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": "op.identity_tail",
+                "godel_unary_map": {
+                  "code": "0010",
+                  "domain": "engine_state",
+                  "codomain": "engine_state",
+                  "identity_map": true
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "reject_operator",
+      "expected_reason": "identity_map_safeguard"
+    },
+    {
+      "id": "reject_third_identity_map",
+      "description": "A deeper identity-map operator is rejected before a longer pool can select the first two candidates",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.alpha",
+              "godel_unary_map": {
+                "code": "0001",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": "op.beta",
+                "godel_unary_map": {
+                  "code": "0010",
+                  "domain": "engine_state",
+                  "codomain": "engine_state",
+                  "identity_map": false
+                }
+              },
+              "tail": {
+                "head": {
+                  "operator_id": "op.identity_deep",
+                  "godel_unary_map": {
+                    "code": "0011",
+                    "domain": "engine_state",
+                    "codomain": "engine_state",
+                    "identity_map": true
+                  }
+                },
+                "tail": null
+              }
+            }
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "reject_operator",
+      "expected_reason": "identity_map_safeguard"
+    },
+    {
+      "id": "reject_non_godel_operator",
+      "description": "An operator without Godel-coded unary-map data is rejected",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.raw",
+              "map": {
+                "domain": "engine_state",
+                "codomain": "engine_state"
+              }
+            },
+            "tail": null
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "reject_operator",
+      "expected_reason": "non_godel_coded_unary_map"
+    },
+    {
+      "id": "missing_map_and_godel",
+      "description": "An operator head with only an id is rejected as non-Godel-coded",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.missing"
+            },
+            "tail": null
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "reject_operator",
+      "expected_reason": "non_godel_coded_unary_map"
+    },
+    {
+      "id": "malformed_godel_missing_identity",
+      "description": "A Godel unary map without identity_map is rejected as malformed/non-Godel-coded",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.partial",
+              "godel_unary_map": {
+                "code": "0011",
+                "domain": "engine_state",
+                "codomain": "engine_state"
+              }
+            },
+            "tail": null
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "reject_operator",
+      "expected_reason": "non_godel_coded_unary_map"
+    },
+    {
+      "id": "reject_non_lexicographic_order",
+      "description": "The known two-operator reversed witness 0010 before 0001 is rejected",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.beta",
+              "godel_unary_map": {
+                "code": "0010",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": "op.alpha",
+                "godel_unary_map": {
+                  "code": "0001",
+                  "domain": "engine_state",
+                  "codomain": "engine_state",
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "reject_pool",
+      "expected_reason": "non_lexicographic_operator_order"
+    },
+    {
+      "id": "reject_unhandled_lexicographic_pair",
+      "description": "A finite two-operator pool outside the seed's explicit ordering witnesses fails closed",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.gamma",
+              "godel_unary_map": {
+                "code": "0011",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": "op.alpha",
+                "godel_unary_map": {
+                  "code": "0001",
+                  "domain": "engine_state",
+                  "codomain": "engine_state",
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "reject_pool",
+      "expected_reason": "unhandled_lexicographic_operator_pair"
+    },
+    {
+      "id": "reversed_other_codes",
+      "description": "The second bounded reversed witness 0100 before 0011 is rejected",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.delta",
+              "godel_unary_map": {
+                "code": "0100",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": "op.gamma",
+                "godel_unary_map": {
+                  "code": "0011",
+                  "domain": "engine_state",
+                  "codomain": "engine_state",
+                  "identity_map": false
+                }
+              },
+              "tail": null
+            }
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "reject_pool",
+      "expected_reason": "non_lexicographic_operator_order"
+    },
+    {
+      "id": "reject_longer_pool_unchecked_suffix",
+      "description": "A longer pool is rejected because the seed has not witnessed full strict lexicographic order",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.alpha",
+              "godel_unary_map": {
+                "code": "0001",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": "op.beta",
+                "godel_unary_map": {
+                  "code": "0010",
+                  "domain": "engine_state",
+                  "codomain": "engine_state",
+                  "identity_map": false
+                }
+              },
+              "tail": {
+                "head": {
+                  "operator_id": "op.zero",
+                  "godel_unary_map": {
+                    "code": "0000",
+                    "domain": "engine_state",
+                    "codomain": "engine_state",
+                    "identity_map": false
+                  }
+                },
+                "tail": null
+              }
+            }
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "reject_pool",
+      "expected_reason": "unhandled_operator_pool_width"
+    },
+    {
+      "id": "reject_malformed_tail_operator",
+      "description": "A malformed non-head operator fails closed instead of leaving the scheduler unchanged",
+      "input": {
+        "schedule_engine": {
+          "seedOps": {
+            "head": {
+              "operator_id": "op.alpha",
+              "godel_unary_map": {
+                "code": "0001",
+                "domain": "engine_state",
+                "codomain": "engine_state",
+                "identity_map": false
+              }
+            },
+            "tail": {
+              "head": {
+                "operator_id": "op.bad"
+              },
+              "tail": null
+            }
+          },
+          "frozen": null,
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "reject_pool",
+      "expected_reason": "unhandled_operator_pool_shape"
+    },
+    {
+      "id": "pool_exhausted",
+      "description": "An empty finite operator pool returns explicit pool exhaustion",
+      "input": {
+        "schedule_engine": {
+          "seedOps": null,
+          "frozen": {
+            "head": "op.alpha",
+            "tail": null
+          },
+          "scheduler_state": {
+            "phase": "ready"
+          }
+        }
+      },
+      "expected_action": "pool_exhausted"
+    }
+  ]
+}

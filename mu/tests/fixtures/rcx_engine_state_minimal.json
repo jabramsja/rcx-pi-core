@@ -1,0 +1,102 @@
+{
+  "valid_minimal_state": {
+    "validate_engine_state": {
+      "state": {
+        "G": {
+          "V": {
+            "head": {
+              "id": {
+                "zero": null
+              }
+            },
+            "tail": null
+          },
+          "E": null
+        },
+        "Omega": null,
+        "Lambda": null,
+        "Xi": null,
+        "rho": {
+          "zero": null
+        },
+        "NextID": {
+          "succ": {
+            "zero": null
+          }
+        }
+      }
+    }
+  },
+  "identity_stability": {
+    "validate_engine_state_identity": {
+      "before": {
+        "id": {
+          "zero": null
+        }
+      },
+      "after": {
+        "id": {
+          "zero": null
+        }
+      }
+    }
+  },
+  "next_id_monotone": {
+    "validate_engine_state_next_id": {
+      "before": {
+        "NextID": {
+          "succ": {
+            "zero": null
+          }
+        }
+      },
+      "allocated": {
+        "succ": {
+          "zero": null
+        }
+      },
+      "after": {
+        "NextID": {
+          "succ": {
+            "succ": {
+              "zero": null
+            }
+          }
+        }
+      }
+    }
+  },
+  "invalid_missing_graph": {
+    "validate_engine_state": {
+      "state": {
+        "Omega": null,
+        "Lambda": null,
+        "Xi": null,
+        "rho": {
+          "zero": null
+        },
+        "NextID": {
+          "succ": {
+            "zero": null
+          }
+        }
+      }
+    }
+  },
+  "invalid_identity_drift": {
+    "validate_engine_state_identity": {
+      "before": {
+        "id": {
+          "zero": null
+        }
+      },
+      "after": {
+        "id": {
+          "succ": {
+            "zero": null
+          }
+        }
+      }
+    }
+  }
+}
