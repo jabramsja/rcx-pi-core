@@ -239,6 +239,24 @@ def wait_inactive(pid, timeout_s):
     return not active_target_alive(pid)
 
 
+def mark_cleanup_degraded(state, pid, reason):
+    now = datetime.now(timezone.utc).isoformat()
+    state.update(
+        {
+            "updated_at": now,
+            "status": "watcher_restart_degraded_active_ping_cleanup_failed",
+            "active_pid": pid,
+            "last_active_cleanup_pid": pid,
+            "last_active_cleanup_at": now,
+            "last_active_cleanup_error": reason,
+        }
+    )
+    try:
+        state_path.write_text(json.dumps(state, sort_keys=True) + "\n", encoding="utf-8")
+    except OSError as exc:
+        log(f"[autoping-window] failed to persist degraded cleanup state pid={pid}: {exc}")
+
+
 state, pid = active_pid_from_state()
 if pid is None:
     raise SystemExit(0)
@@ -247,7 +265,8 @@ if not active_target_alive(pid):
 
 try:
     sent = signal_active(pid, signal.SIGTERM)
-except PermissionError:
+except PermissionError as exc:
+    mark_cleanup_degraded(state, pid, f"permission_denied_sigterm: {exc}")
     raise SystemExit(1)
 
 if sent and wait_inactive(pid, 2.0):
@@ -267,7 +286,8 @@ if sent and wait_inactive(pid, 2.0):
 
 try:
     signal_active(pid, signal.SIGKILL)
-except PermissionError:
+except PermissionError as exc:
+    mark_cleanup_degraded(state, pid, f"permission_denied_sigkill: {exc}")
     raise SystemExit(1)
 
 if wait_inactive(pid, 1.0):
@@ -285,7 +305,8 @@ if wait_inactive(pid, 1.0):
     log(f"[autoping-window] killed stale active ping pid={pid}")
     raise SystemExit(0)
 
-log(f"[autoping-window] stale active ping still alive pid={pid}; restart deferred")
+mark_cleanup_degraded(state, pid, "stale active ping still alive after SIGTERM/SIGKILL")
+log(f"[autoping-window] stale active ping still alive pid={pid}; restarting watcher degraded")
 raise SystemExit(1)
 PY
 }
@@ -299,7 +320,7 @@ ensure_watcher() {
         printf '[autoping-window] watcher exited pid=%s; restarting\n' "$WATCHER_PID" >>"$RUNNER_LOG"
     fi
     if ! cleanup_active_ping_from_state; then
-        return 0
+        printf '[autoping-window] active ping cleanup failed; restarting watcher degraded\n' >>"$RUNNER_LOG"
     fi
     start_watcher
     printf '[autoping-restart] watcher_pid=%s\n' "$WATCHER_PID"

@@ -244,6 +244,7 @@ def run_dialectic(
     current_proposal = proposal
     round_feedback: list[str] = []
     errors: list[str] = []
+    last_failure_kind = ""
 
     for round_number in range(1, max_rounds + 1):
         dialectic_job_id = f"dialectic-r{round_number}-{uuid.uuid4().hex[:8]}"
@@ -285,6 +286,7 @@ def run_dialectic(
             errors = [
                 f"Round {round_number} did not produce a parseable dialectic envelope"
             ]
+            last_failure_kind = "no_envelope"
             round_feedback = errors
             continue
 
@@ -296,11 +298,15 @@ def run_dialectic(
 
         current_proposal = _proposal_for_next_round(narrowed, current_proposal)
         errors = [f"Round {round_number} returned bounded=false"]
+        last_failure_kind = "bounded_false"
         round_feedback = errors
         log(errors[0])
 
     if result["status"] == "success":
-        if result["rounds"] >= max_rounds:
+        if last_failure_kind == "no_envelope":
+            result["status"] = "no_envelope"
+            result["errors"] = errors or ["Could not parse dialectic envelope from Codex output"]
+        elif result["rounds"] >= max_rounds:
             result["status"] = "max_rounds_reached"
             result["errors"] = errors or ["Dialectic narrowing exhausted max_rounds"]
         else:
