@@ -1171,10 +1171,30 @@ def _is_chained_commit_failure(result: dict[str, Any]) -> bool:
     fail while earlier phases succeeded.  Retrying should only re-run the
     commit executor, not the full chain.
     """
+    if _looks_like_private_attr_test_integrity_failure(result):
+        return False
     return (
         result.get("status") == "failed"
         and result.get("executor") == "commit_executor"
         and result.get("chained_from") is not None
+    )
+
+
+def _looks_like_private_attr_test_integrity_failure(result: dict[str, Any]) -> bool:
+    """Detect the anti-cheat failure that must return to Phase B/recovery."""
+    parts: list[str] = []
+    for key in ("stdout", "stderr", "message", "reason", "detail", "step"):
+        value = result.get(key)
+        if isinstance(value, str):
+            parts.append(value)
+    errors = result.get("errors")
+    if isinstance(errors, list):
+        parts.extend(str(item) for item in errors)
+    text = "\n".join(parts).lower()
+    return (
+        "private_attr_gate" in text
+        or "private-attr test-integrity gate failed" in text
+        or "found private attr access in tests/" in text
     )
 
 
