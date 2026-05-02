@@ -110,6 +110,7 @@ class FailureClass(Enum):
     # Tier 3 -- LLM diagnosis (small focused prompt)
     GIT_STAGING_CONFLICT = "git_staging_conflict"
     TEST_FAILURE = "test_failure"
+    PRIVATE_ATTR_TEST_INTEGRITY = "private_attr_test_integrity"
     AGENT_REVIEW_CRASH = "agent_review_crash"
     UNKNOWN_ERROR = "unknown_error"
     NEEDS_PHASE_B = "needs_phase_b"
@@ -144,6 +145,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.PR_MERGE_CONFLICT: 2,
     FailureClass.PR_CONFLICTING: 2,
     FailureClass.GIT_STAGING_CONFLICT: 3, FailureClass.TEST_FAILURE: 3,
+    FailureClass.PRIVATE_ATTR_TEST_INTEGRITY: 3,
     FailureClass.AGENT_REVIEW_CRASH: 3, FailureClass.UNKNOWN_ERROR: 3,
     FailureClass.NEEDS_PHASE_B: 3,
     FailureClass.BOT_FINDINGS_PENDING: 3,
@@ -264,6 +266,19 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.MAX_TURNS_REACHED
 
     status_key = str(status or embedded_status or "").strip().lower()
+    private_attr_signal = " ".join(
+        part
+        for part in (reason_lower, combined_lower, step_lower)
+        if part
+    )
+    if (
+        status_failed
+        and "private-attr checker" in private_attr_signal
+        and "timed out after" in private_attr_signal
+    ):
+        return FailureClass.PROCESS_TIMEOUT
+    if "found private attr access in tests/" in private_attr_signal:
+        return FailureClass.PRIVATE_ATTR_TEST_INTEGRITY
     if status_key in _STANDALONE_STATUS_FAILURE_CLASSES:
         return _STANDALONE_STATUS_FAILURE_CLASSES[status_key]
 
@@ -7631,6 +7646,7 @@ _AGENT_FAILURE_CLASS_MAP: dict[str, list[str] | None] = {
     # Implementation agents — pipeline-subset: only failure classes
     # that produce actionable learnings for build/test execution
     "implementer":      ["test_failure", "git_staging_conflict", "process_timeout",
+                         "private_attr_test_integrity",
                          "implementer_stale", "needs_phase_b", "mixed_staging",
                          "max_turns_reached", "pre_push_failed", "stage_failed",
                          "implementer_error", "bridge_error",

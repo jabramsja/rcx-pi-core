@@ -594,6 +594,143 @@ class TestReceiptChainEndToEnd:
         assert f"  - `reports/l4_wave_indicators/{wave_id}.json`" in packet_text
         assert "  - `TASKS.md`" in packet_text
 
+    def test_tracker_note_refresh_retries_self_cleared_index_lock_once(self, tmp_path):
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wave_id = "packet-lock-wave"
+        old_note = (
+            f"- Tracker sync note (2026-05-02, {wave_id}): **Old note.** "
+            "Class: L4_ENABLER. target_gate_id: G8.\n"
+        )
+        new_note = (
+            f"- Tracker sync note (2026-05-02, {wave_id}): **New note.** "
+            "Class: L4_ENABLER. target_gate_id: G8.\n"
+        )
+        (repo / "TASKS.md").write_text(f"## Ra\n\n{old_note}\n---\n", encoding="utf-8")
+        add_calls = []
+
+        def fake_run(args, **kwargs):
+            if args == ["git", "add", "--", "TASKS.md"]:
+                add_calls.append(args)
+                if len(add_calls) == 1:
+                    raise subprocess.CalledProcessError(
+                        128,
+                        args,
+                        output="",
+                        stderr=(
+                            "fatal: Unable to create "
+                            f"'{repo / '.git' / 'index.lock'}': File exists"
+                        ),
+                    )
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod, "_git_owner_processes_for_repo", return_value=[]):
+            error = commit_mod.refresh_tasks_tracker_note_after_packet_truth(
+                repo,
+                wave_id=wave_id,
+                tracker_note_text=new_note,
+            )
+
+        assert error is None
+        assert len(add_calls) == 2
+        assert new_note in (repo / "TASKS.md").read_text(encoding="utf-8")
+
+    def test_tracker_note_refresh_fails_closed_when_index_lock_persists(self, tmp_path):
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        git_dir = repo / ".git"
+        git_dir.mkdir()
+        lock_path = git_dir / "index.lock"
+        lock_path.write_text("locked", encoding="utf-8")
+        wave_id = "packet-lock-wave"
+        old_note = (
+            f"- Tracker sync note (2026-05-02, {wave_id}): **Old note.** "
+            "Class: L4_ENABLER. target_gate_id: G8.\n"
+        )
+        new_note = (
+            f"- Tracker sync note (2026-05-02, {wave_id}): **New note.** "
+            "Class: L4_ENABLER. target_gate_id: G8.\n"
+        )
+        (repo / "TASKS.md").write_text(f"## Ra\n\n{old_note}\n---\n", encoding="utf-8")
+        add_calls = []
+
+        def fake_run(args, **kwargs):
+            if args == ["git", "add", "--", "TASKS.md"]:
+                add_calls.append(args)
+                raise subprocess.CalledProcessError(
+                    128,
+                    args,
+                    output="",
+                    stderr=f"fatal: Unable to create '{lock_path}': File exists",
+                )
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod, "_git_owner_processes_for_repo", return_value=[]):
+            error = commit_mod.refresh_tasks_tracker_note_after_packet_truth(
+                repo,
+                wave_id=wave_id,
+                tracker_note_text=new_note,
+            )
+
+        assert error is not None
+        assert "index.lock" in error
+        assert len(add_calls) == 1
+        assert lock_path.exists()
+
+    def test_tracker_note_refresh_fails_closed_when_git_owner_remains(self, tmp_path):
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        git_dir = repo / ".git"
+        git_dir.mkdir()
+        lock_path = git_dir / "index.lock"
+        wave_id = "packet-lock-wave"
+        old_note = (
+            f"- Tracker sync note (2026-05-02, {wave_id}): **Old note.** "
+            "Class: L4_ENABLER. target_gate_id: G8.\n"
+        )
+        new_note = (
+            f"- Tracker sync note (2026-05-02, {wave_id}): **New note.** "
+            "Class: L4_ENABLER. target_gate_id: G8.\n"
+        )
+        (repo / "TASKS.md").write_text(f"## Ra\n\n{old_note}\n---\n", encoding="utf-8")
+        add_calls = []
+
+        def fake_run(args, **kwargs):
+            if args == ["git", "add", "--", "TASKS.md"]:
+                add_calls.append(args)
+                raise subprocess.CalledProcessError(
+                    128,
+                    args,
+                    output="",
+                    stderr=f"fatal: Unable to create '{lock_path}': File exists",
+                )
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(
+                 commit_mod,
+                 "_git_owner_processes_for_repo",
+                 return_value=["pid=123 cwd=/repo command=git add -- TASKS.md"],
+             ):
+            error = commit_mod.refresh_tasks_tracker_note_after_packet_truth(
+                repo,
+                wave_id=wave_id,
+                tracker_note_text=new_note,
+            )
+
+        assert error is not None
+        assert "active git owner remains" in error
+        assert len(add_calls) == 1
+        assert not lock_path.exists()
+
     def test_commit_packet_truth_refresh_keeps_continuation_bound_to_original_handoff(self, tmp_path):
         from collections import namedtuple
         import subprocess
@@ -1982,6 +2119,76 @@ class TestCommitExecutorPytestGate:
         assert "targeted pytest gate failed" in result["errors"][0]
         assert "git_commit" not in result.get("steps_completed", [])
         assert mock_pytest.call_args[0][1] == ["tests/test_file.py"]
+        assert not any(cmd[:2] == ["git", "commit"] for cmd in seen_commands)
+
+    def test_run_commit_pipeline_blocks_private_attr_gate_before_git_commit(self, tmp_path):
+        from collections import namedtuple
+        import subprocess
+        import types
+
+        repo = _setup_repo(tmp_path)
+        (repo / "tests").mkdir(parents=True, exist_ok=True)
+        (repo / "tests" / "test_file.py").write_text(
+            "def test_smoke():\n    assert True\n",
+            encoding="utf-8",
+        )
+        checker = repo / "tools" / "checks" / "linters" / "check_private_attr_access.py"
+        checker.parent.mkdir(parents=True, exist_ok=True)
+        checker.write_text(
+            "import sys\n"
+            "print('ERROR: Found private attr access in tests/:')\n"
+            "print('  tests/test_file.py:3: ._private_helper')\n"
+            "sys.exit(1)\n",
+            encoding="utf-8",
+        )
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(json.dumps({
+            "decision": "COMMIT_GO",
+            "staged_sha": "fresh_sha",
+            "timestamp_utc": "2026-03-24T00:00:00+00:00",
+        }))
+
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+        fake_result = SupervisorResult(
+            decision="COMMIT_GO",
+            summary="test",
+            receipt_path=sup_receipt_path,
+        )
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = lambda *a, **kw: fake_result
+        mock_client.MetaBridgeClientError = Exception
+
+        real_subprocess_run = subprocess.run
+        seen_commands: list[list[str]] = []
+
+        def intercept_subprocess_run(args, *run_args, **run_kwargs):
+            command = list(args) if isinstance(args, (list, tuple)) else [str(args)]
+            seen_commands.append(command)
+            if command[:2] == ["git", "commit"]:
+                raise AssertionError("git commit should not run after private-attr gate failure")
+            return real_subprocess_run(args, *run_args, **run_kwargs)
+
+        handoff = _make_new_schema_handoff(
+            files_to_stage=["file.py", "tests/test_file.py"],
+        )
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), \
+             patch.object(
+                 commit_mod,
+                 "_run_pytest_on_files",
+                 return_value={"exit_code": 0, "stdout": "", "stderr": "", "passed": True},
+             ), \
+             patch.object(commit_mod.subprocess, "run", side_effect=intercept_subprocess_run):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "private_attr_gate"
+        error_text = "\n".join(result["errors"])
+        assert "private-attr test-integrity gate failed before local commit creation" in error_text
+        assert "ERROR: Found private attr access in tests/" in error_text
+        assert "git_commit" not in result.get("steps_completed", [])
         assert not any(cmd[:2] == ["git", "commit"] for cmd in seen_commands)
 
     def test_run_pytest_on_files_handles_duplicate_basenames(self, tmp_path):

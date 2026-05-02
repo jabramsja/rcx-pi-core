@@ -865,6 +865,101 @@ def _select_pytest_gate_files(changed_files: list[str]) -> list[str]:
     return [path for path in changed_files if _is_pytest_gate_file(path)]
 
 
+def select_private_attr_gate_files(changed_files: list[str]) -> list[str]:
+    """Return wave-owned Python test files that should trigger anti-cheat."""
+    return sorted({
+        path.replace("\\", "/")
+        for path in changed_files
+        if _is_pytest_gate_file(path.replace("\\", "/"))
+    })
+
+
+def run_private_attr_gate(
+    repo_root: Path,
+    changed_files: list[str],
+    *,
+    timeout: int = 120,
+) -> dict[str, Any]:
+    """Run the existing private-attr checker for wave-owned Python tests."""
+    gate_files = select_private_attr_gate_files(changed_files)
+    if not gate_files:
+        return {
+            "passed": True,
+            "skipped": True,
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": "",
+            "test_files": [],
+        }
+    checker = repo_root / "tools" / "checks" / "linters" / "check_private_attr_access.py"
+    if not checker.exists():
+        checker = SCRIPT_DIR.parents[2] / "tools" / "checks" / "linters" / "check_private_attr_access.py"
+    if not checker.exists():
+        return {
+            "passed": False,
+            "skipped": False,
+            "exit_code": 127,
+            "stdout": "",
+            "stderr": f"private-attr checker not found: {checker}",
+            "test_files": gate_files,
+        }
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(checker), str(repo_root)],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+        return {
+            "passed": completed.returncode == 0,
+            "skipped": False,
+            "exit_code": completed.returncode,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "test_files": gate_files,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "passed": False,
+            "skipped": False,
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": f"private-attr checker timed out after {timeout}s",
+            "test_files": gate_files,
+        }
+
+
+def private_attr_gate_summary(gate_result: dict[str, Any], *, reentry: bool) -> str:
+    output = "\n".join(
+        part
+        for part in (
+            str(gate_result.get("stdout") or ""),
+            str(gate_result.get("stderr") or ""),
+        )
+        if part
+    ).strip()
+    if len(output) > 2500:
+        output = output[-2500:]
+    test_files = gate_result.get("test_files") or []
+    file_summary = ", ".join(str(path) for path in test_files[:8])
+    if len(test_files) > 8:
+        file_summary += f", ... (+{len(test_files) - 8} more)"
+    prefix = "Re-entry " if reentry else ""
+    message = (
+        f"{prefix}private-attr test-integrity gate FAILED "
+        f"(exit={gate_result.get('exit_code')}). "
+        "Python test files in the wave-owned diff must not access single-underscore helpers. "
+        "Use public seams or public commit-packet refresh paths instead."
+    )
+    if file_summary:
+        message += f" Triggering test file(s): {file_summary}."
+    if output:
+        message += f"\n\nChecker output:\n{output}"
+    return message
+
+
 _NON_GATE_TEST_DOMAINS = (
     "tests/engine/", "tests/parity/", "tests/structural/", "tests/tools/", "tests/docs/",
     "mu/tests/engine/", "mu/tests/parity/", "mu/tests/structural/", "mu/tests/tools/", "mu/tests/docs/",
@@ -2241,17 +2336,18 @@ def run_bridge_review(
     task_path.write_text(task_summary, encoding="utf-8")
 
     bridge_script = repo_root / "tools" / "agents" / "bridge_supervisor.py"
-    cmd = [
-        sys.executable, str(bridge_script),
+    active_bus_dir = _active_bus_dir()
+    cmd = [sys.executable, str(bridge_script)]
+    if active_bus_dir is not None:
+        cmd.extend(["--bus-dir", str(active_bus_dir)])
+    cmd.extend([
         "review",
         "--task-file", str(task_path),
         "--summary", "Phase B implementation review",
         "--reviewer", reviewer,
-    ]
+    ])
     if job_id:
         cmd.extend(["--job-id", job_id])
-    if _active_bus_dir() is not None:
-        cmd.extend(["--bus-dir", str(_active_bus_dir())])
     if verbose:
         cmd.append("-v")
 
@@ -3923,19 +4019,492 @@ def run_phase_b(
             executor_created or None,
             baseline_wave_files or None,
         )
+        changed_files = _bridge_review_scope_files(changed_files)
         log(
             f"Re-entry changed files: {len(changed_files)} "
             f"(implementer touched {len(post_reentry_files - pre_reentry_files)})"
         )
         return None
 
+    def _bridge_review_scope_files(candidate_files: list[str]) -> list[str]:
+        """Include the governing packet in bridge-reviewed/staged scope."""
+        scoped = list(candidate_files)
+        if plan_path and not plan_path.startswith("<") and plan_path not in scoped:
+            scoped.append(plan_path)
+        return scoped
+
+    def _private_attr_pending_review_step(*, reentry: bool) -> str:
+        return (
+            "reentry_private_attr_remediation_pending_review"
+            if reentry
+            else "private_attr_remediation_pending_review"
+        )
+
+    def _save_private_attr_pending_review_state(
+        candidate_files: list[str],
+        *,
+        reentry: bool,
+    ) -> list[str]:
+        """Checkpoint private-attr remediation before the required fresh review."""
+        scoped_files = _bridge_review_scope_files(candidate_files)
+        _save_state(repo_root, {
+            "plan_path": plan_path,
+            "completed_step": _private_attr_pending_review_step(reentry=reentry),
+            "wave_id": wave_id,
+            "bridge_rounds": result["bridge_rounds"],
+            "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, scoped_files),
+            "deferred_packet_path": deferred_packet_path,
+            "implementer_changed": sorted(implementer_changed),
+            "executor_created": sorted(executor_created),
+            "baseline_wave_files": sorted(baseline_wave_files),
+            "all_non_blocking": all_non_blocking,
+            "finding_history": finding_history,
+            "private_attr_gate_test_files": result.get("private_attr_gate_test_files", []),
+        })
+        return scoped_files
+
+    def _run_private_attr_gate_with_remediation(
+        candidate_files: list[str],
+        *,
+        reentry: bool = False,
+    ) -> tuple[list[str], dict[str, Any] | None, bool]:
+        """Run anti-cheat and feed failures through the implementer loop."""
+        nonlocal implementer_changed, changed_files
+
+        current_files = list(candidate_files)
+        max_gate_rounds = max(1, max_bridge_rounds)
+        step_name = "reentry_private_attr_gate" if reentry else "private_attr_gate"
+        remediated = False
+        for gate_round in range(1, max_gate_rounds + 1):
+            gate_result = run_private_attr_gate(
+                repo_root,
+                current_files,
+                timeout=pytest_gate_timeout,
+            )
+            if gate_result.get("skipped"):
+                return current_files, None, remediated
+            result["private_attr_gate_test_files"] = gate_result.get("test_files", [])
+            if gate_result.get("passed"):
+                log(
+                    ("Re-entry " if reentry else "")
+                    + "private-attr gate: PASSED for "
+                    f"{len(gate_result.get('test_files') or [])} test file(s)"
+                )
+                return current_files, None, remediated
+
+            failure_summary = private_attr_gate_summary(gate_result, reentry=reentry)
+            if gate_round >= max_gate_rounds:
+                return current_files, {
+                    "status": "error",
+                    "step": step_name,
+                    "errors": [failure_summary],
+                    "private_attr_gate": gate_result,
+                }, remediated
+
+            log(
+                ("Re-entry " if reentry else "")
+                + "private-attr gate failed; re-invoking implementer "
+                f"(round {gate_round}/{max_gate_rounds})"
+            )
+            pre_gate_fix_files = set(_collect_changed_files(repo_root))
+            fix_prompt = build_implementation_prompt(
+                plan_content
+                + "\n\n## Private Attribute Test Integrity Gate Failure\n\n"
+                + failure_summary
+                + "\n\nDo not weaken `tools/checks/linters/check_private_attr_access.py`, "
+                "do not add allowlist entries, do not add `ANTICHEAT_OK`, and do not "
+                "bypass `tools/hooks/pre-push-fast`. Fix the tests through a public seam "
+                "or existing public commit-packet refresh path.",
+                repo_root=repo_root,
+                wave_id=wave_id,
+                scope_hint="Fix private-attribute access in wave-owned Python tests",
+                learning_context=learning_context,
+            )
+            fix_result = invoke_implementer(
+                repo_root,
+                fix_prompt,
+                backend=backend,
+                model_override=model,
+                timeout=timeout,
+                verbose=verbose,
+                bus_dir=_active_bus_dir(),
+            )
+            if fix_result["status"] != "success":
+                return current_files, _implementer_failure_result(
+                    step=step_name,
+                    message=(
+                        "Implementer failed while fixing private-attr test-integrity "
+                        f"gate: {fix_result['status']} (exit={fix_result['exit_code']})"
+                    ),
+                    impl_result=fix_result,
+                ), remediated
+
+            post_gate_fix_files = set(_collect_changed_files(repo_root))
+            implementer_changed |= (post_gate_fix_files - pre_gate_fix_files) - fenced_out_files
+            current_files = _collect_wave_owned_files(
+                repo_root,
+                plan_path,
+                plan_declared_files,
+                implementer_changed or None,
+                executor_created or None,
+                baseline_wave_files or None,
+            )
+            current_files = _save_private_attr_pending_review_state(
+                current_files,
+                reentry=reentry,
+            )
+            changed_files = current_files
+            remediated = True
+
+        return current_files, {
+            "status": "error",
+            "step": step_name,
+            "errors": ["private-attr gate did not converge before commit handoff"],
+        }, remediated
+
+    def _run_private_attr_remediation_bridge_review(
+        candidate_files: list[str],
+        *,
+        reentry: bool = False,
+    ) -> tuple[list[str], dict[str, Any] | None]:
+        """Freshly review implementer changes made by the private-attr gate."""
+        nonlocal all_non_blocking, deferred_packet_path, changed_files
+
+        current_files = _bridge_review_scope_files(candidate_files)
+        next_round = int(result.get("bridge_rounds") or 0) + 1
+        step_name = (
+            "reentry_private_attr_bridge_review"
+            if reentry
+            else "private_attr_bridge_review"
+        )
+        if next_round > max_bridge_rounds:
+            return current_files, {
+                "status": "error",
+                "step": step_name,
+                "errors": [
+                    "Private-attr remediation changed files after the bridge review "
+                    "budget was exhausted; cannot proceed to commit without fresh review."
+                ],
+            }
+        if current_files:
+            log(
+                ("Re-entry " if reentry else "")
+                + "private-attr remediation: staging "
+                f"{len(current_files)} wave-owned files before fresh bridge review..."
+            )
+            staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, current_files)
+            if not staged_ok:
+                return current_files, {
+                    "status": "error",
+                    "step": step_name,
+                    "stderr": stage_detail,
+                    "errors": [
+                        "Failed to stage files before private-attr remediation bridge review",
+                        stage_detail,
+                    ],
+                }
+
+        bridge_job_id = (
+            f"phase-b-reentry-private-attr-r{next_round}-{uuid.uuid4().hex[:8]}"
+            if reentry
+            else f"phase-b-private-attr-r{next_round}-{uuid.uuid4().hex[:8]}"
+        )
+        transition_key = _phase_b_review_transition_key(next_round, bridge_job_id)
+        log(
+            ("Re-entry " if reentry else "")
+            + "private-attr remediation: fresh bridge review "
+            f"{next_round}/{max_bridge_rounds} (job={bridge_job_id})..."
+        )
+        try:
+            bridge_result = run_bridge_review(
+                repo_root,
+                (
+                    ("Phase B re-entry" if reentry else "Phase B")
+                    + f" private-attr remediation review R{next_round} for {plan_path}"
+                ),
+                job_id=bridge_job_id,
+                verbose=verbose,
+                timeout=timeout,
+                on_started=lambda: _emit_phase_b_event(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan=plan,
+                    plan_path=plan_path,
+                    event_type="phase_b_reviewer_started",
+                    state="reviewer_started",
+                    transition_key=transition_key,
+                    summary=(
+                        "Phase B reviewer started after private-attr "
+                        f"remediation for round {next_round}"
+                    ),
+                    artifact_paths={
+                        "agent_review_report": str(result.get("agent_review_report_path") or ""),
+                        "agent_review_status": str(result.get("agent_review_status_path") or ""),
+                    },
+                ),
+            )
+        except Exception as exc:
+            return current_files, {
+                "status": "error",
+                "step": "phase_b_pager",
+                "errors": [
+                    "Phase B pager emission failed after private-attr "
+                    f"remediation reviewer launch: {exc}"
+                ],
+            }
+
+        result["bridge_rounds"] = next_round
+        result["bridge_job_id"] = bridge_job_id
+        result["bridge_stdout_path"] = bridge_result.get("stdout_path")
+        result["bridge_stderr_path"] = bridge_result.get("stderr_path")
+        bridge_decision = bridge_result.get("decision", "")
+        log(
+            ("Re-entry " if reentry else "")
+            + f"private-attr remediation bridge decision: {bridge_decision!r} "
+            f"(exit={bridge_result['exit_code']})"
+        )
+
+        if bridge_result["exit_code"] in (-1, -2, -3):
+            failure_label = {
+                -1: "timed out",
+                -2: "stale",
+                -3: "aggregation hang",
+            }[bridge_result["exit_code"]]
+            return current_files, {
+                "status": "error",
+                "step": step_name,
+                "errors": [
+                    f"Bridge review {failure_label} after private-attr remediation. "
+                    f"{bridge_result.get('stderr', '')}"
+                ],
+            }
+
+        if bridge_result["exit_code"] == 0 and bridge_decision == "GO":
+            render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
+            parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
+            blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
+            if blocking_findings:
+                return current_files, {
+                    "status": "error",
+                    "step": step_name,
+                    "errors": [
+                        "Bridge returned GO after private-attr remediation but rendered "
+                        f"transcript still contains {len(blocking_findings)} blocking finding(s). "
+                        "Fail closed."
+                    ],
+                }
+            if render or raw_texts:
+                prior_deferred_packet_path = deferred_packet_path
+                all_non_blocking, deferred_packet_path = _sync_deferred_non_blocking_state(
+                    repo_root,
+                    wave_id,
+                    all_non_blocking,
+                    non_blocking_findings,
+                    previous_packet_path=prior_deferred_packet_path,
+                    executor_created=executor_created,
+                    wave_class=wave_class,
+                    target_gate_id=target_gate_id,
+                )
+                if deferred_packet_path is not None:
+                    result["deferred_packet_path"] = deferred_packet_path
+                else:
+                    result.pop("deferred_packet_path", None)
+            try:
+                _emit_phase_b_event(
+                    repo_root,
+                    routing_record=routing_record,
+                    plan=plan,
+                    plan_path=plan_path,
+                    event_type="phase_b_bridge_completed",
+                    state="reentry_private_attr_bridge_go" if reentry else "private_attr_bridge_go",
+                    transition_key=_phase_b_transition_key(bridge_job_id, "private_attr_bridge_go"),
+                    summary=(
+                        "Phase B bridge GO after private-attr remediation "
+                        f"for round {next_round}"
+                    ),
+                    artifact_paths={
+                        "bridge_stdout": str(bridge_result.get("stdout_path") or ""),
+                        "bridge_stderr": str(bridge_result.get("stderr_path") or ""),
+                        "deferred_packet": str(deferred_packet_path or ""),
+                    },
+                )
+            except Exception as exc:
+                return current_files, {
+                    "status": "error",
+                    "step": "phase_b_pager",
+                    "errors": [
+                        "Phase B pager emission failed after private-attr "
+                        f"remediation bridge GO: {exc}"
+                    ],
+                }
+            changed_files = current_files
+            return current_files, None
+
+        if bridge_decision == "QUESTION":
+            return current_files, {
+                "status": "question_for_founder",
+                "step": step_name,
+                "errors": [
+                    "Bridge returned QUESTION after private-attr remediation. "
+                    "Founder input required."
+                ],
+            }
+
+        if bridge_result["exit_code"] == 0 and bridge_decision not in RECOGNIZED_BRIDGE_DECISIONS:
+            return current_files, {
+                "status": "error",
+                "step": step_name,
+                "errors": [
+                    "Bridge returned unrecognized success decision after private-attr "
+                    f"remediation: {bridge_decision!r}. Fail closed."
+                ],
+            }
+
+        if bridge_decision in ("REQUEST_CHANGES", "NO_GO"):
+            if bridge_result["exit_code"] not in (0, 1):
+                return current_files, {
+                    "status": "error",
+                    "step": f"{step_name}_subprocess",
+                    "errors": [
+                        "Bridge subprocess failed after private-attr remediation "
+                        f"(exit={bridge_result['exit_code']}, decision={bridge_decision}). "
+                        "Unexpected exit with a recoverable review decision is not recoverable. "
+                        f"stderr: {bridge_result.get('stderr', '')[:500]}"
+                    ],
+                }
+
+            render, raw_texts = _read_bridge_review_material(repo_root, bridge_job_id)
+            findings_text = render if render else bridge_result.get("stdout", "")
+            parsed_findings = _parse_findings_from_render(render, raw_texts) if (render or raw_texts) else []
+            blocking_findings, non_blocking_findings = _classify_findings(parsed_findings, finding_history)
+
+            if blocking_findings and finding_history:
+                unresolvable = [
+                    _finding_key(f) for f in blocking_findings
+                    if finding_history.get(_finding_key(f), 0) >= REPEAT_FINDING_CAP
+                ]
+                if unresolvable:
+                    return current_files, {
+                        "status": "error",
+                        "step": step_name,
+                        "errors": [
+                            "Blocking finding(s) after private-attr remediation were "
+                            f"unresolvable after {REPEAT_FINDING_CAP} rounds: "
+                            + ", ".join(unresolvable[:5])
+                        ],
+                        "unresolvable_findings": blocking_findings,
+                    }
+
+            if render or raw_texts:
+                prior_deferred_packet_path = deferred_packet_path
+                all_non_blocking, deferred_packet_path = _sync_deferred_non_blocking_state(
+                    repo_root,
+                    wave_id,
+                    all_non_blocking,
+                    non_blocking_findings,
+                    previous_packet_path=prior_deferred_packet_path,
+                    executor_created=executor_created,
+                    wave_class=wave_class,
+                    target_gate_id=target_gate_id,
+                )
+                if deferred_packet_path is not None:
+                    result["deferred_packet_path"] = deferred_packet_path
+                else:
+                    result.pop("deferred_packet_path", None)
+
+            if parsed_findings and not blocking_findings:
+                changed_files = current_files
+                return current_files, None
+
+            if blocking_findings:
+                blocking_text = json.dumps(blocking_findings, indent=2)
+                findings_for_impl = (
+                    f"## BLOCKING findings only (non-blocking deferred to {deferred_packet_path or 'N/A'})\n\n"
+                    + blocking_text
+                )
+            else:
+                findings_for_impl = findings_text[:4000]
+
+            _checkpoint_bridge_fix_pending(
+                repo_root,
+                plan_path=plan_path,
+                wave_id=wave_id,
+                round_num=next_round,
+                bridge_decision=bridge_decision,
+                bridge_fix_findings=findings_for_impl,
+                changed_files=current_files,
+                deferred_packet_path=deferred_packet_path,
+                implementer_changed=implementer_changed,
+                executor_created=executor_created,
+                baseline_wave_files=baseline_wave_files,
+                all_non_blocking=all_non_blocking,
+                finding_history=finding_history,
+            )
+            log(
+                ("Re-entry " if reentry else "")
+                + "private-attr remediation bridge returned "
+                f"{bridge_decision} — {len(blocking_findings)} blocking, "
+                f"{len(non_blocking_findings)} non-blocking — re-invoking implementer"
+            )
+            bridge_fix_error = _apply_bridge_fix(next_round, bridge_decision, findings_for_impl)
+            if bridge_fix_error is not None:
+                return current_files, bridge_fix_error
+
+            current_files = _collect_wave_owned_files(
+                repo_root,
+                plan_path,
+                plan_declared_files,
+                implementer_changed or None,
+                executor_created or None,
+                baseline_wave_files or None,
+            )
+            current_files = _bridge_review_scope_files(current_files)
+            changed_files = current_files
+            current_files, gate_error, _gate_remediated = _run_private_attr_gate_with_remediation(
+                current_files,
+                reentry=reentry,
+            )
+            if gate_error is not None:
+                return current_files, gate_error
+            changed_files = current_files
+            return _run_private_attr_remediation_bridge_review(
+                current_files,
+                reentry=reentry,
+            )
+
+        return current_files, {
+            "status": "error",
+            "step": step_name,
+            "errors": [
+                "Bridge did not approve the post-private-attr-remediation diff "
+                f"(decision={bridge_decision!r}, exit={bridge_result['exit_code']})."
+            ],
+        }
+
     # Determine which steps to skip based on resume state
-    _RESUME_ORDER = ["implementer", "agent_review", "bridge_fix_pending", "bridge_converged", "needs_phase_b_reentry"]
-    _skip_to_reentry = resume_after == "needs_phase_b_reentry"
+    _RESUME_ORDER = [
+        "implementer",
+        "agent_review",
+        "bridge_fix_pending",
+        "bridge_converged",
+        "private_attr_remediation_pending_review",
+        "needs_phase_b_reentry",
+        "reentry_private_attr_remediation_pending_review",
+    ]
+    _resume_private_attr_review = resume_after == "private_attr_remediation_pending_review"
+    _resume_reentry_private_attr_review = (
+        resume_after == "reentry_private_attr_remediation_pending_review"
+    )
+    _skip_to_reentry = resume_after == "needs_phase_b_reentry" or _resume_reentry_private_attr_review
     _resume_bridge_fix_pending = resume_after == "bridge_fix_pending"
     _skip_through_bridge = (
         resume_after.startswith("bridge_round_")
-        or resume_after in {"bridge_fix_pending", "bridge_converged"}
+        or resume_after in {
+            "bridge_fix_pending",
+            "bridge_converged",
+            "private_attr_remediation_pending_review",
+            "reentry_private_attr_remediation_pending_review",
+        }
         or _skip_to_reentry
     )
     _skip_through_implementer = resume_after in {"implementer", "agent_review"} or _skip_through_bridge
@@ -4239,7 +4808,12 @@ def run_phase_b(
     # Each round: bridge reviews → if not GO, re-invoke implementer with findings → next round.
     # Decision parsed from stdout. Render read by exact job_id.
     # Enhanced: classify findings by disposition, defer non-blockers, run pytest after fixes.
-    bridge_converged = _skip_through_bridge and resume_after in ("bridge_converged", "needs_phase_b_reentry")
+    bridge_converged = _skip_through_bridge and resume_after in (
+        "bridge_converged",
+        "needs_phase_b_reentry",
+        "private_attr_remediation_pending_review",
+        "reentry_private_attr_remediation_pending_review",
+    )
     deferred_packet_path: str | None = result.get("deferred_packet_path")
 
     # Resume from saved bridge round instead of restarting from 1
@@ -4288,6 +4862,7 @@ def run_phase_b(
             executor_created or None,
             baseline_wave_files or None,
         )
+        changed_files = _bridge_review_scope_files(changed_files)
         if changed_files:
             log(f"Staging {len(changed_files)} wave-owned files before bridge review...")
             staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, changed_files)
@@ -4624,20 +5199,22 @@ def run_phase_b(
         _clear_state(repo_root)
         return result
 
-    # Persist state after bridge convergence
-    _save_state(repo_root, {
-        "plan_path": plan_path,
-        "completed_step": "bridge_converged",
-        "wave_id": wave_id,
-        "bridge_rounds": result["bridge_rounds"],
-        "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
-        "deferred_packet_path": deferred_packet_path,
-        "implementer_changed": sorted(implementer_changed),
-        "executor_created": sorted(executor_created),
-        "baseline_wave_files": sorted(baseline_wave_files),
-        "all_non_blocking": all_non_blocking,
-        "finding_history": finding_history,
-    })
+    # Persist state after bridge convergence unless a stricter private-attr
+    # remediation checkpoint is already the active resume authority.
+    if not (_resume_private_attr_review or _resume_reentry_private_attr_review):
+        _save_state(repo_root, {
+            "plan_path": plan_path,
+            "completed_step": "bridge_converged",
+            "wave_id": wave_id,
+            "bridge_rounds": result["bridge_rounds"],
+            "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
+            "deferred_packet_path": deferred_packet_path,
+            "implementer_changed": sorted(implementer_changed),
+            "executor_created": sorted(executor_created),
+            "baseline_wave_files": sorted(baseline_wave_files),
+            "all_non_blocking": all_non_blocking,
+            "finding_history": finding_history,
+        })
 
     # Resume from NEEDS_PHASE_B re-entry: skip pytest gate + staging + supervisor,
     # jump directly into the re-entry loop below.
@@ -4721,6 +5298,19 @@ def run_phase_b(
             executor_created or None,
             baseline_wave_files or None,
         )
+        changed_files, private_attr_error, private_attr_remediated = _run_private_attr_gate_with_remediation(
+            changed_files,
+            reentry=False,
+        )
+        if private_attr_error is not None:
+            return private_attr_error
+        if private_attr_remediated or _resume_private_attr_review:
+            changed_files, private_attr_bridge_error = _run_private_attr_remediation_bridge_review(
+                changed_files,
+                reentry=False,
+            )
+            if private_attr_bridge_error is not None:
+                return private_attr_bridge_error
         final_test_files = _select_pytest_gate_files(changed_files)
         if final_test_files:
             log(f"Final pytest gate: running {len(final_test_files)} test file(s)...")
@@ -4951,27 +5541,32 @@ def run_phase_b(
     if decision == "NEEDS_PHASE_B":
         # Re-entry: implementer fixes → bridge reviews → loop
         log("NEEDS_PHASE_B — re-invoking implementer then bridge loop")
-        reentry_converged = False
+        reentry_converged = _resume_reentry_private_attr_review
         # Initial findings come from supervisor; subsequent rounds use bridge findings
         findings_for_impl = result.get("pre_commit_summary") or supervisor_parsed.get("summary", "Fix required")
 
-        # Persist needs_phase_b_reentry state so crash-resume re-enters here
-        _save_state(repo_root, {
-            "plan_path": plan_path,
-            "completed_step": "needs_phase_b_reentry",
-            "wave_id": wave_id,
-            "bridge_rounds": result["bridge_rounds"],
-            "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
-            "deferred_packet_path": deferred_packet_path,
-            "implementer_changed": sorted(implementer_changed),
-            "executor_created": sorted(executor_created),
-            "baseline_wave_files": sorted(baseline_wave_files),
-            "all_non_blocking": all_non_blocking,
-            "finding_history": finding_history,
-            "reentry_findings": findings_for_impl,
-        })
+        # Persist needs_phase_b_reentry state so crash-resume re-enters here.
+        # Do not overwrite a re-entry private-attr pending-review checkpoint;
+        # that stricter state must survive until the fresh review runs.
+        if not _resume_reentry_private_attr_review:
+            _save_state(repo_root, {
+                "plan_path": plan_path,
+                "completed_step": "needs_phase_b_reentry",
+                "wave_id": wave_id,
+                "bridge_rounds": result["bridge_rounds"],
+                "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
+                "deferred_packet_path": deferred_packet_path,
+                "implementer_changed": sorted(implementer_changed),
+                "executor_created": sorted(executor_created),
+                "baseline_wave_files": sorted(baseline_wave_files),
+                "all_non_blocking": all_non_blocking,
+                "finding_history": finding_history,
+                "reentry_findings": findings_for_impl,
+            })
 
         for reentry_round in range(result["bridge_rounds"] + 1, max_bridge_rounds + 1):
+            if reentry_converged:
+                break
             log(f"Re-entry round {reentry_round}/{max_bridge_rounds}...")
             result["bridge_rounds"] = reentry_round
 
@@ -5055,6 +5650,7 @@ def run_phase_b(
                     return reentry_fix_error
 
             if changed_files:
+                changed_files = _bridge_review_scope_files(changed_files)
                 log(f"Re-entry: staging {len(changed_files)} wave-owned files before bridge review...")
                 staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, changed_files)
                 if not staged_ok:
@@ -5309,6 +5905,7 @@ def run_phase_b(
                     executor_created or None,
                     baseline_wave_files or None,
                 )
+                changed_files = _bridge_review_scope_files(changed_files)
 
                 # Checkpoint re-entry state so crash-resume picks up new findings and round
                 _save_state(repo_root, {
@@ -5460,6 +6057,21 @@ def run_phase_b(
             executor_created or None,
             baseline_wave_files or None,
         )
+        changed_files, private_attr_error, private_attr_remediated = _run_private_attr_gate_with_remediation(
+            changed_files,
+            reentry=True,
+        )
+        if private_attr_error is not None:
+            _clear_state(repo_root)
+            return private_attr_error
+        if private_attr_remediated or _resume_reentry_private_attr_review:
+            changed_files, private_attr_bridge_error = _run_private_attr_remediation_bridge_review(
+                changed_files,
+                reentry=True,
+            )
+            if private_attr_bridge_error is not None:
+                _clear_state(repo_root)
+                return private_attr_bridge_error
         reentry_test_files = _select_pytest_gate_files(changed_files)
         if reentry_test_files:
             log(f"Re-entry pytest gate: running {len(reentry_test_files)} test file(s)...")
@@ -5630,6 +6242,7 @@ def run_phase_b(
                 baseline_wave_files or None,
             )
             changed_files = _collect_commit_bound_files(repo_root, changed_files)
+            changed_files = _bridge_review_scope_files(changed_files)
             result["status"] = "needs_phase_b"
             result["step"] = "post_reentry_supervisor"
             detail = result.get("pre_commit_summary", "")

@@ -68,6 +68,44 @@ def _init_git_repo(repo: Path) -> None:
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
 
 
+class TestPrivateAttrGate:
+    def test_select_private_attr_gate_files_only_returns_python_tests(self):
+        selected = pb_mod.select_private_attr_gate_files([
+            "mu/tests/tools/test_phase_b_executor.py",
+            "tests/tools/test_commit_executor_receipt.py",
+            "mu/tools/executors/phase_b_executor.py",
+            "docs/test_notes.md",
+        ])
+
+        assert selected == [
+            "mu/tests/tools/test_phase_b_executor.py",
+            "tests/tools/test_commit_executor_receipt.py",
+        ]
+
+    def test_private_attr_gate_failure_reports_checker_output(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        checker = repo / "tools" / "checks" / "linters" / "check_private_attr_access.py"
+        checker.parent.mkdir(parents=True)
+        checker.write_text(
+            "import sys\n"
+            "print('ERROR: Found private attr access in tests/:')\n"
+            "print('  tests/tools/test_phase_b_executor.py:10: ._helper')\n"
+            "sys.exit(1)\n",
+            encoding="utf-8",
+        )
+
+        result = pb_mod.run_private_attr_gate(
+            repo,
+            ["tests/tools/test_phase_b_executor.py"],
+        )
+
+        assert result["passed"] is False
+        assert result["skipped"] is False
+        assert result["test_files"] == ["tests/tools/test_phase_b_executor.py"]
+        assert "ERROR: Found private attr access in tests/" in result["stdout"]
+
+
 class TestBuildImplementationPrompt:
     """Test that the implementer prompt is structured correctly."""
 
@@ -2706,6 +2744,194 @@ class TestFinalPytestGate:
         assert pager_calls[3]["state"] == "final_pytest_started"
         assert pager_calls[4]["state"] == "final_pytest_passed"
 
+    def test_private_attr_gate_remediates_before_commit_handoff(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        gate_fail = {
+            "passed": False,
+            "skipped": False,
+            "exit_code": 1,
+            "stdout": "ERROR: Found private attr access in tests/:",
+            "stderr": "",
+            "test_files": ["mu/tests/tools/test_foo.py"],
+        }
+        gate_pass = {
+            "passed": True,
+            "skipped": False,
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": "",
+            "test_files": ["mu/tests/tools/test_foo.py"],
+        }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", return_value={
+                 "enabled": True, "event_id": "evt", "attempted": [], "budget_exhausted": False,
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1",
+             }) as mock_bridge, \
+             patch.object(pb_mod, "run_private_attr_gate", side_effect=[gate_fail, gate_pass]), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json") as mock_handoff:
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=2)
+
+        assert result["status"] == "commit_ready"
+        assert mock_impl.invoke_implementer.call_count == 2
+        remediation_source = mock_impl.build_implementation_prompt.call_args_list[1].args[0]
+        assert "Private Attribute Test Integrity Gate Failure" in remediation_source
+        assert mock_bridge.call_count == 2
+        assert "private-attr remediation review" in mock_bridge.call_args_list[1].args[1]
+        mock_handoff.assert_called_once()
+
+    def test_private_attr_bridge_request_changes_reinvokes_implementer(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        gate_fail = {
+            "passed": False,
+            "skipped": False,
+            "exit_code": 1,
+            "stdout": "ERROR: Found private attr access in tests/:",
+            "stderr": "",
+            "test_files": ["mu/tests/tools/test_foo.py"],
+        }
+        gate_pass = {
+            "passed": True,
+            "skipped": False,
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": "",
+            "test_files": ["mu/tests/tools/test_foo.py"],
+        }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", return_value={
+                 "enabled": True, "event_id": "evt", "attempted": [], "budget_exhausted": False,
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=[
+                 {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1"},
+                 {
+                     "exit_code": 1,
+                     "stdout": "REQUEST_CHANGES\nprivate attr follow-up\n",
+                     "stderr": "",
+                     "decision": "REQUEST_CHANGES",
+                     "job_id": "j2",
+                 },
+                 {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j3"},
+             ]) as mock_bridge, \
+             patch.object(pb_mod, "run_private_attr_gate", side_effect=[gate_fail, gate_pass, gate_pass]), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=3)
+
+        assert result["status"] == "commit_ready"
+        assert mock_impl.invoke_implementer.call_count == 3
+        bridge_fix_source = mock_impl.build_implementation_prompt.call_args_list[2].args[0]
+        assert "Bridge Round 2 Findings (REQUEST_CHANGES)" in bridge_fix_source
+        assert "private attr follow-up" in bridge_fix_source
+        assert mock_bridge.call_count == 3
+        assert "private-attr remediation review R3" in mock_bridge.call_args_list[2].args[1]
+
+    def test_resume_private_attr_remediation_requires_fresh_bridge_review(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+        state_dir = repo / ".agent_bus" / "executors"
+        state_dir.mkdir(parents=True)
+        state_file = state_dir / "phase_b_state.json"
+        changed_files = ["mu/tests/tools/test_foo.py"]
+        state_file.write_text(json.dumps({
+            "plan_path": "reports/control_plane/plan.md",
+            "completed_step": "private_attr_remediation_pending_review",
+            "wave_id": "plan",
+            "bridge_rounds": 1,
+            "deferred_packet_path": None,
+            "implementer_changed": changed_files,
+            "executor_created": [],
+            "baseline_wave_files": [],
+            "all_non_blocking": [],
+            "finding_history": {},
+            "private_attr_gate_test_files": changed_files,
+        }))
+
+        mock_impl = _make_mock_impl()
+        gate_pass = {
+            "passed": True,
+            "skipped": False,
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": "",
+            "test_files": changed_files,
+        }
+
+        def bridge_side_effect(*args, **kwargs):
+            saved_state = json.loads(state_file.read_text(encoding="utf-8"))
+            assert saved_state["completed_step"] == "private_attr_remediation_pending_review"
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": "j2",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", return_value={
+                 "enabled": True, "event_id": "evt", "attempted": [], "budget_exhausted": False,
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}) as mock_agents, \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side_effect) as mock_bridge, \
+             patch.object(pb_mod, "run_private_attr_gate", return_value=gate_pass), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=3)
+
+        assert result["status"] == "commit_ready"
+        assert result.get("resumed_from") == "private_attr_remediation_pending_review"
+        mock_impl.invoke_implementer.assert_not_called()
+        mock_agents.assert_not_called()
+        mock_bridge.assert_called_once()
+        assert "private-attr remediation review" in mock_bridge.call_args.args[1]
+
 
 class TestBridgeRenderAssociation:
     """Bridge review uses exact job_id, not newest/freshest render."""
@@ -2727,6 +2953,24 @@ class TestBridgeRenderAssociation:
             assert "--job-id" in call_args
             idx = call_args.index("--job-id")
             assert call_args[idx + 1] == "phase-b-r1-abc12345"
+
+    def test_run_bridge_review_places_bus_dir_before_subcommand(self, tmp_path):
+        """Phase B must pass bridge_supervisor global args before the review subcommand."""
+        with patch.object(pb_mod, "_active_bus_dir", return_value=Path(".agent_bus-test")), \
+             patch.object(pb_mod, "_run_bridge_review_subprocess") as mock_run:
+            mock_run.return_value = {
+                "exit_code": 0, "stdout": "GO\n", "stderr": "",
+            }
+            result = pb_mod.run_bridge_review(
+                tmp_path,
+                "test review",
+                job_id="phase-b-r1-abc12345",
+                timeout=10,
+            )
+
+        call_args = mock_run.call_args[0][1]
+        assert call_args[2:5] == ["--bus-dir", ".agent_bus-test", "review"]
+        assert result["exit_code"] == 0
 
     def test_run_bridge_review_uses_configured_reviewer(self, tmp_path, monkeypatch):
         """Phase B bridge review must honor executor-configured reviewer backend."""
@@ -3045,7 +3289,8 @@ class TestBridgeLoopReinvokesImplementer:
                  "exit_code": 1, "stdout": "QUESTION\n", "stderr": "",
                  "decision": "QUESTION", "job_id": "j1",
              }), \
-             patch.object(pb_mod, "_read_bridge_render", return_value="question content"):
+             patch.object(pb_mod, "_read_bridge_render", return_value="question content"), \
+             patch.object(pb_mod, "_stage_files", return_value=True):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
         assert result["status"] == "question_for_founder"

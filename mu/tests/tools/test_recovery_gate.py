@@ -677,6 +677,27 @@ class TestStagePathSymlinkAliasRecovery:
             {"status": "failed", "executor": "commit_executor", "stdout": stdout}
         ) == FailureClass.L4_CONTRACT_VIOLATION
 
+    def test_private_attr_prepush_failure_is_narrow_test_integrity_class(self):
+        payload = json.dumps({
+            "status": "error",
+            "step": "run_pre_push_script",
+            "errors": [
+                "pre-push-fast failed: ERROR: Found private attr access in tests/:\n"
+                "  tests/tools/test_commit_executor_receipt.py:631: "
+                "._refresh_tasks_tracker_note_after_packet_truth"
+            ],
+        })
+
+        fc = rg_mod.classify_failure({
+            "status": "failed",
+            "executor": "commit_executor",
+            "failure_class": "pr_conflicting",
+            "stdout": payload,
+        })
+
+        assert fc == FailureClass.PRIVATE_ATTR_TEST_INTEGRITY
+        assert rg_mod.tier_for(fc) == 3
+
     def test_tracker_note_contract_mismatch(self):
         payload = {
             "status": "error",

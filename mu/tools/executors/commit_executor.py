@@ -154,6 +154,7 @@ _STANDALONE_RECOVERY_STATUSES = frozenset({
 _STANDALONE_RECOVERY_ERROR_STEPS = frozenset({
     "run_pre_push_script",
     "run_pre_commit_script",
+    "private_attr_gate",
     "stage_files",
     "implementer",
     "implementer_bridge_fix",
@@ -1119,8 +1120,182 @@ def _refresh_tasks_tracker_note_after_packet_truth(
     try:
         _run(["git", "add", "--", "TASKS.md"], cwd=repo_root)
     except subprocess.CalledProcessError as exc:
-        return f"git add failed for refreshed TASKS.md tracker note: {exc.stderr.strip()}"
+        stderr = exc.stderr.strip()
+        retry, detail = _git_index_lock_self_cleared_without_owner(repo_root, stderr)
+        if not retry:
+            return f"git add failed for refreshed TASKS.md tracker note ({detail}): {stderr}"
+        try:
+            _run(["git", "add", "--", "TASKS.md"], cwd=repo_root)
+        except subprocess.CalledProcessError as retry_exc:
+            return (
+                "git add failed for refreshed TASKS.md tracker note after "
+                f"self-cleared index.lock retry ({detail}): {retry_exc.stderr.strip()}"
+            )
     return None
+
+
+def refresh_tasks_tracker_note_after_packet_truth(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    tracker_note_text: str,
+) -> str | None:
+    """Public seam for commit-packet truth refresh tests and callers."""
+    return _refresh_tasks_tracker_note_after_packet_truth(
+        repo_root,
+        wave_id=wave_id,
+        tracker_note_text=tracker_note_text,
+    )
+
+
+def _git_index_lock_candidates_from_diagnostic(repo_root: Path, diagnostic: str) -> list[Path]:
+    """Return candidate index.lock paths mentioned by git diagnostics."""
+    candidates: list[Path] = []
+
+    def add(raw: str) -> None:
+        text = raw.strip().strip("'\"`:,.;")
+        if not text or "index.lock" not in text:
+            return
+        path = Path(text)
+        if not path.is_absolute():
+            path = repo_root / path
+        resolved = path.resolve(strict=False)
+        if resolved not in candidates:
+            candidates.append(resolved)
+
+    for match in re.finditer(r"['\"]([^'\"]*index\.lock)['\"]", diagnostic):
+        add(match.group(1))
+    for match in re.finditer(r"(?<!\S)(\S*index\.lock)(?!\S)", diagnostic):
+        add(match.group(1))
+    add(str(repo_root / ".git" / "index.lock"))
+    return candidates
+
+
+def _path_contains(parent: Path, child: Path) -> bool:
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _looks_like_git_process(command: str) -> bool:
+    if not command:
+        return False
+    argv0 = command.strip().split(None, 1)[0]
+    base = Path(argv0).name
+    return base == "git" or base.startswith("git-")
+
+
+def _process_cwd(pid: int) -> tuple[Path | None, str | None]:
+    proc_cwd = Path("/proc") / str(pid) / "cwd"
+    if proc_cwd.exists():
+        try:
+            return proc_cwd.resolve(strict=True), None
+        except FileNotFoundError:
+            return None, None
+        except OSError as exc:
+            return None, str(exc)
+
+    try:
+        proc = subprocess.run(
+            ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+    except FileNotFoundError:
+        return None, "lsof unavailable"
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return None, str(exc)
+
+    if proc.returncode != 0 and not proc.stdout:
+        return None, None
+    for line in proc.stdout.splitlines():
+        if line.startswith("n") and len(line) > 1:
+            return Path(line[1:]).resolve(strict=False), None
+    return None, None
+
+
+def _git_owner_processes_for_repo(repo_root: Path) -> list[str]:
+    """Return live git processes that appear to own the current repo."""
+    repo = repo_root.resolve(strict=False)
+    git_dir = (repo / ".git").resolve(strict=False)
+    try:
+        proc = subprocess.run(
+            ["ps", "-axo", "pid=,command="],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return [f"git owner process probe unavailable: {exc}"]
+    if proc.returncode != 0:
+        return [f"git owner process probe failed: {(proc.stderr or '').strip() or proc.returncode}"]
+
+    owners: list[str] = []
+    current_pid = os.getpid()
+    for line in proc.stdout.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        parts = text.split(None, 1)
+        if len(parts) != 2:
+            continue
+        try:
+            pid = int(parts[0])
+        except ValueError:
+            continue
+        if pid == current_pid:
+            continue
+        command = parts[1]
+        if not _looks_like_git_process(command):
+            continue
+        if str(repo) in command or str(git_dir) in command:
+            owners.append(f"pid={pid} command={command[:180]}")
+            continue
+        cwd, cwd_error = _process_cwd(pid)
+        if cwd is not None:
+            cwd = cwd.resolve(strict=False)
+            if _path_contains(repo, cwd):
+                owners.append(f"pid={pid} cwd={cwd} command={command[:180]}")
+            continue
+        if cwd_error:
+            owners.append(f"pid={pid} cwd_probe_error={cwd_error} command={command[:180]}")
+    return owners
+
+
+def _git_index_lock_self_cleared_without_owner(
+    repo_root: Path,
+    diagnostic: str,
+) -> tuple[bool, str]:
+    """Classify git-add index.lock failures without touching .git internals.
+
+    Git's index writer owns the lock by keeping index.lock present. Retry is
+    allowed only when the failure named index.lock and every candidate lock path
+    has already disappeared before recovery code runs.
+    """
+    if "index.lock" not in diagnostic:
+        return False, "git add failure did not name index.lock"
+
+    candidates = _git_index_lock_candidates_from_diagnostic(repo_root, diagnostic)
+    existing = [str(path) for path in candidates if path.exists()]
+    if existing:
+        return (
+            False,
+            "index.lock still exists or an active git owner remains: "
+            + ", ".join(existing),
+        )
+    owners = _git_owner_processes_for_repo(repo_root)
+    if owners:
+        return (
+            False,
+            "index.lock self-cleared but active git owner remains: "
+            + "; ".join(owners[:3]),
+        )
+    return True, "index.lock self-cleared before retry; no lock owner remained"
 
 
 def refresh_commit_path_packet_truth(
@@ -1472,6 +1647,101 @@ def _collect_commit_test_files(repo_root: Path, staged_files: list[str]) -> list
                         )
                     )
     return sorted(candidates)
+
+
+def _collect_private_attr_gate_files(repo_root: Path, staged_files: list[str]) -> list[str]:
+    """Return staged Python test files that should trigger the private-attr gate."""
+    candidates: set[str] = set()
+    for path in staged_files:
+        normalized = path.replace("\\", "/")
+        if _is_test_file(normalized) and normalized.endswith(".py"):
+            candidates.add(_canonical_repo_test_path(repo_root, normalized))
+    return sorted(candidates)
+
+
+def run_private_attr_test_gate(
+    repo_root: Path,
+    staged_files: list[str],
+    *,
+    timeout: int = 120,
+) -> dict[str, Any]:
+    """Run the repo's private-attribute checker when staged Python tests changed."""
+    gate_files = _collect_private_attr_gate_files(repo_root, staged_files)
+    if not gate_files:
+        return {
+            "passed": True,
+            "skipped": True,
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": "",
+            "test_files": [],
+        }
+    checker = repo_root / "tools" / "checks" / "linters" / "check_private_attr_access.py"
+    if not checker.exists():
+        checker = SCRIPT_DIR.parents[2] / "tools" / "checks" / "linters" / "check_private_attr_access.py"
+    if not checker.exists():
+        return {
+            "passed": False,
+            "skipped": False,
+            "exit_code": 127,
+            "stdout": "",
+            "stderr": f"private-attr checker not found: {checker}",
+            "test_files": gate_files,
+        }
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(checker), str(repo_root)],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+        return {
+            "passed": completed.returncode == 0,
+            "skipped": False,
+            "exit_code": completed.returncode,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "test_files": gate_files,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "passed": False,
+            "skipped": False,
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": f"private-attr checker timed out after {timeout}s",
+            "test_files": gate_files,
+        }
+
+
+def _private_attr_gate_error(gate_result: dict[str, Any]) -> str:
+    detail = _tail_failure_excerpt(
+        "\n".join(
+            part
+            for part in (
+                str(gate_result.get("stdout") or ""),
+                str(gate_result.get("stderr") or ""),
+            )
+            if part
+        ),
+        limit=1500,
+        max_lines=30,
+    )
+    test_files = gate_result.get("test_files") or []
+    file_summary = ", ".join(str(path) for path in test_files[:8])
+    if len(test_files) > 8:
+        file_summary += f", ... (+{len(test_files) - 8} more)"
+    message = (
+        "private-attr test-integrity gate failed before local commit creation "
+        f"(exit={gate_result.get('exit_code')})"
+    )
+    if file_summary:
+        message += f" for staged test file(s): {file_summary}"
+    if detail:
+        message += f": {detail}"
+    return message
 
 
 def _run_pytest_on_files(
@@ -6362,6 +6632,21 @@ def _run_commit_pipeline_impl(
                 ],
                 "steps_completed": result["steps_completed"],
             }
+
+    private_attr_gate = run_private_attr_test_gate(repo_root, staged_python_files)
+    if not private_attr_gate["passed"]:
+        return {
+            "status": "error",
+            "step": "private_attr_gate",
+            "errors": [_private_attr_gate_error(private_attr_gate)],
+            "private_attr_gate": private_attr_gate,
+            "steps_completed": result["steps_completed"],
+        }
+    if not private_attr_gate.get("skipped"):
+        log(
+            "Step 8c: private-attr test-integrity gate passed for "
+            f"{len(private_attr_gate.get('test_files') or [])} staged test file(s)"
+        )
 
     result["steps_completed"].append("run_pre_commit_script")
     log("Step 8: pre-commit script passed")

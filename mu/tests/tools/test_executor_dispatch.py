@@ -1108,11 +1108,21 @@ class TestPhaseAPlanCreation:
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         (tmp_path / "reports" / "control_plane").mkdir(parents=True)
         existing = tmp_path / "reports" / "control_plane" / f"test_plan_{date_str}.md"
-        existing.write_text("# existing plan")
+        existing.write_text(
+            "# Existing Plan\n"
+            "Phase-A-Lock: UNLOCKED\n\n"
+            "## Scope\nexisting\n"
+            "## Work Items\nexisting\n"
+            "## Constraints\nexisting\n"
+            "## Stop Conditions\nexisting\n"
+            "## Acceptance Criteria\nexisting\n"
+            "## Grounding\nexisting\n",
+            encoding="utf-8",
+        )
         scope = {"request": "new content"}
         path = phase_a_mod.create_plan_draft(tmp_path, "test_plan", scope)
         assert path == existing
-        assert path.read_text() == "# existing plan"
+        assert "new content" not in path.read_text(encoding="utf-8")
 
     def test_lock_plan(self, tmp_path):
         (tmp_path / "reports" / "control_plane").mkdir(parents=True)
@@ -8205,6 +8215,65 @@ class TestModularSurfaceEntrypoints:
         mock_recovery.assert_called_once()
         mock_retry.assert_called_once()
 
+    def test_chained_private_attr_failure_routes_to_recovery_not_commit_only(self, tmp_path):
+        plan_path = tmp_path / "reports" / "control_plane" / "plan.md"
+        plan_path.parent.mkdir(parents=True)
+        plan_path.write_text("# plan\n", encoding="utf-8")
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        _write_phase_b_handoff(handoff_dir / "phase_b_handoff.json")
+
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["phase-a", "--plan-name", "surface-wave", "--json"]
+        )
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"], 0, json.dumps({"plan_path": str(plan_path)}), ""
+        )
+        phase_b_ok = subprocess.CompletedProcess(
+            ["phase-b"], 0, json.dumps({"status": "commit_ready"}), ""
+        )
+        commit_fail = subprocess.CompletedProcess(
+            ["commit"],
+            1,
+            json.dumps({
+                "status": "error",
+                "step": "private_attr_gate",
+                "errors": ["ERROR: Found private attr access in tests/"],
+            }),
+            "",
+        )
+        recovery = {
+            "recovered": False,
+            "exhausted": False,
+            "failure_class": "private_attr_test_integrity",
+            "tier": 3,
+            "action": "recovery_loop",
+            "detail": "delegate Phase B remediation",
+        }
+
+        with patch.object(
+            dispatch_mod,
+            "_run_executor_in_group",
+            side_effect=[phase_a_ok, phase_b_ok, commit_fail],
+        ), \
+             patch.object(dispatch_mod, "attempt_recovery", return_value=recovery) as mock_recovery, \
+             patch.object(dispatch_mod, "_retry_commit_only") as mock_retry:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=tmp_path,
+                config={
+                    "timeouts": {
+                        "phase_a_executor": 300,
+                        "phase_b_executor": 3600,
+                        "commit_executor": 300,
+                    }
+                },
+            )
+
+        assert exit_code == 1
+        mock_recovery.assert_called_once()
+        mock_retry.assert_not_called()
+
     def test_commit_surface_requires_exactly_one_handoff_or_routing_record(self, tmp_path):
         handoff_path = tmp_path / "handoff.json"
         handoff_path.write_text("{}", encoding="utf-8")
@@ -9122,11 +9191,20 @@ class TestPhaseATrackedPacketReuse:
         assert path == existing
 
     def test_reuses_substantial_unlocked_packet(self, tmp_path):
-        """If a substantial (>10 lines) unlocked packet exists, reuse it."""
+        """If a substantial unlocked packet has required sections, reuse it."""
         plan_dir = tmp_path / "reports" / "control_plane"
         plan_dir.mkdir(parents=True)
         existing = plan_dir / "my_plan_2026-03-20.md"
-        content = "# My Plan\nPhase-A-Lock: UNLOCKED\n" + "\n".join(f"Line {i}" for i in range(20))
+        content = (
+            "# My Plan\n"
+            "Phase-A-Lock: UNLOCKED\n\n"
+            "## Scope\nexisting\n"
+            "## Work Items\nexisting\n"
+            "## Constraints\nexisting\n"
+            "## Stop Conditions\nexisting\n"
+            "## Acceptance Criteria\nexisting\n"
+            "## Grounding\nexisting\n"
+        )
         existing.write_text(content)
         scope = {"request": "new content"}
         path = phase_a_mod.create_plan_draft(tmp_path, "my_plan", scope)
@@ -9223,7 +9301,17 @@ class TestFindTrackedPacket:
         plan_dir = tmp_path / "reports" / "control_plane"
         plan_dir.mkdir(parents=True)
         exact = plan_dir / "my_plan.md"
-        exact.write_text("# Plan\nPhase-A-Lock: UNLOCKED\n")
+        exact.write_text(
+            "# Plan\n"
+            "Phase-A-Lock: UNLOCKED\n\n"
+            "## Scope\nexisting\n"
+            "## Work Items\nexisting\n"
+            "## Constraints\nexisting\n"
+            "## Stop Conditions\nexisting\n"
+            "## Acceptance Criteria\nexisting\n"
+            "## Grounding\nexisting\n",
+            encoding="utf-8",
+        )
         result = phase_a_mod._find_tracked_packet(plan_dir, "my_plan")  # ANTICHEAT_OK: testing tracked packet reuse
         assert result == exact
 
