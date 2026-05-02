@@ -9,9 +9,9 @@
 ## (a) New regression test
 
 - **Function:** `test_emit_transition_event_routes_claude_through_real_dispatch_target`
-- **File:** `mu/tests/tools/test_pipeline_agent_pager.py:775-813`
+- **File:** `mu/tests/tools/test_pipeline_agent_pager.py:1829-1866`
 
-The test invokes the real `pager_mod.emit_transition_event(repo, route="claude", ...)` so the real `_dispatch_pending_locked` and the real `_dispatch_target` are executed. It patches ONLY `pager_mod.subprocess.run` at the `_dispatch_claude` boundary (the same boundary used by the existing direct `_dispatch_claude` adapter tests at `mu/tests/tools/test_pipeline_agent_pager.py:548-772`). It does NOT monkeypatch `pager_mod._dispatch_target`, which is the exact pattern that masked claude-path coverage in the prior tests at `:204-248` and `:252-302` cited in the Plan §Status.
+The test writes repo config with `route="claude"` and invokes the real `pager_mod.emit_transition_event(repo, ...)`, so the real `_dispatch_pending_locked` and the real `_dispatch_target` are executed. It patches ONLY `pager_mod.subprocess.run` at the `_dispatch_claude` boundary. It does NOT monkeypatch `pager_mod._dispatch_target`, which is the exact pattern that masked claude-path coverage in the prior tests cited in the Plan status.
 
 ## (b) Acceptance command and output
 
