@@ -31,8 +31,8 @@ trigger gaps.
 
 - Implemented and targeted-tested on 2026-04-29.
 - Targeted validation:
-  `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_receipt.py`
-  passed with `1330 passed in 220.58s`.
+  `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/docs/test_doc_placement_rules.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_receipt.py`
+  passed; the commit path truth refresh below records the same validation surface.
 - Deferred blocker archived to
   `reports/archive/deferred/hybrid_recovery_inert_structural_gaps_2026-04-17_closed-by-hybrid-recovery-inert-structural-gaps-2026-04-17.md`.
 
@@ -99,7 +99,7 @@ Admitted files for this wave:
 7. `mu/tests/tools/test_commit_executor_receipt.py`
 8. `reports/control_plane/hybrid_recovery_inert_structural_gaps_2026-04-17.md`
 9. `reports/deferred/blocking/hybrid_recovery_inert_structural_gaps_2026-04-17.md`
-10. `reports/deferred/non_blocking/hybrid-recovery-inert-structural-gaps-2026-04-17_bridge_nonblockers.md`
+10. `reports/archive/deferred/hybrid-recovery-inert-structural-gaps-2026-04-17_bridge_nonblockers_closed-by-deferred-report-truth-cleanup-2026-05-02.md`
 11. `reports/archive/deferred/hybrid_recovery_inert_structural_gaps_2026-04-17_closed-by-hybrid-recovery-inert-structural-gaps-2026-04-17.md`
 12. `.gitignore`
 13. `mu/tests/docs/test_doc_placement_rules.py`
