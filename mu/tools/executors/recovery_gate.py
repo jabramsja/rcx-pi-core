@@ -272,10 +272,12 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         if part
     )
     if (
-        "found private attr access in tests/" in private_attr_signal
-        or "private-attr test-integrity gate failed" in private_attr_signal
-        or "private_attr_gate" in private_attr_signal
+        status_failed
+        and "private-attr checker" in private_attr_signal
+        and "timed out after" in private_attr_signal
     ):
+        return FailureClass.PROCESS_TIMEOUT
+    if "found private attr access in tests/" in private_attr_signal:
         return FailureClass.PRIVATE_ATTR_TEST_INTEGRITY
     if status_key in _STANDALONE_STATUS_FAILURE_CLASSES:
         return _STANDALONE_STATUS_FAILURE_CLASSES[status_key]

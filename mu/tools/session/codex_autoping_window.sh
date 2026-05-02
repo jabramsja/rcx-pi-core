@@ -179,17 +179,68 @@ def active_pid_from_state():
     return state, pid
 
 
+def proc_stat(pid):
+    stat_path = Path("/proc") / str(pid) / "stat"
+    try:
+        text = stat_path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+    close_paren = text.rfind(")")
+    if close_paren == -1:
+        return None
+    fields = text[close_paren + 2:].split()
+    if len(fields) < 3:
+        return None
+    try:
+        return {"state": fields[0], "pgrp": int(fields[2])}
+    except (TypeError, ValueError):
+        return None
+
+
+def pid_is_zombie(pid):
+    stat = proc_stat(pid)
+    return bool(stat and stat.get("state") == "Z")
+
+
 def pid_alive(pid):
+    if pid_is_zombie(pid):
+        return False
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
-    return True
+    return not pid_is_zombie(pid)
+
+
+def process_group_alive_from_proc(pgid):
+    proc_dir = Path("/proc")
+    if not proc_dir.is_dir():
+        return None
+    try:
+        entries = list(proc_dir.iterdir())
+    except OSError:
+        return None
+    saw_member = False
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        stat = proc_stat(int(entry.name))
+        if not stat or stat.get("pgrp") != pgid:
+            continue
+        saw_member = True
+        if stat.get("state") != "Z":
+            return True
+    return False if saw_member else None
 
 
 def process_group_alive(pgid):
+    proc_alive = process_group_alive_from_proc(pgid)
+    if proc_alive is not None:
+        return proc_alive
     try:
         os.killpg(pgid, 0)
     except ProcessLookupError:
