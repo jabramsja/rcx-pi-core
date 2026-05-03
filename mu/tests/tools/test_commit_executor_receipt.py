@@ -2675,7 +2675,7 @@ class TestRequiredCIGreenGuard:
         assert response is not None
         assert response["status"] == "error"
         assert response["step"] == "wait_ci"
-        assert response["failure_class"] == "test_failure"
+        assert response["failure_class"] == "unknown_error"
         assert response["errors"][0].startswith(
             "Required CI checks did not reach green after gh watch returned. "
         )
@@ -2748,12 +2748,13 @@ class TestRequiredCIGreenGuard:
         assert response["step"] == "wait_ci"
         assert response["failure_class"] == "test_failure"
         assert response["ci_failures"] == [
-            {
-                "name": "test",
-                "workflow": "CI",
-                "details_url": details_url,
-                "excerpt": (
-                    "FAILED tests/tools/test_recovery_gate.py::"
+                {
+                    "name": "test",
+                    "workflow": "CI",
+                    "conclusion": "FAILURE",
+                    "details_url": details_url,
+                    "excerpt": (
+                        "FAILED tests/tools/test_recovery_gate.py::"
                     "TestObservabilityWorktreeResolution::"
                     "test_ensure_codex_autoping_restarts_live_watcher_when_tmux_window_missing\n"
                     "tests/tools/test_recovery_gate.py:6768: AssertionError"
@@ -2763,3 +2764,43 @@ class TestRequiredCIGreenGuard:
         assert "Failed required CI: test (CI): tests/tools/test_recovery_gate.py:6768: AssertionError" in (
             response["errors"][0]
         )
+
+    def test_wait_for_pr_ci_transport_failure_without_failed_checks_is_not_test_failure(self, tmp_path):
+        import subprocess
+
+        def completed(cmd, *, stdout="", stderr="", returncode=0):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, **kwargs):
+            if cmd == ["gh", "pr", "checks", "859", "--watch", "--required"]:
+                raise subprocess.CalledProcessError(1, cmd, stderr="network unavailable")
+            if cmd == ["gh", "pr", "checks", "859", "--required"]:
+                return completed(cmd, stdout="test\tpending\t0\t\n", returncode=8)
+            if cmd == ["gh", "pr", "view", "859", "--json", "statusCheckRollup"]:
+                return completed(cmd, stdout=json.dumps({"statusCheckRollup": []}))
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        result = {
+            "commit_sha": "a" * 40,
+            "handoff_sha": "handoff-sha",
+            "receipt_decision": "COMMIT_GO",
+            "steps_completed": ["git_commit"],
+        }
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod, "_poll_ci_checks_fallback", return_value=False):
+            response = commit_mod._wait_for_pr_ci(  # ANTICHEAT_OK: transport failures must not masquerade as tests
+                tmp_path,
+                pr_number="859",
+                result=result,
+                continuation_path=tmp_path / "continuation.json",
+                target_branch="jabramsja/test",
+                log=lambda _msg: None,
+            )
+
+        assert response is not None
+        assert response["status"] == "error"
+        assert response["step"] == "wait_ci"
+        assert response["failure_class"] == "unknown_error"
+        assert response["ci_failures"] == []
+        assert "test\tpending" in response["ci_checks_output"]

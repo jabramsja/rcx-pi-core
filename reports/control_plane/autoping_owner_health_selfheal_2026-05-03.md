@@ -99,11 +99,22 @@ a stale saved thread, restarts without `CODEX_THREAD_ID`, and proves no stale
 autoping launch remains. That makes the review fix structural in the monitor
 path instead of a one-off state cleanup.
 
+The subsequent Codex review pass on commit `b96bf18b` raised another P1 at
+`mu/tools/executors/commit_executor.py:4075`: if `gh pr checks --watch` failed
+for transport or CLI reasons and fallback polling also failed without failed
+required-check evidence, commit executor still forced `failure_class:
+"test_failure"`. This follow-up now classifies wait-CI failures as
+`test_failure` only when failed-check evidence exists; no-failed-check transport
+or pending-state failures report `unknown_error` so recovery does not route them
+into test repair. The regression test covers the transport/no-failed-check
+path directly.
+
 ## Validation
 
 - `bash -n mu/tools/session/ensure_codex_autoping.sh`
 - `bash -n mu/tools/observability/pipeline_monitor.sh`
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pipeline_monitor_start_clears_saved_autoping_thread_when_thread_id_is_absent mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pipeline_monitor_start_reseeds_autoping_when_thread_id_is_present mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pipeline_monitor_owner_tick_keeps_autoping_seeded_after_start -p no:cacheprovider`
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py::TestRequiredCIGreenGuard -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pipeline_monitor_owner_tick_keeps_autoping_seeded_after_start mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_ensure_codex_autoping_restarts_live_watcher_when_tmux_window_missing -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution -p no:cacheprovider`
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_codex_startup_state.py::test_codex_autoping_accepts_live_state mu/tests/tools/test_codex_startup_state.py::test_codex_autoping_restarts_named_lane_when_live_state_lacks_identity mu/tests/tools/test_codex_startup_state.py::test_codex_autoping_context_exhausted_restarts_recovery mu/tests/tools/test_codex_startup_state.py::test_codex_autoping_recovers_missing_state mu/tests/tools/test_codex_startup_state.py::test_tmux_pane_4_rejects_autoping_without_detail mu/tests/tools/test_codex_startup_state.py::test_tmux_pane_4_accepts_observability_detail -p no:cacheprovider`

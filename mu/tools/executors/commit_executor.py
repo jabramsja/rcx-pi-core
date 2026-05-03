@@ -3972,6 +3972,7 @@ def _summarize_required_ci_failures(repo_root: Path, pr_number: str) -> dict[str
         failure = {
             "name": name,
             "workflow": str(check.get("workflowName") or ""),
+            "conclusion": conclusion,
             "details_url": details_url,
             "excerpt": "",
         }
@@ -3990,7 +3991,10 @@ def _summarize_required_ci_failures(repo_root: Path, pr_number: str) -> dict[str
         failures.append(failure)
 
     if not failures:
-        failures = [{"name": name, "workflow": "", "details_url": "", "excerpt": ""} for name in failing_names]
+        failures = [
+            {"name": name, "workflow": "", "conclusion": "FAILURE", "details_url": "", "excerpt": ""}
+            for name in failing_names
+        ]
     summary["failures"] = failures
     if failures:
         compact = []
@@ -4008,6 +4012,19 @@ def _summarize_required_ci_failures(repo_root: Path, pr_number: str) -> dict[str
     else:
         summary["summary"] = "Required CI failed; no failed check details available"
     return summary
+
+
+def _wait_ci_failure_class(ci_failure: dict[str, Any]) -> str:
+    failures = ci_failure.get("failures", [])
+    if not isinstance(failures, list):
+        return "unknown_error"
+    for failure in failures:
+        if not isinstance(failure, dict):
+            continue
+        conclusion = str(failure.get("conclusion") or "").upper()
+        if conclusion == "FAILURE" or failure.get("excerpt"):
+            return "test_failure"
+    return "unknown_error"
 
 
 def _wait_for_pr_ci(
@@ -4038,7 +4055,7 @@ def _wait_for_pr_ci(
             return {
                 "status": "error",
                 "step": "wait_ci",
-                "failure_class": "test_failure",
+                "failure_class": _wait_ci_failure_class(ci_failure),
                 "errors": [
                     "Required CI checks did not reach green after gh watch returned. "
                     + str(ci_failure.get("summary", ""))
@@ -4069,7 +4086,7 @@ def _wait_for_pr_ci(
             return {
                 "status": "error",
                 "step": "wait_ci",
-                "failure_class": "test_failure",
+                "failure_class": _wait_ci_failure_class(ci_failure),
                 "errors": [
                     f"CI checks failed (confirmed by polling): {exc}. "
                     + str(ci_failure.get("summary", ""))
@@ -4084,7 +4101,7 @@ def _wait_for_pr_ci(
             return {
                 "status": "error",
                 "step": "wait_ci",
-                "failure_class": "test_failure",
+                "failure_class": _wait_ci_failure_class(ci_failure),
                 "errors": [
                     f"Required CI checks did not reach green after fallback polling: {exc}. "
                     + str(ci_failure.get("summary", ""))
