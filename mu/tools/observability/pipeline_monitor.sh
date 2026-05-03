@@ -124,6 +124,7 @@ OWNER_ROOT_FILE="$STATE_DIR/owner.root"
 OWNER_LOCK_DIR="$STATE_DIR/owner.lock"
 OWNER_LOCK_PID_FILE="$OWNER_LOCK_DIR/pid"
 OWNER_REGISTRY_DIR="$STATE_DIR/owners"
+AUTOPING_THREAD_FILE="$STATE_DIR/codex_autoping.thread"
 OWNER_INTERVAL_SECONDS="${RCX_PIPELINE_MONITOR_HEALTH_INTERVAL:-5}"
 EXPECTED_PANE_1="PANE 1 · LIVE PIPELINE LOG"
 EXPECTED_PANE_2="PANE 2 · REVIEW FINDINGS"
@@ -392,6 +393,26 @@ normalize_path() {
 
 ensure_state_dir() {
   mkdir -p "$STATE_DIR"
+}
+
+record_codex_autoping_thread() {
+  if [ -z "${CODEX_THREAD_ID:-}" ]; then
+    rm -f "$AUTOPING_THREAD_FILE"
+    return 0
+  fi
+  ensure_state_dir
+  printf '%s\n' "$CODEX_THREAD_ID" > "$AUTOPING_THREAD_FILE"
+}
+
+current_codex_autoping_thread() {
+  local thread_id=""
+  if [ -f "$AUTOPING_THREAD_FILE" ]; then
+    thread_id="$(sed -n '1p' "$AUTOPING_THREAD_FILE" 2>/dev/null || true)"
+  fi
+  if [ -z "$thread_id" ]; then
+    thread_id="${CODEX_THREAD_ID:-}"
+  fi
+  printf '%s\n' "$thread_id"
 }
 
 owner_registry_file() {
@@ -797,11 +818,11 @@ ensure_owner_running() {
   if [ "${#owner_args[@]}" -gt 0 ]; then
     RCX_PIPELINE_MONITOR_STATE_DIR="$STATE_DIR" \
     RCX_PIPELINE_MONITOR_HEALTH_INTERVAL="$OWNER_INTERVAL_SECONDS" \
-      nohup bash "$0" "${owner_args[@]}" __owner-loop >/dev/null 2>&1 &
+      nohup env -u CODEX_THREAD_ID bash "$0" "${owner_args[@]}" __owner-loop >/dev/null 2>&1 &
   else
     RCX_PIPELINE_MONITOR_STATE_DIR="$STATE_DIR" \
     RCX_PIPELINE_MONITOR_HEALTH_INTERVAL="$OWNER_INTERVAL_SECONDS" \
-      nohup bash "$0" __owner-loop >/dev/null 2>&1 &
+      nohup env -u CODEX_THREAD_ID bash "$0" __owner-loop >/dev/null 2>&1 &
   fi
   owner_pid="$!"
   record_owner_pid "$owner_pid"
@@ -859,8 +880,31 @@ ensure_tmux_session_under_owner_lock() {
   return "$rc"
 }
 
+ensure_codex_autoping_health() {
+  local mode="${1:-ensure}" autoping_launcher="" thread_id=""
+  autoping_launcher="$REPO_ROOT/tools/session/ensure_codex_autoping.sh"
+  thread_id="$(current_codex_autoping_thread)"
+  if [ -z "$thread_id" ] || [ ! -x "$autoping_launcher" ]; then
+    return 0
+  fi
+  local autoping_args=(
+    --repo "$REPO_ROOT"
+    --thread-id "$thread_id"
+    --bus-dir "$BUS_DIR"
+    --tmux-session "$SESSION"
+    --tmux-pane "$SESSION:1.3"
+  )
+  if [ "$mode" = "force" ]; then
+    autoping_args+=(--force-restart)
+  fi
+  if ! "$autoping_launcher" "${autoping_args[@]}" >/dev/null 2>&1; then
+    echo "WARN: failed to ensure Codex autoping health" >&2
+  fi
+}
+
 cmd_owner_tick() {
   ensure_tmux_session_under_owner_lock
+  ensure_codex_autoping_health
 }
 
 cmd_owner_loop() {
@@ -899,21 +943,11 @@ cmd_start() {
     esac
   done
 
+  record_codex_autoping_thread
   ensure_owner_running
   ensure_tmux_session_under_owner_lock
 
-  local autoping_launcher="$REPO_ROOT/tools/session/ensure_codex_autoping.sh"
-  if [ -n "${CODEX_THREAD_ID:-}" ] && [ -x "$autoping_launcher" ]; then
-    if ! "$autoping_launcher" \
-      --repo "$REPO_ROOT" \
-      --thread-id "$CODEX_THREAD_ID" \
-      --bus-dir "$BUS_DIR" \
-      --tmux-session "$SESSION" \
-      --tmux-pane "$SESSION:1.3" \
-      --force-restart >/dev/null 2>&1; then
-      echo "WARN: failed to restart Codex autoping after tmux session reset" >&2
-    fi
-  fi
+  ensure_codex_autoping_health force
 
   echo "Pipeline monitor started (session: $SESSION)"
   echo "Lane identity: lane=$IDENTITY_LANE bus=$BUS_PATH dashboard=http://127.0.0.1:$DASHBOARD_PORT"

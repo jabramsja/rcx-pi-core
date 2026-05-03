@@ -1864,7 +1864,7 @@ def _extract_authorized_control_surface_founder_override(
     wave_class: str,
 ) -> str:
     """Derive same-wave override only from explicit control-surface authority."""
-    if str(wave_class or "").strip() != "L4_ENABLER":
+    if str(wave_class or "").strip() not in {"L4_ENABLER", "MAINTENANCE"}:
         return ""
     normalized_wave_id = normalize_wave_id(wave_id)
     if not plan_content or not normalized_wave_id:
@@ -3737,7 +3737,7 @@ def _should_collect_l4_indicator_artifact(
     founder_override_token: str,
     changed_files: list[str],
 ) -> bool:
-    if wave_class != "L4_ENABLER" or not wave_id:
+    if wave_class not in {"L4_STRUCTURAL", "L4_ENABLER", "MAINTENANCE"} or not wave_id:
         return False
     if not _tasks_has_canonical_wave_tracker_note(repo_root, wave_id=wave_id):
         return False

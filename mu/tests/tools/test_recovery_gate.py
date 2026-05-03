@@ -291,6 +291,21 @@ class TestClassifyFailure:
         assert fc == FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP
         assert rg_mod.tier_for(fc) == 2
 
+    def test_wait_ci_explicit_test_failure_class_routes_to_test_recovery(self):
+        result = {
+            "status": "error",
+            "step": "wait_ci",
+            "failure_class": "test_failure",
+            "errors": [
+                "CI checks failed (confirmed by polling). Failed required CI: "
+                "test (CI): FAILED tests/tools/test_recovery_gate.py::"
+                "TestObservabilityWorktreeResolution::"
+                "test_ensure_codex_autoping_restarts_live_watcher_when_tmux_window_missing"
+            ],
+        }
+
+        assert rg_mod.classify_failure(result) == FailureClass.TEST_FAILURE
+
     def test_stale_bridge_lock_in_stderr(self):
         assert rg_mod.classify_failure(
             {"status": "error", "stderr": "cannot acquire bridge.lock",
@@ -6186,6 +6201,149 @@ esac
         finally:
             self._stop_pipeline_monitor(repo_root, env)
 
+    def test_pipeline_monitor_start_clears_saved_autoping_thread_when_thread_id_is_absent(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        launcher_dir = repo_root / "tools" / "session"
+        launcher_dir.mkdir(parents=True, exist_ok=True)
+        marker = tmp_path / "autoping.log"
+        launcher = launcher_dir / "ensure_codex_autoping.sh"
+        launcher.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -eu\n"
+            f"printf '%s\\n' \"$*\" >> {marker!s}\n",
+            encoding="utf-8",
+        )
+        launcher.chmod(launcher.stat().st_mode | 0o111)
+        git_bin = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/test-wave",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        state_dir = tmp_path / "monitor-state"
+        env = os.environ.copy()
+        env.pop("CODEX_THREAD_ID", None)
+        env.update({
+            "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            "RCX_PIPELINE_MONITOR_STATE_DIR": str(state_dir),
+            "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+        })
+        thread_env = env | {"CODEX_THREAD_ID": "stale-thread"}
+
+        try:
+            result = subprocess.run(
+                ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=thread_env,
+            )
+
+            assert result.returncode == 0
+            thread_file = state_dir / "codex_autoping.thread"
+            assert thread_file.read_text(encoding="utf-8").strip() == "stale-thread"
+            assert "--thread-id stale-thread" in marker.read_text(encoding="utf-8")
+            deadline = time.monotonic() + 5
+            marker_lines: list[str] = []
+            while time.monotonic() < deadline:
+                marker_lines = marker.read_text(encoding="utf-8").splitlines()
+                if any("--thread-id stale-thread" in line and "--force-restart" not in line for line in marker_lines):
+                    break
+                time.sleep(0.1)
+            assert any("--thread-id stale-thread" in line and "--force-restart" not in line for line in marker_lines)
+            marker.write_text("", encoding="utf-8")
+
+            result = subprocess.run(
+                ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            assert result.returncode == 0
+            assert not thread_file.exists()
+            assert marker.read_text(encoding="utf-8") == ""
+        finally:
+            self._stop_pipeline_monitor(repo_root, env)
+
+    def test_pipeline_monitor_owner_tick_keeps_autoping_seeded_after_start(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        launcher_dir = repo_root / "tools" / "session"
+        launcher_dir.mkdir(parents=True, exist_ok=True)
+        marker = tmp_path / "autoping.log"
+        launcher = launcher_dir / "ensure_codex_autoping.sh"
+        launcher.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -eu\n"
+            f"printf '%s\\n' \"$*\" >> {marker!s}\n",
+            encoding="utf-8",
+        )
+        launcher.chmod(launcher.stat().st_mode | 0o111)
+        git_bin = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/test-wave",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        env = os.environ.copy()
+        env.update({
+            "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
+            "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "1",
+        })
+        old_thread_env = env | {"CODEX_THREAD_ID": "stale-thread"}
+        new_thread_env = env | {"CODEX_THREAD_ID": "thread-123"}
+
+        try:
+            result = subprocess.run(
+                ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=old_thread_env,
+            )
+
+            assert result.returncode == 0
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and not marker.exists():
+                time.sleep(0.1)
+            marker.write_text("", encoding="utf-8")
+
+            result = subprocess.run(
+                ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=new_thread_env,
+            )
+
+            assert result.returncode == 0
+
+            deadline = time.monotonic() + 5
+            marker_lines: list[str] = []
+            while time.monotonic() < deadline:
+                if marker.exists():
+                    marker_lines = marker.read_text(encoding="utf-8").splitlines()
+                    if (
+                        any("--force-restart" in line and "--thread-id thread-123" in line for line in marker_lines)
+                        and any("--force-restart" not in line and "--thread-id thread-123" in line for line in marker_lines)
+                    ):
+                        break
+                time.sleep(0.1)
+
+            assert marker_lines
+            assert any("--force-restart" in line and "--thread-id thread-123" in line for line in marker_lines)
+            assert any("--force-restart" not in line and "--thread-id thread-123" in line for line in marker_lines)
+        finally:
+            self._stop_pipeline_monitor(repo_root, new_thread_env)
+
     def test_pipeline_monitor_detached_start_is_idempotent_with_single_owner(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -6600,6 +6758,108 @@ esac
 
         assert result.returncode == 0
         assert "Codex autoping: skipped (RCX_PIPELINE_SESSION=1)" in result.stdout
+
+    def test_ensure_codex_autoping_restarts_live_watcher_when_tmux_window_missing(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        launcher_dir = repo_root / "tools" / "session"
+        launcher_dir.mkdir(parents=True, exist_ok=True)
+        launcher = launcher_dir / "ensure_codex_autoping.sh"
+        launcher.write_text(
+            (_REPO_ROOT / "mu" / "tools" / "session" / "ensure_codex_autoping.sh").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        launcher.chmod(launcher.stat().st_mode | 0o111)
+        watch_script = launcher_dir / "codex_autoping_watch.py"
+        watch_script.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
+        window_script = launcher_dir / "codex_autoping_window.sh"
+        window_script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        window_script.chmod(window_script.stat().st_mode | 0o111)
+
+        codex_home = tmp_path / "codex-home"
+        state_dir = codex_home / "state"
+        state_dir.mkdir(parents=True)
+        state_path = state_dir / "rcx_autoping_thread-123.json"
+        unrelated = subprocess.Popen(["sleep", "60"])
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = tmp_path / "tmux-bin"
+        tmux_bin.mkdir()
+        self._write_executable(
+            tmux_bin / "tmux",
+            "#!/usr/bin/env bash\n"
+            "set -eu\n"
+            f"printf '%s\\n' \"$*\" >> {tmux_log!s}\n"
+            "case \"${1:-}\" in\n"
+            "  has-session) exit 0 ;;\n"
+            "  list-windows) printf 'bash\\n'; exit 0 ;;\n"
+            "  new-window) exit 0 ;;\n"
+            "  respawn-window) exit 0 ;;\n"
+            "  *) exit 1 ;;\n"
+            "esac\n",
+        )
+        env = os.environ | {
+            "PATH": f"{tmux_bin}:{os.environ['PATH']}",
+            "RCX_CODEX_HOME": str(codex_home),
+            "RCX_PIPELINE_SESSION": "0",
+        }
+
+        try:
+            state_path.write_text(
+                json.dumps({"thread_id": "thread-123", "watcher_pid": unrelated.pid}) + "\n",
+                encoding="utf-8",
+            )
+            unrelated_result = subprocess.run(
+                ["bash", str(launcher), "--repo", str(repo_root), "--thread-id", "thread-123"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=10,
+            )
+
+            assert unrelated_result.returncode == 0
+            assert "not this autoping watcher; preserving process and reseeding" in unrelated_result.stdout
+            assert unrelated.poll() is None
+
+            tmux_log.write_text("", encoding="utf-8")
+            existing = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(watch_script),
+                    "--repo-root",
+                    str(repo_root),
+                    "--thread-id",
+                    "thread-123",
+                    "--interval",
+                    "60",
+                ]
+            )
+            state_path.write_text(
+                json.dumps({"thread_id": "thread-123", "watcher_pid": existing.pid}) + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                ["bash", str(launcher), "--repo", str(repo_root), "--thread-id", "thread-123"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=10,
+            )
+
+            assert result.returncode == 0
+            assert "AUTO-PING window missing" in result.stdout
+            assert "ACTIVE in tmux-managed AUTO-PING window" in result.stdout
+            assert "new-window -d -t rcx-pipeline -n AUTO-PING" in tmux_log.read_text(encoding="utf-8")
+            assert existing.wait(timeout=5) != 0
+        finally:
+            if unrelated.poll() is None:
+                unrelated.terminate()
+                unrelated.wait(timeout=5)
+            if "existing" in locals() and existing.poll() is None:
+                existing.terminate()
+                existing.wait(timeout=5)
 
     def test_pipeline_monitor_find_newest_log_ignores_blank_bridge_stderr_and_uses_raw_reviewer(self, tmp_path):
         repo_root = tmp_path / "repo"

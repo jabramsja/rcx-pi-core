@@ -144,6 +144,82 @@ SUMMARY_PATH="$STATE_DIR/rcx_autoping_${THREAD_SLUG}_summary.txt"
 RUNNER_LOG="$LOG_DIR/rcx_autoping_${THREAD_SLUG}.runner.log"
 mkdir -p "$STATE_DIR" "$LOG_DIR"
 
+process_is_recorded_autoping_watcher() {
+    local pid="$1"
+    python3 - <<'PY' "$pid" "$WATCH_SCRIPT" "$THREAD_ID"
+import os
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+pid_text, watch_script, thread_id = sys.argv[1:4]
+try:
+    pid = int(pid_text)
+except (TypeError, ValueError):
+    raise SystemExit(1)
+if pid <= 1:
+    raise SystemExit(1)
+command = ""
+proc_cmdline = Path(f"/proc/{pid}/cmdline")
+try:
+    if proc_cmdline.exists():
+        raw = proc_cmdline.read_bytes()
+        command = " ".join(
+            part.decode(errors="replace")
+            for part in raw.split(b"\0")
+            if part
+        ).strip()
+except OSError:
+    command = ""
+if not command:
+    try:
+        proc = subprocess.run(
+            ["ps", "-ww", "-p", str(pid), "-o", "command="],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        raise SystemExit(1)
+    if proc.returncode != 0 or not proc.stdout.strip():
+        raise SystemExit(1)
+    command = proc.stdout.strip()
+try:
+    tokens = shlex.split(command)
+except ValueError:
+    tokens = command.split()
+expected_path = str(Path(watch_script))
+expected_name = os.path.basename(expected_path)
+has_watch_script = any(
+    token == expected_path
+    or os.path.basename(token) == expected_name
+    or token.endswith("/" + expected_name)
+    for token in tokens
+)
+has_thread_id = False
+for index, token in enumerate(tokens):
+    if token == "--thread-id" and index + 1 < len(tokens) and tokens[index + 1] == thread_id:
+        has_thread_id = True
+        break
+if not has_thread_id and thread_id in tokens:
+    has_thread_id = True
+raise SystemExit(0 if has_watch_script and has_thread_id else 1)
+PY
+}
+
+stop_recorded_autoping_watcher() {
+    local pid="$1"
+    local reason="$2"
+    if process_is_recorded_autoping_watcher "$pid"; then
+        echo "Codex autoping: stopping recorded watcher pid=$pid ($reason)"
+        kill "$pid" >/dev/null 2>&1 || true
+        sleep 1
+    else
+        echo "Codex autoping: recorded pid=$pid is live but not this autoping watcher; preserving process and reseeding"
+    fi
+}
+
 existing_pid=""
 if [ -f "$STATE_PATH" ]; then
     existing_pid="$(python3 - <<'PY' "$STATE_PATH"
@@ -161,15 +237,31 @@ PY
 )"
 fi
 
-if [ -n "$existing_pid" ] && ps -p "$existing_pid" > /dev/null 2>&1; then
-    if [ "$FORCE_RESTART" -ne 1 ]; then
-        echo "Codex autoping: active pid=$existing_pid thread=$THREAD_ID"
-        echo "Autoping state: $STATE_PATH"
-        echo "Autoping summary: $SUMMARY_PATH"
-        exit 0
+tmux_session_active=0
+tmux_autoping_window_present=0
+if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    tmux_session_active=1
+    if tmux list-windows -t "$TMUX_SESSION" -F '#W' 2>/dev/null | grep -qx 'AUTO-PING'; then
+        tmux_autoping_window_present=1
     fi
-    kill "$existing_pid" >/dev/null 2>&1 || true
-    sleep 1
+fi
+
+if [ -n "$existing_pid" ] && ps -p "$existing_pid" > /dev/null 2>&1; then
+    if ! process_is_recorded_autoping_watcher "$existing_pid"; then
+        echo "Codex autoping: recorded pid=$existing_pid is live but not this autoping watcher; preserving process and reseeding"
+    elif [ "$FORCE_RESTART" -ne 1 ]; then
+        if [ "$tmux_session_active" -eq 1 ] && [ "$tmux_autoping_window_present" -ne 1 ]; then
+            echo "Codex autoping: active pid=$existing_pid but AUTO-PING window missing; restarting tmux-managed watcher"
+            stop_recorded_autoping_watcher "$existing_pid" "AUTO-PING window missing"
+        else
+            echo "Codex autoping: active pid=$existing_pid thread=$THREAD_ID"
+            echo "Autoping state: $STATE_PATH"
+            echo "Autoping summary: $SUMMARY_PATH"
+            exit 0
+        fi
+    else
+        stop_recorded_autoping_watcher "$existing_pid" "force restart"
+    fi
 fi
 
 cleanup_orphaned_autoping_execs() {
@@ -236,8 +328,8 @@ WINDOW_CMD=("$WINDOW_SCRIPT" --repo "$REPO" --thread-id "$THREAD_ID" --interval 
 WINDOW_CMD_STRING="$(printf '%q ' "${WINDOW_CMD[@]}")"
 WINDOW_CMD_STRING="${WINDOW_CMD_STRING% }"
 
-if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-    if tmux list-windows -t "$TMUX_SESSION" -F '#W' | grep -qx 'AUTO-PING'; then
+if [ "$tmux_session_active" -eq 1 ]; then
+    if [ "$tmux_autoping_window_present" -eq 1 ]; then
         tmux respawn-window -k -t "$TMUX_SESSION:AUTO-PING" "$WINDOW_CMD_STRING"
     else
         tmux new-window -d -t "$TMUX_SESSION" -n "AUTO-PING" "$WINDOW_CMD_STRING"
