@@ -77,9 +77,11 @@ Implemented: 2026-05-03
 
 ### Reproduced Starting State
 
-- `nl -ba TASKS.md | sed -n '254,266p'` reproduced the stale active NOW entry:
-  `[DEFERRED-REPORT-TRUTH-CLEANUP]` was still marked **ACTIVE** and cited
-  `reports/control_plane/deferred_report_truth_cleanup_2026-05-02.md`.
+- Phase B start evidence (`nl -ba TASKS.md | sed -n '254,266p'`) captured the
+  then-stale active NOW entry before this packet updated it:
+  `[DEFERRED-REPORT-TRUTH-CLEANUP]` was marked **ACTIVE** and cited
+  `reports/control_plane/deferred_report_truth_cleanup_2026-05-02.md`; current
+  grounding above records the post-update **CLEARED** state.
 - `reports/control_plane/deferred_report_truth_cleanup_2026-05-02.md` already
   recorded `Status: Phase B (implementation-complete, bridge-converged)`, but
   its commit-path truth refresh still said `Commit status:

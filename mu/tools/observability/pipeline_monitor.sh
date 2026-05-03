@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STATUS_SCRIPT="$SCRIPT_DIR/pipeline_status.sh"
 BUS_DIR="${RCX_AGENT_BUS_DIR:-.agent_bus}"
 LANE="${RCX_PIPELINE_MONITOR_LANE:-}"
+REQUESTED_LANE="$LANE"
 while [ $# -gt 0 ]; do
   case "${1:-}" in
     --bus-dir)
@@ -23,6 +24,7 @@ while [ $# -gt 0 ]; do
         exit 2
       fi
       LANE="${2:-}"
+      REQUESTED_LANE="$LANE"
       shift 2
       ;;
     *)
@@ -116,6 +118,17 @@ LIVE_LOG_KEY="$(printf '%s' "$REPO_ROOT" | cksum | awk '{print $1}')"
 LIVE_LOG="${RCX_PIPELINE_LIVE_LOG:-/tmp/rcx_pipeline_live_${LIVE_LOG_KEY}.txt}"
 SESSION_WIDTH="${RCX_PIPELINE_TMUX_WIDTH:-240}"
 SESSION_HEIGHT="${RCX_PIPELINE_TMUX_HEIGHT:-70}"
+STATE_DIR="${RCX_PIPELINE_MONITOR_STATE_DIR:-${TMPDIR:-/tmp}/rcx_pipeline_monitor/$SESSION}"
+OWNER_PID_FILE="$STATE_DIR/owner.pid"
+OWNER_ROOT_FILE="$STATE_DIR/owner.root"
+OWNER_LOCK_DIR="$STATE_DIR/owner.lock"
+OWNER_LOCK_PID_FILE="$OWNER_LOCK_DIR/pid"
+OWNER_REGISTRY_DIR="$STATE_DIR/owners"
+OWNER_INTERVAL_SECONDS="${RCX_PIPELINE_MONITOR_HEALTH_INTERVAL:-5}"
+EXPECTED_PANE_1="PANE 1 · LIVE PIPELINE LOG"
+EXPECTED_PANE_2="PANE 2 · REVIEW FINDINGS"
+EXPECTED_PANE_3="PANE 3 · PLAIN-ENGLISH STATUS"
+EXPECTED_PANE_4="PANE 4 · SESSION TIMELINE"
 
 usage() {
   cat <<'EOF'
@@ -370,16 +383,290 @@ done
 WATCHER_EOF
 }
 
-cmd_start() {
-  local detach=false
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --detach) detach=true; shift ;;
-      *) echo "Unknown option: $1"; usage 1 ;;
-    esac
-  done
+normalize_path() {
+  local path="$1"
+  (
+    cd "$path" 2>/dev/null && pwd -P
+  ) || printf '%s\n' "$path"
+}
 
-  # Kill existing session if any
+ensure_state_dir() {
+  mkdir -p "$STATE_DIR"
+}
+
+owner_registry_file() {
+  local pid="$1"
+  printf '%s\n' "$OWNER_REGISTRY_DIR/$pid.pid"
+}
+
+current_owner_pid() {
+  [ -f "$OWNER_PID_FILE" ] || return 1
+  tr -d '[:space:]' < "$OWNER_PID_FILE"
+}
+
+current_owner_lock_pid() {
+  [ -f "$OWNER_LOCK_PID_FILE" ] || return 1
+  tr -d '[:space:]' < "$OWNER_LOCK_PID_FILE"
+}
+
+process_command_line() {
+  local pid="$1"
+  ps -ww -p "$pid" -o command= 2>/dev/null || ps -p "$pid" -o command= 2>/dev/null || true
+}
+
+process_cwd() {
+  local pid="$1" cwd=""
+  if [ -e "/proc/$pid/cwd" ]; then
+    (
+      cd "/proc/$pid/cwd" 2>/dev/null && pwd -P
+    ) && return 0
+  fi
+  cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1 || true)"
+  [ -n "$cwd" ] && normalize_path "$cwd"
+}
+
+owner_expected_root() {
+  normalize_path "$REPO_ROOT"
+}
+
+owner_record_root() {
+  local pid="$1" entry="" recorded_pid=""
+  entry="$(owner_registry_file "$pid")"
+  if [ -f "$entry" ]; then
+    sed -n 's/^repo_root=//p' "$entry" | head -1
+    return 0
+  fi
+  recorded_pid="$(current_owner_pid 2>/dev/null || true)"
+  if [ -n "$recorded_pid" ] && [ "$recorded_pid" = "$pid" ] && [ -f "$OWNER_ROOT_FILE" ]; then
+    head -1 "$OWNER_ROOT_FILE"
+    return 0
+  fi
+  return 1
+}
+
+owner_command_matches_root() {
+  local cmd="$1" expected_root="$2"
+  case "$cmd" in
+    *"$expected_root"/mu/tools/observability/pipeline_monitor.sh*__owner-loop*|*"$expected_root"/tools/observability/pipeline_monitor.sh*__owner-loop*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+owner_command_has_absolute_monitor_path() {
+  local cmd="$1"
+  printf '%s\n' "$cmd" | grep -Eq '(^|[[:space:]])/[^[:space:]]*/(mu/tools/observability/pipeline_monitor\.sh|tools/observability/pipeline_monitor\.sh)([[:space:]]|$).*__owner-loop'
+}
+
+owner_process_has_monitor_command() {
+  local pid="$1" cmd=""
+  case "$pid" in
+    ''|*[!0-9]*)
+      return 1
+      ;;
+  esac
+  kill -0 "$pid" 2>/dev/null || return 1
+  cmd="$(process_command_line "$pid")"
+  [ -n "$cmd" ] || return 1
+  case "$cmd" in
+    *pipeline_monitor.sh*__owner-loop*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+owner_process_matches_root() {
+  local pid="$1" expected_root="$2" cmd="" record_root="" cwd=""
+  owner_process_has_monitor_command "$pid" || return 1
+  cmd="$(process_command_line "$pid")"
+  owner_command_matches_root "$cmd" "$expected_root" && return 0
+  if owner_command_has_absolute_monitor_path "$cmd"; then
+    return 1
+  fi
+  record_root="$(owner_record_root "$pid" 2>/dev/null || true)"
+  if [ "$record_root" = "$expected_root" ]; then
+    cwd="$(process_cwd "$pid" 2>/dev/null || true)"
+    [ -n "$cwd" ] && [ "$(normalize_path "$cwd")" = "$expected_root" ]
+    return $?
+  fi
+  return 1
+}
+
+owner_process_verified() {
+  local pid="$1" expected_root=""
+  expected_root="$(owner_expected_root)"
+  owner_process_matches_root "$pid" "$expected_root"
+}
+
+clear_owner_pid_record() {
+  local pid="$1"
+  [ -n "$pid" ] && rm -f "$(owner_registry_file "$pid")"
+  if [ -n "$pid" ] && [ "$(current_owner_pid 2>/dev/null || true)" = "$pid" ]; then
+    rm -f "$OWNER_PID_FILE" "$OWNER_ROOT_FILE"
+  fi
+  rmdir "$OWNER_REGISTRY_DIR" 2>/dev/null || true
+}
+
+owner_is_live() {
+  local pid=""
+  pid="$(current_owner_pid 2>/dev/null || true)"
+  if [ -z "$pid" ]; then
+    return 1
+  fi
+  if owner_process_verified "$pid"; then
+    return 0
+  fi
+  clear_owner_pid_record "$pid"
+  return 1
+}
+
+record_owner_pid() {
+  local pid="$1" root=""
+  root="$(owner_expected_root)"
+  mkdir -p "$OWNER_REGISTRY_DIR"
+  printf '%s\n' "$pid" > "$OWNER_PID_FILE"
+  printf '%s\n' "$root" > "$OWNER_ROOT_FILE"
+  {
+    printf 'repo_root=%s\n' "$root"
+    printf 'session=%s\n' "$SESSION"
+    printf 'bus_dir=%s\n' "$BUS_DIR"
+    printf 'lane=%s\n' "$IDENTITY_LANE"
+  } > "$(owner_registry_file "$pid")"
+}
+
+prune_invalid_owner_registry() {
+  local entry="" pid=""
+  [ -d "$OWNER_REGISTRY_DIR" ] || return 0
+  for entry in "$OWNER_REGISTRY_DIR"/*.pid; do
+    [ -e "$entry" ] || continue
+    pid="$(basename "$entry" .pid)"
+    if ! owner_process_has_monitor_command "$pid"; then
+      rm -f "$entry"
+    fi
+  done
+  rmdir "$OWNER_REGISTRY_DIR" 2>/dev/null || true
+}
+
+prune_stale_owner_state() {
+  local pid=""
+  pid="$(current_owner_pid 2>/dev/null || true)"
+  if [ -n "$pid" ] && ! owner_process_verified "$pid" && ! owner_process_has_monitor_command "$pid"; then
+    clear_owner_pid_record "$pid"
+  fi
+  prune_invalid_owner_registry
+}
+
+tracked_owner_pids() {
+  local pid="" entry="" entry_pid=""
+  pid="$(current_owner_pid 2>/dev/null || true)"
+  [ -n "$pid" ] && printf '%s\n' "$pid"
+  if [ -d "$OWNER_REGISTRY_DIR" ]; then
+    for entry in "$OWNER_REGISTRY_DIR"/*.pid; do
+      [ -e "$entry" ] || continue
+      entry_pid="$(basename "$entry" .pid)"
+      [ -n "$entry_pid" ] && printf '%s\n' "$entry_pid"
+    done
+  fi
+}
+
+acquire_owner_lock() {
+  ensure_state_dir
+  local attempts=0 holder_pid=""
+  while ! mkdir "$OWNER_LOCK_DIR" 2>/dev/null; do
+    holder_pid="$(current_owner_lock_pid 2>/dev/null || true)"
+    if [ -n "$holder_pid" ] && ! kill -0 "$holder_pid" 2>/dev/null; then
+      rm -rf "$OWNER_LOCK_DIR"
+      continue
+    fi
+    attempts=$((attempts + 1))
+    if [ "$attempts" -ge 200 ]; then
+      if [ -z "$holder_pid" ]; then
+        rm -rf "$OWNER_LOCK_DIR"
+        attempts=0
+        continue
+      fi
+      echo "ERROR: timed out acquiring pipeline monitor owner lock" >&2
+      return 1
+    fi
+    sleep 0.05
+  done
+  printf '%s\n' "$$" > "$OWNER_LOCK_PID_FILE"
+}
+
+release_owner_lock() {
+  local holder_pid=""
+  holder_pid="$(current_owner_lock_pid 2>/dev/null || true)"
+  if [ -z "$holder_pid" ] || [ "$holder_pid" = "$$" ]; then
+    rm -rf "$OWNER_LOCK_DIR"
+  fi
+}
+
+tmux_session_health_detail() {
+  local expected_root="$1"
+  local panes="" count=0 title="" pane_path="" expected_root_real="" pane_path_real=""
+  local seen_1=0 seen_2=0 seen_3=0 seen_4=0
+
+  if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+    echo "session missing"
+    return 1
+  fi
+
+  panes="$(tmux list-panes -t "$SESSION" -F '#{pane_title}	#{pane_current_path}' 2>/dev/null || true)"
+  [ -n "$panes" ] || {
+    echo "tmux list-panes returned no pane state"
+    return 1
+  }
+  [ -d "$expected_root" ] || {
+    echo "expected repo root missing: $expected_root"
+    return 1
+  }
+  expected_root_real="$(normalize_path "$expected_root")"
+
+  while IFS=$'\t' read -r title pane_path || [ -n "$title$pane_path" ]; do
+    [ -n "$title" ] && [ -n "$pane_path" ] || {
+      echo "tmux list-panes returned an unparseable pane entry"
+      return 1
+    }
+    count=$((count + 1))
+    case "$title" in
+      "$EXPECTED_PANE_1") seen_1=1 ;;
+      "$EXPECTED_PANE_2") seen_2=1 ;;
+      "$EXPECTED_PANE_3") seen_3=1 ;;
+      "$EXPECTED_PANE_4") seen_4=1 ;;
+      *)
+        echo "unexpected pane title: $title"
+        return 1
+        ;;
+    esac
+    if [ ! -d "$pane_path" ]; then
+      echo "pane rooted at missing path: $title -> $pane_path"
+      return 1
+    fi
+    pane_path_real="$(normalize_path "$pane_path")"
+    if [ "$pane_path_real" != "$expected_root_real" ]; then
+      echo "pane rooted at wrong repo: $title -> $pane_path"
+      return 1
+    fi
+  done <<< "$panes"
+
+  if [ "$count" -ne 4 ]; then
+    echo "unexpected pane count: $count"
+    return 1
+  fi
+  if [ "$seen_1" -ne 1 ] || [ "$seen_2" -ne 1 ] || [ "$seen_3" -ne 1 ] || [ "$seen_4" -ne 1 ]; then
+    echo "missing monitor panes"
+    return 1
+  fi
+
+  echo "session healthy at $expected_root_real"
+  return 0
+}
+
+rebuild_tmux_session() {
+  local repo_root="$1"
+
   tmux kill-session -t "$SESSION" 2>/dev/null || true
 
   # Write the log watcher script
@@ -387,9 +674,9 @@ cmd_start() {
   write_log_watcher > "$watcher"
   chmod +x "$watcher"
 
-  local OBS_DIR="$REPO_ROOT/mu/tools/observability"
+  local OBS_DIR="$repo_root/mu/tools/observability"
   local repo_q="" obs_q="" watcher_q="" status_q="" root_helper_q="" bus_q="" lane_q=""
-  printf -v repo_q '%q' "$REPO_ROOT"
+  printf -v repo_q '%q' "$repo_root"
   printf -v obs_q '%q' "$OBS_DIR"
   printf -v watcher_q '%q' "$watcher"
   printf -v status_q '%q' "$OBS_DIR/pipeline_status.sh"
@@ -448,6 +735,172 @@ cmd_start() {
   tmux select-pane -t "$pane3_id" -T "PANE 3 · PLAIN-ENGLISH STATUS"
   tmux select-pane -t "$pane4_id" -T "PANE 4 · SESSION TIMELINE"
   tmux select-pane -t "$pane1_id"
+}
+
+ensure_tmux_session() {
+  local repo_root="$1"
+  if tmux_session_health_detail "$repo_root" >/dev/null 2>&1; then
+    return 0
+  fi
+  rebuild_tmux_session "$repo_root"
+}
+
+stop_wrong_root_owner_processes() {
+  local owner_pids="" pid="" live_remaining=0 expected_root=""
+  expected_root="$(owner_expected_root)"
+  owner_pids="$(tracked_owner_pids | awk 'NF && !seen[$0]++ { print $0 }' 2>/dev/null || true)"
+  for pid in $owner_pids; do
+    if owner_process_has_monitor_command "$pid" && ! owner_process_matches_root "$pid" "$expected_root"; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+  for _ in $(seq 1 20); do
+    live_remaining=0
+    for pid in $owner_pids; do
+      if owner_process_has_monitor_command "$pid" && ! owner_process_matches_root "$pid" "$expected_root"; then
+        live_remaining=1
+        break
+      fi
+    done
+    if [ "$live_remaining" -eq 0 ]; then
+      break
+    fi
+    sleep 0.1
+  done
+  for pid in $owner_pids; do
+    if owner_process_has_monitor_command "$pid" && ! owner_process_matches_root "$pid" "$expected_root"; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+    if ! owner_process_has_monitor_command "$pid"; then
+      clear_owner_pid_record "$pid"
+    fi
+  done
+}
+
+ensure_owner_running() {
+  local owner_pid="" owner_args=()
+  acquire_owner_lock || return 1
+  prune_stale_owner_state
+  stop_wrong_root_owner_processes
+  prune_stale_owner_state
+  if owner_is_live; then
+    release_owner_lock
+    return 0
+  fi
+
+  if [ "$BUS_DIR" != ".agent_bus" ]; then
+    owner_args+=(--bus-dir "$BUS_DIR")
+  fi
+  if [ -n "$REQUESTED_LANE" ]; then
+    owner_args+=(--lane "$REQUESTED_LANE")
+  fi
+  if [ "${#owner_args[@]}" -gt 0 ]; then
+    RCX_PIPELINE_MONITOR_STATE_DIR="$STATE_DIR" \
+    RCX_PIPELINE_MONITOR_HEALTH_INTERVAL="$OWNER_INTERVAL_SECONDS" \
+      nohup bash "$0" "${owner_args[@]}" __owner-loop >/dev/null 2>&1 &
+  else
+    RCX_PIPELINE_MONITOR_STATE_DIR="$STATE_DIR" \
+    RCX_PIPELINE_MONITOR_HEALTH_INTERVAL="$OWNER_INTERVAL_SECONDS" \
+      nohup bash "$0" __owner-loop >/dev/null 2>&1 &
+  fi
+  owner_pid="$!"
+  record_owner_pid "$owner_pid"
+  for _ in $(seq 1 20); do
+    if owner_process_verified "$owner_pid"; then
+      release_owner_lock
+      return 0
+    fi
+    sleep 0.05
+  done
+  clear_owner_pid_record "$owner_pid"
+  release_owner_lock
+  echo "ERROR: failed to launch pipeline monitor owner" >&2
+  return 1
+}
+
+stop_owner_process() {
+  local owner_pids="" pid="" live_remaining=0
+  prune_stale_owner_state
+  owner_pids="$(tracked_owner_pids | awk 'NF && !seen[$0]++ { print $0 }' 2>/dev/null || true)"
+  for pid in $owner_pids; do
+    if owner_process_has_monitor_command "$pid"; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+  for _ in $(seq 1 20); do
+    live_remaining=0
+    for pid in $owner_pids; do
+      if owner_process_has_monitor_command "$pid"; then
+        live_remaining=1
+        break
+      fi
+    done
+    if [ "$live_remaining" -eq 0 ]; then
+      break
+    fi
+    sleep 0.1
+  done
+  for pid in $owner_pids; do
+    if owner_process_has_monitor_command "$pid"; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  done
+  rm -f "$OWNER_PID_FILE" "$OWNER_ROOT_FILE"
+  rm -f "$OWNER_REGISTRY_DIR"/*.pid 2>/dev/null || true
+  rmdir "$OWNER_REGISTRY_DIR" 2>/dev/null || true
+  rm -rf "$OWNER_LOCK_DIR"
+}
+
+ensure_tmux_session_under_owner_lock() {
+  local rc=0
+  acquire_owner_lock || return 1
+  ensure_tmux_session "$REPO_ROOT" || rc=$?
+  release_owner_lock
+  return "$rc"
+}
+
+cmd_owner_tick() {
+  ensure_tmux_session_under_owner_lock
+}
+
+cmd_owner_loop() {
+  local sleep_pid="" owner_pid=""
+  ensure_state_dir
+  owner_pid="$(current_owner_pid 2>/dev/null || true)"
+  if [ -n "$owner_pid" ] && [ "$owner_pid" != "$$" ] && owner_process_verified "$owner_pid"; then
+    exit 0
+  fi
+  record_owner_pid "$$"
+  trap '
+    if [ -n "${sleep_pid:-}" ] && kill -0 "$sleep_pid" 2>/dev/null; then
+      kill "$sleep_pid" 2>/dev/null || true
+    fi
+    clear_owner_pid_record "$$"
+    if [ -f "$OWNER_PID_FILE" ] && [ "$(cat "$OWNER_PID_FILE" 2>/dev/null || true)" = "$$" ]; then
+      rm -f "$OWNER_PID_FILE"
+    fi
+  ' EXIT INT TERM
+
+  while true; do
+    cmd_owner_tick >/dev/null 2>&1 || true
+    sleep "$OWNER_INTERVAL_SECONDS" &
+    sleep_pid="$!"
+    wait "$sleep_pid" 2>/dev/null || true
+    sleep_pid=""
+  done
+}
+
+cmd_start() {
+  local detach=false
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --detach) detach=true; shift ;;
+      *) echo "Unknown option: $1"; usage 1 ;;
+    esac
+  done
+
+  ensure_owner_running
+  ensure_tmux_session_under_owner_lock
 
   local autoping_launcher="$REPO_ROOT/tools/session/ensure_codex_autoping.sh"
   if [ -n "${CODEX_THREAD_ID:-}" ] && [ -x "$autoping_launcher" ]; then
@@ -473,8 +926,21 @@ cmd_start() {
 }
 
 cmd_stop() {
+  local had_session=false
+  local had_owner=false
+
+  prune_stale_owner_state
+  if tracked_owner_pids | grep -q .; then
+    had_owner=true
+  fi
   if tmux has-session -t "$SESSION" 2>/dev/null; then
-    tmux kill-session -t "$SESSION"
+    had_session=true
+  fi
+
+  stop_owner_process
+  tmux kill-session -t "$SESSION" 2>/dev/null || true
+
+  if [ "$had_session" = true ] || [ "$had_owner" = true ]; then
     echo "Pipeline monitor stopped."
   else
     echo "No active pipeline monitor session."
@@ -587,6 +1053,7 @@ case "${1:-}" in
   clear-lock)  cmd_clear_lock ;;
   nudge)       shift; cmd_nudge "$@" ;;
   kill)        shift; cmd_kill "$@" ;;
+  __owner-loop) shift; cmd_owner_loop "$@" ;;
   -h|--help)   usage 0 ;;
   "")          usage 1 ;;
   *)           echo "Unknown command: $1"; usage 1 ;;
