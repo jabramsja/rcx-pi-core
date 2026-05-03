@@ -458,11 +458,9 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
 def _looks_like_pre_push_pytest_failure(step_lower: str, signal: str) -> bool:
     if "run_pre_push_script" not in step_lower and "pre-push-fast failed" not in signal:
         return False
-    if "failures" not in signal and "failed tests/" not in signal and "failed mu/tests/" not in signal:
-        return False
     return bool(
         re.search(r"\bfailed\s+(?:tests|mu/tests)/", signal)
-        or re.search(r"\b\d+\s+failed,\s+\d+\s+passed\b", signal)
+        or re.search(r"\b[1-9]\d*\s+failed,\s+\d+\s+passed\b", signal)
         or "=================================== failures ===================================" in signal
     )
 

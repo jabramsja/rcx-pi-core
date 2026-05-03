@@ -1953,6 +1953,15 @@ def _audit_binary_guard(codex_home: Path, repo_root: Path) -> CheckResult:
         )
     overall_status = str(payload.get("overall_status") or "unknown")
     if overall_status == "patched":
+        if unexpected_specs:
+            return CheckResult(
+                "binary_guard",
+                "FAIL",
+                "overall_status=patched version=v"
+                + str(version)
+                + " actionable_specs="
+                + ", ".join(unexpected_specs),
+            )
         return CheckResult(
             "binary_guard",
             "OK",
