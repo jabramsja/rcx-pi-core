@@ -1,7 +1,7 @@
 # Deferred Report Truth Cleanup
 
 Date: 2026-05-02
-Status: Phase B (implementation-complete, bridge-converged)
+Status: Historical (merged via PR #853 on 2026-05-02; active-state closeout recorded 2026-05-03)
 Task: [DEFERRED-REPORT-TRUTH-CLEANUP]
 Wave ID: deferred-report-truth-cleanup-2026-05-02
 Wave class: L4_ENABLER, control-surface docs cleanup
@@ -10,6 +10,23 @@ Phase-A-Lock: LOCKED
 FOUNDER_OVERRIDE:deferred-report-truth-cleanup-2026-05-02
 Authorization: founder-directed active control-surface cleanup per `TASKS.md:254-262`; same-wave commit automation derives `FOUNDER_OVERRIDE:deferred-report-truth-cleanup-2026-05-02`.
 Purpose: Founder-directed Phase A packet for deferred/report truth cleanup. This packet defines the bounded plan only; implementation must stop before runtime, projection, or substrate semantic changes.
+
+## 2026-05-03 Active-State Closeout
+
+- Merge proof: `git show --no-patch --format='%H%n%P%n%s%n%ad' --date=short 1d59646b`
+  returns merge commit `1d59646b3d96a7b7b49817c1ad2ece5193cd7929` with subject
+  `Merge pull request #853 from jabramsja/jabramsja/deferred-report-truth-cleanup-2026-05-02`
+  and date `2026-05-02`.
+- Tracker truth: `TASKS.md` now marks `[DEFERRED-REPORT-TRUTH-CLEANUP]`
+  **CLEARED** in NOW and cites this packet as historical.
+- Active residue retained: `reports/deferred/non_blocking/deferred-report-truth-cleanup-2026-05-02_bridge_nonblockers.md`
+  remains an active code-backed follow-up packet for the low-severity
+  DOC_ACCURACY findings that were not fixed by this active-state closeout.
+- L4 indicator handling: `reports/l4_wave_indicators/deferred-report-truth-cleanup-2026-05-02.json`
+  remains retained evidence/provenance for the merged wave.
+- Runtime/projection/substrate delta: none; this closeout is limited to
+  `TASKS.md`, this historical control packet, the retained bridge nonblocker
+  classification, and the 2026-05-03 closeout packet.
 
 ## Grounding / Authorization
 
@@ -217,6 +234,15 @@ Retained paths:
 
 No runtime, projection, substrate, scheduler, seed, parity, or VM files were modified. The changed path set is limited to `TASKS.md`, report packets, and report archive snapshots.
 
+### Post-Implementation / Active-State Validation Results
+
+- `./tools/checks/check_docs_consistency.sh` -> passed during 2026-05-03
+  active-state closeout validation.
+- `python3 tools/docs/docs_sync_report.py --check` -> passed during 2026-05-03
+  active-state closeout validation.
+- Final 2026-05-03 results are recorded in
+  `reports/control_plane/deferred-report-truth-active-closeout-2026-05-03_2026-05-03.md`.
+
 ### Bridge Round 1 Remediation
 
 Bridge Round 1 reported a staged L4 contract violation because the initial
@@ -235,8 +261,8 @@ lane. Evidence command: `git diff --cached -U0 -- TASKS.md`.
 ## Commit Path Truth Refresh
 
 - Refresh wave: `deferred-report-truth-cleanup-2026-05-02`
-- Active packet: `reports/control_plane/deferred_report_truth_cleanup_2026-05-02.md`
-- Commit status: `pre_commit_supervisor_pending`
+- Historical packet: `reports/control_plane/deferred_report_truth_cleanup_2026-05-02.md`
+- Commit status: `merged_pr_853_2026-05-02`
 - Tracker note sha256: `1738b4814d7f3198b65fb5815387a4f590be8d01d23f1021f162373521cca052`
 - Indicator artifact: `reports/l4_wave_indicators/deferred-report-truth-cleanup-2026-05-02.json`
 - Evidence command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id deferred-report-truth-cleanup-2026-05-02 --output reports/l4_wave_indicators/deferred-report-truth-cleanup-2026-05-02.json`.
