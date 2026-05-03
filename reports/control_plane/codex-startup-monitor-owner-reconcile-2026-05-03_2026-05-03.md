@@ -19,7 +19,7 @@ Files and surfaces in scope for this packet:
 - `mu/tools/observability/pipeline_monitor.sh`: tmux monitor owner, health, and recovery behavior around the existing four-pane pipeline monitor layout.
 - `tools/observability/pipeline_monitor.sh`: root command path reached through the tracked `tools -> mu/tools` symlink for the same monitor surface.
 - `mu/tests/tools/`: monitor owner/recovery regressions only, limited to `pipeline_monitor.sh` startup, stop, ownership, tmux health, and four-pane layout cases. New or changed monitor tests must stay under this directory.
-- `mu/tools/executors/recovery_gate.py` and `mu/tests/tools/test_recovery_gate.py`: same-wave dispatcher recovery repairs required by observed failures in this run, limited to plan task header mismatch classification/fix coverage and hybrid `.scratch` baseline handling for pre-existing ignored scratch trees.
+- `mu/tools/executors/recovery_gate.py` and `mu/tests/tools/test_recovery_gate.py`: same-wave dispatcher recovery repairs required by observed failures in this run, limited to plan task header mismatch classification/fix coverage, hybrid `.scratch` baseline handling for pre-existing ignored scratch trees, and pre-push pytest failure classification when hook output also contains benign L4 audit chatter.
 - `mu/tools/executors/phase_b_executor.py` and `mu/tests/tools/test_phase_b_executor.py`: same-wave pre-commit supervisor scope reconciliation required after Phase B mechanically staged the L4 indicator artifact while this locked packet still excluded indicator scope.
 - `reports/l4_wave_indicators/codex-startup-monitor-owner-reconcile-2026-05-03.json`: exact same-wave L4 indicator artifact collected and staged mechanically by Phase B before pre-commit supervisor review.
 
@@ -34,7 +34,7 @@ Indicator scope is limited to the exact same-wave artifact `reports/l4_wave_indi
 5. Add direct monitor regressions under `mu/tests/tools/` proving `start --detach` is idempotent, `stop` cleans owner state, and degraded/missing/wrong-root panes are rebuilt without breaking the existing four-pane layout.
 6. Preserve current lane/bus identity support plus pane timeline/autoping behavior while adding owner recovery.
 7. After implementation is locked and validated, update only the directly required `TASKS.md` lines, this governing packet, and exact same-wave indicator artifact `reports/l4_wave_indicators/codex-startup-monitor-owner-reconcile-2026-05-03.json` when Phase B or commit automation mechanically collects it.
-8. Preserve same-wave recovery ownership for the dispatcher blockers encountered during this run: `validate_inputs fatal: Plan task_id [PIPELINE-RECOVERY] historical follow-up does not match routing task_id [PIPELINE-RECOVERY]`, final pytest failure at `mu/tests/tools/test_recovery_gate.py:860`, and recovery delegation failure on pre-existing ignored `.scratch/adversary_3c` inventory.
+8. Preserve same-wave recovery ownership for the dispatcher blockers encountered during this run: `validate_inputs fatal: Plan task_id [PIPELINE-RECOVERY] historical follow-up does not match routing task_id [PIPELINE-RECOVERY]`, final pytest failure at `mu/tests/tools/test_recovery_gate.py:860`, recovery delegation failure on pre-existing ignored `.scratch/adversary_3c` inventory, and post-commit `run_pre_push_script` failure from `tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pipeline_monitor_start_replaces_wrong_root_detached_owner`.
 
 ## Constraints
 
@@ -186,27 +186,49 @@ Validation:
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_codex_startup_state.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_phase_b_executor.py -p no:cacheprovider` -> `1444 passed in 282.24s`.
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py -k 'mismatched_plan_task_header' -p no:cacheprovider` -> `5 passed, 989 deselected in 0.67s`.
 
+## Post-Commit Pre-Push Failure Remediation Closeout
+
+Post-commit `run_pre_push_script` failed on 2026-05-03 while running the
+repo `pre-push-fast` hook. Direct failure evidence: the hook's xdist pytest
+run failed
+`tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pipeline_monitor_start_replaces_wrong_root_detached_owner`
+with `second.returncode == 1` at `mu/tests/tools/test_recovery_gate.py:6270`.
+Retained pytest temp evidence showed repo B's `start --detach` rebuild
+interleaving with another repo A owner rebuild in the same fake tmux log,
+including an empty pane target line `select-pane -t  -T PANE 2`. The monitor
+owner tick and foreground `start` path now serialize tmux health/rebuild behind
+the owner lock, and `start` replaces/verifies the owner before rebuilding panes.
+
+The same failure also exposed a recovery-routing gap: dispatcher recovery
+classified the pre-push pytest failure as `l4_contract_violation` because the
+hook output contained L4 audit chatter plus `pre-push-fast failed`. Recovery
+now recognizes `run_pre_push_script` pytest failure summaries first and routes
+them as `TEST_FAILURE`, preserving real L4 violations for true L4 policy text.
+
+Validation:
+
+- `bash -n mu/tools/observability/pipeline_monitor.sh` -> passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile mu/tools/executors/recovery_gate.py` -> passed.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 python3 -m pytest -n auto --dist worksteal -q tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution -p no:cacheprovider` -> `54 passed in 42.17s`.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestStagePathSymlinkAliasRecovery::test_pre_push_pytest_failure_wins_over_l4_audit_chatter -p no:cacheprovider` -> `1 passed in 0.55s`.
+
 <!-- COMMIT_PATH_TRUTH_REFRESH:start -->
 ## Commit Path Truth Refresh
 
 - Refresh wave: `codex-startup-monitor-owner-reconcile-2026-05-03`
 - Active packet: `reports/control_plane/codex-startup-monitor-owner-reconcile-2026-05-03_2026-05-03.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `5134c49859320ab1ac8ede3e1d51ea352e0c2fedfa2a31d66ad0480f110c6180`
+- Tracker note sha256: `5e76812107f98ee46a1c7f18a6c08a03e76faff00e33eceb23be737ac880e7ed`
 - Indicator artifact: `reports/l4_wave_indicators/codex-startup-monitor-owner-reconcile-2026-05-03.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_codex_startup_state.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_recovery_gate.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/codex-startup-monitor-owner-reconcile-2026-05-03_2026-05-03.md. (2) Final pytest gate covered 3 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_recovery_gate.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/codex-startup-monitor-owner-reconcile-2026-05-03_2026-05-03.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/codex-startup-monitor-owner-reconcile-2026-05-03.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/tools/test_codex_startup_state.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
   - `mu/tests/tools/test_recovery_gate.py`
-  - `mu/tools/executors/phase_b_executor.py`
   - `mu/tools/executors/recovery_gate.py`
   - `mu/tools/observability/pipeline_monitor.sh`
-  - `mu/tools/session/check_codex_startup_state.py`
   - `reports/control_plane/codex-startup-monitor-owner-reconcile-2026-05-03_2026-05-03.md`
   - `reports/l4_wave_indicators/codex-startup-monitor-owner-reconcile-2026-05-03.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

@@ -342,6 +342,8 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.PR_MERGE_CONFLICT
 
     l4_signal = f"{reason_lower} {combined_lower}"
+    if status_failed and _looks_like_pre_push_pytest_failure(step_lower, l4_signal):
+        return FailureClass.TEST_FAILURE
     if status_failed and (
         "l4 execution contract" in l4_signal
         or "non-structural adjacency cap" in l4_signal
@@ -451,6 +453,18 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.UNKNOWN_ERROR
 
     return FailureClass.UNCLASSIFIED
+
+
+def _looks_like_pre_push_pytest_failure(step_lower: str, signal: str) -> bool:
+    if "run_pre_push_script" not in step_lower and "pre-push-fast failed" not in signal:
+        return False
+    if "failures" not in signal and "failed tests/" not in signal and "failed mu/tests/" not in signal:
+        return False
+    return bool(
+        re.search(r"\bfailed\s+(?:tests|mu/tests)/", signal)
+        or re.search(r"\b\d+\s+failed,\s+\d+\s+passed\b", signal)
+        or "=================================== failures ===================================" in signal
+    )
 
 
 def _looks_like_mixed_staging(result: dict[str, Any]) -> bool:

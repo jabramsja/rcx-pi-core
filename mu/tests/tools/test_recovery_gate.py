@@ -677,6 +677,24 @@ class TestStagePathSymlinkAliasRecovery:
             {"status": "failed", "executor": "commit_executor", "stdout": stdout}
         ) == FailureClass.L4_CONTRACT_VIOLATION
 
+    def test_pre_push_pytest_failure_wins_over_l4_audit_chatter(self):
+        payload = json.dumps({
+            "status": "error",
+            "step": "run_pre_push_script",
+            "errors": [
+                "pre-push-fast failed: L4 execution contract passed\n"
+                "=================================== FAILURES ===================================\n"
+                "FAILED tests/tools/test_recovery_gate.py::"
+                "TestObservabilityWorktreeResolution::"
+                "test_pipeline_monitor_start_replaces_wrong_root_detached_owner\n"
+                "1 failed, 6700 passed, 18 skipped in 283.92s\n"
+                "To bypass (not recommended): git push --no-verify"
+            ],
+        }, indent=2)
+        assert rg_mod.classify_failure(
+            {"status": "failed", "executor": "commit_executor", "stdout": payload}
+        ) == FailureClass.TEST_FAILURE
+
     def test_private_attr_prepush_failure_is_narrow_test_integrity_class(self):
         payload = json.dumps({
             "status": "error",

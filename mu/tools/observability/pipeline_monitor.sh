@@ -851,8 +851,16 @@ stop_owner_process() {
   rm -rf "$OWNER_LOCK_DIR"
 }
 
+ensure_tmux_session_under_owner_lock() {
+  local rc=0
+  acquire_owner_lock || return 1
+  ensure_tmux_session "$REPO_ROOT" || rc=$?
+  release_owner_lock
+  return "$rc"
+}
+
 cmd_owner_tick() {
-  ensure_tmux_session "$REPO_ROOT"
+  ensure_tmux_session_under_owner_lock
 }
 
 cmd_owner_loop() {
@@ -891,8 +899,8 @@ cmd_start() {
     esac
   done
 
-  ensure_tmux_session "$REPO_ROOT"
   ensure_owner_running
+  ensure_tmux_session_under_owner_lock
 
   local autoping_launcher="$REPO_ROOT/tools/session/ensure_codex_autoping.sh"
   if [ -n "${CODEX_THREAD_ID:-}" ] && [ -x "$autoping_launcher" ]; then
