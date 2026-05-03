@@ -866,6 +866,7 @@ class TestTierMapping:
                          FailureClass.PHASE_B_PLAN_REQUIRED,
                          FailureClass.MISSING_PHASE_A_LOCK,
                          FailureClass.MISSING_PLAN_TASK_HEADER,
+                         FailureClass.MISMATCHED_PLAN_TASK_HEADER,
                          FailureClass.STAGE_PATH_SYMLINK_ALIAS}
         # STALE_GIT_INDEX_LOCK demoted to Tier 2 (no sound ownership check)
         assert rg_mod.tier_for(FailureClass.STALE_GIT_INDEX_LOCK) == 2
@@ -2114,6 +2115,22 @@ class TestFixMissingPhaseALock:
         assert fc == FailureClass.MISSING_PLAN_TASK_HEADER
         assert rg_mod.tier_for(fc) == 1
 
+    def test_mismatched_plan_task_header_classifies_to_tier1(self):
+        result = {
+            "status": "error",
+            "step": "validate_inputs",
+            "plan_path": "reports/control_plane/plan.md",
+            "errors": [
+                "validate_inputs fatal: Plan task_id [PIPELINE-RECOVERY] historical follow-up "
+                "does not match routing task_id [PIPELINE-RECOVERY]"
+            ],
+        }
+
+        fc = rg_mod.classify_failure(result)
+
+        assert fc == FailureClass.MISMATCHED_PLAN_TASK_HEADER
+        assert rg_mod.tier_for(fc) == 1
+
     def test_missing_phase_a_lock_repaired_and_stale_bridge_lock_cleared(self, tmp_path, monkeypatch):
         reports = tmp_path / "reports" / "control_plane"
         reports.mkdir(parents=True)
@@ -2217,6 +2234,222 @@ class TestFixMissingPhaseALock:
         assert "Wave ID: parallel-pipeline-agent-teams\n" in header
         parsed = phase_b_mod.load_plan_packet(tmp_path, plan_path)
         assert parsed["task_id"] == "[PARALLEL-PIPELINE]"
+
+    def test_mismatched_plan_task_header_repaired_from_routing_record(self, tmp_path, monkeypatch):
+        reports = tmp_path / "reports" / "control_plane"
+        reports.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        (tmp_path / plan_path).write_text(
+            "# Plan\n\n"
+            "Date: 2026-05-03\n"
+            "Status: Phase B (locked, implementing)\n"
+            "Task: [PIPELINE-RECOVERY] historical follow-up\n"
+            "Wave ID: codex-startup-monitor-owner-reconcile-2026-05-03\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\n"
+            "## Body\n"
+            "Task: [PIPELINE-RECOVERY] historical follow-up should remain body text.\n",
+            encoding="utf-8",
+        )
+
+        phase_b_mod = load_module("phase_b_executor_fix_mismatched_plan_task_header", _EXECUTORS_DIR / "phase_b_executor.py")
+
+        def fake_loader(repo_root, module_name):
+            assert repo_root == tmp_path
+            if module_name == "phase_b_executor":
+                return phase_b_mod
+            raise AssertionError(f"unexpected module load: {module_name}")
+
+        monkeypatch.setattr(rg_mod, "_load_executor_module_from_repo", fake_loader)
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda repo_root, bus_dir=None: {
+                "task_id": "[PIPELINE-RECOVERY]",
+                "wave_name": "codex-startup-monitor-owner-reconcile-2026-05-03",
+            },
+        )
+
+        result = rg_mod.fix_mismatched_plan_task_header(
+            tmp_path,
+            result={
+                "status": "error",
+                "step": "validate_inputs",
+                "plan_path": plan_path,
+                "errors": [
+                    "validate_inputs fatal: Plan task_id [PIPELINE-RECOVERY] historical follow-up "
+                    "does not match routing task_id [PIPELINE-RECOVERY]"
+                ],
+            },
+        )
+
+        assert result["fixed"] is True
+        assert result["action"] == "repair_mismatched_plan_task_header"
+        plan_text = (tmp_path / plan_path).read_text(encoding="utf-8")
+        header, body = plan_text.split("## Body", 1)
+        assert "Task: [PIPELINE-RECOVERY]\n" in header
+        assert "historical follow-up" not in header
+        assert "Task: [PIPELINE-RECOVERY] historical follow-up should remain body text." in body
+        parsed = phase_b_mod.load_plan_packet(tmp_path, plan_path)
+        assert parsed["task_id"] == "[PIPELINE-RECOVERY]"
+
+    def test_mismatched_plan_task_header_refuses_conflicting_live_routing_identity(self, tmp_path, monkeypatch):
+        reports = tmp_path / "reports" / "control_plane"
+        reports.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        original_text = (
+            "# Plan\n\n"
+            "Date: 2026-05-03\n"
+            "Status: Phase B (locked, implementing)\n"
+            "Task: [OLD]\n"
+            "Wave ID: original-wave-2026-05-03\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\n"
+            "## Body\n"
+        )
+        (tmp_path / plan_path).write_text(original_text, encoding="utf-8")
+
+        phase_b_mod = load_module(
+            "phase_b_executor_fix_mismatched_plan_task_header_conflict",
+            _EXECUTORS_DIR / "phase_b_executor.py",
+        )
+
+        def fake_loader(repo_root, module_name):
+            assert repo_root == tmp_path
+            if module_name == "phase_b_executor":
+                return phase_b_mod
+            raise AssertionError(f"unexpected module load: {module_name}")
+
+        monkeypatch.setattr(rg_mod, "_load_executor_module_from_repo", fake_loader)
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda repo_root, bus_dir=None: {
+                "task_id": "[UNRELATED]",
+                "wave_name": "different-wave-2026-05-03",
+            },
+        )
+
+        result = rg_mod.fix_mismatched_plan_task_header(
+            tmp_path,
+            result={
+                "status": "error",
+                "step": "validate_inputs",
+                "plan_path": plan_path,
+                "errors": [
+                    "validate_inputs fatal: Plan task_id [OLD] does not match routing task_id [EXPECTED]"
+                ],
+            },
+        )
+
+        assert result["fixed"] is False
+        assert result["action"] == "routing_task_conflict"
+        assert (tmp_path / plan_path).read_text(encoding="utf-8") == original_text
+
+    def test_mismatched_plan_task_header_refuses_live_wave_conflict(self, tmp_path, monkeypatch):
+        reports = tmp_path / "reports" / "control_plane"
+        reports.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        original_text = (
+            "# Plan\n\n"
+            "Date: 2026-05-03\n"
+            "Status: Phase B (locked, implementing)\n"
+            "Task: [OLD]\n"
+            "Wave ID: original-wave-2026-05-03\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\n"
+            "## Body\n"
+        )
+        (tmp_path / plan_path).write_text(original_text, encoding="utf-8")
+
+        phase_b_mod = load_module(
+            "phase_b_executor_fix_mismatched_plan_task_header_wave_conflict",
+            _EXECUTORS_DIR / "phase_b_executor.py",
+        )
+
+        def fake_loader(repo_root, module_name):
+            assert repo_root == tmp_path
+            if module_name == "phase_b_executor":
+                return phase_b_mod
+            raise AssertionError(f"unexpected module load: {module_name}")
+
+        monkeypatch.setattr(rg_mod, "_load_executor_module_from_repo", fake_loader)
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda repo_root, bus_dir=None: {
+                "task_id": "[EXPECTED]",
+                "wave_name": "different-wave-2026-05-03",
+            },
+        )
+
+        result = rg_mod.fix_mismatched_plan_task_header(
+            tmp_path,
+            result={
+                "status": "error",
+                "step": "validate_inputs",
+                "plan_path": plan_path,
+                "errors": [
+                    "validate_inputs fatal: Plan task_id [OLD] does not match routing task_id [EXPECTED]"
+                ],
+            },
+        )
+
+        assert result["fixed"] is False
+        assert result["action"] == "routing_wave_conflict"
+        assert (tmp_path / plan_path).read_text(encoding="utf-8") == original_text
+
+    def test_mismatched_plan_task_header_repair_refuses_unlocked_packet(self, tmp_path, monkeypatch):
+        reports = tmp_path / "reports" / "control_plane"
+        reports.mkdir(parents=True)
+        plan_path = "reports/control_plane/plan.md"
+        original_text = (
+            "# Plan\n\n"
+            "Date: 2026-05-03\n"
+            "Status: Phase B (locked, implementing)\n"
+            "Task: [WRONG]\n"
+            "Wave ID: codex-startup-monitor-owner-reconcile-2026-05-03\n"
+            "Phase-A-Lock: UNLOCKED\n"
+            "\n"
+            "## Body\n"
+        )
+        (tmp_path / plan_path).write_text(original_text, encoding="utf-8")
+
+        phase_b_mod = load_module("phase_b_executor_fix_mismatched_plan_task_header_unlocked", _EXECUTORS_DIR / "phase_b_executor.py")
+
+        def fake_loader(repo_root, module_name):
+            assert repo_root == tmp_path
+            if module_name == "phase_b_executor":
+                return phase_b_mod
+            raise AssertionError(f"unexpected module load: {module_name}")
+
+        monkeypatch.setattr(rg_mod, "_load_executor_module_from_repo", fake_loader)
+        monkeypatch.setattr(
+            rg_mod,
+            "load_routing_record",
+            lambda repo_root, bus_dir=None: {
+                "task_id": "[RIGHT]",
+                "wave_name": "codex-startup-monitor-owner-reconcile-2026-05-03",
+            },
+        )
+
+        result = rg_mod.fix_mismatched_plan_task_header(
+            tmp_path,
+            result={
+                "status": "error",
+                "step": "validate_inputs",
+                "plan_path": plan_path,
+                "errors": [
+                    "validate_inputs fatal: Plan Phase-A-Lock must be LOCKED "
+                    "(or ROUTING_RECORD_AUTHORITY for planless), got UNLOCKED",
+                    "validate_inputs fatal: Plan task_id [WRONG] does not match routing task_id [RIGHT]",
+                ],
+            },
+        )
+
+        assert result["fixed"] is False
+        assert result["action"] == "phase_a_lock_not_locked"
+        assert (tmp_path / plan_path).read_text(encoding="utf-8") == original_text
 
     def test_bridge_lock_preserved_when_flock_held(self, tmp_path, monkeypatch):
         """bridge.lock must NOT be cleared when a live process holds the flock.
@@ -3770,6 +4003,81 @@ class TestHybridScopeAudit:
         assert audit["observed_drift"] == []
         assert ".scratch/__pycache__/artifact.cpython-313.pyc" not in audit["manifest_reasons"]
 
+    def test_pytest_tagged_scratch_pycache_pyc_stays_out_of_manifest_drift(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        pycache = tmp_path / ".scratch" / "__pycache__"
+        pycache.mkdir(parents=True)
+        rel_path = ".scratch/__pycache__/boot1_timestamp_repro.cpython-313-pytest-9.0.2.pyc"
+        (pycache / "boot1_timestamp_repro.cpython-313-pytest-9.0.2.pyc").write_bytes(b"\0\0")
+
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+
+        assert ok is True
+        assert audit["observed_drift"] == []
+        assert rel_path not in audit["manifest_reasons"]
+
+    def test_preexisting_ignored_scratch_tree_is_baselined_but_new_child_fails_closed(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        adversary_dir = tmp_path / ".scratch" / "adversary_3c"
+        adversary_dir.mkdir(parents=True)
+        (adversary_dir / "attack_01_provenance_bypass.py").write_text(
+            "baseline\n",
+            encoding="utf-8",
+        )
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+        assert ".scratch/adversary_3c/attack_01_provenance_bypass.py" in baseline["manifest"]
+
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+        assert audit["observed_drift"] == []
+
+        (adversary_dir / "attack_02_new_child.py").write_text(
+            "new\n",
+            encoding="utf-8",
+        )
+
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+
+        assert ok is False
+        assert (
+            "unexpected .scratch descendant outside exact exception set: "
+            ".scratch/adversary_3c/attack_02_new_child.py"
+        ) == audit["detail"]
+
     def test_scratch_pycache_exemption_rejects_symlinked_cache_dir(self, tmp_path, monkeypatch):
         init_hybrid_delegate_tree(tmp_path)
         monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
@@ -4960,15 +5268,50 @@ esac
         bin_dir = tmp_path / "tmux-bin"
         bin_dir.mkdir(exist_ok=True)
         counter_path = tmp_path / "tmux-split-counter.txt"
+        session_path = tmp_path / "tmux-session-active"
+        panes_path = tmp_path / "tmux-panes.txt"
         script = f"""#!/usr/bin/env bash
 set -eu
 log_path={str(log_path)!r}
 counter_path={str(counter_path)!r}
+session_path={str(session_path)!r}
+panes_path={str(panes_path)!r}
 printf '%s\\n' "$*" >> "$log_path"
 cmd="${{1:-}}"
 shift || true
+healthy_panes() {{
+  local root="${{PWD}}"
+  printf 'PANE 1 · LIVE PIPELINE LOG\\t%s\\n' "$root"
+  printf 'PANE 2 · REVIEW FINDINGS\\t%s\\n' "$root"
+  printf 'PANE 3 · PLAIN-ENGLISH STATUS\\t%s\\n' "$root"
+  printf 'PANE 4 · SESSION TIMELINE\\t%s\\n' "$root"
+}}
 case "$cmd" in
-  kill-session|new-session|select-pane|setw|attach-session)
+  has-session)
+    [ -f "$session_path" ]
+    ;;
+  kill-session)
+    if [ -f "$session_path" ]; then
+      rm -f "$session_path" "$panes_path" "$counter_path"
+      exit 0
+    fi
+    exit 1
+    ;;
+  new-session)
+    : > "$session_path"
+    printf '0' > "$counter_path"
+    healthy_panes > "$panes_path"
+    exit 0
+    ;;
+  list-panes)
+    [ -f "$session_path" ] || exit 1
+    if [ -f "$panes_path" ]; then
+      cat "$panes_path"
+    else
+      healthy_panes
+    fi
+    ;;
+  select-pane|setw|attach-session)
     exit 0
     ;;
   display-message)
@@ -5009,6 +5352,20 @@ esac
 """
         self._write_executable(bin_dir / "tmux", script)
         return bin_dir
+
+    def _stop_pipeline_monitor(self, repo_root: Path, env: dict[str, str], *monitor_args: str) -> None:
+        subprocess.run(
+            [
+                "bash",
+                str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"),
+                *monitor_args,
+                "stop",
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
 
     def _write_commit_state(
         self,
@@ -5651,21 +6008,28 @@ esac
         )
         tmux_log = tmp_path / "tmux.log"
         tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
-        env = os.environ | {"PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}"}
+        env = os.environ | {
+            "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
+            "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+        }
 
-        result = subprocess.run(
-            ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            env=env,
-        )
+        try:
+            result = subprocess.run(
+                ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
 
-        assert result.returncode == 0
-        log_lines = tmux_log.read_text(encoding="utf-8").splitlines()
-        assert "display-message -p -t rcx-pipeline #{window_id}" in log_lines
-        assert "display-message -p -t @1 #{pane_id}" in log_lines
-        assert not any("display-message -p -t rcx-pipeline:1.1 #{pane_id}" in line for line in log_lines)
+            assert result.returncode == 0
+            log_lines = tmux_log.read_text(encoding="utf-8").splitlines()
+            assert "display-message -p -t rcx-pipeline #{window_id}" in log_lines
+            assert "display-message -p -t @1 #{pane_id}" in log_lines
+            assert not any("display-message -p -t rcx-pipeline:1.1 #{pane_id}" in line for line in log_lines)
+        finally:
+            self._stop_pipeline_monitor(repo_root, env)
 
     def test_pipeline_monitor_start_uses_configured_named_lane_identity(self, tmp_path):
         repo_root = tmp_path / "repo"
@@ -5689,30 +6053,37 @@ esac
         )
         tmux_log = tmp_path / "tmux.log"
         tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
-        env = os.environ | {"PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}"}
+        env = os.environ | {
+            "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
+            "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+        }
 
-        result = subprocess.run(
-            [
-                "bash",
-                str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"),
-                "--bus-dir",
-                ".agent_bus-alpha",
-                "start",
-                "--detach",
-            ],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            env=env,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"),
+                    "--bus-dir",
+                    ".agent_bus-alpha",
+                    "start",
+                    "--detach",
+                ],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
 
-        assert result.returncode == 0, result.stderr
-        log_text = tmux_log.read_text(encoding="utf-8")
-        assert "kill-session -t rcx-pipeline-alpha" in log_text
-        assert "new-session -d -x 240 -y 70 -s rcx-pipeline-alpha" in log_text
-        assert "Pipeline monitor started (session: rcx-pipeline-alpha)" in result.stdout
-        assert f"bus={repo_root / '.agent_bus-alpha'}" in result.stdout
-        assert "dashboard=http://127.0.0.1:8101" in result.stdout
+            assert result.returncode == 0, result.stderr
+            log_text = tmux_log.read_text(encoding="utf-8")
+            assert "kill-session -t rcx-pipeline-alpha" in log_text
+            assert "new-session -d -x 240 -y 70 -s rcx-pipeline-alpha" in log_text
+            assert "Pipeline monitor started (session: rcx-pipeline-alpha)" in result.stdout
+            assert f"bus={repo_root / '.agent_bus-alpha'}" in result.stdout
+            assert "dashboard=http://127.0.0.1:8101" in result.stdout
+        finally:
+            self._stop_pipeline_monitor(repo_root, env, "--bus-dir", ".agent_bus-alpha")
 
     def test_pipeline_monitor_start_does_not_pin_panes_to_launcher_worktree(self, tmp_path):
         repo_root = tmp_path / "repo"
@@ -5725,21 +6096,28 @@ esac
         )
         tmux_log = tmp_path / "tmux.log"
         tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
-        env = os.environ | {"PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}"}
+        env = os.environ | {
+            "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
+            "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+        }
 
-        result = subprocess.run(
-            ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            env=env,
-        )
+        try:
+            result = subprocess.run(
+                ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
 
-        assert result.returncode == 0
-        log_text = tmux_log.read_text(encoding="utf-8")
-        assert "unset RCX_OBS_REPO_ROOT" in log_text
-        assert "RCX_OBS_STATUS_SCRIPT=" in log_text
-        assert "RCX_OBS_REPO_ROOT=" not in log_text
+            assert result.returncode == 0
+            log_text = tmux_log.read_text(encoding="utf-8")
+            assert "unset RCX_OBS_REPO_ROOT" in log_text
+            assert "RCX_OBS_STATUS_SCRIPT=" in log_text
+            assert "RCX_OBS_REPO_ROOT=" not in log_text
+        finally:
+            self._stop_pipeline_monitor(repo_root, env)
 
     def test_pipeline_monitor_start_reseeds_autoping_when_thread_id_is_present(self, tmp_path):
         repo_root = tmp_path / "repo"
@@ -5766,24 +6144,322 @@ esac
         env = os.environ | {
             "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
             "CODEX_THREAD_ID": "thread-123",
+            "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
+            "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
         }
 
-        result = subprocess.run(
-            ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+        try:
+            result = subprocess.run(
+                ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            assert result.returncode == 0
+            marker_text = marker.read_text(encoding="utf-8")
+            assert "--repo" in marker_text
+            assert str(repo_root) in marker_text
+            assert "--thread-id thread-123" in marker_text
+            assert "--bus-dir .agent_bus" in marker_text
+            assert "--tmux-session rcx-pipeline" in marker_text
+            assert "--force-restart" in marker_text
+        finally:
+            self._stop_pipeline_monitor(repo_root, env)
+
+    def test_pipeline_monitor_detached_start_is_idempotent_with_single_owner(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        git_bin = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/test-wave",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        state_dir = tmp_path / "monitor-state"
+        env = os.environ | {
+            "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            "RCX_PIPELINE_MONITOR_STATE_DIR": str(state_dir),
+            "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+        }
+        script = repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+
+        try:
+            first = subprocess.run(
+                ["bash", str(script), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            assert first.returncode == 0, first.stderr
+            owner_pid = (state_dir / "owner.pid").read_text(encoding="utf-8").strip()
+
+            second = subprocess.run(
+                ["bash", str(script), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            assert second.returncode == 0, second.stderr
+            assert (state_dir / "owner.pid").read_text(encoding="utf-8").strip() == owner_pid
+            log_text = tmux_log.read_text(encoding="utf-8")
+            assert log_text.count("new-session -d -x 240 -y 70 -s rcx-pipeline") == 1
+        finally:
+            self._stop_pipeline_monitor(repo_root, env)
+
+    def test_pipeline_monitor_start_replaces_wrong_root_detached_owner(self, tmp_path):
+        repo_a = tmp_path / "repo-a"
+        repo_b = tmp_path / "repo-b"
+        repo_a.mkdir()
+        repo_b.mkdir()
+        self._install_observability_script(repo_a, "pipeline_monitor.sh")
+        self._install_observability_script(repo_b, "pipeline_monitor.sh")
+        git_a_base = tmp_path / "git-a"
+        git_b_base = tmp_path / "git-b"
+        git_a_base.mkdir()
+        git_b_base.mkdir()
+        git_a = self._fake_git_dir(
+            git_a_base,
+            show_toplevel=str(repo_a),
+            branch="jabramsja/repo-a",
+        )
+        git_b = self._fake_git_dir(
+            git_b_base,
+            show_toplevel=str(repo_b),
+            branch="jabramsja/repo-b",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        state_dir = tmp_path / "monitor-state"
+        base_env = os.environ | {
+            "RCX_PIPELINE_MONITOR_STATE_DIR": str(state_dir),
+            "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "1",
+        }
+        env_a = base_env | {"PATH": f"{tmux_bin}:{git_a}:{os.environ['PATH']}"}
+        env_b = base_env | {"PATH": f"{tmux_bin}:{git_b}:{os.environ['PATH']}"}
+        script_a = repo_a / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+        script_b = repo_b / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+        panes_path = tmp_path / "tmux-panes.txt"
+
+        try:
+            first = subprocess.run(
+                ["bash", str(script_a), "start", "--detach"],
+                cwd=repo_a,
+                capture_output=True,
+                text=True,
+                env=env_a,
+            )
+            assert first.returncode == 0, first.stderr
+            owner_a = (state_dir / "owner.pid").read_text(encoding="utf-8").strip()
+            assert (state_dir / "owner.root").read_text(encoding="utf-8").strip() == str(repo_a)
+
+            second = subprocess.run(
+                ["bash", str(script_b), "start", "--detach"],
+                cwd=repo_b,
+                capture_output=True,
+                text=True,
+                env=env_b,
+            )
+
+            assert second.returncode == 0, second.stderr
+            owner_b = (state_dir / "owner.pid").read_text(encoding="utf-8").strip()
+            assert owner_b != owner_a
+            assert (state_dir / "owner.root").read_text(encoding="utf-8").strip() == str(repo_b)
+
+            time.sleep(1.5)
+            panes = panes_path.read_text(encoding="utf-8").splitlines()
+            assert panes == [
+                f"PANE 1 · LIVE PIPELINE LOG\t{repo_b}",
+                f"PANE 2 · REVIEW FINDINGS\t{repo_b}",
+                f"PANE 3 · PLAIN-ENGLISH STATUS\t{repo_b}",
+                f"PANE 4 · SESSION TIMELINE\t{repo_b}",
+            ]
+        finally:
+            self._stop_pipeline_monitor(repo_b, env_b)
+            self._stop_pipeline_monitor(repo_a, env_a)
+
+    def test_pipeline_monitor_start_replaces_owner_with_stale_expected_root_metadata(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        wrong_root = tmp_path / "wrong-root"
+        repo_root.mkdir()
+        wrong_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        wrong_script = wrong_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+        wrong_script.parent.mkdir(parents=True)
+        wrong_script.write_text(
+            "#!/usr/bin/env bash\n"
+            "trap 'exit 0' INT TERM\n"
+            "while true; do sleep 30 & wait $!; done\n",
+            encoding="utf-8",
+        )
+        wrong_script.chmod(wrong_script.stat().st_mode | 0o111)
+        git_bin = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/test-wave",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        state_dir = tmp_path / "monitor-state"
+        env = os.environ | {
+            "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            "RCX_PIPELINE_MONITOR_STATE_DIR": str(state_dir),
+            "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+        }
+        wrong_owner = subprocess.Popen(
+            ["bash", str(wrong_script), "__owner-loop", "30"],
+            cwd=repo_root,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        owner_registry = state_dir / "owners"
+        owner_registry.mkdir(parents=True)
+        (state_dir / "owner.pid").write_text(f"{wrong_owner.pid}\n", encoding="utf-8")
+        (state_dir / "owner.root").write_text(f"{repo_root}\n", encoding="utf-8")
+        (owner_registry / f"{wrong_owner.pid}.pid").write_text(
+            f"repo_root={repo_root}\n"
+            "session=rcx-pipeline\n"
+            "bus_dir=.agent_bus\n"
+            "lane=default\n",
+            encoding="utf-8",
+        )
+        script = repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+
+        try:
+            result = subprocess.run(
+                ["bash", str(script), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            assert result.returncode == 0, result.stderr
+            owner_pid = (state_dir / "owner.pid").read_text(encoding="utf-8").strip()
+            assert owner_pid != str(wrong_owner.pid)
+            wrong_owner.wait(timeout=5)
+            assert (state_dir / "owner.root").read_text(encoding="utf-8").strip() == str(repo_root)
+        finally:
+            self._stop_pipeline_monitor(repo_root, env)
+            if wrong_owner.poll() is None:
+                wrong_owner.terminate()
+                try:
+                    wrong_owner.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    wrong_owner.kill()
+                    wrong_owner.wait(timeout=5)
+
+    def test_pipeline_monitor_stop_cleans_owner_state(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        git_bin = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/test-wave",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        state_dir = tmp_path / "monitor-state"
+        env = os.environ | {
+            "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            "RCX_PIPELINE_MONITOR_STATE_DIR": str(state_dir),
+            "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+        }
+        script = repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+
+        start = subprocess.run(
+            ["bash", str(script), "start", "--detach"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert start.returncode == 0, start.stderr
+        assert (state_dir / "owner.pid").exists()
+
+        stop = subprocess.run(
+            ["bash", str(script), "stop"],
             cwd=repo_root,
             capture_output=True,
             text=True,
             env=env,
         )
 
-        assert result.returncode == 0
-        marker_text = marker.read_text(encoding="utf-8")
-        assert "--repo" in marker_text
-        assert str(repo_root) in marker_text
-        assert "--thread-id thread-123" in marker_text
-        assert "--bus-dir .agent_bus" in marker_text
-        assert "--tmux-session rcx-pipeline" in marker_text
-        assert "--force-restart" in marker_text
+        assert stop.returncode == 0, stop.stderr
+        assert "Pipeline monitor stopped." in stop.stdout
+        assert not (state_dir / "owner.pid").exists()
+        owner_records = list((state_dir / "owners").glob("*.pid")) if (state_dir / "owners").exists() else []
+        assert owner_records == []
+
+    @pytest.mark.parametrize("pane_state", ["missing", "degraded", "wrong_root"])
+    def test_pipeline_monitor_start_rebuilds_missing_degraded_and_wrong_root_panes(self, tmp_path, pane_state):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        git_bin = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/test-wave",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        state_dir = tmp_path / "monitor-state"
+        env = os.environ | {
+            "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            "RCX_PIPELINE_MONITOR_STATE_DIR": str(state_dir),
+            "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+        }
+        session_path = tmp_path / "tmux-session-active"
+        panes_path = tmp_path / "tmux-panes.txt"
+        wrong_root = tmp_path / "wrong-root"
+        wrong_root.mkdir()
+        if pane_state != "missing":
+            session_path.write_text("", encoding="utf-8")
+        if pane_state == "degraded":
+            panes_path.write_text(
+                f"BROKEN TITLE\t{repo_root}\n"
+                f"PANE 2 · REVIEW FINDINGS\t{repo_root}\n"
+                f"PANE 3 · PLAIN-ENGLISH STATUS\t{repo_root}\n"
+                f"PANE 4 · SESSION TIMELINE\t{repo_root}\n",
+                encoding="utf-8",
+            )
+        elif pane_state == "wrong_root":
+            panes_path.write_text(
+                f"PANE 1 · LIVE PIPELINE LOG\t{wrong_root}\n"
+                f"PANE 2 · REVIEW FINDINGS\t{wrong_root}\n"
+                f"PANE 3 · PLAIN-ENGLISH STATUS\t{wrong_root}\n"
+                f"PANE 4 · SESSION TIMELINE\t{wrong_root}\n",
+                encoding="utf-8",
+            )
+
+        try:
+            result = subprocess.run(
+                ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            assert result.returncode == 0, result.stderr
+            log_text = tmux_log.read_text(encoding="utf-8")
+            assert "new-session -d -x 240 -y 70 -s rcx-pipeline" in log_text
+            for title in [
+                "PANE 1 · LIVE PIPELINE LOG",
+                "PANE 2 · REVIEW FINDINGS",
+                "PANE 3 · PLAIN-ENGLISH STATUS",
+                "PANE 4 · SESSION TIMELINE",
+            ]:
+                assert f"-T {title}" in log_text
+        finally:
+            self._stop_pipeline_monitor(repo_root, env)
 
     def test_pipeline_dashboard_web_reads_named_lane_bus_sources(self, tmp_path, monkeypatch):
         repo_root = tmp_path / "repo"

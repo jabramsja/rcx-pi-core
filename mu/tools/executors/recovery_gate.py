@@ -98,6 +98,7 @@ class FailureClass(Enum):
     PHASE_B_PLAN_REQUIRED = "phase_b_plan_required"
     MISSING_PHASE_A_LOCK = "missing_phase_a_lock"
     MISSING_PLAN_TASK_HEADER = "missing_plan_task_header"
+    MISMATCHED_PLAN_TASK_HEADER = "mismatched_plan_task_header"
     STAGE_PATH_SYMLINK_ALIAS = "stage_path_symlink_alias"
     # Tier 2 -- auto-retry with adjustment (zero tokens)
     PROCESS_TIMEOUT = "process_timeout"
@@ -138,6 +139,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.PHASE_B_PLAN_REQUIRED: 1,
     FailureClass.MISSING_PHASE_A_LOCK: 1,
     FailureClass.MISSING_PLAN_TASK_HEADER: 1,
+    FailureClass.MISMATCHED_PLAN_TASK_HEADER: 1,
     FailureClass.STAGE_PATH_SYMLINK_ALIAS: 1,
     FailureClass.PROCESS_TIMEOUT: 2, FailureClass.TRANSIENT_KILL: 2,
     FailureClass.UPSTREAM_CONNECTIVITY: 2,
@@ -380,6 +382,8 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.MISSING_PHASE_A_LOCK
     if _looks_like_missing_plan_task_header(result):
         return FailureClass.MISSING_PLAN_TASK_HEADER
+    if _looks_like_mismatched_plan_task_header(result):
+        return FailureClass.MISMATCHED_PLAN_TASK_HEADER
 
     # Tier 2: transient / timeout issues
     if (
@@ -845,6 +849,28 @@ def _looks_like_missing_plan_task_header(result: dict[str, Any]) -> bool:
     return "validate_inputs" in steps or not steps
 
 
+def _extract_mismatched_plan_task_id_from_errors(result: dict[str, Any]) -> str:
+    for text in _extract_validation_errors(result):
+        match = re.search(
+            r"Plan task_id\s+.+?\s+does not match routing task_id\s+(?P<task_id>[^\s;]+)",
+            str(text or ""),
+        )
+        if match:
+            return match.group("task_id").strip().rstrip(".,;")
+    return ""
+
+
+def _looks_like_mismatched_plan_task_header(result: dict[str, Any]) -> bool:
+    if not _extract_mismatched_plan_task_id_from_errors(result):
+        return False
+    steps = {
+        str(candidate.get("step", "")).strip()
+        for candidate in _extract_result_candidates(result)
+        if candidate.get("step")
+    }
+    return "validate_inputs" in steps or not steps
+
+
 def _extract_plan_path(result: dict[str, Any]) -> str:
     for candidate in _extract_result_candidates(result):
         plan_path = str(candidate.get("plan_path", "") or "").strip()
@@ -1096,6 +1122,174 @@ def fix_missing_plan_task_header(repo_root: Path, **kw: Any) -> dict[str, Any]:
         True,
         "repair_missing_plan_task_header",
         f"inserted authoritative Task header in {plan_path}{lock_detail}",
+    )
+
+
+def _replace_authoritative_task_header(content: str, routing_task_id: str) -> tuple[str, str]:
+    lines = content.splitlines(keepends=True)
+    body_start = len(lines)
+    for i, line in enumerate(lines):
+        if line.startswith("## "):
+            body_start = i
+            break
+
+    task_indexes = [
+        i for i, line in enumerate(lines[:body_start])
+        if line.lstrip().startswith("Task:")
+    ]
+    if len(task_indexes) != 1:
+        return content, "expected exactly one authoritative Task header before the first section"
+
+    index = task_indexes[0]
+    original = lines[index]
+    if original != original.lstrip():
+        return content, "authoritative Task header must not be indented"
+    if original.endswith("\r\n"):
+        newline = "\r\n"
+    elif original.endswith("\n"):
+        newline = "\n"
+    else:
+        newline = ""
+
+    lines[index] = f"Task: {routing_task_id}{newline}"
+    return "".join(lines), ""
+
+
+def fix_mismatched_plan_task_header(repo_root: Path, **kw: Any) -> dict[str, Any]:
+    """Normalize a locked Phase A packet Task header to the routing task_id."""
+    result = kw.get("result", {}) or {}
+    plan_path = _extract_plan_path(result)
+    if not plan_path:
+        return _fix_result(
+            False,
+            "plan_path_missing",
+            "mismatched Task header repair needs plan_path from the executor result",
+        )
+
+    repo_root_resolved = repo_root.resolve()
+    normalized_plan_path = _normalize_phase_a_lock_repair_packet_path(plan_path)
+    if normalized_plan_path is None:
+        return _fix_result(
+            False,
+            "non_packet_plan_path",
+            "mismatched Task header repair only applies to "
+            f"{CONTROL_PLANE_PACKET_PREFIX}*.md packets: {plan_path}",
+        )
+    plan_path = normalized_plan_path
+
+    try:
+        plan_file = (repo_root / plan_path).resolve()
+        plan_file.relative_to(repo_root_resolved)
+        plan_file.relative_to((repo_root / CONTROL_PLANE_PACKET_PREFIX).resolve())
+    except ValueError:
+        return _fix_result(False, "unsafe_plan_path", f"unsafe plan_path outside repo: {plan_path}")
+    if not plan_file.is_file():
+        return _fix_result(False, "plan_missing", f"plan packet not found: {plan_path}")
+
+    try:
+        phase_b_mod = _load_executor_module_from_repo(repo_root, "phase_b_executor")
+    except Exception as exc:
+        return _fix_result(False, "module_load_failed", f"could not load plan helpers: {exc}")
+
+    try:
+        parsed = phase_b_mod.load_plan_packet(repo_root, plan_path)
+    except Exception as exc:
+        return _fix_result(False, "plan_parse_failed", f"could not parse plan packet: {exc}")
+    current_task_id = str(parsed.get("task_id", "") or "").strip()
+    packet_wave_id = str(parsed.get("wave_id", "") or "").strip()
+
+    try:
+        routing_record = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+    except Exception:
+        routing_record = {}
+    live_routing_task_id = str(routing_record.get("task_id", "") or "").strip()
+    live_routing_wave_id = str(
+        routing_record.get("wave_name") or routing_record.get("wave_id") or ""
+    ).strip()
+    error_routing_task_id = _extract_mismatched_plan_task_id_from_errors(result)
+    if live_routing_task_id and error_routing_task_id and live_routing_task_id != error_routing_task_id:
+        return _fix_result(
+            False,
+            "routing_task_conflict",
+            "mismatched Task header repair refuses conflicting routing identities: "
+            f"live routing task_id {live_routing_task_id} != validation error task_id {error_routing_task_id}",
+        )
+    if (
+        live_routing_wave_id
+        and packet_wave_id
+        and normalize_wave_id(live_routing_wave_id) != normalize_wave_id(packet_wave_id)
+    ):
+        return _fix_result(
+            False,
+            "routing_wave_conflict",
+            "mismatched Task header repair refuses conflicting wave identities: "
+            f"live routing wave {live_routing_wave_id} != packet Wave ID {packet_wave_id}",
+        )
+
+    routing_task_id = error_routing_task_id or live_routing_task_id
+    if not routing_task_id:
+        return _fix_result(
+            False,
+            "routing_task_missing",
+            "mismatched Task header repair requires routing task_id from routing record or validation error",
+        )
+
+    if current_task_id == routing_task_id:
+        return _fix_result(
+            True,
+            "task_header_already_normalized",
+            f"{plan_path} already has authoritative Task: {routing_task_id}",
+        )
+    if not current_task_id:
+        return _fix_result(
+            False,
+            "task_header_missing",
+            "mismatched Task header repair found no authoritative Task header; use missing-header repair",
+        )
+    phase_a_lock = str(parsed.get("phase_a_lock", "") or "").strip()
+    if phase_a_lock != "LOCKED":
+        return _fix_result(
+            False,
+            "phase_a_lock_not_locked",
+            f"mismatched Task header repair requires Phase-A-Lock: LOCKED, got {phase_a_lock or '(missing)'}",
+        )
+
+    lock_path = _bus_path(repo_root, "bridge.lock")
+    lock_detail = ""
+    if lock_path.exists():
+        if not _claim_and_remove_bridge_lock(lock_path):
+            return _fix_result(
+                False,
+                "bridge_lock_live",
+                "bridge.lock is still held by a live flock — cannot safely retry after repairing Task header",
+            )
+        lock_detail = " + cleared stale bridge.lock"
+
+    try:
+        content = plan_file.read_text(encoding="utf-8")
+        repaired_content, repair_error = _replace_authoritative_task_header(
+            content,
+            routing_task_id,
+        )
+        if repair_error:
+            return _fix_result(False, "task_header_repair_failed", repair_error)
+        plan_file.write_text(repaired_content, encoding="utf-8")
+        repaired = phase_b_mod.load_plan_packet(repo_root, plan_path)
+    except Exception as exc:
+        return _fix_result(False, "task_header_repair_failed", f"could not repair Task header: {exc}")
+
+    repaired_task_id = str(repaired.get("task_id", "") or "").strip()
+    if repaired_task_id != routing_task_id:
+        return _fix_result(
+            False,
+            "task_header_repair_failed",
+            f"{plan_path} has Task: {repaired_task_id or '(missing)'} after repair, expected {routing_task_id}",
+        )
+
+    return _fix_result(
+        True,
+        "repair_mismatched_plan_task_header",
+        f"normalized authoritative Task header in {plan_path} from {current_task_id} to {routing_task_id}{lock_detail}",
     )
 
 
@@ -1940,6 +2134,7 @@ _TIER1_FIXES: dict[FailureClass, Any] = {
     FailureClass.PHASE_B_PLAN_REQUIRED: fix_phase_b_plan_required,
     FailureClass.MISSING_PHASE_A_LOCK: fix_missing_phase_a_lock,
     FailureClass.MISSING_PLAN_TASK_HEADER: fix_missing_plan_task_header,
+    FailureClass.MISMATCHED_PLAN_TASK_HEADER: fix_mismatched_plan_task_header,
     FailureClass.STAGE_PATH_SYMLINK_ALIAS: fix_stage_path_symlink_alias,
 }
 
@@ -4034,7 +4229,10 @@ def _is_ignored_hybrid_scratch_cache_path(rel_path: str) -> bool:
     cache_name = rel_path[len(prefix):]
     if not cache_name or "/" in cache_name:
         return False
-    return re.fullmatch(r"[^/]+\.cpython-\d+(?:\.opt-\d+)?\.pyc", cache_name) is not None
+    return re.fullmatch(
+        r"[^/]+\.cpython-\d+(?:\.opt-\d+)?(?:-[A-Za-z0-9_.-]+)?\.pyc",
+        cache_name,
+    ) is not None
 
 
 def _validate_ignored_hybrid_scratch_cache_path(
@@ -4056,17 +4254,39 @@ def _validate_ignored_hybrid_scratch_cache_path(
     return True, ""
 
 
+def _validate_baselined_hybrid_scratch_path(
+    repo_root: Path,
+    rel_path: str,
+) -> tuple[bool, str]:
+    path = repo_root / rel_path
+    snapshot = _absolute_path_snapshot(path)
+    expected_realpath = str(path.resolve(strict=False))
+    if not snapshot["exists"]:
+        return True, ""
+    if snapshot["type"] not in {"directory", "file"}:
+        return False, f"baselined .scratch path must remain a regular file or directory: {rel_path}"
+    if snapshot["realpath"] != expected_realpath:
+        return False, f"baselined .scratch path escaped its stable realpath: {rel_path}"
+    return True, ""
+
+
 def _ensure_hybrid_scratch_inventory_allowed(
     repo_root: Path,
     inventory: dict[str, dict[str, Any]],
     *,
     exception_paths: frozenset[str],
+    baseline_inventory: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[bool, str]:
     for rel_path in sorted(inventory):
         if not rel_path.startswith(".scratch/"):
             continue
         if _is_ignored_hybrid_scratch_cache_path(rel_path):
             ok, detail = _validate_ignored_hybrid_scratch_cache_path(repo_root, rel_path)
+            if not ok:
+                return False, detail
+            continue
+        if baseline_inventory is not None and rel_path in baseline_inventory:
+            ok, detail = _validate_baselined_hybrid_scratch_path(repo_root, rel_path)
             if not ok:
                 return False, detail
             continue
@@ -4086,6 +4306,7 @@ def _ensure_hybrid_scratch_inventory_allowed(
         path for path in inventory
         if path.startswith(".scratch/")
         and not _is_ignored_hybrid_scratch_cache_path(path)
+        and not (baseline_inventory is not None and path in baseline_inventory)
         and not _is_allowed_hybrid_exception_path(
             path,
             exception_paths=exception_paths,
@@ -4213,6 +4434,7 @@ def _capture_hybrid_checkpoint(
     *,
     files_in_scope: list[str],
     exception_paths: frozenset[str],
+    baseline_inventory: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     for rel_path in files_in_scope:
         ok, detail = _validate_hybrid_scope_file(repo_root, rel_path)
@@ -4229,6 +4451,7 @@ def _capture_hybrid_checkpoint(
         repo_root,
         inventory,
         exception_paths=exception_paths,
+        baseline_inventory=inventory if baseline_inventory is None else baseline_inventory,
     )
     if not ok:
         return False, {"detail": detail}
@@ -4259,6 +4482,7 @@ def _audit_hybrid_checkpoint(
         repo_root,
         files_in_scope=files_in_scope,
         exception_paths=exception_paths,
+        baseline_inventory=baseline["inventory"],
     )
     if not ok:
         return False, current

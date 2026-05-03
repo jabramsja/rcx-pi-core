@@ -149,32 +149,84 @@ def test_binary_guard_absent_only_partial_state_passes(monkeypatch, tmp_path):
     guard.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
 
     monkeypatch.setattr(startup_mod.os, "access", lambda path, mode: path == guard)
-    monkeypatch.setattr(
-        startup_mod,
-        "_run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            args[0],
-            0,
-            json.dumps(
-                {
-                    "version": "0.122.0",
-                    "version_changed_since_patch": False,
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if args[1:3] == ["audit", "--json"]:
+            payload = {
+                "version": "0.122.0",
+                "version_changed_since_patch": False,
+                "overall_status": "partially_patched",
+                "specs": [
+                    {"patch_id": "reread_after_apply_patch", "status": "patched"},
+                    {"patch_id": "voice_friendly_intro", "status": "absent"},
+                    {"patch_id": "ack_every_response", "status": "absent"},
+                ],
+            }
+        else:
+            assert args[1:] == ["patch", "--dry-run", "--json"]
+            payload = {
+                "status": "no_changes_needed",
+                "audit_after": {
                     "overall_status": "partially_patched",
                     "specs": [
                         {"patch_id": "reread_after_apply_patch", "status": "patched"},
                         {"patch_id": "voice_friendly_intro", "status": "absent"},
                         {"patch_id": "ack_every_response", "status": "absent"},
                     ],
-                }
-            ),
-            "",
-        ),
-    )
+                },
+            }
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(startup_mod, "_run", fake_run)
 
     result = startup_mod._audit_binary_guard(codex_home, tmp_path)  # ANTICHEAT_OK: tool unit test
 
     assert result.status == "OK"
-    assert result.detail == "patched+absent version=v0.122.0"
+    assert "patched+absent version=v0.122.0" in result.detail
+    assert "patch --dry-run no changes needed" in result.detail
+    assert calls == [
+        [str(guard), "audit", "--json"],
+        [str(guard), "patch", "--dry-run", "--json"],
+    ]
+
+
+def test_binary_guard_absent_only_partial_state_fails_when_dry_run_is_actionable(monkeypatch, tmp_path):
+    codex_home = tmp_path / ".codex"
+    bin_dir = codex_home / "bin"
+    bin_dir.mkdir(parents=True)
+    guard = bin_dir / "codex-binary-guard"
+    guard.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    monkeypatch.setattr(startup_mod.os, "access", lambda path, mode: path == guard)
+
+    def fake_run(args, **kwargs):
+        if args[1:3] == ["audit", "--json"]:
+            payload = {
+                "version": "0.122.0",
+                "version_changed_since_patch": False,
+                "overall_status": "partially_patched",
+                "specs": [
+                    {"patch_id": "reread_after_apply_patch", "status": "patched"},
+                    {"patch_id": "voice_friendly_intro", "status": "absent"},
+                ],
+            }
+        else:
+            assert args[1:] == ["patch", "--dry-run", "--json"]
+            payload = {
+                "status": "would_patch",
+                "changes": [{"patch_id": "voice_friendly_intro", "action": "apply"}],
+            }
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(startup_mod, "_run", fake_run)
+
+    result = startup_mod._audit_binary_guard(codex_home, tmp_path)  # ANTICHEAT_OK: tool unit test
+
+    assert result.status == "FAIL"
+    assert "overall_status=partially_patched version=v0.122.0" in result.detail
+    assert "patch --dry-run status=would_patch" in result.detail
 
 
 def test_preflight_wrapper_missing_autoping_canaries_fails(monkeypatch, tmp_path):

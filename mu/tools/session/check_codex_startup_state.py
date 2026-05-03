@@ -1845,18 +1845,59 @@ def _extract_binary_contradictions(payload: dict) -> list[str]:
     return contradictions
 
 
-def _binary_audit_is_actionable(payload: dict) -> bool:
-    if payload.get("version_changed_since_patch"):
-        return True
-    if _extract_binary_contradictions(payload):
-        return True
+def _extract_absent_binary_specs(payload: dict) -> list[str]:
+    absent_specs: list[str] = []
     for item in payload.get("specs") or []:
-        if str(item.get("status") or "") not in {"patched", "absent"}:
-            return True
-    return str(payload.get("overall_status") or "unknown") not in {
-        "patched",
-        "partially_patched",
-    }
+        if item.get("status") == "absent":
+            absent_specs.append(str(item.get("patch_id") or "<unknown>"))
+    return absent_specs
+
+
+def _extract_unexpected_binary_specs(payload: dict) -> list[str]:
+    unexpected_specs: list[str] = []
+    for item in payload.get("specs") or []:
+        status = str(item.get("status") or "unknown")
+        if status not in {"patched", "absent"}:
+            unexpected_specs.append(f"{item.get('patch_id') or '<unknown>'}:{status}")
+    return unexpected_specs
+
+
+def _is_absent_only_partial_patch(payload: dict) -> bool:
+    return (
+        str(payload.get("overall_status") or "unknown") == "partially_patched"
+        and not _extract_binary_contradictions(payload)
+        and not _extract_unexpected_binary_specs(payload)
+        and bool(_extract_absent_binary_specs(payload))
+    )
+
+
+def _binary_guard_dry_run_is_noop(binary_guard: Path, repo_root: Path) -> tuple[bool, str]:
+    proc = _run([str(binary_guard), "patch", "--dry-run", "--json"], cwd=repo_root, timeout=60)
+    payload_raw = (proc.stdout or proc.stderr or "").strip()
+    if proc.returncode != 0 or not payload_raw:
+        return False, "patch --dry-run unreadable or non-zero"
+
+    try:
+        payload = json.loads(payload_raw)
+    except json.JSONDecodeError as exc:
+        return False, f"patch --dry-run invalid JSON: {exc}"
+
+    status = str(payload.get("status") or "unknown")
+    if status != "no_changes_needed":
+        return False, f"patch --dry-run status={status}"
+
+    audit_after = payload.get("audit_after")
+    if isinstance(audit_after, dict):
+        contradictions = _extract_binary_contradictions(audit_after)
+        if contradictions:
+            return False, "patch --dry-run contradictions present: " + ", ".join(contradictions)
+
+        overall_status = str(audit_after.get("overall_status") or "unknown")
+        if overall_status == "patched" or _is_absent_only_partial_patch(audit_after):
+            return True, "patch --dry-run no changes needed"
+        return False, f"patch --dry-run audit_after overall_status={overall_status}"
+
+    return True, "patch --dry-run no changes needed"
 
 
 def _audit_binary_guard(codex_home: Path, repo_root: Path) -> CheckResult:
@@ -1894,6 +1935,8 @@ def _audit_binary_guard(codex_home: Path, repo_root: Path) -> CheckResult:
 
     version = payload.get("version", "unknown")
     contradictions = _extract_binary_contradictions(payload)
+    absent_specs = _extract_absent_binary_specs(payload)
+    unexpected_specs = _extract_unexpected_binary_specs(payload)
     if payload.get("version_changed_since_patch"):
         last_patched = payload.get("last_patched") or {}
         last_version = last_patched.get("version", "unknown")
@@ -1908,22 +1951,47 @@ def _audit_binary_guard(codex_home: Path, repo_root: Path) -> CheckResult:
             "FAIL",
             "contradictions present: " + ", ".join(contradictions),
         )
-    if _binary_audit_is_actionable(payload):
-        return CheckResult(
-            "binary_guard",
-            "FAIL",
-            f"overall_status={payload.get('overall_status')} version=v{version}",
-        )
-    if payload.get("overall_status") == "partially_patched":
+    overall_status = str(payload.get("overall_status") or "unknown")
+    if overall_status == "patched":
         return CheckResult(
             "binary_guard",
             "OK",
-            f"patched+absent version=v{version}",
+            f"patched version=v{version}",
+        )
+    if overall_status == "partially_patched":
+        if not _is_absent_only_partial_patch(payload):
+            detail = f"overall_status={overall_status} version=v{version}"
+            if unexpected_specs:
+                detail += " actionable_specs=" + ", ".join(unexpected_specs)
+            elif not absent_specs:
+                detail += " absent_specs=none"
+            return CheckResult(
+                "binary_guard",
+                "FAIL",
+                detail,
+            )
+
+        dry_run_ok, dry_run_detail = _binary_guard_dry_run_is_noop(binary_guard, repo_root)
+        if dry_run_ok:
+            return CheckResult(
+                "binary_guard",
+                "OK",
+                "patched+absent version=v"
+                + str(version)
+                + " absent="
+                + ", ".join(absent_specs)
+                + "; "
+                + dry_run_detail,
+            )
+        return CheckResult(
+            "binary_guard",
+            "FAIL",
+            f"overall_status={overall_status} version=v{version}; {dry_run_detail}",
         )
     return CheckResult(
         "binary_guard",
-        "OK",
-        f"patched version=v{version}",
+        "FAIL",
+        f"overall_status={overall_status} version=v{version}",
     )
 
 

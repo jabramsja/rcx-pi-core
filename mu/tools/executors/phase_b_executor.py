@@ -3545,6 +3545,165 @@ def _collect_and_stage_l4_indicator_artifact(
     return indicator_path, None
 
 
+PHASE_B_INDICATOR_SCOPE_REFRESH_START = "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->"
+PHASE_B_INDICATOR_SCOPE_REFRESH_END = "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->"
+
+
+def _dedupe_phase_b_repo_paths(paths: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        relpath = str(path or "").strip().replace("\\", "/")
+        while relpath.startswith("./"):
+            relpath = relpath[2:]
+        if not relpath or relpath in seen:
+            continue
+        seen.add(relpath)
+        deduped.append(relpath)
+    return deduped
+
+
+def _render_phase_b_indicator_scope_refresh_block(
+    *,
+    wave_id: str,
+    plan_path: str,
+    indicator_path: str,
+    changed_files: list[str],
+) -> str:
+    staged_paths = sorted(_dedupe_phase_b_repo_paths([*changed_files, indicator_path, plan_path]))
+    lines = [
+        PHASE_B_INDICATOR_SCOPE_REFRESH_START,
+        "## Phase B Indicator Scope Reconciliation",
+        "",
+        f"- Refresh wave: `{wave_id}`",
+        f"- Active packet: `{plan_path}`",
+        f"- Indicator artifact: `{indicator_path}`",
+        "- Purpose: Phase B mechanically collected and staged this same-wave L4 indicator "
+        "before pre-commit supervisor review so the tracker note, Gate 8 package, and "
+        "governing packet describe one staged scope.",
+        "- Scope binding: no indicator file other than the artifact above is in scope for this wave.",
+        "- Current staged files:",
+    ]
+    for path in staged_paths:
+        lines.append(f"  - `{path}`")
+    lines.append(PHASE_B_INDICATOR_SCOPE_REFRESH_END)
+    return "\n".join(lines) + "\n"
+
+
+def _replace_phase_b_indicator_scope_refresh_block(packet_text: str, block: str) -> str:
+    start = packet_text.find(PHASE_B_INDICATOR_SCOPE_REFRESH_START)
+    end = packet_text.find(PHASE_B_INDICATOR_SCOPE_REFRESH_END)
+    if start != -1 and end != -1 and end > start:
+        end += len(PHASE_B_INDICATOR_SCOPE_REFRESH_END)
+        trailing_newline = "\n" if end < len(packet_text) and packet_text[end:end + 1] != "\n" else ""
+        return packet_text[:start].rstrip() + "\n\n" + block.rstrip() + trailing_newline + packet_text[end:]
+    if start != -1 or end != -1:
+        raise ValueError("existing Phase B indicator scope refresh markers are unbalanced")
+    return packet_text.rstrip() + "\n\n" + block
+
+
+def _reconcile_phase_b_indicator_scope_text(packet_text: str, *, indicator_path: str) -> str:
+    exact_scope = (
+        "Indicator scope is limited to the exact same-wave artifact "
+        f"`{indicator_path}`, mechanically collected and staged by Phase B before "
+        "pre-commit supervisor review. No other indicator file is in scope."
+    )
+    refreshed = re.sub(
+        r"(?m)^No indicator file is in scope[^\n]*(?:\n|$)",
+        exact_scope + "\n",
+        packet_text,
+    )
+    refreshed = re.sub(
+        r"(?m)^(\d+\.\s+After implementation is locked and validated, update only .*?)"
+        r"\s+Do not update indicator files unless [^\n]*$",
+        rf"\1 Update only `{indicator_path}` when Phase B or commit automation "
+        "mechanically collects the same-wave L4 indicator artifact.",
+        refreshed,
+    )
+    refreshed = re.sub(
+        r"(?m)^- Do not touch indicator files without [^\n]*$",
+        f"- Do not touch indicator files other than `{indicator_path}`; it is the exact "
+        "same-wave L4 artifact authorized by this Phase B indicator scope reconciliation.",
+        refreshed,
+    )
+    refreshed = re.sub(
+        r"(?m)^- Closeout updates, if any, are limited to directly required "
+        r"`TASKS\.md` lines and this governing packet unless [^\n]*$",
+        f"- Closeout updates may include directly required `TASKS.md` lines, this governing "
+        f"packet, and exact same-wave indicator artifact `{indicator_path}`; all closeout "
+        "text must cite the validation that proved the implementation.",
+        refreshed,
+    )
+    return refreshed.replace(
+        "No indicator file was touched.",
+        f"Indicator artifact `{indicator_path}` was collected and staged mechanically before "
+        "pre-commit supervisor review.",
+    )
+
+
+def _refresh_phase_b_indicator_packet_scope(
+    repo_root: Path,
+    *,
+    plan_path: str,
+    wave_id: str,
+    indicator_path: str,
+    changed_files: list[str],
+) -> tuple[bool, str | None]:
+    """Refresh the active packet when Phase B adds a same-wave L4 indicator."""
+    packet_rel = str(plan_path or "").strip()
+    indicator_rel = str(indicator_path or "").strip()
+    normalized_wave = normalize_wave_id(str(wave_id or ""))
+    if not packet_rel or packet_rel.startswith("<"):
+        return False, None
+    if not normalized_wave:
+        return False, "cannot refresh Phase B indicator packet scope without a canonical wave_id"
+    if not indicator_rel:
+        return False, "cannot refresh Phase B indicator packet scope without an indicator path"
+    if indicator_rel != f"reports/l4_wave_indicators/{normalized_wave}.json":
+        return False, (
+            "indicator path does not match same-wave L4 indicator artifact: "
+            f"{indicator_rel} (wave_id={normalized_wave})"
+        )
+
+    packet_full = (repo_root / packet_rel).resolve()
+    repo_resolved = repo_root.resolve()
+    if not packet_full.is_relative_to(repo_resolved):
+        return False, f"active packet escapes repo root: {packet_rel}"
+    if not packet_full.exists():
+        return False, f"active packet not found for Phase B indicator scope refresh: {packet_rel}"
+
+    packet_text = packet_full.read_text(encoding="utf-8")
+    _tasks, waves = _extract_authoritative_plan_header_metadata(packet_text)
+    if waves != [normalized_wave]:
+        return False, (
+            "active packet missing unique matching Wave ID for Phase B indicator scope refresh: "
+            f"{packet_rel} (wave_id={normalized_wave})"
+        )
+
+    refreshed = _reconcile_phase_b_indicator_scope_text(
+        packet_text,
+        indicator_path=indicator_rel,
+    )
+    block = _render_phase_b_indicator_scope_refresh_block(
+        wave_id=normalized_wave,
+        plan_path=packet_rel,
+        indicator_path=indicator_rel,
+        changed_files=changed_files,
+    )
+    try:
+        refreshed = _replace_phase_b_indicator_scope_refresh_block(refreshed, block)
+    except ValueError as exc:
+        return False, str(exc)
+    if refreshed == packet_text:
+        return False, None
+
+    packet_full.write_text(refreshed, encoding="utf-8")
+    ok, detail = _stage_files_for_pipeline(repo_root, [packet_rel])
+    if not ok:
+        return False, f"git add failed for refreshed packet {packet_rel}: {detail}"
+    return True, None
+
+
 def _tasks_has_canonical_wave_tracker_note(repo_root: Path, *, wave_id: str) -> bool:
     """Return True when TASKS.md carries trusted same-wave tracker authority."""
     tasks_path = repo_root / "TASKS.md"
@@ -5694,6 +5853,7 @@ def run_phase_b(
                     f"{len(changed_files)} to {len(refreshed_changed_files)} file(s)"
                 )
                 changed_files = refreshed_changed_files
+        indicator_path = ""
         should_collect_l4_indicator = _should_collect_l4_indicator_artifact(
             repo_root,
             wave_id=wave_id,
@@ -5717,6 +5877,24 @@ def run_phase_b(
             if indicator_path and indicator_path not in changed_files:
                 changed_files.append(indicator_path)
                 changed_files = sorted(set(changed_files))
+            if indicator_path:
+                packet_scope_modified, packet_scope_error = _refresh_phase_b_indicator_packet_scope(
+                    repo_root,
+                    plan_path=plan_path,
+                    wave_id=wave_id,
+                    indicator_path=indicator_path,
+                    changed_files=changed_files,
+                )
+                if packet_scope_error is not None:
+                    _clear_state(repo_root)
+                    return {
+                        "status": "error",
+                        "step": "pre_supervisor_l4_indicator_scope",
+                        "errors": [packet_scope_error],
+                    }
+                if packet_scope_modified and plan_path not in changed_files:
+                    changed_files.append(plan_path)
+                    changed_files = sorted(set(changed_files))
         package_changed_files = _collect_commit_bound_files(repo_root, changed_files)
         if package_changed_files != changed_files:
             log(
@@ -5744,6 +5922,11 @@ def run_phase_b(
         # Fenced files: dirty in git but not commit-bound (from other waves)
         fenced = _collect_fenced_dirty_files(repo_root, changed_files)
 
+        scope_items = [plan_path]
+        for path in changed_files:
+            if path.startswith("reports/l4_wave_indicators/") and path not in scope_items:
+                scope_items.append(path)
+
         supervisor_package = {
             "task_id": routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
             "wave_name": wave_id,
@@ -5751,7 +5934,7 @@ def run_phase_b(
             "lane": "hooks/agents/bridge control-surface",
             "changed_files": changed_files,
             "fenced_files": fenced,
-            "scope_items": [plan_path],
+            "scope_items": scope_items,
             "fixes_implemented": ["Phase B implementation per locked plan"],
             "deferred_items": deferred_items,
             "bridge_status": _build_effective_bridge_status(
@@ -6486,6 +6669,24 @@ def run_phase_b(
             if indicator_path and indicator_path not in changed_files:
                 changed_files.append(indicator_path)
                 changed_files = sorted(set(changed_files))
+            if indicator_path:
+                packet_scope_modified, packet_scope_error = _refresh_phase_b_indicator_packet_scope(
+                    repo_root,
+                    plan_path=plan_path,
+                    wave_id=wave_id,
+                    indicator_path=indicator_path,
+                    changed_files=changed_files,
+                )
+                if packet_scope_error is not None:
+                    _clear_state(repo_root)
+                    return {
+                        "status": "error",
+                        "step": "reentry_pre_supervisor_l4_indicator_scope",
+                        "errors": [packet_scope_error],
+                    }
+                if packet_scope_modified and plan_path not in changed_files:
+                    changed_files.append(plan_path)
+                    changed_files = sorted(set(changed_files))
         reentry_package_changed_files = _collect_commit_bound_files(repo_root, changed_files)
         if reentry_package_changed_files != changed_files:
             log(
@@ -6501,12 +6702,21 @@ def run_phase_b(
             changed_files,
             deferred_packet_path,
         )
+        scope_items = [plan_path]
+        for path in changed_files:
+            if path.startswith("reports/l4_wave_indicators/") and path not in scope_items:
+                scope_items.append(path)
+        supervisor_package["scope_items"] = scope_items
         supervisor_package["bridge_status"] = _build_effective_bridge_status(
             repo_root,
             wave_id,
             plan_path,
             result.get("bridge_rounds", 0),
             reentry=True,
+        )
+        supervisor_package["evidence_handles"] = _collect_supervisor_evidence_handles(
+            repo_root,
+            wave_id,
         )
         # Refresh blocker acknowledgment (may have changed during re-entry)
         blocking_dir = repo_root / "reports" / "deferred" / "blocking"

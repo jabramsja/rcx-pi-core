@@ -1558,9 +1558,117 @@ class TestMaintenanceTrackerMetadataPropagation:
         indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
         assert "TASKS.md" in captured_package["changed_files"]
         assert indicator_path in captured_package["changed_files"]
+        assert indicator_path in captured_package["scope_items"]
         assert captured_package["evidence_handles"]["indicator"] == indicator_path
         assert captured_package["founder_override_token"] == f"FOUNDER_OVERRIDE:{wave_id}"
+        packet_text = plan.read_text(encoding="utf-8")
+        assert "Phase B Indicator Scope Reconciliation" in packet_text
+        assert indicator_path in packet_text
         mock_indicator.assert_called_once_with(repo, wave_id=wave_id)
+
+    def test_reentry_l4_indicator_collection_refreshes_packet_scope_and_scope_items(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+        wave_id = "phase-b-reentry-indicator-scope-2026-05-03"
+        plan_path = "reports/control_plane/plan.md"
+        plan = repo / plan_path
+        plan.write_text(
+            "# Plan\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Lane: control-surface\n"
+            "Authorization: standing pipeline-bug-fix authorization for bounded pipeline hardening.\n\n"
+            "## Scope\n\n"
+            "No indicator file is in scope for this Phase A packet because the reviewer evidence "
+            "does not name one.\n",
+            encoding="utf-8",
+        )
+
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        captured_packages: list[dict[str, object]] = []
+
+        def collect_indicator(_repo_root, *, wave_id):
+            indicator_file = repo / indicator_path
+            indicator_file.parent.mkdir(parents=True, exist_ok=True)
+            indicator_file.write_text(json.dumps({"wave_id": wave_id}) + "\n", encoding="utf-8")
+            return indicator_path, None
+
+        def supervisor_side(_repo_root, package_path, **_kwargs):
+            captured_packages.append(json.loads(Path(package_path).read_text(encoding="utf-8")))
+            if len(captured_packages) == 1:
+                return {
+                    "exit_code": 0,
+                    "parsed": {
+                        "decision": "NEEDS_PHASE_B",
+                        "summary": "collect the same-wave indicator after re-entry",
+                        "status": "success",
+                        "findings": [],
+                    },
+                    "receipt_path": "",
+                }
+            return {
+                "exit_code": 0,
+                "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            }
+
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": wave_id,
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+        }
+        changed = [
+            "mu/tools/executors/phase_b_executor.py",
+            "mu/tests/tools/test_phase_b_executor.py",
+            plan_path,
+        ]
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=list(changed)), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=list(changed)), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files: list(files)), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0,
+                 "passed": True,
+                 "stdout": "",
+                 "stderr": "",
+             }), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=[
+                 {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1"},
+                 {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j2"},
+             ]), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", side_effect=[False, True]), \
+             patch.object(
+                 pb_mod,
+                 "_collect_and_stage_l4_indicator_artifact",
+                 side_effect=collect_indicator,
+             ) as mock_indicator, \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor_side), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert mock_indicator.call_count == 1
+        assert len(captured_packages) == 2
+        reentry_package = captured_packages[-1]
+        assert indicator_path in reentry_package["changed_files"]
+        assert indicator_path in reentry_package["scope_items"]
+        assert reentry_package["evidence_handles"]["indicator"] == indicator_path
+        packet_text = plan.read_text(encoding="utf-8")
+        assert "Phase B Indicator Scope Reconciliation" in packet_text
+        assert indicator_path in packet_text
+        assert "No indicator file is in scope" not in packet_text
 
     def test_l4_indicator_collection_reruns_after_tracker_only_crash(self, tmp_path):
         repo = tmp_path / "repo"
@@ -1640,6 +1748,69 @@ class TestMaintenanceTrackerMetadataPropagation:
             founder_override_token=f"FOUNDER_OVERRIDE:{wave_id}",
             changed_files=["TASKS.md", "mu/tools/executors/phase_b_executor.py"],
         ) is False
+
+    def test_phase_b_indicator_scope_refresh_reconciles_packet_contradictions(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        wave_id = "phase-b-indicator-scope-refresh-2026-05-03"
+        packet_path = f"reports/control_plane/{wave_id}.md"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        packet = repo / packet_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Plan\n\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [PIPELINE-RECOVERY]\n\n"
+            "## Scope\n\n"
+            "No indicator file is in scope for this Phase A packet because the reviewer evidence "
+            "does not name one.\n\n"
+            "## Work items\n\n"
+            "7. After implementation is locked and validated, update only the directly required "
+            "TASKS.md lines and this governing packet. Do not update indicator files unless a "
+            "later packet amendment names the exact path.\n\n"
+            "## Constraints\n\n"
+            "- Do not touch indicator files without an exact path added by a later locked packet amendment.\n\n"
+            "## Acceptance criteria\n\n"
+            "- Closeout updates, if any, are limited to directly required `TASKS.md` lines and this "
+            "governing packet unless a later locked amendment names an exact indicator file path; "
+            "all closeout text must cite the validation that proved the implementation.\n\n"
+            "## Phase B Closeout\n\n"
+            "No indicator file was touched.\n",
+            encoding="utf-8",
+        )
+
+        changed, error = pb_mod._refresh_phase_b_indicator_packet_scope(  # ANTICHEAT_OK: testing Phase B packet scope refresh
+            repo,
+            plan_path=packet_path,
+            wave_id=wave_id,
+            indicator_path=indicator_path,
+            changed_files=[
+                "TASKS.md",
+                "mu/tools/executors/phase_b_executor.py",
+                "mu/tests/tools/test_phase_b_executor.py",
+                indicator_path,
+            ],
+        )
+
+        assert error is None
+        assert changed is True
+        packet_text = packet.read_text(encoding="utf-8")
+        assert "Phase B Indicator Scope Reconciliation" in packet_text
+        assert indicator_path in packet_text
+        assert "No indicator file is in scope" not in packet_text
+        assert "No indicator file was touched" not in packet_text
+        assert "Do not update indicator files unless" not in packet_text
+        assert "Do not touch indicator files without" not in packet_text
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        assert packet_path in staged
 
     def test_commit_packet_truth_refresh_marks_pre_commit_receipt_pending(self, tmp_path):
         repo = tmp_path / "repo"
