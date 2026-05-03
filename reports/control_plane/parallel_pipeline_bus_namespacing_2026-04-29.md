@@ -90,12 +90,25 @@ Purpose: Plan the first parallel-pipeline slice: executor and bridge agent-bus n
 
 ## Grounding / Authorization
 
-- `TASKS.md:232-237` marks `[PARALLEL-PIPELINE]` as queued/not implemented by code and stale historical prose as non-authoritative unless this active section marks the item open.
-- `TASKS.md:350-356` authorizes `[PARALLEL-PIPELINE]` and lists agent bus namespacing, per-worktree dashboard ports/tmux session names, recovery Tier 2 auto-retry, and agent teams as the work items.
-- `TASKS.md:354` records the code-truth search showing `--bus-dir`, agent bus namespacing, `.agent_bus-*`, dashboard ports, and tmux session-name work remains unimplemented by code.
-- `git check-ignore -v .agent_bus-test/foo` currently returns no match / exit 1, while `git check-ignore -v .agent_bus/foo` matches `.gitignore:120:.agent_bus/`; `.gitignore:116-122` shows only the default `.agent_bus/` runtime directory is ignored today, so namespaced bus behavior is incomplete unless the implementation includes scoped ignore-rule work.
-- `mu/tools/executors/commit_executor.py:99` includes `.agent_bus/` in `FORCE_ADD_DENYLIST` but does not include `.agent_bus-*`; `mu/tools/executors/commit_executor.py:2151-2155` only denies a path part exactly equal to `.agent_bus` or a string starting with `.agent_bus/`; `mu/tools/executors/commit_executor.py:4365-4367` relies on that deny match before accepting handoff `force_add_files`, so ignore-rule coverage alone does not protect namespaced bus runtime state from force-add commit paths.
-- `mu/tools/agents/bridge_supervisor.py:30-38` hardcodes `.agent_bus` as the bridge bus and state-ignore prefix; `mu/tools/agents/bridge_supervisor.py:367-378` derives all bridge paths from `repo_root / BUS_DIR_NAME`.
+- Current tracker truth: `TASKS.md:277-283` and `TASKS.md:399-403` mark
+  `[PARALLEL-PIPELINE]` closed by code. Item 1 bus namespacing landed in PR
+  #833, item 2 monitor identity landed in PR #836, item 3 Tier 2
+  transient-kill retry is satisfied by existing recovery code, and item 4 agent
+  teams landed in PR #842.
+- Historical packet boundary: this packet governed item 1 bus namespacing only.
+  The pre-implementation evidence below is retained as historical grounding for
+  the landed PR #833 slice, not as current unresolved work.
+- Historical pre-implementation evidence: `git check-ignore -v
+  .agent_bus-test/foo` returned no match / exit 1, while `git check-ignore -v
+  .agent_bus/foo` matched `.gitignore:120:.agent_bus/`; `.gitignore:116-122`
+  showed only the default `.agent_bus/` runtime directory was ignored then.
+- Historical pre-implementation evidence: `mu/tools/executors/commit_executor.py`
+  had `.agent_bus/` in `FORCE_ADD_DENYLIST` but did not include `.agent_bus-*`;
+  the packet required extending force-add and status protection for namespaced
+  runtime bus state.
+- Historical pre-implementation evidence: `mu/tools/agents/bridge_supervisor.py`
+  hardcoded `.agent_bus` as the bridge bus and state-ignore prefix, so the
+  packet required threading bus authority through bridge paths.
 - `mu/tools/agents/bridge_supervisor.py:191-195` documents the live receipt authority chain through `meta_bridge_supervisor.write_pre_commit_receipt()` to `meta_bridge_client.run_meta_bridge_package()` and downstream executor handoff; this plan must thread bus authority through that live path, not replace it.
 - `mu/tools/agents/meta_bridge_client.py:84-91` defines `run_meta_bridge_package()` without a bus-dir parameter, and `mu/tools/agents/meta_bridge_client.py:152-176` calls `write_pre_commit_receipt(response, package_path)` and returns the exact repo-relative receipt path.
 - `mu/tools/agents/meta_bridge_supervisor.py:1676-1731` writes pre-commit receipts under `repo_root / META_BUS_DIR_NAME`, so receipt persistence must be made bus-dir-aware while preserving the exact returned path.

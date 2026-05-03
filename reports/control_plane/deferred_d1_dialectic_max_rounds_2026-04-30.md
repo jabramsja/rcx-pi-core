@@ -1,7 +1,7 @@
 # Deferred Consolidation D1 Dialectic Max Rounds
 
 Date: 2026-04-30
-Status: COMMIT_READY
+Status: HISTORICAL / CLOSED (code-truth recorded in TASKS.md:385-387)
 Task: [DEFERRED-CONSOLIDATION]
 Wave ID: deferred-d1-dialectic-max-rounds-2026-04-30
 Wave-ID: deferred-d1-dialectic-max-rounds-2026-04-30
@@ -46,8 +46,8 @@ Lane: control-surface (deferred cleanup)
 
 FOUNDER_OVERRIDE:deferred-d1-dialectic-max-rounds-2026-04-30
 
-Direct code evidence before this wave: `TASKS.md:355-359` says
-`[DEFERRED-CONSOLIDATION]` is open only for D1, and
+Historical code evidence before this wave: the then-current `TASKS.md` said
+`[DEFERRED-CONSOLIDATION]` was open only for D1, and
 `reports/control_plane/wave1b_pipeline_cleanup_2026-03-31.md:23` identifies
 D1 as "Dialectic executor max_rounds — implement or remove dead config."
 `mu/tools/executors/dialectic_executor.py:145-214` accepted `max_rounds` but
@@ -55,6 +55,10 @@ ran exactly one bridge job and set `result["rounds"] = 1`. The dispatcher also
 did not pass the existing configured limit from
 `mu/tools/executors/executor_config.json` / `DEFAULT_EXECUTOR_CONFIG` into the
 dialectic executor path.
+
+Current tracker truth: `TASKS.md:385-387` records
+`[DEFERRED-CONSOLIDATION]` closed by code after this D1 closeout. This packet is
+retained as historical evidence, not as an open commit-ready item.
 
 ## Validation
 

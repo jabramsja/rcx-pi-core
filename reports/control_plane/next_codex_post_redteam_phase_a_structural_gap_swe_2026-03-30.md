@@ -3,6 +3,21 @@
 Date: 2026-03-30
 Status: Phase A (design — bridge-converged)
 Phase-A-Lock: LOCKED
+
+## 2026-05-03 Current-Truth Note
+
+This packet is now a historical Phase A findings/evidence record, not a current
+pending-work list. `TASKS.md:392-397` is the active tracker authority for
+`[NEXT-CODEX-POST-REDTEAM]`: PR #701 landed this Phase A sweep packet/evidence
+only, and the later `post-redteam-engine-state-scheduler-reduction-2026-04-30`
+slice landed the engine-state/scheduler seed, fixture, structural-test,
+scheduler-parity, and seed-registration items listed in `TASKS.md:396`.
+
+The F-1/F-2 findings below remain useful as historical closure evidence for why
+that downstream slice existed, but they must not be relisted as unresolved.
+F-3/F-4 remain historical findings only until a separate bounded packet proves
+new current code truth.
+
 ## 1. Scope
 
 ### First slice target
@@ -860,8 +875,8 @@ substrates. No ratchet regressions. No blocking finding.
 
 | ID | Gap | Classification | Status | Downstream Phase |
 |----|-----|---------------|--------|-----------------|
-| F-1 | Gap 1: Engine State Model | DEFECT | CONFIRMED — no state schema artifact | Phase C (structural reduction) |
-| F-2 | Gap 2: Scheduler Boundary | DEFECT | CONFIRMED — no scheduler seed; run_algorithm chokepoint exists but lacks scheduling semantics; seed-path truth verified | Phase C (structural reduction) |
+| F-1 | Gap 1: Engine State Model | DEFECT | HISTORICAL — downstream engine-state slice landed per `TASKS.md:396`; do not relist as unresolved | Closed for the landed slice only |
+| F-2 | Gap 2: Scheduler Boundary | DEFECT | HISTORICAL — downstream scheduler slice landed per `TASKS.md:396`; do not relist as unresolved | Closed for the landed slice only |
 | F-3 | Gap 5: Terminal Semantics | DEFECT (partial) | PARTIALLY RESOLVED — 5 terminal kinds + 4 exit reasons displaced to seed with 125 L4 gate tests passing; hash_error/globalstall/restart still open | Phase C (extend terminal_classify.v1.json) |
 | F-4 | Gap 7: Workload Corpus | DEFECT | CONFIRMED — 3 of 8+ needed vectors; no negative controls, no ablation tests, no given-for-free ledger | Phase C (structural reduction) |
 | F-5 | Parity + Ratchets | — | ALL PASS — no regression | N/A |

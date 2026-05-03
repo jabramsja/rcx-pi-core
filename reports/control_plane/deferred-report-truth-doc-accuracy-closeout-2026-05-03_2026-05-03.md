@@ -16,10 +16,12 @@ Files and evidence in scope:
 - Governing packet: `reports/control_plane/deferred-report-truth-doc-accuracy-closeout-2026-05-03_2026-05-03.md`.
 - Future Phase B edit target: `reports/deferred/non_blocking/deferred-report-truth-cleanup-2026-05-02_bridge_nonblockers.md`.
 - Future Phase B edit target: `reports/control_plane/deferred-report-truth-active-closeout-2026-05-03_2026-05-03.md`.
+- Tracker closeout target: `TASKS.md`, limited to the `[DEFERRED-REPORT-TRUTH-CLEANUP]` historical/CLEARED closeout wording.
+- Generated indicator artifact: `reports/l4_wave_indicators/deferred-report-truth-doc-accuracy-closeout-2026-05-03.json`.
 - Reviewer evidence source: `reports/deferred/non_blocking/deferred-report-truth-active-closeout-2026-05-03_bridge_nonblockers.md`.
 - Grounding source: TASKS.md lines 258-268 for the `[DEFERRED-REPORT-TRUTH-CLEANUP]` historical/CLEARED state and retained active follow-up.
 
-No directory-wide rewrite is authorized. Scope is limited to the governing packet and the two directly cited future edit targets.
+No directory-wide rewrite is authorized. Scope is limited to the governing packet, the two directly cited future edit targets, the narrow tracker closeout edit, and the generated L4 wave indicator artifact.
 
 ## Work items
 
@@ -32,8 +34,9 @@ No directory-wide rewrite is authorized. Scope is limited to the governing packe
 ## Constraints
 
 - Do not reopen `[DEFERRED-REPORT-TRUTH-CLEANUP]` as active NOW work; TASKS.md lines 258-268 mark it CLEARED and historical.
-- Do not edit `TASKS.md`, `STATUS.md`, `CHANGELOG.md`, `reports/README.md`, runtime, projection, substrate, scheduler, seed, parity, VM semantic, executor, or test implementation files for this wave.
-- Do not create new files or broaden into unrelated docs cleanup.
+- Do not edit `STATUS.md`, `CHANGELOG.md`, `reports/README.md`, runtime, projection, substrate, scheduler, seed, parity, VM semantic, executor, or test implementation files for this wave.
+- Do not edit `TASKS.md` except for the narrow historical/CLEARED closeout wording listed in scope.
+- Do not create new files except the generated L4 wave indicator artifact listed in scope, and do not broaden into unrelated docs cleanup.
 - Do not infer that a listed work item remains unlanded from stale packet wording alone; prefer current target-file truth during Phase B.
 - Do not modify non-cited deferred packets or archive material unless a stop condition is hit and the bridge explicitly re-scopes the wave.
 
@@ -52,7 +55,7 @@ No directory-wide rewrite is authorized. Scope is limited to the governing packe
 - The packet treats `[DEFERRED-REPORT-TRUTH-CLEANUP]` as a historical CLEARED task anchor and does not claim it is active NOW work.
 - Any Phase B edit to `reports/deferred/non_blocking/deferred-report-truth-cleanup-2026-05-02_bridge_nonblockers.md` is limited to the finding 4 disposition/prose defect unless current truth proves no edit is needed.
 - Any Phase B edit to `reports/control_plane/deferred-report-truth-active-closeout-2026-05-03_2026-05-03.md` is limited to removing or correcting the stale current-state claim about TASKS.md ACTIVE status unless current truth proves no edit is needed.
-- No files outside the scoped docs/control-surface targets are changed.
+- Changed files are limited to the scoped docs/control-surface targets, the narrow `TASKS.md` closeout edit, and the generated L4 wave indicator artifact recorded in the commit-path refresh.
 - Validation records successful targeted docs checks, including `./tools/checks/check_docs_consistency.sh` and `python3 tools/docs/docs_sync_report.py --check`, or records the exact blocker if either check cannot run.
 
 ## Grounding / Authorization

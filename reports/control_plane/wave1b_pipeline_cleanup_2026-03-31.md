@@ -1,6 +1,8 @@
 # Wave 1B: Pipeline Cleanup (MEDIUM + LOW)
 
-**Status:** COMMIT_READY (all code-backed Wave 1B residues addressed by the 2026-04-30 D1 closeout; merge pending)
+**Status:** HISTORICAL / CLOSED (all code-backed Wave 1B residues addressed by
+the 2026-04-30 D1 closeout; `TASKS.md:385-387` records
+`[DEFERRED-CONSOLIDATION]` closed by code)
 **Task:** NEXT-CODEX-POST-REDTEAM deferred cleanup
 **Surface:** `mu/tools/executors/`, `mu/tools/agents/`, `mu/tools/checks/`, `mu/tools/observability/`, `mu/tools/hooks/`
 **Classification:** MAINTENANCE (hardening, no runtime dirs)
@@ -20,7 +22,7 @@
 
 ## Cluster D — Executor Logic (4 items)
 
-### D1. [MEDIUM] ~~Dialectic executor max_rounds — implement or remove dead config~~ **COMMIT_READY deferred-d1-dialectic-max-rounds-2026-04-30**
+### D1. [MEDIUM] ~~Dialectic executor max_rounds — implement or remove dead config~~ **CLOSED deferred-d1-dialectic-max-rounds-2026-04-30**
 ### D2. [MEDIUM] Phase B re-entry refresh propagate deferred packet paths
 ### D3. [MEDIUM] Phase B classification logs to stderr not stdout
 ### D4. [MEDIUM] Dispatcher retry surface regression tests
