@@ -1,7 +1,8 @@
 # Deferred Reports
 
-This lane now holds only unresolved residue and active deferred-lane audit
-packets.
+This lane holds active deferred-lane audit packets and retained generated
+advisory records. Retained records for already-closed parent tasks are historical
+unless the current `TASKS.md` NEXT section also marks that parent task open.
 
 Layout:
 
@@ -15,27 +16,34 @@ Archive rule:
 
 - if a whole report is resolved, stale, or mainly historical, its source snapshot
   lives in `reports/archive/deferred/`
-- the active copy in this lane should contain only still-open residue
+- if archive movement is outside the authorized wave scope, the retained active
+  copy must be clearly marked historical or closed-parent advisory
 
-Current active inventory (audited 2026-03-31):
+Current inventory refresh (2026-05-03):
 
-Pipeline/control-surface (consolidated 2026-03-31):
-- `non_blocking/wave1_pipeline_consolidated_2026-03-31.md` — 27 unique items across 6 clusters (A-F), supersedes 6 prior files
+- Evidence command: `rg --files reports/deferred/blocking reports/deferred/non_blocking | sort | nl -ba`.
+- `reports/deferred/blocking/` currently contains only `README.md`; no active
+  blocker packet is present in the authorized deferred blocking lane.
+- `reports/deferred/non_blocking/` contains active advisory records plus
+  retained generated bridge non-blocker records. These records stay in the
+  advisory lane, but closed parent tasks are not reopened by their presence.
 
-Redteam residue (March 2026):
-- `non_blocking/redteam_2026-03-09_wave2.md` — branch-prefix coupling, wrapper staleness (low)
-- `non_blocking/redteam_2026-03-09_wave3.md` — Hypothesis suppressions/decorators (fuzzer hygiene wave)
-- `non_blocking/redteam_2026-03-09_wave4a.md` — Stage0 design decisions, kernel duplication
-- `non_blocking/redteam_2026-03-14_repo_non_blockers.md` — Stage0 hostile-leaf gap (design)
-- `non_blocking/repo_truth_non_blockers_2026-03-14.md` — VM cutover/JS bridge evidence (future waves)
-- `non_blocking/wave-i-non-blocking-findings_2026-03-09.md` — _match_inner duplication (perf risk)
+Closed-parent exclusions for this index:
 
-Runtime/gate residue:
-- `non_blocking/hook_soft_gate_residue.md` — soft-gate annoyance (quote-split, false positives)
-- `non_blocking/w5a_reentry_gate_coverage.md` — gate test missing re-entry exercise
+- `TASKS.md:277-283` marks `[PIPELINE-AGENT-PAGER]`,
+  `[PARALLEL-PIPELINE]`, and `[DEFERRED-CONSOLIDATION]` as closed by code and
+  says old in-progress prose is historical unless the current section marks the
+  item open.
+- `TASKS.md:385-397` records `[DEFERRED-CONSOLIDATION]` as closed by code,
+  keeps `[NEXT-CODEX-POST-REDTEAM]` open only for future bounded structural
+  work, and excludes the landed PR #701 Phase A artifacts plus the landed
+  `post-redteam-engine-state-scheduler-reduction-2026-04-30` seed, fixture,
+  structural-test, scheduler-parity, and seed-registration items from unresolved
+  work.
+- `TASKS.md:399-403` records `[PARALLEL-PIPELINE]` as closed, with bus
+  namespacing, monitor identity, Tier 2 transient-kill retry, and agent-team
+  work landed or satisfied.
 
-Archived (2026-03-31):
-- `redteam_2026-03-09_wave1.md` → `reports/archive/deferred/` (all resolved/design-locked)
-- `redteam_2026-03-10_wave4e.md` → `reports/archive/deferred/` (collected_at fixed, JS-only intentional)
-- `native_agent_test_findings_2026-03-11.md` → `reports/archive/deferred/` (markers added, architecture mitigations)
-- 6 pipeline files → `reports/archive/deferred/` (superseded by `wave1_pipeline_consolidated_2026-03-31.md`)
+Historical/generated advisory records retained in `non_blocking/` therefore do
+not relist PR #701, the engine-state/scheduler slice, `PIPELINE-AGENT-PAGER`,
+`PARALLEL-PIPELINE`, or `DEFERRED-CONSOLIDATION` as active unresolved work.

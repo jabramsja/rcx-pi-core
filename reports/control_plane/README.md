@@ -31,3 +31,11 @@ Canonical packet references:
 - `reports/archive/control_plane/post_merge_supervisor_plan_2026-03-21.md`
 - `reports/archive/control_plane/executor_surfaces_plan_2026-03-22.md`
 - `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`
+
+Index truth note (2026-05-03):
+
+- This README is a lane-placement guide, not an exhaustive active-work tracker.
+- Current open/closed task truth comes from `TASKS.md`.
+- Historical packets in this folder may retain pre-implementation scope,
+  acceptance, or commit-ready evidence, but those packets do not reopen work that
+  `TASKS.md` marks closed or relist landed work as unresolved.

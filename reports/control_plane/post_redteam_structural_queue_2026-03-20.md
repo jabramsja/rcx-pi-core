@@ -14,8 +14,19 @@ control-surface/meta-bridge rollout (all 7 rollout steps complete)
   - the post-merge supervisor has gone through its own Phase A and Phase B ✓
   - Claude has explicit repo-local executors for Phase A, Phase B, and commit flow ✓
   - pipeline proven end-to-end (9 PRs, #673-#681) ✓
-- Current phase: Phase A — plan LOCKED (PR #699), ready for Phase B implementation
-- Canonical locked plan: `reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md` (583 lines, 6+ adversarial Codex review rounds)
+- Current phase: OPEN only for future bounded structural-reduction packets not
+  already proven by landed work. `TASKS.md:395-396` records that PR #701 landed
+  the Phase A structural gap sweep packet/evidence artifacts and that the first
+  downstream `post-redteam-engine-state-scheduler-reduction-2026-04-30` slice has
+  also landed.
+- Canonical historical Phase A sweep packet:
+  `reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md`
+  (bridge-converged findings/evidence record). Do not read its old F-1/F-2
+  "missing artifact" findings as current unresolved work after `TASKS.md:396`
+  records the engine-state/scheduler slice as landed.
+- Old control-surface packets that reused `[NEXT-CODEX-POST-REDTEAM]` as a
+  procedural Gate 8 anchor are not substantive closure evidence for this
+  structural queue.
 
 ## Governing sequence
 

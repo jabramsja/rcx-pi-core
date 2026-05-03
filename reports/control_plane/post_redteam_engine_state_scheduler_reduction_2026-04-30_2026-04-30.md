@@ -1,22 +1,36 @@
 # Post Redteam Engine State Scheduler Reduction 2026-04-30
 
 Date: 2026-04-30
-Status: COMPLETED (commit-ready, supervisor COMMIT_GO)
+Status: HISTORICAL / LANDED (closed for F-1/F-2 by current TASKS code truth)
 Task: [NEXT-CODEX-POST-REDTEAM]
 Wave ID: post-redteam-engine-state-scheduler-reduction-2026-04-30
 Class: L4_STRUCTURAL
 Authorization: FOUNDER_OVERRIDE:post-redteam-engine-state-scheduler-reduction-2026-04-30
 Phase-A-Lock: LOCKED
 
-Purpose: Convert the post-redteam structural authorization into the first bounded downstream implementation plan. This packet targets only the first-sequenced F-1/F-2 reduction from the locked Phase A sweep: formal engine state plus scheduler/operator-pool boundary. It does not implement the reduction in this turn.
+Purpose: Historical governing packet for the first bounded downstream
+`[NEXT-CODEX-POST-REDTEAM]` implementation slice. The slice targeted only the
+first-sequenced F-1/F-2 reduction from the locked Phase A sweep: formal engine
+state plus scheduler/operator-pool boundary.
 
-Evidence boundary for this rewrite: this packet was rewritten from the target file, TASKS.md lines 364-369, the governing structural queue, and the locked Phase A sweep findings F-1/F-2. No downstream implementation files were inspected for this rewrite.
+Current truth (2026-05-03): `TASKS.md:395-396` records this slice as landed and
+lists the landed seed, fixture, structural-test, scheduler-parity, and
+seed-registration artifacts. Future-tense scope, work-item, and acceptance
+language below is retained as historical packet evidence only; do not relist
+those F-1/F-2 artifacts as unresolved work.
+
+Evidence boundary for this cleanup: this packet was updated from this file,
+`TASKS.md:392-397`, the governing structural queue, the historical Phase A sweep
+packet, and the generated deferred advisory that flagged the stale future-tense
+wording. No downstream implementation files were inspected for this cleanup.
 
 ## 1. Scope
 
-This Phase A packet governs the next implementation pass for the F-1/F-2 engine-state and scheduler reduction only.
+This Phase A packet governed the implementation pass for the F-1/F-2
+engine-state and scheduler reduction only. `TASKS.md:396` records that this
+bounded slice has since landed.
 
-Files and directories in scope for the future implementation pass:
+Files and directories that were in scope for that implementation pass:
 
 - `mu/programs/rcx_engine_state.v1.json` -- new formal engine-state seed/schema artifact.
 - `mu/programs/rcx_engine_scheduler.v1.json` -- new scheduler/operator-pool seed artifact.
@@ -37,18 +51,22 @@ Wave-bound Phase B bootstrap exception:
 - Rationale: these files are the Phase B/L4 validation and commit-path package surfaces that classify, package, or locally test this same wave. The exception is limited to passing wave identity into the L4 contract gate, preserving staged commit-bound package truth, excluding non-Python fixtures from Phase B pytest file selection, making protected-branch dirty-worktree stashing recoverable and fail-closed, and suppressing founder override tokens from structural supervisor packages.
 - Boundary: this exception does not authorize runtime/seed semantics outside F-1/F-2, PR automation, executor dispatch behavior outside the named self-validating surfaces, bridge/supervisor behavior beyond the package-validation gate and structural package-token schema fix, or any F-3/F-4 work.
 
-## 2. Work Items
+## 2. Work Items (historical; landed for F-1/F-2)
 
-### WI-1: Open with code-truth checks for F-1/F-2
+### WI-1: Open with code-truth checks for F-1/F-2 (historical)
 
-Before implementing, verify whether the missing artifacts named by TASKS.md and F-1/F-2 are still absent:
+At implementation time, verify whether the artifacts named by the historical
+F-1/F-2 findings are still absent:
 
 ```bash
 ls mu/programs/rcx_engine_state* mu/substrate/engine_state* 2>/dev/null
 ls mu/programs/rcx_engine_scheduler* mu/programs/rcx_engine_supervisor* 2>/dev/null
 ```
 
-If these commands prove that the engine-state or scheduler artifacts have already landed, remove that item from pending work and stop for a narrower replan instead of re-listing stale work as unresolved.
+If these commands prove that the engine-state or scheduler artifacts have
+already landed, remove that item from pending work and stop for a narrower
+replan instead of re-listing stale work as unresolved. Current tracker truth now
+records this landed state at `TASKS.md:396`.
 
 ### WI-2: Add the formal engine-state artifact
 
@@ -94,9 +112,10 @@ Add fixtures and tests that prove the state and scheduler artifacts are executab
 - parity test proves Python and JS agree on the scheduler seed-path result
 - tests prove the scheduler path runs through the seed path, not a host fallback
 
-### WI-6: Validate and record implementation evidence
+### WI-6: Validate and record implementation evidence (historical)
 
-The implementation pass must run these commands after the new tests/files exist:
+The implementation pass had to run these commands after the new tests/files
+existed:
 
 ```bash
 PYTHONHASHSEED=0 python3 -m pytest \
@@ -143,9 +162,10 @@ Stop the implementation pass and return for replan if any condition is met:
 
 ## 5. Acceptance Criteria
 
-This packet is ready for implementation when bridge review accepts it as a concrete Phase A plan.
+This packet was ready for implementation when bridge review accepted it as a
+concrete Phase A plan.
 
-The future implementation is acceptable only when all of the following are true:
+The implementation was acceptable only when all of the following were true:
 
 - `mu/programs/rcx_engine_state.v1.json` exists and encodes the F-1 state model as loadable structural projections.
 - `mu/programs/rcx_engine_scheduler.v1.json` exists and encodes the F-2 scheduler/operator-pool model as loadable structural projections: `seedOps`, Godel-coded unary maps, finite operator pool per step, strict lexicographic order, identity-map safeguard, and promotion/freeze lifecycle.
@@ -155,22 +175,28 @@ The future implementation is acceptable only when all of the following are true:
 - Python/JS scheduler parity is tested.
 - Existing engine parity tests still pass.
 - Host authority inventory, host semantics ratchet, and bootstrap purity ratchet still pass.
-- F-3 terminal semantics and F-4 workload corpus remain explicitly deferred and are not claimed as resolved by this slice.
+- F-3 terminal semantics and F-4 workload corpus remain explicitly deferred and
+  are not claimed as resolved by this slice.
+
+2026-05-03 status: `TASKS.md:396` records the F-1/F-2 seed, fixture,
+structural-test, scheduler-parity, and seed-registration artifacts as landed.
+This packet does not claim closure for F-3 terminal semantics or F-4 workload
+corpus work.
 
 ## 6. Grounding / Authorization
 
 TASKS.md authorization:
 
-- `TASKS.md:364`: `[NEXT-CODEX-POST-REDTEAM]` is UNPARKED and founder-authorized as of 2026-03-28.
-- `TASKS.md:365`: structural follow-on queue is `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
-- `TASKS.md:366`: sequence is Phase A -> Phase B -> Phase C -> Phase D.
-- `TASKS.md:367`: current phase is OPEN; downstream structural reduction remains unimplemented.
-- `TASKS.md:368`: current code truth says PR #701 landed findings/evidence only and did not land runtime/seed structural reductions; missing items include `rcx_engine_state`, scheduler structural tests/fixtures, workload contract metadata, and terminal-classify projections.
-- `TASKS.md:369`: lane is structural post-control-surface.
+- `TASKS.md:392`: `[NEXT-CODEX-POST-REDTEAM]` is UNPARKED and founder-authorized as of 2026-03-28.
+- `TASKS.md:393`: structural follow-on queue is `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
+- `TASKS.md:394`: sequence is Phase A -> Phase B -> Phase C -> Phase D.
+- `TASKS.md:395`: current phase remains OPEN only because remaining structural reduction requires separate bounded packets; the Phase A structural gap sweep and this first engine-state/scheduler reduction have landed.
+- `TASKS.md:396`: PR #701 landed the Phase A sweep packet/evidence only, and current code now contains this follow-on engine-state/scheduler slice: `mu/programs/rcx_engine_state.v1.json`, `mu/programs/rcx_engine_scheduler.v1.json`, `mu/tests/fixtures/rcx_engine_state_minimal.json`, `mu/tests/structural/test_rcx_engine_state_seed.py`, `mu/tests/structural/test_rcx_enginenew_scheduler.py`, `mu/tests/parity/test_rcx_engine_scheduler_parity.py`, and Python/JS seed registration for both engine seeds.
+- `TASKS.md:397`: lane is structural post-control-surface.
 
 Governing packet refs:
 
-- This file is the governing Phase A packet for wave `post-redteam-engine-state-scheduler-reduction-2026-04-30`.
+- This file is the historical governing Phase A packet for landed wave `post-redteam-engine-state-scheduler-reduction-2026-04-30`.
 - `reports/control_plane/post_redteam_structural_queue_2026-03-20.md:3-6` marks the structural queue ACTIVE and points to the canonical locked Phase A sweep.
 - `reports/control_plane/post_redteam_structural_queue_2026-03-20.md:38-70` defines the phase sequence: Phase A gap sweep, Phase B host/boundary unification, Phase C structural reduction into Mu.
 - `reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md:588-620` records F-1 as a DEFECT: no engine-state schema artifact.

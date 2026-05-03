@@ -58,7 +58,10 @@ Files and directories touched by the implementation wave:
 ## Acceptance Criteria
 
 - The Phase A packet contains `Scope`, `Work Items`, `Constraints`, `Stop Conditions`, `Acceptance Criteria`, and `Grounding / Authorization` sections, plus a same-wave `FOUNDER_OVERRIDE` line for the control-surface L4_ENABLER wave.
-- Pending work is limited to `[PARALLEL-PIPELINE]` item 4. Items 1, 2, and 3 are described only as landed/satisfied grounding, not as unresolved implementation work.
+- Historical packet scope was limited to `[PARALLEL-PIPELINE]` item 4. Items 1,
+  2, and 3 were described only as landed/satisfied grounding, not as unresolved
+  implementation work. Current `TASKS.md:399-403` marks item 4 landed as well,
+  so this packet does not relist `[PARALLEL-PIPELINE]` work as pending.
 - Scope explicitly lists every file or directory authorized for the follow-on implementation wave, including `mu/tools/executors/executor_dispatch.py` as the teammate/agent-team launcher control surface. No unnamed future entrypoint-identification task remains.
 - The implementation plan names bounded control-surface areas for worktree creation, bus/session identity handoff, dispatcher/monitor startup, and focused tests.
 - Implementation auto-creates or selects a teammate git worktree with a namespaced bus and does not silently fall back to the caller's dirty worktree or default bus.

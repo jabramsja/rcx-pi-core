@@ -1,7 +1,7 @@
 # Deferred Consolidation E5/E6 Closeout
 
 Date: 2026-04-30
-Status: COMMIT_READY
+Status: HISTORICAL / CLOSED FOR E5-E6 (D1 later closed; see TASKS.md:385-387)
 Task: [DEFERRED-CONSOLIDATION]
 Wave ID: deferred-consolidation-e5-e6-closeout-2026-04-30
 Wave-ID: deferred-consolidation-e5-e6-closeout-2026-04-30
@@ -26,7 +26,10 @@ Lane: control-surface (deferred cleanup)
 
 1. Close the remaining E5 deferred non-blocking finding by stripping C1 controls from displayed PR/CI pane bot comments.
 2. Add targeted regression coverage proving `U+009B` does not survive pane rendering.
-3. Refresh active tracker/report surfaces so E5/E6 are landed and D1 remains the only open code-backed [DEFERRED-CONSOLIDATION] residue.
+3. Refresh active tracker/report surfaces so E5/E6 are landed. At this packet's
+   implementation time, D1 remained the only open code-backed
+   `[DEFERRED-CONSOLIDATION]` residue; `TASKS.md:385-387` now records D1 closed
+   by the later `deferred-d1-dialectic-max-rounds-2026-04-30` slice.
 4. Archive the active E5/E6 deferred non-blocking packet as closed with validation evidence.
 5. Make commit-executor staging idempotent for already-staged deleted handoff paths discovered while rerunning this closeout through the commit path.
 
@@ -41,7 +44,9 @@ Lane: control-surface (deferred cleanup)
 
 - `sanitize_pane_text()` strips C1 controls (`U+0080..U+009F`) before displayed bot comments reach the tmux pane.
 - `mu/tests/tools/test_pane_prci_observability.py` covers the C1 sanitizer regression.
-- `TASKS.md` and Wave 1B report surfaces mark E5/E6 landed while leaving D1 open.
+- `TASKS.md` and Wave 1B report surfaces mark E5/E6 landed. The later D1
+  closeout now closes the remaining `[DEFERRED-CONSOLIDATION]` residue per
+  `TASKS.md:385-387`.
 - The active E5/E6 non-blocking packet is archived as CLOSED.
 - Re-running Step 4 against a handoff path that is already staged as deleted or already deleted in the current branch commit does not fail on a plain `git add <missing path>` pathspec error.
 - L4 indicator artifact exists for this closeout wave.
@@ -71,7 +76,7 @@ Authorization: narrow founder-directed tracker cleanup and pipeline hardening fo
 - Indicator artifact: `reports/l4_wave_indicators/deferred-consolidation-e5-e6-closeout-2026-04-30.json`
 - Pre-commit receipt handle: `.agent_bus/meta/pre_commit_receipt.json`
 - Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_pane_prci_observability.py mu/tests/tools/test_commit_executor_receipt.py::TestWaveIdBounds::test_stage_handoff_paths_is_idempotent_for_staged_deletion && python3 -m py_compile mu/tools/executors/commit_executor.py && git diff --check && bash tools/checks/check_stale_next_items.sh && ./tools/checks/check_docs_consistency.sh`.
-- Evidence delta: (1) `_pane_prci.sh` sanitizer strips C1 controls (`U+0080..U+009F`) in addition to ESC/C0/DEL before rendering bot comments. (2) `test_displayed_bot_comment_text_strips_c1_controls` proves `U+009B` no longer reaches pane output. (3) `commit_executor` Step 4 now treats missing handoff paths that are already staged deletions as idempotent, uses `git add -u` for unstaged tracked deletes, and skips paths already deleted by the current branch commit. (4) TASKS.md and Wave 1B report surfaces now mark E5/E6 landed while leaving D1 dialectic max_rounds as the remaining code-backed residue. (5) The active E5/E6 deferred nonblocking packet is archived as CLOSED with validation evidence, and the closeout has a matching tracked packet for commit truth refresh.
+- Evidence delta: (1) `_pane_prci.sh` sanitizer strips C1 controls (`U+0080..U+009F`) in addition to ESC/C0/DEL before rendering bot comments. (2) `test_displayed_bot_comment_text_strips_c1_controls` proves `U+009B` no longer reaches pane output. (3) `commit_executor` Step 4 now treats missing handoff paths that are already staged deletions as idempotent, uses `git add -u` for unstaged tracked deletes, and skips paths already deleted by the current branch commit. (4) TASKS.md and Wave 1B report surfaces mark E5/E6 landed; D1 was later closed by `deferred-d1-dialectic-max-rounds-2026-04-30`, now reflected in `TASKS.md:385-387`. (5) The active E5/E6 deferred nonblocking packet is archived as CLOSED with validation evidence, and the closeout has a matching tracked packet for commit truth refresh.
 - Evidence handles:
   - `archived_nonblocker`: `reports/deferred/archive/plan-deferred-consolidation-e5-e6-2026-04-02-2026-04-06_bridge_nonblockers_CLOSED_by_deferred-consolidation-e5-e6-closeout-2026-04-30.md`
   - `indicator`: `reports/l4_wave_indicators/deferred-consolidation-e5-e6-closeout-2026-04-30.json`

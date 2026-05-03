@@ -13,11 +13,10 @@ allocation, tmux session naming, and dashboard active-bus identity from
 configuration, without widening executor runtime semantics.
 ## Scope: Files/Directories in Scope
 
-This packet is the governing tracked Phase A packet for `[PARALLEL-PIPELINE]`
-work item 2 only: per-worktree dashboard ports plus tmux session names from
-configuration. The bridge-requested correction is that dashboard lane identity
-is not port-only. A named dashboard lane must bind its configured port and read
-from its configured active bus root.
+This packet governed `[PARALLEL-PIPELINE]` work item 2 only: per-worktree
+dashboard ports plus tmux session names from configuration. The bridge-requested
+correction was that dashboard lane identity is not port-only. A named dashboard
+lane must bind its configured port and read from its configured active bus root.
 
 Subsequent implementation is limited to these control-surface paths:
 
@@ -44,10 +43,11 @@ commit-path identity repair addendum below.
 
 ## Work Items
 
-1. Confirm the active slice boundary from this packet and `TASKS.md`:
+1. Confirm the historical slice boundary from this packet and `TASKS.md`:
    `[PARALLEL-PIPELINE]` item 1, agent bus namespacing, is already landed and is
    not pending work; item 2, per-worktree dashboard ports plus tmux session names
-   from config, is the only open work item in scope for this wave.
+   from config, was the only work item in scope for this wave. Current
+   `TASKS.md:399-403` records the parent lane closed by code.
 2. Define the monitor identity contract in the in-scope control surface:
    - Default lane remains compatible: absent configuration keeps tmux session
      `rcx-pipeline`, dashboard port `8099`, and dashboard data root
@@ -214,9 +214,11 @@ the handoff.
 
 ## Grounding / Authorization
 
-- `TASKS.md` authorizes `[PARALLEL-PIPELINE]` as `OPEN / PARTIAL`, records agent
-  bus namespacing as landed in PR #833, and records this packet's work item 2 as
-  landed in PR #836.
+- Current tracker truth: `TASKS.md:277-283` and `TASKS.md:399-403` mark
+  `[PARALLEL-PIPELINE]` closed by code. Item 1 bus namespacing landed in PR
+  #833, this packet's item 2 monitor identity landed in PR #836, item 3 Tier 2
+  transient-kill retry is satisfied by existing recovery code, and item 4 agent
+  teams landed in PR #842.
 - PR #836 merged this packet at `fc1a2a1d` on 2026-04-30. The implementation
   commit `8bbdf0f3` added `mu/tools/observability/pipeline_monitor_identity.py`
   and updated the monitor, dashboard, startup/autoping, and focused regression
@@ -237,10 +239,10 @@ the handoff.
 - `mu/tests/tools/test_recovery_gate.py` covers named-lane monitor startup,
   dashboard active-bus reads, invalid/duplicate monitor identity config, and
   autoping reseed propagation.
-- Remaining `[PARALLEL-PIPELINE]` residue is outside this packet: teammate
-  worktree integration. Recovery Tier 2 transient-kill retry is already
-  implemented on current `dev` by `recovery_gate.py` classifier/fixer
-  registration and `executor_dispatch.py` recovered-Tier-2 retry handling.
+- Historical note: at this packet's implementation time, teammate worktree
+  integration remained outside this packet. Current `TASKS.md:399-403` records
+  that item 4 has since landed in PR #842, so this packet does not relist
+  remaining `[PARALLEL-PIPELINE]` residue as unresolved.
 - Post-Phase-B root-cause evidence from
   `.agent_bus/observability/pipeline_agent_events.jsonl` recorded
   `event_type="executor_hard_fail"` with reason
