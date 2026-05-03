@@ -397,6 +397,7 @@ ensure_state_dir() {
 
 record_codex_autoping_thread() {
   if [ -z "${CODEX_THREAD_ID:-}" ]; then
+    rm -f "$AUTOPING_THREAD_FILE"
     return 0
   fi
   ensure_state_dir
@@ -817,11 +818,11 @@ ensure_owner_running() {
   if [ "${#owner_args[@]}" -gt 0 ]; then
     RCX_PIPELINE_MONITOR_STATE_DIR="$STATE_DIR" \
     RCX_PIPELINE_MONITOR_HEALTH_INTERVAL="$OWNER_INTERVAL_SECONDS" \
-      nohup bash "$0" "${owner_args[@]}" __owner-loop >/dev/null 2>&1 &
+      nohup env -u CODEX_THREAD_ID bash "$0" "${owner_args[@]}" __owner-loop >/dev/null 2>&1 &
   else
     RCX_PIPELINE_MONITOR_STATE_DIR="$STATE_DIR" \
     RCX_PIPELINE_MONITOR_HEALTH_INTERVAL="$OWNER_INTERVAL_SECONDS" \
-      nohup bash "$0" __owner-loop >/dev/null 2>&1 &
+      nohup env -u CODEX_THREAD_ID bash "$0" __owner-loop >/dev/null 2>&1 &
   fi
   owner_pid="$!"
   record_owner_pid "$owner_pid"

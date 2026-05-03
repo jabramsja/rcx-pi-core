@@ -6201,6 +6201,75 @@ esac
         finally:
             self._stop_pipeline_monitor(repo_root, env)
 
+    def test_pipeline_monitor_start_clears_saved_autoping_thread_when_thread_id_is_absent(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "pipeline_monitor.sh")
+        launcher_dir = repo_root / "tools" / "session"
+        launcher_dir.mkdir(parents=True, exist_ok=True)
+        marker = tmp_path / "autoping.log"
+        launcher = launcher_dir / "ensure_codex_autoping.sh"
+        launcher.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -eu\n"
+            f"printf '%s\\n' \"$*\" >> {marker!s}\n",
+            encoding="utf-8",
+        )
+        launcher.chmod(launcher.stat().st_mode | 0o111)
+        git_bin = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/test-wave",
+        )
+        tmux_log = tmp_path / "tmux.log"
+        tmux_bin = self._fake_tmux_dir(tmp_path, log_path=tmux_log)
+        state_dir = tmp_path / "monitor-state"
+        env = os.environ.copy()
+        env.pop("CODEX_THREAD_ID", None)
+        env.update({
+            "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
+            "RCX_PIPELINE_MONITOR_STATE_DIR": str(state_dir),
+            "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+        })
+        thread_env = env | {"CODEX_THREAD_ID": "stale-thread"}
+
+        try:
+            result = subprocess.run(
+                ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=thread_env,
+            )
+
+            assert result.returncode == 0
+            thread_file = state_dir / "codex_autoping.thread"
+            assert thread_file.read_text(encoding="utf-8").strip() == "stale-thread"
+            assert "--thread-id stale-thread" in marker.read_text(encoding="utf-8")
+            deadline = time.monotonic() + 5
+            marker_lines: list[str] = []
+            while time.monotonic() < deadline:
+                marker_lines = marker.read_text(encoding="utf-8").splitlines()
+                if any("--thread-id stale-thread" in line and "--force-restart" not in line for line in marker_lines):
+                    break
+                time.sleep(0.1)
+            assert any("--thread-id stale-thread" in line and "--force-restart" not in line for line in marker_lines)
+            marker.write_text("", encoding="utf-8")
+
+            result = subprocess.run(
+                ["bash", str(repo_root / "mu" / "tools" / "observability" / "pipeline_monitor.sh"), "start", "--detach"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            assert result.returncode == 0
+            assert not thread_file.exists()
+            assert marker.read_text(encoding="utf-8") == ""
+        finally:
+            self._stop_pipeline_monitor(repo_root, env)
+
     def test_pipeline_monitor_owner_tick_keeps_autoping_seeded_after_start(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()

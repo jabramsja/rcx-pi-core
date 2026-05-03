@@ -1,24 +1,24 @@
 {
   "wave_id": "autoping-owner-health-selfheal-2026-05-03",
-  "repeat_run_speedup_ratio": 1.031704,
+  "repeat_run_speedup_ratio": 1.000956,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.427385,
+  "step_growth_slope": 0.408154,
   "repeat_run_raw_seconds": [
-    0.440935,
-    0.427385
+    0.408544,
+    0.408154
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.440935
+      "elapsed_seconds": 0.408544
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.86832
+      "elapsed_seconds": 0.816698
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-03T21:32:39Z",
+  "collection_timestamp_utc": "2026-05-03T22:06:33Z",
   "collector_version": "2.2.0"
 }
