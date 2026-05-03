@@ -172,27 +172,15 @@ The implementation wave is acceptable only when:
 - Refresh wave: `phase-a-placeholder-refresh-and-busdir-ordering-2026-05-02`
 - Active packet: `reports/control_plane/phase-a-placeholder-refresh-and-busdir-ordering-2026-05-02_2026-05-02.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `d98e4cdb36d042c09318ad6d1817ca5a759322dcb497b828a8f89ffeb49c5843`
+- Tracker note sha256: `fa69de1ebcefedd0558e9aca238e18b1c935c981ce1ed6cfd818e36e471f03a1`
 - Indicator artifact: `reports/l4_wave_indicators/phase-a-placeholder-refresh-and-busdir-ordering-2026-05-02.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_codex_autoping_watch.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_recovery_gate.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/phase-a-placeholder-refresh-and-busdir-ordering-2026-05-02_2026-05-02.md. (2) Final pytest gate covered 5 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_agent_bus_namespacing.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/phase-a-placeholder-refresh-and-busdir-ordering-2026-05-02_2026-05-02.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/phase-a-placeholder-refresh-and-busdir-ordering-2026-05-02.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/tools/test_codex_autoping_watch.py`
-  - `mu/tests/tools/test_commit_executor_receipt.py`
-  - `mu/tests/tools/test_executor_dispatch.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
-  - `mu/tests/tools/test_recovery_gate.py`
-  - `mu/tools/executors/commit_executor.py`
-  - `mu/tools/executors/dialectic_executor.py`
-  - `mu/tools/executors/executor_dispatch.py`
-  - `mu/tools/executors/phase_a_executor.py`
-  - `mu/tools/executors/phase_b_executor.py`
-  - `mu/tools/executors/recovery_gate.py`
-  - `mu/tools/session/codex_autoping_watch.py`
+  - `mu/tests/tools/test_agent_bus_namespacing.py`
   - `reports/control_plane/phase-a-placeholder-refresh-and-busdir-ordering-2026-05-02_2026-05-02.md`
-  - `reports/deferred/non_blocking/phase-a-placeholder-refresh-and-busdir-ordering-2026-05-02_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/phase-a-placeholder-refresh-and-busdir-ordering-2026-05-02.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
