@@ -32,6 +32,7 @@ _EXECUTORS_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "exec
 pb_mod = load_module("phase_b_executor", _EXECUTORS_DIR / "phase_b_executor.py")
 pa_mod = load_module("phase_a_executor", _EXECUTORS_DIR / "phase_a_executor.py")
 impl_mod = load_module("phase_b_implementer", _EXECUTORS_DIR / "phase_b_implementer.py")
+commit_mod = load_module("commit_executor", _EXECUTORS_DIR / "commit_executor.py")
 
 # Default valid routing record for tests that call run_phase_b.
 # Tests that specifically test routing validation should NOT use this.
@@ -1466,6 +1467,284 @@ class TestMaintenanceTrackerMetadataPropagation:
         tracker_note_text = mock_handoff.call_args.kwargs["tracker_note_text"]
         assert "Class: L4_ENABLER" in tracker_note_text
         assert "FOUNDER_OVERRIDE:codex-startup-hardening-2026-04-16-followup" in tracker_note_text
+
+    def test_run_phase_b_syncs_tracker_note_before_pre_commit_supervisor(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        (repo / "TASKS.md").write_text(
+            "## Ra\n\n"
+            "- Tracker sync note (2026-05-01, old-wave): **OLD.** "
+            "Class: L4_ENABLER. target_gate_id: G8.\n"
+            "---\n",
+            encoding="utf-8",
+        )
+        plan = repo / "reports" / "control_plane" / "plan.md"
+        wave_id = "phase-b-pre-supervisor-tracker-sync-2026-05-02"
+        plan.write_text(
+            "# Plan\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [PIPELINE-RECOVERY]\n"
+            "Lane: control-surface\n"
+            "Authorization: standing pipeline-bug-fix authorization for bounded pipeline hardening.\n",
+            encoding="utf-8",
+        )
+        captured_package = {}
+
+        def capture_supervisor(_repo_root, package_path, **_kwargs):
+            captured_package.update(json.loads(Path(package_path).read_text(encoding="utf-8")))
+            tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+            assert f"Tracker sync note" in tasks_text
+            assert wave_id in tasks_text
+            assert f"FOUNDER_OVERRIDE:{wave_id}" in tasks_text
+            assert "Phase B pre-commit supervisor package" in tasks_text
+            return {
+                "exit_code": 0,
+                "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            }
+
+        def collect_indicator(_repo_root, *, wave_id):
+            indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+            indicator_file = repo / indicator_path
+            indicator_file.parent.mkdir(parents=True, exist_ok=True)
+            indicator_file.write_text(json.dumps({"wave_id": wave_id}) + "\n", encoding="utf-8")
+            return indicator_path, None
+
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": wave_id,
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+        }
+        changed = [
+            "mu/tools/executors/phase_b_executor.py",
+            "mu/tests/tools/test_phase_b_executor.py",
+            "reports/control_plane/plan.md",
+        ]
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=[]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=list(changed)), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files: list(files)), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0,
+                 "passed": True,
+                 "stdout": "",
+                 "stderr": "",
+             }), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0, "stdout": "GO\n", "stderr": "",
+                 "decision": "GO", "job_id": "j1",
+             }), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(
+                 pb_mod,
+                 "_collect_and_stage_l4_indicator_artifact",
+                 side_effect=collect_indicator,
+             ) as mock_indicator, \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=capture_supervisor), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        assert "TASKS.md" in captured_package["changed_files"]
+        assert indicator_path in captured_package["changed_files"]
+        assert captured_package["evidence_handles"]["indicator"] == indicator_path
+        assert captured_package["founder_override_token"] == f"FOUNDER_OVERRIDE:{wave_id}"
+        mock_indicator.assert_called_once_with(repo, wave_id=wave_id)
+
+    def test_l4_indicator_collection_reruns_after_tracker_only_crash(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+        wave_id = "phase-b-tracker-only-crash-2026-05-02"
+        changed_files = [
+            "mu/tools/executors/phase_b_executor.py",
+            "mu/tests/tools/test_phase_b_executor.py",
+        ]
+        tracker_note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker binding helper
+            wave_id=wave_id,
+            task_id="[PIPELINE-RECOVERY]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/plan.md",
+            plan_content="",
+            changed_files=changed_files,
+            test_files=["mu/tests/tools/test_phase_b_executor.py"],
+            receipt_path=".agent_bus/meta/pre_commit_receipts/r.json",
+            bridge_rounds=1,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        first_error, first_modified = pb_mod._sync_phase_b_tasks_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker binding helper
+            repo,
+            wave_id=wave_id,
+            tracker_note_text=tracker_note,
+        )
+        second_error, second_modified = pb_mod._sync_phase_b_tasks_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker binding helper
+            repo,
+            wave_id=wave_id,
+            tracker_note_text=tracker_note,
+        )
+
+        assert first_error is None
+        assert first_modified is True
+        assert second_error is None
+        assert second_modified is False
+        assert pb_mod._should_collect_l4_indicator_artifact(  # ANTICHEAT_OK: testing Phase B indicator recovery predicate
+            repo,
+            wave_id=wave_id,
+            wave_class="L4_ENABLER",
+            tracker_note_modified=second_modified,
+            founder_override_token="",
+            changed_files=[*changed_files, "TASKS.md"],
+        ) is True
+
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        indicator_file = repo / indicator_path
+        indicator_file.parent.mkdir(parents=True, exist_ok=True)
+        indicator_file.write_text(json.dumps({"wave_id": wave_id}) + "\n", encoding="utf-8")
+        assert pb_mod._should_collect_l4_indicator_artifact(  # ANTICHEAT_OK: testing Phase B indicator recovery predicate
+            repo,
+            wave_id=wave_id,
+            wave_class="L4_ENABLER",
+            tracker_note_modified=False,
+            founder_override_token="",
+            changed_files=[*changed_files, "TASKS.md", indicator_path],
+        ) is False
+
+    def test_l4_indicator_collection_requires_canonical_tracker_note(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wave_id = "phase-b-pre-supervisor-indicator-2026-05-02"
+        (repo / "TASKS.md").write_text(
+            "- Tracker sync note (2026-05-02, unrelated-wave): old note.\n",
+            encoding="utf-8",
+        )
+
+        assert pb_mod._should_collect_l4_indicator_artifact(  # ANTICHEAT_OK: testing Phase B indicator recovery predicate
+            repo,
+            wave_id=wave_id,
+            wave_class="L4_ENABLER",
+            tracker_note_modified=False,
+            founder_override_token=f"FOUNDER_OVERRIDE:{wave_id}",
+            changed_files=["TASKS.md", "mu/tools/executors/phase_b_executor.py"],
+        ) is False
+
+    def test_commit_packet_truth_refresh_marks_pre_commit_receipt_pending(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        wave_id = "phase-b-pending-receipt-refresh-2026-05-02"
+        packet_path = f"reports/control_plane/{wave_id}.md"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        stale_receipt = ".agent_bus/meta/pre_commit_receipts/receipt_stale.json"
+        stale_note = (
+            f"- Tracker sync note (2026-05-03, {wave_id}): **PIPELINE-RECOVERY - "
+            "commit-ready Phase B handoff.**. Class: L4_ENABLER. target_gate_id: G8. "
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+            "mu/tests/tools/test_phase_b_executor.py`. "
+            f"evidence_delta: (1) Phase B converged on the locked plan at {packet_path}. "
+            "(2) Final pytest gate covered 1 test file(s) from the wave-owned diff. "
+            f"(3) Commit handoff carries explicit receipt authority at {stale_receipt}.. "
+            "progress_proof_before: stale handoff truth. "
+            f"progress_proof_after: Phase B emitted a commit-ready handoff for {wave_id} "
+            "with 12 wave-owned file(s), bridge rounds=2, explicit receipt authority, "
+            "and an L4-compliant tracker note. "
+            f"FOUNDER_OVERRIDE:{wave_id}. primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: {indicator_path}. "
+            f"indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py "
+            f"--wave-id {wave_id} --output {indicator_path}. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        )
+
+        (repo / "TASKS.md").write_text(f"## Ra\n\n{stale_note}\n\n---\n", encoding="utf-8")
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Pending Receipt Refresh\n\n"
+            f"Wave ID: {wave_id}\n"
+            "Wave class: L4_ENABLER\n"
+            "Target gate: G8\n",
+            encoding="utf-8",
+        )
+        staged_paths = [
+            "TASKS.md",
+            "mu/tests/tools/test_codex_autoping_watch.py",
+            "mu/tools/executors/commit_executor.py",
+            "mu/tools/session/codex_autoping_watch.py",
+            packet_path,
+            indicator_path,
+        ]
+        for relpath in staged_paths[1:]:
+            path = repo / relpath
+            if path.exists():
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}\n" if relpath.endswith(".json") else "# staged\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", *staged_paths], cwd=repo, check=True)
+
+        handoff, errors = commit_mod.build_commit_handoff(
+            wave_id=wave_id,
+            task_id="[PIPELINE-RECOVERY]",
+            files_to_stage=["old.py"],
+            commit_message="feat: test\n\nCo-Authored-By: test",
+            fixes_implemented=["test"],
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            caller="phase_b",
+            base_branch="dev",
+            branch_prefix="jabramsja",
+            force_add_files=[],
+            pr_title="feat: test",
+            pr_body="## Summary\ntest",
+            tracker_note_text=stale_note,
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+            evidence_handles={"indicator": indicator_path, "pre_commit_receipt": stale_receipt},
+            pre_commit_receipt_path=stale_receipt,
+            repo_root=repo,
+        )
+        assert errors == []
+
+        refreshed, refreshed_staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+        assert error is None
+        assert set(refreshed_staged) == set(staged_paths)
+        assert set(refreshed["files_to_stage"]) == set(staged_paths)
+        assert "pre_commit_receipt" not in refreshed["evidence_handles"]
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        packet_text = packet_file.read_text(encoding="utf-8")
+        assert stale_receipt not in tasks_text
+        assert stale_receipt not in packet_text
+        assert "pre-commit supervisor package refresh" in tasks_text
+        assert "commit-ready Phase B handoff" not in tasks_text
+        assert "Phase B emitted a commit-ready handoff" not in tasks_text
+        assert "Phase B refreshed the pre-commit supervisor package" in tasks_text
+        assert "Pre-commit supervisor receipt remains pending" in tasks_text
+        assert "package-bound L4 authority pending pre-commit supervisor validation" in tasks_text
+        assert "mu/tests/tools/test_codex_autoping_watch.py" in tasks_text
+        assert "Final pytest gate covered 1 test file(s)" in tasks_text
+        assert "with 6 wave-owned file(s)" in tasks_text
+        assert "- Pre-commit receipt handle:" not in packet_text
+        assert "mu/tools/session/codex_autoping_watch.py" in packet_text
 
     def test_run_phase_b_handoff_bridge_status_total_rounds_matches_current_wave(self, tmp_path):
         repo = tmp_path / "repo"

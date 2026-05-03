@@ -1000,6 +1000,124 @@ class TestReceiptChainEndToEnd:
         assert refreshed_again["tracked_packet"] == packet_path
         assert staged_again == staged
 
+    def test_same_wave_deferred_authorization_refresh_updates_scope_and_acceptance(self):
+        wave_id = "deferred-auth-wave"
+        deferred_path = "reports/deferred/non_blocking/deferred-auth-wave_bridge_nonblockers.md"
+        packet_text = (
+            "# Deferred Auth Wave\n\n"
+            f"Wave ID: {wave_id}\n\n"
+            "## Scope\n\n"
+            "- `mu/tools/executors/commit_executor.py`\n"
+            "\n"
+            "Only files under the explicit paths above may be edited.\n\n"
+            "## Stop Conditions\n\n"
+            "- The required fix resolves to files outside `mu/tools/executors/`, or a canonical `TASKS.md` tracker note for this wave.\n\n"
+            "## Acceptance Criteria\n\n"
+            "- The final touched-file set stays within `mu/tools/executors/`, and the same-wave canonical `TASKS.md` tracker note, or returns for re-authorization.\n"
+        )
+
+        refreshed = commit_mod._refresh_same_wave_deferred_packet_authorization(  # ANTICHEAT_OK: testing bounded packet refresh helper
+            packet_text,
+            wave_id=wave_id,
+            deferred_paths=[deferred_path],
+        )
+        refreshed_again = commit_mod._refresh_same_wave_deferred_packet_authorization(  # ANTICHEAT_OK: testing idempotence
+            refreshed,
+            wave_id=wave_id,
+            deferred_paths=[deferred_path],
+        )
+
+        assert refreshed_again == refreshed
+        assert "## Same-Wave Deferred Non-Blocking Authorization" in refreshed
+        assert f"- `{deferred_path}`" in refreshed
+        assert "Same-wave Phase B/commit generated deferred non-blocking" in refreshed
+        stop_line = next(line for line in refreshed.splitlines() if "required fix resolves" in line)
+        acceptance_line = next(line for line in refreshed.splitlines() if "final touched-file set" in line)
+        assert f"`{deferred_path}`" in stop_line
+        assert f"`{deferred_path}`" in acceptance_line
+
+    def test_commit_packet_truth_refresh_authorizes_staged_same_wave_deferred_packet(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "deferred-auth-wave"
+        packet_path = "reports/control_plane/deferred_auth_wave.md"
+        deferred_path = "reports/deferred/non_blocking/deferred-auth-wave_bridge_nonblockers.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Deferred Auth Wave\n\n"
+            "Wave ID: deferred-auth-wave\n"
+            "Wave class: L4_ENABLER\n"
+            "Target gate: G8\n"
+            "Lane: control-surface\n\n"
+            "## Scope\n\n"
+            "- `mu/tools/executors/commit_executor.py`\n"
+            "\n"
+            "Only files under the explicit paths above may be edited.\n\n"
+            "## Stop Conditions\n\n"
+            "- The required fix resolves to files outside `mu/tools/executors/`, or a canonical `TASKS.md` tracker note for this wave.\n\n"
+            "## Acceptance Criteria\n\n"
+            "- The final touched-file set stays within `mu/tools/executors/`, and the same-wave canonical `TASKS.md` tracker note, or returns for re-authorization.\n",
+            encoding="utf-8",
+        )
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        indicator_file = repo / indicator_path
+        indicator_file.parent.mkdir(parents=True, exist_ok=True)
+        indicator_file.write_text(json.dumps({"wave_id": wave_id}), encoding="utf-8")
+        deferred_file = repo / deferred_path
+        deferred_file.parent.mkdir(parents=True, exist_ok=True)
+        deferred_file.write_text("# Deferred\n", encoding="utf-8")
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "file.py", deferred_path], cwd=repo, check=True)
+        subprocess.run(["git", "add", "-f", "--", indicator_path], cwd=repo, check=True)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path, deferred_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+            deferred_items=[deferred_path],
+        )
+
+        refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+        assert error is None
+        assert deferred_path in staged
+        assert deferred_path in refreshed["files_to_stage"]
+        packet_text = packet_file.read_text(encoding="utf-8")
+        assert "## Same-Wave Deferred Non-Blocking Authorization" in packet_text
+        assert f"- `{deferred_path}`" in packet_text
+        stop_line = next(line for line in packet_text.splitlines() if "required fix resolves" in line)
+        acceptance_line = next(line for line in packet_text.splitlines() if "final touched-file set" in line)
+        assert f"`{deferred_path}`" in stop_line
+        assert f"`{deferred_path}`" in acceptance_line
+
+        start = packet_text.index(commit_mod.DEFERRED_AUTH_REFRESH_START)
+        end = packet_text.index(commit_mod.DEFERRED_AUTH_REFRESH_END) + len(
+            commit_mod.DEFERRED_AUTH_REFRESH_END
+        )
+        packet_file.write_text(
+            packet_text[:start].rstrip() + "\n\n" + packet_text[end:].lstrip(),
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "--", packet_path], cwd=repo, check=True)
+
+        _refreshed_again, _staged_again, error_again = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=refreshed,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+        assert error_again is None
+        assert "## Same-Wave Deferred Non-Blocking Authorization" in packet_file.read_text(encoding="utf-8")
+
     def test_commit_packet_truth_refresh_updates_rebuilt_handoff_file_count(self, tmp_path):
         import subprocess
 

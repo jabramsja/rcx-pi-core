@@ -1,0 +1,24 @@
+{
+  "wave_id": "phase-a-placeholder-refresh-and-busdir-ordering-2026-05-02",
+  "repeat_run_speedup_ratio": 1.030171,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.420166,
+  "repeat_run_raw_seconds": [
+    0.432843,
+    0.420166
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.432843
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.853009
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-03T02:57:19Z",
+  "collector_version": "2.2.0"
+}

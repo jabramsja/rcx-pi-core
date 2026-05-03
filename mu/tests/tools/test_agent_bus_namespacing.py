@@ -398,7 +398,8 @@ def test_dialectic_executor_uses_namespaced_bus_for_routing_bridge_artifacts_and
     assert result["status"] == "narrowed"
     assert result["narrowed_proposal"]["candidate"] == "bounded namespaced result"
     assert bridge_calls
-    assert bridge_calls[0][-2:] == ["--bus-dir", ".agent_bus-test"]
+    bus_idx = bridge_calls[0].index("--bus-dir")
+    assert bridge_calls[0][bus_idx:bus_idx + 3] == ["--bus-dir", ".agent_bus-test", "review"]
     result_path = repo / ".agent_bus-test" / "executors" / "dialectic_result.json"
     assert json.loads(result_path.read_text(encoding="utf-8"))["status"] == "narrowed"
     assert not (repo / ".agent_bus" / "executors" / "dialectic_result.json").exists()

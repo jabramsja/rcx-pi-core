@@ -967,6 +967,7 @@ def run_recoverable_surface_command(
                             emit_output=True,
                             bus_dir=bus_dir,
                             script_repo_root=script_repo_root,
+                            max_bridge_rounds=getattr(args, "max_rounds", None),
                         )
                         if result.get("status") in {"success", "held"}:
                             return 0
@@ -1651,6 +1652,7 @@ def _continue_successful_executor_chain(
     chain_origin: str | None = None,
     bus_dir: str | Path | None = None,
     script_repo_root: Path | None = None,
+    max_bridge_rounds: int | None = None,
 ) -> dict[str, Any]:
     """Continue the A→B→commit chain after a successful executor leg."""
     executor_script_dir = _script_dir_for_repo(script_repo_root)
@@ -1701,6 +1703,8 @@ def _continue_successful_executor_chain(
             str(executor_script_dir / "phase_b_executor.py"),
             "--plan", plan_path,
             "--routing-record", json.dumps(phase_b_routing),
+            "--max-rounds",
+            str(max_bridge_rounds or _configured_bridge_loop_limit(config, "phase_b")),
             "--dispatcher-owned-recovery",
             "--json",
         ]

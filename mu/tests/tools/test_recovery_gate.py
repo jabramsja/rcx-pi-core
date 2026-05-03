@@ -3701,6 +3701,35 @@ class TestHybridScopeAudit:
         assert ok is True
         assert audit["observed_drift"] == []
 
+        pycache = scratch / "__pycache__"
+        pycache.mkdir()
+        (pycache / "artifact.cpython-313.pyc").write_bytes(b"\0\0")
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+                "impl-1234abcd",
+                recovery_prompt_relpath=".scratch/recovery_agent_wave-step-1.txt",
+            ),
+        )
+        assert ok is True
+        assert audit["observed_drift"] == []
+
+        (pycache / "unexpected.txt").write_text("nope\n", encoding="utf-8")
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+                "impl-1234abcd",
+                recovery_prompt_relpath=".scratch/recovery_agent_wave-step-1.txt",
+            ),
+        )
+        assert ok is False
+        assert ".scratch/__pycache__/unexpected.txt" in audit["detail"]
+        (pycache / "unexpected.txt").unlink()
+
         (scratch / "unexpected.txt").write_text("nope\n", encoding="utf-8")
         ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
             tmp_path,
@@ -3713,6 +3742,89 @@ class TestHybridScopeAudit:
         )
         assert ok is False
         assert "unexpected .scratch descendant" in audit["detail"]
+
+    def test_preexisting_scratch_pycache_pyc_stays_out_of_manifest_drift(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        pycache = tmp_path / ".scratch" / "__pycache__"
+        pycache.mkdir(parents=True)
+        pyc = pycache / "artifact.cpython-313.pyc"
+        pyc.write_bytes(b"baseline")
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+        assert ".scratch/__pycache__/artifact.cpython-313.pyc" not in baseline["manifest"]
+
+        pyc.write_bytes(b"mutated")
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+        assert audit["observed_drift"] == []
+        assert ".scratch/__pycache__/artifact.cpython-313.pyc" not in audit["manifest_reasons"]
+
+    def test_scratch_pycache_exemption_rejects_symlinked_cache_dir(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        scratch = tmp_path / ".scratch"
+        scratch.mkdir(exist_ok=True)
+        target = tmp_path / "outside-cache"
+        target.mkdir()
+        try:
+            (scratch / "__pycache__").symlink_to(target, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is False
+        assert ".scratch/__pycache__ must remain a directory" in audit["detail"]
+
+    def test_scratch_pycache_exemption_rejects_symlinked_pyc_file(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+
+        pycache = tmp_path / ".scratch" / "__pycache__"
+        pycache.mkdir(parents=True)
+        target = tmp_path / "outside-cache.pyc"
+        target.write_bytes(b"\0\0")
+        try:
+            (pycache / "artifact.cpython-313.pyc").symlink_to(target)
+        except OSError as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is False
+        assert "hybrid .scratch cache exception must remain a regular file" in audit["detail"]
 
     def test_prior_same_lineage_recovery_prompt_artifacts_are_allowed_but_unrelated_prompt_is_not(self, tmp_path, monkeypatch):
         init_hybrid_delegate_tree(tmp_path)
@@ -7669,6 +7781,76 @@ class TestNeedsPhaseB_Tier3:
         assert recovery["action"] == "retry_phase_b_with_plan"
         assert "--plan reports/control_plane/namespaced.md" in recovery["detail"]
         assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/namespaced.md"
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV] == "wave-plan-required"
+
+    def test_plan_required_fallback_reads_next_candidate_tracked_packet(self, tmp_path, monkeypatch):
+        reports_dir = tmp_path / "reports" / "control_plane"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        (reports_dir / "candidate.md").write_text("Status: LOCKED\n", encoding="utf-8")
+        meta_dir = tmp_path / ".agent_bus" / "meta"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        (meta_dir / "post_merge_routing.json").write_text(
+            json.dumps(
+                {
+                    "decision": "ROUTE_PHASE_B",
+                    "summary": "active routing uses next candidate",
+                    "task_id": "[PIPELINE-RECOVERY]",
+                    "next_candidates": [
+                        {"tracked_packet": "reports/control_plane/candidate.md"}
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.delenv(rg_mod.PHASE_B_RECOVERY_PLAN_ENV, raising=False)
+        result = {
+            "status": "error",
+            "step": "derive_planless_context",
+            "errors": ["tracked packet exists for planless mode. Use --plan"],
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, "wave-plan-required")
+
+        assert recovery["recovered"] is True
+        assert recovery["action"] == "retry_phase_b_with_plan"
+        assert "--plan reports/control_plane/candidate.md" in recovery["detail"]
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/candidate.md"
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV] == "wave-plan-required"
+
+    def test_plan_required_next_candidate_does_not_override_scope_item(self, tmp_path, monkeypatch):
+        reports_dir = tmp_path / "reports" / "control_plane"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        (reports_dir / "scope.md").write_text("Status: LOCKED\n", encoding="utf-8")
+        (reports_dir / "candidate.md").write_text("Status: LOCKED\n", encoding="utf-8")
+        meta_dir = tmp_path / ".agent_bus" / "meta"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        (meta_dir / "post_merge_routing.json").write_text(
+            json.dumps(
+                {
+                    "decision": "ROUTE_PHASE_B",
+                    "summary": "scope item is the explicit routed packet",
+                    "task_id": "[PIPELINE-RECOVERY]",
+                    "scope_items": ["reports/control_plane/scope.md"],
+                    "next_candidates": [
+                        {"tracked_packet": "reports/control_plane/candidate.md"}
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.delenv(rg_mod.PHASE_B_RECOVERY_PLAN_ENV, raising=False)
+        result = {
+            "status": "error",
+            "step": "derive_planless_context",
+            "errors": ["tracked packet exists for planless mode. Use --plan"],
+        }
+
+        recovery = rg_mod.attempt_recovery(tmp_path, result, "wave-plan-required")
+
+        assert recovery["recovered"] is True
+        assert recovery["action"] == "retry_phase_b_with_plan"
+        assert "--plan reports/control_plane/scope.md" in recovery["detail"]
+        assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_ENV] == "reports/control_plane/scope.md"
         assert os.environ[rg_mod.PHASE_B_RECOVERY_PLAN_WAVE_ENV] == "wave-plan-required"
 
 
