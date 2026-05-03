@@ -8,7 +8,7 @@ Phase-A-Lock: LOCKED
 Execution Class: control-surface L4_ENABLER docs cleanup
 FOUNDER_OVERRIDE:deferred-report-truth-active-closeout-2026-05-03
 Authorization: standing pipeline-bug-fix authorization for control-surface L4_ENABLER automation, mechanically bound to Wave ID `deferred-report-truth-active-closeout-2026-05-03`.
-Purpose: Create and execute a narrow docs/control-surface closeout wave. Grounding evidence from the post-merge supervisor says PR #853 merged `deferred-report-truth-cleanup-2026-05-02`, while `TASKS.md` still marks `[DEFERRED-REPORT-TRUTH-CLEANUP]` ACTIVE in NOW. The wave updates `TASKS.md` and the minimum report/control-plane truth needed to mark that wave closed or historical. It does not modify runtime, projection, substrate, scheduler, seed, parity, or VM semantic files.
+Purpose: Create and execute a narrow docs/control-surface closeout wave. Grounding evidence from the post-merge supervisor said PR #853 merged `deferred-report-truth-cleanup-2026-05-02` while the tracker still carried stale NOW state; current `TASKS.md:258-268` now marks `[DEFERRED-REPORT-TRUTH-CLEANUP]` CLEARED and historical with the retained active follow-up packet. The wave updated `TASKS.md` and the minimum report/control-plane truth needed to mark that wave closed or historical. It does not modify runtime, projection, substrate, scheduler, seed, parity, or VM semantic files.
 
 ## Scope
 
@@ -65,8 +65,8 @@ Files and directories in scope for the execution wave:
 
 ## Grounding / Authorization
 
-- `TASKS.md:257-265` marks `[DEFERRED-REPORT-TRUTH-CLEANUP]` ACTIVE, founder-directed, and authorizes an audit/reconcile pass across `reports/deferred/blocking/`, `reports/deferred/non_blocking/`, `reports/control_plane/`, and `reports/l4_wave_indicators/`.
-- `TASKS.md:264` cites tracked packet `reports/control_plane/deferred_report_truth_cleanup_2026-05-02.md`.
+- `TASKS.md:258-268` now marks `[DEFERRED-REPORT-TRUTH-CLEANUP]` CLEARED and historical, cites PR #853 as merged on 2026-05-02, and retains `reports/deferred/non_blocking/deferred-report-truth-cleanup-2026-05-02_bridge_nonblockers.md` as the active follow-up.
+- `TASKS.md:265` cites historical packet `reports/control_plane/deferred_report_truth_cleanup_2026-05-02.md`.
 - Governing Phase A packet for this rewrite and same-wave automation: `reports/control_plane/deferred-report-truth-active-closeout-2026-05-03_2026-05-03.md`.
 - Same-wave override: `FOUNDER_OVERRIDE:deferred-report-truth-active-closeout-2026-05-03`.
 - Authorization: standing pipeline-bug-fix authorization for control-surface L4_ENABLER automation, bound to Wave ID `deferred-report-truth-active-closeout-2026-05-03`.
