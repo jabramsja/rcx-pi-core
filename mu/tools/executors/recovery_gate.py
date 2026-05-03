@@ -3967,6 +3967,8 @@ def _collect_hybrid_manifest(
     manifest: dict[str, dict[str, Any]] = {}
     inventory = _collect_hybrid_inventory(repo_root)
     for rel_path, meta in inventory.items():
+        if _is_ignored_hybrid_scratch_cache_path(rel_path):
+            continue
         if _is_allowed_hybrid_exception_path(
             rel_path,
             exception_paths=exception_paths,
@@ -4023,6 +4025,37 @@ def _validate_hybrid_scratch_state(
     return True, ""
 
 
+def _is_ignored_hybrid_scratch_cache_path(rel_path: str) -> bool:
+    if rel_path == ".scratch/__pycache__":
+        return True
+    prefix = ".scratch/__pycache__/"
+    if not rel_path.startswith(prefix):
+        return False
+    cache_name = rel_path[len(prefix):]
+    if not cache_name or "/" in cache_name:
+        return False
+    return re.fullmatch(r"[^/]+\.cpython-\d+(?:\.opt-\d+)?\.pyc", cache_name) is not None
+
+
+def _validate_ignored_hybrid_scratch_cache_path(
+    repo_root: Path,
+    rel_path: str,
+) -> tuple[bool, str]:
+    path = repo_root / rel_path
+    snapshot = _absolute_path_snapshot(path)
+    expected_realpath = str(path.resolve(strict=False))
+    if not snapshot["exists"]:
+        return True, ""
+    if rel_path == ".scratch/__pycache__":
+        if snapshot["type"] != "directory":
+            return False, ".scratch/__pycache__ must remain a directory at repo root"
+    elif snapshot["type"] != "file":
+        return False, f"hybrid .scratch cache exception must remain a regular file: {rel_path}"
+    if snapshot["realpath"] != expected_realpath:
+        return False, f"hybrid .scratch cache exception escaped its stable realpath: {rel_path}"
+    return True, ""
+
+
 def _ensure_hybrid_scratch_inventory_allowed(
     repo_root: Path,
     inventory: dict[str, dict[str, Any]],
@@ -4031,6 +4064,11 @@ def _ensure_hybrid_scratch_inventory_allowed(
 ) -> tuple[bool, str]:
     for rel_path in sorted(inventory):
         if not rel_path.startswith(".scratch/"):
+            continue
+        if _is_ignored_hybrid_scratch_cache_path(rel_path):
+            ok, detail = _validate_ignored_hybrid_scratch_cache_path(repo_root, rel_path)
+            if not ok:
+                return False, detail
             continue
         if not _is_allowed_hybrid_exception_path(
             rel_path,
@@ -4047,6 +4085,7 @@ def _ensure_hybrid_scratch_inventory_allowed(
     extra_paths = sorted(
         path for path in inventory
         if path.startswith(".scratch/")
+        and not _is_ignored_hybrid_scratch_cache_path(path)
         and not _is_allowed_hybrid_exception_path(
             path,
             exception_paths=exception_paths,
@@ -4123,6 +4162,8 @@ def _diff_hybrid_manifest(
 ) -> dict[str, str]:
     reasons: dict[str, str] = {}
     for rel_path, before in baseline.items():
+        if _is_ignored_hybrid_scratch_cache_path(rel_path):
+            continue
         after = current.get(rel_path, {"exists": False, "type": "missing", "realpath": before["realpath"], "readlink": None, "fingerprint": None})
         for field in ("exists", "type", "realpath", "readlink", "fingerprint"):
             if before.get(field) != after.get(field):
@@ -4139,6 +4180,8 @@ def _diff_hybrid_inventory(
 ) -> dict[str, str]:
     reasons: dict[str, str] = {}
     for rel_path in sorted(set(baseline) | set(current)):
+        if _is_ignored_hybrid_scratch_cache_path(rel_path):
+            continue
         before = baseline.get(rel_path)
         after = current.get(rel_path)
         # Same-lineage recovery prompt siblings are tolerated only when they
@@ -6940,6 +6983,14 @@ def _routing_plan_path(record: dict[str, Any]) -> str:
             text = str(item or "").strip()
             if text.endswith(".md"):
                 return text
+    next_candidates = record.get("next_candidates")
+    if isinstance(next_candidates, list):
+        for candidate in next_candidates:
+            if not isinstance(candidate, dict):
+                continue
+            tracked_packet = str(candidate.get("tracked_packet") or "").strip()
+            if tracked_packet:
+                return tracked_packet
     return ""
 
 

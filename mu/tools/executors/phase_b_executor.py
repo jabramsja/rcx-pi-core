@@ -1826,6 +1826,17 @@ def _extract_founder_override(plan_content: str) -> str:
     return ""
 
 
+def _extract_founder_override_from_tracker_note(tracker_note_text: str) -> str:
+    """Return a prefixed founder override token from rendered tracker text."""
+    if not tracker_note_text:
+        return ""
+    match = re.search(r"FOUNDER_OVERRIDE:\s*(\S+)", tracker_note_text)
+    if not match:
+        return ""
+    bare_token = match.group(1).strip().rstrip("`.,;")
+    return f"FOUNDER_OVERRIDE:{bare_token}" if bare_token else ""
+
+
 _CONTROL_SURFACE_TOKEN_RE = re.compile(
     r"(?i)(?<![A-Za-z0-9_-])control-surface(?![A-Za-z0-9_-])"
 )
@@ -3247,6 +3258,7 @@ def _build_phase_b_tracker_note(
     founder_override: str = "",
     unblocks_wave_id: str = "",
     unblocks_runtime_blocker: str = "",
+    pre_supervisor: bool = False,
 ) -> str:
     """Render an L4-compliant tracker note for a Phase B commit handoff."""
     display_task = (task_id or "").strip() or wave_id
@@ -3258,35 +3270,67 @@ def _build_phase_b_tracker_note(
     indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
     if test_files:
         evidence_command = "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short " + " ".join(test_files)
-        evidence_delta = (
-            f"(1) Phase B converged on the locked plan at {plan_path}. "
-            f"(2) Final pytest gate covered {len(test_files)} test file(s) from the wave-owned diff. "
-            f"(3) Commit handoff carries explicit receipt authority at {receipt_path}."
-        )
+        if pre_supervisor:
+            evidence_delta = (
+                f"(1) Phase B converged on the locked plan at {plan_path}. "
+                f"(2) Final pytest gate covered {len(test_files)} test file(s) from the wave-owned diff. "
+                f"(3) Pre-commit supervisor package is staged at {receipt_path}; "
+                "commit handoff receipt remains pending the supervisor decision."
+            )
+        else:
+            evidence_delta = (
+                f"(1) Phase B converged on the locked plan at {plan_path}. "
+                f"(2) Final pytest gate covered {len(test_files)} test file(s) from the wave-owned diff. "
+                f"(3) Commit handoff carries explicit receipt authority at {receipt_path}."
+            )
     else:
         evidence_command = (
             f"python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} "
             f"--output {indicator_path}"
         )
-        evidence_delta = (
-            f"(1) Phase B converged on the locked plan at {plan_path}. "
-            f"(2) Commit handoff carries {len(changed_files)} wave-owned file(s) with explicit receipt "
-            f"authority at {receipt_path}. "
-            "(3) No test files were present in the wave-owned diff, so indicator collection is the "
-            "mechanical evidence surface."
-        )
+        if pre_supervisor:
+            evidence_delta = (
+                f"(1) Phase B converged on the locked plan at {plan_path}. "
+                f"(2) Pre-commit supervisor package is staged at {receipt_path} with "
+                f"{len(changed_files)} wave-owned file(s). "
+                "(3) No test files were present in the wave-owned diff, so indicator collection is the "
+                "mechanical evidence surface."
+            )
+        else:
+            evidence_delta = (
+                f"(1) Phase B converged on the locked plan at {plan_path}. "
+                f"(2) Commit handoff carries {len(changed_files)} wave-owned file(s) with explicit receipt "
+                f"authority at {receipt_path}. "
+                "(3) No test files were present in the wave-owned diff, so indicator collection is the "
+                "mechanical evidence surface."
+            )
 
-    progress_before = (
-        "Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, "
-        "so downstream governance could not bind the wave cleanly to its indicator artifact."
-    )
-    progress_after = (
-        f"Phase B emitted a commit-ready handoff for {wave_id} with {len(changed_files)} wave-owned "
-        f"file(s), bridge rounds={bridge_rounds}"
-    )
-    if reentry:
-        progress_after += ", reentry=true"
-    progress_after += ", explicit receipt authority, and an L4-compliant tracker note."
+    if pre_supervisor:
+        progress_before = (
+            "Phase B could reach pre-commit supervisor review before TASKS.md contained a "
+            "canonical tracker note for the wave, so Gate 2 and Gate 8 could not bind "
+            "the package to trusted L4 authority."
+        )
+        progress_after = (
+            f"Phase B staged a canonical tracker note for {wave_id} before pre-commit "
+            f"supervisor validation with {len(changed_files)} wave-owned file(s), "
+            f"bridge rounds={bridge_rounds}"
+        )
+        if reentry:
+            progress_after += ", reentry=true"
+        progress_after += ", and package-bound L4 authority."
+    else:
+        progress_before = (
+            "Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, "
+            "so downstream governance could not bind the wave cleanly to its indicator artifact."
+        )
+        progress_after = (
+            f"Phase B emitted a commit-ready handoff for {wave_id} with {len(changed_files)} wave-owned "
+            f"file(s), bridge rounds={bridge_rounds}"
+        )
+        if reentry:
+            progress_after += ", reentry=true"
+        progress_after += ", explicit receipt authority, and an L4-compliant tracker note."
     founder_override = (
         founder_override
         or _extract_founder_override(plan_content)
@@ -3354,7 +3398,11 @@ def _build_phase_b_tracker_note(
 
     fields = TrackerSyncNoteFields(
         wave_id=wave_id,
-        title=f"{display_task} — commit-ready Phase B handoff",
+        title=(
+            f"{display_task} — Phase B pre-commit supervisor package"
+            if pre_supervisor
+            else f"{display_task} — commit-ready Phase B handoff"
+        ),
         wave_class=wave_class,
         target_gate_id=target_gate_id,
         primary_blocker_class="INTEGRATION",
@@ -3368,6 +3416,179 @@ def _build_phase_b_tracker_note(
         **tracker_kwargs,
     )
     return render_tracker_sync_note(fields)
+
+
+def _load_commit_executor_for_tracker_sync() -> Any:
+    try:
+        import commit_executor
+        return commit_executor
+    except ImportError:
+        import importlib.util as _ilu
+
+        _commit_path = SCRIPT_DIR / "commit_executor.py"
+        _commit_spec = _ilu.spec_from_file_location("commit_executor", str(_commit_path))
+        _commit_mod = _ilu.module_from_spec(_commit_spec)
+        assert _commit_spec.loader is not None
+        _commit_spec.loader.exec_module(_commit_mod)
+        return _commit_mod
+
+
+def _sync_phase_b_tasks_tracker_note(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    tracker_note_text: str,
+) -> tuple[str | None, bool]:
+    """Insert or refresh the canonical Phase B tracker note before supervisor review."""
+    tasks_path = repo_root / "TASKS.md"
+    if not tasks_path.exists():
+        return None, False
+
+    commit_mod = _load_commit_executor_for_tracker_sync()
+    lines = tasks_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    ra_idx, ra_end_idx = commit_mod._find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        return None, False
+
+    matching_tracker_indices = commit_mod._matching_tracker_note_indices_in_range(
+        lines,
+        wave_id,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+    canonical_tracker_indices = [
+        idx
+        for idx in matching_tracker_indices
+        if commit_mod._is_canonical_tracker_note_line(lines[idx].rstrip("\n"), wave_id)
+    ]
+    if len(canonical_tracker_indices) > 1:
+        return (
+            f"wave_id '{wave_id}' has {len(canonical_tracker_indices)} canonical "
+            "tracker notes in TASKS.md before Phase B supervisor review"
+        ), False
+    if len(matching_tracker_indices) > 1 and not canonical_tracker_indices:
+        return (
+            f"wave_id '{wave_id}' has {len(matching_tracker_indices)} malformed "
+            "tracker notes in TASKS.md before Phase B supervisor review"
+        ), False
+
+    note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
+    if canonical_tracker_indices:
+        canonical_idx = canonical_tracker_indices[0]
+        if lines[canonical_idx] == note_line:
+            return None, False
+        lines[canonical_idx] = note_line
+    elif matching_tracker_indices:
+        lines[matching_tracker_indices[0]] = note_line
+    else:
+        last_tracker_idx = None
+        for idx in range(ra_idx + 1, ra_end_idx):
+            if lines[idx].strip().startswith("- Tracker sync note"):
+                last_tracker_idx = idx
+        insert_idx = last_tracker_idx + 1 if last_tracker_idx is not None else ra_idx + 1
+        lines.insert(insert_idx, note_line)
+
+    tasks_path.write_text("".join(lines), encoding="utf-8")
+    return None, True
+
+
+def _collect_and_stage_l4_indicator_artifact(
+    repo_root: Path,
+    *,
+    wave_id: str,
+) -> tuple[str | None, str | None]:
+    """Collect and stage the L4 indicator artifact required by tracker notes."""
+    if not normalize_wave_id(wave_id):
+        return None, "cannot collect L4 indicator artifact without a canonical wave_id"
+    indicator_script = repo_root / "mu" / "tools" / "metrics" / "collect_l4_wave_indicators.py"
+    indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+    if not indicator_script.exists():
+        return None, f"Indicator collector script not found: {indicator_script}"
+    try:
+        collect_result = subprocess.run(
+            [
+                sys.executable,
+                str(indicator_script),
+                "--wave-id",
+                wave_id,
+                "--output",
+                indicator_path,
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        return None, "Indicator collection timed out after 120s"
+    if collect_result.returncode != 0:
+        detail = (collect_result.stderr or collect_result.stdout or "").strip()
+        if len(detail) > 500:
+            detail = detail[:500] + "..."
+        return None, (
+            f"Indicator collection failed with exit={collect_result.returncode}: "
+            f"{detail or '(no output)'}"
+        )
+    if not (repo_root / indicator_path).exists():
+        return None, f"Indicator artifact not created: {indicator_path}"
+    try:
+        subprocess.run(
+            ["git", "add", "-f", "--", indicator_path],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        return None, f"git add -f failed for {indicator_path}: {detail or '(no output)'}"
+    return indicator_path, None
+
+
+def _tasks_has_canonical_wave_tracker_note(repo_root: Path, *, wave_id: str) -> bool:
+    """Return True when TASKS.md carries trusted same-wave tracker authority."""
+    tasks_path = repo_root / "TASKS.md"
+    if not tasks_path.exists():
+        return False
+
+    commit_mod = _load_commit_executor_for_tracker_sync()
+    lines = tasks_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    ra_idx, ra_end_idx = commit_mod._find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        return False
+
+    matching_tracker_indices = commit_mod._matching_tracker_note_indices_in_range(
+        lines,
+        wave_id,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+    return any(
+        commit_mod._is_canonical_tracker_note_line(lines[idx].rstrip("\n"), wave_id)
+        for idx in matching_tracker_indices
+    )
+
+
+def _should_collect_l4_indicator_artifact(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    wave_class: str,
+    tracker_note_modified: bool,
+    founder_override_token: str,
+    changed_files: list[str],
+) -> bool:
+    if wave_class != "L4_ENABLER" or not wave_id:
+        return False
+    if not _tasks_has_canonical_wave_tracker_note(repo_root, wave_id=wave_id):
+        return False
+    indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+    return (
+        tracker_note_modified
+        or bool(founder_override_token)
+        or indicator_path not in changed_files
+        or not (repo_root / indicator_path).exists()
+    )
 
 
 def _derive_planless_context(
@@ -5385,6 +5606,11 @@ def run_phase_b(
                 _clear_state(repo_root)
                 return result
 
+        scratch_dir = repo_root / ".scratch"
+        scratch_dir.mkdir(exist_ok=True)
+        package_path = scratch_dir / "phase_b_supervisor_package.json"
+        package_relpath = str(package_path.relative_to(repo_root))
+
         # Step 5b: Update tracked packet status before staging.
         # Advances from "Phase A" to "Phase B (bridge-converged)" so the
         # supervisor sees consistent state (Bug 1 fix, 2026-04-06).
@@ -5400,6 +5626,41 @@ def run_phase_b(
             )
             if plan_path not in changed_files:
                 changed_files.append(plan_path)
+
+        pre_supervisor_tracker_note = _build_phase_b_tracker_note(
+            wave_id=wave_id,
+            task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
+            wave_class=wave_class,
+            target_gate_id=target_gate_id,
+            plan_path=plan_path,
+            plan_content=plan.get("content", ""),
+            changed_files=changed_files,
+            test_files=final_test_files,
+            receipt_path=package_relpath,
+            bridge_rounds=result.get("bridge_rounds", 0),
+            reentry=False,
+            founder_override=plan.get("founder_override", ""),
+            unblocks_wave_id=plan.get("unblocks_wave_id", ""),
+            unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
+            pre_supervisor=True,
+        )
+        pre_supervisor_founder_override_token = _extract_founder_override_from_tracker_note(
+            pre_supervisor_tracker_note,
+        )
+        tracker_sync_error, tracker_note_modified = _sync_phase_b_tasks_tracker_note(
+            repo_root,
+            wave_id=wave_id,
+            tracker_note_text=pre_supervisor_tracker_note,
+        )
+        if tracker_sync_error is not None:
+            _clear_state(repo_root)
+            return {
+                "status": "error",
+                "step": "pre_supervisor_tracker_note",
+                "errors": [tracker_sync_error],
+            }
+        if tracker_note_modified and "TASKS.md" not in changed_files:
+            changed_files.append("TASKS.md")
 
         # Step 6: Stage files BEFORE running supervisor
         # This ensures the receipt staged_sha matches what commit_executor will use.
@@ -5425,12 +5686,37 @@ def run_phase_b(
                 executor_created or None,
                 baseline_wave_files or None,
             )
+            if tracker_note_modified and "TASKS.md" not in refreshed_changed_files:
+                refreshed_changed_files.append("TASKS.md")
             if refreshed_changed_files != changed_files:
                 log(
                     "Post-stage package scope refreshed from "
                     f"{len(changed_files)} to {len(refreshed_changed_files)} file(s)"
                 )
                 changed_files = refreshed_changed_files
+        should_collect_l4_indicator = _should_collect_l4_indicator_artifact(
+            repo_root,
+            wave_id=wave_id,
+            wave_class=wave_class,
+            tracker_note_modified=tracker_note_modified,
+            founder_override_token=pre_supervisor_founder_override_token,
+            changed_files=changed_files,
+        )
+        if should_collect_l4_indicator:
+            indicator_path, indicator_error = _collect_and_stage_l4_indicator_artifact(
+                repo_root,
+                wave_id=wave_id,
+            )
+            if indicator_error is not None:
+                _clear_state(repo_root)
+                return {
+                    "status": "error",
+                    "step": "pre_supervisor_l4_indicator",
+                    "errors": [indicator_error],
+                }
+            if indicator_path and indicator_path not in changed_files:
+                changed_files.append(indicator_path)
+                changed_files = sorted(set(changed_files))
         package_changed_files = _collect_commit_bound_files(repo_root, changed_files)
         if package_changed_files != changed_files:
             log(
@@ -5441,9 +5727,6 @@ def run_phase_b(
 
         # Step 7: Build and run pre-commit supervisor via structured client
         log("Building supervisor package...")
-        scratch_dir = repo_root / ".scratch"
-        scratch_dir.mkdir(exist_ok=True)
-        package_path = scratch_dir / "phase_b_supervisor_package.json"
 
         # Discover active blocking packets for honest acknowledgment
         blocker_paths: list[str] = []
@@ -5481,6 +5764,8 @@ def run_phase_b(
             "blocker_report_paths": blocker_paths,
             "current_judgment": "COMMIT_GO",
         }
+        if pre_supervisor_founder_override_token:
+            supervisor_package["founder_override_token"] = pre_supervisor_founder_override_token
         package_path.write_text(json.dumps(supervisor_package, indent=2) + "\n", encoding="utf-8")
 
         log("Running pre-commit supervisor...")
@@ -6111,6 +6396,41 @@ def run_phase_b(
                 }
             log("Re-entry pytest gate: PASSED")
 
+        reentry_pre_supervisor_tracker_note = _build_phase_b_tracker_note(
+            wave_id=wave_id,
+            task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
+            wave_class=wave_class,
+            target_gate_id=target_gate_id,
+            plan_path=plan_path,
+            plan_content=plan.get("content", ""),
+            changed_files=changed_files,
+            test_files=reentry_test_files,
+            receipt_path=str(package_path.relative_to(repo_root)),
+            bridge_rounds=result.get("bridge_rounds", 0),
+            reentry=True,
+            founder_override=plan.get("founder_override", ""),
+            unblocks_wave_id=plan.get("unblocks_wave_id", ""),
+            unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
+            pre_supervisor=True,
+        )
+        reentry_pre_supervisor_founder_override_token = _extract_founder_override_from_tracker_note(
+            reentry_pre_supervisor_tracker_note,
+        )
+        reentry_tracker_sync_error, reentry_tracker_note_modified = _sync_phase_b_tasks_tracker_note(
+            repo_root,
+            wave_id=wave_id,
+            tracker_note_text=reentry_pre_supervisor_tracker_note,
+        )
+        if reentry_tracker_sync_error is not None:
+            _clear_state(repo_root)
+            return {
+                "status": "error",
+                "step": "reentry_pre_supervisor_tracker_note",
+                "errors": [reentry_tracker_sync_error],
+            }
+        if reentry_tracker_note_modified and "TASKS.md" not in changed_files:
+            changed_files.append("TASKS.md")
+
         # Re-stage and re-run supervisor after re-entry convergence
         # FAIL CLOSED if restaging fails — do not run supervisor on stale state
         # Scope to wave-owned files only — do not sweep unrelated dirty worktree files.
@@ -6135,12 +6455,37 @@ def run_phase_b(
                 executor_created or None,
                 baseline_wave_files or None,
             )
+            if reentry_tracker_note_modified and "TASKS.md" not in refreshed_changed_files:
+                refreshed_changed_files.append("TASKS.md")
             if refreshed_changed_files != changed_files:
                 log(
                     "Re-entry: post-stage package scope refreshed from "
                     f"{len(changed_files)} to {len(refreshed_changed_files)} file(s)"
                 )
                 changed_files = refreshed_changed_files
+        reentry_should_collect_l4_indicator = _should_collect_l4_indicator_artifact(
+            repo_root,
+            wave_id=wave_id,
+            wave_class=wave_class,
+            tracker_note_modified=reentry_tracker_note_modified,
+            founder_override_token=reentry_pre_supervisor_founder_override_token,
+            changed_files=changed_files,
+        )
+        if reentry_should_collect_l4_indicator:
+            indicator_path, indicator_error = _collect_and_stage_l4_indicator_artifact(
+                repo_root,
+                wave_id=wave_id,
+            )
+            if indicator_error is not None:
+                _clear_state(repo_root)
+                return {
+                    "status": "error",
+                    "step": "reentry_pre_supervisor_l4_indicator",
+                    "errors": [indicator_error],
+                }
+            if indicator_path and indicator_path not in changed_files:
+                changed_files.append(indicator_path)
+                changed_files = sorted(set(changed_files))
         reentry_package_changed_files = _collect_commit_bound_files(repo_root, changed_files)
         if reentry_package_changed_files != changed_files:
             log(
@@ -6171,6 +6516,10 @@ def run_phase_b(
                 for p in blocking_dir.iterdir()
                 if p.is_file() and p.suffix == ".md" and p.name != "README.md"
             )
+        if reentry_pre_supervisor_founder_override_token:
+            supervisor_package["founder_override_token"] = reentry_pre_supervisor_founder_override_token
+        else:
+            supervisor_package.pop("founder_override_token", None)
         package_path.write_text(json.dumps(supervisor_package, indent=2) + "\n", encoding="utf-8")
 
         log("Re-running supervisor after bridge re-entry...")

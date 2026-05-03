@@ -261,15 +261,17 @@ def run_dialectic(
 
         cmd = [
             sys.executable, str(bridge_script),
+        ]
+        if bus_dir is not None:
+            cmd.extend(["--bus-dir", str(bus_dir)])
+        cmd.extend([
             "review",
             "--task-file", str(task_path),
             "--summary", f"Dialectic narrowing round {round_number}/{max_rounds}",
             "--reviewer", "codex",
             "-v", "--no-diff",
             "--job-id", dialectic_job_id,
-        ]
-        if bus_dir is not None:
-            cmd.extend(["--bus-dir", str(bus_dir)])
+        ])
 
         log(f"Sending to Codex for dialectic narrowing round {round_number}/{max_rounds}...")
         try:

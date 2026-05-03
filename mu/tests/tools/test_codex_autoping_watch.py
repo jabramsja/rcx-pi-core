@@ -316,6 +316,30 @@ def test_attention_required_summary_flags_failed_reviewer_turn():
     assert "FAILED" in summary
 
 
+def test_attention_required_summary_flags_hard_fail_pager_tail_even_after_go():
+    summary = watch_mod._attention_required_summary(  # ANTICHEAT_OK: tool unit test
+        {
+            "job": {"job_id": "phase-b-r3", "status": "DONE", "decision": "GO"},
+            "turn": {
+                "turn_id": "phase-b-r3--reviewer",
+                "agent_role": "reviewer",
+                "status": "completed",
+                "decision": "GO",
+            },
+        },
+        [
+            "Last pager wake: 20:04:15 | executor_hard_fail | "
+            "executor_dispatch/failed | codex | ack yes",
+            "Last pager event: commit_executor failed after dispatcher recovery handling",
+        ],
+    )
+
+    assert summary is not None
+    assert "attention required" in summary
+    assert "executor_hard_fail" in summary
+    assert "phase-b-r3" in summary
+
+
 def test_attention_required_summary_ignores_running_turn():
     summary = watch_mod._attention_required_summary(  # ANTICHEAT_OK: tool unit test
         {

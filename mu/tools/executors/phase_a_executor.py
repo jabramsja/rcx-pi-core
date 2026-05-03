@@ -101,6 +101,13 @@ BRIDGE_DECISION_RE = re.compile(
     r"(?m)^\s*(?:-\s*)?Decision:\s*"
     r"(GO|REQUEST_CHANGES|NO_GO|QUESTION|STALE|ERROR|SYNTHETIC)\b"
 )
+BRIDGE_TURN_HEADING_RE = re.compile(r"^###\s+(?P<turn_id>\S+)\s+—\s+(?P<role>\S+)\s*$")
+BRIDGE_TURN_RAW_OUTPUT_RE = re.compile(r"^-\s*Raw output:\s*(?P<path>.+?)\s*$")
+BRIDGE_TURN_JOB_PREFIX_RE = re.compile(r"^(?P<job_id>.+)--r\d+-")
+AGENT_ENVELOPE_RE = re.compile(
+    r"BEGIN_AGENT_ENVELOPE\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?END_AGENT_ENVELOPE",
+    re.DOTALL,
+)
 PHASE_A_ALLOWED_REVIEW_EXIT_CODES = {0, 1, 2}
 PHASE_A_BRIDGE_POLL_SLEEP = 2.0
 PHASE_A_BRIDGE_STALE_TIMEOUT = 120.0
@@ -217,7 +224,7 @@ def _find_tracked_packet(plan_dir: Path, plan_name: str) -> Path | None:
     # Prefer locked packets over unlocked ones
     for c in reversed(candidates):
         content = c.read_text(encoding="utf-8")
-        if "Phase-A-Lock: LOCKED" in content:
+        if _phase_a_header_lock_value(content) == "LOCKED":
             return c
 
     # Fall back to the most recent (by filename date) existing packet
@@ -233,35 +240,18 @@ def _find_tracked_packet(plan_dir: Path, plan_name: str) -> Path | None:
     return candidates[-1]
 
 
-def create_plan_draft(
-    repo_root: Path,
+def _render_plan_draft_content(
     plan_name: str,
     scope: dict[str, str],
-) -> Path:
-    """Create an initial plan packet draft, or reuse an existing tracked packet.
-
-    If a tracked/canonical packet already exists for this plan_name, reuse it
-    instead of creating a new dated placeholder. New dated drafts are only
-    created when no matching tracked packet exists.
-    """
-    if not isinstance(plan_name, str) or not PLAN_NAME_RE.fullmatch(plan_name):
-        raise PhaseAExecutorError(f"Unsafe plan_name: {plan_name!r}")
-    if Path(plan_name).name != plan_name or "/" in plan_name or "\\" in plan_name:
-        raise PhaseAExecutorError(f"Path traversal in plan_name: {plan_name!r}")
-
-    plan_dir = repo_root / "reports" / "control_plane"
-    plan_dir.mkdir(parents=True, exist_ok=True)
-
-    # Check for existing tracked packet first
-    existing = _find_tracked_packet(plan_dir, plan_name)
-    if existing is not None:
-        return existing
-
-    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    plan_path = plan_dir / f"{plan_name}_{date_str}.md"
-
-    if plan_path.exists():
-        return plan_path  # Don't overwrite existing draft
+    *,
+    date_str: str,
+) -> str:
+    """Render the initial Phase A packet draft for a new or stale stub packet."""
+    request = str(scope.get("request", "") or "")
+    purpose = next((line.strip() for line in request.splitlines() if line.strip()), "")
+    if not purpose:
+        purpose = "planning required"
+    purpose = re.sub(r"\s+", " ", purpose)
 
     task_id = str(scope.get("task_id", "") or "").strip()
     wave_id = str(scope.get("wave_name", "") or scope.get("wave_id", "") or "").strip()
@@ -274,13 +264,13 @@ def create_plan_draft(
     if identity_block:
         identity_block += "\n"
 
-    content = f"""# {plan_name.replace('_', ' ').title()}
+    return f"""# {plan_name.replace('_', ' ').title()}
 
 Date: {date_str}
 Status: Phase A (design -- not yet agent-reviewed or bridge-converged)
 {identity_block}\
 Phase-A-Lock: UNLOCKED
-Purpose: {scope.get('request', 'planning required')}
+Purpose: {purpose}
 
 ## Scope
 
@@ -290,6 +280,54 @@ Purpose: {scope.get('request', 'planning required')}
 
 {scope.get('request', '(none)')}
 """
+
+
+def create_plan_draft(
+    repo_root: Path,
+    plan_name: str,
+    scope: dict[str, str],
+) -> Path:
+    """Create an initial plan packet draft, or reuse an existing tracked packet.
+
+    If a tracked/canonical packet already exists for this plan_name, reuse it
+    instead of creating a new dated placeholder. New dated drafts are only
+    created when no matching tracked packet exists. Unlocked placeholder stubs
+    are refreshed with the current request so failed Phase A bootstrap can
+    resume mechanically without preserving stale request text.
+    """
+    if not isinstance(plan_name, str) or not PLAN_NAME_RE.fullmatch(plan_name):
+        raise PhaseAExecutorError(f"Unsafe plan_name: {plan_name!r}")
+    if Path(plan_name).name != plan_name or "/" in plan_name or "\\" in plan_name:
+        raise PhaseAExecutorError(f"Path traversal in plan_name: {plan_name!r}")
+
+    plan_dir = repo_root / "reports" / "control_plane"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    content = _render_plan_draft_content(plan_name, scope, date_str=date_str)
+
+    # Check for existing tracked packet first.
+    existing = _find_tracked_packet(plan_dir, plan_name)
+    if existing is not None:
+        existing_content = existing.read_text(encoding="utf-8")
+        if (
+            _phase_a_header_allows_placeholder_refresh(existing_content)
+            and _plan_is_placeholder_stub(existing_content)
+        ):
+            existing.write_text(content, encoding="utf-8")
+        return existing
+
+    plan_path = plan_dir / f"{plan_name}_{date_str}.md"
+
+    if plan_path.exists():
+        plan_content = plan_path.read_text(encoding="utf-8")
+        if (
+            _phase_a_header_allows_placeholder_refresh(plan_content)
+            and _plan_is_placeholder_stub(plan_content)
+        ):
+            plan_path.write_text(content, encoding="utf-8")
+        return plan_path
+
     plan_path.write_text(content, encoding="utf-8")
     return plan_path
 
@@ -307,48 +345,150 @@ _PHASE_A_SECTION_TITLE_ALIASES = {
     "authorization": "grounding",
 }
 
+_PHASE_A_PLACEHOLDER_SECTION_TITLES = frozenset({
+    "scope",
+    "request from post-merge supervisor",
+})
+
+_PHASE_A_LOCK_CANONICAL_RE = re.compile(r"^Phase-A-Lock:\s*(UNLOCKED|LOCKED)[ \t]*$")
+_PHASE_A_LOCK_DECORATED_RE = re.compile(
+    r"^Phase-A-Lock:\s*(UNLOCKED|LOCKED)[ \t]+\([^()\n]+\)[ \t]*$"
+)
+_PHASE_A_H2_RE = re.compile(r"^##(?!#)(?:[ \t]+|$)")
+_BRIDGE_RENDERED_SECTION_RE = re.compile(r"^##(?!#)[ \t]+(.+?)[ \t]*$")
+
+
+def _canonical_phase_a_section_title(stripped_line: str) -> str:
+    title = stripped_line.lstrip("#").strip().lower()
+    title = re.sub(r"^[0-9]+(?:\.[0-9]+)*\.\s*", "", title)
+    title = re.sub(r"\s+", " ", title).rstrip(":").strip()
+    canonical = title
+    for required in _REQUIRED_PHASE_A_SECTION_TITLES:
+        if (
+            title == required
+            or title.startswith(f"{required} ")
+            or title.startswith(f"{required}(")
+            or title.startswith(f"{required}:")
+        ):
+            canonical = required
+            break
+    if canonical == title:
+        for alias, target in _PHASE_A_SECTION_TITLE_ALIASES.items():
+            if (
+                title == alias
+                or title.startswith(f"{alias} ")
+                or title.startswith(f"{alias}(")
+                or title.startswith(f"{alias}:")
+            ):
+                canonical = target
+                break
+    return canonical
+
+
+def _extract_phase_a_sections(
+    content: str,
+    *,
+    suppress_request_body_headings: bool = False,
+) -> dict[str, list[str]]:
+    sections: dict[str, list[str]] = {}
+    current_title: str | None = None
+    current_body: list[str] = []
+    seen_generated_scope = False
+    lines = content.splitlines()
+    for line in lines:
+        stripped = line.strip()
+        if _PHASE_A_H2_RE.match(stripped):
+            canonical_title = _canonical_phase_a_section_title(stripped)
+            if suppress_request_body_headings and not seen_generated_scope:
+                if canonical_title != "scope":
+                    continue
+                seen_generated_scope = True
+            if (
+                current_title == "request from post-merge supervisor"
+                and suppress_request_body_headings
+                and canonical_title not in _REQUIRED_PHASE_A_SECTION_TITLES
+            ):
+                current_body.append(line)
+                continue
+            if current_title is not None:
+                sections.setdefault(current_title, []).append(
+                    "\n".join(current_body).strip()
+                )
+            current_title = canonical_title
+            current_body = []
+            continue
+        if current_title is not None:
+            current_body.append(line)
+    if current_title is not None:
+        sections.setdefault(current_title, []).append("\n".join(current_body).strip())
+    return sections
+
+
 def _extract_phase_a_section_titles(content: str) -> set[str]:
-    titles: set[str] = set()
+    return set(_extract_phase_a_sections(content))
+
+
+def _phase_a_header_value(content: str, key: str) -> str | None:
+    header, _body = _split_plan_header(content)
+    prefix = f"{key}:"
+    values = [
+        line.split(":", 1)[1].strip()
+        for line in header.splitlines()
+        if line.startswith(prefix)
+    ]
+    if len(values) != 1:
+        return None
+    return values[0]
+
+
+def _first_request_body_line(content: str) -> str | None:
+    in_request = False
     for line in content.splitlines():
         stripped = line.strip()
-        if not stripped.startswith("##"):
-            continue
-        title = stripped.lstrip("#").strip().lower()
-        title = re.sub(r"^[0-9]+(?:\.[0-9]+)*\.\s*", "", title)
-        title = re.sub(r"\s+", " ", title).rstrip(":").strip()
-        canonical = title
-        for required in _REQUIRED_PHASE_A_SECTION_TITLES:
-            if (
-                title == required
-                or title.startswith(f"{required} ")
-                or title.startswith(f"{required}(")
-                or title.startswith(f"{required}:")
-            ):
-                canonical = required
-                break
-        if canonical == title:
-            for alias, target in _PHASE_A_SECTION_TITLE_ALIASES.items():
-                if (
-                    title == alias
-                    or title.startswith(f"{alias} ")
-                    or title.startswith(f"{alias}(")
-                    or title.startswith(f"{alias}:")
-                ):
-                    canonical = target
-                    break
-        if canonical:
-            titles.add(canonical)
-    return titles
+        if _PHASE_A_H2_RE.match(stripped):
+            canonical_title = _canonical_phase_a_section_title(stripped)
+            if canonical_title == "request from post-merge supervisor":
+                in_request = True
+                continue
+            if in_request and stripped:
+                return stripped
+        elif in_request and stripped:
+            return stripped
+    return None
+
+
+def _looks_like_generated_phase_a_stub(content: str) -> bool:
+    """Return True for executor-rendered stubs whose request may contain H2s."""
+    if _phase_a_header_lock_value(content) != "UNLOCKED":
+        return False
+    status = _phase_a_header_value(content, "Status")
+    if status != "Phase A (design -- not yet agent-reviewed or bridge-converged)":
+        return False
+    purpose = _phase_a_header_value(content, "Purpose")
+    if not purpose:
+        return False
+    first_request_line = _first_request_body_line(content)
+    return first_request_line == purpose
 
 
 def _plan_is_placeholder_stub(content: str) -> bool:
     """Return True when a Phase A packet is still a bridge/implementer stub."""
-    normalized = content.lower()
-    if "(stub)" in normalized:
-        return True
-    return not _REQUIRED_PHASE_A_SECTION_TITLES.issubset(
-        _extract_phase_a_section_titles(content)
+    suppress_request_body_headings = _looks_like_generated_phase_a_stub(content)
+    sections = _extract_phase_a_sections(
+        content,
+        suppress_request_body_headings=suppress_request_body_headings,
     )
+    section_titles = set(sections)
+    if not section_titles:
+        return True
+    for title, bodies in sections.items():
+        if title in _PHASE_A_PLACEHOLDER_SECTION_TITLES:
+            continue
+        if title not in _REQUIRED_PHASE_A_SECTION_TITLES:
+            return False
+        if any(body.strip() for body in bodies):
+            return False
+    return True
 
 
 def run_sdk_agents(
@@ -654,14 +794,16 @@ def run_bridge_design_review(
     bridge_script = repo_root / "tools" / "agents" / "bridge_supervisor.py"
     cmd = [
         sys.executable, str(bridge_script),
+    ]
+    if bus_dir is not None:
+        cmd.extend(["--bus-dir", str(bus_dir)])
+    cmd.extend([
         "review",
         "--task-file", str(task_path),
         "--summary", f"Phase A plan review R{round_num}",
         "--reviewer", reviewer,
         "-v", "--no-diff",
-    ]
-    if bus_dir is not None:
-        cmd.extend(["--bus-dir", str(bus_dir)])
+    ])
     if job_id:
         cmd.extend(["--job-id", job_id])
 
@@ -788,6 +930,62 @@ def run_bridge_design_review(
             time.sleep(PHASE_A_BRIDGE_POLL_SLEEP)
 
 
+def _extract_phase_a_agent_envelope(text: str) -> dict[str, Any] | None:
+    def _extract_direct_envelope(candidate: str) -> dict[str, Any] | None:
+        chosen: dict[str, Any] | None = None
+        for envelope_match in AGENT_ENVELOPE_RE.finditer(candidate):
+            try:
+                payload = json.loads(envelope_match.group(1))
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            decision = payload.get("decision")
+            if isinstance(decision, str) and "|" in decision:
+                continue
+            chosen = payload
+        return chosen
+
+    envelope = _extract_direct_envelope(text)
+    if envelope is not None:
+        return envelope
+
+    # Adapter raw output may wrap the envelope inside JSON structures.
+    agent_messages: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        # Codex JSONL: {"type":"item.completed","item":{"type":"agent_message","text":"..."}}
+        if payload.get("type") == "item.completed":
+            item = payload.get("item")
+            if isinstance(item, dict) and item.get("type") == "agent_message":
+                message_text = item.get("text")
+                if isinstance(message_text, str) and message_text.strip():
+                    agent_messages.append(message_text)
+        # Claude stream-json: {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}
+        elif payload.get("type") == "assistant":
+            message = payload.get("message")
+            if isinstance(message, dict):
+                for block in message.get("content", []):
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        message_text = block.get("text")
+                        if isinstance(message_text, str) and message_text.strip():
+                            agent_messages.append(message_text)
+        # Stream result payloads can carry the final envelope as a string.
+        result_text = payload.get("result")
+        if isinstance(result_text, str) and result_text.strip():
+            agent_messages.append(result_text)
+
+    if not agent_messages:
+        return None
+    return _extract_direct_envelope("\n".join(agent_messages))
+
+
 def _parse_phase_a_findings(render_content: str) -> list[dict[str, Any]]:
     """Parse findings from bridge rendered output for blocking/non-blocking classification.
 
@@ -816,65 +1014,9 @@ def _parse_phase_a_findings(render_content: str) -> list[dict[str, Any]]:
             })
         return parsed
 
-    def _extract_direct_envelope(text: str) -> dict[str, Any] | None:
-        import re as _re
-
-        matches = _re.finditer(
-            r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE",
-            text,
-            _re.DOTALL,
-        )
-        chosen: dict[str, Any] | None = None
-        for envelope_match in matches:
-            try:
-                payload = json.loads(envelope_match.group(1))
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if not isinstance(payload, dict):
-                continue
-            decision = payload.get("decision")
-            if isinstance(decision, str) and "|" in decision:
-                continue
-            chosen = payload
-        return chosen
-
-    envelope = _extract_direct_envelope(render_content)
+    envelope = _extract_phase_a_agent_envelope(render_content)
     if envelope is not None:
         return _envelope_findings(envelope)
-
-    # Adapter raw output may wrap the envelope inside JSON structures.
-    # Try extracting text from both Codex JSONL and Claude stream-json formats.
-    agent_messages: list[str] = []
-    for line in render_content.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            payload = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        # Codex JSONL: {"type":"item.completed","item":{"type":"agent_message","text":"..."}}
-        if payload.get("type") == "item.completed":
-            item = payload.get("item")
-            if isinstance(item, dict) and item.get("type") == "agent_message":
-                text = item.get("text")
-                if isinstance(text, str) and text.strip():
-                    agent_messages.append(text)
-        # Claude stream-json: {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}
-        elif payload.get("type") == "assistant":
-            message = payload.get("message")
-            if isinstance(message, dict):
-                for block in message.get("content", []):
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text = block.get("text")
-                        if isinstance(text, str) and text.strip():
-                            agent_messages.append(text)
-
-    if agent_messages:
-        normalized = "\n".join(agent_messages)
-        envelope = _extract_direct_envelope(normalized)
-        if envelope is not None:
-            return _envelope_findings(envelope)
 
     return findings
 
@@ -914,15 +1056,141 @@ def _format_phase_a_blocking_findings(findings: list[dict[str, Any]]) -> str:
     return "\n\n".join(formatted)
 
 
-def _extract_bridge_decision(render_content: str) -> str:
+def _extract_bridge_decision(
+    render_content: str,
+    *,
+    rendered_path: Path | None = None,
+) -> str:
     """Parse the canonical bridge decision line from rendered output.
 
-    Uses first-wins semantics: the first non-SYNTHETIC ``Decision:`` token
-    is authoritative.  A later appended ``Decision: GO`` cannot override an
-    earlier ``Decision: REQUEST_CHANGES``.  SYNTHETIC reader turns are
-    skipped so the first real reviewer decision wins.  If only SYNTHETIC
-    tokens exist, the last one is surfaced as fail-closed input.
+    Structured ``## Turns`` output is parsed by turn status: completed
+    reviewer turns outrank stale turns only when their raw-output artifact is
+    verifiable.  Stale-only output remains fail-closed.  Summary text is
+    ignored as untrusted rendered content so quoted headings cannot synthesize
+    a fake completed turn.
+
+    Unstructured fallback output keeps first-wins semantics: the first
+    non-SYNTHETIC ``Decision:`` token is authoritative.  A later appended
+    ``Decision: GO`` cannot override an earlier ``Decision: REQUEST_CHANGES``.
     """
+    rendered_turns: list[dict[str, Any]] = []
+    current_turn: dict[str, Any] | None = None
+    in_turns_section = False
+    saw_turns_section = False
+    for raw_line in render_content.splitlines():
+        line = raw_line.strip()
+        if not in_turns_section:
+            section_match = _BRIDGE_RENDERED_SECTION_RE.match(line)
+            if section_match and section_match.group(1).strip().lower() == "turns":
+                in_turns_section = True
+                saw_turns_section = True
+            continue
+        section_match = _BRIDGE_RENDERED_SECTION_RE.match(line)
+        if section_match:
+            if current_turn is not None and current_turn.get("_turn_complete"):
+                rendered_turns.append(current_turn)
+                current_turn = None
+            break
+        turn_heading_match = BRIDGE_TURN_HEADING_RE.match(line)
+        if turn_heading_match:
+            if current_turn is not None:
+                if not current_turn.get("_turn_complete"):
+                    continue
+                if not current_turn.get("_saw_post_raw_blank"):
+                    continue
+                if not _bridge_turn_heading_can_follow(
+                    current_turn,
+                    turn_heading_match.group("turn_id"),
+                ):
+                    continue
+                rendered_turns.append(current_turn)
+            current_turn = {
+                "turn_id": turn_heading_match.group("turn_id"),
+                "role": turn_heading_match.group("role").lower(),
+                "status": "",
+                "decision": "",
+                "_in_summary": False,
+                "_claimed_after_summary": False,
+                "_turn_complete": False,
+                "_saw_post_raw_blank": False,
+            }
+            continue
+        if current_turn is None:
+            continue
+        if current_turn.get("_turn_complete"):
+            # The turn's own raw-output line terminates trusted rendered
+            # metadata. A canonical next turn is separated by the renderer's
+            # blank line; same-turn injected headings before that delimiter
+            # stay inside untrusted output.
+            if not line:
+                current_turn["_saw_post_raw_blank"] = True
+            continue
+        if current_turn.get("_in_summary"):
+            if line.startswith("- Claimed files:"):
+                current_turn["_claimed_after_summary"] = True
+                continue
+            raw_output_path = _bridge_turn_raw_output_for_turn(current_turn, line)
+            if current_turn.get("_claimed_after_summary") and raw_output_path:
+                current_turn["_raw_output_path"] = raw_output_path
+                current_turn["_turn_complete"] = True
+                current_turn["_in_summary"] = False
+            continue
+        if line.startswith("- Summary:"):
+            current_turn["_in_summary"] = True
+            continue
+        if line.startswith("- Status:"):
+            current_turn["status"] = line.split(":", 1)[1].strip().split()[0].lower()
+        elif line.startswith("- Decision:"):
+            match = BRIDGE_DECISION_RE.search(line)
+            if match:
+                current_turn["decision"] = match.group(1)
+        else:
+            raw_output_path = _bridge_turn_raw_output_for_turn(current_turn, line)
+            if not raw_output_path:
+                continue
+            current_turn["_raw_output_path"] = raw_output_path
+            current_turn["_turn_complete"] = True
+    if current_turn is not None and current_turn.get("_turn_complete"):
+        rendered_turns.append(current_turn)
+    if rendered_turns:
+        completed_reviewer_decisions: list[str] = []
+        completed_decisions: list[str] = []
+        stale_fallback = ""
+        saw_stale_turn = False
+        saw_completed_turn = False
+        for turn in rendered_turns:
+            decision = turn.get("decision", "")
+            status = turn.get("status", "")
+            role = turn.get("role", "")
+            if not status or not decision or decision == "SYNTHETIC":
+                continue
+            if status == "completed":
+                if (
+                    (saw_stale_turn or saw_completed_turn)
+                    and not _bridge_turn_raw_output_artifact_verified(
+                        turn,
+                        rendered_path,
+                    )
+                ):
+                    continue
+                saw_completed_turn = True
+                if role == "reviewer":
+                    completed_reviewer_decisions.append(decision)
+                else:
+                    completed_decisions.append(decision)
+                continue
+            if status == "stale":
+                stale_fallback = stale_fallback or decision
+                saw_stale_turn = True
+        if completed_reviewer_decisions:
+            return completed_reviewer_decisions[-1]
+        if completed_decisions:
+            return completed_decisions[-1]
+        if stale_fallback:
+            return stale_fallback
+    if saw_turns_section:
+        return ""
+
     decisions = [match.group(1) for match in BRIDGE_DECISION_RE.finditer(render_content)]
     if not decisions:
         return ""
@@ -933,6 +1201,86 @@ def _extract_bridge_decision(render_content: str) -> str:
         if decision != "SYNTHETIC":
             return decision
     return decisions[-1]
+
+
+def _bridge_turn_raw_output_for_turn(turn: dict[str, Any], line: str) -> str:
+    match = BRIDGE_TURN_RAW_OUTPUT_RE.match(line)
+    if not match:
+        return ""
+    turn_id = str(turn.get("turn_id", "") or "").strip()
+    if not turn_id:
+        return ""
+    raw_output_path = match.group("path").strip()
+    if Path(raw_output_path).name != f"{turn_id}.txt":
+        return ""
+    return raw_output_path
+
+
+def _bridge_turn_raw_output_artifact_verified(
+    turn: dict[str, Any],
+    rendered_path: Path | None,
+) -> bool:
+    raw_output_path = str(turn.get("_raw_output_path", "") or "").strip()
+    if not raw_output_path or rendered_path is None:
+        return False
+    raw_path = Path(raw_output_path)
+    if raw_path.is_absolute():
+        return _bridge_turn_raw_output_matches_turn(turn, raw_path)
+    rendered = Path(rendered_path)
+    bus_dir = rendered.parent.parent
+    repo_root = bus_dir.parent
+    candidates = [repo_root / raw_path, bus_dir / raw_path]
+    return any(_bridge_turn_raw_output_matches_turn(turn, candidate) for candidate in candidates)
+
+
+def _bridge_turn_raw_output_matches_turn(turn: dict[str, Any], raw_path: Path) -> bool:
+    if not raw_path.is_file():
+        return False
+    try:
+        raw_text = raw_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    envelope = _extract_phase_a_agent_envelope(raw_text)
+    if not envelope:
+        return False
+
+    turn_id = str(turn.get("turn_id", "") or "").strip()
+    role = str(turn.get("role", "") or "").strip().lower()
+    decision = str(turn.get("decision", "") or "").strip()
+    if not turn_id or not role or not decision:
+        return False
+    if str(envelope.get("turn_id", "") or "").strip() != turn_id:
+        return False
+    if str(envelope.get("agent_role", "") or "").strip().lower() != role:
+        return False
+
+    job_id = _bridge_turn_job_prefix(turn_id)
+    if job_id and str(envelope.get("job_id", "") or "").strip() != job_id:
+        return False
+
+    envelope_decision = str(envelope.get("decision", "") or "").strip()
+    if envelope_decision and envelope_decision != decision:
+        return False
+    return True
+
+
+def _bridge_turn_job_prefix(turn_id: str) -> str:
+    match = BRIDGE_TURN_JOB_PREFIX_RE.match(turn_id)
+    if not match:
+        return ""
+    return match.group("job_id")
+
+
+def _bridge_turn_heading_can_follow(turn: dict[str, Any], next_turn_id: str) -> bool:
+    current_turn_id = str(turn.get("turn_id", "") or "").strip()
+    next_turn_id = str(next_turn_id or "").strip()
+    if current_turn_id and current_turn_id == next_turn_id:
+        return False
+    current_prefix = _bridge_turn_job_prefix(current_turn_id)
+    next_prefix = _bridge_turn_job_prefix(next_turn_id)
+    if current_prefix and next_prefix and current_prefix != next_prefix:
+        return False
+    return True
 
 
 def _split_plan_header(content: str) -> tuple[str, str]:
@@ -951,6 +1299,41 @@ def _split_plan_header(content: str) -> tuple[str, str]:
         if line.startswith("## "):
             return "".join(lines[:i]), "".join(lines[i:])
     return content, ""
+
+
+def _phase_a_header_lock_value(content: str) -> str | None:
+    """Return the canonical header lock value, or None when absent/malformed."""
+    header, _body = _split_plan_header(content)
+    lock_lines = [
+        line
+        for line in header.splitlines()
+        if line.lstrip().startswith("Phase-A-Lock:")
+    ]
+    if len(lock_lines) != 1:
+        return None
+    line = lock_lines[0]
+    if line != line.lstrip():
+        return None
+    canonical_match = _PHASE_A_LOCK_CANONICAL_RE.match(line)
+    if canonical_match:
+        return canonical_match.group(1)
+    decorated_match = _PHASE_A_LOCK_DECORATED_RE.match(line)
+    if decorated_match:
+        return decorated_match.group(1)
+    return None
+
+
+def _phase_a_header_allows_placeholder_refresh(content: str) -> bool:
+    """Return True when header metadata proves a stub may be refreshed in place."""
+    header, _body = _split_plan_header(content)
+    lock_lines = [
+        line
+        for line in header.splitlines()
+        if line.lstrip().startswith("Phase-A-Lock:")
+    ]
+    if not lock_lines:
+        return True
+    return len(lock_lines) == 1 and _phase_a_header_lock_value(content) == "UNLOCKED"
 
 
 def _ensure_phase_a_identity_header(
@@ -1043,6 +1426,53 @@ def lock_plan(
     # combined with multiline $, can consume blank lines between the
     # control line and the first ## heading — causing header+body
     # concatenation without a newline separator (bridge R2 finding).
+    phase_a_lock_header_lines = [
+        line
+        for line in header.splitlines()
+        if line.lstrip().startswith("Phase-A-Lock:")
+    ]
+    decorated_lock_values: list[str] = []
+    malformed_lock_lines: list[str] = []
+    for line in phase_a_lock_header_lines:
+        if line != line.lstrip():
+            malformed_lock_lines.append(line)
+            continue
+        canonical_match = _PHASE_A_LOCK_CANONICAL_RE.match(line)
+        if canonical_match:
+            continue
+        decorated_match = _PHASE_A_LOCK_DECORATED_RE.match(line)
+        if decorated_match:
+            decorated_lock_values.append(decorated_match.group(1))
+            continue
+        malformed_lock_lines.append(line)
+    if len(phase_a_lock_header_lines) > 1:
+        raise PhaseAExecutorError(
+            f"Expected exactly one Phase-A-Lock control line in {plan_path}; "
+            "mixed or duplicate canonical Phase-A-Lock metadata is not allowed, "
+            f"found {len(phase_a_lock_header_lines)} header lines"
+        )
+    if malformed_lock_lines:
+        raise PhaseAExecutorError(
+            f"Expected Phase-A-Lock to be exactly UNLOCKED or LOCKED in {plan_path}, "
+            f"found malformed header lines: {', '.join(malformed_lock_lines)}"
+        )
+    if decorated_lock_values:
+        canonical_lock_line = f"Phase-A-Lock: {decorated_lock_values[0]}"
+        hdr_lines = header.splitlines(keepends=True)
+        for i, line in enumerate(hdr_lines):
+            if line.rstrip("\r\n") == phase_a_lock_header_lines[0]:
+                line_ending = "\n" if line.endswith("\n") else ""
+                hdr_lines[i] = f"{canonical_lock_line}{line_ending}"
+                break
+        else:
+            raise PhaseAExecutorError(
+                f"Expected exactly one Phase-A-Lock header line in {plan_path}, "
+                f"found no rewritable decorated line"
+            )
+        header = "".join(hdr_lines)
+        content = header + body
+        full_path.write_text(content, encoding="utf-8")
+        header, body = _split_plan_header(content)
     unlocked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*UNLOCKED[ \t]*$", header)
     locked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*LOCKED[ \t]*$", header)
     total = len(unlocked_lines) + len(locked_lines)
@@ -1434,7 +1864,10 @@ def run_phase_a(
             rendered_path = agent_bus_path(repo_root, bus_dir, "rendered", f"{bridge_job_id}.md")
             if rendered_path.exists():
                 render_content = rendered_path.read_text(encoding="utf-8")
-                bridge_decision = _extract_bridge_decision(render_content)
+                bridge_decision = _extract_bridge_decision(
+                    render_content,
+                    rendered_path=rendered_path,
+                )
                 try:
                     _emit_phase_a_event(
                         repo_root,

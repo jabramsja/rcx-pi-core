@@ -376,7 +376,26 @@ def _bridge_state_signature(bridge_state: dict[str, object], tmux_tail: list[str
     return json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
 
-def _attention_required_summary(bridge_state: dict[str, object]) -> str | None:
+def _attention_required_summary(
+    bridge_state: dict[str, object],
+    tmux_tail: list[str] | None = None,
+) -> str | None:
+    tail_text = "\n".join(tmux_tail or [])
+    hard_fail_markers = ("executor_hard_fail", "pipeline_hard_fail")
+    for marker in hard_fail_markers:
+        if marker not in tail_text:
+            continue
+        job = bridge_state.get("job")
+        job_id = "unknown-job"
+        if isinstance(job, dict):
+            job_id = str(job.get("job_id") or job_id).strip()
+        return _clip_summary(
+            "attention required: "
+            f"tmux/pager tail reports `{marker}` for latest visible pipeline "
+            f"state while bridge latest job is `{job_id}`; foreground operator "
+            "diagnosis is required"
+        )
+
     job = bridge_state.get("job")
     turn = bridge_state.get("turn")
     if not isinstance(job, dict) or not isinstance(turn, dict):
@@ -890,7 +909,7 @@ def main() -> int:
         bridge_state = _read_bridge_state(wave_root, bus_dir=bus_dir)
         tmux_tail = _read_tmux_tail(args.tmux_pane)
         bridge_signature = _bridge_state_signature(bridge_state, tmux_tail)
-        attention_summary = _attention_required_summary(bridge_state)
+        attention_summary = _attention_required_summary(bridge_state, tmux_tail)
         if wave_root is None or bridge_state.get("job") is None:
             _write_state(
                 state_path,

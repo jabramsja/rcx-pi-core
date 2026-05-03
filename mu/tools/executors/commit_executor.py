@@ -298,6 +298,8 @@ CONTINUATION_ACTIVE_STATUS = "post_commit_pending"
 TRANSIENT_STATUS_PREFIXES = (".agent_bus/", ".scratch/")
 COMMIT_PATH_REFRESH_START = "<!-- COMMIT_PATH_TRUTH_REFRESH:start -->"
 COMMIT_PATH_REFRESH_END = "<!-- COMMIT_PATH_TRUTH_REFRESH:end -->"
+DEFERRED_AUTH_REFRESH_START = "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->"
+DEFERRED_AUTH_REFRESH_END = "<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->"
 
 BOT_REMEDIATION_MAX_ROUNDS = 2
 _COMMIT_EXECUTOR_BACKENDS = _COMMIT_EXECUTOR_CONFIG.get("backends", {})
@@ -937,10 +939,47 @@ def _refresh_tracker_note_wave_file_count(note: str, file_count: int) -> str:
             r"handoff now carries \d+ wave-owned file\(s\)",
             f"handoff now carries {file_count} wave-owned file(s)",
         ),
+        (
+            r"Phase B emitted a commit-ready handoff for ([^.;]+?) with \d+ wave-owned file\(s\)",
+            rf"Phase B emitted a commit-ready handoff for \1 with {file_count} wave-owned file(s)",
+        ),
     ]
     refreshed = note
     for pattern, replacement in replacements:
         refreshed = re.sub(pattern, replacement, refreshed)
+    return refreshed
+
+
+def _refresh_tracker_note_test_evidence(note: str, staged_paths: list[str]) -> str:
+    """Align generated tracker-note pytest evidence with the rebuilt staged scope."""
+    test_files = _collect_wave_test_files(staged_paths)
+    if not test_files:
+        return note
+    evidence_command = (
+        "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+        + " ".join(test_files)
+        + "`"
+    )
+    refreshed = re.sub(
+        r"evidence_command:\s*`PYTHONHASHSEED=0 python3 -m pytest -x --tb=short [^`]+`",
+        evidence_command,
+        note,
+    )
+    refreshed = re.sub(
+        r"Final pytest gate covered \d+ test file\(s\)",
+        f"Final pytest gate covered {len(test_files)} test file(s)",
+        refreshed,
+    )
+    refreshed = re.sub(
+        r"Evidence gate exercises \d+ wave-owned test module\(s\)",
+        f"Evidence gate exercises {len(test_files)} wave-owned test module(s)",
+        refreshed,
+    )
+    refreshed = re.sub(
+        r", \d+ wave-owned test module\(s\),",
+        f", {len(test_files)} wave-owned test module(s),",
+        refreshed,
+    )
     return refreshed
 
 
@@ -999,22 +1038,195 @@ def _replace_commit_path_truth_refresh_block(packet_text: str, block: str) -> st
     return packet_text.rstrip() + "\n\n" + block
 
 
+def _same_wave_deferred_non_blocking_paths(wave_id: str, paths: list[str]) -> list[str]:
+    normalized_wave = normalize_wave_id(str(wave_id or ""))
+    if not normalized_wave:
+        return []
+    expected = f"reports/deferred/non_blocking/{normalized_wave}_bridge_nonblockers.md"
+    return [expected] if expected in set(_dedupe_repo_paths(paths)) else []
+
+
+def _render_same_wave_deferred_authorization_block(wave_id: str, paths: list[str]) -> str:
+    lines = [
+        DEFERRED_AUTH_REFRESH_START,
+        "## Same-Wave Deferred Non-Blocking Authorization",
+        "",
+        f"- Refresh wave: `{wave_id}`",
+        "- Purpose: Phase B and commit automation may stage the same-wave "
+        "non-blocking bridge findings packet as deferred follow-up instead of "
+        "blocking an otherwise commit-ready wave.",
+        "- Authorized deferred packet(s):",
+    ]
+    for path in paths:
+        lines.append(f"  - `{path}`")
+    lines.extend([
+        "- Scope binding: the packet(s) above are in scope only as generated "
+        "same-wave non-blocking bridge findings packets.",
+        "- Acceptance binding: the final touched-file set may include the packet(s) "
+        "above when they are also present in `deferred_items` or current staged files.",
+        DEFERRED_AUTH_REFRESH_END,
+    ])
+    return "\n".join(lines) + "\n"
+
+
+def _replace_same_wave_deferred_authorization_block(packet_text: str, block: str) -> str:
+    start = packet_text.find(DEFERRED_AUTH_REFRESH_START)
+    end = packet_text.find(DEFERRED_AUTH_REFRESH_END)
+    if start != -1 and end != -1 and end > start:
+        end += len(DEFERRED_AUTH_REFRESH_END)
+        trailing_newline = "\n" if end < len(packet_text) and packet_text[end:end + 1] != "\n" else ""
+        return packet_text[:start].rstrip() + "\n\n" + block.rstrip() + trailing_newline + packet_text[end:]
+    if start != -1 or end != -1:
+        raise ValueError("existing Same-Wave Deferred Non-Blocking Authorization markers are unbalanced")
+    commit_refresh_start = packet_text.find(COMMIT_PATH_REFRESH_START)
+    if commit_refresh_start != -1:
+        return (
+            packet_text[:commit_refresh_start].rstrip()
+            + "\n\n"
+            + block.rstrip()
+            + "\n\n"
+            + packet_text[commit_refresh_start:]
+        )
+    return packet_text.rstrip() + "\n\n" + block
+
+
+def _section_bounds(lines: list[str], heading: str) -> tuple[int, int] | None:
+    start = next((idx for idx, line in enumerate(lines) if line.strip() == heading), None)
+    if start is None:
+        return None
+    end = next(
+        (idx for idx in range(start + 1, len(lines)) if lines[idx].startswith("## ")),
+        len(lines),
+    )
+    return start, end
+
+
+def _append_paths_to_bounded_packet_line(line: str, paths: list[str]) -> str:
+    missing = [path for path in paths if f"`{path}`" not in line]
+    if not missing:
+        return line
+    addition = ", " + ", ".join(f"`{path}`" for path in missing)
+    for anchor in (
+        ", or a canonical",
+        ", and the same-wave canonical",
+        ", or returns",
+        " or returns",
+    ):
+        if anchor in line:
+            return line.replace(anchor, addition + anchor, 1)
+    return line.rstrip(".") + addition + "."
+
+
+def _refresh_same_wave_deferred_packet_authorization(
+    packet_text: str,
+    *,
+    wave_id: str,
+    deferred_paths: list[str],
+) -> str:
+    paths = _same_wave_deferred_non_blocking_paths(wave_id, deferred_paths)
+    if not paths:
+        return packet_text
+
+    had_final_newline = packet_text.endswith("\n")
+    lines = packet_text.splitlines()
+    scope_bounds = _section_bounds(lines, "## Scope")
+    if scope_bounds is not None:
+        scope_start, scope_end = scope_bounds
+        scope_text = "\n".join(lines[scope_start:scope_end])
+        scope_bullets: list[str] = []
+        for path in paths:
+            if f"`{path}`" in scope_text:
+                continue
+            scope_bullets.extend([
+                f"- `{path}`",
+                "  - Same-wave Phase B/commit generated deferred non-blocking "
+                "bridge findings packet only; no unrelated deferred report is "
+                "authorized by this wave.",
+            ])
+        if scope_bullets:
+            insert_at = next(
+                (
+                    idx
+                    for idx in range(scope_start + 1, scope_end)
+                    if lines[idx].startswith("Only files under ")
+                ),
+                scope_end,
+            )
+            if insert_at > 0 and lines[insert_at - 1].strip():
+                scope_bullets.insert(0, "")
+            if insert_at < len(lines) and lines[insert_at].strip():
+                scope_bullets.append("")
+            lines[insert_at:insert_at] = scope_bullets
+
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("- The required fix resolves to files outside "):
+            lines[idx] = _append_paths_to_bounded_packet_line(line, paths)
+        elif stripped.startswith("- The final touched-file set stays within "):
+            lines[idx] = _append_paths_to_bounded_packet_line(line, paths)
+
+    refreshed = "\n".join(lines)
+    if had_final_newline:
+        refreshed += "\n"
+    block = _render_same_wave_deferred_authorization_block(wave_id, paths)
+    return _replace_same_wave_deferred_authorization_block(refreshed, block)
+
+
 def _commit_refresh_evidence_handles(
     handoff: dict[str, Any],
     *,
     indicator_path: str,
+    include_pre_commit_receipt: bool = True,
 ) -> dict[str, str]:
     evidence_handles: dict[str, str] = {}
     raw = handoff.get("evidence_handles")
     if isinstance(raw, dict):
         for key, value in raw.items():
+            if key == "pre_commit_receipt" and not include_pre_commit_receipt:
+                continue
             if isinstance(key, str) and isinstance(value, str):
                 evidence_handles[key] = value
     evidence_handles.setdefault("indicator", indicator_path)
     receipt = handoff.get("pre_commit_receipt_path")
-    if isinstance(receipt, str) and receipt.strip():
+    if include_pre_commit_receipt and isinstance(receipt, str) and receipt.strip():
         evidence_handles.setdefault("pre_commit_receipt", receipt.strip())
     return evidence_handles
+
+
+_PENDING_PRE_COMMIT_RECEIPT_RE = re.compile(
+    r"\.agent_bus(?:-[A-Za-z0-9_.-]+)?/meta/pre_commit_receipts/[^\s`]+?\.json"
+)
+
+
+def _mark_tracker_note_pre_commit_receipt_pending(tracker_note_text: str) -> str:
+    """Remove stale exact receipt claims while pre-commit supervisor is pending."""
+    receipt_path = _PENDING_PRE_COMMIT_RECEIPT_RE.pattern
+    refreshed = tracker_note_text.replace(
+        "commit-ready Phase B handoff",
+        "pre-commit supervisor package refresh",
+    )
+    refreshed = re.sub(
+        r"Phase B emitted a commit-ready handoff for ([^.;]+?) with (\d+) wave-owned file\(s\)",
+        r"Phase B refreshed the pre-commit supervisor package for \1 with \2 wave-owned file(s)",
+        refreshed,
+    )
+    refreshed = re.sub(
+        rf"\(3\)\s+Commit handoff carries explicit receipt authority at\s+{receipt_path}\.*",
+        "(3) Pre-commit supervisor receipt remains pending for the current staged package.",
+        refreshed,
+    )
+    refreshed = re.sub(
+        rf"\(2\)\s+Commit handoff carries (\d+) wave-owned file\(s\) with explicit "
+        rf"receipt authority at\s+{receipt_path}\.*",
+        r"(2) Commit handoff carries \1 wave-owned file(s) with pre-commit supervisor "
+        r"receipt pending for the current staged package.",
+        refreshed,
+    )
+    refreshed = refreshed.replace(
+        "explicit receipt authority, and an L4-compliant tracker note.",
+        "package-bound L4 authority pending pre-commit supervisor validation.",
+    )
+    return refreshed
 
 
 def _rebuild_handoff_after_packet_truth_refresh(
@@ -1074,6 +1286,32 @@ def _rebuild_handoff_after_packet_truth_refresh(
         repo_root=repo_root,
         tracked_packet=active_packet_path,
     )
+
+
+def _persist_phase_b_handoff_for_commit_path(
+    repo_root: Path,
+    handoff: dict[str, Any],
+) -> str | None:
+    """Persist the Phase B handoff after commit-path rebinding.
+
+    The commit executor may refresh the in-memory handoff from current staged
+    truth before supervisor review. Keep the durable Phase B handoff in sync so
+    retry/review surfaces do not read stale files_to_stage or receipt authority.
+    """
+    if str(handoff.get("caller") or "") != "phase_b":
+        return None
+    handoff_path = agent_bus_path(
+        repo_root,
+        _active_bus_dir(),
+        "executors",
+        "phase_b_handoff.json",
+    )
+    try:
+        handoff_path.parent.mkdir(parents=True, exist_ok=True)
+        handoff_path.write_text(json.dumps(handoff, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        return f"failed to persist refreshed Phase B handoff at {handoff_path}: {exc}"
+    return None
 
 
 def _refresh_tasks_tracker_note_after_packet_truth(
@@ -1328,6 +1566,7 @@ def refresh_commit_path_packet_truth(
     if not packet_full.exists():
         return handoff, [], f"active packet not found for commit packet truth refresh: {active_packet_path}"
     packet_text = packet_full.read_text(encoding="utf-8")
+    original_packet_text = packet_text
     wave_id = str(handoff.get("wave_id") or "")
     if not _packet_declares_same_wave_id(packet_text, normalize_wave_id(wave_id)):
         return handoff, [], (
@@ -1346,6 +1585,15 @@ def refresh_commit_path_packet_truth(
         tracker_note_text,
         len(staged_paths_for_block),
     )
+    refreshed_tracker_note_text = _refresh_tracker_note_test_evidence(
+        refreshed_tracker_note_text,
+        staged_paths_for_block,
+    )
+    pending_pre_commit_supervisor = commit_status == "pre_commit_supervisor_pending"
+    if pending_pre_commit_supervisor:
+        refreshed_tracker_note_text = _mark_tracker_note_pre_commit_receipt_pending(
+            refreshed_tracker_note_text
+        )
     tracker_refresh_error = _refresh_tasks_tracker_note_after_packet_truth(
         repo_root,
         wave_id=wave_id,
@@ -1361,6 +1609,14 @@ def refresh_commit_path_packet_truth(
         refreshed_tracker_note_text,
         len(staged_paths_for_block),
     )
+    tracker_note_after_staging = _refresh_tracker_note_test_evidence(
+        tracker_note_after_staging,
+        staged_paths_for_block,
+    )
+    if pending_pre_commit_supervisor:
+        tracker_note_after_staging = _mark_tracker_note_pre_commit_receipt_pending(
+            tracker_note_after_staging
+        )
     if tracker_note_after_staging != refreshed_tracker_note_text:
         refreshed_tracker_note_text = tracker_note_after_staging
         tracker_refresh_error = _refresh_tasks_tracker_note_after_packet_truth(
@@ -1375,7 +1631,11 @@ def refresh_commit_path_packet_truth(
     if refreshed_tracker_note_text != tracker_note_text:
         handoff = {**handoff, "tracker_note_text": refreshed_tracker_note_text}
         tracker_note_text = refreshed_tracker_note_text
-    evidence_handles = _commit_refresh_evidence_handles(handoff, indicator_path=indicator_path)
+    evidence_handles = _commit_refresh_evidence_handles(
+        handoff,
+        indicator_path=indicator_path,
+        include_pre_commit_receipt=not pending_pre_commit_supervisor,
+    )
     block = _render_commit_path_truth_refresh_block(
         wave_id=wave_id,
         active_packet_path=active_packet_path,
@@ -1384,13 +1644,30 @@ def refresh_commit_path_packet_truth(
         indicator_path=indicator_path,
         commit_status=commit_status,
         evidence_handles=evidence_handles,
-        pre_commit_receipt_path=str(handoff.get("pre_commit_receipt_path") or ""),
+        pre_commit_receipt_path=(
+            ""
+            if pending_pre_commit_supervisor
+            else str(handoff.get("pre_commit_receipt_path") or "")
+        ),
     )
     try:
+        deferred_path_candidates = [
+            *staged_paths_for_block,
+            *(
+                list(handoff.get("deferred_items"))
+                if isinstance(handoff.get("deferred_items"), list)
+                else []
+            ),
+        ]
+        packet_text = _refresh_same_wave_deferred_packet_authorization(
+            packet_text,
+            wave_id=wave_id,
+            deferred_paths=deferred_path_candidates,
+        )
         refreshed_text = _replace_commit_path_truth_refresh_block(packet_text, block)
     except ValueError as exc:
         return handoff, [], str(exc)
-    packet_changed = refreshed_text != packet_text
+    packet_changed = refreshed_text != original_packet_text
     if packet_changed:
         packet_full.write_text(refreshed_text, encoding="utf-8")
     try:
@@ -6323,6 +6600,14 @@ def _run_commit_pipeline_impl(
                 "force_add_files": refreshed_force,
             }
             refreshed_staged_paths = _current_staged_diff_paths(repo_root)
+            persist_error = _persist_phase_b_handoff_for_commit_path(repo_root, handoff)
+            if persist_error:
+                return {
+                    "status": "error",
+                    "step": "refresh_commit_packet_truth",
+                    "errors": [persist_error],
+                    "steps_completed": result["steps_completed"],
+                }
         except subprocess.CalledProcessError as exc:
             return {
                 "status": "error",
@@ -6466,6 +6751,21 @@ def _run_commit_pipeline_impl(
                         "errors": [f"Supervisor receipt_path escapes repo — fail closed: {receipt_path_from_supervisor}"],
                         "steps_completed": result["steps_completed"]}
 
+            handoff_evidence = dict(handoff.get("evidence_handles") or {})
+            handoff_evidence["pre_commit_receipt"] = receipt_path_from_supervisor
+            handoff = {
+                **handoff,
+                "evidence_handles": handoff_evidence,
+            }
+            valid_handoff, validation_errors = validate_handoff(handoff)
+            if not valid_handoff:
+                return {"status": "error", "step": "build_and_run_supervisor",
+                        "errors": [
+                            "Refreshed Phase B handoff invalid after supervisor receipt evidence refresh: "
+                            + "; ".join(validation_errors)
+                        ],
+                        "steps_completed": result["steps_completed"]}
+
             result["steps_completed"].append("build_and_run_supervisor")
             log(f"Step 6: supervisor {receipt_decision}, receipt: {receipt_path_from_supervisor}")
         except ImportError as exc:
@@ -6508,9 +6808,13 @@ def _run_commit_pipeline_impl(
         # ── Step 7: validate_receipt ──────────────────────────────────────
         # The supervisor receipt (step 6) is the runtime authority — it reflects
         # the actual staged state after tracker/indicator mutations in steps 3-5.
-        # The handoff receipt path is preserved for provenance traceability only;
-        # it is NOT authoritative for the commit decision.
-        handoff_receipt_rel = handoff["pre_commit_receipt_path"]
+        # The original handoff receipt remains a provenance check and must not be
+        # overwritten by the supervisor receipt before validation.
+        handoff_receipt_rel = (
+            handoff["pre_commit_receipt_path"]
+            if "pre_commit_receipt_path" in handoff
+            else ""
+        )
         handoff_receipt_decision = ""
         if handoff_receipt_rel:
             # Containment check: handoff receipt must resolve inside the repo root.
@@ -6565,6 +6869,11 @@ def _run_commit_pipeline_impl(
         result["handoff_receipt_decision"] = handoff_receipt_decision
         result["receipt_decision"] = receipt_decision
         result["handoff_sha"] = handoff_sha
+        persist_error = _persist_phase_b_handoff_for_commit_path(repo_root, handoff)
+        if persist_error:
+            return {"status": "error", "step": "validate_receipt",
+                    "errors": [persist_error],
+                    "steps_completed": result["steps_completed"]}
         result["steps_completed"].append("validate_receipt")
         try:
             _emit_commit_ready_event(
