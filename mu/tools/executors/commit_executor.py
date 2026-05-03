@@ -3901,6 +3901,115 @@ def _push_branch(repo_root: Path, branch_name: str) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _extract_ci_failure_excerpt(text: str, *, max_lines: int = 12) -> str:
+    """Return compact failure lines from GitHub Actions log text."""
+    interesting: list[str] = []
+    markers = (
+        "assertionerror",
+        "failed ",
+        " failures ",
+        "==== failures",
+        "##[error]",
+        "error:",
+        "traceback",
+    )
+    for raw_line in (text or "").splitlines():
+        line = re.sub(r"\x1b\[[0-9;]*m", "", raw_line).strip()
+        lowered = line.lower()
+        if not line or not any(marker in lowered for marker in markers):
+            continue
+        interesting.append(line[-500:])
+    return "\n".join(interesting[-max_lines:])
+
+
+def _summarize_required_ci_failures(repo_root: Path, pr_number: str) -> dict[str, Any]:
+    """Gather failed required check names and short GitHub Actions failure excerpts."""
+    summary: dict[str, Any] = {"checks_output": "", "failures": []}
+    try:
+        checks = _run(
+            ["gh", "pr", "checks", pr_number, "--required"],
+            cwd=repo_root,
+            check=False,
+            timeout=60,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        summary["checks_output"] = f"gh pr checks failed while summarizing CI: {exc}"
+        return summary
+
+    checks_output = (checks.stdout or checks.stderr or "").strip()
+    summary["checks_output"] = checks_output
+    failing_names: list[str] = []
+    for line in checks_output.splitlines():
+        fields = [field.strip() for field in line.split("\t") if field.strip()]
+        lowered = line.lower()
+        if len(fields) >= 2 and fields[1].lower() in {"fail", "failed", "failure"}:
+            failing_names.append(fields[0])
+        elif any(token in lowered for token in ("\tfail\t", "\tfailed\t", "\tfailure\t")) and fields:
+            failing_names.append(fields[0])
+
+    try:
+        view = _run(
+            ["gh", "pr", "view", pr_number, "--json", "statusCheckRollup"],
+            cwd=repo_root,
+            check=False,
+            timeout=60,
+        )
+        payload = json.loads(view.stdout or "{}")
+    except (subprocess.SubprocessError, OSError, json.JSONDecodeError):
+        payload = {}
+
+    failures: list[dict[str, str]] = []
+    for check in payload.get("statusCheckRollup", []) or []:
+        if not isinstance(check, dict):
+            continue
+        conclusion = str(check.get("conclusion") or "").upper()
+        name = str(check.get("name") or "")
+        if conclusion not in {"FAILURE", "TIMED_OUT", "CANCELLED"}:
+            continue
+        if failing_names and name and name not in failing_names:
+            continue
+        details_url = str(check.get("detailsUrl") or "")
+        failure = {
+            "name": name,
+            "workflow": str(check.get("workflowName") or ""),
+            "details_url": details_url,
+            "excerpt": "",
+        }
+        match = re.search(r"/actions/runs/(\d+)", details_url)
+        if match:
+            try:
+                run_log = _run(
+                    ["gh", "run", "view", match.group(1), "--log-failed"],
+                    cwd=repo_root,
+                    check=False,
+                    timeout=90,
+                )
+                failure["excerpt"] = _extract_ci_failure_excerpt(run_log.stdout or run_log.stderr or "")
+            except (subprocess.SubprocessError, OSError):
+                failure["excerpt"] = ""
+        failures.append(failure)
+
+    if not failures:
+        failures = [{"name": name, "workflow": "", "details_url": "", "excerpt": ""} for name in failing_names]
+    summary["failures"] = failures
+    if failures:
+        compact = []
+        for failure in failures[:3]:
+            line = failure.get("name", "") or "unknown-check"
+            if failure.get("workflow"):
+                line = f"{line} ({failure['workflow']})"
+            excerpt = str(failure.get("excerpt") or "").splitlines()
+            if excerpt:
+                line = f"{line}: {excerpt[-1]}"
+            compact.append(line)
+        summary["summary"] = "Failed required CI: " + "; ".join(compact)
+    elif checks_output:
+        summary["summary"] = "Required CI failed; gh pr checks output: " + checks_output.replace("\n", " | ")[:1000]
+    else:
+        summary["summary"] = "Required CI failed; no failed check details available"
+    return summary
+
+
 def _wait_for_pr_ci(
     repo_root: Path,
     *,
@@ -3925,10 +4034,17 @@ def _wait_for_pr_ci(
             cwd=repo_root, timeout=600,
         )
         if not _wait_for_required_checks_to_pass(repo_root, pr_number, timeout=900, log=log):
+            ci_failure = _summarize_required_ci_failures(repo_root, pr_number)
             return {
                 "status": "error",
                 "step": "wait_ci",
-                "errors": ["Required CI checks did not reach green after gh watch returned"],
+                "failure_class": "test_failure",
+                "errors": [
+                    "Required CI checks did not reach green after gh watch returned. "
+                    + str(ci_failure.get("summary", ""))
+                ],
+                "ci_failures": ci_failure.get("failures", []),
+                "ci_checks_output": ci_failure.get("checks_output", ""),
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number,
             }
@@ -3949,18 +4065,32 @@ def _wait_for_pr_ci(
                 "polling CI as fallback"
             )
         if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=900, log=log):
+            ci_failure = _summarize_required_ci_failures(repo_root, pr_number)
             return {
                 "status": "error",
                 "step": "wait_ci",
-                "errors": [f"CI checks failed (confirmed by polling): {exc}"],
+                "failure_class": "test_failure",
+                "errors": [
+                    f"CI checks failed (confirmed by polling): {exc}. "
+                    + str(ci_failure.get("summary", ""))
+                ],
+                "ci_failures": ci_failure.get("failures", []),
+                "ci_checks_output": ci_failure.get("checks_output", ""),
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number,
             }
         if not _wait_for_required_checks_to_pass(repo_root, pr_number, timeout=900, log=log):
+            ci_failure = _summarize_required_ci_failures(repo_root, pr_number)
             return {
                 "status": "error",
                 "step": "wait_ci",
-                "errors": [f"Required CI checks did not reach green after fallback polling: {exc}"],
+                "failure_class": "test_failure",
+                "errors": [
+                    f"Required CI checks did not reach green after fallback polling: {exc}. "
+                    + str(ci_failure.get("summary", ""))
+                ],
+                "ci_failures": ci_failure.get("failures", []),
+                "ci_checks_output": ci_failure.get("checks_output", ""),
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number,
             }

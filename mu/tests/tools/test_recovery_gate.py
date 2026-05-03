@@ -291,6 +291,21 @@ class TestClassifyFailure:
         assert fc == FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP
         assert rg_mod.tier_for(fc) == 2
 
+    def test_wait_ci_explicit_test_failure_class_routes_to_test_recovery(self):
+        result = {
+            "status": "error",
+            "step": "wait_ci",
+            "failure_class": "test_failure",
+            "errors": [
+                "CI checks failed (confirmed by polling). Failed required CI: "
+                "test (CI): FAILED tests/tools/test_recovery_gate.py::"
+                "TestObservabilityWorktreeResolution::"
+                "test_ensure_codex_autoping_restarts_live_watcher_when_tmux_window_missing"
+            ],
+        }
+
+        assert rg_mod.classify_failure(result) == FailureClass.TEST_FAILURE
+
     def test_stale_bridge_lock_in_stderr(self):
         assert rg_mod.classify_failure(
             {"status": "error", "stderr": "cannot acquire bridge.lock",

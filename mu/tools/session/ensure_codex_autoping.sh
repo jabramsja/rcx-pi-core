@@ -160,18 +160,31 @@ except (TypeError, ValueError):
     raise SystemExit(1)
 if pid <= 1:
     raise SystemExit(1)
+command = ""
+proc_cmdline = Path(f"/proc/{pid}/cmdline")
 try:
-    proc = subprocess.run(
-        ["ps", "-p", str(pid), "-o", "command="],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    if proc_cmdline.exists():
+        raw = proc_cmdline.read_bytes()
+        command = " ".join(
+            part.decode(errors="replace")
+            for part in raw.split(b"\0")
+            if part
+        ).strip()
 except OSError:
-    raise SystemExit(1)
-if proc.returncode != 0 or not proc.stdout.strip():
-    raise SystemExit(1)
-command = proc.stdout.strip()
+    command = ""
+if not command:
+    try:
+        proc = subprocess.run(
+            ["ps", "-ww", "-p", str(pid), "-o", "command="],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        raise SystemExit(1)
+    if proc.returncode != 0 or not proc.stdout.strip():
+        raise SystemExit(1)
+    command = proc.stdout.strip()
 try:
     tokens = shlex.split(command)
 except ValueError:

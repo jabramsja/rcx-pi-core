@@ -2650,6 +2650,8 @@ class TestRequiredCIGreenGuard:
                 return completed(cmd, stdout="test\tpending\n", returncode=8)
             if cmd == ["gh", "pr", "checks", "844", "--watch", "--required"]:
                 return completed(cmd)
+            if cmd == ["gh", "pr", "view", "844", "--json", "statusCheckRollup"]:
+                return completed(cmd, stdout=json.dumps({"statusCheckRollup": []}))
             raise AssertionError(f"unexpected command: {cmd}")
 
         result = {
@@ -2673,7 +2675,91 @@ class TestRequiredCIGreenGuard:
         assert response is not None
         assert response["status"] == "error"
         assert response["step"] == "wait_ci"
-        assert response["errors"] == [
-            "Required CI checks did not reach green after gh watch returned"
-        ]
+        assert response["failure_class"] == "test_failure"
+        assert response["errors"][0].startswith(
+            "Required CI checks did not reach green after gh watch returned. "
+        )
+        assert "test\tpending" in response["ci_checks_output"]
         assert result["steps_completed"] == ["git_commit"]
+
+    def test_wait_for_pr_ci_failure_payload_includes_failed_check_log_excerpt(self, tmp_path):
+        import subprocess
+
+        details_url = "https://github.com/jabramsja/rcx-pi-core/actions/runs/25290911912/job/74142462431"
+        gh_view_payload = {
+            "statusCheckRollup": [
+                {
+                    "name": "test",
+                    "workflowName": "CI",
+                    "conclusion": "FAILURE",
+                    "detailsUrl": details_url,
+                },
+                {
+                    "name": "fixture-seeds",
+                    "workflowName": "CI",
+                    "conclusion": "SUCCESS",
+                    "detailsUrl": "",
+                },
+            ]
+        }
+
+        def completed(cmd, *, stdout="", stderr="", returncode=0):
+            return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
+
+        def fake_run(cmd, **kwargs):
+            if cmd == ["gh", "pr", "checks", "859", "--watch", "--required"]:
+                raise subprocess.CalledProcessError(1, cmd)
+            if cmd == ["gh", "pr", "checks", "859", "--required"]:
+                return completed(cmd, stdout=f"test\tfail\t4m2s\t{details_url}\n", returncode=8)
+            if cmd == ["gh", "pr", "view", "859", "--json", "statusCheckRollup"]:
+                return completed(cmd, stdout=json.dumps(gh_view_payload))
+            if cmd == ["gh", "run", "view", "25290911912", "--log-failed"]:
+                return completed(
+                    cmd,
+                    stdout=(
+                        "FAILED tests/tools/test_recovery_gate.py::"
+                        "TestObservabilityWorktreeResolution::"
+                        "test_ensure_codex_autoping_restarts_live_watcher_when_tmux_window_missing\n"
+                        "tests/tools/test_recovery_gate.py:6768: AssertionError\n"
+                    ),
+                )
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        result = {
+            "commit_sha": "a" * 40,
+            "handoff_sha": "handoff-sha",
+            "receipt_decision": "COMMIT_GO",
+            "steps_completed": ["git_commit"],
+        }
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod, "_poll_ci_checks_fallback", return_value=False):
+            response = commit_mod._wait_for_pr_ci(  # ANTICHEAT_OK: verifies wait_ci failure context for recovery
+                tmp_path,
+                pr_number="859",
+                result=result,
+                continuation_path=tmp_path / "continuation.json",
+                target_branch="jabramsja/test",
+                log=lambda _msg: None,
+            )
+
+        assert response is not None
+        assert response["status"] == "error"
+        assert response["step"] == "wait_ci"
+        assert response["failure_class"] == "test_failure"
+        assert response["ci_failures"] == [
+            {
+                "name": "test",
+                "workflow": "CI",
+                "details_url": details_url,
+                "excerpt": (
+                    "FAILED tests/tools/test_recovery_gate.py::"
+                    "TestObservabilityWorktreeResolution::"
+                    "test_ensure_codex_autoping_restarts_live_watcher_when_tmux_window_missing\n"
+                    "tests/tools/test_recovery_gate.py:6768: AssertionError"
+                ),
+            }
+        ]
+        assert "Failed required CI: test (CI): tests/tools/test_recovery_gate.py:6768: AssertionError" in (
+            response["errors"][0]
+        )

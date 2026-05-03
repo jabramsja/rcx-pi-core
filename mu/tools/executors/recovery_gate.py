@@ -268,6 +268,14 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.MAX_TURNS_REACHED
 
     status_key = str(status or embedded_status or "").strip().lower()
+    explicit_failure_class = str(
+        result.get("failure_class")
+        or embedded_stdout.get("failure_class")
+        or embedded_stderr.get("failure_class")
+        or ""
+    ).strip().lower()
+    if status_failed and explicit_failure_class == FailureClass.TEST_FAILURE.value:
+        return FailureClass.TEST_FAILURE
     private_attr_signal = " ".join(
         part
         for part in (reason_lower, combined_lower, step_lower)

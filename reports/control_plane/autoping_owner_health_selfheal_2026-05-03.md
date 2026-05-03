@@ -55,6 +55,32 @@ waves, and authorized control-surface maintenance packets derive the same
 wave-bound `FOUNDER_OVERRIDE:<wave_id>` token that L4 enabler packets already
 derive.
 
+## CI Repair Follow-Up
+
+PR #859 CI failed after commit on the `python-only` green gate. The failed
+GitHub Actions log showed
+`tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_ensure_codex_autoping_restarts_live_watcher_when_tmux_window_missing`
+failing at `tests/tools/test_recovery_gate.py:6768` because the launcher printed
+`recorded pid=... is live but not this autoping watcher` instead of the expected
+`AUTO-PING window missing` recovery path.
+
+This follow-up keeps the same wave authority and stages only the CI-repair
+scope:
+
+- `mu/tests/tools/test_commit_executor_receipt.py`
+- `mu/tests/tools/test_recovery_gate.py`
+- `mu/tools/executors/commit_executor.py`
+- `mu/tools/executors/recovery_gate.py`
+- `mu/tools/session/ensure_codex_autoping.sh`
+- `reports/control_plane/autoping_owner_health_selfheal_2026-05-03.md`
+- `reports/l4_wave_indicators/autoping-owner-health-selfheal-2026-05-03.json`
+
+The repair is mechanical, not just manual: the autoping PID identity check now
+uses Linux `/proc/<pid>/cmdline` before falling back to wide `ps`, commit
+executor `wait_ci` failures now carry failed required-check/log excerpts, and
+recovery classification honors explicit `test_failure` payloads so future
+required-CI failures can route to test recovery with diagnostic evidence.
+
 ## Validation
 
 - `bash -n mu/tools/session/ensure_codex_autoping.sh`
@@ -80,7 +106,7 @@ derive.
 - Indicator artifact: `reports/l4_wave_indicators/autoping-owner-health-selfheal-2026-05-03.json`
 - Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before pre-commit supervisor review so the tracker note, Gate 8 package, and governing packet describe one staged scope.
 - Scope binding: no indicator file other than the artifact above is in scope for this wave.
-- Current staged files:
+- Original Phase B staged files:
   - `TASKS.md`
   - `mu/tests/tools/test_phase_b_executor.py`
   - `mu/tests/tools/test_recovery_gate.py`
