@@ -31,7 +31,7 @@ The wave may update only the minimal tracker, report, index, or packet text need
 ## Work Items
 
 1. TASKS current-phase mapping.
-   - Use `TASKS.md:392-397` as the task authorization source for `[NEXT-CODEX-POST-REDTEAM]`.
+   - Use `TASKS.md:393-398` as the task authorization source for `[NEXT-CODEX-POST-REDTEAM]`.
    - Preserve the task as open only for future bounded structural reduction not proven by current code.
    - Do not treat old control-surface packets that reused this task id as substantive closure evidence.
 
@@ -84,11 +84,11 @@ Stop and request split authorization if any of these occur:
 
 ## Grounding / Authorization
 
-- `TASKS.md:392` authorizes `[NEXT-CODEX-POST-REDTEAM]` as **UNPARKED** and founder-authorized on 2026-03-28.
-- `TASKS.md:393` identifies the structural follow-on queue as `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
-- `TASKS.md:394-395` sets the sequence as Phase A through Phase D and keeps the current phase **OPEN** because remaining structural reduction requires separate bounded packets.
-- `TASKS.md:396` records that PR #701 landed the Phase A structural gap sweep packet/evidence artifacts and that the follow-on engine-state/scheduler reduction slice is now present; those seed, fixture, structural-test, scheduler-parity, and seed-registration items must not be relisted as unresolved.
-- `TASKS.md:397` classifies the lane as structural, post-control-surface.
+- `TASKS.md:393` authorizes `[NEXT-CODEX-POST-REDTEAM]` as **UNPARKED** and founder-authorized on 2026-03-28.
+- `TASKS.md:394` identifies the structural follow-on queue as `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
+- `TASKS.md:395-396` sets the sequence as Phase A through Phase D and keeps the current phase **OPEN** because remaining structural reduction requires separate bounded packets.
+- `TASKS.md:397` records that PR #701 landed the Phase A structural gap sweep packet/evidence artifacts and that the follow-on engine-state/scheduler reduction slice is now present; those seed, fixture, structural-test, scheduler-parity, and seed-registration items must not be relisted as unresolved.
+- `TASKS.md:398` classifies the lane as structural, post-control-surface.
 - Governing packet for this wave: `reports/control_plane/tasks-deferred-code-truth-cleanup-2026-05-03_2026-05-03.md`.
 - Control-surface authorization: `FOUNDER_OVERRIDE:tasks-deferred-code-truth-cleanup-2026-05-03`.
 
@@ -101,8 +101,8 @@ changed.
 Tracker evidence:
 
 - `[NEXT-CODEX-POST-REDTEAM]` was not closed. `nl -ba TASKS.md | sed -n
-  '392,397p'` shows the task remains UNPARKED/OPEN only for future bounded
-  structural work, while `TASKS.md:396` excludes PR #701 Phase A artifacts and
+  '393,398p'` shows the task remains UNPARKED/OPEN only for future bounded
+  structural work, while `TASKS.md:397` excludes PR #701 Phase A artifacts and
   the landed engine-state/scheduler slice from unresolved work.
 - Closed-parent exclusions were grounded by `nl -ba TASKS.md | sed -n
   '277,287p'` for `[PIPELINE-AGENT-PAGER]` and by `nl -ba TASKS.md | sed -n
@@ -140,7 +140,7 @@ Control-plane evidence:
   landed downstream slice.
 - `reports/control_plane/post_redteam_engine_state_scheduler_reduction_2026-04-30_2026-04-30.md:4,16-25,54-69,181-195`
   marks the F-1/F-2 engine-state/scheduler packet as landed/historical and binds
-  current truth to `TASKS.md:392-397`.
+  current truth to `TASKS.md:393-398`.
 - `reports/control_plane/parallel_pipeline_bus_namespacing_2026-04-29.md:93-100`,
   `reports/control_plane/parallel_pipeline_monitor_identity_2026-04-30.md:16-50,217-245`,
   and `reports/control_plane/parallel_pipeline_agent_teams_2026-04-30.md:61-64`
