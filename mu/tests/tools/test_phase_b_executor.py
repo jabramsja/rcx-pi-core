@@ -816,6 +816,35 @@ class TestPrepareCommitHandoff:
         assert "Class: L4_ENABLER" in note
         assert "FOUNDER_OVERRIDE:parallel-pipeline-monitor-identity-2026-04-30" in note
 
+    def test_build_phase_b_tracker_note_derives_authorized_control_surface_maintenance_override(self):
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            wave_id="autoping-owner-health-selfheal-2026-05-03",
+            task_id="[PIPELINE-AUTOPING]",
+            wave_class="MAINTENANCE",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/autoping_owner_health_selfheal_2026-05-03.md",
+            plan_content=(
+                "# Autoping Owner Health Self-Heal\n"
+                "Wave ID: autoping-owner-health-selfheal-2026-05-03\n"
+                "Phase-A-Lock: LOCKED\n"
+                "Lane: control-surface\n"
+                "Authorization: standing pipeline-bug-fix authorization for bounded pipeline hardening.\n"
+            ),
+            changed_files=[
+                "mu/tools/observability/pipeline_monitor.sh",
+                "mu/tests/tools/test_recovery_gate.py",
+                "reports/control_plane/autoping_owner_health_selfheal_2026-05-03.md",
+            ],
+            test_files=["mu/tests/tools/test_recovery_gate.py"],
+            receipt_path=".agent_bus/meta/pre_commit_receipts/r.json",
+            bridge_rounds=2,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        assert "Class: MAINTENANCE" in note
+        assert "FOUNDER_OVERRIDE:autoping-owner-health-selfheal-2026-05-03" in note
+
     def test_build_phase_b_tracker_note_does_not_derive_from_control_surface_lane_only(self):
         note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
             wave_id="unauthorized-control-surface-wave",
@@ -1747,6 +1776,66 @@ class TestMaintenanceTrackerMetadataPropagation:
             tracker_note_modified=False,
             founder_override_token=f"FOUNDER_OVERRIDE:{wave_id}",
             changed_files=["TASKS.md", "mu/tools/executors/phase_b_executor.py"],
+        ) is False
+
+    def test_l4_indicator_collection_includes_maintenance_tracker_notes(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+        wave_id = "autoping-owner-health-selfheal-2026-05-03"
+        changed_files = [
+            "mu/tools/observability/pipeline_monitor.sh",
+            "mu/tests/tools/test_recovery_gate.py",
+        ]
+        tracker_note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B indicator recovery predicate
+            wave_id=wave_id,
+            task_id="[PIPELINE-AUTOPING]",
+            wave_class="MAINTENANCE",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/autoping_owner_health_selfheal_2026-05-03.md",
+            plan_content=(
+                "Wave ID: autoping-owner-health-selfheal-2026-05-03\n"
+                "Phase-A-Lock: LOCKED\n"
+                "Lane: control-surface\n"
+                "Authorization: standing pipeline-bug-fix authorization for bounded pipeline hardening.\n"
+            ),
+            changed_files=changed_files,
+            test_files=["mu/tests/tools/test_recovery_gate.py"],
+            receipt_path=".agent_bus/meta/pre_commit_receipts/r.json",
+            bridge_rounds=2,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        tracker_error, tracker_modified = pb_mod._sync_phase_b_tasks_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker binding helper
+            repo,
+            wave_id=wave_id,
+            tracker_note_text=tracker_note,
+        )
+
+        assert tracker_error is None
+        assert tracker_modified is True
+        assert f"FOUNDER_OVERRIDE:{wave_id}" in (repo / "TASKS.md").read_text(encoding="utf-8")
+        assert pb_mod._should_collect_l4_indicator_artifact(  # ANTICHEAT_OK: testing Phase B indicator recovery predicate
+            repo,
+            wave_id=wave_id,
+            wave_class="MAINTENANCE",
+            tracker_note_modified=False,
+            founder_override_token=f"FOUNDER_OVERRIDE:{wave_id}",
+            changed_files=[*changed_files, "TASKS.md"],
+        ) is True
+
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        indicator_file = repo / indicator_path
+        indicator_file.parent.mkdir(parents=True, exist_ok=True)
+        indicator_file.write_text(json.dumps({"wave_id": wave_id}) + "\n", encoding="utf-8")
+        assert pb_mod._should_collect_l4_indicator_artifact(  # ANTICHEAT_OK: testing Phase B indicator recovery predicate
+            repo,
+            wave_id=wave_id,
+            wave_class="MAINTENANCE",
+            tracker_note_modified=False,
+            founder_override_token="",
+            changed_files=[*changed_files, "TASKS.md", indicator_path],
         ) is False
 
     def test_phase_b_indicator_scope_refresh_reconciles_packet_contradictions(self, tmp_path):
