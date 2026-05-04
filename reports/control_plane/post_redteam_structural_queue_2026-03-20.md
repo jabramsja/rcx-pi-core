@@ -15,18 +15,42 @@ control-surface/meta-bridge rollout (all 7 rollout steps complete)
   - Claude has explicit repo-local executors for Phase A, Phase B, and commit flow ✓
   - pipeline proven end-to-end (9 PRs, #673-#681) ✓
 - Current phase: OPEN only for future bounded structural-reduction packets not
-  already proven by landed work. `TASKS.md:395-396` records that PR #701 landed
-  the Phase A structural gap sweep packet/evidence artifacts and that the first
-  downstream `post-redteam-engine-state-scheduler-reduction-2026-04-30` slice has
-  also landed.
+  already proven by landed work. The `TASKS.md` `[NEXT-CODEX-POST-REDTEAM]`
+  entry records that PR #701 landed the Phase A structural gap sweep
+  packet/evidence artifacts and that the first downstream
+  `post-redteam-engine-state-scheduler-reduction-2026-04-30` slice has also
+  landed.
 - Canonical historical Phase A sweep packet:
   `reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md`
   (bridge-converged findings/evidence record). Do not read its old F-1/F-2
-  "missing artifact" findings as current unresolved work after `TASKS.md:396`
-  records the engine-state/scheduler slice as landed.
+  "missing artifact" findings as current unresolved work after the `TASKS.md`
+  `[NEXT-CODEX-POST-REDTEAM]` entry records the engine-state/scheduler slice as
+  landed.
 - Old control-surface packets that reused `[NEXT-CODEX-POST-REDTEAM]` as a
   procedural Gate 8 anchor are not substantive closure evidence for this
   structural queue.
+
+## Immediate pre-production gates
+
+1. `deferred-findings-fix-sweep-2026-05-04`
+   (`reports/control_plane/deferred_findings_fix_sweep_2026-05-04.md`)
+   runs first. It fixes or routes blocker/non-blocker findings in
+   `reports/deferred/blocking/`, `reports/deferred/non_blocking/`,
+   `reports/l4_wave_indicators/`, and `reports/control_plane/`. Stale or
+   code-closed findings must be checked against current code/tests/command
+   evidence, then moved to the appropriate archive or resolved lane instead of
+   remaining in active finding folders.
+2. `mu-preproduction-redteam-2026-05-04`
+   (`reports/control_plane/mu_preproduction_redteam_2026-05-04.md`) runs after
+   the deferred findings sweep. It red-teams all production-relevant `/mu` code
+   and proof surfaces: Python, JavaScript, Stage0/lowering/runtime paths,
+   seeds/registries, tests, tooling, and docs. Blockers route to
+   `reports/deferred/blocking/`; non-blockers route to
+   `reports/deferred/non_blocking/`.
+
+Production-forward movement is blocked until both gates are complete or any
+remaining findings are explicitly routed with evidence and founder-visible
+status.
 
 ## Governing sequence
 
