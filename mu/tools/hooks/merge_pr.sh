@@ -281,16 +281,18 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-case "$SWEEP_COUNT" in
-    ''|*[!0-9]*)
+if [ -n "$FLAG" ]; then
+    case "$SWEEP_COUNT" in
+        ''|*[!0-9]*)
+            echo "--sweep-count must be a positive integer"
+            exit 1
+            ;;
+    esac
+
+    if [ "$SWEEP_COUNT" -lt 1 ]; then
         echo "--sweep-count must be a positive integer"
         exit 1
-        ;;
-esac
-
-if [ "$SWEEP_COUNT" -lt 1 ]; then
-    echo "--sweep-count must be a positive integer"
-    exit 1
+    fi
 fi
 
 if [ "$FLAG" = "--sweep-only" ]; then
