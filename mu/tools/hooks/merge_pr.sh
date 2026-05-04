@@ -3,14 +3,15 @@
 #
 # Usage:
 #   ./tools/hooks/merge_pr.sh <PR_NUM>              # Merge + post-merge check (target PR only)
-#   ./tools/hooks/merge_pr.sh <PR_NUM> --sweep      # Merge + sweep last 10 merged PRs
-#   ./tools/hooks/merge_pr.sh <PR_NUM> --sweep-only # Skip merge, just sweep recent PRs
+#   ./tools/hooks/merge_pr.sh <PR_NUM> --sweep      # Merge + sweep recent merged PRs (default 10)
+#   ./tools/hooks/merge_pr.sh <PR_NUM> --sweep-only # Skip merge, just sweep recent PRs (default 10)
+#   ./tools/hooks/merge_pr.sh <PR_NUM> --sweep-only --sweep-count 15
 #
 # What it does:
 #   1. Pre-merge: resolve bot-authored unresolved threads (warns on human threads)
 #   2. Merge: gh pr merge --merge --delete-branch --admin
 #   3. Post-merge: wait 30s, re-check for late-arriving bot threads, resolve them
-#   4. Sweep (opt-in via --sweep): check last 10 merged PRs for bot threads
+#   4. Sweep (opt-in via --sweep): check recent merged PRs for bot threads
 #
 # POLICY NOTE: The sweep (Step 4) resolves bot threads on PRs beyond the target.
 # This is safe under the repo policy that merged bot threads are clerical residue.
@@ -27,7 +28,7 @@ set -euo pipefail
 REPO_OWNER="jabramsja"
 REPO_NAME="rcx-pi-core"
 GH_REPO="${REPO_OWNER}/${REPO_NAME}"
-SWEEP_COUNT=10
+SWEEP_COUNT="${MERGE_PR_SWEEP_COUNT:-10}"
 POST_MERGE_WAIT=75
 # Derive repo root from script location (mu/tools/hooks/merge_pr.sh),
 # not from cwd — the caller may set cwd outside the repo.
@@ -242,12 +243,55 @@ extract_sweep_findings() {
 # ---------------------------------------------------------------------------
 
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 <PR_NUM> [--sweep | --sweep-only]"
+    echo "Usage: $0 <PR_NUM> [--sweep | --sweep-only] [--sweep-count N]"
     exit 1
 fi
 
 PR_NUM="$1"
-FLAG="${2:-}"
+shift
+FLAG=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --sweep|--sweep-only)
+            if [ -n "$FLAG" ]; then
+                echo "Usage: $0 <PR_NUM> [--sweep | --sweep-only] [--sweep-count N]"
+                echo "Only one sweep mode may be provided."
+                exit 1
+            fi
+            FLAG="$1"
+            ;;
+        --sweep-count)
+            if [ $# -lt 2 ]; then
+                echo "--sweep-count requires a positive integer"
+                exit 1
+            fi
+            SWEEP_COUNT="$2"
+            shift
+            ;;
+        --sweep-count=*)
+            SWEEP_COUNT="${1#--sweep-count=}"
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            echo "Usage: $0 <PR_NUM> [--sweep | --sweep-only] [--sweep-count N]"
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+case "$SWEEP_COUNT" in
+    ''|*[!0-9]*)
+        echo "--sweep-count must be a positive integer"
+        exit 1
+        ;;
+esac
+
+if [ "$SWEEP_COUNT" -lt 1 ]; then
+    echo "--sweep-count must be a positive integer"
+    exit 1
+fi
 
 if [ "$FLAG" = "--sweep-only" ]; then
     echo "=== Sweep-only mode ==="

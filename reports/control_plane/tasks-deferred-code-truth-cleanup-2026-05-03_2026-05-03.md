@@ -175,6 +175,7 @@ Validation results:
 - Current staged files:
   - `TASKS.md`
   - `reports/control_plane/README.md`
+  - `reports/control_plane/deferred-report-truth-doc-accuracy-closeout-2026-05-03_2026-05-03.md`
   - `reports/control_plane/deferred_consolidation_e5_e6_closeout_2026-04-30.md`
   - `reports/control_plane/deferred_d1_dialectic_max_rounds_2026-04-30.md`
   - `reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md`
@@ -215,12 +216,13 @@ Validation results:
 - Tracker note sha256: `f292857a6690d836f7c05b7037fcddf0059ef2af1d79702dacd5eea84fb43c5f`
 - Indicator artifact: `reports/l4_wave_indicators/tasks-deferred-code-truth-cleanup-2026-05-03.json`
 - Evidence command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id tasks-deferred-code-truth-cleanup-2026-05-03 --output reports/l4_wave_indicators/tasks-deferred-code-truth-cleanup-2026-05-03.json`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/tasks-deferred-code-truth-cleanup-2026-05-03_2026-05-03.md. (2) Commit handoff carries 20 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface..
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/tasks-deferred-code-truth-cleanup-2026-05-03_2026-05-03.md. (2) Commit handoff carries 21 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package; PR #860 diff evidence includes `reports/control_plane/deferred-report-truth-doc-accuracy-closeout-2026-05-03_2026-05-03.md`. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/tasks-deferred-code-truth-cleanup-2026-05-03.json`
 - Current staged files:
   - `TASKS.md`
   - `reports/control_plane/README.md`
+  - `reports/control_plane/deferred-report-truth-doc-accuracy-closeout-2026-05-03_2026-05-03.md`
   - `reports/control_plane/deferred_consolidation_e5_e6_closeout_2026-04-30.md`
   - `reports/control_plane/deferred_d1_dialectic_max_rounds_2026-04-30.md`
   - `reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md`
