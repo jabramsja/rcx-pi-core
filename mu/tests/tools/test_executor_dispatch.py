@@ -60,6 +60,101 @@ def mock_routing_record():
         yield
 
 
+def _copy_merge_pr_script(tmp_path: Path) -> Path:
+    script = tmp_path / "mu" / "tools" / "hooks" / "merge_pr.sh"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    source = REPO_ROOT / "mu" / "tools" / "hooks" / "merge_pr.sh"
+    script.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    script.chmod(0o755)
+    return script
+
+
+def _install_fake_gh(tmp_path: Path) -> tuple[Path, Path]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "gh-args.log"
+    gh = bin_dir / "gh"
+    gh.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+: "${GH_ARG_LOG:?}"
+printf '%s\\n' "$*" >> "$GH_ARG_LOG"
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "list" ]; then
+    exit 0
+fi
+if [ "${1:-}" = "api" ]; then
+    printf '%s\\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]},"comments":{"nodes":[]}}}}}'
+    exit 0
+fi
+exit 1
+""",
+        encoding="utf-8",
+    )
+    gh.chmod(0o755)
+    return bin_dir, log_path
+
+
+def _run_merge_pr_sweep(
+    tmp_path: Path,
+    args: list[str],
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    script = _copy_merge_pr_script(tmp_path)
+    bin_dir, log_path = _install_fake_gh(tmp_path)
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env["GH_ARG_LOG"] = str(log_path)
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run(
+        ["bash", str(script), "860", *args],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+class TestMergePrSweepCount:
+    """merge_pr.sh sweep count parsing stays explicit and default-preserving."""
+
+    def test_sweep_only_preserves_default_count_of_10(self, tmp_path):
+        result = _run_merge_pr_sweep(tmp_path, ["--sweep-only"])
+
+        assert result.returncode == 0, result.stderr
+        assert "Sweeping last 10 merged PRs" in result.stdout
+        assert "--limit 10" in (tmp_path / "gh-args.log").read_text(encoding="utf-8")
+
+    @pytest.mark.parametrize(
+        ("args", "expected_count"),
+        [
+            (["--sweep-only", "--sweep-count", "15"], "15"),
+            (["--sweep-only", "--sweep-count=15"], "15"),
+        ],
+    )
+    def test_sweep_count_overrides_default(self, tmp_path, args, expected_count):
+        result = _run_merge_pr_sweep(tmp_path, args)
+
+        assert result.returncode == 0, result.stderr
+        assert f"Sweeping last {expected_count} merged PRs" in result.stdout
+        assert f"--limit {expected_count}" in (tmp_path / "gh-args.log").read_text(encoding="utf-8")
+
+    def test_environment_sweep_count_overrides_default(self, tmp_path):
+        result = _run_merge_pr_sweep(tmp_path, ["--sweep-only"], {"MERGE_PR_SWEEP_COUNT": "12"})
+
+        assert result.returncode == 0, result.stderr
+        assert "Sweeping last 12 merged PRs" in result.stdout
+        assert "--limit 12" in (tmp_path / "gh-args.log").read_text(encoding="utf-8")
+
+    @pytest.mark.parametrize("bad_count", ["0", "abc", ""])
+    def test_sweep_count_rejects_non_positive_integer_values(self, tmp_path, bad_count):
+        result = _run_merge_pr_sweep(tmp_path, ["--sweep-only", f"--sweep-count={bad_count}"])
+
+        assert result.returncode == 1
+        assert "--sweep-count must be a positive integer" in result.stdout
+
+
 # ===========================================================================
 # Dispatcher tests (Slice 1)
 # ===========================================================================
