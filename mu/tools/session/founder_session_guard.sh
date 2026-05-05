@@ -105,7 +105,7 @@ case "$MODE" in
             "PYTHONHASHSEED=0 python3 -m pytest mu/tests/l4_gates/test_lower_stage0.py -q"
             "PYTHONHASHSEED=0 python3 -m pytest mu/tests/l4_gates/test_stage0_vm_cutover.py -q"
             "python3 tools/checks/check_simulated_production_logic.py"
-            "python3 tools/checks/check_gate_behavioral_pairs.py"
+            "python3 tools/checks/check_gate_behavioral_pairs.py --fail-on-theater"
             "./mu/tools/checks/check_test_theater.sh"
             "./mu/tools/checks/check_test_theater_js.sh"
             "./mu/tools/checks/linters/seed_police.sh"

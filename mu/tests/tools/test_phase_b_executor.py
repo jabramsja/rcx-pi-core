@@ -1113,6 +1113,33 @@ class TestLoadPlanPacketPathTraversal:
         assert pb_mod._parse_plan_wave_class(content) == "L4_STRUCTURAL"  # ANTICHEAT_OK: testing packet metadata parser
         assert pb_mod._parse_plan_target_gate_id(content) == "G9"  # ANTICHEAT_OK: testing packet metadata parser
 
+    def test_resolve_phase_b_wave_class_prefers_locked_packet_over_stale_routing(self):
+        content = (
+            "# Plan\n"
+            "Class: L4_ENABLER\n"
+        )
+
+        assert pb_mod._resolve_phase_b_wave_class(  # ANTICHEAT_OK: testing package metadata authority
+            {"wave_class": "L4_STRUCTURAL"},
+            content,
+        ) == "L4_ENABLER"
+
+    def test_resolve_phase_b_wave_class_ignores_later_narrative_class(self):
+        content = (
+            "# Plan\n"
+            "Wave ID: structural-wave\n"
+            "Phase-A-Lock: LOCKED\n"
+            "\n"
+            "## Narrative\n"
+            "- Class: L4_ENABLER\n"
+        )
+
+        assert pb_mod._parse_plan_wave_class(content) == ""  # ANTICHEAT_OK: testing packet metadata parser
+        assert pb_mod._resolve_phase_b_wave_class(  # ANTICHEAT_OK: testing package metadata authority
+            {"wave_class": "L4_STRUCTURAL"},
+            content,
+        ) == "L4_STRUCTURAL"
+
     def test_header_metadata_wins_over_later_narrative_bullets(self, tmp_path):
         """Canonical header metadata must not be overwritten by later bullets."""
         repo = tmp_path / "repo"
@@ -2206,7 +2233,8 @@ class TestMaintenanceTrackerMetadataPropagation:
             "Status: ACTIVE\n"
             "Task: [NEXT-CODEX-POST-REDTEAM]\n"
             "Class: L4_STRUCTURAL\n"
-            "Target Gate: G8\n",
+            "Target Gate: G8\n"
+            "FOUNDER_OVERRIDE:structural-wave-2026-04-30\n",
             encoding="utf-8",
         )
         mock_impl = _make_mock_impl()
@@ -2271,11 +2299,207 @@ class TestMaintenanceTrackerMetadataPropagation:
 
         assert result["status"] == "commit_ready"
         assert captured_package["wave_class"] == "L4_STRUCTURAL"
+        assert "founder_override_token" not in captured_package
         assert staged_extra in captured_package["changed_files"]
         assert staged_extra not in captured_package["fenced_files"]
         assert unstaged_fenced in captured_package["fenced_files"]
         assert staged_extra in mock_handoff.call_args.kwargs["files_to_stage"]
         assert mock_handoff.call_args.kwargs["wave_class"] == "L4_STRUCTURAL"
+
+    def test_run_phase_b_package_prefers_reclassified_packet_over_stale_routing_class(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+        wave_id = "mu-preproduction-redteam-2026-05-04"
+        plan_path = "reports/control_plane/mu_preproduction_redteam_2026-05-04.md"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            f"Wave ID: {wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Task: [NEXT-CODEX-POST-REDTEAM]\n"
+            "Class: L4_ENABLER\n"
+            "Target Gate: G8\n"
+            f"FOUNDER_OVERRIDE:{wave_id}\n",
+            encoding="utf-8",
+        )
+        mock_impl = _make_mock_impl()
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "wave_name": wave_id,
+            "wave_class": "L4_STRUCTURAL",
+            "target_gate_id": "G8",
+        }
+        wave_owned = [
+            "TASKS.md",
+            "mu/tools/executors/phase_b_executor.py",
+            "mu/tests/tools/test_phase_b_executor.py",
+            plan_path,
+        ]
+        captured_package: dict[str, object] = {}
+
+        def _capture_supervisor_package(repo_root, package_path, **_kwargs):
+            captured_package.update(json.loads(package_path.read_text(encoding="utf-8")))
+            return {
+                "exit_code": 0,
+                "parsed": {
+                    "decision": "COMMIT_GO",
+                    "summary": "",
+                    "status": "success",
+                    "findings": [],
+                },
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=wave_owned), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=wave_owned), \
+             patch.object(
+                 pb_mod,
+                 "_run_pytest_on_files",
+                 return_value={
+                     "exit_code": 0,
+                     "passed": True,
+                     "stdout": "",
+                     "stderr": "",
+                 },
+             ), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(
+                 pb_mod,
+                 "run_bridge_review",
+                 return_value={
+                     "exit_code": 0,
+                     "stdout": "GO\n",
+                     "stderr": "",
+                     "decision": "GO",
+                     "job_id": "j1",
+                 },
+             ), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=False), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=_capture_supervisor_package), \
+             patch.object(
+                 pb_mod,
+                 "prepare_commit_handoff",
+                 return_value=repo / ".agent_bus" / "handoff.json",
+             ) as mock_handoff:
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert captured_package["wave_class"] == "L4_ENABLER"
+        assert captured_package["founder_override_token"] == f"FOUNDER_OVERRIDE:{wave_id}"
+        assert mock_handoff.call_args.kwargs["wave_class"] == "L4_ENABLER"
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        assert "Class: L4_ENABLER" in tasks_text
+        assert "host_semantics_delta_before:" not in tasks_text
+        assert "with 4 wave-owned file(s)" in tasks_text
+
+    def test_run_phase_b_package_refreshes_live_packet_class_after_implementer_edit(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+        wave_id = "mu-preproduction-redteam-2026-05-04"
+        plan_path = "reports/control_plane/mu_preproduction_redteam_2026-05-04.md"
+
+        def packet_text(wave_class: str) -> str:
+            return (
+                "# Plan\n"
+                f"Wave ID: {wave_id}\n"
+                "Phase-A-Lock: LOCKED\n"
+                "Status: ACTIVE\n"
+                "Task: [NEXT-CODEX-POST-REDTEAM]\n"
+                f"Class: {wave_class}\n"
+                "Target Gate: G8\n"
+                f"FOUNDER_OVERRIDE:{wave_id}\n"
+            )
+
+        (repo / plan_path).write_text(packet_text("L4_STRUCTURAL"), encoding="utf-8")
+        mock_impl = _make_mock_impl()
+        impl_success = dict(mock_impl.invoke_implementer.return_value)
+
+        def _reclassify_packet(*_args, **_kwargs):
+            (repo / plan_path).write_text(packet_text("L4_ENABLER"), encoding="utf-8")
+            return impl_success
+
+        mock_impl.invoke_implementer.side_effect = _reclassify_packet
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "wave_name": wave_id,
+            "wave_class": "L4_STRUCTURAL",
+            "target_gate_id": "G8",
+        }
+        wave_owned = [
+            "TASKS.md",
+            "mu/tools/executors/phase_b_executor.py",
+            "mu/tests/tools/test_phase_b_executor.py",
+            plan_path,
+        ]
+        captured_package: dict[str, object] = {}
+
+        def _capture_supervisor_package(repo_root, package_path, **_kwargs):
+            captured_package.update(json.loads(package_path.read_text(encoding="utf-8")))
+            return {
+                "exit_code": 0,
+                "parsed": {
+                    "decision": "COMMIT_GO",
+                    "summary": "",
+                    "status": "success",
+                    "findings": [],
+                },
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=wave_owned), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=wave_owned), \
+             patch.object(
+                 pb_mod,
+                 "_run_pytest_on_files",
+                 return_value={
+                     "exit_code": 0,
+                     "passed": True,
+                     "stdout": "",
+                     "stderr": "",
+                 },
+             ), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(
+                 pb_mod,
+                 "run_bridge_review",
+                 return_value={
+                     "exit_code": 0,
+                     "stdout": "GO\n",
+                     "stderr": "",
+                     "decision": "GO",
+                     "job_id": "j1",
+                 },
+             ), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=False), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=_capture_supervisor_package), \
+             patch.object(
+                 pb_mod,
+                 "prepare_commit_handoff",
+                 return_value=repo / ".agent_bus" / "handoff.json",
+             ) as mock_handoff:
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready"
+        assert captured_package["wave_class"] == "L4_ENABLER"
+        assert captured_package["founder_override_token"] == f"FOUNDER_OVERRIDE:{wave_id}"
+        assert mock_handoff.call_args.kwargs["wave_class"] == "L4_ENABLER"
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        assert "Class: L4_ENABLER" in tasks_text
+        assert "Class: L4_STRUCTURAL" not in tasks_text
 
     def test_packet_documented_bridge_round_floor_bounds_tasks_scan_to_current_entry(self, tmp_path):
         repo = tmp_path / "repo"
@@ -6664,6 +6888,127 @@ class TestResumeNeedsPhaseB:
         # Should reach commit_ready (not error or supervisor_rejected)
         assert result["status"] == "commit_ready", f"Expected commit_ready, got {result}"
 
+    def test_resume_from_needs_phase_b_reentry_honors_post_implementer_checkpoint(self, tmp_path):
+        """A saved post-implementer checkpoint reviews current fixes without re-running them."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+        (repo / ".scratch").mkdir()
+
+        state_dir = repo / ".agent_bus" / "executors"
+        state_dir.mkdir(parents=True)
+        changed_files = ["mu/tools/executors/foo.py"]
+        (state_dir / "phase_b_state.json").write_text(json.dumps({
+            "plan_path": "reports/control_plane/plan.md",
+            "completed_step": "needs_phase_b_reentry",
+            "wave_id": "plan",
+            "bridge_rounds": 1,
+            "bridge_scope_fingerprint": pb_mod._bridge_scope_fingerprint(repo, changed_files),  # ANTICHEAT_OK: testing internal executor functions
+            "deferred_packet_path": None,
+            "implementer_changed": changed_files,
+            "executor_created": [],
+            "all_non_blocking": [],
+            "reentry_findings": "Already fixed; review only",
+            "skip_reentry_implementer_once": True,
+        }))
+
+        mock_impl = _make_mock_impl()
+        mock_impl.invoke_implementer.side_effect = AssertionError(
+            "post-implementer re-entry checkpoint should not re-run implementer"
+        )
+        bridge_calls = [0]
+
+        def bridge_side(*a, **kw):
+            bridge_calls[0] += 1
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": f"j-reentry-{bridge_calls[0]}",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result.get("resumed_from") == "needs_phase_b_reentry"
+        assert mock_impl.invoke_implementer.call_count == 0
+        assert bridge_calls[0] >= 1
+        assert result["status"] == "commit_ready", f"Expected commit_ready, got {result}"
+
+    def test_resume_from_legacy_post_implementer_checkpoint_at_max_round_reviews_before_result(self, tmp_path):
+        """Legacy post-implementer checkpoints at the max round must not skip review or crash."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+        (repo / ".scratch").mkdir()
+
+        state_dir = repo / ".agent_bus" / "executors"
+        state_dir.mkdir(parents=True)
+        changed_files = ["mu/tools/executors/foo.py"]
+        (state_dir / "phase_b_state.json").write_text(json.dumps({
+            "plan_path": "reports/control_plane/plan.md",
+            "completed_step": "needs_phase_b_reentry",
+            "wave_id": "plan",
+            "bridge_rounds": 5,
+            "bridge_scope_fingerprint": pb_mod._bridge_scope_fingerprint(repo, changed_files),  # ANTICHEAT_OK: testing internal executor functions
+            "deferred_packet_path": None,
+            "implementer_changed": changed_files,
+            "executor_created": [],
+            "all_non_blocking": [],
+            "reentry_findings": "Already fixed at max round; review only",
+            "skip_reentry_implementer_once": True,
+        }))
+
+        mock_impl = _make_mock_impl()
+        mock_impl.invoke_implementer.side_effect = AssertionError(
+            "legacy post-implementer checkpoint should review before invoking implementer"
+        )
+        bridge_calls = [0]
+
+        def bridge_side(*a, **kw):
+            bridge_calls[0] += 1
+            state_at_review = json.loads((state_dir / "phase_b_state.json").read_text(encoding="utf-8"))
+            assert state_at_review.get("skip_reentry_implementer_once") is True
+            assert state_at_review.get("bridge_rounds") == 5
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": kw.get("job_id", f"j-reentry-{bridge_calls[0]}"),
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result.get("resumed_from") == "needs_phase_b_reentry"
+        assert mock_impl.invoke_implementer.call_count == 0
+        assert bridge_calls[0] == 1
+        assert result["status"] == "commit_ready", f"Expected commit_ready, got {result}"
+
     def test_reentry_repeat_cap_fails_closed(self, tmp_path):
         """Re-entry REQUEST_CHANGES must honor REPEAT_FINDING_CAP like the initial loop."""
         repo = tmp_path / "repo"
@@ -8242,6 +8587,64 @@ class TestReentryRequestChangesCheckpointsState:
         assert "NEW_BRIDGE_FINDINGS" in str(latest["reentry_findings"]) or "BLOCKING" in str(latest["reentry_findings"]), (
             f"Re-entry checkpoint has stale findings: {latest['reentry_findings']}"
         )
+
+    def test_reentry_success_checkpoints_skip_before_next_review(self, tmp_path):
+        """A successful re-entry implementer pass must survive crashes before bridge review."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+
+        mock_impl = _make_mock_impl()
+        bridge_calls = [0]
+
+        def bridge_side(*a, **kw):
+            bridge_calls[0] += 1
+            if bridge_calls[0] == 1:
+                return {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "init"}
+            if bridge_calls[0] == 2:
+                return {
+                    "exit_code": 1,
+                    "stdout": "REQUEST_CHANGES\n",
+                    "stderr": "",
+                    "decision": "REQUEST_CHANGES",
+                    "job_id": "re1",
+                }
+            raise RuntimeError("crash after re-entry implementer checkpoint")
+
+        saved_states = []
+        original_save = pb_mod._save_state  # ANTICHEAT_OK: testing internal executor functions
+
+        def capturing_save(rr, state):
+            saved_states.append(state.copy())
+            return original_save(rr, state)
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["f.py", "fixed.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["f.py", "fixed.py"]), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "_save_state", side_effect=capturing_save), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "NEEDS_PHASE_B", "summary": "OLD_SUPERVISOR_FINDINGS", "status": "ok", "findings": []},
+                 "receipt_path": "",
+             }):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=10)
+
+        assert result["status"] == "error"
+        assert result["step"] == "phase_b_pager"
+        implemented_checkpoints = [
+            s for s in saved_states
+            if s.get("completed_step") == "needs_phase_b_reentry"
+            and s.get("skip_reentry_implementer_once") is True
+        ]
+        assert implemented_checkpoints, f"Expected durable post-implementer checkpoint. States: {saved_states}"
+        latest = implemented_checkpoints[-1]
+        assert latest["reentry_findings"]
+        assert latest["bridge_scope_fingerprint"]
+        assert latest["pending_reentry_bridge_round"]
 
 
 class TestBridgeTimeoutIsError:

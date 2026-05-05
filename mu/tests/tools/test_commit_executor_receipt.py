@@ -1118,6 +1118,73 @@ class TestReceiptChainEndToEnd:
         assert error_again is None
         assert "## Same-Wave Deferred Non-Blocking Authorization" in packet_file.read_text(encoding="utf-8")
 
+    def test_commit_packet_truth_refresh_uses_documented_bridge_round_floor(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "bridge-floor-wave"
+        packet_path = "reports/control_plane/bridge_floor_wave.md"
+        deferred_path = "reports/deferred/non_blocking/bridge-floor-wave_bridge_nonblockers.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Bridge Floor Wave\n\n"
+            "Wave ID: bridge-floor-wave\n"
+            "Wave class: L4_ENABLER\n"
+            "Target gate: G8\n"
+            "Lane: control-surface\n\n"
+            "Bridge Round 3 found that the staged package still underreported the live packet.\n",
+            encoding="utf-8",
+        )
+        deferred_file = repo / deferred_path
+        deferred_file.parent.mkdir(parents=True, exist_ok=True)
+        deferred_file.write_text(
+            "# Deferred Non-Blocking Findings: bridge-floor-wave\n\n"
+            "Wave: bridge-floor-wave\n"
+            "Status: DEFERRED_NON_BLOCKING\n",
+            encoding="utf-8",
+        )
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        indicator_file = repo / indicator_path
+        indicator_file.parent.mkdir(parents=True, exist_ok=True)
+        indicator_file.write_text(json.dumps({"wave_id": wave_id}), encoding="utf-8")
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "file.py", deferred_path], cwd=repo, check=True)
+        subprocess.run(["git", "add", "-f", "--", indicator_path], cwd=repo, check=True)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path, deferred_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+            deferred_items=[deferred_path],
+            bridge_status={"rounds": 1, "total_rounds": 1},
+        )
+        handoff = {
+            **handoff,
+            "tracker_note_text": handoff["tracker_note_text"].replace(
+                "Receipt handoff now carries a canonical tracker note.",
+                "Receipt handoff now carries bridge rounds=1 and a canonical tracker note.",
+            ),
+        }
+        (repo / "TASKS.md").write_text(
+            "## Ra\n\n" + handoff["tracker_note_text"] + "\n\n---\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "--", "TASKS.md"], cwd=repo, check=True)
+
+        refreshed, _staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+        assert error is None
+        assert refreshed["bridge_status"] == {"rounds": 3, "total_rounds": 3}
+        assert "bridge rounds=3" in refreshed["tracker_note_text"]
+        assert "bridge rounds=3" in (repo / "TASKS.md").read_text(encoding="utf-8")
+
     def test_commit_packet_truth_refresh_updates_rebuilt_handoff_file_count(self, tmp_path):
         import subprocess
 
@@ -2362,7 +2429,7 @@ class TestCommitExecutorPytestGate:
             )
 
         assert result["passed"] is True
-        assert mock_run.call_args.kwargs["timeout"] == 660
+        assert mock_run.call_args.kwargs["timeout"] == 1200
 
     def test_run_pytest_on_files_gives_single_large_file_real_slack(self, tmp_path):
         from types import SimpleNamespace
@@ -2381,7 +2448,7 @@ class TestCommitExecutorPytestGate:
             )
 
         assert result["passed"] is True
-        assert mock_run.call_args.kwargs["timeout"] == 180
+        assert mock_run.call_args.kwargs["timeout"] == 240
 
     def test_run_pytest_on_files_gives_two_heavy_files_real_slack(self, tmp_path):
         from types import SimpleNamespace
@@ -2403,7 +2470,30 @@ class TestCommitExecutorPytestGate:
             )
 
         assert result["passed"] is True
-        assert mock_run.call_args.kwargs["timeout"] == 300
+        assert mock_run.call_args.kwargs["timeout"] == 480
+
+    def test_run_pytest_on_files_timeout_reports_budget(self, tmp_path):
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        with patch.object(
+            commit_mod.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["pytest"], timeout=480),
+        ):
+            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing timeout diagnostic includes computed budget
+                repo,
+                [
+                    "mu/tests/tools/test_phase_b_executor.py",
+                    "mu/tests/tools/test_recovery_gate.py",
+                ],
+            )
+
+        assert result["passed"] is False
+        assert result["exit_code"] == -1
+        assert result["stderr"] == "pytest timed out after 480s"
 
 
 class TestReviewFindingExtraction:
