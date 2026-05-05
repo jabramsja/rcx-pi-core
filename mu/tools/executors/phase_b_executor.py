@@ -1542,10 +1542,10 @@ def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
             narrative_lock_values.append(clean.split(":", 1)[1].strip())
         if clean.startswith("Status:") and "status" not in result:
             result["status"] = clean.split(":", 1)[1].strip()
-        if clean.startswith("FOUNDER_OVERRIDE:") and "founder_override" not in result:
-            founder_override = clean.split(":", 1)[1].strip()
+        if "founder_override" not in result:
+            founder_override = _extract_founder_override_from_metadata_line(line)
             if founder_override:
-                result["founder_override"] = founder_override.split()[0].strip().rstrip("`.,;")
+                result["founder_override"] = founder_override
         if (
             clean.startswith("Unblocks wave id:") or clean.startswith("unblocks_wave_id:")
         ) and "unblocks_wave_id" not in result:
@@ -1813,17 +1813,39 @@ def _emit_phase_b_pytest_failure(
     )
 
 
+_FOUNDER_OVERRIDE_TOKEN_RE = re.compile(r"FOUNDER_OVERRIDE:\s*(\S+)")
+_FOUNDER_OVERRIDE_METADATA_PREFIXES = (
+    "founder override:",
+    "founder_override:",
+    "founder override token:",
+    "founder_override_token:",
+    "wave-bound authorization:",
+)
+
+
+def _extract_founder_override_from_metadata_line(line: str) -> str:
+    clean = _normalize_plan_metadata_line(line)
+    lowered = clean.lower()
+    if clean.startswith("FOUNDER_OVERRIDE:"):
+        token = clean.split(":", 1)[1].strip()
+    elif lowered.startswith(_FOUNDER_OVERRIDE_METADATA_PREFIXES):
+        match = _FOUNDER_OVERRIDE_TOKEN_RE.search(clean)
+        if not match:
+            return ""
+        token = match.group(1).strip()
+    else:
+        return ""
+    return token.split()[0].strip().strip("`").rstrip("`.,;)")
+
+
 def _extract_founder_override(plan_content: str) -> str:
     """Read an optional canonical founder override token from the plan text."""
     if not plan_content:
         return ""
     for line in plan_content.splitlines():
-        clean = _normalize_plan_metadata_line(line)
-        if not clean.startswith("FOUNDER_OVERRIDE:"):
-            continue
-        founder_override = clean.split(":", 1)[1].strip()
+        founder_override = _extract_founder_override_from_metadata_line(line)
         if founder_override:
-            return founder_override.split()[0].strip().rstrip("`.,;")
+            return founder_override
     return ""
 
 

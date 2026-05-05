@@ -1,7 +1,7 @@
 # Founder Ordered Redteam Repo Code Audit
 
 Date: 2026-05-05
-Status: QUEUED (packet/tracker seed only; audit not started)
+Status: COMPLETED (commit-ready, supervisor COMMIT_GO)
 Task: [NEXT-CODEX-POST-REDTEAM]
 Parent directive: [FOUNDER-ORDERED-REDTEAM-WAVE-QUEUE]
 Wave ID: founder-ordered-redteam-repo-code-audit-2026-05-05
@@ -108,3 +108,49 @@ or a precise follow-up automation packet before normal execution resumes.
   `FOUNDER_OVERRIDE:founder-ordered-redteam-wave-queue-2026-05-05`.
 - Wave-bound authorization:
   `FOUNDER_OVERRIDE:founder-ordered-redteam-repo-code-audit-2026-05-05`.
+
+<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->
+## Phase B Indicator Scope Reconciliation
+
+- Refresh wave: `founder-ordered-redteam-repo-code-audit-2026-05-05`
+- Active packet: `reports/control_plane/founder_ordered_redteam_repo_code_audit_2026-05-05.md`
+- Indicator artifact: `reports/l4_wave_indicators/founder-ordered-redteam-repo-code-audit-2026-05-05.json`
+- Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before pre-commit supervisor review so the tracker note, Gate 8 package, and governing packet describe one staged scope.
+- Scope binding: no indicator file other than the artifact above is in scope for this wave.
+- Current staged files:
+  - `TASKS.md`
+  - `mu/tests/tools/test_phase_b_executor.py`
+  - `mu/tools/executors/phase_b_executor.py`
+  - `reports/control_plane/founder_ordered_redteam_repo_code_audit_2026-05-05.md`
+  - `reports/deferred/README.md`
+  - `reports/deferred/blocking/README.md`
+  - `reports/deferred/blocking/founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md`
+  - `reports/deferred/non_blocking/README.md`
+  - `reports/deferred/non_blocking/founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`
+  - `reports/l4_wave_indicators/founder-ordered-redteam-repo-code-audit-2026-05-05.json`
+<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
+
+<!-- COMMIT_PATH_TRUTH_REFRESH:start -->
+## Commit Path Truth Refresh
+
+- Refresh wave: `founder-ordered-redteam-repo-code-audit-2026-05-05`
+- Active packet: `reports/control_plane/founder_ordered_redteam_repo_code_audit_2026-05-05.md`
+- Commit status: `pre_commit_supervisor_pending`
+- Tracker note sha256: `67e1ddad3dcb1bdde02370381e411526b9da2633d53060990c1335595b795ead`
+- Indicator artifact: `reports/l4_wave_indicators/founder-ordered-redteam-repo-code-audit-2026-05-05.json`
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_phase_b_executor.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/founder_ordered_redteam_repo_code_audit_2026-05-05.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence handles:
+  - `indicator`: `reports/l4_wave_indicators/founder-ordered-redteam-repo-code-audit-2026-05-05.json`
+- Current staged files:
+  - `TASKS.md`
+  - `mu/tests/tools/test_phase_b_executor.py`
+  - `mu/tools/executors/phase_b_executor.py`
+  - `reports/control_plane/founder_ordered_redteam_repo_code_audit_2026-05-05.md`
+  - `reports/deferred/README.md`
+  - `reports/deferred/blocking/README.md`
+  - `reports/deferred/blocking/founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md`
+  - `reports/deferred/non_blocking/README.md`
+  - `reports/deferred/non_blocking/founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`
+  - `reports/l4_wave_indicators/founder-ordered-redteam-repo-code-audit-2026-05-05.json`
+<!-- COMMIT_PATH_TRUTH_REFRESH:end -->

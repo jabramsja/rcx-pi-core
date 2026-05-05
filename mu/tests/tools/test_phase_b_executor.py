@@ -786,6 +786,33 @@ class TestPrepareCommitHandoff:
         assert "FOUNDER_OVERRIDE:codex-startup-hardening-2026-04-16-followup" in note
         assert "progress_proof_after: Phase B emitted a commit-ready handoff for codex-startup-hardening-2026-04-14 with 3 wave-owned file(s)" in note
 
+    def test_build_phase_b_tracker_note_enabler_reads_founder_override_header(self):
+        wave_id = "founder-ordered-redteam-repo-code-audit-2026-05-05"
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            wave_id=wave_id,
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/founder_ordered_redteam_repo_code_audit_2026-05-05.md",
+            plan_content=(
+                "# Founder Ordered Redteam Repo Code Audit\n"
+                "Task: [NEXT-CODEX-POST-REDTEAM]\n"
+                f"Wave ID: {wave_id}\n"
+                f"Founder override: FOUNDER_OVERRIDE:{wave_id}\n"
+            ),
+            changed_files=[
+                "TASKS.md",
+                "reports/control_plane/founder_ordered_redteam_repo_code_audit_2026-05-05.md",
+            ],
+            test_files=[],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=2,
+            reentry=True,
+            pre_supervisor=True,
+        )
+
+        assert f"FOUNDER_OVERRIDE:{wave_id}" in note
+
     def test_build_phase_b_tracker_note_derives_authorized_control_surface_override(self):
         note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
             wave_id="parallel-pipeline-monitor-identity-2026-04-30",
@@ -1002,6 +1029,24 @@ class TestLoadPlanPacketPathTraversal:
 
         assert result["wave_id"] == "wave-test-2026-04-21"
         assert result["task_id"] == "[TEST-PLAN]"
+
+    def test_founder_override_header_extracts_bounded_token(self, tmp_path):
+        repo = tmp_path / "repo"
+        plan_dir = repo / "reports"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "plan.md"
+        plan_file.write_text(
+            "Phase-A-Lock: LOCKED\n"
+            "Status: ACTIVE\n"
+            "Wave ID: founder-ordered-redteam-repo-code-audit-2026-05-05\n"
+            "Task: [NEXT-CODEX-POST-REDTEAM]\n"
+            "Parent directive token: FOUNDER_OVERRIDE:founder-ordered-redteam-wave-queue-2026-05-05\n"
+            "Founder override: FOUNDER_OVERRIDE:founder-ordered-redteam-repo-code-audit-2026-05-05\n"
+        )
+
+        result = pb_mod.load_plan_packet(repo, "reports/plan.md")
+
+        assert result["founder_override"] == "founder-ordered-redteam-repo-code-audit-2026-05-05"
 
     def test_canonical_identity_fields_win_over_earlier_narrative_bullets(self, tmp_path):
         """Task and Wave ID must come from canonical headers when both forms exist."""

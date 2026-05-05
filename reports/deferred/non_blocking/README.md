@@ -20,3 +20,11 @@ Archived source snapshots for extracted non-blocking residue live in:
 - `deferred-findings-fix-sweep-2026-05-04` moved code-closed/stale generated
   advisory packets out of this active lane. The remaining markdown files are
   active advisories or retained follow-ups with current evidence targets.
+
+2026-05-05 repo-code audit note:
+
+- `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md` records
+  the non-blocking proof-class mismatch from
+  `founder-ordered-redteam-repo-code-audit-2026-05-05`: JS ontology evidence
+  collection source-locks/registers `evidence_walker.v1.json` but still drains
+  runtime traces with host code.
