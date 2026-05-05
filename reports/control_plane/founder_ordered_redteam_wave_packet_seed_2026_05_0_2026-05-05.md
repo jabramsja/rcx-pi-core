@@ -140,8 +140,12 @@ and severity, with blocking remediation before non-blocking remediation. Any
 `/mu` structural remediation wave must be ordered last, and the pipeline must
 hard stop before implementing it.
 
-No same-wave pipeline repair was required to create these packet/tracker
-entries. No follow-up automation packet was created by this seed wave.
+The packet/tracker entries were created without manual repair. During commit
+executor pre-push, the full pipeline surfaced a bounded observability timeout in
+the pane timeline one-shot path. That post-commit unblocker is tracked by
+`reports/control_plane/pane_timeline_process_scan_bound_2026-05-05.md` and is
+limited to making the pipeline pane process scan mechanically bounded before
+resuming commit executor from the failed pre-push point.
 
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->
 ## Phase B Indicator Scope Reconciliation
@@ -167,18 +171,17 @@ entries. No follow-up automation packet was created by this seed wave.
 - Refresh wave: `founder-ordered-redteam-wave-packet-seed-2026-05-05`
 - Active packet: `reports/control_plane/founder_ordered_redteam_wave_packet_seed_2026_05_0_2026-05-05.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `c5069f3b2cdf5ef73f6a25fb2d1005b9a9f0a68085e3d6343bdf07831eb3a28d`
+- Tracker note sha256: `b5e304fa54701e351320c3f6dd6544d907e893000d52e2c646fa96de4c7d1f28`
 - Indicator artifact: `reports/l4_wave_indicators/founder-ordered-redteam-wave-packet-seed-2026-05-05.json`
-- Evidence command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id founder-ordered-redteam-wave-packet-seed-2026-05-05 --output reports/l4_wave_indicators/founder-ordered-redteam-wave-packet-seed-2026-05-05.json`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/founder_ordered_redteam_wave_packet_seed_2026_05_0_2026-05-05.md. (2) Commit handoff carries 7 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface..
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_recovery_gate.py`.
+- Evidence delta: (1) Routed commit handoff scopes 6 wave-owned file(s). (2) Evidence gate exercises 1 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/founder-ordered-redteam-wave-packet-seed-2026-05-05.json..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/founder-ordered-redteam-wave-packet-seed-2026-05-05.json`
 - Current staged files:
   - `TASKS.md`
-  - `reports/control_plane/founder_ordered_redteam_docs_audit_2026-05-05.md`
-  - `reports/control_plane/founder_ordered_redteam_repo_code_audit_2026-05-05.md`
-  - `reports/control_plane/founder_ordered_redteam_tests_audit_2026-05-05.md`
-  - `reports/control_plane/founder_ordered_redteam_tooling_audit_2026-05-05.md`
+  - `mu/tests/tools/test_recovery_gate.py`
+  - `mu/tools/observability/_pane_timeline.sh`
   - `reports/control_plane/founder_ordered_redteam_wave_packet_seed_2026_05_0_2026-05-05.md`
+  - `reports/control_plane/pane_timeline_process_scan_bound_2026-05-05.md`
   - `reports/l4_wave_indicators/founder-ordered-redteam-wave-packet-seed-2026-05-05.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

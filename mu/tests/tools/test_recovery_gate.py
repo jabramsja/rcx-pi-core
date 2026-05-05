@@ -7624,6 +7624,82 @@ printf 'n{repo_root}\\n'
         assert "← Codex reviewing now" in clean_stdout
         assert "← idle" not in clean_stdout
 
+    def test_pane_timeline_bounds_live_process_scan_candidates(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_timeline.sh")
+
+        proc_bin = tmp_path / "proc-bin"
+        proc_bin.mkdir()
+        lsof_log = tmp_path / "lsof_calls.log"
+        self._write_executable(
+            proc_bin / "pgrep",
+            """#!/usr/bin/env bash
+set -eu
+pattern="${2:-}"
+case "$pattern" in
+  "codex.*exec|claude.*--print")
+    seq 1 40
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "ps",
+            """#!/usr/bin/env bash
+set -eu
+case "$*" in
+  *" -o command=")
+    printf '%s\n' 'node /tmp/codex exec - --json'
+    ;;
+  *" -o ppid=")
+    printf '1\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "lsof",
+            """#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >> "$RCX_TEST_LSOF_LOG"
+exit 1
+""",
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\nHEAD 1111111111111111\nbranch refs/heads/jabramsja/repo-wave\n",
+        )
+        env = os.environ | {
+            "PATH": f"{proc_bin}:{bin_dir}:{os.environ['PATH']}",
+            "RCX_PANE_ONESHOT": "1",
+            "RCX_PANE_PROCESS_SCAN_LIMIT": "3",
+            "RCX_TEST_LSOF_LOG": str(lsof_log),
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        lsof_calls = lsof_log.read_text(encoding="utf-8").splitlines()
+        assert len(lsof_calls) <= 6
+
     def test_pane_timeline_shows_last_pager_wake_summary(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
