@@ -2033,6 +2033,38 @@ class TestWaveIdBounds:
         )
         assert third.stdout.strip() == ""
 
+    def test_stage_handoff_paths_is_idempotent_for_branch_history_deletion(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        target = repo / "obsolete.md"
+        target.write_text("remove me\n", encoding="utf-8")
+        subprocess.run(["git", "add", "obsolete.md"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "add obsolete"], cwd=repo, check=True)
+        subprocess.run(["git", "branch", "origin/dev"], cwd=repo, check=True)
+        subprocess.run(["git", "checkout", "-b", "wave"], cwd=repo, check=True)
+        subprocess.run(["git", "branch", "--set-upstream-to", "origin/dev"], cwd=repo, check=True)
+        target.unlink()
+        subprocess.run(["git", "add", "-u", "--", "obsolete.md"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "delete obsolete"], cwd=repo, check=True)
+        (repo / "later.md").write_text("later\n", encoding="utf-8")
+        subprocess.run(["git", "add", "later.md"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "later branch work"], cwd=repo, check=True)
+
+        commit_mod._stage_handoff_paths(  # ANTICHEAT_OK: direct stage helper regression for already-committed branch deletes
+            repo,
+            files_to_stage=["obsolete.md"],
+            force_files=[],
+        )
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--name-status", "--", "obsolete.md"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert result.stdout.strip() == ""
+
     def test_missing_supervisor_receipt_blocks_pipeline(self, tmp_path):
         """When supervisor receipt path doesn't exist on disk, step 7 fails closed."""
         from collections import namedtuple

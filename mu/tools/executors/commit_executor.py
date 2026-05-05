@@ -442,6 +442,39 @@ def _canonicalize_stage_paths(repo_root: Path, paths: list[str]) -> list[str]:
     ])
 
 
+def _path_deleted_in_branch_history(repo_root: Path, relpath: str) -> bool:
+    upstream = _run(
+        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    upstream_ref = upstream.stdout.strip()
+    if upstream.returncode != 0 or not upstream_ref:
+        return False
+
+    merge_base = _run(
+        ["git", "merge-base", upstream_ref, "HEAD"],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    base_sha = merge_base.stdout.strip()
+    if merge_base.returncode != 0 or not base_sha:
+        return False
+
+    committed_delete = _run(
+        [
+            "git", "diff", "--name-only", "--diff-filter=D",
+            f"{base_sha}..HEAD", "--", relpath,
+        ],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    return committed_delete.returncode == 0 and bool(committed_delete.stdout.strip())
+
+
 def _stage_handoff_paths(
     repo_root: Path,
     *,
@@ -488,6 +521,8 @@ def _stage_handoff_paths(
                 timeout=30,
             )
             if committed_delete.returncode == 0 and committed_delete.stdout.strip():
+                continue
+            if _path_deleted_in_branch_history(repo_root, relpath):
                 continue
             _run(["git", "add", "--", relpath], cwd=repo_root)
     if canonical_force:

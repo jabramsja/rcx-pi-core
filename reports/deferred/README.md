@@ -22,12 +22,13 @@ Archive rule:
 Current inventory refresh (2026-05-05):
 
 - Evidence command: `rg --files reports/deferred/blocking reports/deferred/non_blocking | sort | nl -ba`.
-- `reports/deferred/blocking/` contains `README.md` plus one resolved blocker
-  packet retained in place until an archive/closeout wave moves it:
-  `mu_preproduction_gate_theater_blocker_2026-05-04.md`. The 2026-05-05
-  follow-up aligns the redteam startup guard with the curated theater-risk
-  ratchet; `/mu` production-forward movement is no longer blocked by this
-  gate-theater finding.
+- `reports/deferred/blocking/` contains only `README.md`; there are no active
+  blocker packets as of this refresh.
+- The resolved mu preproduction gate-theater blocker was moved to
+  `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`.
+  The 2026-05-05 follow-up aligns the redteam startup guard with the curated
+  theater-risk ratchet; `/mu` production-forward movement is no longer blocked
+  by this gate-theater finding.
 - `reports/deferred/non_blocking/` currently contains 30 markdown files:
   `README.md` plus 29 active advisory/follow-up records with concrete evidence
   targets.
@@ -57,11 +58,11 @@ not relist PR #701, the engine-state/scheduler slice, `PIPELINE-AGENT-PAGER`,
 
 Mu preproduction blocker note (2026-05-05):
 
-- `reports/deferred/blocking/mu_preproduction_gate_theater_blocker_2026-05-04.md`
-  was opened by the mu preproduction red-team stop condition and resolved by
-  the bounded ratchet follow-up. The raw strict checker still reports 85
-  `theater_risk` methods, but `check_theater_risk_ratchet.py` proves they are
-  all current, non-expired curated false positives and will fail on new,
-  expired, or `real` findings. It is not part of the earlier
-  deferred-findings sweep inventory and does not reopen archived or landed
-  parent-queue work.
+- `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`
+  was opened by the mu preproduction red-team stop condition, resolved by the
+  bounded ratchet follow-up, and archived by this closeout. The raw strict
+  checker still reports 85 `theater_risk` methods, but
+  `check_theater_risk_ratchet.py` proves they are all current, non-expired
+  curated false positives and will fail on new, expired, or `real` findings. It
+  is not part of the earlier deferred-findings sweep inventory and does not
+  reopen archived or landed parent-queue work.

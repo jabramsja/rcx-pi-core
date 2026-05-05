@@ -6,10 +6,10 @@ promotion narratives.
 
 Active blockers:
 
-- None as of 2026-05-05. The former theater-risk blocker packet remains in this
-  folder as resolved evidence until an archive/closeout wave moves it, but its
-  body is marked `Status: RESOLVED (2026-05-05)` and current TASKS.md records
-  production-forward movement as unblocked for that gate.
+- None as of 2026-05-05. The former theater-risk blocker packet was moved to
+  `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`
+  after the ratchet follow-up recorded production-forward movement as unblocked
+  for that gate.
 
 Archived source snapshots for extracted blocker residue live in:
 

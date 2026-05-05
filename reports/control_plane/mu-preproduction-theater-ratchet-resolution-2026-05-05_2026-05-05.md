@@ -11,7 +11,7 @@ Target gate: G8
 Authorization: TASKS.md:395-402 authorizes the founder-unparked parent queue and the immediate `[MU-PREPRODUCTION-REDTEAM]` blocked work order; this packet is the governing packet for the bounded follow-up wave.
 Governing packet: reports/control_plane/mu-preproduction-theater-ratchet-resolution-2026-05-05_2026-05-05.md
 Parent governing packet: reports/control_plane/mu_preproduction_redteam_2026-05-04.md
-Blocker: reports/deferred/blocking/mu_preproduction_gate_theater_blocker_2026-05-04.md
+Archived blocker: reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md
 FOUNDER_OVERRIDE:mu-preproduction-theater-ratchet-resolution-2026-05-05
 
 ## Phase B Implementation Result
@@ -135,7 +135,7 @@ Files and directories in scope:
   command set, and any root/`mu` mirror synchronization touched by this wave
 - `TASKS.md`, limited to the current `[NEXT-CODEX-POST-REDTEAM]` /
   `[MU-PREPRODUCTION-REDTEAM]` tracker state
-- `reports/deferred/blocking/mu_preproduction_gate_theater_blocker_2026-05-04.md`
+- `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`
 - deferred blocker/index text needed to keep the active blocker lane truthful
 - this packet
 
@@ -235,10 +235,11 @@ Stop and report immediately if:
   phase as open, and states that the Phase A structural gap sweep plus the
   engine-state/scheduler reduction slice already landed. Those landed items are
   out of scope for this packet.
-- `TASKS.md:400-402` defines the immediate pre-production work order and names
-  `[MU-PREPRODUCTION-REDTEAM]` as Phase B stopped/blocked on gate-theater risk,
-  with blocker `reports/deferred/blocking/mu_preproduction_gate_theater_blocker_2026-05-04.md`
-  and parent governing packet
+- `TASKS.md:400-402` originally defined the immediate pre-production work order
+  and named `[MU-PREPRODUCTION-REDTEAM]` as Phase B stopped/blocked on
+  gate-theater risk. The blocker packet is now archived at
+  `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`,
+  and the parent governing packet remains
   `reports/control_plane/mu_preproduction_redteam_2026-05-04.md`.
 - `reports/control_plane/mu_preproduction_redteam_2026-05-04.md:118-133`
   records the Phase B stop result: strict theater reproduction exits `1`, reports
@@ -247,14 +248,13 @@ Stop and report immediately if:
 - `reports/control_plane/mu_preproduction_redteam_2026-05-04.md:135-148`
   classifies the prior package repair as `L4_ENABLER`, not L4 structural runtime
   movement.
-- `reports/deferred/blocking/mu_preproduction_gate_theater_blocker_2026-05-04.md:19-22`
-  records that the redteam startup guard now runs the strict
-  `check_gate_behavioral_pairs.py --fail-on-theater` path and remains blocked
-  while the 85 findings are unresolved or undispositioned.
-- `reports/deferred/blocking/mu_preproduction_gate_theater_blocker_2026-05-04.md:58-63`
-  defines the required follow-up: decide whether every reported `theater_risk`
-  method is a real defect or classifier false positive before production-forward
-  movement resumes.
+- `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md:30-39`
+  records the strict-gate reproduction path and the bounded follow-up that
+  resolved the blocker through the curated anti-theater ratchet.
+- `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md:66-69`
+  records the ratchet command evidence: `current_count: 85`,
+  `allowlist_count: 85`, empty `new`, empty `expired`, empty `real`, empty
+  `removals`, and `passed: true`.
 - Same-wave control-surface authorization is explicit:
   `FOUNDER_OVERRIDE:mu-preproduction-theater-ratchet-resolution-2026-05-05`.
 
@@ -276,7 +276,7 @@ Stop and report immediately if:
   - `mu/tools/session/founder_session_guard.sh`
   - `reports/control_plane/mu-preproduction-theater-ratchet-resolution-2026-05-05_2026-05-05.md`
   - `reports/deferred/README.md`
-  - `reports/deferred/blocking/mu_preproduction_gate_theater_blocker_2026-05-04.md`
+  - `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`
   - `reports/l4_wave_indicators/mu-preproduction-theater-ratchet-resolution-2026-05-05.json`
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
 
@@ -303,6 +303,6 @@ Stop and report immediately if:
   - `mu/tools/session/founder_session_guard.sh`
   - `reports/control_plane/mu-preproduction-theater-ratchet-resolution-2026-05-05_2026-05-05.md`
   - `reports/deferred/README.md`
-  - `reports/deferred/blocking/mu_preproduction_gate_theater_blocker_2026-05-04.md`
+  - `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`
   - `reports/l4_wave_indicators/mu-preproduction-theater-ratchet-resolution-2026-05-05.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
