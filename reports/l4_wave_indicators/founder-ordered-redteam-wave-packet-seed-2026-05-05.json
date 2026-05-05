@@ -1,0 +1,24 @@
+{
+  "wave_id": "founder-ordered-redteam-wave-packet-seed-2026-05-05",
+  "repeat_run_speedup_ratio": 1.022036,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.419124,
+  "repeat_run_raw_seconds": [
+    0.42836,
+    0.419124
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.42836
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.847484
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-05T21:10:26Z",
+  "collector_version": "2.2.0"
+}

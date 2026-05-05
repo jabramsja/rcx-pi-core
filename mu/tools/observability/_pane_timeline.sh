@@ -52,6 +52,10 @@ LAST_HASH=""
 TMPOUT="/tmp/rcx_pane_timeline_$$.txt"
 ONESHOT="${RCX_PANE_ONESHOT:-0}"
 VERBOSE="${RCX_PANE_VERBOSE:-0}"
+PROCESS_SCAN_LIMIT="${RCX_PANE_PROCESS_SCAN_LIMIT:-32}"
+if ! [[ "$PROCESS_SCAN_LIMIT" =~ ^[0-9]+$ ]] || [ "$PROCESS_SCAN_LIMIT" -lt 1 ]; then
+  PROCESS_SCAN_LIMIT=32
+fi
 
 load_role_agent_labels() {
   local root="${1:-$REPO_ROOT}" output="" key="" value=""
@@ -103,6 +107,11 @@ pid_cwd() {
   lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
 }
 
+pgrep_limited() {
+  local pattern="$1"
+  pgrep -f "$pattern" 2>/dev/null | tail -n "$PROCESS_SCAN_LIMIT"
+}
+
 is_control_plane_resume_command() {
   local cmd="$1"
   case "$cmd" in
@@ -137,7 +146,7 @@ repo_has_process() {
     if [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ]; then
       return 0
     fi
-  done < <(pgrep -f "$pattern" 2>/dev/null || true)
+  done < <(pgrep_limited "$pattern")
   return 1
 }
 
@@ -248,7 +257,7 @@ repo_has_bridge_role() {
     if [ "$wanted_role" = "implement" ] && pid_has_ancestor_matching "$pid" 'phase_b_executor\.py|phase_a_executor\.py|commit_executor\.py'; then
       return 0
     fi
-  done < <(pgrep -f "codex.*exec|claude.*--print" 2>/dev/null || true)
+  done < <(pgrep_limited "codex.*exec|claude.*--print")
   return 1
 }
 

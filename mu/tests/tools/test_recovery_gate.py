@@ -7624,6 +7624,106 @@ printf 'n{repo_root}\\n'
         assert "← Codex reviewing now" in clean_stdout
         assert "← idle" not in clean_stdout
 
+    def test_pane_timeline_bounds_live_process_scan_candidates(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_timeline.sh")
+
+        proc_bin = tmp_path / "proc-bin"
+        proc_bin.mkdir()
+        lsof_log = tmp_path / "lsof_calls.log"
+        self._write_executable(
+            proc_bin / "pgrep",
+            """#!/usr/bin/env bash
+set -eu
+pattern="${2:-}"
+case "$pattern" in
+  "codex.*exec|claude.*--print")
+    seq 1 40
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "ps",
+            """#!/usr/bin/env bash
+set -eu
+case "$*" in
+  *" -o command=")
+    printf '%s\n' 'node /tmp/codex exec - --json'
+    ;;
+  *" -o ppid=")
+    printf '1\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "lsof",
+            """#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >> "$RCX_TEST_LSOF_LOG"
+exit 1
+""",
+        )
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\nHEAD 1111111111111111\nbranch refs/heads/jabramsja/repo-wave\n",
+        )
+        home_dir = tmp_path / "home"
+        home_dir.mkdir()
+        codex_home = tmp_path / "codex-home"
+        codex_home.mkdir()
+        env = os.environ | {
+            "PATH": f"{proc_bin}:{bin_dir}:{os.environ['PATH']}",
+            "HOME": str(home_dir),
+            "RCX_CODEX_HOME": str(codex_home),
+            "RCX_PANE_PROCESS_SCAN_LIMIT": "3",
+            "RCX_TEST_LSOF_LOG": str(lsof_log),
+            "TERM": "xterm",
+        }
+        timeline_script = repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh"
+        timeline_helpers = tmp_path / "probe_timeline_scan_bound_helpers.sh"
+        timeline_helpers.write_text(
+            timeline_script.read_text(encoding="utf-8").split("while true; do", 1)[0],
+            encoding="utf-8",
+        )
+        timeline_helpers.chmod(timeline_helpers.stat().st_mode | 0o111)
+        probe_script = tmp_path / "probe_timeline_scan_bound.sh"
+        probe_script.write_text(
+            f"""#!/usr/bin/env bash
+set -eu
+source {timeline_helpers}
+REPO_ROOT={repo_root}
+repo_has_bridge_role review >/dev/null || true
+repo_has_bridge_role implement >/dev/null || true
+""",
+            encoding="utf-8",
+        )
+        probe_script.chmod(probe_script.stat().st_mode | 0o111)
+
+        result = subprocess.run(
+            ["bash", str(probe_script)],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        lsof_calls = lsof_log.read_text(encoding="utf-8").splitlines()
+        assert 1 <= len(lsof_calls) <= 6
+
     def test_pane_timeline_shows_last_pager_wake_summary(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
