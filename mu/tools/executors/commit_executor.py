@@ -661,6 +661,31 @@ def _extract_founder_override_from_routing_record(
     return ""
 
 
+def _extract_same_wave_founder_override_from_tasks(repo_root: Path, wave_id: str) -> str:
+    """Return a same-wave founder override already staged or written in TASKS.md."""
+    normalized_wave_id = normalize_wave_id(wave_id)
+    if not normalized_wave_id:
+        return ""
+
+    candidates: list[str] = []
+    staged_tasks = _git_index_text_for_repo_path(repo_root, "TASKS.md")
+    if staged_tasks is not None:
+        candidates.append(staged_tasks)
+    try:
+        working_tasks = (repo_root / "TASKS.md").read_text(encoding="utf-8")
+    except OSError:
+        working_tasks = ""
+    if working_tasks and working_tasks not in candidates:
+        candidates.append(working_tasks)
+
+    for text in candidates:
+        for line in text.splitlines():
+            token = _extract_founder_override_token(line)
+            if token and normalize_wave_id(token) == normalized_wave_id:
+                return token
+    return ""
+
+
 def _packet_declares_same_wave_id(packet_text: str, normalized_wave_id: str) -> bool:
     """Return true when packet metadata declares exactly normalized_wave_id."""
     if not packet_text or not normalized_wave_id:
@@ -5339,6 +5364,11 @@ def prepare_handoff_from_routing_record(
             record,
             repo_root,
         )
+        if not founder_override_token:
+            founder_override_token = _extract_same_wave_founder_override_from_tasks(
+                repo_root,
+                wave_id,
+            )
         unblocks_wave_id, unblocks_runtime_blocker = _extract_maintenance_bypass_from_routing_record(
             record,
             repo_root,
