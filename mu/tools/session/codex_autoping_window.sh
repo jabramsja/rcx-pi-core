@@ -127,7 +127,7 @@ watcher_is_running() {
 }
 
 cleanup_active_ping_from_state() {
-    python3 - "$STATE_PATH" "$RUNNER_LOG" "${WATCHER_PID:-}" <<'PY'
+    python3 - "$STATE_PATH" "$RUNNER_LOG" "${WATCHER_PID:-}" "$PING_TIMEOUT" "$INTERVAL" <<'PY'
 import json
 import os
 import signal
@@ -144,11 +144,50 @@ if len(sys.argv) > 3 and sys.argv[3]:
         expected_watcher_pid = int(sys.argv[3])
     except ValueError:
         expected_watcher_pid = None
+try:
+    ping_timeout_s = max(float(sys.argv[4]), 0.0)
+except (IndexError, TypeError, ValueError):
+    ping_timeout_s = 120.0
+try:
+    interval_s = max(float(sys.argv[5]), 0.0)
+except (IndexError, TypeError, ValueError):
+    interval_s = 20.0
+
+
+class ActiveTargetVerificationError(RuntimeError):
+    pass
 
 
 def log(message):
     with runner_log.open("a", encoding="utf-8") as sink:
         sink.write(f"{message}\n")
+
+
+def parse_positive_int(value):
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 1 else None
+
+
+def parse_timestamp(value):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def cleanup_max_state_age_s():
+    return max(60.0, ping_timeout_s + interval_s + 30.0)
 
 
 def active_pid_from_state():
@@ -160,21 +199,17 @@ def active_pid_from_state():
         log(f"[autoping-window] active ping cleanup skipped invalid_state={exc}")
         return {}, None
 
-    try:
-        pid = int(state.get("active_pid") or 0)
-    except (TypeError, ValueError):
+    pid = parse_positive_int(state.get("active_pid"))
+    if pid is None:
         return state, None
-    try:
-        recorded_watcher_pid = int(state.get("watcher_pid") or 0)
-    except (TypeError, ValueError):
-        recorded_watcher_pid = 0
+    recorded_watcher_pid = parse_positive_int(state.get("watcher_pid")) or 0
     if expected_watcher_pid is not None and recorded_watcher_pid != expected_watcher_pid:
         log(
             "[autoping-window] active ping cleanup skipped "
             f"state_watcher_pid={recorded_watcher_pid} expected_watcher_pid={expected_watcher_pid}"
         )
         return state, None
-    if pid <= 1 or pid == expected_watcher_pid:
+    if pid == expected_watcher_pid:
         return state, None
     return state, pid
 
@@ -252,42 +287,99 @@ def process_group_alive(pgid):
     return True
 
 
-def active_target_alive(pid):
-    return pid_alive(pid) or process_group_alive(pid)
+def active_state_identity_error(state, pid):
+    dispatched_pid = parse_positive_int(state.get("last_dispatched_pid"))
+    if dispatched_pid != pid:
+        return f"last_dispatched_pid_mismatch active_pid={pid} last_dispatched_pid={dispatched_pid}"
+    dispatched_at = parse_timestamp(state.get("last_dispatched_at"))
+    if dispatched_at is None:
+        return "missing_or_invalid_last_dispatched_at"
+    updated_at = parse_timestamp(state.get("updated_at"))
+    if updated_at is None:
+        return "missing_or_invalid_updated_at"
+    now = datetime.now(timezone.utc)
+    max_age_s = cleanup_max_state_age_s()
+    dispatch_age_s = (now - dispatched_at).total_seconds()
+    if dispatch_age_s < -10.0:
+        return f"last_dispatched_at_from_future age_s={dispatch_age_s:.1f}"
+    if dispatch_age_s > max_age_s:
+        return f"stale_active_dispatch_age_s={dispatch_age_s:.1f} max_age_s={max_age_s:.1f}"
+    age_s = (now - updated_at).total_seconds()
+    if age_s < -10.0:
+        return f"updated_at_from_future age_s={age_s:.1f}"
+    if age_s > max_age_s:
+        return f"stale_active_state_age_s={age_s:.1f} max_age_s={max_age_s:.1f}"
+    active_log = str(state.get("active_log") or "").strip()
+    if not active_log:
+        return "missing_active_log"
+    active_log_path = Path(active_log)
+    if not active_log_path.is_absolute():
+        return f"relative_active_log={active_log}"
+    try:
+        active_log_parent = active_log_path.parent.resolve()
+        expected_log_parent = runner_log.parent.resolve()
+    except OSError as exc:
+        return f"active_log_parent_unresolvable={active_log}: {exc}"
+    if active_log_parent != expected_log_parent:
+        return f"active_log_outside_autoping_log_dir={active_log}"
+    if not active_log_path.exists():
+        return f"active_log_missing={active_log}"
+    return None
 
 
-def signal_active(pid, sig):
-    sent = False
+def verified_active_target(state, pid):
+    identity_error = active_state_identity_error(state, pid)
+    if identity_error:
+        raise ActiveTargetVerificationError(identity_error)
+    group_alive = process_group_alive(pid)
+    process_alive = pid_alive(pid)
+    if not group_alive and not process_alive:
+        return None
+    if process_alive:
+        try:
+            pgid = os.getpgid(pid)
+        except ProcessLookupError:
+            process_alive = False
+        except PermissionError as exc:
+            raise PermissionError(f"getpgid pid={pid}: {exc}") from exc
+        except OSError as exc:
+            raise ActiveTargetVerificationError(f"getpgid_failed pid={pid}: {exc}") from exc
+        else:
+            if pgid != pid:
+                raise ActiveTargetVerificationError(f"active_pid_pgid_mismatch pid={pid} pgid={pgid}")
+    group_alive = process_group_alive(pid)
+    if not group_alive:
+        return None
+    return {"pgid": pid, "process_alive": process_alive}
+
+
+def active_target_alive(state, pid):
+    return verified_active_target(state, pid) is not None
+
+
+def signal_active(state, pid, sig):
+    target = verified_active_target(state, pid)
+    if target is None:
+        return False
     try:
         os.killpg(pid, sig)
-        sent = True
     except ProcessLookupError:
-        pass
+        return False
     except PermissionError as exc:
         log(f"[autoping-window] active ping cleanup denied pgid={pid} signal={sig.name}: {exc}")
         raise
     except OSError:
-        pass
-
-    if pid_alive(pid):
-        try:
-            os.kill(pid, sig)
-            sent = True
-        except ProcessLookupError:
-            pass
-        except PermissionError as exc:
-            log(f"[autoping-window] active ping cleanup denied pid={pid} signal={sig.name}: {exc}")
-            raise
-    return sent
+        return False
+    return True
 
 
-def wait_inactive(pid, timeout_s):
+def wait_inactive(state, pid, timeout_s):
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        if not active_target_alive(pid):
+        if not active_target_alive(state, pid):
             return True
         time.sleep(0.05)
-    return not active_target_alive(pid)
+    return not active_target_alive(state, pid)
 
 
 def mark_cleanup_degraded(state, pid, reason):
@@ -311,24 +403,45 @@ def mark_cleanup_degraded(state, pid, reason):
 state, pid = active_pid_from_state()
 if pid is None:
     raise SystemExit(0)
-if not active_target_alive(pid):
-    raise SystemExit(0)
+try:
+    if not active_target_alive(state, pid):
+        raise SystemExit(0)
+except ActiveTargetVerificationError as exc:
+    mark_cleanup_degraded(state, pid, f"unsafe_active_ping_cleanup_target: {exc}")
+    raise SystemExit(1)
+except PermissionError as exc:
+    mark_cleanup_degraded(state, pid, f"permission_denied_active_target_check: {exc}")
+    raise SystemExit(1)
 
 try:
-    sent = signal_active(pid, signal.SIGTERM)
+    sent = signal_active(state, pid, signal.SIGTERM)
+except ActiveTargetVerificationError as exc:
+    mark_cleanup_degraded(state, pid, f"unsafe_active_ping_cleanup_target: {exc}")
+    raise SystemExit(1)
 except PermissionError as exc:
     mark_cleanup_degraded(state, pid, f"permission_denied_sigterm: {exc}")
     raise SystemExit(1)
 
-if sent and wait_inactive(pid, 2.0):
+try:
+    term_inactive = sent and wait_inactive(state, pid, 2.0)
+except ActiveTargetVerificationError as exc:
+    mark_cleanup_degraded(state, pid, f"unsafe_active_ping_cleanup_target: {exc}")
+    raise SystemExit(1)
+except PermissionError as exc:
+    mark_cleanup_degraded(state, pid, f"permission_denied_active_target_check: {exc}")
+    raise SystemExit(1)
+
+if term_inactive:
+    now = datetime.now(timezone.utc).isoformat()
     state.update(
         {
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": now,
             "status": "watcher_restarting_active_ping_terminated",
             "active_pid": None,
             "active_mode": None,
             "last_active_cleanup_pid": pid,
-            "last_active_cleanup_at": datetime.now(timezone.utc).isoformat(),
+            "last_active_cleanup_at": now,
+            "last_active_cleanup_error": None,
         }
     )
     state_path.write_text(json.dumps(state, sort_keys=True) + "\n", encoding="utf-8")
@@ -336,20 +449,34 @@ if sent and wait_inactive(pid, 2.0):
     raise SystemExit(0)
 
 try:
-    signal_active(pid, signal.SIGKILL)
+    signal_active(state, pid, signal.SIGKILL)
+except ActiveTargetVerificationError as exc:
+    mark_cleanup_degraded(state, pid, f"unsafe_active_ping_cleanup_target: {exc}")
+    raise SystemExit(1)
 except PermissionError as exc:
     mark_cleanup_degraded(state, pid, f"permission_denied_sigkill: {exc}")
     raise SystemExit(1)
 
-if wait_inactive(pid, 1.0):
+try:
+    kill_inactive = wait_inactive(state, pid, 1.0)
+except ActiveTargetVerificationError as exc:
+    mark_cleanup_degraded(state, pid, f"unsafe_active_ping_cleanup_target: {exc}")
+    raise SystemExit(1)
+except PermissionError as exc:
+    mark_cleanup_degraded(state, pid, f"permission_denied_active_target_check: {exc}")
+    raise SystemExit(1)
+
+if kill_inactive:
+    now = datetime.now(timezone.utc).isoformat()
     state.update(
         {
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": now,
             "status": "watcher_restarting_active_ping_killed",
             "active_pid": None,
             "active_mode": None,
             "last_active_cleanup_pid": pid,
-            "last_active_cleanup_at": datetime.now(timezone.utc).isoformat(),
+            "last_active_cleanup_at": now,
+            "last_active_cleanup_error": None,
         }
     )
     state_path.write_text(json.dumps(state, sort_keys=True) + "\n", encoding="utf-8")

@@ -601,6 +601,7 @@ import signal
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 parser = argparse.ArgumentParser()
@@ -625,6 +626,10 @@ thread_slug = args.thread_id
 state_path = state_dir / f"rcx_autoping_{thread_slug}.json"
 summary_path = state_dir / f"rcx_autoping_{thread_slug}_summary.txt"
 summary_path.write_text(f"fake launch {count}\\n", encoding="utf-8")
+log_dir = codex_home / "log" / "autoping"
+log_dir.mkdir(parents=True, exist_ok=True)
+active_log = log_dir / "fake-active-ping.jsonl"
+active_log.write_text("fake active log\\n", encoding="utf-8")
 
 active_pid = None
 if count == 1:
@@ -686,11 +691,16 @@ raise SystemExit(3)
         str(active_pid), encoding="utf-8"
     )
 
+now = datetime.now(timezone.utc).isoformat()
 payload = {
+    "updated_at": now,
     "watcher_pid": os.getpid(),
     "thread_id": args.thread_id,
     "status": f"fake_launch_{count}",
     "active_pid": active_pid,
+    "active_log": str(active_log) if active_pid is not None else None,
+    "last_dispatched_at": now if active_pid is not None else None,
+    "last_dispatched_pid": active_pid,
     "summary_path": str(summary_path),
 }
 state_path.write_text(json.dumps(payload, sort_keys=True) + "\\n", encoding="utf-8")
@@ -801,6 +811,161 @@ print(f"fake render {args.thread_id}")
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.communicate(timeout=5)
+
+
+def test_autoping_window_skips_stale_active_pid_and_records_degraded_state(tmp_path):
+    fake_repo = tmp_path / "repo"
+    session_dir = fake_repo / "tools" / "session"
+    session_dir.mkdir(parents=True)
+    codex_home = tmp_path / "codex-home"
+    launch_log = tmp_path / "watcher-launches.jsonl"
+    launch_count = tmp_path / "watcher-launch-count.txt"
+    unrelated = subprocess.Popen(
+        ["sleep", "60"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    try:
+        (session_dir / "codex_autoping_watch.py").write_text(
+            """
+import argparse
+import json
+import os
+import time
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--repo-root")
+parser.add_argument("--thread-id")
+parser.add_argument("--interval")
+parser.add_argument("--initial-delay")
+parser.add_argument("--ping-timeout")
+parser.add_argument("--bus-dir")
+parser.add_argument("--tmux-session")
+parser.add_argument("--tmux-pane")
+args = parser.parse_args()
+
+count_path = Path(os.environ["FAKE_WATCH_COUNT"])
+count = int(count_path.read_text(encoding="utf-8")) + 1 if count_path.exists() else 1
+count_path.write_text(str(count), encoding="utf-8")
+with Path(os.environ["FAKE_WATCH_LAUNCH_LOG"]).open("a", encoding="utf-8") as sink:
+    sink.write(json.dumps({"count": count, "pid": os.getpid()}, sort_keys=True) + "\\n")
+
+if count == 1:
+    codex_home = Path(os.environ["RCX_CODEX_HOME"])
+    state_dir = codex_home / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = codex_home / "log" / "autoping"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    active_log = log_dir / "fake-stale-active-ping.jsonl"
+    active_log.write_text("stale active log\\n", encoding="utf-8")
+    stale_pid = int(os.environ["FAKE_STALE_ACTIVE_PID"])
+    old_timestamp = "2000-01-01T00:00:00+00:00"
+    payload = {
+        "updated_at": old_timestamp,
+        "watcher_pid": os.getpid(),
+        "thread_id": args.thread_id,
+        "status": "fake_stale_active_state",
+        "active_pid": stale_pid,
+        "active_log": str(active_log),
+        "active_mode": "resume",
+        "last_dispatched_at": old_timestamp,
+        "last_dispatched_pid": stale_pid,
+        "summary_path": str(state_dir / f"rcx_autoping_{args.thread_id}_summary.txt"),
+    }
+    (state_dir / f"rcx_autoping_{args.thread_id}.json").write_text(
+        json.dumps(payload, sort_keys=True) + "\\n", encoding="utf-8"
+    )
+    raise SystemExit(0)
+
+time.sleep(60)
+""".lstrip(),
+            encoding="utf-8",
+        )
+        (session_dir / "render_codex_autoping_status.py").write_text(
+            """
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--thread-id")
+args = parser.parse_args()
+print(f"fake render {args.thread_id}")
+""".lstrip(),
+            encoding="utf-8",
+        )
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "RCX_CODEX_HOME": str(codex_home),
+                "FAKE_STALE_ACTIVE_PID": str(unrelated.pid),
+                "FAKE_WATCH_COUNT": str(launch_count),
+                "FAKE_WATCH_LAUNCH_LOG": str(launch_log),
+            }
+        )
+        proc = subprocess.Popen(
+            [
+                "bash",
+                str(REPO_ROOT / "tools" / "session" / "codex_autoping_window.sh"),
+                "--repo",
+                str(fake_repo),
+                "--thread-id",
+                "thread-stale-window",
+                "--initial-delay",
+                "0",
+                "--interval",
+                "999",
+                "--ping-timeout",
+                "1",
+            ],
+            cwd=str(REPO_ROOT),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        def ready_launches() -> list[dict[str, object]] | None:
+            records = _read_launches(launch_log)
+            return records if len(records) >= 2 else None
+
+        try:
+            launches = _wait_until(ready_launches)
+            assert launches is not None, "wrapper did not restart after stale active state"
+            assert _pid_alive(unrelated.pid)
+
+            state_path = codex_home / "state" / "rcx_autoping_thread-stale-window.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            assert state["status"] == "watcher_restart_degraded_active_ping_cleanup_failed"
+            assert state["active_pid"] == unrelated.pid
+            assert state["last_active_cleanup_pid"] == unrelated.pid
+            assert "unsafe_active_ping_cleanup_target" in state["last_active_cleanup_error"]
+            assert "stale_active_" in state["last_active_cleanup_error"]
+
+            runner_log = (
+                codex_home
+                / "log"
+                / "autoping"
+                / "rcx_autoping_thread-stale-window.runner.log"
+            ).read_text(encoding="utf-8")
+            assert "[autoping-window] active ping cleanup failed; restarting watcher degraded" in runner_log
+        finally:
+            proc.terminate()
+            try:
+                proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate(timeout=5)
+    finally:
+        if _pid_alive(unrelated.pid):
+            unrelated.terminate()
+            try:
+                unrelated.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                unrelated.kill()
+                unrelated.wait(timeout=5)
 
 
 def test_resume_env_keeps_rcx_overlay_for_resumed_turns(monkeypatch):
