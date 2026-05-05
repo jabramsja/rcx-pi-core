@@ -2,25 +2,24 @@
 
 ## Current State
 
-- Original branch state at initial handoff write time was `dev...origin/dev`
-  with a clean local worktree except this untracked handoff file.
-- Updated branch state after the Codex protocol-audit pass:
-  `git status --short --branch` reports:
-  - `## dev...origin/dev`
-  - ` M mu/tools/session/check_codex_startup_state.py`
-  - `?? reports/control_plane/session_handoff_2026-05-05.md`
-- The repo-tracked change is intentional: it hardens Codex startup-state
-  preflight against cached instruction canaries that contradict founder
-  protocol. The handoff file remains untracked.
-- The handoff directive pass also cleaned stale active-blocker truth: the
-  resolved mu preproduction gate-theater blocker moved from
-  `reports/deferred/blocking/` to `reports/archive/deferred/`, and
-  `FOUNDER_SESSION_BOOTSTRAP.md` now records the dispatcher-first pipeline rule.
-- Latest truth cleanup wave landed as PR #865:
-  `docs: clarify resolved theater blocker archive note`.
-- PR #864 landed immediately before it and resolved the `/mu` preproduction
-  gate-theater blocker by aligning red-team startup truth with the theater-risk
-  ratchet.
+- Post-merge repo truth for this handoff: PR #870 is merged, and `HEAD`,
+  `dev`, and `origin/dev` all point at merge commit `69ca3050`
+  (`Merge pull request #870 from
+  jabramsja/jabramsja/codex-autoping-active-ping-cleanup-hardening-2026-05-05`).
+- The old handoff wording that described a modified
+  `mu/tools/session/check_codex_startup_state.py` file and an untracked
+  `session_handoff_2026-05-05.md` file is stale. That package has landed
+  through the normal PR sequence; do not treat the earlier dirty-worktree
+  snapshot as current state.
+- Recent merge chronology on first-parent `dev`: PR #867
+  (`post-merge-package-stale-refresh-guard-2026-05-05`), PR #868
+  (`codex-models-cache-preflight-guard-2026-05-05`), PR #869
+  (`deferred-findings-stale-reference-cleanup-2026-05-05`), and PR #870
+  (`codex-autoping-active-ping-cleanup-hardening-2026-05-05`) are all merged
+  after PRs #864-#866.
+- Active deferred-lane truth remains split by lane: `reports/deferred/blocking/`
+  contains no active blocker packet beyond `README.md`, while retained active
+  advisory/non-blocking residue remains under `reports/deferred/non_blocking/`.
 - Do not treat hidden or personal memory as canonical. Re-check `STATUS.md`,
   `TASKS.md`, `CHANGELOG.md`, `reports/README.md`, and `git status --short` at
   next session start.
@@ -196,11 +195,10 @@ truth-refresh steps unless the manual operator reproduces them exactly.
 ## Suggested Next Session Sequence
 
 1. Run normal founder preflight/startup guard for the selected mode.
-2. Confirm live repo state. As of this handoff update, the repo is not clean:
-   it contains the intentional modified Codex startup-state checker, this
-   handoff, and the bounded doc/protocol cleanup from this directive pass.
-3. Decide whether to keep and commit the Codex startup-state checker hardening
-   and handoff cleanup through the normal dispatcher/commit-executor path.
+2. Confirm live repo state from `git status --short` and current branch refs
+   instead of reusing the historical dirty-worktree snapshot above.
+3. Treat PR #870 as the current `dev`/`origin/dev` baseline before choosing
+   any new bounded cleanup wave.
 4. Confirm current `TASKS.md` truth.
 5. Dispatch the next bounded wave against the retained non-blocking advisories
    or any remaining pager/autoping/recovery hardening packet.
