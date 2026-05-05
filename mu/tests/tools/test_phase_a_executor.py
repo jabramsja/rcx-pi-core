@@ -72,6 +72,40 @@ def test_create_plan_draft_writes_authoritative_routing_identity(tmp_path):
     assert header.index("Task: [PARALLEL-PIPELINE]") < header.index("Phase-A-Lock: UNLOCKED")
 
 
+def test_extract_plan_scope_carries_bounded_candidate_detail():
+    scope = phase_a_mod.extract_plan_scope(
+        {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "generic post-merge summary",
+            "request_for_claude": "generic post-merge request",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "wave_name": "founder-ordered-redteam-wave-packet-seed-2026-05-05",
+            "next_candidates": [
+                {
+                    "candidate": "unbounded-background-item",
+                    "bounded": False,
+                    "summary": "must not be selected",
+                    "request_for_claude": "must not leak into Phase A",
+                },
+                {
+                    "candidate": "founder-ordered-redteam-wave-packet-seed-2026-05-05",
+                    "bounded": True,
+                    "summary": "create code/docs/tests/tooling audit packets",
+                    "request_for_claude": "carry founder-ordered audit queue details into Phase A",
+                },
+            ],
+        }
+    )
+
+    assert "generic post-merge request" in scope["request"]
+    assert "carry founder-ordered audit queue details into Phase A" in scope["request"]
+    assert "founder-ordered-redteam-wave-packet-seed-2026-05-05" in scope["request"]
+    assert "must not leak into Phase A" not in scope["request"]
+    assert "generic post-merge summary" in scope["summary"]
+    assert "create code/docs/tests/tooling audit packets" in scope["summary"]
+    assert scope["task_id"] == "[NEXT-CODEX-POST-REDTEAM]"
+
+
 def test_lock_plan_inserts_missing_authoritative_routing_identity(tmp_path):
     repo = tmp_path / "repo"
     reports = repo / "reports" / "control_plane"

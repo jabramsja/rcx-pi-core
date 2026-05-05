@@ -189,11 +189,61 @@ def resolve_bridge_turn_timeout(config: dict[str, Any], phase_key: str, default:
     return float(timeout)
 
 
+def _first_bounded_next_candidate(routing_record: dict[str, Any]) -> dict[str, Any]:
+    """Return the first bounded next-candidate object, if one exists."""
+    candidates = routing_record.get("next_candidates", [])
+    if not isinstance(candidates, list):
+        return {}
+    for candidate in candidates:
+        if isinstance(candidate, dict) and candidate.get("bounded") is True:
+            return candidate
+    return {}
+
+
+def _append_distinct_context(base: str, label: str, extra: str) -> str:
+    base = str(base or "").strip()
+    extra = str(extra or "").strip()
+    if not extra:
+        return base
+    if not base:
+        return extra
+    if extra in base:
+        return base
+    return f"{base}\n\n{label}:\n{extra}"
+
+
 def extract_plan_scope(routing_record: dict[str, Any]) -> dict[str, str]:
-    """Extract planning scope from routing record's request_for_claude."""
+    """Extract planning scope from the routing record and bounded candidate."""
+    candidate = _first_bounded_next_candidate(routing_record)
+    candidate_request = str(
+        candidate.get("request_for_claude")
+        or candidate.get("request")
+        or ""
+    )
+    candidate_summary = str(candidate.get("summary") or "")
+    candidate_name = str(candidate.get("candidate") or "").strip()
+
+    request = _append_distinct_context(
+        str(routing_record.get("request_for_claude", "") or ""),
+        "Routed next-candidate request",
+        candidate_request,
+    )
+    if candidate_name:
+        request = _append_distinct_context(
+            request,
+            "Routed next-candidate",
+            candidate_name,
+        )
+
+    summary = _append_distinct_context(
+        str(routing_record.get("summary", "") or ""),
+        "Routed next-candidate summary",
+        candidate_summary,
+    )
+
     return {
-        "request": routing_record.get("request_for_claude", ""),
-        "summary": routing_record.get("summary", ""),
+        "request": request,
+        "summary": summary,
         "decision": routing_record.get("decision", ""),
         "task_id": routing_record.get("task_id", ""),
         "wave_name": routing_record.get("wave_name", ""),
