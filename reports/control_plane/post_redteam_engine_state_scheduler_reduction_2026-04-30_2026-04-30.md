@@ -13,22 +13,25 @@ Purpose: Historical governing packet for the first bounded downstream
 first-sequenced F-1/F-2 reduction from the locked Phase A sweep: formal engine
 state plus scheduler/operator-pool boundary.
 
-Current truth (2026-05-03): `TASKS.md:395-396` records this slice as landed and
-lists the landed seed, fixture, structural-test, scheduler-parity, and
-seed-registration artifacts. Future-tense scope, work-item, and acceptance
-language below is retained as historical packet evidence only; do not relist
-those F-1/F-2 artifacts as unresolved work.
+Current truth (2026-05-05): the current `TASKS.md`
+`[NEXT-CODEX-POST-REDTEAM]` entry records this slice as landed and lists the
+landed seed, fixture, structural-test, scheduler-parity, and seed-registration
+artifacts. Future-tense scope, work-item, and acceptance language below is
+retained as historical packet evidence only; do not relist those F-1/F-2
+artifacts as unresolved work.
 
 Evidence boundary for this cleanup: this packet was updated from this file,
-`TASKS.md:392-397`, the governing structural queue, the historical Phase A sweep
-packet, and the generated deferred advisory that flagged the stale future-tense
-wording. No downstream implementation files were inspected for this cleanup.
+the current `TASKS.md` `[NEXT-CODEX-POST-REDTEAM]` entry, the governing
+structural queue, the historical Phase A sweep packet, and the generated
+deferred advisory that flagged the stale future-tense wording. No downstream
+implementation files were inspected for this cleanup.
 
 ## 1. Scope
 
 This Phase A packet governed the implementation pass for the F-1/F-2
-engine-state and scheduler reduction only. `TASKS.md:396` records that this
-bounded slice has since landed.
+engine-state and scheduler reduction only. The current `TASKS.md`
+`[NEXT-CODEX-POST-REDTEAM]` entry records that this bounded slice has since
+landed.
 
 Files and directories that were in scope for that implementation pass:
 
@@ -66,7 +69,7 @@ ls mu/programs/rcx_engine_scheduler* mu/programs/rcx_engine_supervisor* 2>/dev/n
 If these commands prove that the engine-state or scheduler artifacts have
 already landed, remove that item from pending work and stop for a narrower
 replan instead of re-listing stale work as unresolved. Current tracker truth now
-records this landed state at `TASKS.md:396`.
+records this landed state in the `TASKS.md` `[NEXT-CODEX-POST-REDTEAM]` entry.
 
 ### WI-2: Add the formal engine-state artifact
 
@@ -178,21 +181,33 @@ The implementation was acceptable only when all of the following were true:
 - F-3 terminal semantics and F-4 workload corpus remain explicitly deferred and
   are not claimed as resolved by this slice.
 
-2026-05-03 status: `TASKS.md:396` records the F-1/F-2 seed, fixture,
-structural-test, scheduler-parity, and seed-registration artifacts as landed.
-This packet does not claim closure for F-3 terminal semantics or F-4 workload
-corpus work.
+2026-05-05 status: the current `TASKS.md` `[NEXT-CODEX-POST-REDTEAM]` entry
+records the F-1/F-2 seed, fixture, structural-test, scheduler-parity, and
+seed-registration artifacts as landed. This packet does not claim closure for
+F-3 terminal semantics or F-4 workload corpus work.
 
 ## 6. Grounding / Authorization
 
 TASKS.md authorization:
 
-- `TASKS.md:392`: `[NEXT-CODEX-POST-REDTEAM]` is UNPARKED and founder-authorized as of 2026-03-28.
-- `TASKS.md:393`: structural follow-on queue is `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
-- `TASKS.md:394`: sequence is Phase A -> Phase B -> Phase C -> Phase D.
-- `TASKS.md:395`: current phase remains OPEN only because remaining structural reduction requires separate bounded packets; the Phase A structural gap sweep and this first engine-state/scheduler reduction have landed.
-- `TASKS.md:396`: PR #701 landed the Phase A sweep packet/evidence only, and current code now contains this follow-on engine-state/scheduler slice: `mu/programs/rcx_engine_state.v1.json`, `mu/programs/rcx_engine_scheduler.v1.json`, `mu/tests/fixtures/rcx_engine_state_minimal.json`, `mu/tests/structural/test_rcx_engine_state_seed.py`, `mu/tests/structural/test_rcx_enginenew_scheduler.py`, `mu/tests/parity/test_rcx_engine_scheduler_parity.py`, and Python/JS seed registration for both engine seeds.
-- `TASKS.md:397`: lane is structural post-control-surface.
+- The current `TASKS.md` `[NEXT-CODEX-POST-REDTEAM]` entry is UNPARKED and
+  founder-authorized as of 2026-03-28.
+- The entry points to structural follow-on queue
+  `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
+- The entry preserves the sequence Phase A -> Phase B -> Phase C -> Phase D.
+- The entry keeps the current phase OPEN only because remaining structural
+  reduction requires separate bounded packets; the Phase A structural gap sweep
+  and this first engine-state/scheduler reduction have landed.
+- The entry records that PR #701 landed the Phase A sweep packet/evidence only,
+  and that current code now contains this follow-on engine-state/scheduler
+  slice: `mu/programs/rcx_engine_state.v1.json`,
+  `mu/programs/rcx_engine_scheduler.v1.json`,
+  `mu/tests/fixtures/rcx_engine_state_minimal.json`,
+  `mu/tests/structural/test_rcx_engine_state_seed.py`,
+  `mu/tests/structural/test_rcx_enginenew_scheduler.py`,
+  `mu/tests/parity/test_rcx_engine_scheduler_parity.py`, and Python/JS seed
+  registration for both engine seeds.
+- The entry places the lane as structural post-control-surface.
 
 Governing packet refs:
 
