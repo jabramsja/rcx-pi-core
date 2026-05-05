@@ -85,6 +85,7 @@ SESSION_START_REQUIRED_CANARIES = (
     "codex_binary_patch_surface.md",
 )
 PREFLIGHT_WRAPPER_REQUIRED_CANARIES = (
+    "codex-models-cache-guard",
     "ensure_codex_autoping.sh",
     "--no-autoping",
     "Codex autoping:",

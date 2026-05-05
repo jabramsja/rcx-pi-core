@@ -263,6 +263,7 @@ def test_preflight_wrapper_accepts_autoping_aware_wrapper(monkeypatch, tmp_path)
         "echo 'Codex pager: route=codex'\n"
         "echo 'Codex autoping: ACTIVE'\n"
         "echo '--no-autoping'\n"
+        "echo 'codex-models-cache-guard'\n"
         "echo 'ensure_codex_autoping.sh'\n"
         "echo 'rev-parse --is-inside-work-tree'\n",
         encoding="utf-8",
