@@ -147,6 +147,82 @@ render_recovery_once() {
   fi
   max_ticks=$(( timeout_s * 10 ))
 
+  if [ "$FAST_ONESHOT" = "1" ]; then
+    python3 - "$dashboard_py" "$output_path" "$REPO_ROOT" "$BUS_DIR" "$timeout_s" <<'PY'
+from __future__ import annotations
+
+import os
+import signal
+import subprocess
+import sys
+from pathlib import Path
+
+dashboard_py = Path(sys.argv[1])
+output_path = Path(sys.argv[2])
+repo_root = sys.argv[3]
+bus_dir = sys.argv[4]
+timeout_s = int(sys.argv[5])
+raw_output_path = Path(str(output_path) + ".raw")
+
+
+def write_timeout_fallback() -> None:
+    bus = Path(repo_root) / bus_dir
+    if (bus / "recovery" / "recovery_status.json").is_file():
+        body = (
+            "RECOVERY\n"
+            "─────────────────────────────────────\n"
+            "  Recovery detail unavailable: render timed out in one-shot mode.\n"
+        )
+    else:
+        body = (
+            "RECOVERY\n"
+            "─────────────────────────────────────\n"
+            "  No recovery activity recorded yet.\n"
+        )
+    output_path.write_text(body, encoding="utf-8")
+
+
+try:
+    raw_output_path.unlink(missing_ok=True)
+    with raw_output_path.open("w", encoding="utf-8") as stdout:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                str(dashboard_py),
+                "--render-recovery",
+                "--repo-root",
+                repo_root,
+                "--bus-dir",
+                bus_dir,
+            ],
+            stdout=stdout,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            returncode = proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=1)
+            write_timeout_fallback()
+            raise SystemExit(124)
+
+    output_path.write_text(raw_output_path.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
+    raise SystemExit(returncode)
+finally:
+    raw_output_path.unlink(missing_ok=True)
+PY
+    return $?
+  fi
+
   python3 "$dashboard_py" --render-recovery --repo-root "$REPO_ROOT" --bus-dir "$BUS_DIR" > "$output_path" 2>/dev/null &
   child="$!"
   while kill -0 "$child" 2>/dev/null; do
@@ -388,6 +464,9 @@ PY
 }
 
 render_autoping_attention_line() {
+  if [ "$FAST_ONESHOT" = "1" ] && [ -z "${RCX_CODEX_HOME:-}" ] && [ -z "${CODEX_HOME:-}" ]; then
+    return 0
+  fi
   python3 - "$REPO_ROOT" <<'PY' 2>/dev/null
 from __future__ import annotations
 

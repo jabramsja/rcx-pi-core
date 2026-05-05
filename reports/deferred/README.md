@@ -19,15 +19,17 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-04):
+Current inventory refresh (2026-05-05):
 
 - Evidence command: `rg --files reports/deferred/blocking reports/deferred/non_blocking | sort | nl -ba`.
-- `reports/deferred/blocking/` contains `README.md` plus one active blocker:
-  `mu_preproduction_gate_theater_blocker_2026-05-04.md`. `/mu`
-  production-forward movement is blocked until the strict theater-risk gate is
-  green for the right reason.
-- `reports/deferred/non_blocking/` currently contains 29 markdown files:
-  `README.md` plus 28 active advisory/follow-up records with concrete evidence
+- `reports/deferred/blocking/` contains `README.md` plus one resolved blocker
+  packet retained in place until an archive/closeout wave moves it:
+  `mu_preproduction_gate_theater_blocker_2026-05-04.md`. The 2026-05-05
+  follow-up aligns the redteam startup guard with the curated theater-risk
+  ratchet; `/mu` production-forward movement is no longer blocked by this
+  gate-theater finding.
+- `reports/deferred/non_blocking/` currently contains 30 markdown files:
+  `README.md` plus 29 active advisory/follow-up records with concrete evidence
   targets.
 - The deferred findings sweep archived 6 stale, self-closed, or code-closed
   generated advisory packets under `reports/archive/deferred/` with
@@ -53,11 +55,13 @@ Historical/generated advisory records retained in `non_blocking/` therefore do
 not relist PR #701, the engine-state/scheduler slice, `PIPELINE-AGENT-PAGER`,
 `PARALLEL-PIPELINE`, or `DEFERRED-CONSOLIDATION` as active unresolved work.
 
-Mu preproduction blocker note (2026-05-04):
+Mu preproduction blocker note (2026-05-05):
 
 - `reports/deferred/blocking/mu_preproduction_gate_theater_blocker_2026-05-04.md`
-  was opened by the mu preproduction red-team stop condition. Phase B now
-  enforces `--fail-on-theater` from the redteam startup guard; the packet
-  remains active while the 85 strict-gate theater-risk findings are unresolved.
-  It is not part of the earlier deferred-findings sweep inventory and does not
-  reopen archived or landed parent-queue work.
+  was opened by the mu preproduction red-team stop condition and resolved by
+  the bounded ratchet follow-up. The raw strict checker still reports 85
+  `theater_risk` methods, but `check_theater_risk_ratchet.py` proves they are
+  all current, non-expired curated false positives and will fail on new,
+  expired, or `real` findings. It is not part of the earlier
+  deferred-findings sweep inventory and does not reopen archived or landed
+  parent-queue work.

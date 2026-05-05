@@ -61,6 +61,17 @@ def validate_allowlist(data: dict) -> list[str]:
         errors.append("'entries' must be a list")
         return errors
 
+    total = data.get("total_theater_risk")
+    if not isinstance(total, int):
+        errors.append(
+            f"total_theater_risk must be an int, got {type(total).__name__}"
+        )
+    elif total != len(entries):
+        errors.append(
+            f"total_theater_risk must equal entries length "
+            f"({len(entries)}), got {total}"
+        )
+
     seen: set[tuple[str, str, str]] = set()
     for i, entry in enumerate(entries):
         if not isinstance(entry, dict):

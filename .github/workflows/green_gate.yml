@@ -49,10 +49,15 @@ jobs:
 
       - name: Install system deps
         shell: bash
+        timeout-minutes: 3
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y ripgrep
+          if command -v rg >/dev/null 2>&1; then
+            rg --version | head -1
+            exit 0
+          fi
+          timeout 120s sudo apt-get update
+          timeout 120s sudo apt-get install -y ripgrep
 
       - name: Install project (editable)
         shell: bash

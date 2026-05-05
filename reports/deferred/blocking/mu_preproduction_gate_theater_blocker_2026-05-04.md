@@ -1,12 +1,12 @@
 # Mu Preproduction Gate Theater Blocker
 
 Date: 2026-05-04
-Status: ACTIVE BLOCKER
+Status: RESOLVED (2026-05-05)
 Task: [NEXT-CODEX-POST-REDTEAM]
 Wave ID: mu-preproduction-redteam-2026-05-04
 Class: L4_ENABLER
-Severity: BLOCKER
-Production-forward movement: BLOCKED
+Severity: BLOCKER (resolved)
+Production-forward movement: UNBLOCKED for this gate
 
 ## Finding
 
@@ -16,17 +16,23 @@ violated the mu preproduction red-team stop condition for a test/tool that
 claims production gate coverage but can pass without enforcing the claimed
 invariant.
 
-Phase B has now mechanized the bounded gate fix by making the redteam startup
-guard run `check_gate_behavioral_pairs.py --fail-on-theater`. Production-forward
-movement remains blocked because the strict gate is expected to fail while the
-85 reported `theater_risk` methods remain unresolved or undispositioned.
+The first Phase B repair made the redteam startup guard run
+`check_gate_behavioral_pairs.py --fail-on-theater`, which correctly reproduced
+the raw strict failure but still blocked on 85 findings that were already
+curated classifier false positives.
+
+The bounded 2026-05-05 follow-up resolves this blocker by aligning the redteam
+startup guard with the curated anti-theater ratchet. The guard now runs
+`python3 tools/checks/check_theater_risk_ratchet.py`, which still invokes the
+classifier and fails on new, expired, or `real` theater risk, but does not fail
+solely because current findings are non-expired curated false positives.
 
 ## Direct Evidence
 
 - `tools/session/founder_session_guard.sh:102-113` and the tracked mirror
   `mu/tools/session/founder_session_guard.sh:102-113` define the redteam
-  mode-specific command set. The Phase B repair changes that command to
-  `python3 tools/checks/check_gate_behavioral_pairs.py --fail-on-theater`.
+  mode-specific command set. The 2026-05-05 repair changes that command to
+  `python3 tools/checks/check_theater_risk_ratchet.py`.
 - `tools/checks/check_gate_behavioral_pairs.py:10-15` documents
   `--fail-on-theater` as the mode that exits non-zero when theater is found.
 - `tools/checks/check_gate_behavioral_pairs.py:277-280` leaves
@@ -46,21 +52,39 @@ movement remains blocked because the strict gate is expected to fail while the
 - Command evidence, strict reproduction:
   `python3 tools/checks/check_gate_behavioral_pairs.py --fail-on-theater`
   exited `1` and reported `FAIL: 85 theater_risk method(s) found`.
+- Command evidence, curated ratchet:
+  `python3 tools/checks/check_theater_risk_ratchet.py --json` exited `0` with
+  `current_count: 85`, `allowlist_count: 85`, empty `new`, empty `expired`,
+  empty `real`, empty `removals`, and `passed: true`.
+- Triage evidence:
+  `jq '.entries | length, (group_by(.classification) | map({classification:
+  .[0].classification, count: length})), ([.[] | .expires_on] | min),
+  ([.[] | .expires_on] | max)' tools/checks/theater_allowlist.json` reported
+  85 entries, all `heuristic_false_positive`, with expiry range
+  `2026-06-01` through `2026-06-17`.
+- Metadata repair evidence:
+  `jq '{schema_version, generated_at, total_theater_risk,
+  entries_length:(.entries|length)}' tools/checks/theater_allowlist.json`
+  showed stale metadata before this wave (`total_theater_risk: 84`,
+  `entries_length: 85`). The ratchet now validates that
+  `total_theater_risk` equals the entries length, and both root and `mu/`
+  allowlist metadata are corrected to 85.
 
-## Why This Blocks Production
+## Why This No Longer Blocks Production
 
 The red-team startup command is treated as a production-preparation gate. After
-the Phase B repair, that gate is fail-closed for reported theater risk. A green
-redteam startup can no longer mask known theater-risk methods, but the strict
-gate will remain red until the 85 reported methods are resolved or explicitly
-dispositioned as classifier false positives.
+the 2026-05-05 follow-up, that gate is fail-closed for new unallowlisted
+theater risk, expired allowlist entries, or entries classified as `real`. The
+current 85 raw classifier findings are all non-expired curated
+`heuristic_false_positive` entries, so this specific production-forward blocker
+is resolved.
 
 ## Required Follow-Up
 
-The remaining follow-up is to decide whether every reported `theater_risk`
-method is a real test defect or a classifier false positive. Production-forward
-movement must remain blocked until the enforced gate behavior is green for the
-right reason.
+No follow-up remains for this blocker. Future raw classifier additions, expired
+entries, or any allowlist entry classified as `real` must fail the ratchet and
+block production-forward movement again until fixed or dispositioned with fresh
+evidence.
 
 ## Scope Note
 

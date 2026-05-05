@@ -188,6 +188,18 @@ class TestAllowlistValidation:
         errors = validate_allowlist(data)
         assert any("schema_version" in e for e in errors)
 
+    def test_rejects_missing_total_theater_risk(self):
+        data = _make_allowlist([_make_entry()])
+        del data["total_theater_risk"]
+        errors = validate_allowlist(data)
+        assert any("total_theater_risk must be an int" in e for e in errors)
+
+    def test_rejects_total_theater_risk_metadata_drift(self):
+        data = _make_allowlist([_make_entry(), _make_entry(method="test_baz")])
+        data["total_theater_risk"] = 1
+        errors = validate_allowlist(data)
+        assert any("must equal entries length (2), got 1" in e for e in errors)
+
     def test_rejects_unknown_classification(self):
         entry = _make_entry(classification="maybe")
         data = _make_allowlist([entry])
@@ -361,6 +373,45 @@ class TestClassifierValidation:
 
 class TestInvocationPaths:
     """Both tools/ and mu/tools/ paths must work (B1 blocker)."""
+
+    def test_mirror_surfaces_are_synchronized(self):
+        pairs = [
+            (
+                "tools/checks/check_theater_risk_ratchet.py",
+                "mu/tools/checks/check_theater_risk_ratchet.py",
+            ),
+            (
+                "tools/checks/check_gate_behavioral_pairs.py",
+                "mu/tools/checks/check_gate_behavioral_pairs.py",
+            ),
+            (
+                "tools/checks/theater_allowlist.json",
+                "mu/tools/checks/theater_allowlist.json",
+            ),
+            (
+                "tools/session/founder_session_guard.sh",
+                "mu/tools/session/founder_session_guard.sh",
+            ),
+        ]
+        for root_rel, mu_rel in pairs:
+            assert (REPO_ROOT / root_rel).read_text() == (REPO_ROOT / mu_rel).read_text()
+
+    def test_current_allowlist_metadata_matches_entries(self):
+        for rel in [
+            "tools/checks/theater_allowlist.json",
+            "mu/tools/checks/theater_allowlist.json",
+        ]:
+            data = json.loads((REPO_ROOT / rel).read_text())
+            assert data["total_theater_risk"] == len(data["entries"])
+
+    def test_redteam_guard_uses_curated_theater_ratchet(self):
+        for rel in [
+            "tools/session/founder_session_guard.sh",
+            "mu/tools/session/founder_session_guard.sh",
+        ]:
+            text = (REPO_ROOT / rel).read_text()
+            assert "python3 tools/checks/check_theater_risk_ratchet.py" in text
+            assert "check_gate_behavioral_pairs.py --fail-on-theater" not in text
 
     def test_ratchet_via_tools_path(self):
         result = subprocess.run(
