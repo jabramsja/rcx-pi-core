@@ -716,6 +716,8 @@ def _looks_like_phase_b_wave_class_package_gap(result: dict[str, Any]) -> bool:
         *(_summarize_json_value(candidate) for candidate in candidates),
     ]
     signal = " ".join(part for part in text_parts if part).lower()
+    if "founder_override_token requires wave_class" in signal:
+        return True
     if (
         "package-scope contradiction" in signal
         or "staged files are not fully represented by changed_files" in signal
@@ -2017,6 +2019,7 @@ def fix_phase_b_wave_class_package_gap(repo_root: Path, **kw: Any) -> dict[str, 
     """Retry a Phase B package-truth failure only after source support exists."""
     phase_b_path = repo_root / "mu" / "tools" / "executors" / "phase_b_executor.py"
     meta_path = repo_root / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py"
+    result = kw.get("result", {})
     try:
         phase_b_text = phase_b_path.read_text(encoding="utf-8")
         meta_text = meta_path.read_text(encoding="utf-8")
@@ -2031,9 +2034,30 @@ def fix_phase_b_wave_class_package_gap(repo_root: Path, **kw: Any) -> dict[str, 
         snippet in phase_b_text
         for snippet in (
             '"wave_class": wave_class',
+            "_resolve_phase_b_wave_class",
             "_parse_plan_wave_class",
             "_collect_commit_bound_files",
             "_collect_fenced_dirty_files",
+        )
+    )
+    result_candidates = _extract_result_candidates(result) if isinstance(result, dict) else []
+    result_signal = " ".join(
+        part
+        for part in (
+            _summarize_result_reason(result) if isinstance(result, dict) else "",
+            *(_summarize_json_value(candidate) for candidate in result_candidates),
+        )
+        if part
+    ).lower()
+    needs_structural_override_filter = (
+        "founder_override_token requires wave_class" in result_signal
+    )
+    phase_b_structural_override_ready = all(
+        snippet in phase_b_text
+        for snippet in (
+            "_supervisor_package_founder_override_token",
+            "pre_supervisor_raw_founder_override_token",
+            "reentry_pre_supervisor_raw_founder_override_token",
         )
     )
     meta_ready = (
@@ -2041,12 +2065,22 @@ def fix_phase_b_wave_class_package_gap(repo_root: Path, **kw: Any) -> dict[str, 
         and '"--wave-id"' in meta_text
         and "enforce_l4_execution_contract.py" in meta_text
     )
-    if not (phase_b_ready and meta_ready):
+    if (
+        not (phase_b_ready and meta_ready)
+        or (needs_structural_override_filter and not phase_b_structural_override_ready)
+    ):
         return _fix_result(
             False,
             "wave_class_package_fix_missing",
             "Phase B/meta-bridge source does not yet propagate package wave_class, "
-            "commit-bound staged scope, and wave_id into the supervisor gates",
+            "commit-bound staged scope, wave_id, and structural override-token suppression "
+            "into the supervisor gates",
+        )
+    if needs_structural_override_filter:
+        return _fix_result(
+            True,
+            "retry_phase_b_after_structural_override_package_fix",
+            "Phase B now suppresses founder_override_token for L4_STRUCTURAL supervisor packages; retry Phase B",
         )
     return _fix_result(
         True,

@@ -134,6 +134,7 @@ _MAINTENANCE_FORBIDDEN_PREFIXES = (
     "mu/tools/compilers/",
     "tools/compilers/",
 )
+_SUPERVISOR_OVERRIDE_WAVE_CLASSES = {"L4_ENABLER", "MAINTENANCE"}
 
 
 # ---------------------------------------------------------------------------
@@ -1837,6 +1838,18 @@ def _extract_founder_override_from_tracker_note(tracker_note_text: str) -> str:
     return f"FOUNDER_OVERRIDE:{bare_token}" if bare_token else ""
 
 
+def _supervisor_package_founder_override_token(raw_token: str, *, wave_class: str) -> str:
+    """Return an override token only for wave classes allowed by supervisor schema."""
+    token = str(raw_token or "").strip()
+    if not token:
+        return ""
+    if str(wave_class or "").strip() not in _SUPERVISOR_OVERRIDE_WAVE_CLASSES:
+        return ""
+    if not token.startswith("FOUNDER_OVERRIDE:"):
+        token = f"FOUNDER_OVERRIDE:{token}"
+    return token
+
+
 _CONTROL_SURFACE_TOKEN_RE = re.compile(
     r"(?i)(?<![A-Za-z0-9_-])control-surface(?![A-Za-z0-9_-])"
 )
@@ -1864,7 +1877,7 @@ def _extract_authorized_control_surface_founder_override(
     wave_class: str,
 ) -> str:
     """Derive same-wave override only from explicit control-surface authority."""
-    if str(wave_class or "").strip() not in {"L4_ENABLER", "MAINTENANCE"}:
+    if str(wave_class or "").strip() not in _SUPERVISOR_OVERRIDE_WAVE_CLASSES:
         return ""
     normalized_wave_id = normalize_wave_id(wave_id)
     if not plan_content or not normalized_wave_id:
@@ -2893,12 +2906,46 @@ def _parse_fenced_out_files(plan_content: str) -> list[str]:
 
 
 def _parse_plan_wave_class(plan_content: str) -> str:
-    """Extract the locked packet's declared wave class when routing omits it."""
-    for line in plan_content.splitlines():
+    """Extract the locked packet's declared header wave class."""
+    for line in _iter_authoritative_plan_header_lines(plan_content):
         match = _PLAN_WAVE_CLASS_RE.match(line.strip())
         if match:
             return match.group("value").strip().strip("`.,;")
     return ""
+
+
+def _resolve_phase_b_wave_class(
+    routing_record: dict[str, Any],
+    plan_content: str,
+) -> str:
+    """Resolve package class from the locked packet before stale routing metadata."""
+    plan_wave_class = _parse_plan_wave_class(plan_content)
+    if plan_wave_class:
+        return plan_wave_class
+    return str(routing_record.get("wave_class") or "").strip() or "L4_ENABLER"
+
+
+def _refresh_phase_b_package_governance(
+    repo_root: Path,
+    plan: dict[str, Any],
+    plan_path: str,
+    routing_record: dict[str, Any],
+) -> tuple[str, str]:
+    """Refresh package governance from the live packet before supervisor packaging."""
+    plan_content = str(plan.get("content", "") or "")
+    if plan_path and not plan_path.startswith("<"):
+        try:
+            plan_content = (repo_root / plan_path).read_text(encoding="utf-8")
+            plan["content"] = plan_content
+        except OSError:
+            pass
+    wave_class = _resolve_phase_b_wave_class(routing_record, plan_content)
+    target_gate_id = (
+        str(routing_record.get("target_gate_id") or "").strip()
+        or _parse_plan_target_gate_id(plan_content)
+        or "G8"
+    )
+    return wave_class, target_gate_id
 
 
 def _parse_plan_target_gate_id(plan_content: str) -> str:
@@ -4089,16 +4136,12 @@ def run_phase_b(
 
     plan_content = plan.get("content", "")
 
-    # Extract wave governance fields from routing first, then the locked packet.
-    wave_class = (
-        str(routing_record.get("wave_class") or "").strip()
-        or _parse_plan_wave_class(plan_content)
-        or "L4_ENABLER"
-    )
-    target_gate_id = (
-        str(routing_record.get("target_gate_id") or "").strip()
-        or _parse_plan_target_gate_id(plan_content)
-        or "G8"
+    # The locked packet is the package-truth authority when it declares class.
+    wave_class, target_gate_id = _refresh_phase_b_package_governance(
+        repo_root,
+        plan,
+        plan_path,
+        routing_record,
     )
 
     # Parse plan-declared files from markdown/body content.
@@ -4376,6 +4419,8 @@ def run_phase_b(
     def _complete_reentry_fix(
         impl_result: dict[str, Any],
         pre_reentry_files: set[str],
+        reentry_findings: str,
+        pending_bridge_round: int,
     ) -> dict[str, Any] | None:
         """Record a re-entry implementer pass before the next bridge review."""
         nonlocal implementer_changed, changed_files
@@ -4404,6 +4449,23 @@ def run_phase_b(
             f"Re-entry changed files: {len(changed_files)} "
             f"(implementer touched {len(post_reentry_files - pre_reentry_files)})"
         )
+        _save_state(repo_root, {
+            "plan_path": plan_path,
+            "completed_step": "needs_phase_b_reentry",
+            "wave_id": wave_id,
+            "bridge_rounds": result["bridge_rounds"],
+            "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
+            "deferred_packet_path": deferred_packet_path,
+            "implementer_changed": sorted(implementer_changed),
+            "executor_created": sorted(executor_created),
+            "baseline_wave_files": sorted(baseline_wave_files),
+            "all_non_blocking": all_non_blocking,
+            "finding_history": finding_history,
+            "reentry_findings": reentry_findings,
+            "skip_reentry_implementer_once": True,
+            "pending_reentry_bridge_round": pending_bridge_round,
+        })
+        log("Re-entry: checkpointed implemented fixes before bridge review")
         return None
 
     def _bridge_review_scope_files(candidate_files: list[str]) -> list[str]:
@@ -5581,7 +5643,11 @@ def run_phase_b(
 
     # Persist state after bridge convergence unless a stricter private-attr
     # remediation checkpoint is already the active resume authority.
-    if not (_resume_private_attr_review or _resume_reentry_private_attr_review):
+    if not (
+        _resume_private_attr_review
+        or _resume_reentry_private_attr_review
+        or _skip_to_reentry
+    ):
         _save_state(repo_root, {
             "plan_path": plan_path,
             "completed_step": "bridge_converged",
@@ -5601,6 +5667,7 @@ def run_phase_b(
     supervisor_parsed: dict[str, Any] = {}
     refresh_reentry_findings = False
     skip_reentry_implementer_once = False
+    pending_reentry_bridge_round = 0
     if _skip_to_reentry:
         log("Resuming into NEEDS_PHASE_B re-entry (skipping supervisor)")
         changed_files = _collect_wave_owned_files(
@@ -5619,6 +5686,15 @@ def run_phase_b(
             log("NEEDS_PHASE_B resume checkpoint drifted or lacked scope fingerprint; refreshing bridge findings first")
         else:
             findings_for_impl = (saved_state or {}).get("reentry_findings", "Fix required (resumed)")
+            skip_reentry_implementer_once = bool(
+                (saved_state or {}).get("skip_reentry_implementer_once")
+            )
+            try:
+                pending_reentry_bridge_round = int(
+                    (saved_state or {}).get("pending_reentry_bridge_round") or 0
+                )
+            except (TypeError, ValueError):
+                pending_reentry_bridge_round = 0
         result["pre_commit_summary"] = findings_for_impl
         decision = "NEEDS_PHASE_B"
         # Provide stubs for variables used in re-entry block
@@ -5628,6 +5704,12 @@ def run_phase_b(
         scratch_dir = repo_root / ".scratch"
         scratch_dir.mkdir(exist_ok=True)
         package_path = scratch_dir / "phase_b_supervisor_package.json"
+        wave_class, target_gate_id = _refresh_phase_b_package_governance(
+            repo_root,
+            plan,
+            plan_path,
+            routing_record,
+        )
         # Build a COMPLETE supervisor package — not an empty dict.
         # The re-entry path at line ~1489 updates changed_files and bridge_status,
         # but validate_package_schema() requires all 11 fields present.
@@ -5786,6 +5868,12 @@ def run_phase_b(
             if plan_path not in changed_files:
                 changed_files.append(plan_path)
 
+        wave_class, target_gate_id = _refresh_phase_b_package_governance(
+            repo_root,
+            plan,
+            plan_path,
+            routing_record,
+        )
         pre_supervisor_tracker_note = _build_phase_b_tracker_note(
             wave_id=wave_id,
             task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
@@ -5803,8 +5891,12 @@ def run_phase_b(
             unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
             pre_supervisor=True,
         )
-        pre_supervisor_founder_override_token = _extract_founder_override_from_tracker_note(
+        pre_supervisor_raw_founder_override_token = _extract_founder_override_from_tracker_note(
             pre_supervisor_tracker_note,
+        )
+        pre_supervisor_founder_override_token = _supervisor_package_founder_override_token(
+            pre_supervisor_raw_founder_override_token,
+            wave_class=wave_class,
         )
         tracker_sync_error, tracker_note_modified = _sync_phase_b_tasks_tracker_note(
             repo_root,
@@ -5859,7 +5951,7 @@ def run_phase_b(
             wave_id=wave_id,
             wave_class=wave_class,
             tracker_note_modified=tracker_note_modified,
-            founder_override_token=pre_supervisor_founder_override_token,
+            founder_override_token=pre_supervisor_raw_founder_override_token,
             changed_files=changed_files,
         )
         if should_collect_l4_indicator:
@@ -6010,13 +6102,17 @@ def run_phase_b(
         # Re-entry: implementer fixes → bridge reviews → loop
         log("NEEDS_PHASE_B — re-invoking implementer then bridge loop")
         reentry_converged = _resume_reentry_private_attr_review
+        bridge_decision = str((saved_state or {}).get("last_reentry_bridge_decision") or "")
         # Initial findings come from supervisor; subsequent rounds use bridge findings
         findings_for_impl = result.get("pre_commit_summary") or supervisor_parsed.get("summary", "Fix required")
 
         # Persist needs_phase_b_reentry state so crash-resume re-enters here.
-        # Do not overwrite a re-entry private-attr pending-review checkpoint;
-        # that stricter state must survive until the fresh review runs.
-        if not _resume_reentry_private_attr_review:
+        # Do not overwrite pending-review checkpoints; those stricter states
+        # must survive until the fresh review runs.
+        if not (
+            _resume_reentry_private_attr_review
+            or (_skip_to_reentry and skip_reentry_implementer_once)
+        ):
             _save_state(repo_root, {
                 "plan_path": plan_path,
                 "completed_step": "needs_phase_b_reentry",
@@ -6032,7 +6128,16 @@ def run_phase_b(
                 "reentry_findings": findings_for_impl,
             })
 
-        for reentry_round in range(result["bridge_rounds"] + 1, max_bridge_rounds + 1):
+        reentry_start_round = result["bridge_rounds"] + 1
+        if skip_reentry_implementer_once:
+            # A post-implementer checkpoint means fixes are already in the
+            # worktree and the next durable action is bridge review. Older
+            # checkpoints did not record the pending round, so fall back to the
+            # saved bridge_rounds value to review the same round rather than
+            # skipping past the max-round boundary.
+            reentry_start_round = pending_reentry_bridge_round or max(1, result["bridge_rounds"])
+
+        for reentry_round in range(reentry_start_round, max_bridge_rounds + 1):
             if reentry_converged:
                 break
             log(f"Re-entry round {reentry_round}/{max_bridge_rounds}...")
@@ -6113,7 +6218,12 @@ def run_phase_b(
                         "step": "phase_b_pager",
                         "errors": [f"Phase B pager emission failed after re-entry implementer: {exc}"],
                     }
-                reentry_fix_error = _complete_reentry_fix(impl_result, pre_reentry_files)
+                reentry_fix_error = _complete_reentry_fix(
+                    impl_result,
+                    pre_reentry_files,
+                    findings_for_impl,
+                    reentry_round,
+                )
                 if reentry_fix_error is not None:
                     return reentry_fix_error
 
@@ -6389,6 +6499,7 @@ def run_phase_b(
                     "all_non_blocking": all_non_blocking,
                     "finding_history": finding_history,
                     "reentry_findings": findings_for_impl,
+                    "last_reentry_bridge_decision": bridge_decision,
                 })
                 log("Re-entry: checkpointed bridge findings; re-invoking implementer in-branch")
                 pre_reentry_files = set(_collect_changed_files(repo_root))
@@ -6453,7 +6564,12 @@ def run_phase_b(
                         "step": "phase_b_pager",
                         "errors": [f"Phase B pager emission failed after re-entry implementer: {exc}"],
                     }
-                reentry_fix_error = _complete_reentry_fix(impl_result, pre_reentry_files)
+                reentry_fix_error = _complete_reentry_fix(
+                    impl_result,
+                    pre_reentry_files,
+                    findings_for_impl,
+                    reentry_round + 1,
+                )
                 if reentry_fix_error is not None:
                     return reentry_fix_error
                 skip_reentry_implementer_once = True
@@ -6579,6 +6695,12 @@ def run_phase_b(
                 }
             log("Re-entry pytest gate: PASSED")
 
+        wave_class, target_gate_id = _refresh_phase_b_package_governance(
+            repo_root,
+            plan,
+            plan_path,
+            routing_record,
+        )
         reentry_pre_supervisor_tracker_note = _build_phase_b_tracker_note(
             wave_id=wave_id,
             task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
@@ -6596,8 +6718,12 @@ def run_phase_b(
             unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
             pre_supervisor=True,
         )
-        reentry_pre_supervisor_founder_override_token = _extract_founder_override_from_tracker_note(
+        reentry_pre_supervisor_raw_founder_override_token = _extract_founder_override_from_tracker_note(
             reentry_pre_supervisor_tracker_note,
+        )
+        reentry_pre_supervisor_founder_override_token = _supervisor_package_founder_override_token(
+            reentry_pre_supervisor_raw_founder_override_token,
+            wave_class=wave_class,
         )
         reentry_tracker_sync_error, reentry_tracker_note_modified = _sync_phase_b_tasks_tracker_note(
             repo_root,
@@ -6651,7 +6777,7 @@ def run_phase_b(
             wave_id=wave_id,
             wave_class=wave_class,
             tracker_note_modified=reentry_tracker_note_modified,
-            founder_override_token=reentry_pre_supervisor_founder_override_token,
+            founder_override_token=reentry_pre_supervisor_raw_founder_override_token,
             changed_files=changed_files,
         )
         if reentry_should_collect_l4_indicator:

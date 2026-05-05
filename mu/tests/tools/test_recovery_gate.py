@@ -258,6 +258,23 @@ class TestClassifyFailure:
         assert fc == FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP
         assert rg_mod.tier_for(fc) == 2
 
+    def test_phase_b_structural_override_schema_rejection_is_recoverable(self):
+        result = {
+            "status": "supervisor_rejected",
+            "step": "pre_commit_supervisor",
+            "errors": [
+                "Supervisor returned ERROR_PACKAGE_INVALID: Package failed schema validation: "
+                "founder_override_token requires wave_class to be explicitly "
+                "'L4_ENABLER' or 'MAINTENANCE' (got: 'L4_STRUCTURAL'); "
+                "L4_STRUCTURAL, empty, and missing values are not authorized"
+            ],
+        }
+
+        fc = rg_mod.classify_failure(result)
+
+        assert fc == FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP
+        assert rg_mod.tier_for(fc) == 2
+
     def test_commit_supervisor_generic_package_schema_rejection_needs_diagnosis(self):
         result = {
             "status": "error",
@@ -1523,6 +1540,7 @@ class TestAttemptRecovery:
         meta_path.parent.mkdir(parents=True)
         phase_b_path.write_text(
             'def _parse_plan_wave_class(content):\n    return "L4_STRUCTURAL"\n'
+            'def _resolve_phase_b_wave_class(routing_record, plan_content):\n    return _parse_plan_wave_class(plan_content)\n'
             'def _collect_commit_bound_files(repo_root, changed_files):\n    return changed_files\n'
             'def _collect_fenced_dirty_files(repo_root, changed_files):\n    return []\n'
             'supervisor_package = {"wave_class": wave_class}\n',
@@ -1549,6 +1567,80 @@ class TestAttemptRecovery:
         assert r["tier"] == 2
         assert r["failure_class"] == FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP.value
         assert r["action"] == "retry_phase_b_after_wave_class_package_fix"
+
+    def test_tier2_phase_b_wave_class_package_gap_requires_packet_class_resolver(self, tmp_path):
+        phase_b_path = tmp_path / "mu" / "tools" / "executors" / "phase_b_executor.py"
+        meta_path = tmp_path / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py"
+        phase_b_path.parent.mkdir(parents=True)
+        meta_path.parent.mkdir(parents=True)
+        phase_b_path.write_text(
+            'def _parse_plan_wave_class(content):\n    return "L4_ENABLER"\n'
+            'def _collect_commit_bound_files(repo_root, changed_files):\n    return changed_files\n'
+            'def _collect_fenced_dirty_files(repo_root, changed_files):\n    return []\n'
+            'supervisor_package = {"wave_class": wave_class}\n',
+            encoding="utf-8",
+        )
+        meta_path.write_text(
+            'cmd = ["python3", "tools/checks/enforce_l4_execution_contract.py"]\n'
+            'cmd.extend(["--wave-class", wave_class])\n'
+            'cmd.extend(["--wave-id", wave_name])\n',
+            encoding="utf-8",
+        )
+        result = {
+            "status": "supervisor_rejected",
+            "step": "pre_commit_supervisor",
+            "errors": [
+                "Wave class is inconsistent with repo truth: package declares "
+                "wave_class L4_STRUCTURAL while the packet declares L4_ENABLER."
+            ],
+        }
+
+        r = rg_mod.attempt_recovery(tmp_path, result, "w1")
+
+        assert r["recovered"] is False
+        assert r["tier"] == 2
+        assert r["failure_class"] == FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP.value
+        assert r["action"] == "wave_class_package_fix_missing"
+
+    def test_tier2_phase_b_structural_override_package_gap_retries_when_source_fixed(self, tmp_path):
+        phase_b_path = tmp_path / "mu" / "tools" / "executors" / "phase_b_executor.py"
+        meta_path = tmp_path / "mu" / "tools" / "agents" / "meta_bridge_supervisor.py"
+        phase_b_path.parent.mkdir(parents=True)
+        meta_path.parent.mkdir(parents=True)
+        phase_b_path.write_text(
+            'def _parse_plan_wave_class(content):\n    return "L4_STRUCTURAL"\n'
+            'def _resolve_phase_b_wave_class(routing_record, plan_content):\n    return _parse_plan_wave_class(plan_content)\n'
+            'def _collect_commit_bound_files(repo_root, changed_files):\n    return changed_files\n'
+            'def _collect_fenced_dirty_files(repo_root, changed_files):\n    return []\n'
+            'def _supervisor_package_founder_override_token(raw_token, *, wave_class):\n    return ""\n'
+            'pre_supervisor_raw_founder_override_token = "FOUNDER_OVERRIDE:structural-wave"\n'
+            'reentry_pre_supervisor_raw_founder_override_token = "FOUNDER_OVERRIDE:structural-wave"\n'
+            'supervisor_package = {"wave_class": wave_class}\n',
+            encoding="utf-8",
+        )
+        meta_path.write_text(
+            'cmd = ["python3", "tools/checks/enforce_l4_execution_contract.py"]\n'
+            'cmd.extend(["--wave-class", wave_class])\n'
+            'cmd.extend(["--wave-id", wave_name])\n',
+            encoding="utf-8",
+        )
+        result = {
+            "status": "supervisor_rejected",
+            "step": "pre_commit_supervisor",
+            "errors": [
+                "Supervisor returned ERROR_PACKAGE_INVALID: Package failed schema validation: "
+                "founder_override_token requires wave_class to be explicitly "
+                "'L4_ENABLER' or 'MAINTENANCE' (got: 'L4_STRUCTURAL'); "
+                "L4_STRUCTURAL, empty, and missing values are not authorized"
+            ],
+        }
+
+        r = rg_mod.attempt_recovery(tmp_path, result, "w1")
+
+        assert r["recovered"] is True
+        assert r["tier"] == 2
+        assert r["failure_class"] == FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP.value
+        assert r["action"] == "retry_phase_b_after_structural_override_package_fix"
 
     def test_tier2_commit_supervisor_structural_override_package_gap_retries_when_source_fixed(self, tmp_path):
         package_path = tmp_path / ".scratch" / "auto_supervisor_package.json"

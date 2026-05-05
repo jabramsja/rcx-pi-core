@@ -989,6 +989,22 @@ def _refresh_tracker_note_wave_file_count(note: str, file_count: int) -> str:
     return refreshed
 
 
+def _refresh_tracker_note_bridge_rounds(
+    note: str,
+    bridge_status: dict[str, Any] | None,
+) -> str:
+    """Align generated tracker-note bridge rounds with the supervisor package."""
+    if not isinstance(bridge_status, dict):
+        return note
+    rounds = max(
+        _bridge_status_round_value(bridge_status.get("rounds")),
+        _bridge_status_round_value(bridge_status.get("total_rounds")),
+    )
+    if rounds <= 0:
+        return note
+    return re.sub(r"bridge rounds=\d+", f"bridge rounds={rounds}", note)
+
+
 def _refresh_tracker_note_test_evidence(note: str, staged_paths: list[str]) -> str:
     """Align generated tracker-note pytest evidence with the rebuilt staged scope."""
     test_files = _collect_wave_test_files(staged_paths)
@@ -1281,6 +1297,11 @@ def _rebuild_handoff_after_packet_truth_refresh(
         *(scope_items if isinstance(scope_items, list) else []),
         active_packet_path,
     ])
+    bridge_status = _effective_commit_bridge_status(
+        repo_root=repo_root,
+        handoff=handoff,
+        active_packet_path=active_packet_path,
+    )
     return build_commit_handoff(
         wave_id=str(handoff.get("wave_id") or ""),
         task_id=str(handoff.get("task_id") or ""),
@@ -1310,11 +1331,7 @@ def _rebuild_handoff_after_packet_truth_refresh(
             if isinstance(handoff.get("deferred_items"), list)
             else None
         ),
-        bridge_status=(
-            dict(handoff.get("bridge_status"))
-            if isinstance(handoff.get("bridge_status"), dict)
-            else None
-        ),
+        bridge_status=bridge_status,
         scope_items=rebuilt_scope_items,
         evidence_handles=evidence_handles,
         pre_commit_receipt_path=(
@@ -1325,6 +1342,90 @@ def _rebuild_handoff_after_packet_truth_refresh(
         repo_root=repo_root,
         tracked_packet=active_packet_path,
     )
+
+
+def _bridge_status_round_value(raw_value: Any) -> int:
+    try:
+        return max(int(raw_value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _same_wave_document_bridge_round_floor(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    active_packet_path: str,
+    handoff: dict[str, Any],
+) -> int:
+    """Return highest same-wave Bridge Round mention in packet/deferred truth."""
+    candidate_paths = _dedupe_repo_paths(
+        [
+            active_packet_path,
+            *(
+                list(handoff.get("deferred_items"))
+                if isinstance(handoff.get("deferred_items"), list)
+                else []
+            ),
+        ]
+    )
+    round_floor = 0
+    for rel_path in candidate_paths:
+        if not rel_path or rel_path.startswith("<") or not rel_path.endswith(".md"):
+            continue
+        full_path = (repo_root / rel_path).resolve()
+        try:
+            if not full_path.is_relative_to(repo_root.resolve()):
+                continue
+            text = full_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        normalized_wave_id = normalize_wave_id(wave_id)
+        same_wave = (
+            rel_path == active_packet_path
+            and _packet_declares_same_wave_id(text, normalized_wave_id)
+        ) or bool(
+            re.search(
+                rf"(?im)^\s*(?:Wave|Wave ID):\s*{re.escape(normalized_wave_id)}\s*$",
+                text,
+            )
+        )
+        if not same_wave:
+            continue
+        for match in re.finditer(r"\bBridge\s+Round\s+(\d+)\b", text, flags=re.IGNORECASE):
+            round_floor = max(round_floor, int(match.group(1)))
+    return round_floor
+
+
+def _effective_commit_bridge_status(
+    *,
+    repo_root: Path,
+    handoff: dict[str, Any],
+    active_packet_path: str,
+) -> dict[str, Any] | None:
+    raw_status = handoff.get("bridge_status")
+    if not isinstance(raw_status, dict):
+        raw_status = {}
+    current_rounds = max(
+        _bridge_status_round_value(raw_status.get("rounds")),
+        _bridge_status_round_value(raw_status.get("total_rounds")),
+    )
+    documented_rounds = _same_wave_document_bridge_round_floor(
+        repo_root,
+        wave_id=str(handoff.get("wave_id") or ""),
+        active_packet_path=active_packet_path,
+        handoff=handoff,
+    )
+    effective_rounds = max(current_rounds, documented_rounds)
+    if effective_rounds == 0 and not raw_status:
+        return None
+    refreshed = dict(raw_status)
+    refreshed["rounds"] = effective_rounds
+    refreshed["total_rounds"] = max(
+        effective_rounds,
+        _bridge_status_round_value(raw_status.get("total_rounds")),
+    )
+    return refreshed
 
 
 def _persist_phase_b_handoff_for_commit_path(
@@ -1620,9 +1721,18 @@ def refresh_commit_path_packet_truth(
             f"{indicator_path}"
         )
     staged_paths_for_block = sorted(_dedupe_repo_paths([*staged_paths_before, active_packet_path]))
+    effective_bridge_status = _effective_commit_bridge_status(
+        repo_root=repo_root,
+        handoff=handoff,
+        active_packet_path=active_packet_path,
+    )
     refreshed_tracker_note_text = _refresh_tracker_note_wave_file_count(
         tracker_note_text,
         len(staged_paths_for_block),
+    )
+    refreshed_tracker_note_text = _refresh_tracker_note_bridge_rounds(
+        refreshed_tracker_note_text,
+        effective_bridge_status,
     )
     refreshed_tracker_note_text = _refresh_tracker_note_test_evidence(
         refreshed_tracker_note_text,
@@ -1647,6 +1757,10 @@ def refresh_commit_path_packet_truth(
     tracker_note_after_staging = _refresh_tracker_note_wave_file_count(
         refreshed_tracker_note_text,
         len(staged_paths_for_block),
+    )
+    tracker_note_after_staging = _refresh_tracker_note_bridge_rounds(
+        tracker_note_after_staging,
+        effective_bridge_status,
     )
     tracker_note_after_staging = _refresh_tracker_note_test_evidence(
         tracker_note_after_staging,
@@ -2069,13 +2183,12 @@ def _run_pytest_on_files(
     """Run pytest on specific test files. Returns exit_code and output."""
     if not test_files:
         return {"exit_code": 0, "stdout": "", "stderr": "", "passed": True}
-    # A single affected control-plane test file can legitimately take close to
-    # two minutes, and the real 2-file gate for
-    # `test_phase_b_executor.py test_recovery_gate.py` took 198.857s on
-    # 2026-04-21. Keep the single-file floor at 180s, then add real slack for
-    # each additional file so the targeted gate fails on test truth, not an
-    # undersized timeout budget.
-    effective_timeout = max(timeout, 180, 180 + 120 * (len(test_files) - 1))
+    # Control-plane executor tests are integration-heavy. The real 2-file gate
+    # for `test_phase_b_executor.py test_recovery_gate.py` took 198.857s on
+    # 2026-04-21, and the same commit gate exhausted the old 300s budget on
+    # 2026-05-05. Keep enough slack that the gate fails on test truth, not an
+    # undersized commit-executor budget.
+    effective_timeout = max(timeout, 240 * len(test_files))
     try:
         result = subprocess.run(
             [
@@ -2101,7 +2214,12 @@ def _run_pytest_on_files(
             "passed": result.returncode == 0,
         }
     except subprocess.TimeoutExpired:
-        return {"exit_code": -1, "stdout": "", "stderr": "pytest timed out", "passed": False}
+        return {
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": f"pytest timed out after {effective_timeout}s",
+            "passed": False,
+        }
 
 
 def _parse_worktree_list(output: str) -> list[dict[str, str]]:
