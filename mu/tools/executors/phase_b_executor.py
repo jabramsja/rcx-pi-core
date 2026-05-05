@@ -2665,12 +2665,7 @@ def _select_sdk_review_files(files: list[str]) -> list[str]:
 
 
 def _build_bridge_status(rounds: Any, *, reentry: bool = False) -> dict[str, Any]:
-    """Render wave-scoped bridge status from the current convergence result.
-
-    ``result["bridge_rounds"]`` is the authoritative count for the wave being
-    packaged. Global bridge.db history is not wave-scoped and can drift from the
-    current staged convergence evidence.
-    """
+    """Render a normalized bridge-status block from an explicit round count."""
     try:
         normalized_rounds = max(int(rounds or 0), 0)
     except (TypeError, ValueError):
@@ -2684,6 +2679,72 @@ def _build_bridge_status(rounds: Any, *, reentry: bool = False) -> dict[str, Any
     return bridge_status
 
 
+_BRIDGE_ROUND_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+}
+_BRIDGE_ROUND_WORD_PATTERN = "|".join(
+    sorted((re.escape(word) for word in _BRIDGE_ROUND_WORDS), key=len, reverse=True)
+)
+_BRIDGE_ROUND_ILLUSTRATIVE_PREFIX_RE = re.compile(
+    r"\b(?:such\s+as|for\s+example|e\.g\.|examples?\s*(?:include|:)|sample)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _documented_bridge_round_value(raw_value: str) -> int:
+    normalized = raw_value.strip().lower()
+    if normalized.isdigit():
+        return int(normalized)
+    return _BRIDGE_ROUND_WORDS.get(normalized, 0)
+
+
+def _bridge_round_match_is_illustrative(text: str, match_start: int) -> bool:
+    line_start = text.rfind("\n", 0, match_start) + 1
+    prefix = text[line_start:match_start]
+    return bool(_BRIDGE_ROUND_ILLUSTRATIVE_PREFIX_RE.search(prefix))
+
+
+def _documented_bridge_round_floor_from_text(text: str) -> int:
+    round_floor = 0
+    for match in re.finditer(
+        r"\bBridge\s+Round\s+(\d+)\s+Remediation\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        if _bridge_round_match_is_illustrative(text, match.start()):
+            continue
+        round_floor = max(round_floor, int(match.group(1)))
+    for match in re.finditer(
+        rf"\b(\d+|{_BRIDGE_ROUND_WORD_PATTERN})\s+"
+        r"(?:Phase\s+[AB]\s+)?bridge\s+rounds?\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        if _bridge_round_match_is_illustrative(text, match.start()):
+            continue
+        round_floor = max(round_floor, _documented_bridge_round_value(match.group(1)))
+    return round_floor
+
+
 def _documented_bridge_round_floor(repo_root: Path, wave_id: str, plan_path: str) -> int:
     """Return the highest same-wave bridge remediation round recorded in repo truth."""
     round_floor = 0
@@ -2693,12 +2754,7 @@ def _documented_bridge_round_floor(repo_root: Path, wave_id: str, plan_path: str
             packet_text = packet_path.read_text(encoding="utf-8")
         except OSError:
             packet_text = ""
-        for match in re.finditer(
-            r"\bBridge\s+Round\s+(\d+)\s+Remediation\b",
-            packet_text,
-            flags=re.IGNORECASE,
-        ):
-            round_floor = max(round_floor, int(match.group(1)))
+        round_floor = max(round_floor, _documented_bridge_round_floor_from_text(packet_text))
 
     wave_date_match = re.search(r"(\d{4}-\d{2}-\d{2})$", str(wave_id or ""))
     if wave_date_match:
@@ -2743,6 +2799,17 @@ def _build_effective_bridge_status(
         executor_rounds = 0
     documented_rounds = _documented_bridge_round_floor(repo_root, wave_id, plan_path)
     return _build_bridge_status(max(executor_rounds, documented_rounds), reentry=reentry)
+
+
+def _bridge_rounds_for_tracker_note(bridge_status: dict[str, Any]) -> int:
+    """Use the package bridge-status floor when rendering tracker prose."""
+    round_candidates: list[int] = []
+    for key in ("rounds", "total_rounds"):
+        try:
+            round_candidates.append(max(int(bridge_status.get(key) or 0), 0))
+        except (TypeError, ValueError):
+            round_candidates.append(0)
+    return max(round_candidates or [0])
 
 
 def _collect_changed_files(
@@ -5874,6 +5941,12 @@ def run_phase_b(
             plan_path,
             routing_record,
         )
+        pre_supervisor_bridge_status = _build_effective_bridge_status(
+            repo_root,
+            wave_id,
+            plan_path,
+            result.get("bridge_rounds", 0),
+        )
         pre_supervisor_tracker_note = _build_phase_b_tracker_note(
             wave_id=wave_id,
             task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
@@ -5884,7 +5957,7 @@ def run_phase_b(
             changed_files=changed_files,
             test_files=final_test_files,
             receipt_path=package_relpath,
-            bridge_rounds=result.get("bridge_rounds", 0),
+            bridge_rounds=_bridge_rounds_for_tracker_note(pre_supervisor_bridge_status),
             reentry=False,
             founder_override=plan.get("founder_override", ""),
             unblocks_wave_id=plan.get("unblocks_wave_id", ""),
@@ -6029,12 +6102,7 @@ def run_phase_b(
             "scope_items": scope_items,
             "fixes_implemented": ["Phase B implementation per locked plan"],
             "deferred_items": deferred_items,
-            "bridge_status": _build_effective_bridge_status(
-                repo_root,
-                wave_id,
-                plan_path,
-                result.get("bridge_rounds", 0),
-            ),
+            "bridge_status": pre_supervisor_bridge_status,
             "evidence_handles": _collect_supervisor_evidence_handles(repo_root, wave_id),
             "blocker_report_paths": blocker_paths,
             "current_judgment": "COMMIT_GO",
@@ -6701,6 +6769,13 @@ def run_phase_b(
             plan_path,
             routing_record,
         )
+        reentry_pre_supervisor_bridge_status = _build_effective_bridge_status(
+            repo_root,
+            wave_id,
+            plan_path,
+            result.get("bridge_rounds", 0),
+            reentry=True,
+        )
         reentry_pre_supervisor_tracker_note = _build_phase_b_tracker_note(
             wave_id=wave_id,
             task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
@@ -6711,7 +6786,7 @@ def run_phase_b(
             changed_files=changed_files,
             test_files=reentry_test_files,
             receipt_path=str(package_path.relative_to(repo_root)),
-            bridge_rounds=result.get("bridge_rounds", 0),
+            bridge_rounds=_bridge_rounds_for_tracker_note(reentry_pre_supervisor_bridge_status),
             reentry=True,
             founder_override=plan.get("founder_override", ""),
             unblocks_wave_id=plan.get("unblocks_wave_id", ""),
@@ -6833,13 +6908,7 @@ def run_phase_b(
             if path.startswith("reports/l4_wave_indicators/") and path not in scope_items:
                 scope_items.append(path)
         supervisor_package["scope_items"] = scope_items
-        supervisor_package["bridge_status"] = _build_effective_bridge_status(
-            repo_root,
-            wave_id,
-            plan_path,
-            result.get("bridge_rounds", 0),
-            reentry=True,
-        )
+        supervisor_package["bridge_status"] = reentry_pre_supervisor_bridge_status
         supervisor_package["evidence_handles"] = _collect_supervisor_evidence_handles(
             repo_root,
             wave_id,
@@ -7074,7 +7143,7 @@ def run_phase_b(
         changed_files=wave_owned_files,
         test_files=handoff_test_files,
         receipt_path=receipt_path,
-        bridge_rounds=result.get("bridge_rounds", 0),
+        bridge_rounds=_bridge_rounds_for_tracker_note(handoff_bridge_status),
         reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
         founder_override=plan.get("founder_override", ""),
         unblocks_wave_id=plan.get("unblocks_wave_id", ""),

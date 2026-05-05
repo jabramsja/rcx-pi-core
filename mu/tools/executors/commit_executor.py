@@ -1386,6 +1386,68 @@ def _bridge_status_round_value(raw_value: Any) -> int:
         return 0
 
 
+_BRIDGE_ROUND_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+}
+_BRIDGE_ROUND_WORD_PATTERN = "|".join(
+    sorted((re.escape(word) for word in _BRIDGE_ROUND_WORDS), key=len, reverse=True)
+)
+_BRIDGE_ROUND_ILLUSTRATIVE_PREFIX_RE = re.compile(
+    r"\b(?:such\s+as|for\s+example|e\.g\.|examples?\s*(?:include|:)|sample)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _documented_bridge_round_value(raw_value: str) -> int:
+    normalized = raw_value.strip().lower()
+    if normalized.isdigit():
+        return int(normalized)
+    return _BRIDGE_ROUND_WORDS.get(normalized, 0)
+
+
+def _bridge_round_match_is_illustrative(text: str, match_start: int) -> bool:
+    line_start = text.rfind("\n", 0, match_start) + 1
+    prefix = text[line_start:match_start]
+    return bool(_BRIDGE_ROUND_ILLUSTRATIVE_PREFIX_RE.search(prefix))
+
+
+def _documented_bridge_round_floor_from_text(text: str) -> int:
+    round_floor = 0
+    for match in re.finditer(r"\bBridge\s+Round\s+(\d+)\b", text, flags=re.IGNORECASE):
+        if _bridge_round_match_is_illustrative(text, match.start()):
+            continue
+        round_floor = max(round_floor, int(match.group(1)))
+    for match in re.finditer(
+        rf"\b(\d+|{_BRIDGE_ROUND_WORD_PATTERN})\s+"
+        r"(?:Phase\s+[AB]\s+)?bridge\s+rounds?\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        if _bridge_round_match_is_illustrative(text, match.start()):
+            continue
+        round_floor = max(round_floor, _documented_bridge_round_value(match.group(1)))
+    return round_floor
+
+
 def _same_wave_document_bridge_round_floor(
     repo_root: Path,
     *,
@@ -1427,8 +1489,7 @@ def _same_wave_document_bridge_round_floor(
         )
         if not same_wave:
             continue
-        for match in re.finditer(r"\bBridge\s+Round\s+(\d+)\b", text, flags=re.IGNORECASE):
-            round_floor = max(round_floor, int(match.group(1)))
+        round_floor = max(round_floor, _documented_bridge_round_floor_from_text(text))
     return round_floor
 
 

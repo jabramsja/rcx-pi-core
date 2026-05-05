@@ -1545,7 +1545,8 @@ class TestMaintenanceTrackerMetadataPropagation:
             "Status: ACTIVE\n"
             "Task: [PIPELINE-RECOVERY]\n"
             "Lane: control-surface\n"
-            "Authorization: standing pipeline-bug-fix authorization for bounded pipeline hardening.\n",
+            "Authorization: standing pipeline-bug-fix authorization for bounded pipeline hardening.\n"
+            "Manual repair grounding: dispatcher previously exited after six Phase B bridge rounds.\n",
             encoding="utf-8",
         )
         captured_package = {}
@@ -1557,6 +1558,7 @@ class TestMaintenanceTrackerMetadataPropagation:
             assert wave_id in tasks_text
             assert f"FOUNDER_OVERRIDE:{wave_id}" in tasks_text
             assert "Phase B pre-commit supervisor package" in tasks_text
+            assert "bridge rounds=6" in tasks_text
             return {
                 "exit_code": 0,
                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
@@ -1607,7 +1609,11 @@ class TestMaintenanceTrackerMetadataPropagation:
                  side_effect=collect_indicator,
              ) as mock_indicator, \
              patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=capture_supervisor), \
-             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+             patch.object(
+                 pb_mod,
+                 "prepare_commit_handoff",
+                 return_value=repo / ".agent_bus" / "handoff.json",
+             ) as mock_handoff:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
         assert result["status"] == "commit_ready"
@@ -1617,6 +1623,9 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert indicator_path in captured_package["scope_items"]
         assert captured_package["evidence_handles"]["indicator"] == indicator_path
         assert captured_package["founder_override_token"] == f"FOUNDER_OVERRIDE:{wave_id}"
+        assert captured_package["bridge_status"]["rounds"] == 6
+        tracker_note_text = mock_handoff.call_args.kwargs["tracker_note_text"]
+        assert "bridge rounds=6" in tracker_note_text
         packet_text = plan.read_text(encoding="utf-8")
         assert "Phase B Indicator Scope Reconciliation" in packet_text
         assert indicator_path in packet_text
@@ -1639,6 +1648,7 @@ class TestMaintenanceTrackerMetadataPropagation:
             "Task: [PIPELINE-RECOVERY]\n"
             "Lane: control-surface\n"
             "Authorization: standing pipeline-bug-fix authorization for bounded pipeline hardening.\n\n"
+            "Manual repair grounding: dispatcher previously exited after six Phase B bridge rounds.\n\n"
             "## Scope\n\n"
             "No indicator file is in scope for this Phase A packet because the reviewer evidence "
             "does not name one.\n",
@@ -1711,7 +1721,11 @@ class TestMaintenanceTrackerMetadataPropagation:
                  side_effect=collect_indicator,
              ) as mock_indicator, \
              patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor_side), \
-             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+             patch.object(
+                 pb_mod,
+                 "prepare_commit_handoff",
+                 return_value=repo / ".agent_bus" / "handoff.json",
+             ) as mock_handoff:
             result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
 
         assert result["status"] == "commit_ready"
@@ -1721,6 +1735,11 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert indicator_path in reentry_package["changed_files"]
         assert indicator_path in reentry_package["scope_items"]
         assert reentry_package["evidence_handles"]["indicator"] == indicator_path
+        assert reentry_package["bridge_status"]["rounds"] == 6
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        assert "bridge rounds=6" in tasks_text
+        tracker_note_text = mock_handoff.call_args.kwargs["tracker_note_text"]
+        assert "bridge rounds=6" in tracker_note_text
         packet_text = plan.read_text(encoding="utf-8")
         assert "Phase B Indicator Scope Reconciliation" in packet_text
         assert indicator_path in packet_text
@@ -2527,6 +2546,33 @@ class TestMaintenanceTrackerMetadataPropagation:
             "current-wave-2026-04-28",
             plan_path,
         ) == 3
+
+    def test_packet_documented_bridge_round_floor_reads_prose_rounds(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        plan_path = "reports/control_plane/current-wave-2026-05-05.md"
+        (repo / plan_path).write_text(
+            "# Plan\n"
+            "Wave ID: current-wave-2026-05-05\n\n"
+            "Manual repair grounding: dispatcher first exited max_rounds_reached "
+            "after six Phase B bridge rounds before the package was repaired. "
+            "Parser examples such as fifteen Phase B bridge rounds are not "
+            "same-wave bridge history.\n",
+            encoding="utf-8",
+        )
+
+        assert pb_mod._documented_bridge_round_floor_from_text(  # ANTICHEAT_OK: direct helper regression for package truth floor
+            "after eleven Phase B bridge rounds"
+        ) == 11
+        assert pb_mod._documented_bridge_round_floor_from_text(  # ANTICHEAT_OK: direct helper regression for package truth floor
+            "after six Phase B bridge rounds. Parser examples such as fifteen Phase B bridge rounds."
+        ) == 6
+        assert pb_mod._documented_bridge_round_floor(  # ANTICHEAT_OK: direct helper regression for package truth floor
+            repo,
+            "current-wave-2026-05-05",
+            plan_path,
+        ) == 6
 
     def test_run_phase_b_emits_reviewer_started_event_from_authoritative_bridge_round(self, tmp_path):
         repo = tmp_path / "repo"
