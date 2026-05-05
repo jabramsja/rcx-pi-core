@@ -7679,8 +7679,14 @@ exit 1
             branch="jabramsja/repo-wave",
             worktree_output=f"worktree {repo_root}\nHEAD 1111111111111111\nbranch refs/heads/jabramsja/repo-wave\n",
         )
+        home_dir = tmp_path / "home"
+        home_dir.mkdir()
+        codex_home = tmp_path / "codex-home"
+        codex_home.mkdir()
         env = os.environ | {
             "PATH": f"{proc_bin}:{bin_dir}:{os.environ['PATH']}",
+            "HOME": str(home_dir),
+            "RCX_CODEX_HOME": str(codex_home),
             "RCX_PANE_ONESHOT": "1",
             "RCX_PANE_PROCESS_SCAN_LIMIT": "3",
             "RCX_TEST_LSOF_LOG": str(lsof_log),

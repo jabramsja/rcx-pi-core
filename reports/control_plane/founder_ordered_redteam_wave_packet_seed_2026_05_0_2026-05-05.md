@@ -171,16 +171,15 @@ resuming commit executor from the failed pre-push point.
 - Refresh wave: `founder-ordered-redteam-wave-packet-seed-2026-05-05`
 - Active packet: `reports/control_plane/founder_ordered_redteam_wave_packet_seed_2026_05_0_2026-05-05.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `b5e304fa54701e351320c3f6dd6544d907e893000d52e2c646fa96de4c7d1f28`
+- Tracker note sha256: `6a2769471963514825e8acbb5a1dab4c5702d578a12db13c6a20aa1496dcdf91`
 - Indicator artifact: `reports/l4_wave_indicators/founder-ordered-redteam-wave-packet-seed-2026-05-05.json`
 - Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_recovery_gate.py`.
-- Evidence delta: (1) Routed commit handoff scopes 6 wave-owned file(s). (2) Evidence gate exercises 1 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/founder-ordered-redteam-wave-packet-seed-2026-05-05.json..
+- Evidence delta: (1) Routed commit handoff scopes 5 wave-owned file(s). (2) Evidence gate exercises 1 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/founder-ordered-redteam-wave-packet-seed-2026-05-05.json..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/founder-ordered-redteam-wave-packet-seed-2026-05-05.json`
 - Current staged files:
   - `TASKS.md`
   - `mu/tests/tools/test_recovery_gate.py`
-  - `mu/tools/observability/_pane_timeline.sh`
   - `reports/control_plane/founder_ordered_redteam_wave_packet_seed_2026_05_0_2026-05-05.md`
   - `reports/control_plane/pane_timeline_process_scan_bound_2026-05-05.md`
   - `reports/l4_wave_indicators/founder-ordered-redteam-wave-packet-seed-2026-05-05.json`

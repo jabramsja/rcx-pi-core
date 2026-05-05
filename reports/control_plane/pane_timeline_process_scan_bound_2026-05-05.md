@@ -45,6 +45,18 @@ with the observed timeout. The full pre-push rerun remains the confirmation
 step; this packet treats the change as a pipeline unblocker, not as an audit
 finding or remediation wave.
 
+Second repair iteration evidence:
+
+- After the process-scan bound was committed locally, the full `pre-push-fast`
+  suite reported a timeout in the new regression itself:
+  `test_pane_timeline_bounds_live_process_scan_candidates`.
+- Direct file review showed that the regression had not isolated `HOME` or
+  `RCX_CODEX_HOME`, so the pane script could still inspect the operator's live
+  Codex state while the regression was intended to exercise only process-scan
+  bounds.
+- The regression now uses temporary `HOME` and `RCX_CODEX_HOME` directories so
+  it tests the bounded scan path without relying on user-local autoping state.
+
 ## Scope
 
 Files in scope:
