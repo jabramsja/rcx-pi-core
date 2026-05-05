@@ -2219,6 +2219,25 @@ def _auto_refresh_routing(
         if verbose:
             print(f"[dispatch] No post-merge package at {package_path} — cannot auto-refresh")
         return False, None
+    try:
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        if verbose:
+            print(f"[dispatch] Cannot read post-merge package at {package_path}: {exc}")
+        return False, None
+    package_merge_sha = package.get("merge_sha")
+    current_head = _compute_repo_state(repo_root).head_sha
+    if not isinstance(package_merge_sha, str) or not package_merge_sha.strip():
+        if verbose:
+            print("[dispatch] Post-merge package has no merge_sha — cannot auto-refresh")
+        return False, None
+    if package_merge_sha.strip() != current_head:
+        if verbose:
+            print(
+                "[dispatch] Post-merge package is stale: "
+                f"merge_sha={package_merge_sha.strip()[:8]}, current HEAD={current_head[:8]}"
+            )
+        return False, None
 
     supervisor_script = _agents_dir_for_repo(script_repo_root) / "meta_bridge_supervisor.py"
     if not supervisor_script.exists():

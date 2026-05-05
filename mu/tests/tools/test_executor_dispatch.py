@@ -533,6 +533,60 @@ class TestDispatcherFreshnessRefresh:
         assert result["decision"] == "ROUTE_PHASE_A"
         assert auto_refresh_calls
 
+    def test_auto_refresh_rejects_stale_post_merge_package_before_supervisor(
+        self, tmp_path, monkeypatch,
+    ):
+        package_dir = tmp_path / ".agent_bus" / "meta"
+        package_dir.mkdir(parents=True)
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "canonical-stale",
+            "wave_name": "old-wave",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "state_sha": "stale-state",
+            "next_candidates": [
+                {"candidate": "old-wave", "bounded": True},
+            ],
+        }
+        (package_dir / "post_merge_routing.json").write_text(
+            json.dumps(record),
+            encoding="utf-8",
+        )
+        (package_dir / "post_merge_package.json").write_text(
+            json.dumps(
+                {
+                    "task_id": "[PIPELINE-RECOVERY]",
+                    "merged_pr": 765,
+                    "merge_sha": "oldmerge",
+                    "wave_name": "old-wave",
+                    "lane": "control-surface",
+                    "deferred_items": [],
+                    "tracker_state_summary": "stale",
+                    "next_candidates": [
+                        {"candidate": "old-wave", "bounded": True},
+                    ],
+                    "blocker_report_paths": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        class RepoState:
+            head_sha = "currenthead"
+            state_sha = "currentstate"
+
+        monkeypatch.setattr(dispatch_mod, "_compute_repo_state", lambda _repo: RepoState())
+
+        def fail_if_supervisor_runs(*_args, **_kwargs):
+            pytest.fail("stale post-merge package must not invoke supervisor")
+
+        monkeypatch.setattr(dispatch_mod.subprocess, "run", fail_if_supervisor_runs)
+
+        result = dispatch_mod.dispatch(record, repo_root=tmp_path, verbose=True)
+
+        assert result["status"] == "stale"
+        assert "Auto-refresh failed" in result["message"]
+
 
 # ===========================================================================
 # Shared test helpers
