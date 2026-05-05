@@ -1185,6 +1185,69 @@ class TestReceiptChainEndToEnd:
         assert "bridge rounds=3" in refreshed["tracker_note_text"]
         assert "bridge rounds=3" in (repo / "TASKS.md").read_text(encoding="utf-8")
 
+    def test_commit_packet_truth_refresh_uses_prose_bridge_round_floor(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "bridge-prose-floor-wave"
+        packet_path = "reports/control_plane/bridge_prose_floor_wave.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Bridge Prose Floor Wave\n\n"
+            "Wave ID: bridge-prose-floor-wave\n"
+            "Wave class: L4_ENABLER\n\n"
+            "Manual repair grounding: dispatcher first exited max_rounds_reached "
+            "after six Phase B bridge rounds before the package was repaired. "
+            "Parser examples such as fifteen Phase B bridge rounds are not "
+            "same-wave bridge history.\n",
+            encoding="utf-8",
+        )
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        indicator_file = repo / indicator_path
+        indicator_file.parent.mkdir(parents=True, exist_ok=True)
+        indicator_file.write_text(json.dumps({"wave_id": wave_id}), encoding="utf-8")
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "file.py"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "-f", "--", indicator_path], cwd=repo, check=True)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+            bridge_status={"rounds": 1, "total_rounds": 1},
+        )
+        handoff = {
+            **handoff,
+            "tracker_note_text": handoff["tracker_note_text"].replace(
+                "Receipt handoff now carries a canonical tracker note.",
+                "Receipt handoff now carries bridge rounds=1 and a canonical tracker note.",
+            ),
+        }
+        (repo / "TASKS.md").write_text(
+            "## Ra\n\n" + handoff["tracker_note_text"] + "\n\n---\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "--", "TASKS.md"], cwd=repo, check=True)
+
+        assert commit_mod._documented_bridge_round_floor_from_text(  # ANTICHEAT_OK: direct helper regression for package truth floor
+            "after eleven Phase B bridge rounds"
+        ) == 11
+        assert commit_mod._documented_bridge_round_floor_from_text(  # ANTICHEAT_OK: direct helper regression for package truth floor
+            "after six Phase B bridge rounds. Parser examples such as fifteen Phase B bridge rounds."
+        ) == 6
+        refreshed, _staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+        assert error is None
+        assert refreshed["bridge_status"] == {"rounds": 6, "total_rounds": 6}
+        assert "bridge rounds=6" in refreshed["tracker_note_text"]
+
     def test_commit_packet_truth_refresh_updates_rebuilt_handoff_file_count(self, tmp_path):
         import subprocess
 

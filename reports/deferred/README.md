@@ -29,9 +29,10 @@ Current inventory refresh (2026-05-05):
   The 2026-05-05 follow-up aligns the redteam startup guard with the curated
   theater-risk ratchet; `/mu` production-forward movement is no longer blocked
   by this gate-theater finding.
-- `reports/deferred/non_blocking/` currently contains 30 markdown files:
-  `README.md` plus 29 active advisory/follow-up records with concrete evidence
-  targets.
+- `reports/deferred/non_blocking/` currently contains 32 markdown files:
+  `README.md` plus 31 retained advisory/follow-up records with concrete
+  evidence targets, reproduced with
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
 - The deferred findings sweep archived 6 stale, self-closed, or code-closed
   generated advisory packets under `reports/archive/deferred/` with
   `closed-by-deferred-findings-fix-sweep-2026-05-04` filenames.
