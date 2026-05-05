@@ -1525,6 +1525,42 @@ class TestWaveIdBounds:
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
+    def test_prepare_handoff_tracker_only_derives_same_wave_override_from_tasks(
+        self, tmp_path
+    ):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "founder-ordered-redteam-wave-queue-2026-05-05"
+        (repo / "TASKS.md").write_text(
+            "## Ra\n\n- Tracker sync note (seed): init\n\n---\n\n"
+            "## NEXT\n\n"
+            "- **[NEXT-CODEX-POST-REDTEAM]** OPEN.\n"
+            "  3. **[FOUNDER-ORDERED-REDTEAM-WAVE-QUEUE] ACTIVE DIRECTIVE.** "
+            f"FOUNDER_OVERRIDE:{wave_id}.\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "add", "--", "TASKS.md"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+        record = {
+            "wave_name": wave_id,
+            "summary": "persist founder-ordered redteam wave queue directive",
+            "decision": "UPDATE_TRACKER_ONLY",
+            "wave_class": "MAINTENANCE",
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, repo)
+
+        assert errors == []
+        assert handoff is not None
+        assert f"FOUNDER_OVERRIDE:{wave_id}" in handoff["tracker_note_text"]
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
     def test_build_commit_handoff_allows_standalone_empty_receipt_path(self, tmp_path):
         repo = _setup_repo(tmp_path)
         handoff, errors = commit_mod.build_commit_handoff(
