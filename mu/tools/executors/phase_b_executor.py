@@ -2705,9 +2705,13 @@ _BRIDGE_ROUND_WORD_PATTERN = "|".join(
     sorted((re.escape(word) for word in _BRIDGE_ROUND_WORDS), key=len, reverse=True)
 )
 _BRIDGE_ROUND_ILLUSTRATIVE_PREFIX_RE = re.compile(
-    r"\b(?:such\s+as|for\s+example|e\.g\.|examples?\s*(?:include|:)|sample)\b",
+    r"\b(?:"
+    r"such\s+as|for\s+example|e\.g\.|"
+    r"examples?\s+include|examples?\s*:|sample\s*:"
+    r")\s*(?:[,:-]\s*)?",
     flags=re.IGNORECASE,
 )
+_BRIDGE_ROUND_ILLUSTRATIVE_CLAUSE_BREAK_RE = re.compile(r"[.;!?,:]")
 
 
 def _documented_bridge_round_value(raw_value: str) -> int:
@@ -2720,7 +2724,10 @@ def _documented_bridge_round_value(raw_value: str) -> int:
 def _bridge_round_match_is_illustrative(text: str, match_start: int) -> bool:
     line_start = text.rfind("\n", 0, match_start) + 1
     prefix = text[line_start:match_start]
-    return bool(_BRIDGE_ROUND_ILLUSTRATIVE_PREFIX_RE.search(prefix))
+    for marker in _BRIDGE_ROUND_ILLUSTRATIVE_PREFIX_RE.finditer(prefix):
+        if not _BRIDGE_ROUND_ILLUSTRATIVE_CLAUSE_BREAK_RE.search(prefix[marker.end():]):
+            return True
+    return False
 
 
 def _documented_bridge_round_floor_from_text(text: str) -> int:
