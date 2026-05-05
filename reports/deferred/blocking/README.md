@@ -6,10 +6,10 @@ promotion narratives.
 
 Active blockers:
 
-- `mu_preproduction_gate_theater_blocker_2026-05-04.md` — redteam startup
-  gate now runs `check_gate_behavioral_pairs.py --fail-on-theater`; production-
-  forward `/mu` movement is blocked until the 85 reported `theater_risk`
-  methods are fixed or dispositioned as classifier false positives.
+- None as of 2026-05-05. The former theater-risk blocker packet remains in this
+  folder as same-wave evidence until the resolving PR lands, but its body is
+  marked `Status: RESOLVED (2026-05-05)` and current TASKS.md records
+  production-forward movement as unblocked for that gate.
 
 Archived source snapshots for extracted blocker residue live in:
 

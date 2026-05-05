@@ -226,7 +226,7 @@ PY
   python3 "$dashboard_py" --render-recovery --repo-root "$REPO_ROOT" --bus-dir "$BUS_DIR" > "$output_path" 2>/dev/null &
   child="$!"
   while kill -0 "$child" 2>/dev/null; do
-    if [ "$ticks" -ge "$max_ticks" ]; then
+    if [ "$FAST_ONESHOT" = "1" ] && [ "$ticks" -ge "$max_ticks" ]; then
       kill "$child" 2>/dev/null || true
       wait "$child" 2>/dev/null || true
       {
