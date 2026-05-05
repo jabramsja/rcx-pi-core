@@ -113,6 +113,13 @@ except ImportError as _exc:
 
 BRANCH_PREFIX_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 TARGET_BRANCH_SUFFIX_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,190}$")
+TARGET_GATE_ID_RE = re.compile(r"^G[1-8]$")
+PACKET_TARGET_GATE_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?(?:\*\*)?"
+    r"(?:Target Gate|Target gate|target_gate_id)"
+    r"(?:\*\*)?\s*:\s*`?([A-Za-z0-9][A-Za-z0-9._-]*)`?",
+    re.IGNORECASE,
+)
 
 FORCE_ADD_DENYLIST = tuple(d.lower() for d in (".git/", ".env", ".agent_bus/"))
 
@@ -564,6 +571,38 @@ def _tracked_packet_text_from_record(record: dict[str, Any], repo_root: Path) ->
 def _tracked_packet_path_from_record(record: dict[str, Any]) -> str:
     paths = _tracked_packet_paths_from_record(record)
     return paths[0] if paths else ""
+
+
+def _normalize_target_gate_id(value: Any) -> str:
+    gate = str(value or "").strip().strip("`.,;")
+    return gate if TARGET_GATE_ID_RE.fullmatch(gate) else ""
+
+
+def _extract_target_gate_id_from_text(text: str) -> str:
+    for line in str(text or "").splitlines():
+        match = PACKET_TARGET_GATE_RE.match(line)
+        if match:
+            gate = _normalize_target_gate_id(match.group(1))
+            if gate:
+                return gate
+    return ""
+
+
+def _resolve_target_gate_id(
+    record: dict[str, Any],
+    repo_root: Path,
+    *,
+    embedded_handoff: dict[str, Any] | None = None,
+) -> str:
+    for value in (
+        (embedded_handoff or {}).get("target_gate_id"),
+        record.get("target_gate_id"),
+    ):
+        gate = _normalize_target_gate_id(value)
+        if gate:
+            return gate
+    gate = _extract_target_gate_id_from_text(_tracked_packet_text_from_record(record, repo_root))
+    return gate or "G8"
 
 
 def _extract_founder_override_from_routing_record(
@@ -4992,7 +5031,11 @@ def prepare_handoff_from_routing_record(
     # Normalize wave_id for branch naming
     wave_id = normalize_wave_id(wave_name)
     wave_class = record.get("wave_class", "MAINTENANCE")
-    target_gate_id = record.get("target_gate_id", "NONE")
+    target_gate_id = _resolve_target_gate_id(
+        record,
+        repo_root,
+        embedded_handoff=embedded_copy,
+    )
     default_commit_message = (
         f"chore: {summary}\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
     )
@@ -5042,7 +5085,7 @@ def prepare_handoff_from_routing_record(
             commit_message=commit_message,
             fixes_implemented=_build_standalone_staged_diff_fixes(staged_files),
             wave_class=standalone_wave_class,
-            target_gate_id=str((embedded_copy or {}).get("target_gate_id") or target_gate_id),
+            target_gate_id=target_gate_id,
             caller="standalone",
             base_branch=str((embedded_copy or {}).get("base_branch") or "dev"),
             branch_prefix=str((embedded_copy or {}).get("branch_prefix") or "jabramsja"),
@@ -5511,6 +5554,11 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
         val = handoff.get(fld)
         if not isinstance(val, str) or not val.strip():
             errors.append(f"{fld} must be a non-empty string")
+    target_gate_id = handoff.get("target_gate_id")
+    if isinstance(target_gate_id, str) and target_gate_id.strip():
+        normalized_gate = _normalize_target_gate_id(target_gate_id)
+        if not normalized_gate:
+            errors.append(f"target_gate_id must match G1-G8, got: {target_gate_id}")
 
     branch_prefix = handoff.get("branch_prefix", "")
     if isinstance(branch_prefix, str) and branch_prefix and not BRANCH_PREFIX_RE.fullmatch(branch_prefix):

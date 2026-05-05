@@ -31,11 +31,15 @@ Canonical packet references:
 - `reports/archive/control_plane/post_merge_supervisor_plan_2026-03-21.md`
 - `reports/archive/control_plane/executor_surfaces_plan_2026-03-22.md`
 - `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`
+- `reports/control_plane/deferred_findings_fix_sweep_2026-05-04.md`
+- `reports/control_plane/mu_preproduction_redteam_2026-05-04.md`
 
-Index truth note (2026-05-03):
+Index truth note (2026-05-04):
 
 - This README is a lane-placement guide, not an exhaustive active-work tracker.
 - Current open/closed task truth comes from `TASKS.md`.
 - Historical packets in this folder may retain pre-implementation scope,
   acceptance, or commit-ready evidence, but those packets do not reopen work that
   `TASKS.md` marks closed or relist landed work as unresolved.
+- The active pre-production sequence is governed by the deferred findings sweep
+  packet first, then the `/mu` preproduction red-team packet.

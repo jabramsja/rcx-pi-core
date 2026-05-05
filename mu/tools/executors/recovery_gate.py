@@ -466,9 +466,12 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
 def _looks_like_pre_push_pytest_failure(step_lower: str, signal: str) -> bool:
     if "run_pre_push_script" not in step_lower and "pre-push-fast failed" not in signal:
         return False
+    test_path = re.search(r"(?:^|[^A-Za-z0-9_]|\\n)(?:tests|mu/tests)/", signal)
     return bool(
         re.search(r"\bfailed\s+(?:tests|mu/tests)/", signal)
         or re.search(r"\b[1-9]\d*\s+failed,\s+\d+\s+passed\b", signal)
+        or ("timeoutexpired" in signal and test_path)
+        or ("timed out after" in signal and test_path)
         or "=================================== failures ===================================" in signal
     )
 

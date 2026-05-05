@@ -1,7 +1,7 @@
 # Parallel Pipeline Bus Namespacing
 
 Date: 2026-04-29
-Status: COMPLETED (commit-ready, supervisor COMMIT_GO)
+Status: HISTORICAL / LANDED (PR #833)
 Phase-A-Lock: LOCKED
 Task: [PARALLEL-PIPELINE]
 Wave ID: parallel-pipeline-bus-namespacing-2026-04-29

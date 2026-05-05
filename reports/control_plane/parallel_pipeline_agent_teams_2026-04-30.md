@@ -74,11 +74,18 @@ Files and directories touched by the implementation wave:
 
 ## Grounding / Authorization
 
-- TASKS.md previously marked `[PARALLEL-PIPELINE]` as `OPEN / PARTIAL` and founder-authorized, with item 4 as the remaining open work: "Agent teams integration -- teammates auto-create worktrees with namespaced buses (open)." This cleanup closes that residue from current code evidence.
-- TASKS.md lines 360-362 authorize the wave goal: enable parallel pipelines across git worktrees with agent teams, after `[PIPELINE-RECOVERY]` Phase 1 and agent bus namespacing have landed.
-- TASKS.md lines 362-363 record current code truth for completed/satisfied prerequisites: item 1 bus namespacing landed in PR #833, item 2 per-worktree dashboard/tmux identity landed in PR #836, and item 3 Tier 2 transient-kill retry is satisfied by existing recovery code.
-- TASKS.md line 364 states the target failure modes this wave should solve: dirty worktree scope creep, stale bridge retries after state changes, shared lock contention, and dashboard port collisions.
-- TASKS.md line 365 places the wave in the control-surface pipeline scaling lane.
+- TASKS.md now marks `[PARALLEL-PIPELINE]` as closed by code, with item 4
+  landed in PR #842.
+- Current TASKS.md `[PARALLEL-PIPELINE]` tracker truth records item 1 bus
+  namespacing as landed in PR #833, item 2 per-worktree dashboard/tmux identity
+  as landed in PR #836, item 3 Tier 2 transient-kill retry as satisfied by
+  existing recovery code, and item 4 agent teams integration as landed in
+  PR #842.
+- The closed tracker entry states the target failure modes solved by this lane:
+  dirty worktree scope creep, stale bridge retries after state changes, shared
+  lock contention, and dashboard port collisions.
+- The closed tracker entry places the wave in the control-surface pipeline
+  scaling lane.
 - `mu/tools/executors/executor_dispatch.py` is the scoped launcher/control entrypoint for item 4 because its modular `phase-a` surface builds Phase A executor commands (`mu/tools/executors/executor_dispatch.py:514-532`, `mu/tools/executors/executor_dispatch.py:581-591`), routing records (`mu/tools/executors/executor_dispatch.py:407-431`), recoverable surface-chain execution (`mu/tools/executors/executor_dispatch.py:761-815`), and Phase A -> Phase B -> commit handoff while propagating `--bus-dir` (`mu/tools/executors/executor_dispatch.py:1262-1310`).
 - `mu/tests/tools/test_executor_dispatch.py` already contains explicit `parallel_pipeline_agent_teams` routing-record and phase-chain regression coverage for the dispatcher surface (`mu/tests/tools/test_executor_dispatch.py:6574-6615`, `mu/tests/tools/test_executor_dispatch.py:7192-7253`), making it the focused test home for the item 4 launcher/control changes.
 - This file, `reports/control_plane/parallel_pipeline_agent_teams_2026-04-30.md`, is the governing Phase A packet for the wave. This rewrite fixes the packet-level blocking finding by replacing unnamed teammate launcher scope with an explicit file/directory list and bounded dispatcher entrypoint.

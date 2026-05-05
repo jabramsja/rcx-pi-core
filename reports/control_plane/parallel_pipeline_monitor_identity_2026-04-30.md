@@ -1,7 +1,7 @@
 # Parallel Pipeline Monitor Identity
 
 Date: 2026-04-30
-Status: COMPLETED (commit-ready, supervisor COMMIT_GO)
+Status: HISTORICAL / LANDED (PR #836)
 Phase-A-Lock: LOCKED after active-bus correction
 Task: [PARALLEL-PIPELINE]
 Wave ID: parallel-pipeline-monitor-identity-2026-04-30
