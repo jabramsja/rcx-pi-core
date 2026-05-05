@@ -19,8 +19,16 @@ Purpose: Create the smallest bounded pipeline/control-surface plan for the two r
 - Reproduction before editing confirmed the active-ping cleanup finding was live: current wrapper cleanup trusted `active_pid` after a watcher-pid match, then signaled both `os.killpg(pid, ...)` and `os.kill(pid, ...)`, leaving stale PID/PGID reuse exposure.
 - Reproduction before editing confirmed the cleanup-failure surfacing finding was partially stale and partially live: permission and still-alive cleanup failures were already persisted in durable state, but unsafe active-target/freshness cleanup skips were not durably surfaced.
 - Landed repair in the hardlinked root/`mu/` wrapper content verifies dispatch identity (`last_dispatched_pid`, `last_dispatched_at`), state freshness (`updated_at` bounded by ping timeout and interval), same autoping log directory, active-log existence, and process-group identity before sending signals. Cleanup now targets the verified process group only.
-- Landed repair persists unsafe cleanup target failures to durable state with `status=watcher_restart_degraded_active_ping_cleanup_failed` and `last_active_cleanup_error=unsafe_active_ping_cleanup_target: ...`.
-- Focused regression coverage in `mu/tests/tools/test_codex_autoping_watch.py` preserves intended stale process-group cleanup and proves a stale active PID pointing at an unrelated live process is not killed and is surfaced as degraded cleanup state.
+- Landed repair records unsafe cleanup target failures at the failed cleanup
+  attempt with `status=watcher_restart_degraded_active_ping_cleanup_failed` and
+  `last_active_cleanup_error=unsafe_active_ping_cleanup_target: ...`. A later
+  real watcher initialization rewrites live watcher status from the new watcher
+  state, so the degraded cleanup record is evidence of the prior cleanup
+  failure, not a claim that a successfully restarted watcher remains degraded.
+- Focused regression coverage in `mu/tests/tools/test_codex_autoping_watch.py`
+  preserves intended stale process-group cleanup and proves a stale active PID
+  pointing at an unrelated live process is not killed and is recorded as a
+  cleanup-failure state for that failed cleanup attempt.
 - Local validation passed: `bash -n tools/session/codex_autoping_window.sh`; `bash -n mu/tools/session/codex_autoping_window.sh`; `python3 -m py_compile mu/tests/tools/test_codex_autoping_watch.py`; `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_codex_autoping_watch.py::test_autoping_window_restarts_dead_watcher_without_manual_preflight mu/tests/tools/test_codex_autoping_watch.py::test_autoping_window_skips_stale_active_pid_and_records_degraded_state`.
 - L4 indicator artifact written with `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id codex-autoping-active-ping-cleanup-hardening-2026-05-05 --output reports/l4_wave_indicators/codex-autoping-active-ping-cleanup-hardening-2026-05-05.json --range HEAD` after the collector refused the unstaged default invocation.
 
