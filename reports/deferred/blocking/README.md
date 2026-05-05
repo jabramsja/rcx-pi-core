@@ -7,8 +7,8 @@ promotion narratives.
 Active blockers:
 
 - None as of 2026-05-05. The former theater-risk blocker packet remains in this
-  folder as same-wave evidence until the resolving PR lands, but its body is
-  marked `Status: RESOLVED (2026-05-05)` and current TASKS.md records
+  folder as resolved evidence until an archive/closeout wave moves it, but its
+  body is marked `Status: RESOLVED (2026-05-05)` and current TASKS.md records
   production-forward movement as unblocked for that gate.
 
 Archived source snapshots for extracted blocker residue live in:
