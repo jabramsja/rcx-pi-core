@@ -38,19 +38,19 @@ Current inventory refresh (2026-05-05):
 
 Closed-parent exclusions for this index:
 
-- `TASKS.md:277-283` marks `[PIPELINE-AGENT-PAGER]`,
-  `[PARALLEL-PIPELINE]`, and `[DEFERRED-CONSOLIDATION]` as closed by code and
-  says old in-progress prose is historical unless the current section marks the
-  item open.
-- `TASKS.md:385-397` records `[DEFERRED-CONSOLIDATION]` as closed by code,
-  keeps `[NEXT-CODEX-POST-REDTEAM]` open only for future bounded structural
-  work, and excludes the landed PR #701 Phase A artifacts plus the landed
+- The current `TASKS.md` NEXT code-truth reconciliation note marks
+  `[PIPELINE-AGENT-PAGER]`, `[PARALLEL-PIPELINE]`, and
+  `[DEFERRED-CONSOLIDATION]` as closed by code and says old in-progress prose is
+  historical unless the current section marks the item open.
+- The current `TASKS.md` `[NEXT-CODEX-POST-REDTEAM]` entry keeps that queue open
+  only for future bounded structural work and excludes the landed PR #701 Phase A
+  artifacts plus the landed
   `post-redteam-engine-state-scheduler-reduction-2026-04-30` seed, fixture,
   structural-test, scheduler-parity, and seed-registration items from unresolved
   work.
-- `TASKS.md:399-403` records `[PARALLEL-PIPELINE]` as closed, with bus
-  namespacing, monitor identity, Tier 2 transient-kill retry, and agent-team
-  work landed or satisfied.
+- The current `TASKS.md` `[PARALLEL-PIPELINE]` closed tracker entry records bus
+  namespacing, monitor identity, Tier 2 transient-kill retry, and agent-team work
+  as landed or satisfied.
 
 Historical/generated advisory records retained in `non_blocking/` therefore do
 not relist PR #701, the engine-state/scheduler slice, `PIPELINE-AGENT-PAGER`,
