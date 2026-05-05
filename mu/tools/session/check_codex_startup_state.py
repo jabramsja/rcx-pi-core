@@ -39,6 +39,41 @@ STALE_MODELS_CACHE_CANARIES = (
     "interesting or promising about their approach or problem framing",
 )
 
+CRITICAL_MODELS_CACHE_CANARIES = (
+    "vivid inner life as Codex",
+    "warm and upbeat",
+    "wry humor",
+    "another subjectivity",
+    "The user would prefer that you make mistakes rather than over-explore",
+    "super fast model",
+    "every tool call (no matter how simple) is expensive and slow",
+    "EXTREMELY careful not to run tool calls",
+    "Do NOT modify or run tests or verify your work unless the user asks explicitly",
+    "do NOT explore the codebase or read files",
+    "do NOT explore",
+    "Finish your work as quickly as possible; don't re-review your work",
+    "Avoid exhaustive file reads and don't run tests unless you are instructed",
+    "STRICT ONE_SHOT MODE",
+    "Read each required file at most once per task",
+    "Do not run read/inspect commands on files already read",
+    "Do not run syntax/behavior validation unless I explicitly ask",
+    "The only valid reason to re-read a file is a hard failure",
+    "For follow up questions or tasks, you never read files",
+    "NEVER do another pass just to check",
+    "NEVER review code you've written",
+    "NEVER list anything to verify that it is there or gone",
+    "NEVER read any files you have written",
+    "NEVER use git",
+    "NEVER run tests or validate your work",
+    "HARD STOP requirement: if you need to do a verification",
+    "You WILL lose 100 points",
+    "If you realize you put a bug in the code",
+    "Do not waste tokens by re-reading files",
+    "hold off on running tests or lint commands",
+    "Brevity is very important as a default",
+    "no more than 10 lines",
+)
+
 PROMPT_HOOK_DISABLED_CANARY = (
     "Disabled because UserPromptSubmit output cannot currently be hidden in Codex."
 )
@@ -2506,18 +2541,14 @@ def _check_models_cache(codex_home: Path) -> CheckResult:
         )
 
     disallowed_paths: list[str] = []
-    allowed_paths: list[str] = []
-    allowed_suffix = ("instructions_variables", "personality_friendly")
+    canaries = STALE_MODELS_CACHE_CANARIES + CRITICAL_MODELS_CACHE_CANARIES
     for path, string_value in _iter_json_string_paths(payload):
-        matched = [
-            needle for needle in STALE_MODELS_CACHE_CANARIES if needle in string_value
-        ]
+        matched = [needle for needle in canaries if needle in string_value]
         if not matched:
             continue
-        if tuple(path[-2:]) == allowed_suffix:
-            allowed_paths.append(_format_json_path(path))
-            continue
-        disallowed_paths.append(_format_json_path(path))
+        disallowed_paths.append(
+            f"{_format_json_path(path)} ({', '.join(matched[:2])})"
+        )
     if disallowed_paths:
         preview = "; ".join(disallowed_paths[:3])
         if len(disallowed_paths) > 3:
@@ -2525,20 +2556,13 @@ def _check_models_cache(codex_home: Path) -> CheckResult:
         return CheckResult(
             "models_cache",
             "FAIL",
-            "stale friendly-persona canaries present outside personality_friendly: " + preview,
-        )
-
-    if allowed_paths:
-        return CheckResult(
-            "models_cache",
-            "OK",
-            "friendly canaries confined to vendor personality_friendly variants",
+            "protocol contradiction canaries present in cached model instructions: " + preview,
         )
 
     return CheckResult(
         "models_cache",
         "OK",
-        "no stale friendly-persona canaries detected",
+        "no protocol contradiction canaries detected",
     )
 
 

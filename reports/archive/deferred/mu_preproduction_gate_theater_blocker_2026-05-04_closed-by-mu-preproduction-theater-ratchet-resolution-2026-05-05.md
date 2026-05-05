@@ -8,6 +8,17 @@ Class: L4_ENABLER
 Severity: BLOCKER (resolved)
 Production-forward movement: UNBLOCKED for this gate
 
+## Archive / Closeout Status
+
+- Archived on 2026-05-05 after the bounded
+  `mu-preproduction-theater-ratchet-resolution-2026-05-05` follow-up and
+  `TASKS.md` tracker note recorded the gate-theater finding as resolved.
+- Current enforcement is `python3 tools/checks/check_theater_risk_ratchet.py`,
+  which fails on new, expired, or `real` theater risk while allowing current
+  non-expired curated `heuristic_false_positive` entries.
+- This packet is retained as historical evidence. It is not an active
+  `reports/deferred/blocking/` item.
+
 ## Finding
 
 DEFECT: the red-team startup gate previously completed successfully while the
@@ -89,5 +100,6 @@ evidence.
 ## Scope Note
 
 This packet does not relist the already-landed PR #701 Phase A artifacts or the
-landed engine-state/scheduler reduction slice. The blocker is limited to the
-current mu preproduction red-team gate-theater enforcement gap.
+landed engine-state/scheduler reduction slice. The blocker was limited to the
+mu preproduction red-team gate-theater enforcement gap and is now archived as
+resolved historical evidence.

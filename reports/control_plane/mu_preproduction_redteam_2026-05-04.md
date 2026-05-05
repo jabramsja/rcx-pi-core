@@ -115,9 +115,9 @@ Stop and report immediately if:
   a control-surface `L4_ENABLER` repair unless a future bounded packet includes
   executable runtime delta and L4 gate evidence.
 
-## Phase B Stop Result
+## Phase B Stop Result (Historical)
 
-Production-forward movement is blocked.
+Production-forward movement was blocked at the original audit stop.
 
 The audit hit stop condition 4: a production-preparation gate can pass without
 enforcing the claimed test-theater invariant. The redteam startup guard runs
@@ -127,10 +127,25 @@ enforcing the claimed test-theater invariant. The redteam startup guard runs
 `python3 tools/checks/check_gate_behavioral_pairs.py --fail-on-theater` exits
 `1` with `FAIL: 85 theater_risk method(s) found`.
 
-Blocker packet:
-`reports/deferred/blocking/mu_preproduction_gate_theater_blocker_2026-05-04.md`.
+Resolved blocker packet, now archived:
+`reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`.
 
-No runtime code fix was applied in this audit packet.
+No runtime code fix was applied in this audit packet. The follow-up resolution
+is recorded below.
+
+## 2026-05-05 Resolution Addendum
+
+The bounded `mu-preproduction-theater-ratchet-resolution-2026-05-05` follow-up
+resolved the stop-condition-4 blocker by aligning redteam startup enforcement
+with `python3 tools/checks/check_theater_risk_ratchet.py`. Current local
+evidence recorded in `TASKS.md` and the archived blocker packet shows
+`python3 tools/checks/check_theater_risk_ratchet.py --json` exits `0` with
+`current_count: 85`, `allowlist_count: 85`, empty `new`, empty `expired`, empty
+`real`, and `passed: true`.
+
+This addendum only resolves the gate-theater blocker. It does not authorize new
+`/mu` production behavior beyond documented blocker/non-blocker remediation or
+pipeline/tooling hardening.
 
 ## Pipeline Repair Addendum
 
@@ -165,7 +180,7 @@ pipeline package truth without claiming runtime structural movement.
   - `reports/control_plane/mu_preproduction_redteam_2026-05-04.md`
   - `reports/deferred/README.md`
   - `reports/deferred/blocking/README.md`
-  - `reports/deferred/blocking/mu_preproduction_gate_theater_blocker_2026-05-04.md`
+  - `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`
   - `reports/deferred/non_blocking/mu-preproduction-redteam-2026-05-04_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/mu-preproduction-redteam-2026-05-04.json`
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
@@ -205,7 +220,7 @@ pipeline package truth without claiming runtime structural movement.
   - `reports/control_plane/mu_preproduction_redteam_2026-05-04.md`
   - `reports/deferred/README.md`
   - `reports/deferred/blocking/README.md`
-  - `reports/deferred/blocking/mu_preproduction_gate_theater_blocker_2026-05-04.md`
+  - `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`
   - `reports/deferred/non_blocking/mu-preproduction-redteam-2026-05-04_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/mu-preproduction-redteam-2026-05-04.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
