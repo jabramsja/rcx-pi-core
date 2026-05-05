@@ -2,10 +2,12 @@
 
 ## Current State
 
-- Post-merge repo truth for this handoff: PR #870 is merged, and `HEAD`,
-  `dev`, and `origin/dev` all point at merge commit `69ca3050`
-  (`Merge pull request #870 from
+- Post-merge baseline truth for this handoff: PR #870 is merged, and `dev` /
+  `origin/dev` point at merge commit `69ca3050` (`Merge pull request #870 from
   jabramsja/jabramsja/codex-autoping-active-ping-cleanup-hardening-2026-05-05`).
+  The PR #871 handoff-reconciliation branch `HEAD` is newer than that baseline;
+  do not treat `HEAD` as identical to `dev` / `origin/dev` when resuming from
+  this package.
 - The old handoff wording that described a modified
   `mu/tools/session/check_codex_startup_state.py` file and an untracked
   `session_handoff_2026-05-05.md` file is stale. That package has landed
