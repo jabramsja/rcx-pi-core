@@ -89,6 +89,21 @@ Post-commit pre-push repair:
   `PYTHONHASHSEED=0 python3 -m pytest -q -n auto mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution --tb=short`
   passed (`59 passed`).
 
+Post-PR CI repair:
+
+- GitHub PR #864 CI showed `green-gate` in progress on step
+  `Install system deps` from `2026-05-05T07:08:12Z`, while all later steps
+  including `Run green gate` remained pending.
+- Code root: `.github/workflows/green_gate.yml` performed unconditional
+  `sudo apt-get update` and `sudo apt-get install -y ripgrep` without a
+  step-local timeout or preinstalled-tool fast path.
+- Mechanical repair: the `Install system deps` step now has
+  `timeout-minutes: 3`, skips apt when `rg` already exists, and bounds apt
+  fallback commands with `timeout 120s`.
+- Local validation: `.github/workflows/green_gate.yml` parsed successfully with
+  PyYAML, and local `rg --version` confirms the fast path works on systems with
+  ripgrep already installed.
+
 ## Purpose
 
 Resolve the active mu preproduction gate-theater blocker without hiding real test
@@ -274,11 +289,12 @@ Stop and report immediately if:
 - Tracker note sha256: `1bd1c10291793e65f6137cf1273bc8d940b9e80633e3a8fd5b46864fd47d7e1c`
 - Indicator artifact: `reports/l4_wave_indicators/mu-preproduction-theater-ratchet-resolution-2026-05-05.json`
 - Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_check_theater_risk_ratchet.py mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/mu-preproduction-theater-ratchet-resolution-2026-05-05_2026-05-05.md. (2) Final pytest gate covered the theater-ratchet test file from the wave-owned diff. (3) Commit executor created local commit `5c279c25`. (4) Pre-push exposed a pane one-shot recovery-render timeout, and the repair mechanically bounds that render path with process-group cleanup, hermetic one-shot autoping reads, and regression coverage.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/mu-preproduction-theater-ratchet-resolution-2026-05-05_2026-05-05.md. (2) Final pytest gate covered the theater-ratchet test file from the wave-owned diff. (3) Commit executor created local commit `5c279c25`. (4) Pre-push exposed a pane one-shot recovery-render timeout, and the repair mechanically bounds that render path with process-group cleanup, hermetic one-shot autoping reads, and regression coverage. (5) PR CI exposed a long-running `green-gate` system-dependency install before tests started, and the repair gives that step a fast path plus a finite timeout.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/mu-preproduction-theater-ratchet-resolution-2026-05-05.json`
 - Wave-owned files through pre-push repair:
   - `TASKS.md`
+  - `.github/workflows/green_gate.yml`
   - `mu/tests/tools/test_check_theater_risk_ratchet.py`
   - `mu/tests/tools/test_recovery_gate.py`
   - `mu/tools/checks/check_theater_risk_ratchet.py`
