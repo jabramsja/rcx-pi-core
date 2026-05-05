@@ -2,12 +2,12 @@
 
 ## Current State
 
-- Post-merge baseline truth for this handoff: PR #870 is merged, and `dev` /
-  `origin/dev` point at merge commit `69ca3050` (`Merge pull request #870 from
-  jabramsja/jabramsja/codex-autoping-active-ping-cleanup-hardening-2026-05-05`).
-  The PR #871 handoff-reconciliation branch `HEAD` is newer than that baseline;
-  do not treat `HEAD` as identical to `dev` / `origin/dev` when resuming from
-  this package.
+- Post-merge baseline truth for this handoff update: PR #873 is merged, and
+  `dev` / `origin/dev` point at merge commit `7c2f326c`
+  (`Merge pull request #873 from
+  jabramsja/jabramsja/founder-ordered-redteam-wave-queue-2026-05-05`).
+  Do not reuse the earlier PR #870 / PR #871 branch-state snapshot as current
+  routing truth.
 - The old handoff wording that described a modified
   `mu/tools/session/check_codex_startup_state.py` file and an untracked
   `session_handoff_2026-05-05.md` file is stale. That package has landed
@@ -18,7 +18,9 @@
   (`codex-models-cache-preflight-guard-2026-05-05`), PR #869
   (`deferred-findings-stale-reference-cleanup-2026-05-05`), and PR #870
   (`codex-autoping-active-ping-cleanup-hardening-2026-05-05`) are all merged
-  after PRs #864-#866.
+  after PRs #864-#866; PR #871 reconciled this handoff, PR #872 refreshed the
+  deferred README inventory, and PR #873 persisted the founder-ordered
+  red-team wave queue in `TASKS.md`.
 - Active deferred-lane truth remains split by lane: `reports/deferred/blocking/`
   contains no active blocker packet beyond `README.md`, while retained active
   advisory/non-blocking residue remains under `reports/deferred/non_blocking/`.
@@ -81,6 +83,12 @@ Applied fixes:
 - `~/.codex/models_cache.json` was sanitized so tracked shortcut,
   anti-read, anti-verify, stale friendly-persona, and brevity-over-proof
   canaries are absent.
+- A later same-day cache-guard pass patched a refreshed
+  `~/.codex/models_cache.json` drift set (`changed=56`, after paths empty).
+  Backups:
+  `~/.codex/patch_backups/models_cache_pre_cache_guard_20260505T190917Z.json`
+  and
+  `~/.codex/patch_backups/models_cache_post_cache_guard_20260505T190917Z.json`.
 - `mu/tools/session/check_codex_startup_state.py` now fails startup-state
   audit on critical models-cache canaries for shortcut, anti-read, anti-verify,
   "prefer mistakes," and brevity-over-proof text. It no longer treats stale
@@ -168,6 +176,11 @@ python3 mu/tools/executors/executor_dispatch.py --routing-record .agent_bus/meta
 `--bus-dir`, so normal pipeline execution should use that surface and the
 repo's routing record rather than bypassing it.
 
+For the founder-ordered red-team queue, the required path is the full dispatcher
+chain: post-merge supervisor -> Phase A -> Phase B -> commit executor. If a
+leg fails and a fix is made, resume from the appropriate failed point instead of
+replaying unrelated earlier legs.
+
 ## Pipeline Failure Rule
 
 Pipeline failures can be manually repaired when that is the narrowest way to
@@ -199,7 +212,7 @@ truth-refresh steps unless the manual operator reproduces them exactly.
 1. Run normal founder preflight/startup guard for the selected mode.
 2. Confirm live repo state from `git status --short` and current branch refs
    instead of reusing the historical dirty-worktree snapshot above.
-3. Treat PR #870 as the current `dev`/`origin/dev` baseline before choosing
+3. Treat PR #873 as the current `dev`/`origin/dev` baseline before choosing
    any new bounded cleanup wave.
 4. Confirm current `TASKS.md` truth.
 5. Dispatch the next bounded wave against the retained non-blocking advisories
