@@ -1447,6 +1447,20 @@ def _git_head_sha(root: Path, *, context: str) -> str:
     return result.stdout.strip()
 
 
+def _git_is_ancestor_of_head(root: Path, commitish: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", commitish, "HEAD"],
+            cwd=root,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 def _ensure_teammate_worktree_head_matches_caller(
     *,
     caller_root: Path,
@@ -2231,11 +2245,12 @@ def _auto_refresh_routing(
         if verbose:
             print("[dispatch] Post-merge package has no merge_sha — cannot auto-refresh")
         return False, None
-    if package_merge_sha.strip() != current_head:
+    package_merge_sha = package_merge_sha.strip()
+    if package_merge_sha != current_head and not _git_is_ancestor_of_head(repo_root, package_merge_sha):
         if verbose:
             print(
                 "[dispatch] Post-merge package is stale: "
-                f"merge_sha={package_merge_sha.strip()[:8]}, current HEAD={current_head[:8]}"
+                f"merge_sha={package_merge_sha[:8]} is not an ancestor of current HEAD={current_head[:8]}"
             )
         return False, None
 
