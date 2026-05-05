@@ -7687,14 +7687,32 @@ exit 1
             "PATH": f"{proc_bin}:{bin_dir}:{os.environ['PATH']}",
             "HOME": str(home_dir),
             "RCX_CODEX_HOME": str(codex_home),
-            "RCX_PANE_ONESHOT": "1",
             "RCX_PANE_PROCESS_SCAN_LIMIT": "3",
             "RCX_TEST_LSOF_LOG": str(lsof_log),
             "TERM": "xterm",
         }
+        timeline_script = repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh"
+        timeline_helpers = tmp_path / "probe_timeline_scan_bound_helpers.sh"
+        timeline_helpers.write_text(
+            timeline_script.read_text(encoding="utf-8").split("while true; do", 1)[0],
+            encoding="utf-8",
+        )
+        timeline_helpers.chmod(timeline_helpers.stat().st_mode | 0o111)
+        probe_script = tmp_path / "probe_timeline_scan_bound.sh"
+        probe_script.write_text(
+            f"""#!/usr/bin/env bash
+set -eu
+source {timeline_helpers}
+REPO_ROOT={repo_root}
+repo_has_bridge_role review >/dev/null || true
+repo_has_bridge_role implement >/dev/null || true
+""",
+            encoding="utf-8",
+        )
+        probe_script.chmod(probe_script.stat().st_mode | 0o111)
 
         result = subprocess.run(
-            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh")],
+            ["bash", str(probe_script)],
             cwd=repo_root,
             capture_output=True,
             text=True,
@@ -7704,7 +7722,7 @@ exit 1
 
         assert result.returncode == 0
         lsof_calls = lsof_log.read_text(encoding="utf-8").splitlines()
-        assert len(lsof_calls) <= 6
+        assert 1 <= len(lsof_calls) <= 6
 
     def test_pane_timeline_shows_last_pager_wake_summary(self, tmp_path):
         repo_root = tmp_path / "repo"

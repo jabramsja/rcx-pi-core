@@ -54,8 +54,9 @@ Second repair iteration evidence:
   `RCX_CODEX_HOME`, so the pane script could still inspect the operator's live
   Codex state while the regression was intended to exercise only process-scan
   bounds.
-- The regression now uses temporary `HOME` and `RCX_CODEX_HOME` directories so
-  it tests the bounded scan path without relying on user-local autoping state.
+- The regression now uses temporary `HOME` and `RCX_CODEX_HOME` directories and
+  sources the pane helper prefix directly, so it tests the bounded scan path
+  without relying on user-local autoping state or full-pane render wall time.
 
 ## Scope
 
