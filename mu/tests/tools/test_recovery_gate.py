@@ -8520,6 +8520,66 @@ fi
         clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
         assert "Recovery detail unavailable: render timed out in one-shot mode." in clean_stdout
 
+    def test_pane_processes_oneshot_force_bounds_term_ignoring_recovery_render(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_processes.sh")
+        self._install_observability_script(repo_root, "_resolve_live_root.sh")
+
+        dashboard = repo_root / "mu" / "tools" / "observability" / "pipeline_dashboard.py"
+        dashboard.write_text(
+            "import subprocess, sys, time\n"
+            "subprocess.Popen([\n"
+            "    sys.executable,\n"
+            "    '-c',\n"
+            "    'import signal, time\\n'\n"
+            "    'signal.signal(signal.SIGTERM, signal.SIG_IGN)\\n'\n"
+            "    'time.sleep(60)\\n',\n"
+            "])\n"
+            "time.sleep(60)\n",
+            encoding="utf-8",
+        )
+
+        recovery_dir = repo_root / ".agent_bus" / "recovery"
+        recovery_dir.mkdir(parents=True, exist_ok=True)
+        (recovery_dir / "recovery_status.json").write_text(
+            json.dumps({"active": True, "updated_at": datetime.now(timezone.utc).isoformat()}),
+            encoding="utf-8",
+        )
+
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\nHEAD 1111111111111111\nbranch refs/heads/jabramsja/repo-wave\n",
+        )
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_PANE_ONESHOT": "1",
+            "RCX_PANE_ONESHOT_RECOVERY_TIMEOUT_S": "1",
+            "TERM": "xterm",
+        }
+
+        started = time.monotonic()
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_processes.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=15,
+        )
+        elapsed = time.monotonic() - started
+
+        assert result.returncode == 0
+        # Loaded xdist pre-push runs can overshoot the 1s internal timer; the
+        # pane contract is that one-shot recovery rendering returns before the
+        # former 10s caller timeout even when child processes keep output open.
+        assert elapsed < 10
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Recovery detail unavailable: render timed out in one-shot mode." in clean_stdout
+
     def test_pane_processes_trims_long_output_to_keep_header_visible(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()

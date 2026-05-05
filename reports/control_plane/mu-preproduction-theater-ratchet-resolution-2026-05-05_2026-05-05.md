@@ -1,7 +1,7 @@
 # Mu-Preproduction-Theater-Ratchet-Resolution-2026-05-05
 
 Date: 2026-05-05
-Status: COMPLETED (commit-ready, supervisor COMMIT_GO)
+Status: COMPLETED (local commit plus bounded pre-push repair)
 Task: [NEXT-CODEX-POST-REDTEAM]
 Parent queue: [NEXT-CODEX-POST-REDTEAM]
 Wave ID: mu-preproduction-theater-ratchet-resolution-2026-05-05
@@ -63,10 +63,31 @@ Validation result:
   `python3 tools/checks/check_theater_risk_ratchet.py` in the redteam
   mode-specific command set.
 - `./tools/checks/check_docs_consistency.sh` passed.
-- `python3 tools/checks/enforce_l4_execution_contract.py --files ...`
-  passed as `L4_ENABLER` when bound to the parent
-  `mu-preproduction-redteam-2026-05-04` tracker note and existing parent
-  indicator artifact. This follow-up does not create a new L4 indicator file.
+- `python3 tools/checks/enforce_l4_execution_contract.py --staged` passed
+  during Phase B review, and Phase B/commit routing collected the same-wave
+  indicator artifact at
+  `reports/l4_wave_indicators/mu-preproduction-theater-ratchet-resolution-2026-05-05.json`.
+
+Post-commit pre-push repair:
+
+- `mu/tools/hooks/pre-push-fast` failed in `run_pre_push_script` after local
+  commit because `audit_fast.sh` timed out
+  `tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_processes_oneshot_bounds_recovery_render_timeout`
+  while invoking `mu/tools/observability/_pane_processes.sh`.
+- Recovery attempted Tier 3 repair and exhausted without recovering the push.
+- Manual repair is structural and mechanical: one-shot recovery rendering in
+  `_pane_processes.sh` now launches
+  `pipeline_dashboard.py --render-recovery` in its own process group, writes
+  stdout to a temp file instead of a pipe, kills the group on timeout, and emits
+  the existing fallback recovery text on timeout.
+- One-shot pane mode also skips unpinned real Codex autoping state reads unless
+  `RCX_CODEX_HOME` or `CODEX_HOME` is explicitly set, keeping test panes
+  hermetic while preserving live pane autoping visibility.
+- Regression coverage adds a pipe-holding child-process dashboard stub, proving
+  the one-shot pane still exits before the pre-push caller timeout.
+- Local validation after the repair:
+  `PYTHONHASHSEED=0 python3 -m pytest -q -n auto mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution --tb=short`
+  passed (`59 passed`).
 
 ## Purpose
 
@@ -230,11 +251,13 @@ Stop and report immediately if:
 - Indicator artifact: `reports/l4_wave_indicators/mu-preproduction-theater-ratchet-resolution-2026-05-05.json`
 - Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before pre-commit supervisor review so the tracker note, Gate 8 package, and governing packet describe one staged scope.
 - Scope binding: no indicator file other than the artifact above is in scope for this wave.
-- Current staged files:
+- Wave-owned files through Phase B:
   - `TASKS.md`
   - `mu/tests/tools/test_check_theater_risk_ratchet.py`
+  - `mu/tests/tools/test_recovery_gate.py`
   - `mu/tools/checks/check_theater_risk_ratchet.py`
   - `mu/tools/checks/theater_allowlist.json`
+  - `mu/tools/observability/_pane_processes.sh`
   - `mu/tools/session/founder_session_guard.sh`
   - `reports/control_plane/mu-preproduction-theater-ratchet-resolution-2026-05-05_2026-05-05.md`
   - `reports/deferred/README.md`
@@ -247,18 +270,20 @@ Stop and report immediately if:
 
 - Refresh wave: `mu-preproduction-theater-ratchet-resolution-2026-05-05`
 - Active packet: `reports/control_plane/mu-preproduction-theater-ratchet-resolution-2026-05-05_2026-05-05.md`
-- Commit status: `pre_commit_supervisor_pending`
+- Commit status: `local_commit_created_pre_push_repair_appended`
 - Tracker note sha256: `1bd1c10291793e65f6137cf1273bc8d940b9e80633e3a8fd5b46864fd47d7e1c`
 - Indicator artifact: `reports/l4_wave_indicators/mu-preproduction-theater-ratchet-resolution-2026-05-05.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_check_theater_risk_ratchet.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/mu-preproduction-theater-ratchet-resolution-2026-05-05_2026-05-05.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_check_theater_risk_ratchet.py mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/mu-preproduction-theater-ratchet-resolution-2026-05-05_2026-05-05.md. (2) Final pytest gate covered the theater-ratchet test file from the wave-owned diff. (3) Commit executor created local commit `5c279c25`. (4) Pre-push exposed a pane one-shot recovery-render timeout, and the repair mechanically bounds that render path with process-group cleanup, hermetic one-shot autoping reads, and regression coverage.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/mu-preproduction-theater-ratchet-resolution-2026-05-05.json`
-- Current staged files:
+- Wave-owned files through pre-push repair:
   - `TASKS.md`
   - `mu/tests/tools/test_check_theater_risk_ratchet.py`
+  - `mu/tests/tools/test_recovery_gate.py`
   - `mu/tools/checks/check_theater_risk_ratchet.py`
   - `mu/tools/checks/theater_allowlist.json`
+  - `mu/tools/observability/_pane_processes.sh`
   - `mu/tools/session/founder_session_guard.sh`
   - `reports/control_plane/mu-preproduction-theater-ratchet-resolution-2026-05-05_2026-05-05.md`
   - `reports/deferred/README.md`
