@@ -1,24 +1,24 @@
 {
   "wave_id": "handoff-directive-closeout-2026-05-05",
-  "repeat_run_speedup_ratio": 1.08928,
+  "repeat_run_speedup_ratio": 1.270311,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.471974,
+  "step_growth_slope": 0.41365,
   "repeat_run_raw_seconds": [
-    0.514112,
-    0.471974
+    0.525464,
+    0.41365
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.514112
+      "elapsed_seconds": 0.525464
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.986086
+      "elapsed_seconds": 0.939114
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-05T09:55:40Z",
+  "collection_timestamp_utc": "2026-05-05T10:12:50Z",
   "collector_version": "2.2.0"
 }

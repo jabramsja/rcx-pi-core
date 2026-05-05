@@ -301,10 +301,11 @@ def test_models_cache_canaries_fail(tmp_path):
 
     result = startup_mod._check_models_cache(codex_home)  # ANTICHEAT_OK: tool unit test
     assert result.status == "FAIL"
-    assert "stale friendly-persona canaries present" in result.detail
+    assert "protocol contradiction canaries present" in result.detail
+    assert "warm, encouraging, and conversational" in result.detail
 
 
-def test_models_cache_allows_vendor_personality_friendly_lane(tmp_path):
+def test_models_cache_rejects_vendor_personality_friendly_lane(tmp_path):
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
     models_cache = codex_home / "models_cache.json"
@@ -332,8 +333,9 @@ def test_models_cache_allows_vendor_personality_friendly_lane(tmp_path):
 
     result = startup_mod._check_models_cache(codex_home)  # ANTICHEAT_OK: tool unit test
 
-    assert result.status == "OK"
-    assert "personality_friendly variants" in result.detail
+    assert result.status == "FAIL"
+    assert "protocol contradiction canaries present" in result.detail
+    assert "models[0].instructions_variables.personality_friendly" in result.detail
 
 
 def test_models_cache_invalid_json_fails_closed(tmp_path):
