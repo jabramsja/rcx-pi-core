@@ -34,7 +34,7 @@ control-surface/meta-bridge rollout (all 7 rollout steps complete)
 
 1. `deferred-findings-fix-sweep-2026-05-04`
    (`reports/control_plane/deferred_findings_fix_sweep_2026-05-04.md`)
-   runs first. It fixes or routes blocker/non-blocker findings in
+   runs first and is the current Phase B cleanup packet. It fixes or routes blocker/non-blocker findings in
    `reports/deferred/blocking/`, `reports/deferred/non_blocking/`,
    `reports/l4_wave_indicators/`, and `reports/control_plane/`. Stale or
    code-closed findings must be checked against current code/tests/command
@@ -42,7 +42,7 @@ control-surface/meta-bridge rollout (all 7 rollout steps complete)
    remaining in active finding folders.
 2. `mu-preproduction-redteam-2026-05-04`
    (`reports/control_plane/mu_preproduction_redteam_2026-05-04.md`) runs after
-   the deferred findings sweep. It red-teams all production-relevant `/mu` code
+   the deferred findings sweep lands. It red-teams all production-relevant `/mu` code
    and proof surfaces: Python, JavaScript, Stage0/lowering/runtime paths,
    seeds/registries, tests, tooling, and docs. Blockers route to
    `reports/deferred/blocking/`; non-blockers route to

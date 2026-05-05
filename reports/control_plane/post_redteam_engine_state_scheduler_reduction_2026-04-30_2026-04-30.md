@@ -199,9 +199,9 @@ Governing packet refs:
 - This file is the historical governing Phase A packet for landed wave `post-redteam-engine-state-scheduler-reduction-2026-04-30`.
 - `reports/control_plane/post_redteam_structural_queue_2026-03-20.md:3-6` marks the structural queue ACTIVE and points to the canonical locked Phase A sweep.
 - `reports/control_plane/post_redteam_structural_queue_2026-03-20.md:38-70` defines the phase sequence: Phase A gap sweep, Phase B host/boundary unification, Phase C structural reduction into Mu.
-- `reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md:588-620` records F-1 as a DEFECT: no engine-state schema artifact.
-- `reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md:624-697` records F-2 as a DEFECT: no scheduler seed or operator-pool artifact; existing `run_algorithm` is a boundary but not scheduler semantics.
-- `reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md:863-864` classifies F-1/F-2 as confirmed downstream structural-reduction work.
+- `reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md:603-635` records F-1 as a DEFECT: no engine-state schema artifact.
+- `reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md:639-704` records F-2 as a DEFECT: no scheduler seed or operator-pool artifact; existing `run_algorithm` is a boundary but not scheduler semantics.
+- `reports/control_plane/next_codex_post_redteam_phase_a_structural_gap_swe_2026-03-30.md:878-879` classifies F-1/F-2 as historical for the landed downstream engine-state/scheduler slice.
 
 Authorization for automation:
 

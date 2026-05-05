@@ -710,6 +710,23 @@ class TestStagePathSymlinkAliasRecovery:
             {"status": "failed", "executor": "commit_executor", "stdout": payload}
         ) == FailureClass.TEST_FAILURE
 
+    def test_pre_push_pytest_timeout_failure_wins_over_l4_audit_chatter(self):
+        payload = json.dumps({
+            "status": "error",
+            "step": "run_pre_push_script",
+            "errors": [
+                "pre-push-fast failed: L4 execution contract passed\n"
+                "tests/tools/test_recovery_gate.py:8355:\n"
+                "E subprocess.TimeoutExpired: Command '['bash', "
+                "'/tmp/repo/mu/tools/observability/_pane_processes.sh'] "
+                "timed out after 10 seconds\n"
+                "To bypass (not recommended): git push --no-verify"
+            ],
+        }, indent=2)
+        assert rg_mod.classify_failure(
+            {"status": "failed", "executor": "commit_executor", "stdout": payload}
+        ) == FailureClass.TEST_FAILURE
+
     def test_private_attr_prepush_failure_is_narrow_test_integrity_class(self):
         payload = json.dumps({
             "status": "error",
@@ -8367,6 +8384,49 @@ fi
         assert "Last saved Phase B checkpoint: waiting to restart Phase B" in clean_stdout
         assert "Current step:" not in clean_stdout
         assert "needs phase b reentry" not in clean_stdout
+
+    def test_pane_processes_oneshot_bounds_recovery_render_timeout(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_processes.sh")
+        self._install_observability_script(repo_root, "_resolve_live_root.sh")
+
+        dashboard = repo_root / "mu" / "tools" / "observability" / "pipeline_dashboard.py"
+        dashboard.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
+
+        recovery_dir = repo_root / ".agent_bus" / "recovery"
+        recovery_dir.mkdir(parents=True, exist_ok=True)
+        (recovery_dir / "recovery_status.json").write_text(
+            json.dumps({"active": True, "updated_at": datetime.now(timezone.utc).isoformat()}),
+            encoding="utf-8",
+        )
+
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\nHEAD 1111111111111111\nbranch refs/heads/jabramsja/repo-wave\n",
+        )
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_PANE_ONESHOT": "1",
+            "RCX_PANE_ONESHOT_RECOVERY_TIMEOUT_S": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_processes.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Recovery detail unavailable: render timed out in one-shot mode." in clean_stdout
 
     def test_pane_processes_trims_long_output_to_keep_header_visible(self, tmp_path):
         repo_root = tmp_path / "repo"

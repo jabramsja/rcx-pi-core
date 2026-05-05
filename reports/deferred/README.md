@@ -19,14 +19,17 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-03):
+Current inventory refresh (2026-05-04):
 
 - Evidence command: `rg --files reports/deferred/blocking reports/deferred/non_blocking | sort | nl -ba`.
 - `reports/deferred/blocking/` currently contains only `README.md`; no active
   blocker packet is present in the authorized deferred blocking lane.
-- `reports/deferred/non_blocking/` contains active advisory records plus
-  retained generated bridge non-blocker records. These records stay in the
-  advisory lane, but closed parent tasks are not reopened by their presence.
+- `reports/deferred/non_blocking/` currently contains 28 markdown files:
+  `README.md` plus 27 active advisory/follow-up records with concrete evidence
+  targets.
+- The deferred findings sweep archived 6 stale, self-closed, or code-closed
+  generated advisory packets under `reports/archive/deferred/` with
+  `closed-by-deferred-findings-fix-sweep-2026-05-04` filenames.
 
 Closed-parent exclusions for this index:
 

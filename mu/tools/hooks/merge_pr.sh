@@ -308,8 +308,8 @@ if [ "$FLAG" = "--sweep-only" ]; then
     else
         while IFS= read -r pr; do
             [ -z "$pr" ] && continue
-            extract_sweep_findings "$pr" "$SWEEP_FILE"
             resolve_threads "$pr" "sweep"
+            extract_sweep_findings "$pr" "$SWEEP_FILE"
             describe_latest_bot_issue_comment "$pr" "sweep"
         done <<< "$merged_prs"
     fi
@@ -359,8 +359,8 @@ if [ "$FLAG" = "--sweep" ]; then
     else
         while IFS= read -r pr; do
             [ -z "$pr" ] && continue
-            extract_sweep_findings "$pr" "$SWEEP_FILE"
             resolve_threads "$pr" "sweep"
+            extract_sweep_findings "$pr" "$SWEEP_FILE"
             describe_latest_bot_issue_comment "$pr" "sweep"
         done <<< "$merged_prs"
     fi

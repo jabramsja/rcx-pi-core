@@ -14,3 +14,9 @@ Archived source snapshots for extracted non-blocking residue live in:
 
 - `reports/archive/deferred/`
 - `reports/codex/Archive/non_blockers/`
+
+2026-05-04 sweep note:
+
+- `deferred-findings-fix-sweep-2026-05-04` moved code-closed/stale generated
+  advisory packets out of this active lane. The remaining markdown files are
+  active advisories or retained follow-ups with current evidence targets.

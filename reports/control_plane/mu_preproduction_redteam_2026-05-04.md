@@ -1,7 +1,7 @@
 # Mu Preproduction Red-Team
 
 Date: 2026-05-04
-Status: QUEUED (blocked on deferred-findings-fix-sweep-2026-05-04)
+Status: QUEUED / NEXT AFTER deferred-findings-fix-sweep-2026-05-04
 Task: [NEXT-CODEX-POST-REDTEAM]
 Wave ID: mu-preproduction-redteam-2026-05-04
 Phase-A-Lock: LOCKED

@@ -58,6 +58,9 @@ FAST_ONESHOT=0
 load_role_agent_labels() {
   local root="${1:-$REPO_ROOT}" output="" key="" value=""
   [ -n "$root" ] || return 0
+  if [ "$FAST_ONESHOT" = "1" ] && [ ! -f "$root/mu/tools/executors/executor_common.py" ]; then
+    return 0
+  fi
   output="$(python3 - "$root" <<'PY' 2>/dev/null
 from pathlib import Path
 import sys
@@ -133,6 +136,38 @@ fit_output_to_pane() {
     tail -n "$tail_keep" "$file"
   } > "$tmp"
   mv "$tmp" "$file"
+}
+
+render_recovery_once() {
+  local dashboard_py="$1" output_path="$2" timeout_s="${RCX_PANE_ONESHOT_RECOVERY_TIMEOUT_S:-3}"
+  local child="" ticks=0 max_ticks=30
+
+  if ! [[ "$timeout_s" =~ ^[0-9]+$ ]] || [ "$timeout_s" -lt 1 ]; then
+    timeout_s=3
+  fi
+  max_ticks=$(( timeout_s * 10 ))
+
+  python3 "$dashboard_py" --render-recovery --repo-root "$REPO_ROOT" --bus-dir "$BUS_DIR" > "$output_path" 2>/dev/null &
+  child="$!"
+  while kill -0 "$child" 2>/dev/null; do
+    if [ "$FAST_ONESHOT" = "1" ] && [ "$ticks" -ge "$max_ticks" ]; then
+      kill "$child" 2>/dev/null || true
+      wait "$child" 2>/dev/null || true
+      {
+        echo "RECOVERY"
+        echo "─────────────────────────────────────"
+        if [ -f "$BUS/recovery/recovery_status.json" ]; then
+          echo "  Recovery detail unavailable: render timed out in one-shot mode."
+        else
+          echo "  No recovery activity recorded yet."
+        fi
+      } > "$output_path"
+      return 124
+    fi
+    sleep 0.1
+    ticks=$((ticks + 1))
+  done
+  wait "$child" 2>/dev/null || true
 }
 
 elapsed_str() {
@@ -739,7 +774,7 @@ else:
   DASHBOARD_PY="$SCRIPT_DIR/pipeline_dashboard.py"
   if [ -f "$DASHBOARD_PY" ]; then
     RECOVERY_TMP="/tmp/rcx_pane_processes_recovery_$$.txt"
-    python3 "$DASHBOARD_PY" --render-recovery --repo-root "$REPO_ROOT" --bus-dir "$BUS_DIR" > "$RECOVERY_TMP" 2>/dev/null || true
+    render_recovery_once "$DASHBOARD_PY" "$RECOVERY_TMP" || true
     recovery_line_count=$(wc -l < "$RECOVERY_TMP" 2>/dev/null | xargs)
     if [[ "$recovery_line_count" =~ ^[0-9]+$ ]] && [ "$recovery_line_count" -gt 0 ]; then
       # Add staleness indicator to recovery header — check the status file age
