@@ -1,7 +1,7 @@
 # Founder Ordered Redteam Docs Audit
 
 Date: 2026-05-05
-Status: COMPLETED (commit-ready, supervisor COMMIT_GO)
+Status: COMPLETED (commit-ready, pre-commit supervisor pending)
 Task: [NEXT-CODEX-POST-REDTEAM]
 Parent directive: [FOUNDER-ORDERED-REDTEAM-WAVE-QUEUE]
 Wave ID: founder-ordered-redteam-docs-audit-2026-05-05
