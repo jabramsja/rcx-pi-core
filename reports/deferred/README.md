@@ -22,16 +22,19 @@ Archive rule:
 Current inventory refresh (2026-05-05):
 
 - Evidence command: `rg --files reports/deferred/blocking reports/deferred/non_blocking | sort | nl -ba`.
-- `reports/deferred/blocking/` contains only `README.md`; there are no active
-  blocker packets as of this refresh.
+- `reports/deferred/blocking/` contains `README.md` plus the active repo-code
+  blocker packet
+  `founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md`.
 - The resolved mu preproduction gate-theater blocker was moved to
   `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`.
   The 2026-05-05 follow-up aligns the redteam startup guard with the curated
   theater-risk ratchet; `/mu` production-forward movement is no longer blocked
   by this gate-theater finding.
-- `reports/deferred/non_blocking/` currently contains 32 markdown files:
-  `README.md` plus 31 retained advisory/follow-up records with concrete
-  evidence targets, reproduced with
+- `reports/deferred/non_blocking/` currently contains 33 markdown files:
+  `README.md` plus 32 retained advisory/follow-up records with concrete
+  evidence targets, including
+  `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
+  reproduced with
   `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
 - The deferred findings sweep archived 6 stale, self-closed, or code-closed
   generated advisory packets under `reports/archive/deferred/` with
