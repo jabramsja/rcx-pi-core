@@ -1,6 +1,8 @@
 # Changelog
 
-All notable changes to RCX are documented in this file.
+This file is a selected historical changelog, not the complete current
+merge ledger. For live recent wave chronology, use `TASKS.md` plus
+`git log --oneline`.
 
 ## 2026-04-04
 

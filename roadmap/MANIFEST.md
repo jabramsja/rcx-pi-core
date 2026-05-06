@@ -42,12 +42,16 @@
 **Execution order (reordered per 9-agent review 2026-02-04):**
 > Gate 1 → Gate 0 → Gate 2 → Gate 3 → Gate 4 → Gate 5
 
-| Gates | Level | Scope | Status |
-|-------|-------|-------|--------|
-| 1, 0, 2-5 | L2/L3 | Structural algorithm execution | COMPLETE (2026-02-09) |
-| 6-8 | L4 | Boot chain / substrate independence | PARKED |
+| Gates | Level | Scope | Current-state source |
+|-------|-------|-------|----------------------|
+| 1, 0, 2-5 | L2/L3 | Structural algorithm execution | `STATUS.md` Gate Snapshot / `TASKS.md` Ra |
+| 6-8 | L4 | Boot chain / substrate independence | `STATUS.md` Gate Snapshot / `TASKS.md` SINK and completed production-reduction history |
 
 **Rationale:** Spec (Gate 1) first; baseline freeze (Gate 0) immediately before code changes.
+
+This manifest does not carry gate pass/fail state. `STATUS.md` is the
+canonical current-state source; `TASKS.md` records authorization and completed
+production-reduction history.
 
 **Naming note:** Gate numbers (`0-8`) are conceptual architecture gates. `C1-C8` in `Hex0_Boot0_Checklist.md` are operational CI/merge gates.
 

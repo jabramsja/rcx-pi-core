@@ -10,6 +10,13 @@ advisory file does not reopen a parent task that `TASKS.md` marks closed, and it
 does not relist landed work as unresolved unless the file itself records a
 current, file-line-grounded advisory finding.
 
+Status convention:
+
+- Active advisory packets must carry an unresolved `Status:` value and current
+  file-line-grounded evidence.
+- Resolved retained packets must carry `Historical retention: yes` and
+  `Active advisory: no` near the top of the file.
+
 Archived source snapshots for extracted non-blocking residue live in:
 
 - `reports/archive/deferred/`

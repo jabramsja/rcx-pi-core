@@ -334,7 +334,7 @@ See `STATUS.md` for current implementation status.
 
 ### What Stays the Same
 
-- All seed files (see STATUS.md L3 Seed Categories table for full list; 19 seeds total, 13 JS-loaded)
+- All registered seed files (21 total in `tests/structural/test_seed_counts.py`, 13 JS-loaded)
 - All parity tests
 - All grounding tests
 - The fundamental algorithms
@@ -400,7 +400,7 @@ This contract is verified by `tests/parity/test_js_parity_automated.py` which ru
 |------------|---------------|-------|
 | Boot0 | `eval_seed.py` (match, substitute), `mu_type.py` (mu_hash_cached), `kernel.py` (budget) | None (pure Python) |
 | Boot1 | `step_mu.py`, `match_mu.py`, `subst_mu.py` | `match.v2.json`, `subst.v2.json` |
-| Boot2 | `kernel.py`, `eval_seed.py` (step) | All remaining seeds (see STATUS.md L3 Seed Categories for full 19-seed inventory) |
+| Boot2 | `kernel.py`, `eval_seed.py` (step) | All remaining registered seeds (see `tests/structural/test_seed_counts.py` for the 21-seed inventory) |
 
 ## Risk Assessment
 

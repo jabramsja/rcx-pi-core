@@ -13,14 +13,14 @@ A projection-based computational substrate where **structure is the primitive**.
 | **Hemispheres v0** | Native structural routing (12 projections) | ✅ DONE |
 | **L4** | True self-hosting (bootstrap primitive elimination) | SINK (full completion research; bounded reduction active) |
 
-> **Current reality:** L1-L3 are complete and gate-enforced. L4 full completion remains in SINK, but bounded reduction work is active: P7 Stage0 meta-circular reduction landed through shadow-mode cutover (PR #581). Production flip requires performance evidence + founder GO. G8 classification gate PASS (all 4 primitives classified). See `mu/docs/core/L4ExitChecklist.v0.md` and `mu/docs/core/G8CpsFeasibility.v0.md`.
+> **Current reality:** L1-L3 are complete and gate-enforced. L4 full completion remains in SINK, but bounded reduction work has active production evidence: Stage0 VM cutover is active for the kernel/bridge/match/subst projection set. Full bootstrap-primitive elimination still requires separate productionization gates. G8 classification gate PASS (all 4 primitives classified). See `STATUS.md`, `TASKS.md`, `mu/docs/core/L4ExitChecklist.v0.md`, and `mu/docs/core/G8CpsFeasibility.v0.md` for exact counts and gate state.
 >
 > Hemispheres v0 is structural routing; hemisphere metabolization COMPLETE (E1-E5 all MET, 2026-02-20).
 
 - **Comprehensive test coverage** (see STATUS.md for current counts)
 - **12 tracked host-debt markers** (6 Py decorator + 6 JS decorator — see STATUS.md)
 - **44 CRITICAL_TEST_FILES** protected from silent skipping
-- **~163 projections** across 19 seed files (see `test_seed_counts.py` for exact counts)
+- **Current registered projection total** across 21 seed files (see `tests/structural/test_seed_counts.py` for exact counts)
 
 **Hemispheres v0:** Routing decisions expressed as pure Mu projections (`mu/programs/hemispheres.v1.json`).
 Five automatic routes: null→r_null, closure→r_a, exhaustion→sink, stall→r_inf, default→lobes. Cross-substrate parity verified. Metabolization COMPLETE (E1-E5 all MET).
@@ -97,6 +97,8 @@ This delegates to: python3 -m rcx_pi.worlds.world_trace_cli
 | `mu/programs/hemispheres.v1.json` | Hemisphere routing (12 projections) - native structural routing |
 | `mu/programs/paxos_demo.v1.json` | Paxos deadlock demo (6 projections) - application |
 | `mu/programs/rcx_engine.v1.json` | Engine orchestration (11 projections) - structural specification |
+| `mu/programs/rcx_engine_state.v1.json` | Engine state shape checks (9 projections) - explicit RCX engine state |
+| `mu/programs/rcx_engine_scheduler.v1.json` | Engine scheduler ordering (see `tests/structural/test_seed_counts.py`) - operator scheduler |
 | `mu/substrate/match.v1.json` | Pattern matching (7 projections) - legacy standalone |
 | `mu/substrate/subst.v1.json` | Substitution (12 projections) - legacy standalone |
 | `mu/closures/fix.v1.json` | Fixed-point combinator (6 projections) - Rule 4.1 |
