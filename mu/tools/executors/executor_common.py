@@ -805,6 +805,11 @@ def _load_meta_bridge_symbol(symbol_name: str) -> Any:
 
 
 _CONTROL_PLANE_PREFIX = "reports/control_plane/"
+_PACKET_STATUS_SCAN_LIMIT = 40
+_COMPLETED_PACKET_STATUS_RE = re.compile(
+    r"\b(?:COMPLETED|IMPLEMENTED|LANDED|CLOSED)\b",
+    re.IGNORECASE,
+)
 
 
 def _validate_tracked_packet_for_builder(
@@ -848,6 +853,41 @@ def _validate_tracked_packet_for_builder(
     if not full_path.is_file():
         return f"tracked_packet must be a file, not a directory: {tracked_packet}"
     return None
+
+
+def packet_status_is_completed(status: str | None) -> bool:
+    clean = str(status or "").strip()
+    if not clean:
+        return False
+    return bool(_COMPLETED_PACKET_STATUS_RE.search(clean)) or (
+        "FINDINGS ROUTED" in clean.upper()
+    )
+
+
+def read_control_plane_packet_status(repo_root: Path, tracked_packet: str) -> str | None:
+    packet_err = _validate_tracked_packet_for_builder(tracked_packet, repo_root)
+    if packet_err:
+        return None
+    packet_path = (repo_root / tracked_packet).resolve()
+    try:
+        lines = packet_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in lines[:_PACKET_STATUS_SCAN_LIMIT]:
+        clean = line.strip()
+        if clean.lower().startswith("status:"):
+            return clean.partition(":")[2].strip() or None
+    return None
+
+
+def _completed_tracked_packet_error(tracked_packet: str, repo_root: Path) -> str | None:
+    status = read_control_plane_packet_status(repo_root, tracked_packet)
+    if not packet_status_is_completed(status):
+        return None
+    return (
+        "tracked_packet is already complete and must not be routed again: "
+        f"{tracked_packet} has Status: {status}"
+    )
 
 
 def build_post_merge_routing_record(
@@ -917,6 +957,13 @@ def build_post_merge_routing_record(
     )
     if packet_err:
         errors.append(packet_err)
+    else:
+        completed_packet_err = _completed_tracked_packet_error(
+            tracked_packet if isinstance(tracked_packet, str) else "",
+            effective_repo_root,
+        )
+        if completed_packet_err:
+            errors.append(completed_packet_err)
 
     if errors:
         return {}, errors

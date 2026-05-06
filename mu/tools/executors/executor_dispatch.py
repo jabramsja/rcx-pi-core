@@ -42,7 +42,9 @@ try:
         ExecutorCommonError,
         emit_pipeline_agent_event,
         normalize_wave_id,
+        packet_status_is_completed,
         process_descendants,
+        read_control_plane_packet_status,
         resolve_agent_bus_dir,
         routing_record_path as _common_routing_record_path,
         terminate_process_tree,
@@ -66,7 +68,9 @@ except ImportError:
     ExecutorCommonError = _mod.ExecutorCommonError
     emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
     normalize_wave_id = _mod.normalize_wave_id
+    packet_status_is_completed = _mod.packet_status_is_completed
     process_descendants = _mod.process_descendants
+    read_control_plane_packet_status = _mod.read_control_plane_packet_status
     resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     _common_routing_record_path = _mod.routing_record_path
     terminate_process_tree = _mod.terminate_process_tree
@@ -385,6 +389,23 @@ def _canonicalize_surface_task_id(task_id: str) -> str:
     return f"[{clean}]"
 
 
+def _routing_candidate_dicts(record: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates = record.get("next_candidates")
+    if not isinstance(candidates, list):
+        return []
+    return [candidate for candidate in candidates if isinstance(candidate, dict)]
+
+
+def _selected_routing_candidate_dicts(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return candidates eligible for routing, with legacy fallback."""
+    candidates = _routing_candidate_dicts(record)
+    bounded = [
+        candidate for candidate in candidates
+        if candidate.get("bounded") is True
+    ]
+    return bounded or candidates
+
+
 def _surface_phase_b_plan_from_routing_payload(routing_payload: str | None) -> str | None:
     """Prefer tracked_packet from a Phase B routing payload when no explicit plan is given."""
     if not routing_payload:
@@ -395,12 +416,7 @@ def _surface_phase_b_plan_from_routing_payload(routing_payload: str | None) -> s
         return None
     if not isinstance(record, dict):
         return None
-    candidates = record.get("next_candidates")
-    if not isinstance(candidates, list):
-        return None
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
+    for candidate in _selected_routing_candidate_dicts(record):
         tracked_packet = str(candidate.get("tracked_packet") or "").strip()
         if tracked_packet:
             return tracked_packet
@@ -408,16 +424,65 @@ def _surface_phase_b_plan_from_routing_payload(routing_payload: str | None) -> s
 
 
 def _routing_record_tracked_packet(record: dict[str, Any]) -> str:
-    candidates = record.get("next_candidates")
-    if not isinstance(candidates, list):
-        return ""
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
+    for candidate in _selected_routing_candidate_dicts(record):
         tracked_packet = str(candidate.get("tracked_packet") or "").strip()
         if tracked_packet:
             return tracked_packet
     return ""
+
+
+def _completed_routing_candidates(
+    repo_root: Path,
+    record: dict[str, Any],
+) -> list[dict[str, str]]:
+    completed: list[dict[str, str]] = []
+    for candidate in _selected_routing_candidate_dicts(record):
+        tracked_packet = str(candidate.get("tracked_packet") or "").strip()
+        if not tracked_packet:
+            continue
+        status = read_control_plane_packet_status(repo_root, tracked_packet)
+        if packet_status_is_completed(status):
+            completed.append(
+                {
+                    "tracked_packet": tracked_packet,
+                    "status": str(status or ""),
+                    "candidate": str(candidate.get("candidate") or ""),
+                }
+            )
+    return completed
+
+
+def _completed_candidate_stop_result(
+    repo_root: Path,
+    record: dict[str, Any],
+    *,
+    decision: str,
+    executor_name: str,
+) -> dict[str, Any] | None:
+    if decision not in {"ROUTE_PHASE_A", "ROUTE_PHASE_B"}:
+        return None
+    completed = _completed_routing_candidates(repo_root, record)
+    if not completed:
+        return None
+    packets = ", ".join(
+        f"{item['tracked_packet']} (Status: {item['status']})"
+        for item in completed
+    )
+    return {
+        "status": "stopped",
+        "decision": decision,
+        "executor": executor_name,
+        "summary": "Routing stopped because the selected bounded packet is already complete.",
+        "message": (
+            "Refusing to dispatch an already-complete bounded candidate. "
+            f"Refresh the post-merge routing record to the next open packet. Completed: {packets}"
+        ),
+        "completed_candidates": completed,
+        "request_for_claude": (
+            "Refresh post-merge routing from the canonical open queue before "
+            "retrying dispatcher; do not rerun completed packets."
+        ),
+    }
 
 
 def _phase_b_plan_declared_wave_id(repo_root: Path, plan_path: str) -> str:
@@ -1097,9 +1162,7 @@ def _phase_b_tracked_plan_or_error(
     include_recovery_env: bool = False,
 ) -> tuple[str | None, dict[str, Any] | None]:
     """Resolve a Phase B tracked packet path, optionally from recovery env."""
-    for candidate in record.get("next_candidates", []):
-        if not isinstance(candidate, dict):
-            continue
+    for candidate in _selected_routing_candidate_dicts(record):
         tracked_packet = candidate.get("tracked_packet")
         if tracked_packet and isinstance(tracked_packet, str):
             plan_path = tracked_packet
@@ -2445,6 +2508,15 @@ def dispatch(
                        f"Manual execution required.",
         }
 
+    completed_stop = _completed_candidate_stop_result(
+        repo,
+        record,
+        decision=decision,
+        executor_name=executor_name,
+    )
+    if completed_stop is not None:
+        return completed_stop
+
     # Validate freshness — auto-refresh via post-merge supervisor if stale
     if not skip_freshness:
         fresh, msg = validate_routing_record_freshness(record, repo)
@@ -2541,6 +2613,14 @@ def dispatch(
                     "decision": decision,
                     "message": f"Refreshed routing decision unknown: {decision}.",
                 }
+            completed_stop = _completed_candidate_stop_result(
+                repo,
+                record,
+                decision=decision,
+                executor_name=executor_name,
+            )
+            if completed_stop is not None:
+                return completed_stop
             if verbose:
                 print(f"[dispatch] Refreshed: decision={decision}, executor={executor_name}")
 
@@ -2604,7 +2684,7 @@ def dispatch(
             # Phase A needs --plan-name. When a candidate already declares a
             # tracked packet, prefer that canonical packet stem so Phase A
             # reuses the tracked file instead of minting a date-slug duplicate.
-            candidates = record.get("next_candidates", [])
+            candidates = _selected_routing_candidate_dicts(record)
             plan_name = None
             for c in candidates:
                 tp = c.get("tracked_packet")

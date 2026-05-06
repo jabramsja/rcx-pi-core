@@ -51,6 +51,8 @@ from executor_common import (
     is_agent_bus_runtime_path,
     load_executor_config,
     normalize_wave_id,
+    packet_status_is_completed,
+    read_control_plane_packet_status,
     resolve_agent_bus_dir,
     resolve_role_agent,
 )
@@ -2338,20 +2340,51 @@ def _decide_post_merge_route_locally(
             ),
         }
 
-    bounded_candidates = [
-        candidate
-        for candidate in package.get("next_candidates", [])
-        if isinstance(candidate, dict) and candidate.get("bounded") is True
-    ]
+    completed_candidates: list[dict[str, str]] = []
+    bounded_candidates: list[dict[str, Any]] = []
+    for candidate in package.get("next_candidates", []):
+        if not isinstance(candidate, dict) or candidate.get("bounded") is not True:
+            continue
+        tracked_packet = str(candidate.get("tracked_packet") or "").strip()
+        status = read_control_plane_packet_status(repo_root, tracked_packet)
+        if packet_status_is_completed(status):
+            completed_candidates.append(
+                {
+                    "candidate": str(candidate.get("candidate") or ""),
+                    "tracked_packet": tracked_packet,
+                    "status": str(status or ""),
+                }
+            )
+            continue
+        bounded_candidates.append(candidate)
     if not bounded_candidates:
+        findings = []
+        if completed_candidates:
+            completed_detail = "; ".join(
+                f"{item['tracked_packet']} Status: {item['status']}"
+                for item in completed_candidates
+            )
+            findings.append(
+                {
+                    "severity": "low",
+                    "title": "Completed next candidate removed from routing",
+                    "detail": (
+                        "The post-merge package selected an already-complete "
+                        f"packet, so it was not routed again: {completed_detail}"
+                    ),
+                }
+            )
         return {
             "decision": Decision.UPDATE_TRACKER_ONLY.value,
             "summary": (
-                "Merge verification passed and there is no remaining bounded next candidate, "
+                "Merge verification passed and there is no remaining open bounded next candidate, "
                 "so only tracker synchronization remains."
             ),
-            "findings": [],
-            "request_for_claude": "Update tracker state only. No new Phase A or Phase B wave is authorized.",
+            "findings": findings,
+            "request_for_claude": (
+                "Update tracker state only. No new Phase A or Phase B wave is authorized "
+                "until post-merge routing is refreshed to an open packet."
+            ),
         }
     if len(bounded_candidates) > 1:
         return {
