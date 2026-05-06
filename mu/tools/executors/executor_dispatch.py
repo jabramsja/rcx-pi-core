@@ -45,6 +45,7 @@ try:
         packet_status_is_completed,
         process_descendants,
         read_control_plane_packet_status,
+        read_founder_ordered_task_state,
         resolve_agent_bus_dir,
         routing_record_path as _common_routing_record_path,
         terminate_process_tree,
@@ -71,6 +72,7 @@ except ImportError:
     packet_status_is_completed = _mod.packet_status_is_completed
     process_descendants = _mod.process_descendants
     read_control_plane_packet_status = _mod.read_control_plane_packet_status
+    read_founder_ordered_task_state = _mod.read_founder_ordered_task_state
     resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     _common_routing_record_path = _mod.routing_record_path
     terminate_process_tree = _mod.terminate_process_tree
@@ -446,6 +448,28 @@ def _completed_routing_candidates(
                 {
                     "tracked_packet": tracked_packet,
                     "status": str(status or ""),
+                    "candidate": str(candidate.get("candidate") or ""),
+                }
+            )
+            continue
+        task_wave = str(
+            candidate.get("wave_name")
+            or candidate.get("wave_id")
+            or record.get("wave_name")
+            or record.get("wave_id")
+            or candidate.get("candidate")
+            or ""
+        )
+        task_state = read_founder_ordered_task_state(
+            repo_root,
+            wave_id=task_wave,
+            tracked_packet=tracked_packet,
+        )
+        if packet_status_is_completed(task_state):
+            completed.append(
+                {
+                    "tracked_packet": tracked_packet,
+                    "status": f"TASKS.md state: {task_state}",
                     "candidate": str(candidate.get("candidate") or ""),
                 }
             )

@@ -242,6 +242,52 @@ def test_post_merge_package_refresh_skips_completed_audit_status_with_pending_te
     assert audit_packet not in package["deferred_items"]
 
 
+def test_post_merge_package_refresh_skips_completed_tasks_state_even_if_packet_stale(tmp_path):
+    repo = _init_repo(tmp_path)
+    completed_packet = (
+        "reports/control_plane/"
+        "founder_ordered_redteam_docs_non_blocking_remediation_2026-05-06.md"
+    )
+    open_packet = (
+        "reports/control_plane/"
+        "founder_ordered_redteam_tooling_non_blocking_remediation_2026-05-06.md"
+    )
+    _write_queue_packet(repo, completed_packet, "QUEUED - STALE HEADER")
+    _write_queue_packet(repo, open_packet, "QUEUED - NON-BLOCKING REMEDIATION PACKET")
+    (repo / "TASKS.md").write_text(
+        (
+            "## Ra\n"
+            "  4. **[FOUNDER-ORDERED-REDTEAM-DOCS-NON-BLOCKING-REMEDIATION] "
+            "IMPLEMENTED / LOCAL EVIDENCE (2026-05-06).** "
+            "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            "Wave ID: `founder-ordered-redteam-docs-non-blocking-remediation-2026-05-06`. "
+            "Class: `L4_ENABLER`. Category: docs. "
+            f"Packet: `{completed_packet}`.\n"
+            "  5. **[FOUNDER-ORDERED-REDTEAM-TOOLING-NON-BLOCKING-REMEDIATION] "
+            "QUEUED / NON-BLOCKING.** "
+            "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            "Wave ID: `founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06`. "
+            "Class: `L4_ENABLER`. Category: tooling. "
+            f"Packet: `{open_packet}`.\n"
+        ),
+        encoding="utf-8",
+    )
+
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result={"pr_number": "890"},
+        merge_sha="fresh-head",
+        log=_noop_log,
+    )
+
+    assert package["wave_name"] == (
+        "founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06"
+    )
+    assert package["next_candidates"][0]["tracked_packet"] == open_packet
+    assert completed_packet not in package["deferred_items"]
+
+
 def test_post_merge_package_refresh_stops_before_mu_structural_queue(tmp_path):
     repo = _init_repo(tmp_path)
     packet = (

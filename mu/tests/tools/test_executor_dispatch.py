@@ -533,6 +533,59 @@ class TestDispatcherFreshnessRefresh:
         assert result["completed_candidates"][0]["tracked_packet"] == packet_rel
         assert calls == []
 
+    def test_dispatch_stops_completed_tasks_state_before_phase_executor(
+        self, tmp_path, monkeypatch,
+    ):
+        repo, _ = _init_builder_repo(tmp_path)
+        packet_rel = "reports/control_plane/seed_packet.md"
+        (repo / packet_rel).write_text(
+            "# seed packet\n\nStatus: QUEUED - STALE HEADER\n",
+            encoding="utf-8",
+        )
+        (repo / "TASKS.md").write_text(
+            (
+                "## Ra\n"
+                "  4. **[FOUNDER-ORDERED-REDTEAM-DOCS-NON-BLOCKING-REMEDIATION] "
+                "IMPLEMENTED / LOCAL EVIDENCE (2026-05-06).** "
+                "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+                "Wave ID: `founder-ordered-redteam-docs-non-blocking-remediation-2026-05-06`. "
+                "Class: `L4_ENABLER`. Category: docs. "
+                f"Packet: `{packet_rel}`.\n"
+            ),
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "stale completed task route",
+            "wave_name": "founder-ordered-redteam-docs-non-blocking-remediation-2026-05-06",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "next_candidates": [
+                {
+                    "candidate": (
+                        "founder-ordered-redteam-docs-non-blocking-remediation-2026-05-06"
+                    ),
+                    "bounded": True,
+                    "tracked_packet": packet_rel,
+                }
+            ],
+        }
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout='{"status":"success"}', stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+
+        result = dispatch_mod.dispatch(record, repo_root=repo, skip_freshness=True)
+
+        assert result["status"] == "stopped"
+        assert "already-complete bounded candidate" in result["message"]
+        assert result["completed_candidates"][0]["status"] == (
+            "TASKS.md state: IMPLEMENTED / LOCAL EVIDENCE (2026-05-06)."
+        )
+        assert calls == []
+
     def test_dispatch_ignores_completed_unbounded_candidate_when_bounded_open_exists(
         self, tmp_path, monkeypatch,
     ):
