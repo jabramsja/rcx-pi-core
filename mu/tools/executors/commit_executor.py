@@ -6467,9 +6467,8 @@ def _run_commit_pipeline_impl(
     commit is allowed; no extra resume flags.
 
     Args:
-        skip_supervisor: Skip steps 6 (build_and_run_supervisor) and
-            7 (validate_receipt). Used with --standalone for pre-implemented
-            changes that don't need Codex meta-review.
+        skip_supervisor: Historical direct-bypass flag. It is retained only for
+            API compatibility and now fails closed before supervisor authority.
     """
     try:
         ensure_not_agent_review_mode("commit_executor.run_commit_pipeline")
@@ -6478,6 +6477,16 @@ def _run_commit_pipeline_impl(
             "status": "error",
             "step": "review_mode_guard",
             "errors": [str(exc)],
+            "steps_completed": [],
+        }
+    if skip_supervisor:
+        return {
+            "status": "error",
+            "step": "skip_supervisor_forbidden",
+            "errors": [
+                "--skip-supervisor is disabled: commit execution requires "
+                "pre-commit supervisor review and receipt validation"
+            ],
             "steps_completed": [],
         }
 
@@ -7062,18 +7071,7 @@ def _run_commit_pipeline_impl(
                 f"{len(refreshed_staged_paths)} file(s)"
             )
 
-    # ── Steps 6-7 skip (--skip-supervisor) ──────────────────────────
-    if skip_supervisor:
-        log("Steps 6-7: skipped (--skip-supervisor)")
-        result["steps_completed"].append("build_and_run_supervisor")
-        result["steps_completed"].append("validate_receipt")
-        receipt_decision = "COMMIT_GO"
-        receipt_path_from_supervisor = ""
-        result["receipt_decision"] = receipt_decision
-        result["handoff_sha"] = handoff_sha
-        # Jump to step 8 — set env so pre-commit hook skips receipt check
-        os.environ["RCX_SKIP_RECEIPT_CHECK"] = "1"
-
+    # ── Steps 6-7: supervisor review + receipt validation ───────────
     if not skip_supervisor:
         # ── Step 6: build_and_run_supervisor ──────────────────────────────
         try:
@@ -7338,10 +7336,9 @@ def _run_commit_pipeline_impl(
     # ── Step 8: run_pre_commit_script ─────────────────────────────────
     pre_commit_script = repo_root / "mu" / "tools" / "hooks" / "pre-commit-doc-check"
     if pre_commit_script.exists():
-        # Propagate active bus authority to the hook verifier; when supervisor
-        # is skipped, also propagate RCX_SKIP_RECEIPT_CHECK through the _run env
-        # filter, which strips RCX_SKIP_* by default.
-        step8_env = _commit_subprocess_env(skip_receipt_check=skip_supervisor)
+        # Propagate active bus authority to the hook verifier. Receipt checks
+        # must remain active on the commit path.
+        step8_env = _commit_subprocess_env(skip_receipt_check=False)
         try:
             _run(["bash", str(pre_commit_script)], cwd=repo_root, timeout=30, env=step8_env)
         except subprocess.CalledProcessError as exc:
@@ -7400,7 +7397,7 @@ def _run_commit_pipeline_impl(
     log("Step 8: pre-commit script passed")
 
     # ── Step 9: git_commit ────────────────────────────────────────────
-    step9_env = _commit_subprocess_env(skip_receipt_check=skip_supervisor)
+    step9_env = _commit_subprocess_env(skip_receipt_check=False)
     try:
         commit_out = _run(
             ["git", "commit", "-m", handoff["commit_message"]],
@@ -7497,6 +7494,16 @@ def run_commit_pipeline(
             "errors": [str(exc)],
             "steps_completed": [],
         }
+    if skip_supervisor:
+        return {
+            "status": "error",
+            "step": "skip_supervisor_forbidden",
+            "errors": [
+                "--skip-supervisor is disabled: commit execution requires "
+                "pre-commit supervisor review and receipt validation"
+            ],
+            "steps_completed": [],
+        }
 
     wave_id = str(handoff.get("wave_id") or "unknown").strip() or "unknown"
     handoff_sha = _handoff_sha(handoff) if isinstance(handoff, dict) else "invalid"
@@ -7580,8 +7587,8 @@ def main() -> int:
         action="store_true",
         help="Output as JSON",
     )
-    # Modular bypass flags — for running commit executor directly
-    # without a full Phase A/B pipeline cycle.
+    # Modular direct flags. Standalone may relax handoff provenance for recovery
+    # continuations, but supervisor and receipt authority are always required.
     parser.add_argument(
         "--standalone",
         action="store_true",
@@ -7590,7 +7597,7 @@ def main() -> int:
     parser.add_argument(
         "--skip-supervisor",
         action="store_true",
-        help="Skip steps 6-7 (no Codex meta-review, no receipt validation)",
+        help="Disabled: commit execution always requires supervisor receipt validation",
     )
     parser.add_argument(
         "--task-id",
@@ -7605,10 +7612,18 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # Block bypass flags when called from dispatch (safety guard)
+    if args.skip_supervisor:
+        print(
+            "[error] --skip-supervisor is disabled: commit execution requires "
+            "pre-commit supervisor review and receipt validation",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Block direct standalone mode when called from dispatch (safety guard)
     if os.environ.get("RCX_EXECUTOR_DISPATCH_PID"):
-        if args.standalone or args.skip_supervisor:
-            print("[error] --standalone and --skip-supervisor are blocked when called from dispatch", file=sys.stderr)
+        if args.standalone:
+            print("[error] --standalone is blocked when called from dispatch", file=sys.stderr)
             return 1
 
     try:

@@ -5,8 +5,8 @@
 # Policy:
 # - If core structural files change, at least one tracker must change:
 #   STATUS.md or TASKS.md
-# - If control-plane tooling under mu/tools/agents/ changes, at least one tracker
-#   must change: STATUS.md or TASKS.md
+# - If critical control-plane tooling changes, at least one tracker must change:
+#   STATUS.md or TASKS.md
 #
 # Usage:
 #   tools/enforce_tracker_sync.sh --staged
@@ -79,7 +79,11 @@ case "$MODE" in
 esac
 
 CORE_CHANGED="$(echo "$CHANGED_FILES" | grep -E '^(mu/|rcx_pi/selfhost/)' | grep -v '^mu/docs/' | grep -v '^mu/tools/' | grep -v '^mu/scripts/' | grep -v '^mu/tests/' || true)"
-CONTROL_PLANE_CHANGED="$(echo "$CHANGED_FILES" | grep -E '^mu/tools/agents/' || true)"
+CONTROL_PLANE_CHANGED="$(
+    echo "$CHANGED_FILES" \
+        | grep -E '^(\.github/workflows/|tools/checks/|mu/tools/(agents|executors|checks|hooks|observability|recovery)/)' \
+        || true
+)"
 TRACKER_RELEVANT_CHANGED="$(
     printf '%s\n%s\n' "$CORE_CHANGED" "$CONTROL_PLANE_CHANGED" \
         | sed '/^$/d' \
@@ -87,7 +91,7 @@ TRACKER_RELEVANT_CHANGED="$(
 )"
 
 if [[ -z "$TRACKER_RELEVANT_CHANGED" ]]; then
-    echo "Tracker sync OK: no core changes detected."
+    echo "Tracker sync OK: no core/control-plane changes detected."
     exit 0
 fi
 

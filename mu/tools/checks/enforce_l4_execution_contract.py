@@ -68,6 +68,19 @@ RUNTIME_DIRS = (
     "mu/tools/compilers/",
 )
 
+# Critical control-plane surfaces that must carry a wave class even when they
+# do not touch runtime/substrate paths.
+CONTROL_PLANE_DIRS = (
+    ".github/workflows/",
+    "tools/checks/",
+    "mu/tools/agents/",
+    "mu/tools/executors/",
+    "mu/tools/checks/",
+    "mu/tools/hooks/",
+    "mu/tools/observability/",
+    "mu/tools/recovery/",
+)
+
 # Host-semantics debt categories (shared with ratchet checker).
 HOST_SEMANTIC_CATEGORIES = frozenset({
     "host_iteration", "host_recursion", "host_builtin", "host_mutation",
@@ -420,6 +433,11 @@ def is_comment_only_runtime_diff(
 def is_runtime_file(filepath: str) -> bool:
     """Check if a file is in a runtime/substrate directory."""
     return any(filepath.startswith(d) for d in RUNTIME_DIRS)
+
+
+def is_control_plane_file(filepath: str) -> bool:
+    """Check if a file is in a governed control-plane tooling directory."""
+    return any(filepath.startswith(d) for d in CONTROL_PLANE_DIRS)
 
 
 def is_l4_gate_test(filepath: str) -> bool:
@@ -1495,8 +1513,9 @@ def enforce(
     """
     errors: list[str] = []
     runtime_files = [f for f in changed_files if is_runtime_file(f)]
+    control_plane_files = [f for f in changed_files if is_control_plane_file(f)]
 
-    # Fail-closed: runtime changes without class marker
+    # Fail-closed: governed runtime/control-plane changes without class marker
     if not wave_class:
         if runtime_files:
             # FOUNDER_OVERRIDE bypass for comment/docstring-only runtime edits.
@@ -1553,6 +1572,13 @@ def enforce(
             errors.append(
                 f"FAIL-CLOSED: Runtime/core files changed but no wave class marker found. "
                 f"Runtime files: {runtime_files[:5]}"
+            )
+            return False, errors
+        if control_plane_files:
+            errors.append(
+                "FAIL-CLOSED: Critical control-plane tooling files changed but "
+                "no wave class marker found. "
+                f"Control-plane files: {control_plane_files[:5]}"
             )
             return False, errors
         return True, []
@@ -2216,6 +2242,7 @@ def main() -> int:
         wave_class = notes[0]["wave_class"] if notes else None
 
     runtime_count = sum(1 for f in changed_files if is_runtime_file(f))
+    control_plane_count = sum(1 for f in changed_files if is_control_plane_file(f))
 
     # Derive old_ref for preimage resolution (P1 #1 fix).
     # Context-driven: --staged => HEAD, --range => parsed, --files => HEAD.
@@ -2237,6 +2264,7 @@ def main() -> int:
     print(f"Wave class: {wave_class or '(none)'}")
     print(f"Changed files: {len(changed_files)}")
     print(f"Runtime files: {runtime_count}")
+    print(f"Control-plane files: {control_plane_count}")
 
     passed, errors = enforce(
         wave_class, changed_files, diff_text, notes,

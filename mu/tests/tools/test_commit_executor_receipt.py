@@ -10,6 +10,7 @@ Covers:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -111,6 +112,56 @@ def _setup_repo(tmp_path):
         'out.write_text(json.dumps({"wave_id": a.wave_id}))\n'
     )
     return repo
+
+
+class TestSkipSupervisorBypassClosure:
+    def test_run_commit_pipeline_rejects_skip_supervisor_without_synthesized_receipt(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        repo = _setup_repo(tmp_path)
+        monkeypatch.delenv("RCX_SKIP_RECEIPT_CHECK", raising=False)
+
+        result = commit_mod.run_commit_pipeline(
+            _make_new_schema_handoff(),
+            repo_root=repo,
+            skip_supervisor=True,
+        )
+
+        assert result["status"] == "error"
+        assert result["step"] == "skip_supervisor_forbidden"
+        assert "build_and_run_supervisor" not in result.get("steps_completed", [])
+        assert "validate_receipt" not in result.get("steps_completed", [])
+        assert result.get("receipt_decision") != "COMMIT_GO"
+        assert "RCX_SKIP_RECEIPT_CHECK" not in os.environ
+
+    def test_cli_rejects_skip_supervisor_before_pipeline_execution(self, tmp_path):
+        handoff_path = tmp_path / "handoff.json"
+        handoff_path.write_text(
+            json.dumps(_make_new_schema_handoff()),
+            encoding="utf-8",
+        )
+
+        result = __import__("subprocess").run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "mu" / "tools" / "executors" / "commit_executor.py"),
+                "--handoff",
+                str(handoff_path),
+                "--skip-supervisor",
+                "--json",
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+        assert result.returncode == 1
+        assert "--skip-supervisor is disabled" in result.stderr
+        assert "build_and_run_supervisor" not in result.stdout
+        assert "validate_receipt" not in result.stdout
 
 
 class TestStandaloneRecoveryTrigger:

@@ -1411,7 +1411,7 @@ class TestMaintenanceTrackerMetadataPropagation:
              patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json") as mock_handoff:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
-        assert result["status"] == "commit_ready"
+        assert result["status"] == "commit_ready", result
         tracker_note_text = mock_handoff.call_args.kwargs["tracker_note_text"]
         assert "Class: MAINTENANCE" in tracker_note_text
         assert "unblocks_wave_id: wave-codex-startup-hardening-2026-04-14" in tracker_note_text
@@ -1508,7 +1508,7 @@ class TestMaintenanceTrackerMetadataPropagation:
              ) as mock_handoff:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
-        assert result["status"] == "commit_ready"
+        assert result["status"] == "commit_ready", result
         assert mock_handoff.call_args.kwargs["task_id"] == "[PIPELINE-RECOVERY]"
         assert mock_handoff.call_args.kwargs["wave_id"] == "phase-b-validate-inputs-task-id-leniency-2026-04-20"
 
@@ -1740,6 +1740,7 @@ class TestMaintenanceTrackerMetadataPropagation:
             "mu/tools/executors/phase_b_executor.py",
             "mu/tests/tools/test_phase_b_executor.py",
             plan_path,
+            indicator_path,
         ]
 
         with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
@@ -1759,7 +1760,7 @@ class TestMaintenanceTrackerMetadataPropagation:
                  {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j2"},
              ]), \
              patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
-             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", side_effect=[False, True]), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", side_effect=[True, False]), \
              patch.object(
                  pb_mod,
                  "_collect_and_stage_l4_indicator_artifact",
@@ -1773,7 +1774,7 @@ class TestMaintenanceTrackerMetadataPropagation:
              ) as mock_handoff:
             result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
 
-        assert result["status"] == "commit_ready"
+        assert result["status"] == "commit_ready", result
         assert mock_indicator.call_count == 1
         assert len(captured_packages) == 2
         reentry_package = captured_packages[-1]
@@ -1851,12 +1852,12 @@ class TestMaintenanceTrackerMetadataPropagation:
             changed_files=[*changed_files, "TASKS.md", indicator_path],
         ) is False
 
-    def test_l4_indicator_collection_requires_canonical_tracker_note(self, tmp_path):
+    def test_l4_indicator_collection_can_run_before_tracker_note_sync(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
         wave_id = "phase-b-pre-supervisor-indicator-2026-05-02"
         (repo / "TASKS.md").write_text(
-            "- Tracker sync note (2026-05-02, unrelated-wave): old note.\n",
+            "## Ra\n\n- Tracker sync note (2026-05-02, unrelated-wave): old note.\n\n---\n",
             encoding="utf-8",
         )
 
@@ -1867,7 +1868,7 @@ class TestMaintenanceTrackerMetadataPropagation:
             tracker_note_modified=False,
             founder_override_token=f"FOUNDER_OVERRIDE:{wave_id}",
             changed_files=["TASKS.md", "mu/tools/executors/phase_b_executor.py"],
-        ) is False
+        ) is True
 
     def test_l4_indicator_collection_includes_maintenance_tracker_notes(self, tmp_path):
         repo = tmp_path / "repo"
@@ -1928,6 +1929,117 @@ class TestMaintenanceTrackerMetadataPropagation:
             founder_override_token="",
             changed_files=[*changed_files, "TASKS.md", indicator_path],
         ) is False
+
+    def test_pre_supervisor_tracker_note_prefers_same_wave_override_and_final_scope(
+        self,
+        tmp_path,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+        wave_id = "founder-ordered-redteam-tooling-blocking-remediation-2026-05-06"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        plan_content = (
+            "Source authorization: FOUNDER_OVERRIDE:founder-ordered-redteam-remediation-queue-organization-2026-05-05\n"
+            f"Founder override: FOUNDER_OVERRIDE:{wave_id}\n"
+        )
+
+        with patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files: sorted(set(files))):
+            (
+                note,
+                raw_override,
+                package_override,
+                modified,
+                final_scope,
+                error,
+            ) = pb_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: locks Phase B pre-supervisor tracker ordering
+                repo,
+                wave_id=wave_id,
+                task_id="[NEXT-CODEX-POST-REDTEAM]",
+                wave_class="L4_ENABLER",
+                target_gate_id="G8",
+                plan_path="reports/control_plane/tooling.md",
+                plan_content=plan_content,
+                changed_files=[
+                    "mu/tools/executors/phase_b_executor.py",
+                    "reports/control_plane/tooling.md",
+                    indicator_path,
+                ],
+                test_files=[],
+                receipt_path=".scratch/phase_b_supervisor_package.json",
+                bridge_status={"rounds": 2},
+                reentry=False,
+                founder_override="founder-ordered-redteam-remediation-queue-organization-2026-05-05",
+            )
+
+        assert error is None
+        assert modified is True
+        assert "TASKS.md" in final_scope
+        assert indicator_path in final_scope
+        assert f"FOUNDER_OVERRIDE:{wave_id}" in note
+        assert raw_override == f"FOUNDER_OVERRIDE:{wave_id}"
+        assert package_override == f"FOUNDER_OVERRIDE:{wave_id}"
+        assert "with 4 wave-owned file(s)" in note
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        assert f"FOUNDER_OVERRIDE:{wave_id}" in tasks_text
+        assert "with 4 wave-owned file(s)" in tasks_text
+
+    def test_pre_supervisor_tracker_note_verification_rejects_stale_top_note(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wave_id = "phase-b-stale-top-note-2026-05-06"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        expected_note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: expected tracker note fixture
+            wave_id=wave_id,
+            task_id="[PIPELINE-RECOVERY]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/plan.md",
+            plan_content=f"Founder override: FOUNDER_OVERRIDE:{wave_id}\n",
+            changed_files=[
+                "TASKS.md",
+                "mu/tools/executors/phase_b_executor.py",
+                indicator_path,
+            ],
+            test_files=[],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=1,
+            reentry=False,
+            pre_supervisor=True,
+        )
+        unrelated_top = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: stale top-note fixture
+            wave_id="unrelated-top-wave-2026-05-06",
+            task_id="[OTHER]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/other.md",
+            plan_content="",
+            changed_files=["TASKS.md", "mu/tools/executors/other.py", "reports/l4_wave_indicators/unrelated-top-wave-2026-05-06.json"],
+            test_files=[],
+            receipt_path=".scratch/other.json",
+            bridge_rounds=1,
+            reentry=False,
+            pre_supervisor=True,
+        )
+        (repo / "TASKS.md").write_text(
+            f"## Ra\n\n{expected_note}\n{unrelated_top}\n\n---\n",
+            encoding="utf-8",
+        )
+
+        error = pb_mod._verify_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: fail-closed top-note verification
+            repo,
+            wave_id=wave_id,
+            expected_note_text=expected_note,
+            changed_files=[
+                "TASKS.md",
+                "mu/tools/executors/phase_b_executor.py",
+                indicator_path,
+            ],
+        )
+
+        assert error is not None
+        assert "latest tracker note is not the canonical note" in error
 
     def test_phase_b_indicator_scope_refresh_reconciles_packet_contradictions(self, tmp_path):
         repo = tmp_path / "repo"
@@ -2192,6 +2304,7 @@ class TestMaintenanceTrackerMetadataPropagation:
         (repo / "reports" / "control_plane").mkdir(parents=True)
         (repo / ".agent_bus").mkdir()
         (repo / "TASKS.md").write_text(
+            "## Ra (Resolved / Merged)\n\n"
             "- Tracker sync note (2026-04-28, pager-commit-packet-truth-refresh-2026-04-28): done\n"
             "  **2026-04-28 bridge round 1 remediation:** fixed first bridge finding.\n"
             "  **2026-04-28 bridge round 2 remediation:** fixed second bridge finding.\n"
@@ -2222,10 +2335,24 @@ class TestMaintenanceTrackerMetadataPropagation:
             "wave_class": "L4_ENABLER",
             "target_gate_id": "G8",
         }
+        indicator_path = "reports/l4_wave_indicators/pager-commit-packet-truth-refresh-2026-04-28.json"
+        (repo / indicator_path).parent.mkdir(parents=True)
+        (repo / indicator_path).write_text(
+            json.dumps(
+                {
+                    "wave_id": "pager-commit-packet-truth-refresh-2026-04-28",
+                    "wave_class": "L4_ENABLER",
+                    "target_gate_id": "G8",
+                },
+                sort_keys=True,
+            ) + "\n",
+            encoding="utf-8",
+        )
         wave_owned = [
             "TASKS.md",
             "mu/tools/executors/phase_b_executor.py",
             "mu/tests/tools/test_phase_b_executor.py",
+            indicator_path,
             plan_path,
         ]
         captured_package: dict[str, object] = {}
@@ -2397,10 +2524,24 @@ class TestMaintenanceTrackerMetadataPropagation:
             "wave_class": "L4_STRUCTURAL",
             "target_gate_id": "G8",
         }
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        (repo / indicator_path).parent.mkdir(parents=True)
+        (repo / indicator_path).write_text(
+            json.dumps(
+                {
+                    "wave_id": wave_id,
+                    "wave_class": "L4_ENABLER",
+                    "target_gate_id": "G8",
+                },
+                sort_keys=True,
+            ) + "\n",
+            encoding="utf-8",
+        )
         wave_owned = [
             "TASKS.md",
             "mu/tools/executors/phase_b_executor.py",
             "mu/tests/tools/test_phase_b_executor.py",
+            indicator_path,
             plan_path,
         ]
         captured_package: dict[str, object] = {}
@@ -2461,7 +2602,7 @@ class TestMaintenanceTrackerMetadataPropagation:
         tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
         assert "Class: L4_ENABLER" in tasks_text
         assert "host_semantics_delta_before:" not in tasks_text
-        assert "with 4 wave-owned file(s)" in tasks_text
+        assert "with 5 wave-owned file(s)" in tasks_text
 
     def test_run_phase_b_package_refreshes_live_packet_class_after_implementer_edit(self, tmp_path):
         repo = tmp_path / "repo"
@@ -2500,10 +2641,24 @@ class TestMaintenanceTrackerMetadataPropagation:
             "wave_class": "L4_STRUCTURAL",
             "target_gate_id": "G8",
         }
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        (repo / indicator_path).parent.mkdir(parents=True)
+        (repo / indicator_path).write_text(
+            json.dumps(
+                {
+                    "wave_id": wave_id,
+                    "wave_class": "L4_ENABLER",
+                    "target_gate_id": "G8",
+                },
+                sort_keys=True,
+            ) + "\n",
+            encoding="utf-8",
+        )
         wave_owned = [
             "TASKS.md",
             "mu/tools/executors/phase_b_executor.py",
             "mu/tests/tools/test_phase_b_executor.py",
+            indicator_path,
             plan_path,
         ]
         captured_package: dict[str, object] = {}
@@ -3544,6 +3699,23 @@ class TestFinalPytestGate:
 
         assert result["status"] == "error"
         assert "PYTHONHASHSEED" in result["errors"][0]
+
+    def test_pytest_failure_summary_preserves_long_stdout_tail(self):
+        stdout = (
+            "collected 639 items\n"
+            + ("." * 200)
+            + "\nFAILED mu/tests/tools/test_phase_b_executor.py::test_tail\n"
+            "E AssertionError: boom"
+        )
+
+        summary = pb_mod._summarize_pytest_failure(  # ANTICHEAT_OK: locks bounded failure summary helper
+            {"stdout": stdout, "stderr": ""},
+            stdout_limit=80,
+        )
+
+        assert "stdout_head:" in summary
+        assert "stdout_tail:" in summary
+        assert "E AssertionError: boom" in summary
 
     def test_pytest_success_allows_commit_ready(self, tmp_path):
         """If final pytest gate passes, pipeline continues to supervisor."""
@@ -7248,7 +7420,7 @@ class TestResumeNeedsPhaseB:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
         assert result["status"] == "commit_ready"
-        assert captured_package["value"]["changed_files"] == changed_files
+        assert captured_package["value"]["changed_files"] == ["TASKS.md", *changed_files]
 
     def test_resume_from_bridge_converged_unions_saved_and_current_baseline(self, tmp_path):
         """Saved baseline scope must be refreshed with any newly dirty wave files before packaging."""
@@ -7305,7 +7477,7 @@ class TestResumeNeedsPhaseB:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
         assert result["status"] == "commit_ready"
-        assert captured_package["value"]["changed_files"] == changed_files
+        assert captured_package["value"]["changed_files"] == ["TASKS.md", *changed_files]
 
     def test_resume_from_bridge_converged_surfaces_changed_deferred_packet_in_supervisor_package(self, tmp_path):
         """Supervisor package must acknowledge changed non-blocking packets even without deferred_packet_path state."""

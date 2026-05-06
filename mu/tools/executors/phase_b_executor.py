@@ -1018,15 +1018,32 @@ def _build_structural_post_gate_sweep(test_files: list[str], changed_files: list
     return "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/structural/ mu/tests/parity/"
 
 
+def _summarize_bounded_output(label: str, text: str, *, limit: int) -> list[str]:
+    content = text.strip()
+    if not content:
+        return []
+    if limit <= 0:
+        return [f"{label}: <{len(content)} char(s) captured; display limit is 0>"]
+    if len(content) <= limit:
+        return [f"{label}: {content}"]
+
+    head_limit = max(1, limit // 2)
+    tail_limit = max(1, limit - head_limit)
+    omitted = len(content) - head_limit - tail_limit
+    return [
+        f"{label}_head: {content[:head_limit]}",
+        f"{label}_omitted: {omitted} char(s)",
+        f"{label}_tail: {content[-tail_limit:]}",
+    ]
+
+
 def _summarize_pytest_failure(result: dict[str, Any], *, stdout_limit: int = 1000, stderr_limit: int = 1000) -> str:
-    """Build a bounded pytest failure summary without dropping stderr-only failures."""
-    stdout = (result.get("stdout") or "").strip()
-    stderr = (result.get("stderr") or "").strip()
+    """Build a bounded pytest failure summary without dropping tail assertions."""
+    stdout = result.get("stdout") or ""
+    stderr = result.get("stderr") or ""
     parts: list[str] = []
-    if stdout:
-        parts.append(f"stdout: {stdout[:stdout_limit]}")
-    if stderr:
-        parts.append(f"stderr: {stderr[:stderr_limit]}")
+    parts.extend(_summarize_bounded_output("stdout", stdout, limit=stdout_limit))
+    parts.extend(_summarize_bounded_output("stderr", stderr, limit=stderr_limit))
     return " ".join(parts) if parts else "no stdout/stderr captured"
 
 
@@ -1847,6 +1864,58 @@ def _extract_founder_override(plan_content: str) -> str:
         if founder_override:
             return founder_override
     return ""
+
+
+def _extract_founder_override_candidates(plan_content: str) -> list[str]:
+    """Return founder override tokens in packet order, stripped to bare IDs."""
+    candidates: list[str] = []
+    if not plan_content:
+        return candidates
+    for line in plan_content.splitlines():
+        founder_override = _extract_founder_override_from_metadata_line(line)
+        if founder_override:
+            candidates.append(founder_override)
+    return candidates
+
+
+def _bare_founder_override_token(raw_token: str) -> str:
+    token = str(raw_token or "").strip()
+    if token.startswith("FOUNDER_OVERRIDE:"):
+        token = token.split(":", 1)[1].strip()
+    if not token:
+        return ""
+    return token.split()[0].strip().strip("`").rstrip("`.,;)")
+
+
+def _derive_phase_b_founder_override(
+    *,
+    plan_content: str,
+    wave_id: str,
+    wave_class: str,
+    explicit_founder_override: str = "",
+) -> str:
+    """Prefer the same-wave override when the locked packet authorizes one."""
+    normalized_wave_id = normalize_wave_id(wave_id)
+    candidates = [
+        token
+        for token in [
+            _bare_founder_override_token(explicit_founder_override),
+            *_extract_founder_override_candidates(plan_content),
+        ]
+        if token
+    ]
+    for token in candidates:
+        if normalize_wave_id(token) == normalized_wave_id:
+            return token
+
+    authorized = _extract_authorized_control_surface_founder_override(
+        plan_content,
+        wave_id=wave_id,
+        wave_class=wave_class,
+    )
+    if authorized:
+        return authorized
+    return candidates[0] if candidates else ""
 
 
 def _extract_founder_override_from_tracker_note(tracker_note_text: str) -> str:
@@ -3474,14 +3543,11 @@ def _build_phase_b_tracker_note(
         if reentry:
             progress_after += ", reentry=true"
         progress_after += ", explicit receipt authority, and an L4-compliant tracker note."
-    founder_override = (
-        founder_override
-        or _extract_founder_override(plan_content)
-        or _extract_authorized_control_surface_founder_override(
-            plan_content,
-            wave_id=wave_id,
-            wave_class=wave_class,
-        )
+    founder_override = _derive_phase_b_founder_override(
+        plan_content=plan_content,
+        wave_id=wave_id,
+        wave_class=wave_class,
+        explicit_founder_override=founder_override,
     )
 
     tracker_kwargs: dict[str, str] = {
@@ -3616,20 +3682,30 @@ def _sync_phase_b_tasks_tracker_note(
         ), False
 
     note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
-    if canonical_tracker_indices:
-        canonical_idx = canonical_tracker_indices[0]
-        if lines[canonical_idx] == note_line:
-            return None, False
-        lines[canonical_idx] = note_line
-    elif matching_tracker_indices:
-        lines[matching_tracker_indices[0]] = note_line
-    else:
-        last_tracker_idx = None
-        for idx in range(ra_idx + 1, ra_end_idx):
-            if lines[idx].strip().startswith("- Tracker sync note"):
-                last_tracker_idx = idx
-        insert_idx = last_tracker_idx + 1 if last_tracker_idx is not None else ra_idx + 1
-        lines.insert(insert_idx, note_line)
+    existing_idx = (
+        canonical_tracker_indices[0]
+        if canonical_tracker_indices
+        else matching_tracker_indices[0]
+        if matching_tracker_indices
+        else None
+    )
+    last_tracker_idx = None
+    for idx in range(ra_idx + 1, ra_end_idx):
+        if lines[idx].strip().startswith("- Tracker sync note"):
+            last_tracker_idx = idx
+    if existing_idx is not None and lines[existing_idx] == note_line and existing_idx == last_tracker_idx:
+        return None, False
+    if existing_idx is not None:
+        lines.pop(existing_idx)
+        if existing_idx < ra_end_idx:
+            ra_end_idx -= 1
+
+    last_tracker_idx = None
+    for idx in range(ra_idx + 1, ra_end_idx):
+        if lines[idx].strip().startswith("- Tracker sync note"):
+            last_tracker_idx = idx
+    insert_idx = last_tracker_idx + 1 if last_tracker_idx is not None else ra_idx + 1
+    lines.insert(insert_idx, note_line)
 
     tasks_path.write_text("".join(lines), encoding="utf-8")
     return None, True
@@ -3882,7 +3958,7 @@ def _should_collect_l4_indicator_artifact(
 ) -> bool:
     if wave_class not in {"L4_STRUCTURAL", "L4_ENABLER", "MAINTENANCE"} or not wave_id:
         return False
-    if not _tasks_has_canonical_wave_tracker_note(repo_root, wave_id=wave_id):
+    if not (repo_root / "TASKS.md").exists():
         return False
     indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
     return (
@@ -3890,6 +3966,203 @@ def _should_collect_l4_indicator_artifact(
         or bool(founder_override_token)
         or indicator_path not in changed_files
         or not (repo_root / indicator_path).exists()
+    )
+
+
+def _phase_b_same_wave_indicator_path(wave_id: str) -> str:
+    return f"reports/l4_wave_indicators/{wave_id}.json"
+
+
+def _phase_b_pre_supervisor_note_scope(changed_files: list[str]) -> list[str]:
+    return sorted({*changed_files, "TASKS.md"})
+
+
+def _verify_phase_b_pre_supervisor_tracker_note(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    expected_note_text: str,
+    changed_files: list[str],
+) -> str | None:
+    """Fail closed when the final package scope and latest tracker note diverge."""
+    tasks_path = repo_root / "TASKS.md"
+    if not tasks_path.exists():
+        return None
+
+    expected_indicator = _phase_b_same_wave_indicator_path(wave_id)
+    if expected_indicator not in changed_files:
+        return (
+            "pre-supervisor tracker note verification failed: same-wave "
+            f"indicator '{expected_indicator}' is not in the final supervisor scope"
+        )
+
+    commit_mod = _load_commit_executor_for_tracker_sync()
+    lines = tasks_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    ra_idx, ra_end_idx = commit_mod._find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        return "pre-supervisor tracker note verification failed: TASKS.md has no Ra tracker section"
+
+    tracker_indices = [
+        idx
+        for idx in range(ra_idx + 1, ra_end_idx)
+        if lines[idx].strip().startswith("- Tracker sync note")
+    ]
+    if not tracker_indices:
+        return "pre-supervisor tracker note verification failed: TASKS.md has no tracker notes"
+
+    top_idx = tracker_indices[-1]
+    matching_indices = commit_mod._matching_tracker_note_indices_in_range(
+        lines,
+        wave_id,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+    canonical_indices = [
+        idx
+        for idx in matching_indices
+        if commit_mod._is_canonical_tracker_note_line(lines[idx].rstrip("\n"), wave_id)
+    ]
+    if canonical_indices != [top_idx]:
+        return (
+            "pre-supervisor tracker note verification failed: latest tracker "
+            f"note is not the canonical note for wave_id '{wave_id}'"
+        )
+
+    expected_line = expected_note_text.rstrip("\n")
+    observed_line = lines[top_idx].rstrip("\n")
+    if observed_line != expected_line:
+        return (
+            "pre-supervisor tracker note verification failed: latest tracker "
+            "note does not match the final supervisor scope"
+        )
+
+    checker = repo_root / "tools" / "checks" / "enforce_l4_execution_contract.py"
+    if checker.exists():
+        check = subprocess.run(
+            [
+                "python3",
+                "tools/checks/enforce_l4_execution_contract.py",
+                "--staged",
+                "--wave-id",
+                wave_id,
+            ],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if check.returncode != 0:
+            detail = (check.stdout + "\n" + check.stderr).strip()
+            return (
+                "pre-supervisor tracker note verification failed: L4 execution "
+                f"contract rejected final staged scope (exit={check.returncode}): "
+                f"{detail[:1200]}"
+            )
+
+    return None
+
+
+def _finalize_phase_b_pre_supervisor_tracker_note(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    task_id: str,
+    wave_class: str,
+    target_gate_id: str,
+    plan_path: str,
+    plan_content: str,
+    changed_files: list[str],
+    test_files: list[str],
+    receipt_path: str,
+    bridge_status: dict[str, Any],
+    reentry: bool,
+    founder_override: str = "",
+    unblocks_wave_id: str = "",
+    unblocks_runtime_blocker: str = "",
+) -> tuple[str, str, str, bool, list[str], str | None]:
+    """Render/stage the final pre-supervisor tracker note after scope refresh."""
+    final_scope = _phase_b_pre_supervisor_note_scope(changed_files)
+    modified_any = False
+    tracker_note = ""
+    raw_founder_override = ""
+    package_founder_override = ""
+
+    for _attempt in range(2):
+        tracker_note = _build_phase_b_tracker_note(
+            wave_id=wave_id,
+            task_id=task_id,
+            wave_class=wave_class,
+            target_gate_id=target_gate_id,
+            plan_path=plan_path,
+            plan_content=plan_content,
+            changed_files=final_scope,
+            test_files=test_files,
+            receipt_path=receipt_path,
+            bridge_rounds=_bridge_rounds_for_tracker_note(bridge_status),
+            reentry=reentry,
+            founder_override=founder_override,
+            unblocks_wave_id=unblocks_wave_id,
+            unblocks_runtime_blocker=unblocks_runtime_blocker,
+            pre_supervisor=True,
+        )
+        raw_founder_override = _extract_founder_override_from_tracker_note(tracker_note)
+        package_founder_override = _supervisor_package_founder_override_token(
+            raw_founder_override,
+            wave_class=wave_class,
+        )
+        tracker_sync_error, tracker_note_modified = _sync_phase_b_tasks_tracker_note(
+            repo_root,
+            wave_id=wave_id,
+            tracker_note_text=tracker_note,
+        )
+        if tracker_sync_error is not None:
+            return tracker_note, raw_founder_override, package_founder_override, modified_any, final_scope, tracker_sync_error
+        if tracker_note_modified:
+            modified_any = True
+            ok, detail = _stage_files_for_pipeline(repo_root, ["TASKS.md"])
+            if not ok:
+                return (
+                    tracker_note,
+                    raw_founder_override,
+                    package_founder_override,
+                    modified_any,
+                    final_scope,
+                    f"git add failed for final Phase B tracker note: {detail}",
+                )
+
+        refreshed_scope = _phase_b_pre_supervisor_note_scope(
+            _collect_commit_bound_files(repo_root, final_scope)
+        )
+        if refreshed_scope == final_scope:
+            verify_error = _verify_phase_b_pre_supervisor_tracker_note(
+                repo_root,
+                wave_id=wave_id,
+                expected_note_text=tracker_note,
+                changed_files=final_scope,
+            )
+            return (
+                tracker_note,
+                raw_founder_override,
+                package_founder_override,
+                modified_any,
+                final_scope,
+                verify_error,
+            )
+        final_scope = refreshed_scope
+
+    verify_error = _verify_phase_b_pre_supervisor_tracker_note(
+        repo_root,
+        wave_id=wave_id,
+        expected_note_text=tracker_note,
+        changed_files=final_scope,
+    )
+    return (
+        tracker_note,
+        raw_founder_override,
+        package_founder_override,
+        modified_any,
+        final_scope,
+        verify_error,
     )
 
 
@@ -5976,44 +6249,17 @@ def run_phase_b(
             plan_path,
             result.get("bridge_rounds", 0),
         )
-        pre_supervisor_tracker_note = _build_phase_b_tracker_note(
-            wave_id=wave_id,
-            task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
-            wave_class=wave_class,
-            target_gate_id=target_gate_id,
-            plan_path=plan_path,
+        pre_supervisor_raw_founder_override_token = _derive_phase_b_founder_override(
             plan_content=plan.get("content", ""),
-            changed_files=changed_files,
-            test_files=final_test_files,
-            receipt_path=package_relpath,
-            bridge_rounds=_bridge_rounds_for_tracker_note(pre_supervisor_bridge_status),
-            reentry=False,
-            founder_override=plan.get("founder_override", ""),
-            unblocks_wave_id=plan.get("unblocks_wave_id", ""),
-            unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
-            pre_supervisor=True,
-        )
-        pre_supervisor_raw_founder_override_token = _extract_founder_override_from_tracker_note(
-            pre_supervisor_tracker_note,
+            wave_id=wave_id,
+            wave_class=wave_class,
+            explicit_founder_override=plan.get("founder_override", ""),
         )
         pre_supervisor_founder_override_token = _supervisor_package_founder_override_token(
             pre_supervisor_raw_founder_override_token,
             wave_class=wave_class,
         )
-        tracker_sync_error, tracker_note_modified = _sync_phase_b_tasks_tracker_note(
-            repo_root,
-            wave_id=wave_id,
-            tracker_note_text=pre_supervisor_tracker_note,
-        )
-        if tracker_sync_error is not None:
-            _clear_state(repo_root)
-            return {
-                "status": "error",
-                "step": "pre_supervisor_tracker_note",
-                "errors": [tracker_sync_error],
-            }
-        if tracker_note_modified and "TASKS.md" not in changed_files:
-            changed_files.append("TASKS.md")
+        tracker_note_modified = False
 
         # Step 6: Stage files BEFORE running supervisor
         # This ensures the receipt staged_sha matches what commit_executor will use.
@@ -6039,8 +6285,6 @@ def run_phase_b(
                 executor_created or None,
                 baseline_wave_files or None,
             )
-            if tracker_note_modified and "TASKS.md" not in refreshed_changed_files:
-                refreshed_changed_files.append("TASKS.md")
             if refreshed_changed_files != changed_files:
                 log(
                     "Post-stage package scope refreshed from "
@@ -6096,6 +6340,37 @@ def run_phase_b(
                 f"{len(package_changed_files) - len(changed_files)} staged commit-bound file(s)"
             )
             changed_files = package_changed_files
+        (
+            pre_supervisor_tracker_note,
+            pre_supervisor_raw_founder_override_token,
+            pre_supervisor_founder_override_token,
+            tracker_note_modified,
+            changed_files,
+            tracker_sync_error,
+        ) = _finalize_phase_b_pre_supervisor_tracker_note(
+            repo_root,
+            wave_id=wave_id,
+            task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
+            wave_class=wave_class,
+            target_gate_id=target_gate_id,
+            plan_path=plan_path,
+            plan_content=plan.get("content", ""),
+            changed_files=changed_files,
+            test_files=final_test_files,
+            receipt_path=package_relpath,
+            bridge_status=pre_supervisor_bridge_status,
+            reentry=False,
+            founder_override=pre_supervisor_raw_founder_override_token,
+            unblocks_wave_id=plan.get("unblocks_wave_id", ""),
+            unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
+        )
+        if tracker_sync_error is not None:
+            _clear_state(repo_root)
+            return {
+                "status": "error",
+                "step": "pre_supervisor_tracker_note",
+                "errors": [tracker_sync_error],
+            }
 
         # Step 7: Build and run pre-commit supervisor via structured client
         log("Building supervisor package...")
@@ -6805,44 +7080,17 @@ def run_phase_b(
             result.get("bridge_rounds", 0),
             reentry=True,
         )
-        reentry_pre_supervisor_tracker_note = _build_phase_b_tracker_note(
-            wave_id=wave_id,
-            task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
-            wave_class=wave_class,
-            target_gate_id=target_gate_id,
-            plan_path=plan_path,
+        reentry_pre_supervisor_raw_founder_override_token = _derive_phase_b_founder_override(
             plan_content=plan.get("content", ""),
-            changed_files=changed_files,
-            test_files=reentry_test_files,
-            receipt_path=str(package_path.relative_to(repo_root)),
-            bridge_rounds=_bridge_rounds_for_tracker_note(reentry_pre_supervisor_bridge_status),
-            reentry=True,
-            founder_override=plan.get("founder_override", ""),
-            unblocks_wave_id=plan.get("unblocks_wave_id", ""),
-            unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
-            pre_supervisor=True,
-        )
-        reentry_pre_supervisor_raw_founder_override_token = _extract_founder_override_from_tracker_note(
-            reentry_pre_supervisor_tracker_note,
+            wave_id=wave_id,
+            wave_class=wave_class,
+            explicit_founder_override=plan.get("founder_override", ""),
         )
         reentry_pre_supervisor_founder_override_token = _supervisor_package_founder_override_token(
             reentry_pre_supervisor_raw_founder_override_token,
             wave_class=wave_class,
         )
-        reentry_tracker_sync_error, reentry_tracker_note_modified = _sync_phase_b_tasks_tracker_note(
-            repo_root,
-            wave_id=wave_id,
-            tracker_note_text=reentry_pre_supervisor_tracker_note,
-        )
-        if reentry_tracker_sync_error is not None:
-            _clear_state(repo_root)
-            return {
-                "status": "error",
-                "step": "reentry_pre_supervisor_tracker_note",
-                "errors": [reentry_tracker_sync_error],
-            }
-        if reentry_tracker_note_modified and "TASKS.md" not in changed_files:
-            changed_files.append("TASKS.md")
+        reentry_tracker_note_modified = False
 
         # Re-stage and re-run supervisor after re-entry convergence
         # FAIL CLOSED if restaging fails — do not run supervisor on stale state
@@ -6868,8 +7116,6 @@ def run_phase_b(
                 executor_created or None,
                 baseline_wave_files or None,
             )
-            if reentry_tracker_note_modified and "TASKS.md" not in refreshed_changed_files:
-                refreshed_changed_files.append("TASKS.md")
             if refreshed_changed_files != changed_files:
                 log(
                     "Re-entry: post-stage package scope refreshed from "
@@ -6924,6 +7170,37 @@ def run_phase_b(
                 f"{len(reentry_package_changed_files) - len(changed_files)} staged commit-bound file(s)"
             )
             changed_files = reentry_package_changed_files
+        (
+            reentry_pre_supervisor_tracker_note,
+            reentry_pre_supervisor_raw_founder_override_token,
+            reentry_pre_supervisor_founder_override_token,
+            reentry_tracker_note_modified,
+            changed_files,
+            reentry_tracker_sync_error,
+        ) = _finalize_phase_b_pre_supervisor_tracker_note(
+            repo_root,
+            wave_id=wave_id,
+            task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
+            wave_class=wave_class,
+            target_gate_id=target_gate_id,
+            plan_path=plan_path,
+            plan_content=plan.get("content", ""),
+            changed_files=changed_files,
+            test_files=reentry_test_files,
+            receipt_path=str(package_path.relative_to(repo_root)),
+            bridge_status=reentry_pre_supervisor_bridge_status,
+            reentry=True,
+            founder_override=reentry_pre_supervisor_raw_founder_override_token,
+            unblocks_wave_id=plan.get("unblocks_wave_id", ""),
+            unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
+        )
+        if reentry_tracker_sync_error is not None:
+            _clear_state(repo_root)
+            return {
+                "status": "error",
+                "step": "reentry_pre_supervisor_tracker_note",
+                "errors": [reentry_tracker_sync_error],
+            }
 
         # Refresh ALL supervisor package truth for re-entry
         supervisor_package["changed_files"] = changed_files
