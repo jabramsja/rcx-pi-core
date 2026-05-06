@@ -108,7 +108,7 @@ def test_post_merge_package_refresh_selects_next_open_queue_packet(tmp_path):
     _write_queue_packet(
         repo,
         "reports/control_plane/founder_ordered_redteam_docs_non_blocking_remediation_2026-05-06.md",
-        "COMPLETED",
+        "COMPLETED (commit-ready, pre-commit supervisor pending)",
     )
     _write_queue_packet(
         repo,
@@ -188,6 +188,58 @@ def test_post_merge_package_refresh_selects_next_open_queue_packet(tmp_path):
     assert "post-merge supervisor -> Phase A -> Phase B -> commit executor" in (
         package["next_candidates"][0]["request_for_claude"]
     )
+
+
+def test_post_merge_package_refresh_skips_completed_audit_status_with_pending_text(tmp_path):
+    repo = _init_repo(tmp_path)
+    audit_packet = (
+        "reports/control_plane/founder_ordered_redteam_docs_audit_2026-05-05.md"
+    )
+    remediation_packet = (
+        "reports/control_plane/"
+        "founder_ordered_redteam_tests_non_blocking_remediation_2026-05-06.md"
+    )
+    _write_queue_packet(
+        repo,
+        audit_packet,
+        "COMPLETED (commit-ready, pre-commit supervisor pending)",
+    )
+    _write_queue_packet(
+        repo,
+        remediation_packet,
+        "QUEUED - NON-BLOCKING REMEDIATION PACKET",
+    )
+    (repo / "TASKS.md").write_text(
+        (
+            "## Ra\n"
+            "  2. **[FOUNDER-ORDERED-REDTEAM-DOCS-AUDIT] COMPLETED / FINDINGS ROUTED.** "
+            "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            "Wave ID: `founder-ordered-redteam-docs-audit-2026-05-05`. "
+            "Class: `L4_ENABLER`. "
+            f"Packet: `{audit_packet}`.\n"
+            "  4. **[FOUNDER-ORDERED-REDTEAM-TESTS-NON-BLOCKING-REMEDIATION] "
+            "QUEUED / NON-BLOCKING.** Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            "Wave ID: `founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06`. "
+            "Class: `L4_ENABLER`. Category: tests. "
+            f"Packet: `{remediation_packet}`.\n"
+        ),
+        encoding="utf-8",
+    )
+
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result={"pr_number": "887"},
+        merge_sha="fresh-head",
+        log=_noop_log,
+    )
+
+    assert package["merge_sha"] == "fresh-head"
+    assert package["wave_name"] == (
+        "founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06"
+    )
+    assert package["next_candidates"][0]["tracked_packet"] == remediation_packet
+    assert audit_packet not in package["deferred_items"]
 
 
 def test_post_merge_package_refresh_stops_before_mu_structural_queue(tmp_path):
