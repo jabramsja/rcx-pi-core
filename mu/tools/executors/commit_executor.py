@@ -6036,6 +6036,8 @@ def _next_open_founder_ordered_queue_entry(repo_root: Path) -> dict[str, Any] | 
     for entry in _founder_ordered_queue_entries(repo_root):
         if packet_status_is_completed(entry.get("status")):
             continue
+        if packet_status_is_completed(entry.get("state")):
+            continue
         return entry
     return None
 

@@ -892,6 +892,47 @@ def read_control_plane_packet_status(repo_root: Path, tracked_packet: str) -> st
     return None
 
 
+def _tasks_queue_backtick_value(line: str, label: str) -> str:
+    match = re.search(rf"{re.escape(label)}:\s*`([^`]+)`", line)
+    return match.group(1).strip() if match else ""
+
+
+def read_founder_ordered_task_state(
+    repo_root: Path,
+    *,
+    wave_id: str = "",
+    tracked_packet: str = "",
+) -> str | None:
+    """Return the TASKS.md state for a founder-ordered queue entry."""
+    wanted_wave = normalize_wave_id(wave_id) if wave_id else ""
+    wanted_packet = str(tracked_packet or "").strip()
+    if not wanted_wave and not wanted_packet:
+        return None
+
+    tasks_path = repo_root / "TASKS.md"
+    try:
+        lines = tasks_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+
+    state_re = re.compile(
+        r"^\s*\d+\.\s+\*\*\[(?P<label>[^\]]+)\]\s*(?P<state>.*?)\*\*"
+    )
+    for line in lines:
+        if "FOUNDER-ORDERED-REDTEAM-" not in line:
+            continue
+        match = state_re.match(line)
+        if not match:
+            continue
+        entry_wave = _tasks_queue_backtick_value(line, "Wave ID")
+        entry_packet = _tasks_queue_backtick_value(line, "Packet")
+        if wanted_wave and entry_wave and normalize_wave_id(entry_wave) == wanted_wave:
+            return match.group("state").strip()
+        if wanted_packet and entry_packet == wanted_packet:
+            return match.group("state").strip()
+    return None
+
+
 def _completed_tracked_packet_error(tracked_packet: str, repo_root: Path) -> str | None:
     status = read_control_plane_packet_status(repo_root, tracked_packet)
     if not packet_status_is_completed(status):
