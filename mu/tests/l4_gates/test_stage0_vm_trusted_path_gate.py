@@ -460,8 +460,11 @@ class TestJsBehavioralParity:
             cwd=str(REPO_ROOT)
         )
 
-        if result.returncode != 0:
-            pytest.skip(f"JS execution failed: {result.stderr}")
+        assert result.returncode == 0, (
+            f"JS execution failed with exit {result.returncode}:\n"
+            f"stdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
 
         output = json.loads(result.stdout.strip())
         assert output["match"], (
