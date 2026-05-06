@@ -3,8 +3,8 @@ Tests for tools/enforce_tracker_sync.sh.
 
 These tests validate the fail-closed policy:
 - If mu/ core code changes, STATUS.md or TASKS.md must also change.
-- If control-plane tooling under mu/tools/agents/ changes, STATUS.md or TASKS.md
-  must also change.
+- If critical control-plane tooling changes, STATUS.md or TASKS.md must also
+  change.
 - Core = mu/ minus mu/docs/, mu/tools/, mu/scripts/, mu/tests/
 """
 
@@ -36,7 +36,7 @@ class TestTrackerSyncEnforcement:
     def test_no_core_changes_passes(self):
         result = self.run_script("mu/docs/core/BootstrapPrimitives.v0.md")
         assert result.returncode == 0
-        assert "no core changes detected" in result.stdout.lower()
+        assert "no core/control-plane changes detected" in result.stdout.lower()
 
     def test_core_with_status_passes(self):
         # Canonical path after ownership flip (rcx_pi/ is now symlink)
@@ -62,22 +62,32 @@ class TestTrackerSyncEnforcement:
         assert result.returncode == 1
         assert "tracker sync violation" in result.stdout.lower()
 
-    def test_mu_tools_not_core(self):
-        """mu/tools/ changes are infra, not core — should not require tracker sync."""
-        result = self.run_script("mu/tools/audit_fast.sh")
+    def test_mu_tools_non_governed_not_core(self):
+        """Non-governed mu/tools/ changes should not require tracker sync."""
+        result = self.run_script("mu/tools/audits/audit_fast.sh")
         assert result.returncode == 0
-        assert "no core changes detected" in result.stdout.lower()
+        assert "no core/control-plane changes detected" in result.stdout.lower()
 
-    def test_mu_tools_agents_requires_tracker_sync(self):
-        """mu/tools/agents/ changes are control-plane critical and must update trackers."""
-        result = self.run_script("mu/tools/agents/meta_bridge_supervisor.py")
+    @pytest.mark.parametrize("path", [
+        "mu/tools/agents/meta_bridge_supervisor.py",
+        "mu/tools/executors/commit_executor.py",
+        "mu/tools/checks/enforce_l4_execution_contract.py",
+        "tools/checks/enforce_tracker_sync.sh",
+        "mu/tools/hooks/pre-commit-doc-check",
+        "mu/tools/observability/pipeline_monitor.sh",
+        "mu/tools/recovery/recovery_gate.py",
+        ".github/workflows/ci.yml",
+    ])
+    def test_critical_control_plane_requires_tracker_sync(self, path: str):
+        """Audited control-plane surfaces must update trackers."""
+        result = self.run_script(path)
         assert result.returncode == 1
         assert "tracker sync violation" in result.stdout.lower()
-        assert "mu/tools/agents/meta_bridge_supervisor.py" in result.stdout
+        assert path in result.stdout
 
     def test_mu_tools_agents_with_tasks_passes(self):
-        """mu/tools/agents/ changes pass when TASKS.md is updated in the same wave."""
-        result = self.run_script("mu/tools/agents/meta_bridge_supervisor.py", "TASKS.md")
+        """Control-plane changes pass when TASKS.md is updated in the same wave."""
+        result = self.run_script("mu/tools/executors/commit_executor.py", "TASKS.md")
         assert result.returncode == 0
         assert "tracker sync ok" in result.stdout.lower()
 
@@ -85,10 +95,10 @@ class TestTrackerSyncEnforcement:
         """mu/tests/ changes are infra, not core — should not require tracker sync."""
         result = self.run_script("mu/tests/test_foo.py")
         assert result.returncode == 0
-        assert "no core changes detected" in result.stdout.lower()
+        assert "no core/control-plane changes detected" in result.stdout.lower()
 
     def test_mu_scripts_not_core(self):
         """mu/scripts/ changes are infra, not core — should not require tracker sync."""
         result = self.run_script("mu/scripts/green_gate.sh")
         assert result.returncode == 0
-        assert "no core changes detected" in result.stdout.lower()
+        assert "no core/control-plane changes detected" in result.stdout.lower()

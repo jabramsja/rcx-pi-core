@@ -28,6 +28,7 @@ import enforce_l4_execution_contract as l4_contract
 from enforce_l4_execution_contract import (
     LEGACY_CLASS_ALIAS,
     NON_GATE_TEST_DOMAINS,
+    CONTROL_PLANE_DIRS,
     RUNTIME_DIRS,
     VALID_BLOCKER_CLASSES,
     VALID_INVARIANT_IDS,
@@ -45,6 +46,7 @@ from enforce_l4_execution_contract import (
     validate_indicator_with_ratchet,
     has_non_comment_runtime_delta,
     is_comment_line,
+    is_control_plane_file,
     is_runtime_file,
     parse_tracker_notes,
 )
@@ -98,6 +100,32 @@ class TestIsRuntimeFile:
     ])
     def test_non_runtime_files_rejected(self, path: str) -> None:
         assert not is_runtime_file(path), f"{path} should NOT be classified as runtime"
+
+
+class TestIsControlPlaneFile:
+    """Verify critical control-plane directory classification."""
+
+    @pytest.mark.parametrize("path", [
+        ".github/workflows/ci.yml",
+        "tools/checks/enforce_l4_execution_contract.py",
+        "mu/tools/agents/meta_bridge_supervisor.py",
+        "mu/tools/executors/commit_executor.py",
+        "mu/tools/checks/enforce_tracker_sync.sh",
+        "mu/tools/hooks/pre-commit-doc-check",
+        "mu/tools/observability/pipeline_monitor.sh",
+        "mu/tools/recovery/recovery_gate.py",
+    ])
+    def test_control_plane_files_detected(self, path: str) -> None:
+        assert is_control_plane_file(path), f"{path} should be governed control-plane"
+
+    @pytest.mark.parametrize("path", [
+        "README.md",
+        "mu/tests/tools/test_phase_b_executor.py",
+        "mu/tools/audits/audit_fast.sh",
+        "mu/docs/core/SomeDoc.md",
+    ])
+    def test_non_control_plane_files_rejected(self, path: str) -> None:
+        assert not is_control_plane_file(path), f"{path} should not be governed control-plane"
 
 
 # =============================================================================
@@ -297,6 +325,12 @@ class TestEnforceEdgeCases:
         assert not passed
         assert any("FAIL-CLOSED" in e for e in errors)
 
+    def test_no_wave_class_with_control_plane_fails_closed(self) -> None:
+        """No wave class marker + critical control-plane files = FAIL-CLOSED."""
+        passed, errors = enforce(None, ["mu/tools/executors/commit_executor.py"])
+        assert not passed
+        assert any("FAIL-CLOSED" in e and "control-plane" in e for e in errors)
+
     def test_unknown_wave_class_fails(self) -> None:
         passed, errors = enforce("UNKNOWN_CLASS", ["README.md"])
         assert not passed
@@ -314,6 +348,19 @@ class TestEnforceEdgeCases:
             "mu/tools/compilers/",
         }
         assert set(RUNTIME_DIRS) == expected_prefixes
+
+    def test_control_plane_dirs_constant_covers_audited_surfaces(self) -> None:
+        expected_prefixes = {
+            ".github/workflows/",
+            "tools/checks/",
+            "mu/tools/agents/",
+            "mu/tools/executors/",
+            "mu/tools/checks/",
+            "mu/tools/hooks/",
+            "mu/tools/observability/",
+            "mu/tools/recovery/",
+        }
+        assert set(CONTROL_PLANE_DIRS) == expected_prefixes
 
 
 # =============================================================================
