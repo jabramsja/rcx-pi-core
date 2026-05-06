@@ -6,6 +6,11 @@ repo-wide verification sweep.
 The blocker lane is now governance-truth only; see
 `reports/archive/deferred/redteam_2026-03-14_wave5_governance_loopholes.md`.
 
+Cleanup note (2026-05-06): resolved section N2 was moved to
+`reports/archive/deferred/redteam_2026-03-14_repo_non_blockers_partial-closed-by-deferred-non-blocking-cleanup-2026-05-06.md`.
+Resolved section N3 was retained because it references Claude surfaces and was
+not re-adjudicated by this cleanup.
+
 ## N1 `DEFECT` — Stage0 direct APIs still retain raw hostile leaves in capture slots before materialization **PARTIALLY RESOLVED** (2026-03-14)
 
 **Fix applied:** `capture_ref` now deep-copies via `_safe_mu_copy`/`safeMuCopy`. Python `_mu_copy` rejects non-Mu types (returns None). JS `muCopy` uses `_isPlainArray`/`_isPlainObject` and rejects non-Mu types (returns null).
@@ -96,77 +101,10 @@ Why this remains advisory:
   path, so this is still a direct-API hardening gap rather than a reproduced
   production exploit.
 
-## N2 `DEFECT` — Stage0 compiled-bundle integrity **RESOLVED** (2026-03-15)
-
-**Fix applied:** Both runtimes now validate `source_digest` format: must be exact `str`/`string` type (no subclasses), prefix `sha256:`, exactly 64 lowercase hex chars. Malformed digests like `"bogus"` or non-hex chars are rejected.
-
-**Remaining gap:** Format is validated but content is not verified — a
-well-formed but incorrect digest (valid hex but wrong hash) still passes.
-
-Founder direction (2026-03-14):
-
-- if full verification is added, do it in a way that does not make the
-  semantic execution core depend on host source files at runtime
-- prefer compiler/loader/provenance enforcement over adding source-file access
-  to the Stage0 execution path
-- disposition: defer content verification to a compiler/loader provenance wave,
-  not a Stage0 execution-core wave
-
-Evidence:
-
-- Python:
-  - `mu/host/python/rcx_pi/selfhost/stage0_vm.py:458-467`
-- JS:
-  - `mu/host/js/core/stage0_vm.js:487-492`
-
-Direct repro:
-
-```bash
-python3 - <<'PY'
-import sys
-sys.path.insert(0, 'mu/host/python')
-from rcx_pi.selfhost.stage0_vm import validate_bundle
-bundle = {
-    'stage0_ir_version': 1,
-    'bundle_id': 'b',
-    'source_seed': 's',
-    'machine_profile': 'rcx.stage0.v1',
-    'program_order': ['p1'],
-    'programs': [{'id': 'p1', 'ops': [{'op': 'return_projection_fail'}]}],
-    'lowering_version': '1.0.0',
-    'source_digest': 'sha256:' + ('0' * 64),
-}
-validate_bundle(bundle)
-print('PY_OK')
-PY
-node - <<'JS'
-const { validateBundle } = require('./mu/host/js/core/stage0_vm');
-const bundle = {
-  stage0_ir_version: 1,
-  bundle_id: 'b',
-  source_seed: 's',
-  machine_profile: 'rcx.stage0.v1',
-  program_order: ['p1'],
-  programs: [{ id: 'p1', ops: [{ op: 'return_projection_fail' }] }],
-  lowering_version: '1.0.0',
-  source_digest: 'sha256:' + '0'.repeat(64),
-};
-validateBundle(bundle);
-console.log('JS_OK');
-JS
-```
-
-Observed:
-
-- `PY_OK`
-- `JS_OK`
-
-Why this remains advisory:
-
-- This is a real integrity gap, but current gates only claim field-presence
-  integrity and both runtimes still behave consistently.
-
 ## N3 `DOC_ACCURACY` — the canonical doctrine map is still split across startup surfaces — **RESOLVED 2026-03-15**
+
+2026-05-06 cleanup note: retained because this resolved section references
+Claude surfaces; it was not re-adjudicated or extracted by this cleanup.
 
 Fixed: added `Why_RCX_PI_VM_EXISTS.md` and `StructuralPurity.v0.md` to MANIFEST.md
 canonical reading order (items 14-15). ROADMAP.md updated to reference 15-doc order.
@@ -207,11 +145,8 @@ Why this remains advisory:
 ## Validation Used
 
 - Stage0 direct-API repros above
-- metadata-only integrity repros above
-- `wc -l ROADMAP.md roadmap/MANIFEST.md`
-- `rg` over bootstrap/Claude/manifest/docs README doctrine references
 
 ## Classification Summary
 
-- `DEFECT`: N1, N2
-- `DOC_ACCURACY`: N3
+- `DEFECT`: N1
+- Historical/retained because Claude-related: N3

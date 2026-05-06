@@ -4,18 +4,17 @@ Use this folder for active founder-facing advisory audits and unresolved
 non-blocking residue that still matters, but does not currently block runtime
 integrity or truthful promotion claims.
 
-Generated `*_bridge_nonblockers.md` records may also be retained here as
-historical advisory evidence after their parent tracker task closes. A retained
-advisory file does not reopen a parent task that `TASKS.md` marks closed, and it
-does not relist landed work as unresolved unless the file itself records a
-current, file-line-grounded advisory finding.
+Generated `*_bridge_nonblockers.md` records should remain here only when they
+still carry a current, file-line-grounded advisory finding. A retained advisory
+file does not reopen a parent task that `TASKS.md` marks closed, and it does not
+relist landed work as unresolved unless the file itself records current evidence.
 
 Status convention:
 
 - Active advisory packets must carry an unresolved `Status:` value and current
   file-line-grounded evidence.
-- Resolved retained packets must carry `Historical retention: yes` and
-  `Active advisory: no` near the top of the file.
+- Resolved packets belong under `reports/archive/deferred/` unless a narrow
+  retained section still carries an active advisory.
 
 Archived source snapshots for extracted non-blocking residue live in:
 
@@ -35,3 +34,24 @@ Archived source snapshots for extracted non-blocking residue live in:
   `founder-ordered-redteam-repo-code-audit-2026-05-05`: JS ontology evidence
   collection source-locks/registers `evidence_walker.v1.json` but still drains
   runtime traces with host code.
+
+2026-05-06 cleanup note:
+
+- Evidence command:
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
+- Current inventory after cleanup: 30 markdown files, including this README and
+  29 active or partially active advisory packets.
+- Whole-file archives moved 12 closed, stale, or historical packets to
+  `reports/archive/deferred/` with `closed-by-deferred-non-blocking-cleanup-2026-05-06`,
+  `historical-by-deferred-non-blocking-cleanup-2026-05-06`, or source-wave
+  closure suffixes.
+- Partial splits moved closed sections from:
+  `recovery-gate-wiring-2026-03-31_bridge_nonblockers.md`,
+  `pipeline-recovery-phase1-2026-03-31_bridge_nonblockers.md`,
+  `redteam_2026-03-14_repo_non_blockers.md`,
+  `repo_truth_non_blockers_2026-03-14.md`, and
+  `plan-learning-store-enforcement-2026-04-08-2026-04-08_bridge_nonblockers.md`.
+- `hook_soft_gate_residue.md` and the Claude-referencing resolved sections
+  retained in `redteam_2026-03-14_repo_non_blockers.md` and
+  `repo_truth_non_blockers_2026-03-14.md` were not extracted because they are
+  Claude-related residue outside this cleanup authorization.

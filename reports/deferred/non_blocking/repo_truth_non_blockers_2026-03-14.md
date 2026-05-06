@@ -12,6 +12,12 @@ Archived as stale/resolved from the source snapshots:
 - Hypothesis fuzzer timeout in hemisphere routing parity tests is resolved
 - old blocker carryovers N10/N11 were archived to `reports/archive/deferred/repo_truth_blockers_2026-03-14.md`
 
+2026-05-06 cleanup note: resolved sections N4, N6, N7, N9, N12, N13,
+N15, N16, N17, and N19 were moved to
+`reports/archive/deferred/repo_truth_non_blockers_2026-03-14_partial-closed-by-deferred-non-blocking-cleanup-2026-05-06.md`.
+Resolved section N18 was retained because it references Claude surfaces and was
+not re-adjudicated by this cleanup.
+
 ## Active Non-Blockers
 
 ### N1. Python VM cutover coverage reconstruction is not directly locked
@@ -50,11 +56,6 @@ requires eliminating host constructs in engine pipeline, hemisphere routing, ont
 promotion, etc. — each of which is a separate L4 workstream.
 **No single fix** — this is the nature of incremental reduction.
 
-### N4. JS locked seed registries still lack a direct subset/diff gate — **RESOLVED 2026-03-14**
-
-- Fixed: `TestJsSeedLoaderSubsetGate` in `test_seed_loading_parity.py` proves CORE registries ⊂ main registries.
-- 3 tests: checksum subset, projection ID subset, registry key symmetry.
-
 ### N5. `pipeline.js` still has no explicit size/shape governance
 
 - the file remains large (~800 lines)
@@ -68,33 +69,6 @@ The file is well-sectioned with clear function boundaries. A LOC cap without
 decomposition guidance would be arbitrary. **Target wave:** JS architecture refactor
 wave (requires Wave A design for module decomposition strategy).
 
-### N6. Historical report drift still requires date discipline — **RESOLVED 2026-03-15**
-
-- All active report files now include dates in filenames (2026-03-XX pattern).
-- Archive moves use `reports/archive/deferred/` with date-stamped filenames.
-- Practice enforcement, not a single-commit fix.
-
-### N7. Wave indicator artifacts remain thin for deep replay — **RESOLVED 2026-03-15**
-
-- Recent wave indicators (wave4, wave2, non-blocker-sweep) include full provenance.
-- Accepted as ongoing practice — each new wave adds richer indicator artifacts.
-
-### N9. debt_dashboard.sh scope differs from ratchet scope — **RESOLVED 2026-03-14**
-
-- Fixed: added Scope Reconciliation section to debt_dashboard.sh output.
-- Documents why Dashboard (8) > Ratchet (6): rcx_pi/ includes deep_eval.py, ratchet counts inline markers.
-- Canonical source is baseline JSON (16), now shown in dashboard output.
-
-### N12. JS _ALGORITHM_SEED_ALLOWLIST uses Object.freeze(Set) — **RESOLVED 2026-03-14**
-
-- Fixed: replaced `Object.freeze(new Set(...))` with `Object.freeze(Object.assign(Object.create(null), {...}))`.
-- Null-prototype object: no prototype chain mutation, `in` operator for lookup, `Object.keys()` for enumeration.
-
-### N13. reports/codex/ exempt from docs governance — attestation false-fail — **RESOLVED 2026-03-14**
-
-- Founder directive (2026-03-14): reports/codex/ belongs to GPT, leave as-is.
-- Attestation already changed to advisory (not failure) in founder_session_attest.sh.
-
 ### N14. Stage0 capture_ref returns null/None for hostile leaves (design gap)
 
 - capture_ref deep-copies via _safe_mu_copy. Non-Mu types (subclasses) are canonicalized to null/None.
@@ -102,27 +76,10 @@ wave (requires Wave A design for module decomposition strategy).
 - Design decision: null/None is the correct fail-closed canonical value for non-Mu inputs. The alternative (stall on non-Mu capture) would require type-checking at capture_path time, which is a larger change.
 - Status: documented design gap, not a production exploit path.
 
-### N15. Stage0 source_digest format-only validation (design gap) — **RESOLVED 2026-03-15**
-
-- Fixed: `_verify_bundle_provenance()` in step_mu.py + `verifyBundleProvenance()` in main.js verify bundle source_digest against SEED_CHECKSUMS registry at load time. No source-file I/O needed — uses existing canonical checksums. Fail-closed on mismatch. 5 gate tests prove provenance (pass, reject, missing, unknown).
-
-### N16. check_gate_behavioral_pairs.py: module-level test functions unclassified — **RESOLVED 2026-03-14**
-
-- Fixed: `scan_file()` now scans module-level `test_*` functions under `<module>` key.
-- Test: `test_module_level_functions_scanned` in `test_check_gate_behavioral_pairs.py`.
-
-### N17. check_gate_behavioral_pairs.py: positional args accepted silently — **RESOLVED 2026-03-14**
-
-- Fixed: positional args now rejected with exit code 2 (fail-closed).
-- Test: `test_positional_args_rejected` in `test_check_gate_behavioral_pairs.py`.
-
 ### N18. /checkpoint should force comprehensive memory.md + claude.md re-read — **RESOLVED 2026-03-14**
+
+2026-05-06 cleanup note: retained because this resolved section references
+Claude surfaces; it was not re-adjudicated or extracted by this cleanup.
 
 - Fixed: /checkpoint skill Step 0 now includes MANDATORY re-read with explicit file list and "This is not a checkbox" instruction.
 - Claude Code PreToolUse hook (`.claude/hooks/pre-commit-reminder.sh`) shows MEMORY.md + CLAUDE.md before git commit tool calls.
-
-### N19. Three-scope debt counting mismatch (ratchet vs dashboard vs baseline) — **RESOLVED 2026-03-14**
-
-- Fixed: dashboard now includes Scope Reconciliation section explaining why the three tools show different numbers.
-- The scopes intentionally differ (different tools, different purposes). The fix is documentation, not unification.
-- Canonical source: baseline JSON (16), shown in dashboard + STATUS.md.
