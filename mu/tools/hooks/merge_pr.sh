@@ -84,7 +84,7 @@ resolve_threads() {
         # Collect bot-authored unresolved thread IDs
         local page_bot_ids
         page_bot_ids=$(echo "$response" | jq -r "
-            .data.repository.pullRequest.reviewThreads.nodes[]
+            (.data.repository.pullRequest.reviewThreads.nodes // [])[]
             | select(.isResolved == false)
             | select(.comments.nodes[0].author.login == \"$BOT_LOGIN\")
             | .id
@@ -96,7 +96,7 @@ resolve_threads() {
         # Count human-authored unresolved threads (warn, don't resolve)
         local page_human
         page_human=$(echo "$response" | jq "[
-            .data.repository.pullRequest.reviewThreads.nodes[]
+            (.data.repository.pullRequest.reviewThreads.nodes // [])[]
             | select(.isResolved == false)
             | select(.comments.nodes[0].author.login != \"$BOT_LOGIN\")
         ] | length")
@@ -150,7 +150,7 @@ describe_latest_bot_issue_comment() {
 
     latest_kind=$(echo "$response" | jq -r --arg bot "$BOT_LOGIN" --arg re "$BOT_NO_ISSUES_RE" '
         [
-            .data.repository.pullRequest.comments.nodes[]
+            (.data.repository.pullRequest.comments.nodes // [])[]
             | select(.author.login == $bot)
         ]
         | sort_by(.createdAt)
@@ -172,7 +172,7 @@ describe_latest_bot_issue_comment() {
         other)
             latest_excerpt=$(echo "$response" | jq -r --arg bot "$BOT_LOGIN" '
                 [
-                    .data.repository.pullRequest.comments.nodes[]
+                    (.data.repository.pullRequest.comments.nodes // [])[]
                     | select(.author.login == $bot)
                 ]
                 | sort_by(.createdAt)
@@ -225,7 +225,7 @@ extract_sweep_findings() {
 
         # Extract unresolved bot findings with content
         echo "$response" | jq -c --arg bot "$BOT_LOGIN" --arg pr "$pr_num" '
-            .data.repository.pullRequest.reviewThreads.nodes[]
+            (.data.repository.pullRequest.reviewThreads.nodes // [])[]
             | select(.isResolved == false)
             | select(.comments.nodes[0].author.login == $bot)
             | {

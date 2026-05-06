@@ -80,10 +80,17 @@ set -euo pipefail
 : "${GH_ARG_LOG:?}"
 printf '%s\\n' "$*" >> "$GH_ARG_LOG"
 if [ "${1:-}" = "pr" ] && [ "${2:-}" = "list" ]; then
+    if [ -n "${GH_PR_LIST_STDOUT:-}" ]; then
+        printf '%s\\n' "$GH_PR_LIST_STDOUT"
+    fi
     exit 0
 fi
 if [ "${1:-}" = "api" ]; then
-    printf '%s\\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]},"comments":{"nodes":[]}}}}}'
+    if [ -n "${GH_GRAPHQL_RESPONSE:-}" ]; then
+        printf '%s\\n' "$GH_GRAPHQL_RESPONSE"
+    else
+        printf '%s\\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]},"comments":{"nodes":[]}}}}}'
+    fi
     exit 0
 fi
 exit 1
@@ -146,6 +153,23 @@ class TestMergePrSweepCount:
         assert result.returncode == 0, result.stderr
         assert "Sweeping last 12 merged PRs" in result.stdout
         assert "--limit 12" in (tmp_path / "gh-args.log").read_text(encoding="utf-8")
+
+    def test_sweep_only_treats_null_graphql_thread_fields_as_empty(self, tmp_path):
+        result = _run_merge_pr_sweep(
+            tmp_path,
+            ["--sweep-only"],
+            {
+                "GH_PR_LIST_STDOUT": "888",
+                "GH_GRAPHQL_RESPONSE": (
+                    '{"data":{"repository":{"pullRequest":'
+                    '{"reviewThreads":null,"comments":null}}}}'
+                ),
+            },
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "PR #888 (sweep): no unresolved threads" in result.stdout
+        assert "Cannot iterate over null" not in result.stderr
 
     @pytest.mark.parametrize("bad_count", ["0", "abc", ""])
     def test_sweep_count_rejects_non_positive_integer_values(self, tmp_path, bad_count):
