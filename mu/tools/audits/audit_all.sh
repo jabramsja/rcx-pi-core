@@ -22,13 +22,16 @@ export PYTHONHASHSEED=0
 export HYPOTHESIS_PROFILE="${HYPOTHESIS_PROFILE:-ci_fast}"
 
 # ============================================================================
-# FULL AUDIT - CI standard (~4-6 minutes with parallel, ~10+ without)
+# FULL AUDIT - required checks plus optional stress evidence
 # ============================================================================
 #
-# This is the comprehensive audit for CI and pre-push validation. It runs:
-# - All 3,155+ tests including fuzzer and slow (hash-seeded for determinism)
+# This is the manual required-check audit for CI/pre-push-style evidence. It runs:
+# - Core, fuzzer, and slow tests (hash-seeded for determinism)
 # - Semantic purity checks, contraband detection, AST police
 # - Anti-cheat scans, fixture validation
+# - Optional stress probes; stress skip/failure is reported but not exit-blocking
+#
+# For fail-closed stress/deep-fuzz proof, use the weekly_deep_fuzz workflow.
 #
 # For local iteration, use ./tools/audit_fast.sh (~2 minutes)
 #
@@ -42,6 +45,7 @@ export HYPOTHESIS_PROFILE="${HYPOTHESIS_PROFILE:-ci_fast}"
 # === Timing and result tracking for synthesis summary ===
 AUDIT_START_TIME=$SECONDS
 TESTS_PASSED=0
+STRESS_STATUS="NOT_RUN"
 
 # Phase timing (bash 3 compatible - no associative arrays)
 TIME_STRUCTURAL=0
@@ -72,8 +76,8 @@ TIME_STRUCTURAL=$((SECONDS - PHASE_START))
 PHASE_START=$SECONDS
 echo "== 1a) Core + Fuzzer tests (hash-seeded, excludes slow) =="
 # Run all tests EXCEPT stress and slow tests
-# Slow tests (meta-circular recurrence, paxos e2e) run in 1c below
-# Stress tests are for edge case validation, not CI blocking
+# Slow tests (meta-circular recurrence, paxos e2e) run in 1b below
+# Stress tests are for edge case validation, not required-check blocking
 # Also exclude test_js_parity_automated.py - JS parity verified via node run below
 TEST_OUTPUT=$(pytest $PARALLEL_FLAG -q -m "not slow" --ignore=tests/stress/ --ignore=tests/parity/test_js_parity_automated.py 2>&1) || { echo "$TEST_OUTPUT"; exit 1; }
 echo "$TEST_OUTPUT"
@@ -94,11 +98,20 @@ fi
 
 echo "== 1c) Stress tests (deep/wide edge cases, optional) =="
 # Stress tests probe pathological inputs - run sequentially with longer timeouts
-# These are for comprehensive validation, not CI blocking
+# These are optional evidence here, not required-check exit blockers.
 if [ "${RCX_SKIP_STRESS:-}" = "1" ]; then
-    echo "Skipping stress tests (RCX_SKIP_STRESS=1)"
+    STRESS_STATUS="SKIPPED (RCX_SKIP_STRESS=1, optional/non-blocking)"
+    echo "Skipping optional stress tests (RCX_SKIP_STRESS=1)"
 else
-    pytest -q tests/stress/ --timeout=300 2>/dev/null || echo "Note: Stress tests skipped or failed (non-blocking)"
+    STRESS_OUTPUT=""
+    if STRESS_OUTPUT=$(pytest -q tests/stress/ --timeout=300 2>&1); then
+        echo "$STRESS_OUTPUT"
+        STRESS_STATUS="PASSED (optional/non-blocking)"
+    else
+        echo "$STRESS_OUTPUT"
+        STRESS_STATUS="FAILED_OR_SKIPPED (optional/non-blocking)"
+        echo "Note: Optional stress tests skipped or failed; required audit exit status remains governed by required checks."
+    fi
 fi
 TIME_TESTS=$((SECONDS - PHASE_START))
 
@@ -272,6 +285,7 @@ printf "║  %-10s  %-8s  %s\n" "PHASE" "TIME" "STATUS                          
 echo "║  ──────────  ────────  ──────────────────────────────────────────────────  ║"
 printf "║  %-10s  %3ds      ✅ Repo clean, docs match code                       ║\n" "Structural" "$TIME_STRUCTURAL"
 printf "║  %-10s  %3ds      ✅ %s tests passed                                  ║\n" "Tests" "$TIME_TESTS" "${TESTS_PASSED:-2000+}"
+printf "║  %-10s  %-8s  %-50s  ║\n" "Stress" "optional" "$STRESS_STATUS"
 printf "║  %-10s  %3ds      ✅ Contraband, AST, theater, seeds clean             ║\n" "Security" "$TIME_SECURITY"
 printf "║  %-10s  %3ds      ✅ No private attrs, no underscore imports           ║\n" "Anti-cheat" "$TIME_ANTICHEAT"
 printf "║  %-10s  %3ds      ✅ %d fixtures validated                             ║\n" "Fixtures" "$TIME_FIXTURES" "$FIXTURE_COUNT"
@@ -286,8 +300,11 @@ echo "║                                                                       
 echo "╠════════════════════════════════════════════════════════════════════════════╣"
 printf "║  TOTAL TIME: %dm %ds                                                      ║\n" "$TOTAL_MINS" "$TOTAL_SECS"
 echo "║                                                                            ║"
-echo "║                         ✅ OVERALL: SHIP IT                                ║"
+echo "║             ✅ OVERALL: REQUIRED AUDIT CHECKS PASSED                       ║"
 echo "║                                                                            ║"
 echo "╚════════════════════════════════════════════════════════════════════════════╝"
 echo ""
-echo "✅ audit_all pass"
+echo "✅ audit_all pass: required audit checks passed"
+echo "Optional stress status: $STRESS_STATUS"
+echo "Exit status 0 means required audit checks passed; it does not certify fail-closed release/stress proof when optional stress tests are skipped or fail non-blockingly."
+echo "Use .github/workflows/weekly_deep_fuzz.yml for fail-closed scheduled stress/deep-fuzz evidence."

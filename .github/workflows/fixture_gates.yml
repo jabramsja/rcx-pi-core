@@ -57,7 +57,12 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install Graphviz
-        run: sudo apt-get update && sudo apt-get install -y graphviz
+        shell: bash
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          timeout 120s sudo apt-get update
+          timeout 120s sudo apt-get install -y graphviz
       - name: Orbit SVG fixture gate
         env:
           PYTHONHASHSEED: "0"
@@ -68,7 +73,12 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install Graphviz
-        run: sudo apt-get update && sudo apt-get install -y graphviz
+        shell: bash
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          timeout 120s sudo apt-get update
+          timeout 120s sudo apt-get install -y graphviz
       - name: Build artifacts
         env:
           PYTHONHASHSEED: "0"

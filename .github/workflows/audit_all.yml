@@ -1,11 +1,11 @@
-name: Audit All
+name: Required Audit Checks
 
-# Manual-only gate for deep validation (includes extra checks beyond green_gate)
+# Manual-only required-check audit with optional stress evidence.
 # NOTE: green_gate.yml now includes anti-cheat scans and fixture validation
 # This workflow adds: CLI exec-summary spot-check, repo clean verification
-# Use this for comprehensive validation before important releases
+# This is not fail-closed release/stress proof; weekly_deep_fuzz.yml owns that lane.
 on:
-  workflow_dispatch:  # Manual trigger only - avoids duplicate runs with green_gate.yml
+  workflow_dispatch:  # Manual required-check trigger; avoids duplicate runs with green_gate.yml
 
 concurrency:
   group: audit-${{ github.workflow }}-${{ github.ref }}
@@ -36,7 +36,7 @@ jobs:
           python -m pip install -U pip
           python -m pip install -e ".[test]"
 
-      - name: Run audit_all.sh
+      - name: Run required audit checks
         shell: bash
         run: |
           set -euo pipefail
