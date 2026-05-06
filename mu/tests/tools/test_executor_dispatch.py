@@ -12384,6 +12384,11 @@ class TestRoutingRecordBuilderCompletedPacketRejection:
             "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT"
         ) is False
 
+    def test_status_predicate_treats_completed_with_pending_detail_as_complete(self):
+        assert common_mod.packet_status_is_completed(
+            "COMPLETED (commit-ready, pre-commit supervisor pending)"
+        ) is True
+
     def test_rejects_completed_control_plane_packet(self, tmp_path):
         repo, _ = _init_builder_repo(tmp_path)
         packet = repo / "reports" / "control_plane" / "seed_packet.md"

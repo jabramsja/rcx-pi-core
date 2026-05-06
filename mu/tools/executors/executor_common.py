@@ -806,8 +806,12 @@ def _load_meta_bridge_symbol(symbol_name: str) -> Any:
 
 _CONTROL_PLANE_PREFIX = "reports/control_plane/"
 _PACKET_STATUS_SCAN_LIMIT = 40
-_COMPLETED_PACKET_STATUS_RE = re.compile(
-    r"\b(?:COMPLETED|IMPLEMENTED|LANDED|CLOSED)\b",
+_EXPLICIT_COMPLETE_PACKET_STATUS_RE = re.compile(
+    r"\b(?:COMPLETED|LANDED|CLOSED)\b",
+    re.IGNORECASE,
+)
+_IMPLEMENTED_PACKET_STATUS_RE = re.compile(
+    r"\bIMPLEMENTED\b",
     re.IGNORECASE,
 )
 _PENDING_PACKET_STATUS_RE = re.compile(
@@ -865,9 +869,11 @@ def packet_status_is_completed(status: str | None) -> bool:
         return False
     if "FINDINGS ROUTED" in clean.upper():
         return True
+    if _EXPLICIT_COMPLETE_PACKET_STATUS_RE.search(clean):
+        return True
     if _PENDING_PACKET_STATUS_RE.search(clean):
         return False
-    return bool(_COMPLETED_PACKET_STATUS_RE.search(clean))
+    return bool(_IMPLEMENTED_PACKET_STATUS_RE.search(clean))
 
 
 def read_control_plane_packet_status(repo_root: Path, tracked_packet: str) -> str | None:
