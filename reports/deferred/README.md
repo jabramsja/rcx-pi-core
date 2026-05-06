@@ -19,26 +19,30 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-05):
+Current inventory refresh (2026-05-06):
 
-- Evidence command: `rg --files reports/deferred/blocking reports/deferred/non_blocking | sort | nl -ba`.
-- `reports/deferred/blocking/` contains `README.md` plus the active repo-code
-  blocker packet
-  `founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md`.
+- Evidence commands:
+  `find reports/deferred/blocking -maxdepth 1 -type f -name "*.md" -print | sort`
+  and
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
+- `reports/deferred/blocking/` currently contains 5 markdown files: `README.md`
+  plus the founder-ordered docs, repo-code, tests, and tooling blocking-lane
+  audit packets. This non-blocking cleanup did not adjudicate or archive the
+  blocking lane.
 - The resolved mu preproduction gate-theater blocker was moved to
   `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`.
   The 2026-05-05 follow-up aligns the redteam startup guard with the curated
   theater-risk ratchet; `/mu` production-forward movement is no longer blocked
   by this gate-theater finding.
-- `reports/deferred/non_blocking/` currently contains 33 markdown files:
-  `README.md` plus 32 retained advisory/follow-up records with concrete
-  evidence targets, including
+- `reports/deferred/non_blocking/` currently contains 30 markdown files:
+  `README.md` plus 29 active or partially active advisory/follow-up records with
+  concrete evidence targets, including
   `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
   reproduced with
   `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
-- The deferred findings sweep archived 6 stale, self-closed, or code-closed
-  generated advisory packets under `reports/archive/deferred/` with
-  `closed-by-deferred-findings-fix-sweep-2026-05-04` filenames.
+- The 2026-05-06 non-blocking cleanup archived 12 closed, stale, or historical
+  whole packets and extracted closed sections from 5 partial packets under
+  `reports/archive/deferred/`.
 
 Closed-parent exclusions for this index:
 

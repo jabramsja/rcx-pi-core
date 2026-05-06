@@ -1951,6 +1951,95 @@ class TestWaveIdBounds:
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
+    def test_prepare_handoff_standalone_force_adds_indexed_ignored_paths(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        (repo / ".gitignore").write_text("reports/archive/deferred/*\n", encoding="utf-8")
+        ignored_path = (
+            repo
+            / "reports"
+            / "archive"
+            / "deferred"
+            / "closed-by-cleanup.md"
+        )
+        ignored_path.parent.mkdir(parents=True, exist_ok=True)
+        ignored_path.write_text("# archived\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "-f", "--", "reports/archive/deferred/closed-by-cleanup.md"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+        indexed_check = subprocess.run(
+            ["git", "check-ignore", "-q", "reports/archive/deferred/closed-by-cleanup.md"],
+            cwd=repo,
+            capture_output=True,
+            check=False,
+        )
+        assert indexed_check.returncode != 0
+
+        record = {
+            "wave_name": "deferred-non-blocking-cleanup-2026-05-06",
+            "summary": "archive deferred non-blocking cleanup",
+            "decision": "UPDATE_TRACKER_ONLY",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "wave_class": "MAINTENANCE",
+            "target_gate_id": "G8",
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert errors == []
+        assert handoff is not None
+        assert "reports/archive/deferred/closed-by-cleanup.md" in handoff["force_add_files"]
+        assert "reports/archive/deferred/closed-by-cleanup.md" not in handoff["files_to_stage"]
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
+    def test_prepare_handoff_standalone_preserves_same_wave_tasks_override_for_maintenance(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "deferred-non-blocking-cleanup-2026-05-06"
+        (repo / "TASKS.md").write_text(
+            "## Ra\n\n"
+            f"- Tracker sync note (2026-05-06, {wave_id}): **manual authorized cleanup.** "
+            f"Class: MAINTENANCE. FOUNDER_OVERRIDE:{wave_id} (founder authorized cleanup rerun)\n\n"
+            "---\n",
+            encoding="utf-8",
+        )
+        (repo / "file.py").write_text("# staged now\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "--", "TASKS.md", "file.py"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+
+        record = {
+            "wave_name": wave_id,
+            "summary": "archive deferred non-blocking cleanup",
+            "decision": "UPDATE_TRACKER_ONLY",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "wave_class": "MAINTENANCE",
+            "target_gate_id": "G8",
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert errors == []
+        assert handoff is not None
+        assert f"FOUNDER_OVERRIDE:{wave_id}" in handoff["tracker_note_text"]
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
     def test_prepare_handoff_from_routing_record_standalone_preserves_restart_target_branch(self, tmp_path):
         import subprocess
 

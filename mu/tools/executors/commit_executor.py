@@ -878,6 +878,9 @@ def _resolve_standalone_founder_override_token(
     )
     if token:
         return token, None
+    token = _extract_same_wave_founder_override_from_tasks(repo_root, wave_id)
+    if token and _wave_class_allows_founder_override(wave_class):
+        return token, None
     if str(wave_class or "").strip() == "L4_ENABLER":
         return "", _missing_founder_override_error(wave_id)
     return "", None
@@ -5473,7 +5476,7 @@ def build_commit_handoff(
         for f in list(effective_files):
             try:
                 result = subprocess.run(
-                    ["git", "check-ignore", "-q", f],
+                    ["git", "check-ignore", "--no-index", "-q", f],
                     cwd=repo_root, capture_output=True, timeout=5,
                 )
                 if result.returncode == 0:
