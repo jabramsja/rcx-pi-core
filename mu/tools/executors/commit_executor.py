@@ -6080,17 +6080,50 @@ def _refresh_post_merge_package_for_next_open_queue(
     result: dict[str, Any],
     merge_sha: str,
     log: Any,
-) -> dict[str, Any] | None:
-    """Write the next post-merge package from the founder-ordered open queue."""
+) -> dict[str, Any]:
+    """Write a fresh post-merge package from the founder-ordered queue state."""
     entry = _next_open_founder_ordered_queue_entry(repo_root)
-    if entry is None:
-        return None
-
     pr_number_raw = result.get("pr_number")
     try:
         merged_pr = int(pr_number_raw)
     except (TypeError, ValueError):
         merged_pr = 0
+
+    package_path = agent_bus_path(
+        repo_root,
+        _active_bus_dir(),
+        "meta",
+        "post_merge_package.json",
+    )
+
+    if entry is None:
+        package = {
+            "task_id": str(handoff.get("task_id") or "[NEXT-CODEX-POST-REDTEAM]"),
+            "merged_pr": merged_pr,
+            "merge_sha": merge_sha,
+            "wave_name": "founder-ordered-post-merge-queue-empty",
+            "lane": "founder-ordered remediation queue complete",
+            "rollout_packet_path": "reports/control_plane/post_redteam_structural_queue_2026-03-20.md",
+            "deferred_items": [],
+            "tracker_state_summary": (
+                "Post-merge package refreshed mechanically after commit merge. "
+                "No open founder-ordered queue packets remain."
+            ),
+            "next_candidates": [],
+            "blocker_report_paths": _post_merge_blocker_report_paths(repo_root),
+        }
+        package_path.parent.mkdir(parents=True, exist_ok=True)
+        package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+        result["post_merge_package_path"] = str(package_path.relative_to(repo_root))
+        result["post_merge_next_wave"] = None
+        result["post_merge_next_hard_stop"] = False
+        result["post_merge_queue_empty"] = True
+        log(
+            "Step 15b: refreshed post-merge package with no open "
+            "founder-ordered queue entry"
+        )
+        return package
+
     deferred_items = [
         p
         for p in (entry.get("source_packet"), entry.get("packet"))
@@ -6129,17 +6162,12 @@ def _refresh_post_merge_package_for_next_open_queue(
         "next_candidates": next_candidates,
         "blocker_report_paths": _post_merge_blocker_report_paths(repo_root),
     }
-    package_path = agent_bus_path(
-        repo_root,
-        _active_bus_dir(),
-        "meta",
-        "post_merge_package.json",
-    )
     package_path.parent.mkdir(parents=True, exist_ok=True)
     package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
     result["post_merge_package_path"] = str(package_path.relative_to(repo_root))
     result["post_merge_next_wave"] = entry["wave_id"]
     result["post_merge_next_hard_stop"] = bool(entry.get("hard_stop"))
+    result["post_merge_queue_empty"] = False
     log(
         "Step 15b: refreshed post-merge package for "
         f"{entry['wave_id']}"

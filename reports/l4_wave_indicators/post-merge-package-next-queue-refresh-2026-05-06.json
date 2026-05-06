@@ -1,24 +1,24 @@
 {
   "wave_id": "post-merge-package-next-queue-refresh-2026-05-06",
-  "repeat_run_speedup_ratio": 1.088162,
+  "repeat_run_speedup_ratio": 0.980463,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.442004,
+  "step_growth_slope": 0.401283,
   "repeat_run_raw_seconds": [
-    0.480972,
-    0.442004
+    0.393443,
+    0.401283
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.480972
+      "elapsed_seconds": 0.393443
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.922976
+      "elapsed_seconds": 0.794726
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-06T09:04:36Z",
+  "collection_timestamp_utc": "2026-05-06T09:34:18Z",
   "collector_version": "2.2.0"
 }

@@ -226,6 +226,64 @@ def test_post_merge_package_refresh_stops_before_mu_structural_queue(tmp_path):
     assert "hard stop" in package["tracker_state_summary"].lower()
 
 
+def test_post_merge_package_refresh_closes_completed_only_queue(tmp_path):
+    repo = _init_repo(tmp_path)
+    packet = (
+        "reports/control_plane/"
+        "founder_ordered_redteam_docs_non_blocking_remediation_2026-05-06.md"
+    )
+    _write_queue_packet(repo, packet, "COMPLETED")
+    stale_package_path = repo / ".agent_bus" / "meta" / "post_merge_package.json"
+    stale_package_path.parent.mkdir(parents=True)
+    stale_package_path.write_text(
+        json.dumps(
+            {
+                "merge_sha": "stale",
+                "next_candidates": [
+                    {
+                        "candidate": (
+                            "founder-ordered-redteam-docs-non-blocking-remediation-2026-05-06"
+                        ),
+                        "bounded": True,
+                        "tracked_packet": packet,
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (repo / "TASKS.md").write_text(
+        (
+            "## Ra\n"
+            "  4. **[FOUNDER-ORDERED-REDTEAM-DOCS-NON-BLOCKING-REMEDIATION] "
+            "COMPLETED.** Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            "Wave ID: `founder-ordered-redteam-docs-non-blocking-remediation-2026-05-06`. "
+            "Class: `L4_ENABLER`. Category: docs. "
+            f"Packet: `{packet}`.\n"
+        ),
+        encoding="utf-8",
+    )
+    result = {"pr_number": "888"}
+
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result=result,
+        merge_sha="fresh-head",
+        log=_noop_log,
+    )
+
+    assert json.loads(stale_package_path.read_text(encoding="utf-8")) == package
+    assert package["merge_sha"] == "fresh-head"
+    assert package["wave_name"] == "founder-ordered-post-merge-queue-empty"
+    assert package["next_candidates"] == []
+    assert package["deferred_items"] == []
+    assert packet not in json.dumps(package)
+    assert result["post_merge_next_wave"] is None
+    assert result["post_merge_queue_empty"] is True
+
+
 def test_skips_when_cleanup_root_not_on_base_branch(tmp_path):
     repo = _init_repo(tmp_path)
     wave_id = "test-wave-wrong-branch-2026-04-17"
