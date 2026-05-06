@@ -1,0 +1,24 @@
+{
+  "wave_id": "commit-continuation-persisted-handoff-fix-2026-05-06",
+  "repeat_run_speedup_ratio": 1.248183,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.403879,
+  "repeat_run_raw_seconds": [
+    0.504115,
+    0.403879
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.504115
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.907994
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-06T08:10:26Z",
+  "collector_version": "2.2.0"
+}

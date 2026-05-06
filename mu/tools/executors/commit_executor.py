@@ -1575,6 +1575,11 @@ def _persist_phase_b_handoff_for_commit_path(
     return None
 
 
+def _can_rekey_continuation_to_refreshed_handoff(handoff: dict[str, Any]) -> bool:
+    """Return true when reruns read a refreshed handoff persisted by this executor."""
+    return str(handoff.get("caller") or "") == "phase_b"
+
+
 def _refresh_tasks_tracker_note_after_packet_truth(
     repo_root: Path,
     *,
@@ -7035,7 +7040,11 @@ def _run_commit_pipeline_impl(
         }
     if refreshed_handoff is not handoff:
         handoff = refreshed_handoff
-        result["refreshed_handoff_sha"] = _handoff_sha(handoff)
+        refreshed_handoff_sha = _handoff_sha(handoff)
+        result["refreshed_handoff_sha"] = refreshed_handoff_sha
+        if _can_rekey_continuation_to_refreshed_handoff(handoff):
+            handoff_sha = refreshed_handoff_sha
+            result["handoff_sha"] = handoff_sha
         try:
             refreshed_files, refreshed_force = _stage_handoff_paths(
                 repo_root,
@@ -7305,7 +7314,11 @@ def _run_commit_pipeline_impl(
         result["handoff_receipt_path"] = handoff_receipt_rel
         result["handoff_receipt_decision"] = handoff_receipt_decision
         result["receipt_decision"] = receipt_decision
-        result["handoff_sha"] = handoff_sha
+        receipt_refreshed_handoff_sha = _handoff_sha(handoff)
+        result["receipt_refreshed_handoff_sha"] = receipt_refreshed_handoff_sha
+        if _can_rekey_continuation_to_refreshed_handoff(handoff):
+            handoff_sha = receipt_refreshed_handoff_sha
+            result["handoff_sha"] = handoff_sha
         persist_error = _persist_phase_b_handoff_for_commit_path(repo_root, handoff)
         if persist_error:
             return {"status": "error", "step": "validate_receipt",

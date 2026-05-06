@@ -459,8 +459,6 @@ def _completed_candidate_stop_result(
     decision: str,
     executor_name: str,
 ) -> dict[str, Any] | None:
-    if decision not in {"ROUTE_PHASE_A", "ROUTE_PHASE_B"}:
-        return None
     completed = _completed_routing_candidates(repo_root, record)
     if not completed:
         return None
@@ -578,23 +576,47 @@ def _surface_record_for_chain(
             record["dashboard_port"] = teammate_identity.get("dashboard_port")
             record["tmux_session"] = teammate_identity.get("tmux_session", "")
             record["teammate_worktree"] = str(getattr(args, "_teammate_worktree", ""))
+    if args.surface == "commit" and getattr(args, "handoff", None):
+        try:
+            handoff = json.loads(args.handoff.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            handoff = None
+        if isinstance(handoff, dict):
+            wave_id = handoff.get("wave_id")
+            if isinstance(wave_id, str) and wave_id.strip():
+                record["wave_name"] = normalize_wave_id(wave_id)
+            task_id = handoff.get("task_id")
+            if isinstance(task_id, str) and task_id.strip():
+                record["task_id"] = task_id
+            tracked_packet = handoff.get("tracked_packet")
+            if isinstance(tracked_packet, str) and tracked_packet.strip():
+                record["next_candidates"] = [
+                    {
+                        "candidate": str(record.get("wave_name") or ""),
+                        "bounded": True,
+                        "tracked_packet": tracked_packet.strip(),
+                    }
+                ]
+        return record
+    if args.surface in {"phase-b", "commit"}:
+        routing_payload = _load_routing_record_payload(
+            path_value=getattr(args, "routing_record_path", None),
+            json_value=getattr(args, "routing_record_json", None),
+        )
+        if routing_payload:
+            try:
+                parsed = json.loads(routing_payload)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                parsed = None
+            if isinstance(parsed, dict):
+                record.update(parsed)
+                record["decision"] = str(record.get("decision") or decision)
+                if canonical_task_id:
+                    record["task_id"] = canonical_task_id
+        if args.surface == "commit":
+            return record
     if args.surface != "phase-b":
         return record
-
-    routing_payload = _load_routing_record_payload(
-        path_value=args.routing_record_path,
-        json_value=args.routing_record_json,
-    )
-    if routing_payload:
-        try:
-            parsed = json.loads(routing_payload)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            parsed = None
-        if isinstance(parsed, dict):
-            record.update(parsed)
-            record["decision"] = str(record.get("decision") or decision)
-            if canonical_task_id:
-                record["task_id"] = canonical_task_id
 
     _bind_phase_b_recovery_plan_wave(record, repo_root)
     plan_path = (
@@ -931,6 +953,20 @@ def _reload_explicit_routing_record(
     return record
 
 
+def _emit_surface_stop_result(result: dict[str, Any], *, json_output: bool) -> None:
+    if json_output:
+        print(json.dumps(result, indent=2))
+        return
+    print(f"[dispatch] Status: {result.get('status', 'stopped')}")
+    print(f"[dispatch] Decision: {result.get('decision', 'unknown')}")
+    executor = result.get("executor")
+    if executor:
+        print(f"[dispatch] Executor: {executor}")
+    message = result.get("message") or result.get("summary")
+    if message:
+        print(f"[dispatch] {message}")
+
+
 def run_recoverable_surface_command(
     args: argparse.Namespace,
     *,
@@ -949,6 +985,18 @@ def run_recoverable_surface_command(
     }[args.surface]
     decision = _surface_decision(args)
     surface_record = _surface_record_for_chain(args, repo_root)
+    completed_stop = _completed_candidate_stop_result(
+        repo_root,
+        surface_record,
+        decision=decision,
+        executor_name=executor_name,
+    )
+    if completed_stop is not None:
+        _emit_surface_stop_result(
+            completed_stop,
+            json_output=bool(getattr(args, "json", False)),
+        )
+        return 0
     wave_id = normalize_wave_id(
         str(surface_record.get("wave_name") or surface_record.get("wave_id") or "")
     )
