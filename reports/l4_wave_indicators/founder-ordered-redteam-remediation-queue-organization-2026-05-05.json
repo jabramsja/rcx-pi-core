@@ -1,0 +1,24 @@
+{
+  "wave_id": "founder-ordered-redteam-remediation-queue-organization-2026-05-05",
+  "repeat_run_speedup_ratio": 0.99594,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.422682,
+  "repeat_run_raw_seconds": [
+    0.420966,
+    0.422682
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.420966
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.843648
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-06T01:53:20Z",
+  "collector_version": "2.2.0"
+}
