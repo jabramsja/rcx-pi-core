@@ -9,6 +9,7 @@ Covers:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -25,6 +26,11 @@ commit_mod = load_module(
     "commit_executor",
     REPO_ROOT / "mu" / "tools" / "executors" / "commit_executor.py",
 )
+
+
+def _canonical_handoff_sha_for_test(handoff: dict) -> str:
+    canonical = json.dumps(handoff, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _make_new_schema_handoff(**overrides):
@@ -436,6 +442,7 @@ class TestSupervisorReceiptIsAuthority:
             caller="standalone",
             pre_commit_receipt_path="",
         )
+        original_handoff_sha = _canonical_handoff_sha_for_test(handoff)
         import types
         mock_client = types.ModuleType("meta_bridge_client")
         mock_client.run_meta_bridge_package = lambda *a, **kw: fake_result
@@ -456,6 +463,16 @@ class TestSupervisorReceiptIsAuthority:
         )
         assert result.get("handoff_receipt_path") == ""
         assert result.get("handoff_receipt_decision") == "STANDALONE_SKIP"
+        assert result.get("handoff_sha") == original_handoff_sha
+        assert result.get("receipt_refreshed_handoff_sha") != original_handoff_sha
+        continuation_path = (
+            repo
+            / ".agent_bus"
+            / "executors"
+            / "commit_executor_test-wave.json"
+        )
+        continuation = json.loads(continuation_path.read_text(encoding="utf-8"))
+        assert continuation["handoff_sha"] == original_handoff_sha
 
     def test_supervisor_receipt_decision_still_wins_after_handoff_verification(self, tmp_path):
         """Even with a valid handoff receipt, the fresh supervisor receipt sets the final decision."""
@@ -841,7 +858,7 @@ class TestReceiptChainEndToEnd:
             tracked_packet=packet_path,
             scope_items=[packet_path],
         )
-        original_handoff_sha = commit_mod._handoff_sha(handoff)  # ANTICHEAT_OK: locks continuation key identity
+        original_handoff_sha = _canonical_handoff_sha_for_test(handoff)
         post_commit_results = []
 
         def fake_post_commit_pipeline(**kwargs):
@@ -862,9 +879,7 @@ class TestReceiptChainEndToEnd:
                     / "phase_b_handoff.json"
                 ).read_text(encoding="utf-8")
             )
-            persisted_handoff_sha = commit_mod._handoff_sha(  # ANTICHEAT_OK: rerun binds to durable CLI handoff
-                persisted_handoff
-            )
+            persisted_handoff_sha = _canonical_handoff_sha_for_test(persisted_handoff)
             second = commit_mod.run_commit_pipeline(persisted_handoff, repo_root=repo)
 
         continuation_path = (
