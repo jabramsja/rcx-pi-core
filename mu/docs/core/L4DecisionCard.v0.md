@@ -4,7 +4,7 @@ TYPE: REFERENCE
 LAST_VERIFIED: 2026-02-19
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
-GROUNDING_TESTS: none
+GROUNDING_TESTS: tests/docs/test_status_tasks_consistency.py; tests/research/test_d002_micro_matcher.py; tests/research/test_d003_staged_bootstrap.py; tests/research/test_d006_h1_fuel_threading.py; tests/research/test_d007_h3_negative_control.py; tests/research/test_d009_h4_depth_threading.py; mu/tests/research/test_d010_h5_projection_loader_binary.py; mu/tests/l4_gates/test_stage0_production_pilot_gate.py
 
 This header enables automated doc drift detection.
 - REFERENCE: Stable definitions, rarely changes

@@ -1,7 +1,7 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-02-14
+LAST_VERIFIED: 2026-05-06
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
 GROUNDING_TESTS: tests/docs/test_doc_contracts.py
@@ -51,19 +51,24 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 | [EntropyBudget.md](core/EntropyBudget.md) | RCX Entropy Budget (Contract) |
 | [G8CpsFeasibility.v0.md](core/G8CpsFeasibility.v0.md) | G8 CPS Feasibility Study v0 |
 | [HemisphereExecutionChecklist.v0.md](core/HemisphereExecutionChecklist.v0.md) | Hemisphere Metabolization Execution Checklist v0 |
+| [L3SubstrateArchitecture.v0.md](core/L3SubstrateArchitecture.v0.md) | L3 Substrate Portability Architecture |
 | [L4DecisionCard.v0.md](core/L4DecisionCard.v0.md) | L4 Decision Card Template |
 | [L4ExitChecklist.v0.md](core/L4ExitChecklist.v0.md) | L4 Exit Checklist v0 |
 | [L4MicroAbi.v0.md](core/L4MicroAbi.v0.md) | L4 Micro-ABI v0 |
 | [LegacySurfaceDecisionRecord.v0.md](core/LegacySurfaceDecisionRecord.v0.md) | Legacy Surface Decision Record v0 |
 | [MetaCircularKernel.v0.md](core/MetaCircularKernel.v0.md) | Meta-Circular Kernel Specification v0 |
+| [MuDagAbiSpike.v0.md](core/MuDagAbiSpike.v0.md) | Mu DAG ABI Spike v0 |
 | [MuType.v0.md](core/MuType.v0.md) | Mu Type Definition v0 |
+| [NorthStarSemantics.v0.md](core/NorthStarSemantics.v0.md) | North Star Semantics Lock v0 |
 | [ObserverEventContract.v0.md](core/ObserverEventContract.v0.md) | Observer Event Contract v0 |
+| [OntologyPromotionContract.v0.md](core/OntologyPromotionContract.v0.md) | Ontology Promotion Contract v0 |
 | [OperatorExhaustion.v0.md](core/OperatorExhaustion.v0.md) | Operator Exhaustion Structural Specification v0 |
 | [RCXEngine.v0.md](core/RCXEngine.v0.md) | RCX Engine |
 | [RCXKernel.v0.md](core/RCXKernel.v0.md) | RCX Kernel Specification v0 |
 | [RecursiveKernel.v0.md](core/RecursiveKernel.v0.md) | Recursive Kernel Design (Phase 8) |
 | [SelfHosting.v0.md](core/SelfHosting.v0.md) | Self-Hosting Specification v0 |
 | [StructuralPurity.v0.md](core/StructuralPurity.v0.md) | Structural Purity Guardrails v0 |
+| [TypedNumericEnvelopes.v0.md](core/TypedNumericEnvelopes.v0.md) | P6: Typed Numeric Envelopes — Decision Packet |
 | [UniversalEval.v0.md](core/UniversalEval.v0.md) | Universal Eval Seed (L4 Alternative Design) |
 | [Why_RCX_PI_VM_EXISTS.md](core/Why_RCX_PI_VM_EXISTS.md) | Why RCX PI VM EXISTS |
 | [recurrence_v2_design.md](core/recurrence_v2_design.md) | Recurrence v2 Design — Hash-Accelerated Closure Detection |
@@ -112,10 +117,12 @@ Run: pytest tests/docs/test_doc_contracts.py -v
 
 | File | Title |
 |------|-------|
+| [AgentBridgeProtocol.v0.md](agents/AgentBridgeProtocol.v0.md) | Agent Bridge Protocol v0 |
 | [AgentGuardrails.v0.md](agents/AgentGuardrails.v0.md) | Agent Guardrails v0 |
 | [AgentRig.v0.md](agents/AgentRig.v0.md) | RCX Agent Rig - Lead Architect Workflow |
 | [AgentRunbook.v0.md](agents/AgentRunbook.v0.md) | Agent Runbook v0 |
 | [NoOpProofTemplate.v0.md](agents/NoOpProofTemplate.v0.md) | NO-OP Proof Template |
+| [PipelineRecovery.v0.md](agents/PipelineRecovery.v0.md) | Pipeline Recovery System — Design v0 |
 
 ## audit
 

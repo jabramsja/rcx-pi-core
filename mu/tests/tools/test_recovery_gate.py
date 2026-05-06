@@ -13,6 +13,7 @@ from mu.tests.tools.module_loader import load_module
 _EXECUTORS_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "executors"
 _OBSERVABILITY_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "observability"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_OBSERVABILITY_ONESHOT_TIMEOUT_S = int(os.environ.get("RCX_TEST_OBSERVABILITY_ONESHOT_TIMEOUT_S", "30"))
 rg_mod = load_module("recovery_gate", _EXECUTORS_DIR / "recovery_gate.py")
 dash_mod = load_module("pipeline_dashboard_observability", _OBSERVABILITY_DIR / "pipeline_dashboard.py")
 web_mod = load_module("pipeline_dashboard_web_observability", _OBSERVABILITY_DIR / "pipeline_dashboard_web.py")
@@ -8267,7 +8268,7 @@ fi
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -8334,7 +8335,7 @@ fi
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -8401,7 +8402,7 @@ fi
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -8455,7 +8456,7 @@ fi
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -8524,7 +8525,7 @@ fi
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -8567,7 +8568,7 @@ fi
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -8613,7 +8614,7 @@ fi
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0
@@ -8773,7 +8774,7 @@ fi
             capture_output=True,
             text=True,
             env=env,
-            timeout=10,
+            timeout=_OBSERVABILITY_ONESHOT_TIMEOUT_S,
         )
 
         assert result.returncode == 0

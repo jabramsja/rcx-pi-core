@@ -197,7 +197,3 @@ Examples:
 
 ## CLI Quickstart
 See `mu/docs/cli/cli_quickstart.md` for the umbrella `rcx` command and the JSON-emitting tools.
-
----
-
-*Last updated: 2026-03-05*
