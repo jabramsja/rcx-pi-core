@@ -1,7 +1,7 @@
 # Founder Ordered Redteam Tests Audit
 
 Date: 2026-05-05
-Status: QUEUED (packet/tracker seed only; audit not started)
+Status: COMPLETED (commit-ready, supervisor COMMIT_GO)
 Task: [NEXT-CODEX-POST-REDTEAM]
 Parent directive: [FOUNDER-ORDERED-REDTEAM-WAVE-QUEUE]
 Wave ID: founder-ordered-redteam-tests-audit-2026-05-05
@@ -31,6 +31,9 @@ Output lanes:
 - `reports/deferred/blocking/` for blocking findings.
 - `reports/deferred/non_blocking/` for non-blocking findings.
 - `TASKS.md` for the tracker status produced by the audit wave.
+
+- `reports/deferred/non_blocking/founder-ordered-redteam-tests-audit-2026-05-05_bridge_nonblockers.md`
+  - Same-wave Phase B/commit generated deferred non-blocking bridge findings packet only; no unrelated deferred report is authorized by this wave.
 
 ## Work Items
 
@@ -103,3 +106,52 @@ or a precise follow-up automation packet before normal execution resumes.
   `FOUNDER_OVERRIDE:founder-ordered-redteam-wave-queue-2026-05-05`.
 - Wave-bound authorization:
   `FOUNDER_OVERRIDE:founder-ordered-redteam-tests-audit-2026-05-05`.
+
+<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->
+## Phase B Indicator Scope Reconciliation
+
+- Refresh wave: `founder-ordered-redteam-tests-audit-2026-05-05`
+- Active packet: `reports/control_plane/founder_ordered_redteam_tests_audit_2026-05-05.md`
+- Indicator artifact: `reports/l4_wave_indicators/founder-ordered-redteam-tests-audit-2026-05-05.json`
+- Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before pre-commit supervisor review so the tracker note, Gate 8 package, and governing packet describe one staged scope.
+- Scope binding: no indicator file other than the artifact above is in scope for this wave.
+- Current staged files:
+  - `TASKS.md`
+  - `reports/control_plane/founder_ordered_redteam_tests_audit_2026-05-05.md`
+  - `reports/deferred/blocking/founder_ordered_redteam_tests_audit_2026-05-05_blocking.md`
+  - `reports/deferred/non_blocking/founder-ordered-redteam-tests-audit-2026-05-05_bridge_nonblockers.md`
+  - `reports/deferred/non_blocking/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking.md`
+  - `reports/l4_wave_indicators/founder-ordered-redteam-tests-audit-2026-05-05.json`
+<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
+
+<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->
+## Same-Wave Deferred Non-Blocking Authorization
+
+- Refresh wave: `founder-ordered-redteam-tests-audit-2026-05-05`
+- Purpose: Phase B and commit automation may stage the same-wave non-blocking bridge findings packet as deferred follow-up instead of blocking an otherwise commit-ready wave.
+- Authorized deferred packet(s):
+  - `reports/deferred/non_blocking/founder-ordered-redteam-tests-audit-2026-05-05_bridge_nonblockers.md`
+- Scope binding: the packet(s) above are in scope only as generated same-wave non-blocking bridge findings packets.
+- Acceptance binding: the final touched-file set may include the packet(s) above when they are also present in `deferred_items` or current staged files.
+<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->
+
+<!-- COMMIT_PATH_TRUTH_REFRESH:start -->
+## Commit Path Truth Refresh
+
+- Refresh wave: `founder-ordered-redteam-tests-audit-2026-05-05`
+- Active packet: `reports/control_plane/founder_ordered_redteam_tests_audit_2026-05-05.md`
+- Commit status: `pre_commit_supervisor_pending`
+- Tracker note sha256: `658960270acd9b95449bce25bb5b30ee65c2328966ac9ec2868878efbfc6eda5`
+- Indicator artifact: `reports/l4_wave_indicators/founder-ordered-redteam-tests-audit-2026-05-05.json`
+- Evidence command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id founder-ordered-redteam-tests-audit-2026-05-05 --output reports/l4_wave_indicators/founder-ordered-redteam-tests-audit-2026-05-05.json`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/founder_ordered_redteam_tests_audit_2026-05-05.md. (2) Commit handoff carries 6 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface..
+- Evidence handles:
+  - `indicator`: `reports/l4_wave_indicators/founder-ordered-redteam-tests-audit-2026-05-05.json`
+- Current staged files:
+  - `TASKS.md`
+  - `reports/control_plane/founder_ordered_redteam_tests_audit_2026-05-05.md`
+  - `reports/deferred/blocking/founder_ordered_redteam_tests_audit_2026-05-05_blocking.md`
+  - `reports/deferred/non_blocking/founder-ordered-redteam-tests-audit-2026-05-05_bridge_nonblockers.md`
+  - `reports/deferred/non_blocking/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking.md`
+  - `reports/l4_wave_indicators/founder-ordered-redteam-tests-audit-2026-05-05.json`
+<!-- COMMIT_PATH_TRUTH_REFRESH:end -->
