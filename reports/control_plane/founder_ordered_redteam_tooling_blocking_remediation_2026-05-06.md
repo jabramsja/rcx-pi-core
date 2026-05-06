@@ -272,14 +272,6 @@ Same-wave failure evidence from
 - Scope binding: no indicator file other than the artifact above is in scope for this wave.
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/tools/test_commit_executor_receipt.py`
-  - `mu/tests/tools/test_l4_execution_contract_enforcement.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
-  - `mu/tests/tools/test_tracker_sync_enforcement.py`
-  - `mu/tools/checks/enforce_l4_execution_contract.py`
-  - `mu/tools/checks/enforce_tracker_sync.sh`
-  - `mu/tools/executors/commit_executor.py`
-  - `mu/tools/executors/phase_b_executor.py`
   - `reports/control_plane/founder_ordered_redteam_tooling_blocking_remediation_2026-05-06.md`
   - `reports/deferred/non_blocking/founder-ordered-redteam-tooling-blocking-remediation-2026-05-06_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/founder-ordered-redteam-tooling-blocking-remediation-2026-05-06.json`
@@ -302,22 +294,14 @@ Same-wave failure evidence from
 - Refresh wave: `founder-ordered-redteam-tooling-blocking-remediation-2026-05-06`
 - Active packet: `reports/control_plane/founder_ordered_redteam_tooling_blocking_remediation_2026-05-06.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `818c7ac10b5f5282ff604323607d4be63e9bc5f8d0845ba3ea982dec9755fa1b`
+- Tracker note sha256: `615e5f3977e41b0d5a46327f37ac195e05fb4f56227348f5339a30c64cf0edde`
 - Indicator artifact: `reports/l4_wave_indicators/founder-ordered-redteam-tooling-blocking-remediation-2026-05-06.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_l4_execution_contract_enforcement.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_tracker_sync_enforcement.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/founder_ordered_redteam_tooling_blocking_remediation_2026-05-06.md. (2) Final pytest gate covered 4 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id founder-ordered-redteam-tooling-blocking-remediation-2026-05-06 --output reports/l4_wave_indicators/founder-ordered-redteam-tooling-blocking-remediation-2026-05-06.json`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/founder_ordered_redteam_tooling_blocking_remediation_2026-05-06.md. (2) Commit handoff carries 4 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/founder-ordered-redteam-tooling-blocking-remediation-2026-05-06.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/tools/test_commit_executor_receipt.py`
-  - `mu/tests/tools/test_l4_execution_contract_enforcement.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
-  - `mu/tests/tools/test_tracker_sync_enforcement.py`
-  - `mu/tools/checks/enforce_l4_execution_contract.py`
-  - `mu/tools/checks/enforce_tracker_sync.sh`
-  - `mu/tools/executors/commit_executor.py`
-  - `mu/tools/executors/phase_b_executor.py`
   - `reports/control_plane/founder_ordered_redteam_tooling_blocking_remediation_2026-05-06.md`
   - `reports/deferred/non_blocking/founder-ordered-redteam-tooling-blocking-remediation-2026-05-06_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/founder-ordered-redteam-tooling-blocking-remediation-2026-05-06.json`
