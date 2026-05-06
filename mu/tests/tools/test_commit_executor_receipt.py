@@ -782,7 +782,7 @@ class TestReceiptChainEndToEnd:
         assert len(add_calls) == 1
         assert not lock_path.exists()
 
-    def test_commit_packet_truth_refresh_keeps_continuation_bound_to_original_handoff(self, tmp_path):
+    def test_commit_packet_truth_refresh_binds_continuation_to_persisted_handoff(self, tmp_path):
         from collections import namedtuple
         import subprocess
         import types
@@ -854,7 +854,18 @@ class TestReceiptChainEndToEnd:
             side_effect=fake_post_commit_pipeline,
         ):
             first = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
-            second = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+            persisted_handoff = json.loads(
+                (
+                    repo
+                    / ".agent_bus"
+                    / "executors"
+                    / "phase_b_handoff.json"
+                ).read_text(encoding="utf-8")
+            )
+            persisted_handoff_sha = commit_mod._handoff_sha(  # ANTICHEAT_OK: rerun binds to durable CLI handoff
+                persisted_handoff
+            )
+            second = commit_mod.run_commit_pipeline(persisted_handoff, repo_root=repo)
 
         continuation_path = (
             repo / ".agent_bus" / "executors" / f"commit_executor_{wave_id}.json"
@@ -864,10 +875,10 @@ class TestReceiptChainEndToEnd:
         assert first["status"] == "continued", first
         assert second["status"] == "continued", second
         assert len(post_commit_results) == 2
-        assert first["handoff_sha"] == original_handoff_sha
+        assert first["handoff_sha"] == persisted_handoff_sha
         assert first["refreshed_handoff_sha"] != original_handoff_sha
-        assert continuation["handoff_sha"] == original_handoff_sha
-        assert post_commit_results[-1]["handoff_sha"] == original_handoff_sha
+        assert continuation["handoff_sha"] == persisted_handoff_sha
+        assert post_commit_results[-1]["handoff_sha"] == persisted_handoff_sha
         assert post_commit_results[-1]["commit_sha"] == continuation["commit_sha"]
         assert "git_commit" in post_commit_results[-1]["steps_completed"]
 
