@@ -472,6 +472,43 @@ class TestDispatcherFreshnessRefresh:
         assert result["completed_candidates"][0]["tracked_packet"] == packet_rel
         assert calls == []
 
+    def test_dispatch_stops_completed_bounded_candidate_before_tracker_update(
+        self, tmp_path, monkeypatch,
+    ):
+        repo, _ = _init_builder_repo(tmp_path)
+        packet_rel = "reports/control_plane/seed_packet.md"
+        (repo / packet_rel).write_text(
+            "# seed packet\n\nStatus: COMPLETED (commit-ready, supervisor COMMIT_GO)\n",
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "stale completed tracker update",
+            "wave_name": "builder-wave-2026-04-20",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "next_candidates": [
+                {
+                    "candidate": "builder-wave-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": packet_rel,
+                }
+            ],
+        }
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout='{"status":"success"}', stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+
+        result = dispatch_mod.dispatch(record, repo_root=repo, skip_freshness=True)
+
+        assert result["status"] == "stopped"
+        assert "already-complete bounded candidate" in result["message"]
+        assert result["completed_candidates"][0]["tracked_packet"] == packet_rel
+        assert calls == []
+
     def test_dispatch_ignores_completed_unbounded_candidate_when_bounded_open_exists(
         self, tmp_path, monkeypatch,
     ):
@@ -7990,6 +8027,84 @@ class TestModularSurfaceEntrypoints:
         assert payload["wave_name"] == "parallel-pipeline-agent-teams"
         assert "--dispatcher-owned-recovery" in cmd
 
+    def test_phase_b_surface_stops_completed_bounded_packet_before_executor(
+        self, tmp_path, capsys,
+    ):
+        repo, _ = _init_builder_repo(tmp_path)
+        packet_rel = "reports/control_plane/seed_packet.md"
+        (repo / packet_rel).write_text(
+            "# seed packet\n\nStatus: COMPLETED (commit-ready, supervisor COMMIT_GO)\n",
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "stale completed phase-b route",
+            "wave_name": "builder-wave-2026-04-20",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "next_candidates": [
+                {
+                    "candidate": "builder-wave-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": packet_rel,
+                }
+            ],
+        }
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["phase-b", "--routing-record-json", json.dumps(record), "--json"]
+        )
+
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=repo,
+                config={"timeouts": {"phase_b_executor": 300}},
+            )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert exit_code == 0
+        assert payload["status"] == "stopped"
+        assert payload["completed_candidates"][0]["tracked_packet"] == packet_rel
+        mock_run.assert_not_called()
+
+    def test_commit_surface_stops_completed_bounded_packet_before_executor(
+        self, tmp_path, capsys,
+    ):
+        repo, _ = _init_builder_repo(tmp_path)
+        packet_rel = "reports/control_plane/seed_packet.md"
+        (repo / packet_rel).write_text(
+            "# seed packet\n\nStatus: COMPLETED (commit-ready, supervisor COMMIT_GO)\n",
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "stale completed commit route",
+            "wave_name": "builder-wave-2026-04-20",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "next_candidates": [
+                {
+                    "candidate": "builder-wave-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": packet_rel,
+                }
+            ],
+        }
+        args = dispatch_mod.build_surface_parser().parse_args(
+            ["commit", "--routing-record-json", json.dumps(record), "--json"]
+        )
+
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
+            exit_code = dispatch_mod.run_recoverable_surface_command(
+                args,
+                repo_root=repo,
+                config={"timeouts": {"commit_executor": 300}},
+            )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert exit_code == 0
+        assert payload["status"] == "stopped"
+        assert payload["completed_candidates"][0]["tracked_packet"] == packet_rel
+        mock_run.assert_not_called()
+
     def test_phase_b_surface_derives_plan_from_tracked_packet(self, tmp_path):
         routing_path = tmp_path / "routing.json"
         routing_path.write_text(
@@ -12264,6 +12379,11 @@ class TestRoutingRecordBuilderDirectoryRejection:
 
 
 class TestRoutingRecordBuilderCompletedPacketRejection:
+    def test_status_predicate_keeps_pending_commit_routable(self):
+        assert common_mod.packet_status_is_completed(
+            "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT"
+        ) is False
+
     def test_rejects_completed_control_plane_packet(self, tmp_path):
         repo, _ = _init_builder_repo(tmp_path)
         packet = repo / "reports" / "control_plane" / "seed_packet.md"
@@ -12279,6 +12399,23 @@ class TestRoutingRecordBuilderCompletedPacketRejection:
         assert errors
         assert any("already complete" in e for e in errors)
         assert record == {}
+
+    def test_accepts_implemented_pending_commit_control_plane_packet(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        packet = repo / "reports" / "control_plane" / "seed_packet.md"
+        packet.write_text(
+            "# seed packet\n\nStatus: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT\n",
+            encoding="utf-8",
+        )
+
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo)
+        )
+
+        assert errors == []
+        assert record["next_candidates"][0]["tracked_packet"] == (
+            "reports/control_plane/seed_packet.md"
+        )
 
 
 class TestRoutingRecordBuilderBlockerReadmeExclusion:

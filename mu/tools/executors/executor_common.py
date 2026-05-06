@@ -810,6 +810,10 @@ _COMPLETED_PACKET_STATUS_RE = re.compile(
     r"\b(?:COMPLETED|IMPLEMENTED|LANDED|CLOSED)\b",
     re.IGNORECASE,
 )
+_PENDING_PACKET_STATUS_RE = re.compile(
+    r"\b(?:PENDING|PENDING_COMMIT|PENDING-COMMIT|PRE_COMMIT|PRE-COMMIT)\b",
+    re.IGNORECASE,
+)
 
 
 def _validate_tracked_packet_for_builder(
@@ -859,9 +863,11 @@ def packet_status_is_completed(status: str | None) -> bool:
     clean = str(status or "").strip()
     if not clean:
         return False
-    return bool(_COMPLETED_PACKET_STATUS_RE.search(clean)) or (
-        "FINDINGS ROUTED" in clean.upper()
-    )
+    if "FINDINGS ROUTED" in clean.upper():
+        return True
+    if _PENDING_PACKET_STATUS_RE.search(clean):
+        return False
+    return bool(_COMPLETED_PACKET_STATUS_RE.search(clean))
 
 
 def read_control_plane_packet_status(repo_root: Path, tracked_packet: str) -> str | None:
