@@ -389,6 +389,23 @@ def _canonicalize_surface_task_id(task_id: str) -> str:
     return f"[{clean}]"
 
 
+def _routing_candidate_dicts(record: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates = record.get("next_candidates")
+    if not isinstance(candidates, list):
+        return []
+    return [candidate for candidate in candidates if isinstance(candidate, dict)]
+
+
+def _selected_routing_candidate_dicts(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return candidates eligible for routing, with legacy fallback."""
+    candidates = _routing_candidate_dicts(record)
+    bounded = [
+        candidate for candidate in candidates
+        if candidate.get("bounded") is True
+    ]
+    return bounded or candidates
+
+
 def _surface_phase_b_plan_from_routing_payload(routing_payload: str | None) -> str | None:
     """Prefer tracked_packet from a Phase B routing payload when no explicit plan is given."""
     if not routing_payload:
@@ -399,12 +416,7 @@ def _surface_phase_b_plan_from_routing_payload(routing_payload: str | None) -> s
         return None
     if not isinstance(record, dict):
         return None
-    candidates = record.get("next_candidates")
-    if not isinstance(candidates, list):
-        return None
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
+    for candidate in _selected_routing_candidate_dicts(record):
         tracked_packet = str(candidate.get("tracked_packet") or "").strip()
         if tracked_packet:
             return tracked_packet
@@ -412,12 +424,7 @@ def _surface_phase_b_plan_from_routing_payload(routing_payload: str | None) -> s
 
 
 def _routing_record_tracked_packet(record: dict[str, Any]) -> str:
-    candidates = record.get("next_candidates")
-    if not isinstance(candidates, list):
-        return ""
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
+    for candidate in _selected_routing_candidate_dicts(record):
         tracked_packet = str(candidate.get("tracked_packet") or "").strip()
         if tracked_packet:
             return tracked_packet
@@ -428,13 +435,8 @@ def _completed_routing_candidates(
     repo_root: Path,
     record: dict[str, Any],
 ) -> list[dict[str, str]]:
-    candidates = record.get("next_candidates")
-    if not isinstance(candidates, list):
-        return []
     completed: list[dict[str, str]] = []
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
+    for candidate in _selected_routing_candidate_dicts(record):
         tracked_packet = str(candidate.get("tracked_packet") or "").strip()
         if not tracked_packet:
             continue
@@ -1160,9 +1162,7 @@ def _phase_b_tracked_plan_or_error(
     include_recovery_env: bool = False,
 ) -> tuple[str | None, dict[str, Any] | None]:
     """Resolve a Phase B tracked packet path, optionally from recovery env."""
-    for candidate in record.get("next_candidates", []):
-        if not isinstance(candidate, dict):
-            continue
+    for candidate in _selected_routing_candidate_dicts(record):
         tracked_packet = candidate.get("tracked_packet")
         if tracked_packet and isinstance(tracked_packet, str):
             plan_path = tracked_packet
@@ -2684,7 +2684,7 @@ def dispatch(
             # Phase A needs --plan-name. When a candidate already declares a
             # tracked packet, prefer that canonical packet stem so Phase A
             # reuses the tracked file instead of minting a date-slug duplicate.
-            candidates = record.get("next_candidates", [])
+            candidates = _selected_routing_candidate_dicts(record)
             plan_name = None
             for c in candidates:
                 tp = c.get("tracked_packet")
