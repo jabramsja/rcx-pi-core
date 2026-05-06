@@ -81,8 +81,7 @@ class TestAgentToolingSmoke:
         because they load prompt files at import time which can be slow.
         """
         script_path = TOOLS_DIR / script
-        if not script_path.exists():
-            pytest.skip(f"Script not found: {script}")
+        assert script_path.exists(), f"Required core tool script missing: {script}"
 
         # Run with --help to test basic import/execution
         result = subprocess.run(

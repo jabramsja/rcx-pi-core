@@ -1,9 +1,11 @@
 """Wave I Phase 2: Meta-Circular Execution Evidence Gate Tests.
 
 Proves that match.v2 and subst.v2 projections execute STRUCTURALLY within
-the kernel loop (`step_kernel_mu` -> `_step_trusted` -> `_apply_projection_trusted`
--> Stage0 bootstrap). The trusted path uses Stage0 host functions
-(`_stage0_match`, `_stage0_substitute`) as the irreducible bootstrap.
+the Stage0 bootstrap. Source-lock coverage in this file preserves the
+compatibility/fallback helper chain (`_step_trusted` ->
+`_apply_projection_trusted` -> Stage0 match/subst). The production
+`step_kernel_mu` cutover path is proved behaviorally by
+`test_stage0_vm_cutover.py`.
 
 Evidence for: L4 Gate G8, Wave I Phase 2 (L4_ENABLER).
 
@@ -12,7 +14,7 @@ Seven test categories (24 tests total):
 2. Stage0 routing lock (runtime proof: _stage0_match called, _match_inner not called)
 3. Static seed pipeline proof (kernel -> match -> subst handoff via JSON)
 4. Combined kernel projection count lock (28 = 7 + 8 + 13)
-5. Trusted-path call-graph proof (two-layer AST scan)
+5. Trusted fallback call-graph proof (two-layer AST scan)
 6. Cross-substrate parity (JS stepKernel same step count + result)
 7. Dict pattern meta-circular execution (higher step count for complex matching)
 """
@@ -295,18 +297,18 @@ class TestCombinedKernelProjectionCountLock:
 
 
 # ===========================================================================
-# Test 4: Trusted-Path Call-Graph Proof
+# Test 4: Trusted Fallback Call-Graph Proof
 # ===========================================================================
 
-class TestTrustedPathCallGraphProof:
-    """Two-layer AST proof of the trusted execution path.
+class TestTrustedFallbackCallGraphProof:
+    """Two-layer AST proof of the trusted fallback helper path.
 
     Layer 1: _step_trusted is a projection loop (for-loop iterating projections
              via _apply_projection_trusted, plus coverage hooks).
     Layer 2: _apply_projection_trusted extracts pattern/body and delegates to
              Stage0 match/subst (the irreducible bootstrap).
 
-    Claim: trusted path = projection loop + coverage hooks + Stage0 bootstrap.
+    Claim: trusted fallback = projection loop + coverage hooks + Stage0 bootstrap.
     NOT "zero host interception" — Stage0 IS host code, but it's the
     irreducible bootstrap that makes no semantic decisions.
     """
@@ -348,21 +350,22 @@ class TestTrustedPathCallGraphProof:
             "_step_trusted must contain at least one for-loop (projection iteration)"
         )
 
-    def test_apply_projection_trusted_delegates_to_stage0(self):
-        """_apply_projection_trusted must delegate to Stage0 match and substitute.
+    def test_apply_projection_trusted_fallback_delegates_to_stage0(self):
+        """_apply_projection_trusted fallback delegates to Stage0 match/subst.
 
-        Stage0 is the sole production path (flag removed Wave 4, 2026-03-12).
-        The test verifies Stage0 functions are called directly.
+        This is source-lock coverage for the compatibility helper path. The
+        current step_kernel_mu production cutover path is behavioral evidence
+        in test_stage0_vm_cutover.py, not this AST assertion.
         """
         source = _get_function_source(_apply_projection_trusted)
-        # Stage0 is production default — require Stage0 functions, not fallbacks
+        # Preserve fallback-helper delegation to the Stage0 bootstrap helpers.
         assert "_stage0_match" in source, (
             "_apply_projection_trusted must call _stage0_match "
-            "(Stage0 is production default since Wave H)"
+            "(trusted fallback helper must reuse Stage0 match)"
         )
         assert "_stage0_substitute" in source, (
             "_apply_projection_trusted must call _stage0_substitute "
-            "(Stage0 is production default since Wave H)"
+            "(trusted fallback helper must reuse Stage0 substitute)"
         )
 
     def test_apply_projection_trusted_extracts_pattern_body(self):
