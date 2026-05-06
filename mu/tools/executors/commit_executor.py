@@ -58,6 +58,8 @@ try:
         is_agent_bus_runtime_path,
         load_executor_config,
         normalize_wave_id,
+        packet_status_is_completed,
+        read_control_plane_packet_status,
         resolve_agent_bus_dir,
         ensure_not_agent_review_mode,
         ExecutorCommonError,
@@ -80,6 +82,8 @@ except ImportError:
     is_agent_bus_runtime_path = _mod.is_agent_bus_runtime_path
     load_executor_config = _mod.load_executor_config
     normalize_wave_id = _mod.normalize_wave_id
+    packet_status_is_completed = _mod.packet_status_is_completed
+    read_control_plane_packet_status = _mod.read_control_plane_packet_status
     resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
@@ -5976,6 +5980,202 @@ def _post_merge_cleanup(
     return outcome
 
 
+def _queue_entry_backtick_value(line: str, label: str) -> str:
+    match = re.search(rf"{re.escape(label)}:\s*`([^`]+)`", line)
+    return match.group(1).strip() if match else ""
+
+
+def _founder_ordered_queue_entries(repo_root: Path) -> list[dict[str, Any]]:
+    tasks_path = repo_root / "TASKS.md"
+    try:
+        lines = tasks_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+
+    entries: list[dict[str, Any]] = []
+    for line in lines:
+        if "FOUNDER-ORDERED-REDTEAM-" not in line:
+            continue
+        if "Wave ID:" not in line or "Packet:" not in line:
+            continue
+        label_match = re.match(
+            r"^\s*\d+\.\s+\*\*\[(?P<label>[^\]]+)\]\s*(?P<state>.*?)\*\*",
+            line,
+        )
+        if not label_match:
+            continue
+        wave_id = _queue_entry_backtick_value(line, "Wave ID")
+        packet = _queue_entry_backtick_value(line, "Packet")
+        if not wave_id or not packet:
+            continue
+        category_match = re.search(r"Category:\s*([^.`]+)", line)
+        source_packet = _queue_entry_backtick_value(line, "Source audit packet")
+        status = read_control_plane_packet_status(repo_root, packet)
+        line_upper = line.upper()
+        status_upper = str(status or "").upper()
+        entries.append(
+            {
+                "label": label_match.group("label").strip(),
+                "state": label_match.group("state").strip(),
+                "wave_id": normalize_wave_id(wave_id),
+                "category": (
+                    category_match.group(1).strip()
+                    if category_match
+                    else "founder-ordered redteam"
+                ),
+                "packet": packet,
+                "source_packet": source_packet,
+                "status": status,
+                "hard_stop": "HARD STOP" in line_upper or "HARD STOP" in status_upper,
+            }
+        )
+    return entries
+
+
+def _next_open_founder_ordered_queue_entry(repo_root: Path) -> dict[str, Any] | None:
+    for entry in _founder_ordered_queue_entries(repo_root):
+        if packet_status_is_completed(entry.get("status")):
+            continue
+        return entry
+    return None
+
+
+def _post_merge_blocker_report_paths(repo_root: Path) -> list[str]:
+    blocking_dir = repo_root / "reports" / "deferred" / "blocking"
+    if not blocking_dir.is_dir():
+        return []
+    return sorted(
+        p.relative_to(repo_root).as_posix()
+        for p in blocking_dir.glob("*.md")
+        if p.name != "README.md"
+    )
+
+
+def _post_merge_request_for_queue_entry(entry: dict[str, Any]) -> str:
+    packet = str(entry.get("packet") or "")
+    source_packet = str(entry.get("source_packet") or "")
+    category = str(entry.get("category") or "founder-ordered redteam")
+    read_targets = [packet]
+    if source_packet:
+        read_targets.append(source_packet)
+    target_text = " and ".join(read_targets)
+    if entry.get("hard_stop"):
+        return (
+            "Hard stop before implementation. The next open founder-ordered "
+            f"candidate is {packet}; report that /mu structural work is queued "
+            "and do not dispatch Phase A, Phase B, or commit implementation."
+        )
+    return (
+        f"Use the full dispatcher pipeline for this {category} remediation wave: "
+        "post-merge supervisor -> Phase A -> Phase B -> commit executor. "
+        f"Read {target_text}. Do not edit Claude-related files. Stop if the "
+        "packet requires /mu structural work or founder input."
+    )
+
+
+def _refresh_post_merge_package_for_next_open_queue(
+    *,
+    repo_root: Path,
+    handoff: dict[str, Any],
+    result: dict[str, Any],
+    merge_sha: str,
+    log: Any,
+) -> dict[str, Any]:
+    """Write a fresh post-merge package from the founder-ordered queue state."""
+    entry = _next_open_founder_ordered_queue_entry(repo_root)
+    pr_number_raw = result.get("pr_number")
+    try:
+        merged_pr = int(pr_number_raw)
+    except (TypeError, ValueError):
+        merged_pr = 0
+
+    package_path = agent_bus_path(
+        repo_root,
+        _active_bus_dir(),
+        "meta",
+        "post_merge_package.json",
+    )
+
+    if entry is None:
+        package = {
+            "task_id": str(handoff.get("task_id") or "[NEXT-CODEX-POST-REDTEAM]"),
+            "merged_pr": merged_pr,
+            "merge_sha": merge_sha,
+            "wave_name": "founder-ordered-post-merge-queue-empty",
+            "lane": "founder-ordered remediation queue complete",
+            "rollout_packet_path": "reports/control_plane/post_redteam_structural_queue_2026-03-20.md",
+            "deferred_items": [],
+            "tracker_state_summary": (
+                "Post-merge package refreshed mechanically after commit merge. "
+                "No open founder-ordered queue packets remain."
+            ),
+            "next_candidates": [],
+            "blocker_report_paths": _post_merge_blocker_report_paths(repo_root),
+        }
+        package_path.parent.mkdir(parents=True, exist_ok=True)
+        package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+        result["post_merge_package_path"] = str(package_path.relative_to(repo_root))
+        result["post_merge_next_wave"] = None
+        result["post_merge_next_hard_stop"] = False
+        result["post_merge_queue_empty"] = True
+        log(
+            "Step 15b: refreshed post-merge package with no open "
+            "founder-ordered queue entry"
+        )
+        return package
+
+    deferred_items = [
+        p
+        for p in (entry.get("source_packet"), entry.get("packet"))
+        if isinstance(p, str) and p.strip()
+    ]
+    next_candidates: list[dict[str, Any]] = []
+    if not entry.get("hard_stop"):
+        next_candidates.append(
+            {
+                "candidate": entry["wave_id"],
+                "bounded": True,
+                "tracked_packet": entry["packet"],
+                "summary": (
+                    f"Implement the queued {entry['category']} remediation packet only."
+                ),
+                "request_for_claude": _post_merge_request_for_queue_entry(entry),
+            }
+        )
+
+    package = {
+        "task_id": str(handoff.get("task_id") or "[NEXT-CODEX-POST-REDTEAM]"),
+        "merged_pr": merged_pr,
+        "merge_sha": merge_sha,
+        "wave_name": entry["wave_id"],
+        "lane": f"{entry['category']} remediation",
+        "rollout_packet_path": "reports/control_plane/post_redteam_structural_queue_2026-03-20.md",
+        "deferred_items": deferred_items,
+        "tracker_state_summary": (
+            "Post-merge package refreshed mechanically after commit merge. "
+            + (
+                f"Next open queue packet is a hard stop: {entry['packet']}."
+                if entry.get("hard_stop")
+                else f"Next open queue packet: {entry['packet']}."
+            )
+        ),
+        "next_candidates": next_candidates,
+        "blocker_report_paths": _post_merge_blocker_report_paths(repo_root),
+    }
+    package_path.parent.mkdir(parents=True, exist_ok=True)
+    package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+    result["post_merge_package_path"] = str(package_path.relative_to(repo_root))
+    result["post_merge_next_wave"] = entry["wave_id"]
+    result["post_merge_next_hard_stop"] = bool(entry.get("hard_stop"))
+    result["post_merge_queue_empty"] = False
+    log(
+        "Step 15b: refreshed post-merge package for "
+        f"{entry['wave_id']}"
+        + (" (hard stop)" if entry.get("hard_stop") else "")
+    )
+    return package
+
+
 def _run_post_commit_pipeline(
     *,
     handoff: dict[str, Any],
@@ -6439,6 +6639,14 @@ def _run_post_commit_pipeline(
                 "errors": [f"Post-merge verify failed: {exc.stderr.strip()}"],
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number}
+
+    _refresh_post_merge_package_for_next_open_queue(
+        repo_root=verify_root,
+        handoff=handoff,
+        result=result,
+        merge_sha=str(result.get("merge_sha") or ""),
+        log=log,
+    )
 
     # ── Step 16: post_merge_cleanup ────────────────────────────────────
     # Best-effort cleanup of wave-local state that would otherwise

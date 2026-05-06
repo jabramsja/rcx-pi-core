@@ -57,6 +57,12 @@ def _noop_log(msg: str) -> None:
     pass
 
 
+def _write_queue_packet(repo: Path, relpath: str, status: str) -> None:
+    path = repo / relpath
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"# Packet\n\nStatus: {status}\n", encoding="utf-8")
+
+
 def test_happy_path_removes_branch_worktree_and_matching_stashes(tmp_path):
     repo = _init_repo(tmp_path)
     wave_id = "test-wave-alpha-2026-04-17"
@@ -95,6 +101,187 @@ def test_happy_path_removes_branch_worktree_and_matching_stashes(tmp_path):
     stash_list = _git(["stash", "list"], cwd=repo).stdout
     assert "unrelated-topic" in stash_list
     assert wave_id not in stash_list
+
+
+def test_post_merge_package_refresh_selects_next_open_queue_packet(tmp_path):
+    repo = _init_repo(tmp_path)
+    _write_queue_packet(
+        repo,
+        "reports/control_plane/founder_ordered_redteam_docs_non_blocking_remediation_2026-05-06.md",
+        "COMPLETED",
+    )
+    _write_queue_packet(
+        repo,
+        "reports/control_plane/founder_ordered_redteam_tests_non_blocking_remediation_2026-05-06.md",
+        "QUEUED - NON-BLOCKING REMEDIATION PACKET",
+    )
+    source = (
+        "reports/deferred/non_blocking/"
+        "founder_ordered_redteam_tests_audit_2026-05-05_non_blocking.md"
+    )
+    (repo / source).parent.mkdir(parents=True, exist_ok=True)
+    (repo / source).write_text("# source\n", encoding="utf-8")
+    (repo / "reports" / "deferred" / "blocking").mkdir(parents=True)
+    (repo / "reports" / "deferred" / "blocking" / "open_blocker.md").write_text(
+        "# blocker\n", encoding="utf-8"
+    )
+    (repo / "reports" / "deferred" / "blocking" / "README.md").write_text(
+        "# index\n", encoding="utf-8"
+    )
+    (repo / "TASKS.md").write_text(
+        "\n".join(
+            [
+                "## Ra",
+                (
+                    "  3. **[FOUNDER-ORDERED-REDTEAM-DOCS-NON-BLOCKING-REMEDIATION] "
+                    "IMPLEMENTED / LOCAL EVIDENCE (2026-05-06).** Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+                    "Wave ID: `founder-ordered-redteam-docs-non-blocking-remediation-2026-05-06`. "
+                    "Class: `L4_ENABLER`. Category: docs. Packet: "
+                    "`reports/control_plane/founder_ordered_redteam_docs_non_blocking_remediation_2026-05-06.md`."
+                ),
+                (
+                    "  4. **[FOUNDER-ORDERED-REDTEAM-TESTS-NON-BLOCKING-REMEDIATION] "
+                    "QUEUED / NON-BLOCKING.** Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+                    "Wave ID: `founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06`. "
+                    "Class: `L4_ENABLER`. Category: tests. Packet: "
+                    "`reports/control_plane/founder_ordered_redteam_tests_non_blocking_remediation_2026-05-06.md`. "
+                    f"Source audit packet: `{source}`."
+                ),
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result={"pr_number": "886"},
+        merge_sha="abc123",
+        log=_noop_log,
+    )
+
+    package_path = repo / ".agent_bus" / "meta" / "post_merge_package.json"
+    assert package is not None
+    assert json.loads(package_path.read_text(encoding="utf-8")) == package
+    assert package["merged_pr"] == 886
+    assert package["merge_sha"] == "abc123"
+    assert package["wave_name"] == (
+        "founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06"
+    )
+    assert package["next_candidates"] == [
+        {
+            "candidate": "founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06",
+            "bounded": True,
+            "tracked_packet": (
+                "reports/control_plane/"
+                "founder_ordered_redteam_tests_non_blocking_remediation_2026-05-06.md"
+            ),
+            "summary": "Implement the queued tests remediation packet only.",
+            "request_for_claude": package["next_candidates"][0]["request_for_claude"],
+        }
+    ]
+    assert source in package["deferred_items"]
+    assert package["blocker_report_paths"] == [
+        "reports/deferred/blocking/open_blocker.md"
+    ]
+    assert "post-merge supervisor -> Phase A -> Phase B -> commit executor" in (
+        package["next_candidates"][0]["request_for_claude"]
+    )
+
+
+def test_post_merge_package_refresh_stops_before_mu_structural_queue(tmp_path):
+    repo = _init_repo(tmp_path)
+    packet = (
+        "reports/control_plane/"
+        "founder_ordered_redteam_mu_structural_blocking_remediation_2026-05-06.md"
+    )
+    _write_queue_packet(repo, packet, "QUEUED - HARD STOP BEFORE IMPLEMENTATION")
+    (repo / "TASKS.md").write_text(
+        (
+            "## Ra\n"
+            "  6. **[FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-BLOCKING-REMEDIATION] "
+            "QUEUED / BLOCKING / HARD STOP BEFORE IMPLEMENTATION.** "
+            "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            "Wave ID: `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06`. "
+            "Class: `L4_ENABLER`. Category: `/mu` structural. "
+            f"Packet: `{packet}`.\n"
+        ),
+        encoding="utf-8",
+    )
+
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result={"pr_number": 887},
+        merge_sha="def456",
+        log=_noop_log,
+    )
+
+    assert package is not None
+    assert package["wave_name"] == (
+        "founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06"
+    )
+    assert package["next_candidates"] == []
+    assert "hard stop" in package["tracker_state_summary"].lower()
+
+
+def test_post_merge_package_refresh_closes_completed_only_queue(tmp_path):
+    repo = _init_repo(tmp_path)
+    packet = (
+        "reports/control_plane/"
+        "founder_ordered_redteam_docs_non_blocking_remediation_2026-05-06.md"
+    )
+    _write_queue_packet(repo, packet, "COMPLETED")
+    stale_package_path = repo / ".agent_bus" / "meta" / "post_merge_package.json"
+    stale_package_path.parent.mkdir(parents=True)
+    stale_package_path.write_text(
+        json.dumps(
+            {
+                "merge_sha": "stale",
+                "next_candidates": [
+                    {
+                        "candidate": (
+                            "founder-ordered-redteam-docs-non-blocking-remediation-2026-05-06"
+                        ),
+                        "bounded": True,
+                        "tracked_packet": packet,
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (repo / "TASKS.md").write_text(
+        (
+            "## Ra\n"
+            "  4. **[FOUNDER-ORDERED-REDTEAM-DOCS-NON-BLOCKING-REMEDIATION] "
+            "COMPLETED.** Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            "Wave ID: `founder-ordered-redteam-docs-non-blocking-remediation-2026-05-06`. "
+            "Class: `L4_ENABLER`. Category: docs. "
+            f"Packet: `{packet}`.\n"
+        ),
+        encoding="utf-8",
+    )
+    result = {"pr_number": "888"}
+
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result=result,
+        merge_sha="fresh-head",
+        log=_noop_log,
+    )
+
+    assert json.loads(stale_package_path.read_text(encoding="utf-8")) == package
+    assert package["merge_sha"] == "fresh-head"
+    assert package["wave_name"] == "founder-ordered-post-merge-queue-empty"
+    assert package["next_candidates"] == []
+    assert package["deferred_items"] == []
+    assert packet not in json.dumps(package)
+    assert result["post_merge_next_wave"] is None
+    assert result["post_merge_queue_empty"] is True
 
 
 def test_skips_when_cleanup_root_not_on_base_branch(tmp_path):
