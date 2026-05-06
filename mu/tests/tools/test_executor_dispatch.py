@@ -435,6 +435,43 @@ class TestDispatcherFreshnessRefresh:
         assert persisted["state_sha"] != "stale-state"
         assert fresh_ok, msg
 
+    def test_dispatch_stops_completed_bounded_candidate_before_phase_executor(
+        self, tmp_path, monkeypatch,
+    ):
+        repo, _ = _init_builder_repo(tmp_path)
+        packet_rel = "reports/control_plane/seed_packet.md"
+        (repo / packet_rel).write_text(
+            "# seed packet\n\nStatus: COMPLETED (commit-ready, supervisor COMMIT_GO)\n",
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "stale completed route",
+            "wave_name": "builder-wave-2026-04-20",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "next_candidates": [
+                {
+                    "candidate": "builder-wave-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": packet_rel,
+                }
+            ],
+        }
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout='{"status":"success"}', stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+
+        result = dispatch_mod.dispatch(record, repo_root=repo, skip_freshness=True)
+
+        assert result["status"] == "stopped"
+        assert "already-complete bounded candidate" in result["message"]
+        assert result["completed_candidates"][0]["tracked_packet"] == packet_rel
+        assert calls == []
+
     def test_inline_stale_record_without_path_fails_closed_when_not_canonical(
         self, tmp_path, monkeypatch,
     ):
@@ -12167,6 +12204,24 @@ class TestRoutingRecordBuilderDirectoryRejection:
         )
         assert errors, "directory tracked_packet must be rejected"
         assert any("file, not a directory" in e or "directory" in e.lower() for e in errors)
+        assert record == {}
+
+
+class TestRoutingRecordBuilderCompletedPacketRejection:
+    def test_rejects_completed_control_plane_packet(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        packet = repo / "reports" / "control_plane" / "seed_packet.md"
+        packet.write_text(
+            "# seed packet\n\nStatus: COMPLETED (commit-ready, supervisor COMMIT_GO)\n",
+            encoding="utf-8",
+        )
+
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo)
+        )
+
+        assert errors
+        assert any("already complete" in e for e in errors)
         assert record == {}
 
 

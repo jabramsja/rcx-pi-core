@@ -1599,6 +1599,36 @@ class TestPostMergeIntegration:
         assert envelope["decision"] == "ROUTE_PHASE_B"
         assert "Phase B" in envelope["summary"]
 
+    def test_decide_post_merge_route_locally_skips_completed_packet(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "roundtrip.md").write_text(
+            "# Roundtrip\nStatus: COMPLETED (commit-ready, supervisor COMMIT_GO)\nPhase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        package = {
+            "next_candidates": [
+                {
+                    "candidate": "[TASK] Run the routed proof.",
+                    "bounded": True,
+                    "tracked_packet": "reports/control_plane/roundtrip.md",
+                }
+            ]
+        }
+        results = [meta.ValidationResult("merge_verification", True)]
+
+        envelope = meta._decide_post_merge_route_locally(  # ANTICHEAT_OK: testing internal supervisor functions
+            repo,
+            package,
+            results,
+            "1. Canonical next step",
+        )
+
+        assert envelope["decision"] == "UPDATE_TRACKER_ONLY"
+        assert "no remaining open bounded next candidate" in envelope["summary"]
+        assert envelope["findings"][0]["title"] == "Completed next candidate removed from routing"
+
     def test_check_rollout_packet_canonical_derives_when_path_missing(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
