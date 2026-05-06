@@ -248,7 +248,7 @@ Any envelope key (`_mu_int`, `_mu_float`, `_mu_num`) must be added to `KERNEL_RE
 
 ### Seed compatibility strategy
 
-All 14 seed files use integer literals only (verified by grep). Migration is mechanical: replace bare integers with `{"_mu_int": N}`. No float literals exist in seeds today. The migration script would be deterministic and verifiable by checksum comparison.
+All 21 registered seed files use integer literals only; a JSON parse of the current seed corpus finds zero float literals. Migration is mechanical: replace bare integers with `{"_mu_int": N}`. No float literals exist in seeds today. The migration script would be deterministic and verifiable by checksum comparison.
 
 ---
 
@@ -310,7 +310,7 @@ For Option A (NO decision), the checklist is:
 
 3. **Envelopes violate structural minimalism.** RCX's design principle is minimal bootstrap — adding an envelope layer below match/substitute increases the bootstrap surface, adds host-semantics debt, and makes every numeric operation more complex. This runs counter to the self-hosting goal.
 
-4. **Blast radius is disproportionate to benefit.** Option B touches 30-50 files, 500-1000 lines, all 14 seeds, and many test files — for an edge case that does not affect any production path.
+4. **Blast radius is disproportionate to benefit.** Option B touches 30-50 files, 500-1000 lines, all 21 registered seeds, and many test files — for an edge case that does not affect any production path.
 
 5. **The hybrid (Option C) is a half-measure.** It normalizes inputs but not intermediate values, creating false parity confidence. If strict parity matters, only full envelopes achieve it — and the cost is prohibitive.
 
