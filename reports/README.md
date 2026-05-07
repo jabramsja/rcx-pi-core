@@ -20,6 +20,9 @@ Deferred lane rules:
 - active founder-facing advisory/non-blocking audits live in `reports/deferred/non_blocking/`
 - do not add compatibility symlinks under `reports/deferred/`; repoint tracker
   references to the canonical file paths instead
+- once a deferred source packet is routed into a bounded control-plane packet,
+  archive the source snapshot under `reports/archive/deferred/` and track the
+  active work from the routed packet and `TASKS.md`
 
 Codex lane rules:
 

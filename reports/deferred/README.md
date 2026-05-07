@@ -19,33 +19,35 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-07):
+Current inventory refresh (2026-05-07 truth sweep):
 
 - Evidence commands:
-  `find reports/deferred/blocking -maxdepth 1 -type f -name "*.md" -print | sort`
-  and
-  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
-- `reports/deferred/blocking/` currently contains 2 markdown files: `README.md`
-  plus the founder-ordered repo-code blocking-lane audit packet. The docs-audit
-  blocking-lane packet recorded no blocking findings and was moved to
-  `reports/archive/deferred/founder_ordered_redteam_docs_audit_2026-05-05_blocking_closed-by-docs-root-mu-docs-audit-closeout-2026-05-07.md`.
-  The tests and tooling blocking source packets were closed by their implemented
-  remediation waves and moved to
-  `reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`
-  and
-  `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`.
+  `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' ! -name README.md -print | sort`.
+- `reports/deferred/blocking/` currently contains `README.md` plus one active
+  blocker packet:
+  `founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md`. The packet
+  remains a `/mu` structural hard stop; this truth sweep documented status only
+  and did not route or implement `/mu` structural remediation.
 - The resolved mu preproduction gate-theater blocker was moved to
   `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`.
   The 2026-05-05 follow-up aligns the redteam startup guard with the curated
   theater-risk ratchet; `/mu` production-forward movement is no longer blocked
   by this gate-theater finding.
-- `reports/deferred/non_blocking/` currently contains 28 markdown files:
-  `README.md` plus 27 active or partially active advisory/follow-up records with
-  concrete evidence targets, including
-  `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md` and
-  `docs-root-mu-docs-audit-closeout-2026-05-07_non_blocking.md`,
-  reproduced with
-  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
+- `reports/deferred/non_blocking/` currently contains `README.md` plus three
+  active `/mu` structural advisory packets:
+  `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
+  `redteam_2026-03-14_repo_non_blockers.md`, and
+  `repo_truth_non_blockers_2026-03-14.md`.
+- The truth sweep archived routed non-`/mu` deferred source packets under
+  `reports/archive/deferred/` with
+  `_closed-by-deferred-non-mu-deferred-lane-truth-sweep-2026-05-07.md`
+  suffixes, including stale Phase B generated packets and the closed
+  `w5a_reentry_gate_coverage.md` source packet.
+- Remaining non-`/mu` work is routed into bounded control-plane packets:
+  `reports/control_plane/deferred-non-mu-docs-control-plane-remediation-2026-05-07_2026-05-07.md`,
+  `reports/control_plane/deferred-non-mu-tooling-control-plane-remediation-2026-05-07_2026-05-07.md`,
+  and
+  `reports/control_plane/deferred-non-mu-tests-proof-remediation-2026-05-07_2026-05-07.md`.
 - The 2026-05-06 non-blocking cleanup archived 12 closed, stale, or historical
   whole packets and extracted closed sections from 5 partial packets under
   `reports/archive/deferred/`.
@@ -70,8 +72,9 @@ Current inventory refresh (2026-05-07):
   low-severity README wording finding. The 2026-05-07 deferred folder cleanup
   also archived the tests/tooling generated remediation bridge packets whose
   stale wording and evidence-command findings no longer reproduce. The current
-  non-blocking inventory is 28 markdown files: `README.md` plus 27 active or
-  partially active advisory/follow-up records.
+  non-blocking inventory was 28 markdown files before the 2026-05-07 truth
+  sweep. The current active non-blocking inventory is `README.md` plus three
+  `/mu` structural advisory packets.
 
 Closed-parent exclusions for this index:
 

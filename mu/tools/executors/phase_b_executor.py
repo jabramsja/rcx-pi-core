@@ -4603,6 +4603,8 @@ def run_phase_b(
         round_num: int,
         fix_result: dict[str, Any],
         pre_fix_files: set[str],
+        *,
+        bridge_decision: str = "",
     ) -> dict[str, Any] | None:
         """Finalize a bridge-fix implementer run and persist the completed round."""
         nonlocal implementer_changed, changed_files
@@ -4744,6 +4746,7 @@ def run_phase_b(
             "wave_id": wave_id,
             "bridge_rounds": round_num,
             "current_bridge_round": round_num,
+            "last_bridge_decision": bridge_decision,
             "bridge_scope_fingerprint": _bridge_scope_fingerprint(repo_root, changed_files),
             "deferred_packet_path": deferred_packet_path,
             "implementer_changed": sorted(implementer_changed),
@@ -4803,7 +4806,12 @@ def run_phase_b(
                 "step": "phase_b_pager",
                 "errors": [f"Phase B pager emission failed after bridge-fix implementer: {exc}"],
             }
-        return _complete_bridge_fix(round_num, fix_result, pre_fix_files)
+        return _complete_bridge_fix(
+            round_num,
+            fix_result,
+            pre_fix_files,
+            bridge_decision=bridge_decision,
+        )
 
     def _complete_reentry_fix(
         impl_result: dict[str, Any],
@@ -5003,18 +5011,22 @@ def run_phase_b(
 
         current_files = _bridge_review_scope_files(candidate_files)
         next_round = int(result.get("bridge_rounds") or 0) + 1
+        private_attr_review_budget = max(1, max_bridge_rounds)
+        private_attr_review_limit = max_bridge_rounds + private_attr_review_budget
         step_name = (
             "reentry_private_attr_bridge_review"
             if reentry
             else "private_attr_bridge_review"
         )
-        if next_round > max_bridge_rounds:
+        if next_round > private_attr_review_limit:
             return current_files, {
                 "status": "error",
                 "step": step_name,
                 "errors": [
                     "Private-attr remediation changed files after the bridge review "
-                    "budget was exhausted; cannot proceed to commit without fresh review."
+                    "budget was exhausted and did not converge within the additional "
+                    f"{private_attr_review_budget} private-attr review round(s); cannot "
+                    "proceed to commit without fresh review."
                 ],
             }
         if current_files:
@@ -5044,7 +5056,9 @@ def run_phase_b(
         log(
             ("Re-entry " if reentry else "")
             + "private-attr remediation: fresh bridge review "
-            f"{next_round}/{max_bridge_rounds} (job={bridge_job_id})..."
+            f"{next_round}/{private_attr_review_limit} "
+            f"(bridge budget={max_bridge_rounds}, "
+            f"private-attr extra={private_attr_review_budget}, job={bridge_job_id})..."
         )
         try:
             bridge_result = run_bridge_review(
@@ -5675,6 +5689,11 @@ def run_phase_b(
             return bridge_fix_error
         _resume_bridge_round = pending_round
 
+    bridge_decision = str(
+        (saved_state or {}).get("last_bridge_decision")
+        or (saved_state or {}).get("bridge_decision")
+        or "unknown"
+    )
     for round_num in range(1, max_bridge_rounds + 1):
         if bridge_converged:
             break  # Already converged (e.g. needs_phase_b_reentry resume) — skip initial loop

@@ -616,6 +616,101 @@ def _phase_b_plan_routing_packet(repo_root: Path, plan_path: str) -> str:
     return clean_path
 
 
+def _plan_requires_pre_phase_b_tracker_entry(repo_root: Path, plan_path: str) -> bool:
+    """Return true when a locked packet explicitly gates Phase B on TASKS sync."""
+    clean_path = str(plan_path or "").strip()
+    if not clean_path:
+        return False
+    candidate = Path(clean_path)
+    try:
+        if candidate.is_absolute():
+            full_path = candidate.resolve()
+        else:
+            if ".." in candidate.parts:
+                return False
+            full_path = (repo_root / clean_path).resolve()
+        if not full_path.is_relative_to(repo_root.resolve()):
+            return False
+        content = full_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    lowered = content.lower()
+    return (
+        "before phase b dispatch" in lowered
+        and "tasks.md" in lowered
+        and "tracker entr" in lowered
+    )
+
+
+def _tasks_tracker_entry_exists(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    tracked_packet: str,
+) -> bool:
+    """Check TASKS.md for a canonical same-wave tracker note for a packet."""
+    normalized_wave = normalize_wave_id(wave_id)
+    packet = _phase_b_plan_routing_packet(repo_root, tracked_packet)
+    if not normalized_wave or not packet:
+        return False
+    note_header = re.compile(
+        r"^- Tracker sync note \([^,]+,\s*([^)]+)\):\s*\*\*[^*]+\*\*"
+    )
+    packet_field = re.compile(
+        r"\bPacket:\s*`?" + re.escape(packet) + r"`?(?=\.|\s|$)"
+    )
+    try:
+        lines = (repo_root / "TASKS.md").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        match = note_header.match(line)
+        if not match:
+            continue
+        if normalize_wave_id(match.group(1)) != normalized_wave:
+            continue
+        if packet_field.search(line):
+            return True
+    return False
+
+
+def _phase_b_tracker_gate_result(
+    repo_root: Path,
+    *,
+    plan_path: str,
+    wave_id: str,
+    tracked_packet: str,
+) -> dict[str, Any] | None:
+    """Hold Phase B when the packet's own tracker precondition is unmet."""
+    if not _plan_requires_pre_phase_b_tracker_entry(repo_root, plan_path):
+        return None
+    normalized_wave = normalize_wave_id(wave_id)
+    packet = str(tracked_packet or "").strip()
+    if _tasks_tracker_entry_exists(
+        repo_root,
+        wave_id=normalized_wave,
+        tracked_packet=packet,
+    ):
+        return None
+    return {
+        "status": "held",
+        "decision": "ROUTE_PHASE_B",
+        "executor": "phase_b_executor",
+        "summary": "Phase B held until same-wave TASKS tracker entry exists.",
+        "message": (
+            "Refusing to dispatch Phase B because the locked packet requires a "
+            "TASKS.md tracker entry before Phase B dispatch, but TASKS.md does "
+            f"not contain the exact wave/packet pair: wave_id={normalized_wave!r}, "
+            f"packet={packet!r}."
+        ),
+        "request_for_claude": (
+            "Add or repair the same-wave TASKS.md tracker entry for the locked "
+            "packet, then resume Phase B from that packet. Do not bypass the "
+            "packet's tracker precondition."
+        ),
+    }
+
+
 def _surface_record_for_chain(
     args: argparse.Namespace,
     repo_root: Path,
@@ -1057,18 +1152,20 @@ def run_recoverable_surface_command(
     }[args.surface]
     decision = _surface_decision(args)
     surface_record = _surface_record_for_chain(args, repo_root)
-    completed_stop = _completed_candidate_stop_result(
-        repo_root,
-        surface_record,
-        decision=decision,
-        executor_name=executor_name,
-    )
-    if completed_stop is not None:
-        _emit_surface_stop_result(
-            completed_stop,
-            json_output=bool(getattr(args, "json", False)),
+    explicit_commit_handoff = args.surface == "commit" and getattr(args, "handoff", None)
+    if not explicit_commit_handoff:
+        completed_stop = _completed_candidate_stop_result(
+            repo_root,
+            surface_record,
+            decision=decision,
+            executor_name=executor_name,
         )
-        return 0
+        if completed_stop is not None:
+            _emit_surface_stop_result(
+                completed_stop,
+                json_output=bool(getattr(args, "json", False)),
+            )
+            return 0
     wave_id = normalize_wave_id(
         str(surface_record.get("wave_name") or surface_record.get("wave_id") or "")
     )
@@ -1862,6 +1959,7 @@ def _continue_successful_executor_chain(
             # identity must follow the converged locked packet Phase B uses.
             phase_b_wave_name = plan_wave_id
         phase_b_candidates = list((record or {}).get("next_candidates", []))
+        phase_b_tracked_packet = _phase_b_plan_routing_packet(repo_root, plan_path)
         if plan_wave_id and not _routing_record_tracked_packet(
             {"next_candidates": phase_b_candidates}
         ):
@@ -1869,9 +1967,23 @@ def _continue_successful_executor_chain(
                 {
                     "candidate": plan_wave_id,
                     "bounded": True,
-                    "tracked_packet": _phase_b_plan_routing_packet(repo_root, plan_path),
+                    "tracked_packet": phase_b_tracked_packet,
                 }
             ]
+        else:
+            phase_b_tracked_packet = (
+                _routing_record_tracked_packet({"next_candidates": phase_b_candidates})
+                or phase_b_tracked_packet
+            )
+        tracker_gate = _phase_b_tracker_gate_result(
+            repo_root,
+            plan_path=plan_path,
+            wave_id=phase_b_wave_name,
+            tracked_packet=phase_b_tracked_packet,
+        )
+        if tracker_gate is not None:
+            tracker_gate["chained_from"] = "phase_a_executor"
+            return tracker_gate
 
         phase_b_timeout = config.get("timeouts", {}).get("phase_b_executor", DEFAULT_EXECUTOR_CONFIG["timeouts"]["phase_b_executor"])
         phase_b_routing = {
@@ -2862,6 +2974,18 @@ def dispatch(
             if plan_error:
                 return plan_error
             if plan_path:
+                phase_b_wave = (
+                    _phase_b_plan_wave_id(repo, plan_path)
+                    or str(record.get("wave_name") or record.get("wave_id") or "")
+                )
+                tracker_gate = _phase_b_tracker_gate_result(
+                    repo,
+                    plan_path=plan_path,
+                    wave_id=phase_b_wave,
+                    tracked_packet=plan_path,
+                )
+                if tracker_gate is not None:
+                    return tracker_gate
                 executor_args.extend(["--plan", plan_path])
                 executor_args.extend(["--routing-record", json.dumps(record)])
             else:

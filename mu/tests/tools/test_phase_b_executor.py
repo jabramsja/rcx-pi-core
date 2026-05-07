@@ -4037,6 +4037,78 @@ class TestFinalPytestGate:
         mock_bridge.assert_called_once()
         assert "private-attr remediation review" in mock_bridge.call_args.args[1]
 
+    def test_resume_private_attr_review_runs_after_bridge_budget_exhausted(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+        state_dir = repo / ".agent_bus" / "executors"
+        state_dir.mkdir(parents=True)
+        state_file = state_dir / "phase_b_state.json"
+        changed_files = ["mu/tests/tools/test_foo.py"]
+        state_file.write_text(json.dumps({
+            "plan_path": "reports/control_plane/plan.md",
+            "completed_step": "private_attr_remediation_pending_review",
+            "wave_id": "plan",
+            "bridge_rounds": 2,
+            "deferred_packet_path": None,
+            "implementer_changed": changed_files,
+            "executor_created": [],
+            "baseline_wave_files": [],
+            "all_non_blocking": [],
+            "finding_history": {},
+            "private_attr_gate_test_files": changed_files,
+        }))
+
+        mock_impl = _make_mock_impl()
+        gate_pass = {
+            "passed": True,
+            "skipped": False,
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": "",
+            "test_files": changed_files,
+        }
+
+        def bridge_side_effect(*args, **kwargs):
+            saved_state = json.loads(state_file.read_text(encoding="utf-8"))
+            assert saved_state["completed_step"] == "private_attr_remediation_pending_review"
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": "j3",
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", return_value={
+                 "enabled": True, "event_id": "evt", "attempted": [], "budget_exhausted": False,
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}) as mock_agents, \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side_effect) as mock_bridge, \
+             patch.object(pb_mod, "run_private_attr_gate", return_value=gate_pass), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
+             }), \
+             patch.object(pb_mod, "_stage_files", return_value=True), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=2)
+
+        assert result["status"] == "commit_ready"
+        assert result.get("resumed_from") == "private_attr_remediation_pending_review"
+        mock_impl.invoke_implementer.assert_not_called()
+        mock_agents.assert_not_called()
+        mock_bridge.assert_called_once()
+        assert "private-attr remediation review R3" in mock_bridge.call_args.args[1]
+
 
 class TestBridgeRenderAssociation:
     """Bridge review uses exact job_id, not newest/freshest render."""
@@ -6336,6 +6408,54 @@ class TestStatePersistence:
 
         assert result.get("resumed_from") == "bridge_round_1"
         assert result.get("deferred_packet_path") == "reports/deferred/non_blocking/plan_bridge_nonblockers.md"
+
+    def test_resume_from_over_budget_bridge_round_returns_max_rounds(self, tmp_path):
+        """A saved bridge_round_N beyond the current budget must fail closed, not crash."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text(
+            "# Plan\nPhase-A-Lock: LOCKED\n",
+            encoding="utf-8",
+        )
+        pb_mod._save_state(repo, {  # ANTICHEAT_OK: testing internal executor resume state
+            "plan_path": "reports/control_plane/plan.md",
+            "completed_step": "bridge_round_3",
+            "wave_id": "plan",
+            "bridge_rounds": 3,
+            "current_bridge_round": 3,
+            "last_bridge_decision": "REQUEST_CHANGES",
+            "bridge_scope_fingerprint": "fp",
+            "deferred_packet_path": None,
+            "implementer_changed": ["mu/tests/tools/test_foo.py"],
+            "executor_created": [],
+            "baseline_wave_files": [],
+            "all_non_blocking": [],
+            "finding_history": {},
+        })
+
+        mock_impl = _make_mock_impl()
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=["mu/tests/tools/test_foo.py"]), \
+             patch.object(pb_mod, "run_bridge_review") as mock_bridge, \
+             patch.object(pb_mod, "run_sdk_agents") as mock_agents, \
+             patch.object(pb_mod, "_emit_phase_b_event"), \
+             patch.object(pb_mod, "_emit_phase_b_hard_fail"), \
+             patch.object(pb_mod, "_bridge_scope_fingerprint", return_value="fp"), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()):
+            result = pb_mod.run_phase_b(
+                repo,
+                "reports/control_plane/plan.md",
+                max_bridge_rounds=2,
+            )
+
+        assert result["status"] == "max_rounds_reached"
+        assert "REQUEST_CHANGES" in result["errors"][0]
+        mock_bridge.assert_not_called()
+        mock_agents.assert_not_called()
+        mock_impl.invoke_implementer.assert_not_called()
 
 
 @pytest.mark.usefixtures("mock_routing_record")
