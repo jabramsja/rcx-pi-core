@@ -6187,6 +6187,7 @@ def _refresh_post_merge_package_for_next_open_queue(
 ) -> dict[str, Any]:
     """Write a fresh post-merge package from the founder-ordered queue state."""
     entry = _next_open_founder_ordered_queue_entry(repo_root)
+    queue_task_id = "[NEXT-CODEX-POST-REDTEAM]"
     pr_number_raw = result.get("pr_number")
     try:
         merged_pr = int(pr_number_raw)
@@ -6202,7 +6203,7 @@ def _refresh_post_merge_package_for_next_open_queue(
 
     if entry is None:
         package = {
-            "task_id": str(handoff.get("task_id") or "[NEXT-CODEX-POST-REDTEAM]"),
+            "task_id": queue_task_id,
             "merged_pr": merged_pr,
             "merge_sha": merge_sha,
             "wave_name": "founder-ordered-post-merge-queue-empty",
@@ -6248,7 +6249,7 @@ def _refresh_post_merge_package_for_next_open_queue(
         )
 
     package = {
-        "task_id": str(handoff.get("task_id") or "[NEXT-CODEX-POST-REDTEAM]"),
+        "task_id": queue_task_id,
         "merged_pr": merged_pr,
         "merge_sha": merge_sha,
         "wave_name": entry["wave_id"],
