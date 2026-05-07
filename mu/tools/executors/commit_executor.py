@@ -5262,6 +5262,31 @@ def prepare_handoff_from_routing_record(
     files_to_stage = record.get("files_to_stage", [])
     tracker_note = record.get("tracker_note_text", "")
 
+    def has_nonblank_list_item(value: Any) -> bool:
+        return isinstance(value, list) and any(str(item).strip() for item in value)
+
+    candidate_has_scope = any(
+        isinstance(c, dict)
+        and (
+            str(c.get("tracked_packet") or "").strip()
+            or has_nonblank_list_item(c.get("files"))
+        )
+        for c in candidates
+    )
+    if (
+        decision == "UPDATE_TRACKER_ONLY"
+        and not standalone
+        and not (isinstance(tracker_note, str) and tracker_note.strip())
+        and not has_nonblank_list_item(files_to_stage)
+        and not has_nonblank_list_item(record.get("force_add_files"))
+        and not candidate_has_scope
+    ):
+        return None, [
+            "UPDATE_TRACKER_ONLY routing record has no actionable tracker scope "
+            "(tracker_note_text, files_to_stage, force_add_files, tracked_packet, "
+            "or candidate files). Refusing to synthesize a TASKS.md-only handoff."
+        ]
+
     # Try to derive files_to_stage from candidates if not directly provided
     if not files_to_stage:
         for c in candidates:

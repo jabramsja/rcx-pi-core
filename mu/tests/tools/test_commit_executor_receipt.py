@@ -1553,6 +1553,7 @@ class TestWaveIdBounds:
             "wave_name": "x" * 120,
             "summary": "tighten commit pipeline",
             "decision": "UPDATE_TRACKER_ONLY",
+            "files_to_stage": ["TASKS.md"],
         }
         handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
         assert errors == []
@@ -1565,6 +1566,7 @@ class TestWaveIdBounds:
             "wave_name": "tracker-only-wave",
             "summary": "sync tracker only",
             "decision": "UPDATE_TRACKER_ONLY",
+            "files_to_stage": ["TASKS.md"],
         }
         handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
         assert errors == []
@@ -1574,12 +1576,32 @@ class TestWaveIdBounds:
         assert "no_op_proof:" in handoff["tracker_note_text"]
         assert "defer_reason_code:" in handoff["tracker_note_text"]
 
+    @pytest.mark.parametrize(
+        "extra_scope",
+        [
+            {"tracker_note_text": "   "},
+            {"files_to_stage": ["", "   "]},
+            {"force_add_files": ["", "   "]},
+        ],
+    )
+    def test_prepare_handoff_tracker_only_blank_scope_rejected(self, tmp_path, extra_scope):
+        record = {
+            "wave_name": "tracker-only-wave",
+            "summary": "sync tracker only",
+            "decision": "UPDATE_TRACKER_ONLY",
+            **extra_scope,
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert handoff is None
+        assert any("no actionable tracker scope" in error for error in errors)
+
     def test_prepare_handoff_tracker_only_null_force_add_files_treated_as_empty(self, tmp_path):
         record = {
             "wave_name": "tracker-only-wave",
             "summary": "sync tracker only",
             "decision": "UPDATE_TRACKER_ONLY",
             "force_add_files": None,
+            "files_to_stage": ["TASKS.md"],
         }
         handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
         assert errors == []
@@ -1594,6 +1616,7 @@ class TestWaveIdBounds:
             "summary": "sync tracker only",
             "decision": "UPDATE_TRACKER_ONLY",
             "commit_message": 123,
+            "files_to_stage": ["TASKS.md"],
         }
         handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
         assert errors == []
@@ -1628,6 +1651,7 @@ class TestWaveIdBounds:
             "summary": "persist founder-ordered redteam wave queue directive",
             "decision": "UPDATE_TRACKER_ONLY",
             "wave_class": "MAINTENANCE",
+            "files_to_stage": ["TASKS.md"],
         }
 
         handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, repo)

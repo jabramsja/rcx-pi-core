@@ -507,6 +507,54 @@ def _completed_candidate_stop_result(
     }
 
 
+def _candidate_has_tracker_update_scope(candidate: dict[str, Any]) -> bool:
+    if str(candidate.get("tracked_packet") or "").strip():
+        return True
+    files = candidate.get("files")
+    return isinstance(files, list) and any(str(item).strip() for item in files)
+
+
+def _tracker_update_has_actionable_scope(record: dict[str, Any]) -> bool:
+    tracker_note = record.get("tracker_note_text")
+    if isinstance(tracker_note, str) and tracker_note.strip():
+        return True
+    for field in ("files_to_stage", "force_add_files"):
+        files = record.get(field)
+        if isinstance(files, list) and any(str(item).strip() for item in files):
+            return True
+    return any(
+        _candidate_has_tracker_update_scope(candidate)
+        for candidate in _selected_routing_candidate_dicts(record)
+    )
+
+
+def _empty_tracker_update_hold_result(
+    record: dict[str, Any],
+    *,
+    decision: str,
+    executor_name: str,
+) -> dict[str, Any] | None:
+    if decision != "UPDATE_TRACKER_ONLY":
+        return None
+    if _tracker_update_has_actionable_scope(record):
+        return None
+    return {
+        "status": "held",
+        "decision": decision,
+        "executor": executor_name,
+        "summary": "No actionable tracker update scope is present.",
+        "message": (
+            "UPDATE_TRACKER_ONLY was held because the routing record has no "
+            "tracker_note_text, files_to_stage, force_add_files, tracked_packet, "
+            "or candidate files. Refusing to synthesize a TASKS.md-only handoff."
+        ),
+        "request_for_claude": (
+            "Refresh post-merge routing to an open packet or provide explicit "
+            "tracker update scope before dispatching UPDATE_TRACKER_ONLY."
+        ),
+    }
+
+
 def _phase_b_plan_declared_wave_id(repo_root: Path, plan_path: str) -> str:
     """Read an explicit Wave ID from a Phase B plan, without stem fallback."""
     clean_path = str(plan_path or "").strip()
@@ -2589,6 +2637,14 @@ def dispatch(
     if completed_stop is not None:
         return completed_stop
 
+    empty_tracker_update = _empty_tracker_update_hold_result(
+        record,
+        decision=decision,
+        executor_name=executor_name,
+    )
+    if empty_tracker_update is not None:
+        return empty_tracker_update
+
     # Validate freshness — auto-refresh via post-merge supervisor if stale
     if not skip_freshness:
         fresh, msg = validate_routing_record_freshness(record, repo)
@@ -2693,6 +2749,13 @@ def dispatch(
             )
             if completed_stop is not None:
                 return completed_stop
+            empty_tracker_update = _empty_tracker_update_hold_result(
+                record,
+                decision=decision,
+                executor_name=executor_name,
+            )
+            if empty_tracker_update is not None:
+                return empty_tracker_update
             if verbose:
                 print(f"[dispatch] Refreshed: decision={decision}, executor={executor_name}")
 
