@@ -15,8 +15,11 @@ Archived as stale/resolved from the source snapshots:
 2026-05-06 cleanup note: resolved sections N4, N6, N7, N9, N12, N13,
 N15, N16, N17, and N19 were moved to
 `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_partial-closed-by-deferred-non-blocking-cleanup-2026-05-06.md`.
-Resolved section N18 was retained because it references Claude surfaces and was
-not re-adjudicated by this cleanup.
+Truth-sweep note (2026-05-07): resolved Claude-referencing section N18 was moved
+to
+`reports/archive/deferred/repo_truth_non_blockers_2026-03-14_partial_closed-by-deferred-non-mu-deferred-lane-truth-sweep-2026-05-07.md`.
+The active packet now retains only current `/mu` structural advisory status and
+does not authorize `/mu` implementation.
 
 ## Active Non-Blockers
 
@@ -75,11 +78,3 @@ wave (requires Wave A design for module decomposition strategy).
 - Bridge considers this a "successful match on hostile input" since the VM returns match with root=null.
 - Design decision: null/None is the correct fail-closed canonical value for non-Mu inputs. The alternative (stall on non-Mu capture) would require type-checking at capture_path time, which is a larger change.
 - Status: documented design gap, not a production exploit path.
-
-### N18. /checkpoint should force comprehensive memory.md + claude.md re-read — **RESOLVED 2026-03-14**
-
-2026-05-06 cleanup note: retained because this resolved section references
-Claude surfaces; it was not re-adjudicated or extracted by this cleanup.
-
-- Fixed: /checkpoint skill Step 0 now includes MANDATORY re-read with explicit file list and "This is not a checkbox" instruction.
-- Claude Code PreToolUse hook (`.claude/hooks/pre-commit-reminder.sh`) shows MEMORY.md + CLAUDE.md before git commit tool calls.

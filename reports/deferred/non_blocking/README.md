@@ -94,3 +94,20 @@ Archived source snapshots for extracted non-blocking residue live in:
   and
   `reports/archive/deferred/founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06_bridge_nonblockers_closed-by-deferred-folder-cleanup-2026-05-07.md`.
 - Claude-related retained residue was left untouched.
+
+2026-05-07 deferred non-`/mu` truth sweep note:
+
+- Evidence command:
+  `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' ! -name README.md -print | sort`.
+- Current non-blocking inventory after routing/archive cleanup: `README.md` plus
+  three active `/mu` structural advisory packets:
+  `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
+  `redteam_2026-03-14_repo_non_blockers.md`, and
+  `repo_truth_non_blockers_2026-03-14.md`.
+- Routed non-`/mu` source packets were moved to `reports/archive/deferred/` with
+  same-wave `routed-by` suffixes, and remaining work is tracked by the bounded
+  control-plane packets for docs/control-plane, tooling/control-plane, and
+  tests/proof-integrity remediation.
+- `w5a_reentry_gate_coverage.md` was archived as closed by current direct test
+  evidence in `mu/tests/l4_gates/test_boot1_step_monotonicity_gate.py`.
+- Claude-related files were not edited.

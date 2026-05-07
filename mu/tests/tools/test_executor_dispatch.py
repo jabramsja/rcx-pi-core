@@ -12308,6 +12308,127 @@ class TestRecoveryGateWiring:
         assert "--json" in calls[0]
         assert "--json" in calls[1]
 
+    def test_chained_phase_a_holds_when_locked_packet_requires_missing_tracker_entry(
+        self, tmp_path, monkeypatch,
+    ):
+        """Phase A→B chaining must honor packet-declared TASKS preconditions."""
+        packet_rel = "reports/control_plane/tracker_guard_plan.md"
+        packet = tmp_path / packet_rel
+        packet.parent.mkdir(parents=True)
+        packet.write_text(
+            (
+                "# Tracker Guard Plan\n\n"
+                "Date: 2026-05-07\n"
+                "Status: Phase B (locked, implementing)\n"
+                "Wave ID: tracker-guard-wave-2026-05-07\n"
+                "Phase-A-Lock: LOCKED\n\n"
+                "Before Phase B dispatch, require a TASKS.md tracker entry "
+                "for this exact wave id and packet path.\n"
+            ),
+            encoding="utf-8",
+        )
+        (tmp_path / "TASKS.md").write_text("## Ra\n", encoding="utf-8")
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"],
+            0,
+            stdout=json.dumps({"plan_path": packet_rel}),
+            stderr="",
+        )
+
+        executor_calls = []
+
+        def fake_run_executor(args, **kwargs):
+            executor_calls.append((args, kwargs))
+            if len(executor_calls) == 1:
+                return phase_a_ok
+            pytest.fail("Phase B must not start before TASKS sync")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run_executor)
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "ensure_not_agent_review_mode",
+            lambda *a, **k: None,
+        )
+
+        result = dispatch_mod.dispatch(
+            {
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": "tracker-guard-wave-2026-05-07",
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            },
+            repo_root=tmp_path,
+            skip_freshness=True,
+        )
+
+        assert result["status"] == "held"
+        assert result["executor"] == "phase_b_executor"
+        assert result.get("chained_from") == "phase_a_executor"
+        assert "requires a TASKS.md tracker entry before Phase B dispatch" in result["message"]
+        assert "tracker-guard-wave-2026-05-07" in result["message"]
+        assert packet_rel in result["message"]
+        assert len(executor_calls) == 1
+
+    def test_phase_b_tracker_guard_requires_canonical_tracker_note(self, tmp_path):
+        """Arbitrary TASKS prose must not satisfy a locked packet tracker gate."""
+        packet_rel = "reports/control_plane/fake.md"
+        packet = tmp_path / packet_rel
+        packet.parent.mkdir(parents=True)
+        packet.write_text(
+            (
+                "# Fake Plan\n\n"
+                "Wave ID: fake-wave-2026-05-07\n"
+                "Before Phase B dispatch, require a TASKS.md tracker entry "
+                "for this exact wave id and packet path.\n"
+            ),
+            encoding="utf-8",
+        )
+        tasks = tmp_path / "TASKS.md"
+        tasks.write_text(
+            (
+                "## Ra\n\n"
+                "Not a tracker note: missing tracker for wave fake-wave-2026-05-07 "
+                "packet reports/control_plane/fake.md.\n"
+            ),
+            encoding="utf-8",
+        )
+
+        assert not dispatch_mod._tasks_tracker_entry_exists(  # ANTICHEAT_OK: direct guard regression
+            tmp_path,
+            wave_id="fake-wave-2026-05-07",
+            tracked_packet=packet_rel,
+        )
+        held = dispatch_mod._phase_b_tracker_gate_result(  # ANTICHEAT_OK: direct guard regression
+            tmp_path,
+            plan_path=packet_rel,
+            wave_id="fake-wave-2026-05-07",
+            tracked_packet=packet_rel,
+        )
+        assert held is not None
+        assert held["status"] == "held"
+
+        tasks.write_text(
+            (
+                "## Ra\n\n"
+                "- Tracker sync note (2026-05-07, fake-wave-2026-05-07): **Fake sync.** "
+                "Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/fake.md`. "
+                "evidence_command: `pytest fake`. evidence_delta: current packet is tracker-bound. "
+                "progress_proof_before: missing tracker note. progress_proof_after: canonical tracker note present. "
+                "FOUNDER_OVERRIDE:fake-wave-2026-05-07. primary_blocker_class: INTEGRATION. "
+                "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+                "indicator_artifact_ref: reports/l4_wave_indicators/fake-wave-2026-05-07.json. "
+                "indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id fake-wave-2026-05-07 --output reports/l4_wave_indicators/fake-wave-2026-05-07.json. "
+                "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. "
+                "boot0_progress_state: HOLD.\n"
+            ),
+            encoding="utf-8",
+        )
+        assert dispatch_mod._tasks_tracker_entry_exists(  # ANTICHEAT_OK: direct guard regression
+            tmp_path,
+            wave_id="fake-wave-2026-05-07",
+            tracked_packet=packet_rel,
+        )
+
     def test_chained_commit_timeout_reports_commit_executor(self, tmp_path):
         """Chained commit timeout (from Phase B chain) reports commit_executor.
 
