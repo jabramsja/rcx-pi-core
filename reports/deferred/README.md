@@ -19,16 +19,17 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-06):
+Current inventory refresh (2026-05-07):
 
 - Evidence commands:
   `find reports/deferred/blocking -maxdepth 1 -type f -name "*.md" -print | sort`
   and
   `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
-- `reports/deferred/blocking/` currently contains 5 markdown files: `README.md`
-  plus the founder-ordered docs, repo-code, tests, and tooling blocking-lane
-  audit packets. This non-blocking cleanup did not adjudicate or archive the
-  blocking lane.
+- `reports/deferred/blocking/` currently contains 4 markdown files: `README.md`
+  plus the founder-ordered repo-code, tests, and tooling blocking-lane audit
+  packets. The docs-audit blocking-lane packet recorded no blocking findings and
+  was moved to
+  `reports/archive/deferred/founder_ordered_redteam_docs_audit_2026-05-05_blocking_closed-by-docs-root-mu-docs-audit-closeout-2026-05-07.md`.
 - The resolved mu preproduction gate-theater blocker was moved to
   `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`.
   The 2026-05-05 follow-up aligns the redteam startup guard with the curated
@@ -37,7 +38,8 @@ Current inventory refresh (2026-05-06):
 - `reports/deferred/non_blocking/` currently contains 32 markdown files:
   `README.md` plus 31 active or partially active advisory/follow-up records with
   concrete evidence targets, including
-  `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
+  `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md` and
+  `docs-root-mu-docs-audit-closeout-2026-05-07_non_blocking.md`,
   reproduced with
   `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
 - The 2026-05-06 non-blocking cleanup archived 12 closed, stale, or historical
@@ -52,9 +54,15 @@ Current inventory refresh (2026-05-06):
   Bridge Round 1 then generated this wave's own retained non-blocking packet,
   `reports/deferred/non_blocking/deferred-non-blocking-retained-residue-cleanup-2026-05-06_bridge_nonblockers.md`.
   The routed retained-candidate follow-up then generated
-  `reports/deferred/non_blocking/docs-root-mu-docs-retained-packet-cleanup-2026-05-06_bridge_nonblockers.md`.
-  The post-bridge non-blocking inventory is 32 markdown files: `README.md` plus
-  31 active or partially active advisory/follow-up records.
+  `reports/archive/deferred/docs-root-mu-docs-retained-packet-cleanup-2026-05-06_bridge_nonblockers_closed-by-docs-root-mu-docs-audit-closeout-2026-05-07.md`.
+  The 2026-05-07 root/mu-docs audit closeout archived that duplicate-tracker
+  advisory at
+  `reports/archive/deferred/docs-root-mu-docs-retained-packet-cleanup-2026-05-06_bridge_nonblockers_closed-by-docs-root-mu-docs-audit-closeout-2026-05-07.md`
+  and added
+  `reports/deferred/non_blocking/docs-root-mu-docs-audit-closeout-2026-05-07_non_blocking.md`
+  for the remaining active L4 G8 docs DOC_ACCURACY advisory. The post-closeout
+  non-blocking inventory is 32 markdown files: `README.md` plus 31 active or
+  partially active advisory/follow-up records.
 
 Closed-parent exclusions for this index:
 

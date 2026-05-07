@@ -56,14 +56,14 @@ Archived source snapshots for extracted non-blocking residue live in:
   `repo_truth_non_blockers_2026-03-14.md` were not extracted because they are
   Claude-related residue outside this cleanup authorization.
 
-2026-05-06 retained-residue cleanup note:
+2026-05-07 root/mu-docs audit closeout note:
 
 - Evidence command:
   `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
-- Current post-bridge inventory after retained-residue cleanup and the routed
-  docs-root/mu-docs retained-candidate follow-up: 32 markdown
-  files, including this README and 31 active or partially active advisory
-  packets.
+- Current post-closeout inventory after retained-residue cleanup, the routed
+  docs-root/mu-docs retained-candidate follow-up, and
+  `docs-root-mu-docs-audit-closeout-2026-05-07`: 32 markdown files, including
+  this README and 31 active or partially active advisory packets.
 - Whole-file archive:
   `reports/archive/deferred/pager-deterministic-session-2026-04-18_bridge_nonblockers_closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`.
 - Partial closed-section extraction:
@@ -71,7 +71,11 @@ Archived source snapshots for extracted non-blocking residue live in:
 - Bridge Round 1 generated and retained
   `deferred-non-blocking-retained-residue-cleanup-2026-05-06_bridge_nonblockers.md`
   as this wave's active non-blocking follow-up packet.
-- The routed retained-candidate follow-up generated and retained
-  `docs-root-mu-docs-retained-packet-cleanup-2026-05-06_bridge_nonblockers.md`
-  as the active advisory packet for post-Bridge findings in that routed cleanup.
+- The routed retained-candidate follow-up generated a duplicate-tracker advisory;
+  `docs-root-mu-docs-audit-closeout-2026-05-07` resolved the duplicate
+  same-wave tracker note and moved that advisory to
+  `reports/archive/deferred/docs-root-mu-docs-retained-packet-cleanup-2026-05-06_bridge_nonblockers_closed-by-docs-root-mu-docs-audit-closeout-2026-05-07.md`.
+- `docs-root-mu-docs-audit-closeout-2026-05-07_non_blocking.md` remains active
+  with one DOC_ACCURACY advisory for stale pre-S1 no-production-reduction
+  wording in active L4 G8 docs.
 - Claude-related retained residue was left untouched.
