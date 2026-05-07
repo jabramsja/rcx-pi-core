@@ -1152,18 +1152,20 @@ def run_recoverable_surface_command(
     }[args.surface]
     decision = _surface_decision(args)
     surface_record = _surface_record_for_chain(args, repo_root)
-    completed_stop = _completed_candidate_stop_result(
-        repo_root,
-        surface_record,
-        decision=decision,
-        executor_name=executor_name,
-    )
-    if completed_stop is not None:
-        _emit_surface_stop_result(
-            completed_stop,
-            json_output=bool(getattr(args, "json", False)),
+    explicit_commit_handoff = args.surface == "commit" and getattr(args, "handoff", None)
+    if not explicit_commit_handoff:
+        completed_stop = _completed_candidate_stop_result(
+            repo_root,
+            surface_record,
+            decision=decision,
+            executor_name=executor_name,
         )
-        return 0
+        if completed_stop is not None:
+            _emit_surface_stop_result(
+                completed_stop,
+                json_output=bool(getattr(args, "json", False)),
+            )
+            return 0
     wave_id = normalize_wave_id(
         str(surface_record.get("wave_name") or surface_record.get("wave_id") or "")
     )
@@ -2972,9 +2974,10 @@ def dispatch(
             if plan_error:
                 return plan_error
             if plan_path:
-                phase_b_wave = str(record.get("wave_name") or record.get("wave_id") or "")
-                if not phase_b_wave:
-                    phase_b_wave = _phase_b_plan_wave_id(repo, plan_path)
+                phase_b_wave = (
+                    _phase_b_plan_wave_id(repo, plan_path)
+                    or str(record.get("wave_name") or record.get("wave_id") or "")
+                )
                 tracker_gate = _phase_b_tracker_gate_result(
                     repo,
                     plan_path=plan_path,
