@@ -1,0 +1,24 @@
+{
+  "wave_id": "deferred-non-mu-post-merge-routed-queue-selection-repair-2026-05-07",
+  "repeat_run_speedup_ratio": 1.002521,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.413253,
+  "repeat_run_raw_seconds": [
+    0.414295,
+    0.413253
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.414295
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.827548
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-07T20:37:50Z",
+  "collector_version": "2.2.0"
+}

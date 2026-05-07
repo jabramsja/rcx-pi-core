@@ -6025,6 +6025,58 @@ def _queue_entry_backtick_value(line: str, label: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _tracker_note_wave_id(line: str) -> str:
+    match = re.search(r"Tracker sync note\s*\([^,]+,\s*([^)]+)\)", line)
+    return match.group(1).strip() if match else ""
+
+
+def _routed_tracker_queue_entries(
+    repo_root: Path,
+    *,
+    existing_wave_ids: set[str],
+) -> list[dict[str, Any]]:
+    tasks_path = repo_root / "TASKS.md"
+    try:
+        lines = tasks_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+
+    entries: list[dict[str, Any]] = []
+    for line in lines:
+        if "Tracker sync note" not in line or "Packet:" not in line:
+            continue
+        wave_id = normalize_wave_id(_tracker_note_wave_id(line))
+        if not wave_id or wave_id in existing_wave_ids:
+            continue
+        packet = _queue_entry_backtick_value(line, "Packet")
+        if not packet:
+            continue
+        status = read_control_plane_packet_status(repo_root, packet)
+        status_upper = str(status or "").upper()
+        if not status_upper.startswith("ROUTED - PHASE A"):
+            continue
+        category_match = re.search(r"Category:\s*([^.`]+)", line)
+        line_upper = line.upper()
+        entries.append(
+            {
+                "label": wave_id.upper(),
+                "state": str(status or "Routed tracker note"),
+                "wave_id": wave_id,
+                "category": (
+                    category_match.group(1).strip()
+                    if category_match
+                    else "routed remediation"
+                ),
+                "packet": packet,
+                "source_packet": "",
+                "status": status,
+                "hard_stop": "HARD STOP" in line_upper or "HARD STOP" in status_upper,
+            }
+        )
+        existing_wave_ids.add(wave_id)
+    return entries
+
+
 def _founder_ordered_queue_entries(repo_root: Path) -> list[dict[str, Any]]:
     tasks_path = repo_root / "TASKS.md"
     try:
@@ -6033,6 +6085,7 @@ def _founder_ordered_queue_entries(repo_root: Path) -> list[dict[str, Any]]:
         return []
 
     entries: list[dict[str, Any]] = []
+    seen_wave_ids: set[str] = set()
     for line in lines:
         if "FOUNDER-ORDERED-REDTEAM-" not in line:
             continue
@@ -6048,16 +6101,18 @@ def _founder_ordered_queue_entries(repo_root: Path) -> list[dict[str, Any]]:
         packet = _queue_entry_backtick_value(line, "Packet")
         if not wave_id or not packet:
             continue
+        normalized_wave_id = normalize_wave_id(wave_id)
         category_match = re.search(r"Category:\s*([^.`]+)", line)
         source_packet = _queue_entry_backtick_value(line, "Source audit packet")
         status = read_control_plane_packet_status(repo_root, packet)
         line_upper = line.upper()
         status_upper = str(status or "").upper()
+        seen_wave_ids.add(normalized_wave_id)
         entries.append(
             {
                 "label": label_match.group("label").strip(),
                 "state": label_match.group("state").strip(),
-                "wave_id": normalize_wave_id(wave_id),
+                "wave_id": normalized_wave_id,
                 "category": (
                     category_match.group(1).strip()
                     if category_match
@@ -6069,17 +6124,24 @@ def _founder_ordered_queue_entries(repo_root: Path) -> list[dict[str, Any]]:
                 "hard_stop": "HARD STOP" in line_upper or "HARD STOP" in status_upper,
             }
         )
+    entries.extend(
+        _routed_tracker_queue_entries(repo_root, existing_wave_ids=seen_wave_ids)
+    )
     return entries
 
 
 def _next_open_founder_ordered_queue_entry(repo_root: Path) -> dict[str, Any] | None:
+    open_entries: list[dict[str, Any]] = []
     for entry in _founder_ordered_queue_entries(repo_root):
         if packet_status_is_completed(entry.get("status")):
             continue
         if packet_status_is_completed(entry.get("state")):
             continue
-        return entry
-    return None
+        open_entries.append(entry)
+    for entry in open_entries:
+        if not entry.get("hard_stop"):
+            return entry
+    return open_entries[0] if open_entries else None
 
 
 def _post_merge_blocker_report_paths(repo_root: Path) -> list[str]:
