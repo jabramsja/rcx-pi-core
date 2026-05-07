@@ -39,8 +39,8 @@ Archived source snapshots for extracted non-blocking residue live in:
 
 - Evidence command:
   `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
-- Current inventory after cleanup: 30 markdown files, including this README and
-  29 active or partially active advisory packets.
+- Inventory after the first 2026-05-06 cleanup: 30 markdown files, including
+  this README and 29 active or partially active advisory packets.
 - Whole-file archives moved 12 closed, stale, or historical packets to
   `reports/archive/deferred/` with `closed-by-deferred-non-blocking-cleanup-2026-05-06`,
   `historical-by-deferred-non-blocking-cleanup-2026-05-06`, or source-wave
@@ -55,3 +55,19 @@ Archived source snapshots for extracted non-blocking residue live in:
   retained in `redteam_2026-03-14_repo_non_blockers.md` and
   `repo_truth_non_blockers_2026-03-14.md` were not extracted because they are
   Claude-related residue outside this cleanup authorization.
+
+2026-05-06 retained-residue cleanup note:
+
+- Evidence command:
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
+- Current post-bridge inventory after retained-residue cleanup: 31 markdown
+  files, including this README and 30 active or partially active advisory
+  packets.
+- Whole-file archive:
+  `reports/archive/deferred/pager-deterministic-session-2026-04-18_bridge_nonblockers_closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`.
+- Partial closed-section extraction:
+  `reports/archive/deferred/docs-root-mu-docs-redteam-cleanup-2026-05-06_bridge_nonblockers_partial-closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`.
+- Bridge Round 1 generated and retained
+  `deferred-non-blocking-retained-residue-cleanup-2026-05-06_bridge_nonblockers.md`
+  as this wave's active non-blocking follow-up packet.
+- Claude-related retained residue was left untouched.
