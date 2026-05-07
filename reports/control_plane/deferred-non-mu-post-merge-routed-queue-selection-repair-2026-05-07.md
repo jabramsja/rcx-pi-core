@@ -21,7 +21,7 @@ implementation. It does not authorize Claude-related edits.
 
 ## Root-Cause Evidence
 
-After PR #900 merged, commit executor Step 15b refreshed
+After the deferred-lane truth-sweep merge, commit executor Step 15b refreshed
 `.agent_bus/meta/post_merge_package.json` to
 `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06` with
 `post_merge_next_hard_stop: true`.
@@ -61,16 +61,14 @@ Hard stop before implementing either `/mu` structural packet.
 - Refresh wave: `deferred-non-mu-post-merge-routed-queue-selection-repair-2026-05-07`
 - Active packet: `reports/control_plane/deferred-non-mu-post-merge-routed-queue-selection-repair-2026-05-07.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `37cfc1d296def171b085042774f85bc31ca64a1eb4b3d96e60d576181da14016`
+- Tracker note sha256: `eac67ac514e11ae6349fb54359bad9354e4cee5747ffe595bfbaba3d241c5051`
 - Indicator artifact: `reports/l4_wave_indicators/deferred-non-mu-post-merge-routed-queue-selection-repair-2026-05-07.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_post_merge_cleanup.py::test_post_merge_package_refresh_routes_open_tracker_packet_before_hard_stop mu/tests/tools/test_commit_executor_post_merge_cleanup.py::test_post_merge_package_refresh_stops_before_mu_structural_queue mu/tests/tools/test_commit_executor_post_merge_cleanup.py::test_post_merge_package_refresh_selects_next_open_queue_packet && python3 -m py_compile mu/tools/executors/commit_executor.py && python3 mu/tools/checks/linters/check_private_attr_access.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py`.
-- Evidence delta: (1) PR #900 Step 15b selected the `/mu` structural hard-stop package while three routed non-`/mu` packets still had `Status: Routed - Phase A required before implementation`. (2) `mu/tools/executors/commit_executor.py` now extracts open routed tracker-note queue entries and selects open non-hard-stop entries before hard-stop entries. (3) The repair is bounded to post-merge queue selection and does not authorize `/mu` structural implementation or Claude-related edits.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_post_merge_cleanup.py`.
+- Evidence delta: (1) Routed commit handoff scopes 3 wave-owned file(s). (2) Evidence gate exercises 1 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/deferred-non-mu-post-merge-routed-queue-selection-repair-2026-05-07.json..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/deferred-non-mu-post-merge-routed-queue-selection-repair-2026-05-07.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/tools/test_commit_executor_post_merge_cleanup.py`
-  - `mu/tools/executors/commit_executor.py`
   - `reports/control_plane/deferred-non-mu-post-merge-routed-queue-selection-repair-2026-05-07.md`
   - `reports/l4_wave_indicators/deferred-non-mu-post-merge-routed-queue-selection-repair-2026-05-07.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
