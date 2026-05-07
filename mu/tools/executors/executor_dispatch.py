@@ -2067,6 +2067,7 @@ def _continue_successful_executor_chain(
                             "before chaining commit"
                         ),
                         "recovery": recovery,
+                        "retry_record": dict(record or {}),
                         "chained_from": (
                             "phase_a_executor" if origin == "phase_a_executor" else None
                         ),
@@ -2495,6 +2496,20 @@ def _clear_phase_b_state_for_retry(
         state_path.unlink()
         if verbose:
             print("[dispatch] Cleared stale Phase B state before retry")
+
+
+def _recovered_retry_record(result: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a recovered executor's explicit retry record when it is valid."""
+    retry_record = result.get("retry_record")
+    if not isinstance(retry_record, dict):
+        return None
+    decision = str(retry_record.get("decision") or "").strip()
+    if decision not in ROUTING_DISPATCH:
+        return None
+    try:
+        return json.loads(json.dumps(retry_record))
+    except (TypeError, ValueError):
+        return dict(retry_record)
 
 
 def _auto_refresh_routing(
@@ -3237,7 +3252,10 @@ def main(argv: list[str] | None = None) -> int:
                         "before commit chain"
                     )
                 _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
-                if not _is_chained_commit_failure(result):
+                retry_record = _recovered_retry_record(result)
+                if retry_record is not None:
+                    record = retry_record
+                elif not _is_chained_commit_failure(result):
                     if args.routing_record:
                         explicit_record = _reload_explicit_routing_record(
                             args.routing_record,
@@ -3298,7 +3316,10 @@ def main(argv: list[str] | None = None) -> int:
                         _recovery_original_timeouts = new_orig
                     # Recovery succeeded — grant one extra attempt (don't increment counter)
                     _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
-                    if not _is_chained_commit_failure(result):
+                    retry_record = _recovered_retry_record(result)
+                    if retry_record is not None:
+                        record = retry_record
+                    elif not _is_chained_commit_failure(result):
                         if args.routing_record:
                             explicit_record = _reload_explicit_routing_record(
                                 args.routing_record,

@@ -11772,6 +11772,80 @@ class TestRecoveryGateWiring:
         mock_recovery.assert_not_called()
         mock_clear.assert_called_once()
 
+    def test_in_process_phase_b_recovery_retries_retry_record_not_phase_a(self, tmp_path):
+        routing_file = tmp_path / "routing.json"
+        routing_file.write_text(
+            json.dumps(
+                {
+                    "status": "open",
+                    "decision": "ROUTE_PHASE_A",
+                    "summary": "docs wave",
+                    "wave_name": "docs-wave",
+                    "next_candidates": [
+                        {
+                            "candidate": "docs-wave",
+                            "tracked_packet": "reports/control_plane/docs-wave.md",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        retry_record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "Chained from Phase A convergence",
+            "wave_name": "docs-wave",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "next_candidates": [
+                {
+                    "candidate": "docs-wave",
+                    "tracked_packet": "reports/control_plane/docs-wave.md",
+                }
+            ],
+        }
+        recovered_phase_b = {
+            "status": "failed",
+            "decision": "ROUTE_PHASE_B",
+            "executor": "phase_b_executor",
+            "message": "Phase B recovered in-process and must be retried before chaining commit",
+            "recovery": {
+                "recovered": True,
+                "failure_class": "stale_git_index_lock",
+                "tier": 2,
+            },
+            "retry_record": retry_record,
+        }
+        success_result = {
+            "status": "success",
+            "decision": "COMMIT_GO",
+            "executor": "commit_executor",
+        }
+        seen_records: list[dict[str, object]] = []
+        mock_proc = MagicMock()
+        mock_proc.stdout = str(tmp_path)
+
+        def fake_dispatch(record, **kwargs):
+            seen_records.append(json.loads(json.dumps(record)))
+            return recovered_phase_b if len(seen_records) == 1 else success_result
+
+        with patch.object(dispatch_mod, "dispatch", side_effect=fake_dispatch) as mock_dispatch, \
+             patch.object(dispatch_mod, "attempt_recovery") as mock_recovery, \
+             patch.object(dispatch_mod, "_clear_phase_b_state_for_retry") as mock_clear, \
+             patch.object(dispatch_mod, "_auto_refresh_routing") as mock_refresh, \
+             patch.object(dispatch_mod.subprocess, "run", return_value=mock_proc):
+            exit_code = dispatch_mod.main(self._base_args(routing_file))
+
+        assert exit_code == 0
+        assert mock_dispatch.call_count == 2
+        assert seen_records[0]["decision"] == "ROUTE_PHASE_A"
+        assert seen_records[1]["decision"] == "ROUTE_PHASE_B"
+        assert seen_records[1]["next_candidates"][0]["tracked_packet"] == (
+            "reports/control_plane/docs-wave.md"
+        )
+        mock_recovery.assert_not_called()
+        mock_clear.assert_called_once()
+        mock_refresh.assert_not_called()
+
     def test_recovery_exhausted_stops_retry(self, tmp_path):
         """Exhausted recovery breaks the retry loop immediately."""
         routing_file = self._routing_file(tmp_path)
