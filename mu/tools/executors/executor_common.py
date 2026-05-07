@@ -957,7 +957,8 @@ def build_post_merge_routing_record(
 ) -> tuple[dict[str, Any], list[str]]:
     """Build a validated post-merge routing record from kwargs.
 
-    Canonical builder for .agent_bus/meta/post_merge_routing.json. Mirrors
+    Canonical builder for the active bus post-merge routing record (default
+    .agent_bus/meta/post_merge_routing.json). Mirrors
     commit_executor.build_commit_handoff's shape: returns (record, errors);
     callers MUST check that ``errors`` is empty before trusting the record.
 

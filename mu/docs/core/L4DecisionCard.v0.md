@@ -936,11 +936,16 @@ Scope: Formal G8 gate verdict based on D001-D010 executable evidence
      H5 PARTIALLY CONFIRMED.
 
 5. What G8 PASS Does NOT Mean
-   - No production reduction claim. All four primitives remain in
-     production code unchanged.
-   - No production elimination claim. REDUCIBLE_WITH means "can be
-     reduced IF [specific change] is made" — no such change has been made
-     (except D005 pilot, which is flag-gated OFF by default).
+   - No full-L4 or full bootstrap-primitive elimination claim. All four
+     bootstrap primitives still have production code paths and require separate
+     productionization gates before any full elimination claim.
+   - Bounded production reduction is active outside this G8 classification
+     result: current Stage0 VM cutover routes the kernel/bridge/match/subst
+     projection set through the Stage0 VM. G8 PASS itself does not prove or
+     widen that production cutover.
+   - REDUCIBLE_WITH means "can be reduced IF [specific change] is made" for the
+     primitive under classification; the D005 pilot and later bounded cutover
+     evidence do not make L4 complete.
    - No L4-complete claim. L4 remains blocked by stop conditions #3
      (host for-loop in effect handler) and #4 (L3-to-L4 gap).
    - G8 PASS closes primitive classification evidence, not L4 completion.

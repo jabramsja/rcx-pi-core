@@ -2923,7 +2923,10 @@ def run_post_merge_bridge(
             summary="Failed to write routing record — decision voided",
             error_code="ROUTING_RECORD_FAILED",
             error_detail=str(exc),
-            recovery_hint="Fix .agent_bus/meta/ permissions and retry",
+            recovery_hint=(
+                "Fix permissions for the active bus meta directory "
+                f"{agent_bus_path(repo_root, bus_dir, 'meta')} and retry"
+            ),
         )
 
     return response

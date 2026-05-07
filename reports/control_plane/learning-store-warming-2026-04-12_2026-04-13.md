@@ -89,9 +89,13 @@ Subagent warming: inject learning store patterns into SDK agent and implementer 
 - **Sanitization:** Output is sanitized — inject a fingerprint containing prompt-injection markers (e.g., triple backticks, instruction-like patterns, zero-width characters, Greek/Cyrillic confusable characters, `VERDICT:`/`OVERALL_VERDICT:` markers) and verify they are neutralized in the returned string. Specifically: `_extract_classifier_signal`-derived fingerprints contain raw stderr/stdout, so test that `load_relevant_learnings()` strips/escapes these via the local `_sanitize_learning_output()` helper. Verify confusable-character translation prevents keyword-redaction bypass (e.g., Greek Α in "ignore previous" is normalized to Latin A before redaction fires)
 
 **`test_run_review.py`** — SDK agent warming wiring:
-- `run_review.py` injects learning_context into prompt for all 9 agents when `use_learning=True` (default) and targets are code files (not report packets)
+- `run_review.py` exposes the learning-control wiring for SDK review prompts:
+  default `use_learning=True`, explicit `use_learning=False`, `--no-memory`
+  independence, report-packet exclusion, and availability of
+  `load_relevant_learnings`. This test module does not by itself prove prompt
+  injection for all 9 agents.
 - **`--no-learning` opt-out:** When `use_learning=False` (via `--no-learning`), learning_context is NOT computed or injected (verify `load_relevant_learnings` is not called and prompt does not contain `## Learning Context` section)
-- **`--no-memory` independence (Phase B SDK review proof):** When `use_memory=False` (via `--no-memory`) but `use_learning=True` (default) and targets are code files, learning_context IS still injected. This directly tests the decoupling added in work item (b) and proves the Phase B SDK review surface is warm: `phase_b_executor.py:1253-1259` passes `--no-memory` but not `--no-learning`, so SDK agents must still receive warming.
+- **`--no-memory` independence:** When `use_memory=False` (via `--no-memory`) but `use_learning=True` (default) and targets are code files, learning_context remains eligible for injection. The `test_run_review.py` coverage proves the flag decoupling; Phase B SDK review warming is inferred from the Phase B command path not passing `--no-learning`, not from an all-agent prompt-rendering assertion in this test module.
 - **Report-packet exclusion:** When `use_learning=True` (default) but all review targets are `reports/*.md` packets (`build_report_packet_context()` returns non-empty), learning_context is NOT injected. Verify `load_relevant_learnings` is not called and prompt does not contain `## Learning Context` section. This proves that `REPORT-PACKET REVIEW MODE` evidence-only discipline is not contaminated by historical pipeline-recovery snippets.
 
 **`test_phase_b_executor.py`** — Phase B surface proof (addresses existing `TestBuildImplementationPrompt` at lines 70-125):
@@ -118,9 +122,9 @@ Subagent warming: inject learning store patterns into SDK agent and implementer 
 5. `run_review.py` DOES inject learning_context when `use_memory=False` but `use_learning=True` and targets are code files — `--no-memory` does not suppress learning context (Phase B SDK review surface proof: `phase_b_executor.py:1253-1259` passes `--no-memory` but not `--no-learning`)
 6. `run_review.py` does NOT inject learning_context when all targets are `reports/*.md` packets, regardless of `use_learning` — `REPORT-PACKET REVIEW MODE` evidence-only discipline is preserved (historical learning-store snippets are not packet-cited evidence)
 7. `phase_b_implementer.py` receives and renders learning_context from `phase_b_executor.py`
-8. All new tests pass: `pytest mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_run_review.py mu/tests/tools/test_phase_b_executor.py -v`
+8. All new tests pass: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_run_review.py mu/tests/tools/test_phase_b_executor.py`
 9. Phase B surface proof: `test_phase_b_executor.py` proves `learning_context` kwarg propagation through all `build_implementation_prompt()` call sites
-10. Existing tests in touched files still pass: `pytest mu/tests/tools/ -v --timeout=30`
+10. Existing tests in touched files still pass through executor/closeout-owned validation; bare `pytest` commands without `PYTHONHASHSEED=0` are not accepted as deterministic proof in this repo.
 
 Note: `tools/pre-push-fast` is executor/closeout-owned (see `phase_b_implementer.py:100-103`). It runs during `commit_executor.py` Step 11, not during Phase B implementation. The Phase B implementer MUST NOT run it.
 
@@ -131,10 +135,10 @@ Note: `tools/pre-push-fast` is executor/closeout-owned (see `phase_b_implementer
 3. Output is capped at 4000 characters (`len(result) <= 4000`) regardless of store size — cap enforced by `_sanitize_learning_output(max_len=4000)` post-sanitization
 4. Empty `learned_patterns.json` and missing `.claude/rules/learning.md` both degrade to empty string without error
 5. **Sanitization:** `load_relevant_learnings()` output passes through local `_sanitize_learning_output()` (stdlib-only, defined in `recovery_gate.py`) — fingerprints containing triple backticks, instruction-like patterns, zero-width characters, confusable Greek/Cyrillic characters, or verdict-marker patterns (`VERDICT:`, `OVERALL_VERDICT:`) are neutralized before returning to any caller. The local helper replicates the complete security-relevant measure set from `sanitize_for_prompt` (confusable translation, verdict redaction, instruction redaction, zero-width stripping, backtick escaping, NFKC normalization, truncation). No import from `tools.runners.shared_agent_utils` is introduced.
-6. `run_review.py` prompt includes `## Learning Context` section when `use_learning=True` (default), learning store has content, and targets are code files (not report packets)
+6. `run_review.py` learning-control tests cover default enablement, explicit opt-out, report-packet exclusion, and import availability; full all-agent prompt rendering is not claimed from `test_run_review.py` alone.
 7. **`--no-learning` opt-out:** `run_review.py` does NOT inject `## Learning Context` when `use_learning=False` (via `--no-learning`) — verified by test that `load_relevant_learnings` is not called and prompt omits the section
 8. **Report-packet exclusion:** `run_review.py` does NOT inject `## Learning Context` when all review targets are `reports/*.md` packets, regardless of `use_learning`. `REPORT-PACKET REVIEW MODE` (`run_review.py:295-309`) constrains agents to verify claims against cited evidence only — historical learning-store snippets are not packet-cited evidence and would contaminate this bounded review discipline. Verified by test that `load_relevant_learnings` is not called and prompt omits `## Learning Context` when `build_report_packet_context()` returns non-empty
-9. **`--no-memory` independence (Phase B SDK review surface):** `run_review.py` DOES inject `## Learning Context` when `use_memory=False` (via `--no-memory`) but `use_learning=True` (default) and targets are code files. This proves the Phase B SDK review path (`phase_b_executor.py:1253-1259`, which hard-codes `--no-memory`) delivers warming to SDK agents. (Phase B reviews target code files, not report packets, so the report-packet exclusion does not affect this surface.)
+9. **`--no-memory` independence (Phase B SDK review surface):** `run_review.py` keeps `use_learning=True` when `use_memory=False` (via `--no-memory`) and targets are code files. This proves the flag-level prerequisite for Phase B SDK review warming; actual Phase B delivery also depends on the Phase B command path not passing `--no-learning` and on non-report targets.
 10. `phase_b_implementer.py` prompt includes `## Learning Context` section when `learning_context` kwarg is non-empty
 11. Existing `get_pattern_context()` behavior in `agent_memory.py` is unchanged
 12. No new file readers introduced -- all reads go through existing `_load_learning_store()` and `_load_session_fixed_entries()`
@@ -146,7 +150,7 @@ Note: `tools/pre-push-fast` is executor/closeout-owned (see `phase_b_implementer
 - **Parent task:** `[PIPELINE-RECOVERY]` (TASKS.md line 177-185). IN PROGRESS, founder-authorized.
 - **Authorization:** TASKS.md line 184: Phase 5 learning store code baseline landed (PR #751). Integration gaps remain: "no `.claude/rules/learning.md` cross-pollination, no subagent warming."
 - **Predecessor:** Item A (cross-pollination) landed via PR #768 (`6eb429a5`). This wave covers the injection-surface portion of Item B (subagent warming): `load_relevant_learnings()` function + all prompt injection paths (SDK review + implementer) + pipeline-subset filtering for implementer/grounding/fuzzer. **Not delivered in this wave:** domain-level relevance filtering for 7 non-pipeline agents (design doc `PipelineRecovery.v0.md:280`) — the `FailureClass` taxonomy lacks domain-level categories (security, complexity, structural correctness). A follow-up wave is required to extend the taxonomy and satisfy the design doc's full relevance contract.
-- **Governing packet:** This file (`reports/control_plane/learning-store-warming-2026-04-12_2026-04-13.md`). Supersedes untracked predecessor `reports/control_plane/learning_store_warming_2026-04-12.md` (Item B design draft, same scope, never committed).
+- **Governing packet:** This file (`reports/control_plane/learning-store-warming-2026-04-12_2026-04-13.md`). Supersedes predecessor design draft `reports/control_plane/learning_store_warming_2026-04-12.md`, which remains present as a historical Phase A design surface.
 - **Design doc:** `mu/docs/agents/PipelineRecovery.v0.md` (subagent learning injection).
 - **Wave class:** L4_ENABLER
 - **target_gate_id:** G8

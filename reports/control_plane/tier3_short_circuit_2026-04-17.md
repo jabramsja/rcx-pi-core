@@ -1,6 +1,6 @@
 # Wave Packet: tier3-short-circuit-2026-04-17
 
-## Status: Phase B (locked, implementing)
+## Status: Historical (implemented; later PR #791/#792 follow-ups refined severity semantics)
 ## Phase-A-Lock: LOCKED
 
 ## Goal
@@ -23,7 +23,8 @@ smallest bounded structural fix for the observed wastage.
 
 ## Scope
 
-Control-surface / tooling + tests only. 2 file edits + 1 wave packet.
+Control-surface / tooling + tests only. Historical implementation touched the
+recovery gate, focused tests, and this wave packet.
 
 **Files (3 total):**
 
@@ -33,10 +34,10 @@ Control-surface / tooling + tests only. 2 file edits + 1 wave packet.
   number < `max_iterations - 1`, log "tier-3 iter N returned non-actionable
   action={action}; short-circuiting remaining iterations" and break out of
   the loop with `outcome = "short_circuited_non_actionable"`. The subsequent
-  return path should record the short-circuit in the recovery_log.json +
-  recovery_status.json with `exhausted=True` (same terminal semantics) but
-  `detail` reflects the short-circuit reason. `_make_result(...)` signature
-  may need a new kwarg or a new helper; pick the least-invasive shape.
+    return path should record the short-circuit in the recovery_log.json +
+    recovery_status.json with `detail` reflecting the short-circuit reason.
+    Current landed semantics differentiate severity: `skip` short-circuits with
+    `exhausted=False`, while `escalate` short-circuits with `exhausted=True`.
 - `mu/tests/tools/test_recovery_gate.py` — add 2 regression tests in a new
   class `TestTier3ShortCircuit`:
   - `test_skip_action_on_iter_1_short_circuits`: mock the recovery agent
@@ -82,10 +83,11 @@ projection, seed, runtime, or any `*.js` file.
 - **Evidence command:** `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_recovery_gate.py`
 - **Evidence delta:**
   1. `recovery_gate.run_recovery_loop` short-circuits on non-actionable
-     agent response (skip/escalate with empty commands) at iteration 1,
-     saving up to 2 × codex-xhigh invocations per exhausted cycle
+     agent response (skip/escalate with empty commands) when more iterations
+     remain, saving up to 2 × codex-xhigh invocations per exhausted cycle
      (approximately 2-3 minutes + budget per observed PR #783-class
-     recovery).
+     recovery). Landed follow-up semantics keep deliberate `skip`
+     non-exhausted and keep `escalate` exhausted/hard-fail.
   2. Two new regression tests verify (a) short-circuit fires on non-actionable
      iter 1, (b) short-circuit does NOT fire on actionable iter 1 that later
      fails verification.
@@ -107,23 +109,24 @@ projection, seed, runtime, or any `*.js` file.
    preferred, defer to a future wave (do NOT re-architect in-line).
 2. Step 8b targeted pytest on `test_recovery_gate.py` — 849 tests (847
    pre-existing + 2 new) must PASS.
-3. Pre-push-fast ratchet sweep + `enforce_l4_execution_contract.py` PASS on
-   L4_ENABLER.
+3. Commit/pre-push-owned ratchet sweep plus L4 contract enforcement must pass
+   outside the Phase B implementer loop.
 
 ## Stop Conditions
 
 - Abort if pytest fails or any pre-existing test regresses.
 - Abort if bridge review returns blocking findings on the short-circuit
   contract shape (e.g., reviewer prefers candidate #1 or #3).
-- Abort if L4 contract enforcement rejects the classification.
+- Abort Phase B if the local pytest or bridge review rejects the bounded
+  short-circuit contract. L4 contract enforcement is commit/pre-push-owned.
 
 ## Closeout
 
-On merge, commit_executor step 16 cleans up worktree + branch. Archive
-`reports/deferred/blocking/recovery_gate_tier3_unactionable_exhaust_2026-04-17.md`
-with `_CLOSED_by_PR<N>` suffix (performed by the implementer; PR # resolved
-at commit time). 3 remaining pipeline-hardening deferreds stay open:
+On merge, commit_executor step 16 cleaned up the worktree + branch and the
+source blocker was archived by the follow-through wave. The remaining deferred
+inventory below is historical and must not be treated as current active work by
+this packet:
 - `commit_executor_step16_cascade_block_2026-04-17.md`
 - `pipeline_monitor_watcher_staleness_2026-04-17.md`
 - `hybrid_recovery_inert_structural_gaps_2026-04-17.md` (3 sub-gaps)
-- NEW (to file separately): `commit_executor_step15_commented_review_detection_2026-04-17.md`
+- `commit_executor_step15_commented_review_detection_2026-04-17.md`

@@ -19,9 +19,10 @@ Purpose: Founder-directed Phase A packet for deferred/report truth cleanup. This
   and date `2026-05-02`.
 - Tracker truth: `TASKS.md` now marks `[DEFERRED-REPORT-TRUTH-CLEANUP]`
   **CLEARED** in NOW and cites this packet as historical.
-- Active residue retained: `reports/deferred/non_blocking/deferred-report-truth-cleanup-2026-05-02_bridge_nonblockers.md`
-  remains an active code-backed follow-up packet for the low-severity
-  DOC_ACCURACY findings that were not fixed by this active-state closeout.
+- Active residue was retained by the 2026-05-03 closeout and later routed by
+  `deferred-non-mu-deferred-lane-truth-sweep-2026-05-07`; the source packet is
+  now archived at
+  `reports/archive/deferred/deferred-report-truth-cleanup-2026-05-02_bridge_nonblockers_closed-by-deferred-non-mu-deferred-lane-truth-sweep-2026-05-07.md`.
 - L4 indicator handling: `reports/l4_wave_indicators/deferred-report-truth-cleanup-2026-05-02.json`
   remains retained evidence/provenance for the merged wave.
 - Runtime/projection/substrate delta: none; this closeout is limited to
@@ -185,7 +186,7 @@ Moved mechanically, evidence-preserving:
 - `ls .claude/hooks/force-mcp-sqlite.sh` proves the PR #761 hook file exists on the current tree.
 - `nl -ba reports/deferred/non_blocking/pr769_bot_findings_2026-04-13.md` and `nl -ba reports/deferred/non_blocking/pr771_bot_findings_2026-04-13.md` showed CLOSED/FIXED source packet status before archiving, and `TASKS.md:310-311` supplies current tracker truth.
 - `git status --short` before implementation showed only `TASKS.md` and this tracked packet dirty, proving `main_repo_dirty_files_2026-04-11.md` no longer represented current active worktree truth.
-- `nl -ba TASKS.md | sed -n '145,151p'` proves `pager-ping-delivery-2026-04-18` was a NO_OP close note with no runtime change.
+- `nl -ba TASKS.md | sed -n '150p'` proves `pager-ping-delivery-2026-04-18` was a NO_OP close note with no runtime change and now points at the archived close-note path.
 - `nl -ba mu/tests/tools/test_pipeline_agent_pager.py | sed -n '1829,1865p'` proves the pager close-note wording fix: the test routes through repo config and calls `emit_transition_event(repo, ...)`.
 - `nl -ba reports/control_plane/hybrid_recovery_inert_structural_gaps_2026-04-17.md | sed -n '24,40p;96,106p;200,220p'` proves the hybrid-recovery non-blocker was only a closeout wording gap; the packet now includes `mu/tests/docs/test_doc_placement_rules.py` in the targeted validation line and points to the archived non-blocker.
 
@@ -254,8 +255,10 @@ keeps the cleanup wave's active reference updates limited to the new
 `[DEFERRED-REPORT-TRUTH-CLEANUP]` task entry and the anti-drift closed residue
 reference. Bridge Round 1 also generated
 `reports/deferred/non_blocking/deferred-report-truth-cleanup-2026-05-02_bridge_nonblockers.md`;
-that packet is retained as a code-backed follow-up in the active non-blocking
-lane. Evidence command: `git diff --cached -U0 -- TASKS.md`.
+that packet was retained as a code-backed follow-up at the time and later
+archived by `deferred-non-mu-deferred-lane-truth-sweep-2026-05-07` after the
+remaining docs/control-plane findings were routed. Historical evidence command:
+`git diff --cached -U0 -- TASKS.md`.
 
 <!-- COMMIT_PATH_TRUTH_REFRESH:start -->
 ## Commit Path Truth Refresh
@@ -286,6 +289,6 @@ lane. Evidence command: `git diff --cached -U0 -- TASKS.md`.
   - `reports/control_plane/deferred_report_truth_cleanup_2026-05-02.md`
   - `reports/control_plane/hybrid_recovery_inert_structural_gaps_2026-04-17.md`
   - `reports/control_plane/pager_ping_delivery_fix_2026-04-18.md`
-  - `reports/deferred/non_blocking/deferred-report-truth-cleanup-2026-05-02_bridge_nonblockers.md`
+  - `reports/deferred/non_blocking/deferred-report-truth-cleanup-2026-05-02_bridge_nonblockers.md` (historical at commit time; later archived by deferred-non-mu deferred-lane truth sweep)
   - `reports/l4_wave_indicators/deferred-report-truth-cleanup-2026-05-02.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

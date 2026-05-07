@@ -465,7 +465,10 @@ only far enough to acknowledge those two wave-owned additions.
 18. Tests prove the admitted transition set, the automatic trigger path, the
     event-id identity contract, the explicit budget / failure policy, the
     adapter-ACK contract, and the dedupe / partial-failure / restart semantics
-    above without depending on live tmux panes or wall-clock sleeps.
+    above without depending on live tmux panes. Some timeout-budget regressions
+    intentionally use bounded `time.sleep()` probes in
+    `mu/tests/tools/test_pipeline_agent_pager.py`; they are not live-pane
+    dependencies.
 
 ## Validation
 

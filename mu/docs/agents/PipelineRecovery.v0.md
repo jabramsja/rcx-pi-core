@@ -61,7 +61,9 @@ executors, but Tier 3 is now split into two branches:
 - Tier 1 and Tier 2 remain deterministic.
 - Tier 4 remains a hard escalation boundary.
 - Tier 3 diagnosis still runs through the configured recovery-agent path and
-  returns JSON only; diagnosis does not get tool-use rights.
+  returns JSON only; it does not get direct shell/tool execution rights. The
+  executor may consume a bounded JSON action such as `shell`, `edit`, or
+  `delegate_implementer` only through the fail-closed contracts below.
 - The hybrid branch is disabled by default behind
   `hybrid_recovery_enabled: false`.
 - `recovery_gate.py` remains stdlib + `executor_common` at module import time.
@@ -80,22 +82,46 @@ executors, but Tier 3 is now split into two branches:
 class FailureClass(Enum):
     # Tier 1 — deterministic auto-fix (zero tokens)
     STALE_BRIDGE_LOCK = "stale_bridge_lock"
-    STALE_GIT_INDEX_LOCK = "stale_git_index_lock"
     STALE_EXECUTOR_STATE = "stale_executor_state"
     STALE_CONTINUATION = "stale_continuation"
     MIXED_STAGING = "mixed_staging"
+    TRACKER_NOTE_CONTRACT = "tracker_note_contract"
+    FEATURE_BRANCH_MISMATCH = "feature_branch_mismatch"
+    MISSING_BRIDGE_CONFIG = "missing_bridge_config"
+    POST_REENTRY_NEEDS_PHASE_B = "post_reentry_needs_phase_b"
+    PHASE_B_PLAN_REQUIRED = "phase_b_plan_required"
+    MISSING_PHASE_A_LOCK = "missing_phase_a_lock"
+    MISSING_PLAN_TASK_HEADER = "missing_plan_task_header"
+    MISMATCHED_PLAN_TASK_HEADER = "mismatched_plan_task_header"
+    STAGE_PATH_SYMLINK_ALIAS = "stage_path_symlink_alias"
 
     # Tier 2 — auto-retry with adjustment (zero tokens)
+    STALE_GIT_INDEX_LOCK = "stale_git_index_lock"
     PROCESS_TIMEOUT = "process_timeout"
     TRANSIENT_KILL = "transient_kill"
+    UPSTREAM_CONNECTIVITY = "upstream_connectivity"
     AGGREGATION_HANG = "aggregation_hang"
     IMPLEMENTER_STALE = "implementer_stale"
+    PR_MERGE_CONFLICT = "pr_merge_conflict"
+    PR_CONFLICTING = "pr_conflicting"
+    PHASE_B_WAVE_CLASS_PACKAGE_GAP = "phase_b_wave_class_package_gap"
+    COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP = "commit_supervisor_structural_override_package_gap"
+    PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP = "phase_b_l4_structural_tracker_note_gap"
 
     # Tier 3 — LLM diagnosis (small focused prompt)
     GIT_STAGING_CONFLICT = "git_staging_conflict"
     TEST_FAILURE = "test_failure"
+    PRIVATE_ATTR_TEST_INTEGRITY = "private_attr_test_integrity"
     AGENT_REVIEW_CRASH = "agent_review_crash"
     UNKNOWN_ERROR = "unknown_error"
+    NEEDS_PHASE_B = "needs_phase_b"
+    BOT_FINDINGS_PENDING = "bot_findings_pending"
+    MAX_TURNS_REACHED = "max_turns_reached"
+    PRE_PUSH_FAILED = "pre_push_failed"
+    STAGE_FAILED = "stage_failed"
+    IMPLEMENTER_ERROR = "implementer_error"
+    BRIDGE_ERROR = "bridge_error"
+    L4_CONTRACT_VIOLATION = "l4_contract_violation"
 
     # Tier 4 — escalate (never recover)
     TERMINAL_POLICY = "terminal_policy"
@@ -113,10 +139,13 @@ Classification is pure dict inspection — reads `result["status"]`, `result["st
 | Failure Signal | Detection | Recovery |
 |---|---|---|
 | `.agent_bus/bridge.lock` held by dead PID | `kill -0 pid` fails | Truncate lock file |
-| `.git/index.lock` exists | `Path.exists()` | `os.unlink()` |
 | Stale `phase_b_state.json` from prior run | wave_id mismatch with current routing | `Path.unlink()` |
 | Stale commit_executor continuation records | File age > 1h, no executor alive | `Path.unlink()` |
 | Mixed staged/unstaged state | `git status --porcelain` shows both index and worktree changes | `git reset HEAD -- <files>` |
+| Tracker-note contract gap | tracker-note validation failure | deterministic tracker-note recovery path |
+| Feature branch mismatch | current branch differs from expected wave branch | create or switch to the expected branch when collision checks pass |
+| Missing bridge config | bridge config missing in linked worktree | copy repo-local bridge config from main worktree |
+| Missing Phase A lock / task header | packet header validation failure | deterministic packet-header repair |
 
 After fix: retry the failed step via `dispatch()` with same routing.
 
@@ -124,10 +153,14 @@ After fix: retry the failed step via `dispatch()` with same routing.
 
 | Failure Signal | Detection | Recovery |
 |---|---|---|
+| Self-cleared `.git/index.lock` | index-lock failure and lock gone by recovery time | grant one retry without deleting `.git` internals |
 | Process timeout | `status == "timeout"` | Increase timeout 50% (capped 2x), retry once |
 | Transient process kill | exit_code in (-9, -15, 137) | Retry with same parameters |
+| Upstream connectivity | provider/network transient | Retry after bounded delay |
 | Bridge aggregation hang | stderr contains "aggregation" | Clear bridge state, retry |
 | Implementer stale timeout | `implementer_status == "stale"` | Increase stale timeout, retry |
+| PR merge conflict / conflicting PR | PR state is merge-conflict or CONFLICTING/DIRTY | bounded branch sync or conflict auto-resolve guard |
+| Structural package/tracker gaps | package metadata is mechanically incomplete | retry after deterministic package/tracker repair |
 
 Timeout adjustments passed via `RCX_RECOVERY_TIMEOUT_OVERRIDE` env var.
 

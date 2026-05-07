@@ -2450,7 +2450,8 @@ def run_bridge_review(
     """Run bridge_supervisor.py review and return the result.
 
     If job_id is provided, it's passed to bridge_supervisor so the rendered
-    output is written to a deterministic path (.agent_bus/rendered/{job_id}.md).
+    output is written to a deterministic path under the active bus rendered
+    directory.
     The decision is parsed from stdout (bridge_supervisor prints it).
     """
     config = load_executor_config(repo_root)

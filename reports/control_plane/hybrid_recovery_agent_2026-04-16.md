@@ -7,7 +7,7 @@ Task: [PIPELINE-RECOVERY]
 Wave ID: hybrid-recovery-agent-2026-04-16
 Wave class: L4_ENABLER
 Target gate: G8
-Packet path: This file (`TASKS.md:191-193` routes the active wave here as the tracked packet; reviewer-cited git evidence shows the path is staged in the index but absent from `HEAD`, so this rewrite treats it as the active tracked packet, not a landed governing packet in `HEAD`)
+Packet path: This historical governing packet (`TASKS.md:191-193` originally routed the active wave here as the tracked packet; the packet is now completed and remains evidence for the landed hybrid-recovery slice)
 
 ## Purpose
 

@@ -312,9 +312,9 @@ class _BridgeLock:
             raise BridgeError(
                 "Another bridge supervisor is already running. "
                 f"Wait for it to finish.{detail_suffix} "
-                "The lockfile path persists by design; only remove "
-                ".agent_bus/bridge.lock if a lock probe shows no process "
-                "holds the flock."
+                "The lockfile path persists by design; only remove the active "
+                f"bus lock at {self._lock_path} if a lock probe shows no "
+                "process holds the flock."
             )
         _write_lock_metadata(
             self._fp,
