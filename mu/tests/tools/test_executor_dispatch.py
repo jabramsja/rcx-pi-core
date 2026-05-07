@@ -740,6 +740,68 @@ class TestDispatcherFreshnessRefresh:
         assert result["decision"] == "ROUTE_PHASE_A"
         assert auto_refresh_calls
 
+    def test_stale_empty_tracker_update_refreshes_before_hold(
+        self, tmp_path, monkeypatch,
+    ):
+        canonical_dir = tmp_path / ".agent_bus" / "meta"
+        canonical_dir.mkdir(parents=True)
+        record = {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "stale empty tracker update",
+            "wave_name": "canonical-tracker-wave",
+            "task_id": "[CANONICAL-TRACKER-WAVE]",
+            "state_sha": "stale-state",
+            "next_candidates": [],
+        }
+        (canonical_dir / "post_merge_routing.json").write_text(
+            json.dumps(record),
+            encoding="utf-8",
+        )
+        refreshed_record = {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "refreshed tracker update",
+            "wave_name": "canonical-tracker-wave",
+            "task_id": "[CANONICAL-TRACKER-WAVE]",
+            "state_sha": "fresh-state",
+            "files_to_stage": ["TASKS.md"],
+            "next_candidates": [],
+        }
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "validate_routing_record_freshness",
+            lambda *a, **k: (False, "stale for proof"),
+        )
+        auto_refresh_calls = []
+
+        def fake_refresh(*args, **kwargs):
+            auto_refresh_calls.append((args, kwargs))
+            return True, refreshed_record
+
+        monkeypatch.setattr(dispatch_mod, "_auto_refresh_routing", fake_refresh)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_run_executor_in_group",
+            lambda args, cwd, timeout: subprocess.CompletedProcess(
+                args, 0, stdout='{"status":"success"}', stderr=""
+            ),
+        )
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_continue_successful_executor_chain",
+            lambda *a, **k: {
+                "status": "success",
+                "decision": refreshed_record["decision"],
+                "executor": "commit_executor",
+            },
+        )
+
+        result = dispatch_mod.dispatch(record, repo_root=tmp_path)
+
+        assert result["status"] == "success"
+        assert result["decision"] == "UPDATE_TRACKER_ONLY"
+        assert auto_refresh_calls
+
     def test_auto_refresh_rejects_stale_post_merge_package_before_supervisor(
         self, tmp_path, monkeypatch,
     ):
@@ -10668,7 +10730,11 @@ class TestDispatcherCommitMechanicalBridge:
 
     def test_update_tracker_without_handoff_passes_routing_record(self, tmp_path):
         """When no handoff file exists, dispatcher passes --routing-record."""
-        record = {"decision": "UPDATE_TRACKER_ONLY", "summary": "update tracker"}
+        record = {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "update tracker",
+            "files_to_stage": ["TASKS.md"],
+        }
         with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
@@ -10680,10 +10746,26 @@ class TestDispatcherCommitMechanicalBridge:
         call_args = mock_run.call_args[0][0]
         assert "--routing-record" in call_args
 
+    def test_update_tracker_empty_scope_holds_without_executor(self, tmp_path):
+        """Empty UPDATE_TRACKER_ONLY records are terminal no-ops, not TASKS.md commits."""
+        record = {"decision": "UPDATE_TRACKER_ONLY", "summary": "nothing left"}
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
+            result = dispatch_mod.dispatch(
+                record, repo_root=tmp_path, skip_freshness=True
+        )
+
+        assert result["status"] == "held"
+        assert "Refusing to synthesize a TASKS.md-only handoff" in result["message"]
+        assert mock_run.call_args is None
+
     def test_no_longer_returns_needs_handoff(self, tmp_path):
         """Dispatcher must not return needs_handoff for mechanically preparable routes."""
         # Use UPDATE_TRACKER_ONLY since COMMIT_GO now requires a handoff file
-        record = {"decision": "UPDATE_TRACKER_ONLY", "summary": "test"}
+        record = {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "test",
+            "files_to_stage": ["TASKS.md"],
+        }
         with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="ok", stderr=""
@@ -10702,7 +10784,7 @@ class TestCommitExecutorRoutingRecordAcceptance:
             "decision": "UPDATE_TRACKER_ONLY",
             "summary": "update the tracker",
             "wave_name": "tracker-update",
-            "next_candidates": [{"candidate": "update TASKS.md"}],
+            "files_to_stage": ["TASKS.md"],
         }
         handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
         assert not errors
@@ -10716,6 +10798,7 @@ class TestCommitExecutorRoutingRecordAcceptance:
             "decision": "UPDATE_TRACKER_ONLY",
             "summary": "update the tracker",
             "wave_name": "tracker-update",
+            "files_to_stage": ["TASKS.md"],
         }
         handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
         assert not errors
@@ -10726,6 +10809,16 @@ class TestCommitExecutorRoutingRecordAcceptance:
         assert "primary_invariant_id:" in note
         assert "indicator_artifact_ref:" in note
         assert "boot0_progress_state:" in note
+
+    def test_prepare_handoff_tracker_only_empty_scope_rejected(self, tmp_path):
+        record = {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "update the tracker",
+            "wave_name": "tracker-update",
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert handoff is None
+        assert any("no actionable tracker scope" in error for error in errors)
 
     def test_prepare_handoff_from_valid_embedded_handoff(self, tmp_path):
         """Embedded handoffs are accepted only after full validation."""
@@ -11343,6 +11436,7 @@ class TestDispatcherStaleHandoffOverride:
             "decision": "UPDATE_TRACKER_ONLY",
             "summary": "just tracker",
             "wave_name": "tracker-only-wave",
+            "files_to_stage": ["TASKS.md"],
         }
         with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run:
             mock_run.return_value = MagicMock(

@@ -4955,7 +4955,17 @@ def _attempt_bot_finding_remediation(
                 cwd=repo_root, timeout=300,
             )
         except subprocess.CalledProcessError as exc:
-            log(f"Step 15: git operation failed in round {round_num}: {exc}")
+            failure_detail = _tail_failure_excerpt(
+                "\n".join(part for part in (exc.stderr, exc.stdout) if part),
+                limit=1200,
+            )
+            if failure_detail:
+                log(
+                    f"Step 15: git operation failed in round {round_num}: "
+                    f"{failure_detail}"
+                )
+            else:
+                log(f"Step 15: git operation failed in round {round_num}: {exc}")
             return {
                 "status": "bot_findings_pending",
                 "bot_findings": current_findings,
@@ -5259,8 +5269,35 @@ def prepare_handoff_from_routing_record(
 
     # For UPDATE_TRACKER_ONLY: construct a minimal tracker-only handoff
     candidates = record.get("next_candidates", [])
+    if not isinstance(candidates, list):
+        candidates = []
     files_to_stage = record.get("files_to_stage", [])
     tracker_note = record.get("tracker_note_text", "")
+
+    def has_nonblank_list_item(value: Any) -> bool:
+        return isinstance(value, list) and any(str(item).strip() for item in value)
+
+    candidate_has_scope = any(
+        isinstance(c, dict)
+        and (
+            str(c.get("tracked_packet") or "").strip()
+            or has_nonblank_list_item(c.get("files"))
+        )
+        for c in candidates
+    )
+    if (
+        decision == "UPDATE_TRACKER_ONLY"
+        and not standalone
+        and not (isinstance(tracker_note, str) and tracker_note.strip())
+        and not has_nonblank_list_item(files_to_stage)
+        and not has_nonblank_list_item(record.get("force_add_files"))
+        and not candidate_has_scope
+    ):
+        return None, [
+            "UPDATE_TRACKER_ONLY routing record has no actionable tracker scope "
+            "(tracker_note_text, files_to_stage, force_add_files, tracked_packet, "
+            "or candidate files). Refusing to synthesize a TASKS.md-only handoff."
+        ]
 
     # Try to derive files_to_stage from candidates if not directly provided
     if not files_to_stage:
