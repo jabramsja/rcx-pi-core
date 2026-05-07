@@ -324,6 +324,57 @@ def test_post_merge_package_refresh_stops_before_mu_structural_queue(tmp_path):
     assert "hard stop" in package["tracker_state_summary"].lower()
 
 
+def test_post_merge_package_refresh_routes_open_tracker_packet_before_hard_stop(tmp_path):
+    repo = _init_repo(tmp_path)
+    routed_packet = (
+        "reports/control_plane/"
+        "deferred-non-mu-docs-control-plane-remediation-2026-05-07_2026-05-07.md"
+    )
+    hard_stop_packet = (
+        "reports/control_plane/"
+        "founder_ordered_redteam_mu_structural_blocking_remediation_2026-05-06.md"
+    )
+    _write_queue_packet(
+        repo,
+        routed_packet,
+        "Routed - Phase A required before implementation",
+    )
+    _write_queue_packet(repo, hard_stop_packet, "QUEUED - HARD STOP BEFORE IMPLEMENTATION")
+    (repo / "TASKS.md").write_text(
+        (
+            "## Ra\n"
+            "  6. **[FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-BLOCKING-REMEDIATION] "
+            "QUEUED / BLOCKING / HARD STOP BEFORE IMPLEMENTATION.** "
+            "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            "Wave ID: `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06`. "
+            "Class: `L4_ENABLER`. Category: `/mu` structural. "
+            f"Packet: `{hard_stop_packet}`.\n"
+            "- Tracker sync note (2026-05-07, deferred-non-mu-docs-control-plane-remediation-2026-05-07): "
+            "**NEXT-CODEX-POST-REDTEAM - routed deferred non-mu docs/control-plane remediation packet.** "
+            "Class: L4_ENABLER. Category: docs/control-plane. target_gate_id: G8. "
+            f"Packet: `{routed_packet}`. "
+            "FOUNDER_OVERRIDE:deferred-non-mu-docs-control-plane-remediation-2026-05-07.\n"
+        ),
+        encoding="utf-8",
+    )
+
+    result = {"pr_number": 900}
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result=result,
+        merge_sha="merge-sha",
+        log=_noop_log,
+    )
+
+    assert package["wave_name"] == (
+        "deferred-non-mu-docs-control-plane-remediation-2026-05-07"
+    )
+    assert package["next_candidates"][0]["tracked_packet"] == routed_packet
+    assert result["post_merge_next_hard_stop"] is False
+    assert "hard stop" not in package["tracker_state_summary"].lower()
+
+
 def test_post_merge_package_refresh_closes_completed_only_queue(tmp_path):
     repo = _init_repo(tmp_path)
     packet = (
