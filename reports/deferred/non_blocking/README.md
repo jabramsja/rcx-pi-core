@@ -60,17 +60,20 @@ Archived source snapshots for extracted non-blocking residue live in:
 
 - Evidence command:
   `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
-- Current post-closeout inventory after retained-residue cleanup, the routed
-  docs-root/mu-docs retained-candidate follow-up, and
-  `docs-root-mu-docs-audit-closeout-2026-05-07`: 32 markdown files, including
-  this README and 31 active or partially active advisory packets.
+- Current inventory after retained-residue cleanup, the routed
+  docs-root/mu-docs retained-candidate follow-up,
+  `docs-root-mu-docs-audit-closeout-2026-05-07`, and the 2026-05-07
+	  deferred folder cleanup: 28 markdown files, including this README and 27
+	  active or partially active advisory packets.
 - Whole-file archive:
   `reports/archive/deferred/pager-deterministic-session-2026-04-18_bridge_nonblockers_closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`.
 - Partial closed-section extraction:
   `reports/archive/deferred/docs-root-mu-docs-redteam-cleanup-2026-05-06_bridge_nonblockers_partial-closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`.
-- Bridge Round 1 generated and retained
-  `deferred-non-blocking-retained-residue-cleanup-2026-05-06_bridge_nonblockers.md`
-  as this wave's active non-blocking follow-up packet.
+- Bridge Round 1 generated
+  `deferred-non-blocking-retained-residue-cleanup-2026-05-06_bridge_nonblockers.md`;
+  the 2026-05-07 non-blocking folder cleanup archived it to
+  `reports/archive/deferred/deferred-non-blocking-retained-residue-cleanup-2026-05-06_bridge_nonblockers_closed-by-non-blocking-folder-cleanup-2026-05-07.md`
+  after confirming the only finding targeted an archive-only closure snapshot.
 - The routed retained-candidate follow-up generated a duplicate-tracker advisory;
   `docs-root-mu-docs-audit-closeout-2026-05-07` resolved the duplicate
   same-wave tracker note and moved that advisory to
@@ -78,4 +81,16 @@ Archived source snapshots for extracted non-blocking residue live in:
 - `docs-root-mu-docs-audit-closeout-2026-05-07_non_blocking.md` remains active
   with one DOC_ACCURACY advisory for stale pre-S1 no-production-reduction
   wording in active L4 G8 docs.
+- The generated `docs-root-mu-docs-audit-closeout-2026-05-07` bridge packet was
+  archived to
+  `reports/archive/deferred/docs-root-mu-docs-audit-closeout-2026-05-07_bridge_nonblockers_closed-by-non-blocking-folder-cleanup-2026-05-07.md`
+  after the active README wording finding was closed and the TASKS line-citation
+  finding no longer reproduced against current tracker lines.
+- The 2026-05-07 deferred folder cleanup archived the generated tests/tooling
+  remediation bridge packets after patching their stale implemented-status,
+  standalone receipt wording, and audit-wrapper syntax-check findings:
+  `reports/archive/deferred/founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06_bridge_nonblockers_closed-by-deferred-folder-cleanup-2026-05-07.md`,
+  `reports/archive/deferred/founder-ordered-redteam-tooling-blocking-remediation-2026-05-06_bridge_nonblockers_closed-by-deferred-folder-cleanup-2026-05-07.md`,
+  and
+  `reports/archive/deferred/founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06_bridge_nonblockers_closed-by-deferred-folder-cleanup-2026-05-07.md`.
 - Claude-related retained residue was left untouched.

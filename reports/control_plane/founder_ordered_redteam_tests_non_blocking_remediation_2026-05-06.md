@@ -8,7 +8,7 @@ Phase-A-Lock: LOCKED
 Class: L4_ENABLER
 Category: tests
 Severity: NON-BLOCKING
-Source audit packet: `reports/deferred/non_blocking/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking.md`
+Source audit packet: `reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06.md`
 Queue order: non-`/mu` non-blocking remediation, after docs non-blocking
 remediation and before tooling non-blocking remediation.
 Founder override: FOUNDER_OVERRIDE:founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06
@@ -39,7 +39,7 @@ Writable implementation scope is limited to this explicit inventory:
 
 Read-only grounding and validation scope is limited to:
 
-- `reports/deferred/non_blocking/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking.md`
+- `reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06.md`
   - source finding evidence.
 - `mu/tests/l4_gates/test_stage0_vm_cutover.py` - behavioral production-path
   negative-control evidence for the Stage0 VM cutover path.
@@ -139,12 +139,12 @@ FOUNDER_OVERRIDE:founder-ordered-redteam-tests-non-blocking-remediation-2026-05-
 - `TASKS.md:435` records the organized remediation packet queue created by
   `founder-ordered-redteam-remediation-queue-organization-2026-05-05` and
   states that remediation was not implemented in that queue-organization wave.
-- `TASKS.md:439` queues this exact
-  `[FOUNDER-ORDERED-REDTEAM-TESTS-NON-BLOCKING-REMEDIATION]` packet under
-  `[NEXT-CODEX-POST-REDTEAM]` with wave ID
+- Current `TASKS.md` records
+  `[FOUNDER-ORDERED-REDTEAM-TESTS-NON-BLOCKING-REMEDIATION]` as implemented
+  with local evidence under `[NEXT-CODEX-POST-REDTEAM]`, wave ID
   `founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06`, class
-  `L4_ENABLER`, category `tests`, this packet path, the non-blocking tests
-  source audit packet path, and the N1/N2 finding inventory.
+  `L4_ENABLER`, category `tests`, this packet path, the archived
+  non-blocking tests source audit packet path, and the N1/N2 finding inventory.
 - Source authorization remains
   `FOUNDER_OVERRIDE:founder-ordered-redteam-remediation-queue-organization-2026-05-05`;
   this Phase A packet adds the same-wave L4_ENABLER authority above so commit
@@ -159,7 +159,7 @@ Classification: NON-BLOCKING DEFECT
 Surfaces: agent/tooling smoke tests, test fail-closed behavior.
 
 Source evidence preserved from
-`reports/deferred/non_blocking/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking.md`:
+`reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06.md`:
 
 - Lines 44-53: `mu/tests/tools/test_agent_tooling_smoke.py:64` declares smoke
   coverage for importable/runnable agent tools; lines 67 through 76 enumerate
@@ -180,7 +180,7 @@ Surfaces: L4 Stage0 / meta-circular evidence tests, source-lock-only
 assertions, stale production-path wording.
 
 Source evidence preserved from
-`reports/deferred/non_blocking/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking.md`:
+`reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06.md`:
 
 - Lines 102-106: `mu/tests/l4_gates/test_meta_circular_evidence_gate.py:351`
   through `mu/tests/l4_gates/test_meta_circular_evidence_gate.py:366` assert by

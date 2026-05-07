@@ -8,7 +8,7 @@ Phase-A-Lock: LOCKED
 Class: L4_ENABLER
 Category: tests
 Severity: BLOCKING
-Source audit packet: `reports/deferred/blocking/founder_ordered_redteam_tests_audit_2026-05-05_blocking.md`
+Source audit packet: `reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`
 Queue order: non-`/mu` blocking remediation, before non-blocking remediation and before all `/mu` structural remediation.
 Founder override: FOUNDER_OVERRIDE:founder-ordered-redteam-tests-blocking-remediation-2026-05-06
 Queue organization source authorization: FOUNDER_OVERRIDE:founder-ordered-redteam-remediation-queue-organization-2026-05-05
@@ -41,7 +41,7 @@ Surfaces: L4 Stage0 VM trusted-path gate, JavaScript behavioral parity, G8
 test fail-closed behavior.
 
 Source evidence preserved from
-`reports/deferred/blocking/founder_ordered_redteam_tests_audit_2026-05-05_blocking.md`:
+`reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`:
 
 - Lines 41-44: `mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py:425`
   through `mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py:430`
@@ -82,7 +82,7 @@ Files and directories in scope for this remediation wave:
 
 Reference-only grounding, not edit scope:
 
-- `reports/deferred/blocking/founder_ordered_redteam_tests_audit_2026-05-05_blocking.md`
+- `reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`
 
 ## Work Items
 
@@ -163,7 +163,7 @@ Reference-only grounding, not edit scope:
 - Governing packet:
   `reports/control_plane/founder_ordered_redteam_tests_blocking_remediation_2026-05-06.md`.
 - Source audit packet:
-  `reports/deferred/blocking/founder_ordered_redteam_tests_audit_2026-05-05_blocking.md`.
+  `reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`.
 - Wave-bound L4_ENABLER authorization for commit automation:
   FOUNDER_OVERRIDE:founder-ordered-redteam-tests-blocking-remediation-2026-05-06.
 - Queue-organization source authorization preserved for chronology:

@@ -462,7 +462,7 @@ class TestSupervisorReceiptIsAuthority:
             f"Standalone continuation should skip stale handoff receipt provenance. Got: {result}"
         )
         assert result.get("handoff_receipt_path") == ""
-        assert result.get("handoff_receipt_decision") == "STANDALONE_SKIP"
+        assert result.get("handoff_receipt_decision") == "STANDALONE_NO_HANDOFF_RECEIPT"
         assert result.get("handoff_sha") == original_handoff_sha
         assert result.get("receipt_refreshed_handoff_sha") != original_handoff_sha
         continuation_path = (
