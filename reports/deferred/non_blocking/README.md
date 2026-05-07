@@ -60,8 +60,9 @@ Archived source snapshots for extracted non-blocking residue live in:
 
 - Evidence command:
   `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
-- Current post-bridge inventory after retained-residue cleanup: 31 markdown
-  files, including this README and 30 active or partially active advisory
+- Current post-bridge inventory after retained-residue cleanup and the routed
+  docs-root/mu-docs retained-candidate follow-up: 32 markdown
+  files, including this README and 31 active or partially active advisory
   packets.
 - Whole-file archive:
   `reports/archive/deferred/pager-deterministic-session-2026-04-18_bridge_nonblockers_closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`.
@@ -70,4 +71,7 @@ Archived source snapshots for extracted non-blocking residue live in:
 - Bridge Round 1 generated and retained
   `deferred-non-blocking-retained-residue-cleanup-2026-05-06_bridge_nonblockers.md`
   as this wave's active non-blocking follow-up packet.
+- The routed retained-candidate follow-up generated and retained
+  `docs-root-mu-docs-retained-packet-cleanup-2026-05-06_bridge_nonblockers.md`
+  as the active advisory packet for post-Bridge findings in that routed cleanup.
 - Claude-related retained residue was left untouched.

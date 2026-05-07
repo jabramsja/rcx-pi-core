@@ -1515,6 +1515,19 @@ def _extract_authoritative_plan_header_metadata(
     return canonical_task_values, canonical_wave_values
 
 
+def _extract_authoritative_routed_retained_candidates(plan_content: str) -> list[str]:
+    """Return top-level routed retained candidate identities from the packet header."""
+    routed_candidates: list[str] = []
+    for line in _iter_authoritative_plan_header_lines(plan_content):
+        candidate_value, _ = _extract_plan_metadata_value(
+            line,
+            ("Routed retained candidate:", "routed_retained_candidate:"),
+        )
+        if candidate_value is not None:
+            routed_candidates.append(candidate_value)
+    return routed_candidates
+
+
 def load_plan_packet(repo_root: Path, plan_path: str) -> dict[str, str]:
     """Load and parse key fields from a plan packet."""
     full_path = (repo_root / plan_path).resolve()
@@ -3893,9 +3906,16 @@ def _refresh_phase_b_indicator_packet_scope(
 
     packet_text = packet_full.read_text(encoding="utf-8")
     _tasks, waves = _extract_authoritative_plan_header_metadata(packet_text)
-    if waves != [normalized_wave]:
+    routed_candidates = _extract_authoritative_routed_retained_candidates(packet_text)
+    identity_matches_wave = waves == [normalized_wave]
+    identity_matches_routed_candidate = (
+        len(waves) == 1
+        and routed_candidates == [normalized_wave]
+    )
+    if not identity_matches_wave and not identity_matches_routed_candidate:
         return False, (
-            "active packet missing unique matching Wave ID for Phase B indicator scope refresh: "
+            "active packet missing unique matching Wave ID or routed retained candidate "
+            "for Phase B indicator scope refresh: "
             f"{packet_rel} (wave_id={normalized_wave})"
         )
 

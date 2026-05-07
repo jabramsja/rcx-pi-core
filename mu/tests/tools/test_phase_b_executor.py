@@ -2104,6 +2104,85 @@ class TestMaintenanceTrackerMetadataPropagation:
         ).stdout.splitlines()
         assert packet_path in staged
 
+    def test_phase_b_indicator_scope_refresh_accepts_routed_retained_candidate_identity(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        parent_wave_id = "deferred-non-blocking-retained-residue-cleanup-2026-05-06"
+        routed_wave_id = "docs-root-mu-docs-retained-packet-cleanup-2026-05-06"
+        packet_path = f"reports/control_plane/{routed_wave_id}.md"
+        indicator_path = f"reports/l4_wave_indicators/{routed_wave_id}.json"
+        packet = repo / packet_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Retained Candidate\n\n"
+            f"Wave ID: {parent_wave_id}\n"
+            f"Routed retained candidate: {routed_wave_id}\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [NEXT-CODEX-POST-REDTEAM]\n\n"
+            "## Scope\n\n"
+            "No indicator file is in scope for this Phase A packet because the reviewer evidence "
+            "does not name one.\n",
+            encoding="utf-8",
+        )
+
+        changed, error = pb_mod._refresh_phase_b_indicator_packet_scope(  # ANTICHEAT_OK: routed retained candidate identity
+            repo,
+            plan_path=packet_path,
+            wave_id=routed_wave_id,
+            indicator_path=indicator_path,
+            changed_files=[
+                packet_path,
+                indicator_path,
+            ],
+        )
+
+        assert error is None
+        assert changed is True
+        packet_text = packet.read_text(encoding="utf-8")
+        assert "Phase B Indicator Scope Reconciliation" in packet_text
+        assert f"- Refresh wave: `{routed_wave_id}`" in packet_text
+        assert f"Wave ID: {parent_wave_id}" in packet_text
+        assert f"Routed retained candidate: {routed_wave_id}" in packet_text
+
+    def test_phase_b_indicator_scope_refresh_rejects_ambiguous_routed_retained_candidates(
+        self,
+        tmp_path,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        parent_wave_id = "deferred-non-blocking-retained-residue-cleanup-2026-05-06"
+        routed_wave_id = "docs-root-mu-docs-retained-packet-cleanup-2026-05-06"
+        packet_path = f"reports/control_plane/{routed_wave_id}.md"
+        indicator_path = f"reports/l4_wave_indicators/{routed_wave_id}.json"
+        packet = repo / packet_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Retained Candidate\n\n"
+            f"Wave ID: {parent_wave_id}\n"
+            f"Routed retained candidate: {routed_wave_id}\n"
+            "Routed retained candidate: another-candidate\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Task: [NEXT-CODEX-POST-REDTEAM]\n",
+            encoding="utf-8",
+        )
+
+        changed, error = pb_mod._refresh_phase_b_indicator_packet_scope(  # ANTICHEAT_OK: routed retained candidate ambiguity rejection
+            repo,
+            plan_path=packet_path,
+            wave_id=routed_wave_id,
+            indicator_path=indicator_path,
+            changed_files=[
+                packet_path,
+                indicator_path,
+            ],
+        )
+
+        assert changed is False
+        assert error is not None
+        assert "active packet missing unique matching Wave ID or routed retained candidate" in error
+
     def test_commit_packet_truth_refresh_marks_pre_commit_receipt_pending(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()

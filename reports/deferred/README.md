@@ -34,8 +34,8 @@ Current inventory refresh (2026-05-06):
   The 2026-05-05 follow-up aligns the redteam startup guard with the curated
   theater-risk ratchet; `/mu` production-forward movement is no longer blocked
   by this gate-theater finding.
-- `reports/deferred/non_blocking/` currently contains 31 markdown files:
-  `README.md` plus 30 active or partially active advisory/follow-up records with
+- `reports/deferred/non_blocking/` currently contains 32 markdown files:
+  `README.md` plus 31 active or partially active advisory/follow-up records with
   concrete evidence targets, including
   `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
   reproduced with
@@ -51,8 +51,10 @@ Current inventory refresh (2026-05-06):
   `reports/archive/deferred/docs-root-mu-docs-redteam-cleanup-2026-05-06_bridge_nonblockers_partial-closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`.
   Bridge Round 1 then generated this wave's own retained non-blocking packet,
   `reports/deferred/non_blocking/deferred-non-blocking-retained-residue-cleanup-2026-05-06_bridge_nonblockers.md`.
-  The post-bridge non-blocking inventory is 31 markdown files: `README.md` plus
-  30 active or partially active advisory/follow-up records.
+  The routed retained-candidate follow-up then generated
+  `reports/deferred/non_blocking/docs-root-mu-docs-retained-packet-cleanup-2026-05-06_bridge_nonblockers.md`.
+  The post-bridge non-blocking inventory is 32 markdown files: `README.md` plus
+  31 active or partially active advisory/follow-up records.
 
 Closed-parent exclusions for this index:
 
