@@ -361,12 +361,17 @@ def test_post_merge_package_refresh_routes_open_tracker_packet_before_hard_stop(
     result = {"pr_number": 900}
     package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
         repo_root=repo,
-        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        handoff={
+            "task_id": (
+                "[deferred-non-mu-post-merge-routed-queue-selection-repair-2026-05-07]"
+            )
+        },
         result=result,
         merge_sha="merge-sha",
         log=_noop_log,
     )
 
+    assert package["task_id"] == "[NEXT-CODEX-POST-REDTEAM]"
     assert package["wave_name"] == (
         "deferred-non-mu-docs-control-plane-remediation-2026-05-07"
     )
