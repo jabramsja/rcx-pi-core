@@ -1,24 +1,24 @@
 {
   "wave_id": "deferred-non-blocking-retained-residue-cleanup-2026-05-06",
-  "repeat_run_speedup_ratio": 0.864968,
+  "repeat_run_speedup_ratio": 1.047321,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.547123,
+  "step_growth_slope": 0.525705,
   "repeat_run_raw_seconds": [
-    0.473244,
-    0.547123
+    0.550582,
+    0.525705
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.473244
+      "elapsed_seconds": 0.550582
     },
     {
       "step": 2,
-      "elapsed_seconds": 1.020367
+      "elapsed_seconds": 1.076287
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-07T02:29:46Z",
+  "collection_timestamp_utc": "2026-05-07T02:34:07Z",
   "collector_version": "2.2.0"
 }
