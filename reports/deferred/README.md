@@ -34,8 +34,8 @@ Current inventory refresh (2026-05-06):
   The 2026-05-05 follow-up aligns the redteam startup guard with the curated
   theater-risk ratchet; `/mu` production-forward movement is no longer blocked
   by this gate-theater finding.
-- `reports/deferred/non_blocking/` currently contains 30 markdown files:
-  `README.md` plus 29 active or partially active advisory/follow-up records with
+- `reports/deferred/non_blocking/` currently contains 31 markdown files:
+  `README.md` plus 30 active or partially active advisory/follow-up records with
   concrete evidence targets, including
   `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
   reproduced with
@@ -43,6 +43,16 @@ Current inventory refresh (2026-05-06):
 - The 2026-05-06 non-blocking cleanup archived 12 closed, stale, or historical
   whole packets and extracted closed sections from 5 partial packets under
   `reports/archive/deferred/`.
+- The retained-residue follow-up
+  `deferred-non-blocking-retained-residue-cleanup-2026-05-06` archived one
+  additional closed whole packet,
+  `reports/archive/deferred/pager-deterministic-session-2026-04-18_bridge_nonblockers_closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`,
+  and extracted the now-closed docs-root inventory-count section to
+  `reports/archive/deferred/docs-root-mu-docs-redteam-cleanup-2026-05-06_bridge_nonblockers_partial-closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`.
+  Bridge Round 1 then generated this wave's own retained non-blocking packet,
+  `reports/deferred/non_blocking/deferred-non-blocking-retained-residue-cleanup-2026-05-06_bridge_nonblockers.md`.
+  The post-bridge non-blocking inventory is 31 markdown files: `README.md` plus
+  30 active or partially active advisory/follow-up records.
 
 Closed-parent exclusions for this index:
 
