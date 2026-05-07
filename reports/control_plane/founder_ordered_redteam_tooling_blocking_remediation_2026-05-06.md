@@ -8,7 +8,7 @@ Phase-A-Lock: LOCKED
 Class: L4_ENABLER
 Category: tooling/control-plane
 Severity: BLOCKING
-Source audit packet: `reports/deferred/blocking/founder_ordered_redteam_tooling_audit_2026-05-05_blocking.md`
+Source audit packet: `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`
 Governing packet: `reports/control_plane/founder_ordered_redteam_tooling_blocking_remediation_2026-05-06.md`
 Queue order: non-`/mu` blocking remediation, after tests blocking remediation and before non-blocking remediation.
 Founder override: FOUNDER_OVERRIDE:founder-ordered-redteam-tooling-blocking-remediation-2026-05-06
@@ -45,7 +45,7 @@ regressions needed to prove the blocker fixes:
 Evidence-only references that may be read but must not be edited for this
 remediation are:
 
-- `reports/deferred/blocking/founder_ordered_redteam_tooling_audit_2026-05-05_blocking.md`
+- `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`
 - `.scratch/phase_b_supervisor_package.json`
 
 ## Work Items
@@ -148,7 +148,7 @@ remediation are:
   required for control-surface L4_ENABLER commit automation:
   `FOUNDER_OVERRIDE:founder-ordered-redteam-tooling-blocking-remediation-2026-05-06`.
 - The source audit packet is
-  `reports/deferred/blocking/founder_ordered_redteam_tooling_audit_2026-05-05_blocking.md`.
+  `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`.
 - The queue source is
   `founder-ordered-redteam-remediation-queue-organization-2026-05-05`; this
   packet is the governing packet for the later remediation wave and must be the
@@ -164,7 +164,7 @@ Surfaces: commit executor, pre-commit supervisor authority, receipt validation,
 manual workaround residue.
 
 Source evidence preserved from
-`reports/deferred/blocking/founder_ordered_redteam_tooling_audit_2026-05-05_blocking.md`:
+`reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`:
 
 - Lines 48-51: `mu/tools/executors/commit_executor.py:7583` through
   `mu/tools/executors/commit_executor.py:7594` define "Modular bypass flags"
@@ -197,7 +197,7 @@ Surfaces: L4 execution contract, tracker sync gate, dispatcher/commit/recovery
 tooling governance, G8 package truth.
 
 Source evidence preserved from
-`reports/deferred/blocking/founder_ordered_redteam_tooling_audit_2026-05-05_blocking.md`:
+`reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`:
 
 - Lines 102-107: `mu/tools/checks/enforce_tracker_sync.sh:81` builds
   `CORE_CHANGED` from `mu/` and `rcx_pi/selfhost/` but excludes `mu/tools/`;

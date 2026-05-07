@@ -7504,7 +7504,7 @@ def _run_commit_pipeline_impl(
                         "errors": [f"Phase B handoff receipt unreadable: {exc}"],
                         "steps_completed": result["steps_completed"]}
         else:
-            handoff_receipt_decision = "STANDALONE_SKIP"
+            handoff_receipt_decision = "STANDALONE_NO_HANDOFF_RECEIPT"
 
         receipt_file = repo_root / receipt_path_from_supervisor
         if not receipt_file.exists():

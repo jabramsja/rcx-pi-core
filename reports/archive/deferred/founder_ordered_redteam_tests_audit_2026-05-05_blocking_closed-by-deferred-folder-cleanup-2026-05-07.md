@@ -82,3 +82,15 @@ Remediation is not authorized in this audit wave. Follow-up remediation must be
 ordered by the founder remediation rule after all four audit waves classify
 findings, with tests blockers before tests non-blockers and any `/mu`
 structural remediation ordered last with a hard stop before implementation.
+
+## Archive Closure Note (2026-05-07)
+
+Closed by `founder-ordered-redteam-tests-blocking-remediation-2026-05-06` and
+verified during `deferred-folder-cleanup-2026-05-07`.
+
+Current tracker truth records the tests blocking remediation as implemented with
+local evidence under `[NEXT-CODEX-POST-REDTEAM]`. Focused re-verification before
+archive showed the normal parity test exits `0` with `1 passed`, while the
+sabotaged `NODE_OPTIONS=--invalid-option` run exits `1` with the expected
+assertion failure instead of a skip. This packet is retained as a historical
+source snapshot in `reports/archive/deferred/`.

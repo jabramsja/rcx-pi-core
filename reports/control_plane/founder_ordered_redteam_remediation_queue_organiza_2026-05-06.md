@@ -25,12 +25,12 @@ The downstream wave's read-only source scope is limited to the authorized queue 
 - `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`
 - `reports/deferred/blocking/founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md`
 - `reports/deferred/blocking/founder_ordered_redteam_docs_audit_2026-05-05_blocking.md`
-- `reports/deferred/blocking/founder_ordered_redteam_tests_audit_2026-05-05_blocking.md`
-- `reports/deferred/blocking/founder_ordered_redteam_tooling_audit_2026-05-05_blocking.md`
+- `reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`
+- `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`
 - `reports/deferred/non_blocking/founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`
 - `reports/deferred/non_blocking/founder_ordered_redteam_docs_audit_2026-05-05_non_blocking.md`
-- `reports/deferred/non_blocking/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking.md`
-- `reports/deferred/non_blocking/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking.md`
+- `reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06.md`
+- `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06.md`
 
 Queue organization categories are `/mu`, docs, tests, and tooling. Blocking remediation waves are ordered before non-blocking remediation waves except for the explicit `/mu` structural exception: any `/mu` structural blocking or non-blocking remediation wave is ordered last and is a hard stop before implementation.
 
@@ -39,14 +39,14 @@ Queue organization categories are `/mu`, docs, tests, and tooling. Blocking reme
 1. Reconstruct the remediation candidate inventory from the audit-output packets without implementing any remediation. Preserve each source finding's file:line or command-output evidence in the generated packet for that remediation wave.
 
 2. Create or update the non-`/mu` blocking remediation wave packets first, with matching `TASKS.md` tracker entries:
-   - Tests: 1 blocking tests fail-closed defect from `reports/deferred/blocking/founder_ordered_redteam_tests_audit_2026-05-05_blocking.md`.
-   - Tooling/control-plane: 2 blocking tooling/control-plane defects from `reports/deferred/blocking/founder_ordered_redteam_tooling_audit_2026-05-05_blocking.md`.
+   - Tests: 1 blocking tests fail-closed defect from `reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`.
+   - Tooling/control-plane: 2 blocking tooling/control-plane defects from `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`.
    - Docs: no blocking docs wave is expected from the current TASKS inventory because TASKS.md line 423 records 0 blocking docs findings.
 
 3. Create or update the non-`/mu` non-blocking remediation wave packets next, with matching `TASKS.md` tracker entries:
    - Docs: 6 non-blocking DOC_ACCURACY doc/report drift findings from `reports/deferred/non_blocking/founder_ordered_redteam_docs_audit_2026-05-05_non_blocking.md`.
-   - Tests: 2 non-blocking test-integrity/proof-class findings from `reports/deferred/non_blocking/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking.md`.
-   - Tooling: 2 non-blocking CI/audit-tooling findings from `reports/deferred/non_blocking/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking.md`.
+   - Tests: 2 non-blocking test-integrity/proof-class findings from `reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tests-non-blocking-remediation-2026-05-06.md`.
+   - Tooling: 2 non-blocking CI/audit-tooling findings from `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06.md`.
 
 4. Create or update `/mu` structural remediation wave packets last, with matching `TASKS.md` tracker entries and an explicit hard stop before implementation:
    - Repo-code blocking: 1 blocking repo-code defect from `reports/deferred/blocking/founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md`.

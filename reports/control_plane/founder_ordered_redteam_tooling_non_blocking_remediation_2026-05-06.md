@@ -8,13 +8,13 @@ Phase-A-Lock: LOCKED
 Class: L4_ENABLER
 Category: tooling
 Severity: NON-BLOCKING
-Source audit packet: `reports/deferred/non_blocking/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking.md`
+Source audit packet: `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06.md`
 Queue order: non-`/mu` non-blocking remediation, after tests non-blocking remediation and before all `/mu` structural remediation.
 Founder override: FOUNDER_OVERRIDE:founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06
 Source queue authorization: FOUNDER_OVERRIDE:founder-ordered-redteam-remediation-queue-organization-2026-05-05
 
-This packet queues the non-blocking tooling follow-up from the founder ordered
-redteam audit output. It does not implement remediation.
+This packet governs the completed non-blocking tooling follow-up from the
+founder ordered redteam audit output and records the implementation evidence.
 ## Scope
 
 Editable implementation-wave files:
@@ -37,7 +37,7 @@ Reference-only files and docs:
 
 - `reports/control_plane/founder_ordered_redteam_tooling_non_blocking_remediation_2026-05-06.md`
   as the governing remediation packet for this wave.
-- `reports/deferred/non_blocking/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking.md`
+- `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06.md`
   as the source audit packet and preserved finding evidence.
 - `.github/workflows/weekly_deep_fuzz.yml` as the fail-closed scheduled
   stress/deep-fuzz reference for N1.
@@ -137,7 +137,7 @@ Reference-only files and docs:
 - Governing task: `TASKS.md` `[NEXT-CODEX-POST-REDTEAM]`, exact current entry
   for `[FOUNDER-ORDERED-REDTEAM-TOOLING-NON-BLOCKING-REMEDIATION]`.
 - Governing packet: `reports/control_plane/founder_ordered_redteam_tooling_non_blocking_remediation_2026-05-06.md`.
-- Source audit packet: `reports/deferred/non_blocking/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking.md`.
+- Source audit packet: `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06.md`.
 - TASKS queue authorization: `FOUNDER_OVERRIDE:founder-ordered-redteam-remediation-queue-organization-2026-05-05`.
 - Same-wave L4_ENABLER authorization:
   FOUNDER_OVERRIDE:founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06.
@@ -154,7 +154,7 @@ Classification: NON-BLOCKING PROOF-CLASS MISMATCH
 Surfaces: `audit_all.sh`, manual Audit All workflow, stress-test proof class.
 
 Source evidence preserved from
-`reports/deferred/non_blocking/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking.md`:
+`reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06.md`:
 
 - Lines 47-55: `mu/tools/audits/audit_all.sh:28` through
   `mu/tools/audits/audit_all.sh:31` describe the full audit as comprehensive
@@ -177,7 +177,7 @@ Classification: NON-BLOCKING DEFECT
 Surfaces: GitHub fixture gates, CI liveness, stale tooling workaround residue.
 
 Source evidence preserved from
-`reports/deferred/non_blocking/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking.md`:
+`reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06.md`:
 
 - Lines 84-90: `.github/workflows/fixture_gates.yml:54` through
   `.github/workflows/fixture_gates.yml:60` and

@@ -136,9 +136,9 @@ or a precise follow-up automation packet before normal execution resumes.
 - Current staged files:
   - `TASKS.md`
   - `reports/control_plane/founder_ordered_redteam_tooling_audit_2026-05-05.md`
-  - `reports/deferred/blocking/founder_ordered_redteam_tooling_audit_2026-05-05_blocking.md`
+  - `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`
   - `reports/deferred/non_blocking/founder-ordered-redteam-tooling-audit-2026-05-05_bridge_nonblockers.md`
-  - `reports/deferred/non_blocking/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking.md`
+  - `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06.md`
   - `reports/l4_wave_indicators/founder-ordered-redteam-tooling-audit-2026-05-05.json`
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
 
@@ -168,8 +168,8 @@ or a precise follow-up automation packet before normal execution resumes.
 - Current staged files:
   - `TASKS.md`
   - `reports/control_plane/founder_ordered_redteam_tooling_audit_2026-05-05.md`
-  - `reports/deferred/blocking/founder_ordered_redteam_tooling_audit_2026-05-05_blocking.md`
+  - `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`
   - `reports/deferred/non_blocking/founder-ordered-redteam-tooling-audit-2026-05-05_bridge_nonblockers.md`
-  - `reports/deferred/non_blocking/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking.md`
+  - `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_non_blocking_closed-by-founder-ordered-redteam-tooling-non-blocking-remediation-2026-05-06.md`
   - `reports/l4_wave_indicators/founder-ordered-redteam-tooling-audit-2026-05-05.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

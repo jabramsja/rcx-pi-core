@@ -25,18 +25,22 @@ Current inventory refresh (2026-05-07):
   `find reports/deferred/blocking -maxdepth 1 -type f -name "*.md" -print | sort`
   and
   `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
-- `reports/deferred/blocking/` currently contains 4 markdown files: `README.md`
-  plus the founder-ordered repo-code, tests, and tooling blocking-lane audit
-  packets. The docs-audit blocking-lane packet recorded no blocking findings and
-  was moved to
+- `reports/deferred/blocking/` currently contains 2 markdown files: `README.md`
+  plus the founder-ordered repo-code blocking-lane audit packet. The docs-audit
+  blocking-lane packet recorded no blocking findings and was moved to
   `reports/archive/deferred/founder_ordered_redteam_docs_audit_2026-05-05_blocking_closed-by-docs-root-mu-docs-audit-closeout-2026-05-07.md`.
+  The tests and tooling blocking source packets were closed by their implemented
+  remediation waves and moved to
+  `reports/archive/deferred/founder_ordered_redteam_tests_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`
+  and
+  `reports/archive/deferred/founder_ordered_redteam_tooling_audit_2026-05-05_blocking_closed-by-deferred-folder-cleanup-2026-05-07.md`.
 - The resolved mu preproduction gate-theater blocker was moved to
   `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`.
   The 2026-05-05 follow-up aligns the redteam startup guard with the curated
   theater-risk ratchet; `/mu` production-forward movement is no longer blocked
   by this gate-theater finding.
-- `reports/deferred/non_blocking/` currently contains 32 markdown files:
-  `README.md` plus 31 active or partially active advisory/follow-up records with
+- `reports/deferred/non_blocking/` currently contains 28 markdown files:
+  `README.md` plus 27 active or partially active advisory/follow-up records with
   concrete evidence targets, including
   `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md` and
   `docs-root-mu-docs-audit-closeout-2026-05-07_non_blocking.md`,
@@ -51,17 +55,22 @@ Current inventory refresh (2026-05-07):
   `reports/archive/deferred/pager-deterministic-session-2026-04-18_bridge_nonblockers_closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`,
   and extracted the now-closed docs-root inventory-count section to
   `reports/archive/deferred/docs-root-mu-docs-redteam-cleanup-2026-05-06_bridge_nonblockers_partial-closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`.
-  Bridge Round 1 then generated this wave's own retained non-blocking packet,
-  `reports/deferred/non_blocking/deferred-non-blocking-retained-residue-cleanup-2026-05-06_bridge_nonblockers.md`.
-  The routed retained-candidate follow-up then generated
-  `reports/archive/deferred/docs-root-mu-docs-retained-packet-cleanup-2026-05-06_bridge_nonblockers_closed-by-docs-root-mu-docs-audit-closeout-2026-05-07.md`.
-  The 2026-05-07 root/mu-docs audit closeout archived that duplicate-tracker
+  Bridge Round 1 then generated a same-wave retained non-blocking packet that
+  was later archived by the 2026-05-07 non-blocking folder cleanup at
+  `reports/archive/deferred/deferred-non-blocking-retained-residue-cleanup-2026-05-06_bridge_nonblockers_closed-by-non-blocking-folder-cleanup-2026-05-07.md`.
+  The routed retained-candidate follow-up generated an active duplicate-tracker
+  advisory, and the 2026-05-07 root/mu-docs audit closeout archived that
   advisory at
   `reports/archive/deferred/docs-root-mu-docs-retained-packet-cleanup-2026-05-06_bridge_nonblockers_closed-by-docs-root-mu-docs-audit-closeout-2026-05-07.md`
   and added
   `reports/deferred/non_blocking/docs-root-mu-docs-audit-closeout-2026-05-07_non_blocking.md`
-  for the remaining active L4 G8 docs DOC_ACCURACY advisory. The post-closeout
-  non-blocking inventory is 32 markdown files: `README.md` plus 31 active or
+  for the remaining active L4 G8 docs DOC_ACCURACY advisory. The 2026-05-07
+  non-blocking folder cleanup also archived the same-wave
+  `docs-root-mu-docs-audit-closeout-2026-05-07` bridge packet after closing its
+  low-severity README wording finding. The 2026-05-07 deferred folder cleanup
+  also archived the tests/tooling generated remediation bridge packets whose
+  stale wording and evidence-command findings no longer reproduce. The current
+  non-blocking inventory is 28 markdown files: `README.md` plus 27 active or
   partially active advisory/follow-up records.
 
 Closed-parent exclusions for this index:
