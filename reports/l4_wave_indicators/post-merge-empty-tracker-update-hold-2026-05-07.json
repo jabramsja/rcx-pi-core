@@ -1,24 +1,24 @@
 {
   "wave_id": "post-merge-empty-tracker-update-hold-2026-05-07",
-  "repeat_run_speedup_ratio": 1.177486,
+  "repeat_run_speedup_ratio": 1.261687,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.416083,
+  "step_growth_slope": 0.423055,
   "repeat_run_raw_seconds": [
-    0.489932,
-    0.416083
+    0.533763,
+    0.423055
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.489932
+      "elapsed_seconds": 0.533763
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.906015
+      "elapsed_seconds": 0.956818
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-07T16:46:17Z",
+  "collection_timestamp_utc": "2026-05-07T17:13:29Z",
   "collector_version": "2.2.0"
 }

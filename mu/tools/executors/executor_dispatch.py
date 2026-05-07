@@ -2637,14 +2637,6 @@ def dispatch(
     if completed_stop is not None:
         return completed_stop
 
-    empty_tracker_update = _empty_tracker_update_hold_result(
-        record,
-        decision=decision,
-        executor_name=executor_name,
-    )
-    if empty_tracker_update is not None:
-        return empty_tracker_update
-
     # Validate freshness — auto-refresh via post-merge supervisor if stale
     if not skip_freshness:
         fresh, msg = validate_routing_record_freshness(record, repo)
@@ -2758,6 +2750,14 @@ def dispatch(
                 return empty_tracker_update
             if verbose:
                 print(f"[dispatch] Refreshed: decision={decision}, executor={executor_name}")
+
+    empty_tracker_update = _empty_tracker_update_hold_result(
+        record,
+        decision=decision,
+        executor_name=executor_name,
+    )
+    if empty_tracker_update is not None:
+        return empty_tracker_update
 
     if verbose:
         print(f"[dispatch] Decision: {decision} → {executor_name}")

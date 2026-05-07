@@ -1610,6 +1610,20 @@ class TestWaveIdBounds:
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
+    def test_prepare_handoff_tracker_only_null_next_candidates_treated_as_empty(self, tmp_path):
+        record = {
+            "wave_name": "tracker-only-wave",
+            "summary": "sync tracker only",
+            "decision": "UPDATE_TRACKER_ONLY",
+            "next_candidates": None,
+            "files_to_stage": ["TASKS.md"],
+        }
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+        assert errors == []
+        assert handoff is not None
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
     def test_prepare_handoff_tracker_only_coerces_non_string_commit_message(self, tmp_path):
         record = {
             "wave_name": "tracker-only-wave",

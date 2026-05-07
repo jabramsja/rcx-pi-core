@@ -4955,7 +4955,17 @@ def _attempt_bot_finding_remediation(
                 cwd=repo_root, timeout=300,
             )
         except subprocess.CalledProcessError as exc:
-            log(f"Step 15: git operation failed in round {round_num}: {exc}")
+            failure_detail = _tail_failure_excerpt(
+                "\n".join(part for part in (exc.stderr, exc.stdout) if part),
+                limit=1200,
+            )
+            if failure_detail:
+                log(
+                    f"Step 15: git operation failed in round {round_num}: "
+                    f"{failure_detail}"
+                )
+            else:
+                log(f"Step 15: git operation failed in round {round_num}: {exc}")
             return {
                 "status": "bot_findings_pending",
                 "bot_findings": current_findings,
@@ -5259,6 +5269,8 @@ def prepare_handoff_from_routing_record(
 
     # For UPDATE_TRACKER_ONLY: construct a minimal tracker-only handoff
     candidates = record.get("next_candidates", [])
+    if not isinstance(candidates, list):
+        candidates = []
     files_to_stage = record.get("files_to_stage", [])
     tracker_note = record.get("tracker_note_text", "")
 

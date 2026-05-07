@@ -740,6 +740,68 @@ class TestDispatcherFreshnessRefresh:
         assert result["decision"] == "ROUTE_PHASE_A"
         assert auto_refresh_calls
 
+    def test_stale_empty_tracker_update_refreshes_before_hold(
+        self, tmp_path, monkeypatch,
+    ):
+        canonical_dir = tmp_path / ".agent_bus" / "meta"
+        canonical_dir.mkdir(parents=True)
+        record = {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "stale empty tracker update",
+            "wave_name": "canonical-tracker-wave",
+            "task_id": "[CANONICAL-TRACKER-WAVE]",
+            "state_sha": "stale-state",
+            "next_candidates": [],
+        }
+        (canonical_dir / "post_merge_routing.json").write_text(
+            json.dumps(record),
+            encoding="utf-8",
+        )
+        refreshed_record = {
+            "decision": "UPDATE_TRACKER_ONLY",
+            "summary": "refreshed tracker update",
+            "wave_name": "canonical-tracker-wave",
+            "task_id": "[CANONICAL-TRACKER-WAVE]",
+            "state_sha": "fresh-state",
+            "files_to_stage": ["TASKS.md"],
+            "next_candidates": [],
+        }
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "validate_routing_record_freshness",
+            lambda *a, **k: (False, "stale for proof"),
+        )
+        auto_refresh_calls = []
+
+        def fake_refresh(*args, **kwargs):
+            auto_refresh_calls.append((args, kwargs))
+            return True, refreshed_record
+
+        monkeypatch.setattr(dispatch_mod, "_auto_refresh_routing", fake_refresh)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_run_executor_in_group",
+            lambda args, cwd, timeout: subprocess.CompletedProcess(
+                args, 0, stdout='{"status":"success"}', stderr=""
+            ),
+        )
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_continue_successful_executor_chain",
+            lambda *a, **k: {
+                "status": "success",
+                "decision": refreshed_record["decision"],
+                "executor": "commit_executor",
+            },
+        )
+
+        result = dispatch_mod.dispatch(record, repo_root=tmp_path)
+
+        assert result["status"] == "success"
+        assert result["decision"] == "UPDATE_TRACKER_ONLY"
+        assert auto_refresh_calls
+
     def test_auto_refresh_rejects_stale_post_merge_package_before_supervisor(
         self, tmp_path, monkeypatch,
     ):

@@ -48,6 +48,14 @@ Root-cause evidence:
   `tracker_note_text`, `files_to_stage`, and `force_add_files`, matching the
   dispatcher guard instead of accepting whitespace-only strings or blank list
   entries as actionable scope.
+- Bot review round 1 found two real edge cases in the repair: stale empty
+  tracker-only records were held before freshness refresh, and
+  `next_candidates: null` could raise before direct handoff preparation. The
+  same-wave repair now runs the empty tracker hold after freshness refresh and
+  treats non-list `next_candidates` as an empty candidate set.
+- The bot-remediation failure path now logs captured stdout/stderr from failed
+  git operations instead of only logging the `CalledProcessError` object, so a
+  future recovery record names the rejected command output.
 - Existing valid tracker-only handoffs remain routable when the routing record
   declares explicit `files_to_stage`, candidate files, `force_add_files`,
   `tracker_note_text`, or a tracked packet.
@@ -63,6 +71,15 @@ Root-cause evidence:
   commit-executor guard was truthiness-based; same-wave repair added direct
   regressions for whitespace-only `tracker_note_text`, blank `files_to_stage`,
   and blank `force_add_files`.
+- PR #899 bot review round 1 reported:
+  `mu/tools/executors/executor_dispatch.py:2646` stale empty tracker hold before
+  freshness refresh, and `mu/tools/executors/commit_executor.py:5275`
+  `next_candidates: null` iteration. Same-wave remediation adds targeted tests
+  for both cases.
+- Dispatcher recovery then exhausted on `bot_findings_pending`; the staged patch
+  was left in the worktree. Root-cause evidence for the diagnostic gap is
+  `mu/tools/executors/commit_executor.py:4957-4964`, which logged failed git
+  operations without stderr/stdout. This wave repairs that evidence surface.
 
 ## Boundary
 
@@ -79,10 +96,10 @@ Root-cause evidence:
 - Refresh wave: `post-merge-empty-tracker-update-hold-2026-05-07`
 - Active packet: `reports/control_plane/post_merge_empty_tracker_update_hold_2026-05-07.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `2cf6a9c36abc17106fd543b78cc42a2fdab33e9d60690cfdb24e7a10f1f9f85c`
+- Tracker note sha256: `18872282a6ac2951d70a841e57e22a90b0c0018ea2a76cb5e209f0a3fd04e366`
 - Indicator artifact: `reports/l4_wave_indicators/post-merge-empty-tracker-update-hold-2026-05-07.json`
 - Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py`.
-- Evidence delta: (1) Routed commit handoff scopes 7 wave-owned file(s). (2) Evidence gate exercises 2 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/post-merge-empty-tracker-update-hold-2026-05-07.json..
+- Evidence delta: (1) Routed commit handoff scopes 6 wave-owned file(s). (2) Evidence gate exercises 2 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/post-merge-empty-tracker-update-hold-2026-05-07.json..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/post-merge-empty-tracker-update-hold-2026-05-07.json`
 - Current staged files:
