@@ -81,20 +81,23 @@ Recommended structural fix: wrap each alternative with portable character-class 
 
 ## 4. Stop conditions
 
-Stop when ALL of the following are true:
+Phase B-local implementation stops when the bounded code/doc changes and local
+proof below are complete. Executor/pre-push-owned checks are recorded separately
+and are not Phase B implementer stop criteria.
 
 1. `commit_executor.py:2511` uses `git fetch` + `git merge --ff-only` in place of `git pull`. No `git reset --hard` anywhere in the post-merge verify path.
 2. `check-reasoning-depth.sh:167` regex uses character-class word boundaries around every alternative.
 3. Regression test in `mu/tests/tools/` asserts the fetch invocation (not pull) in the post-merge verify path.
 4. `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_commit_executor_receipt.py -q --tb=short` — all tests pass.
-5. `bash tools/pre-push-fast` — passes end-to-end.
-6. L4 indicator artifact at `reports/l4_wave_indicators/post-merge-verify-fetch-fix-2026-04-11.json` is collected and non-empty.
+5. L4 indicator artifact at `reports/l4_wave_indicators/post-merge-verify-fetch-fix-2026-04-11.json` is collected and non-empty by the commit/closeout path.
+6. Executor-owned pre-push validation, including `bash tools/pre-push-fast`,
+   belongs to commit/pre-push execution rather than the Phase B implementer.
 
 ## 5. Acceptance criteria
 
-1. `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_commit_executor_receipt.py -q --tb=short` — all tests pass.
-2. `./tools/checks/check_docs_consistency.sh` — clean.
-3. `python3 tools/checks/enforce_l4_execution_contract.py --staged` — clean (FOUNDER_OVERRIDE required; see §6).
+1. `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_commit_executor_receipt.py -q --tb=short` — Phase B-local test proof.
+2. `./tools/checks/check_docs_consistency.sh` — commit/closeout-owned doc consistency proof.
+3. `python3 tools/checks/enforce_l4_execution_contract.py --staged` — commit/closeout-owned L4 proof (FOUNDER_OVERRIDE required; see §6).
 4. `bash .claude/hooks/check-reasoning-depth.sh` invoked on a stub input that contains a hyphenated word with tail 9 chars `re-launch` but no pipeline-restart prose — does NOT block.
 5. `bash .claude/hooks/check-reasoning-depth.sh` invoked on a stub input that actually says "restart the pipeline" without a file:line citation — DOES block (the check still fires on real restart language).
 
@@ -112,10 +115,10 @@ Stop when ALL of the following are true:
 - **bootstrap_endgame_policy:** SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP
 - **boot0_track_id:** V1
 - **boot0_progress_state:** HOLD
-- **evidence_command:** `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_commit_executor_receipt.py -q --tb=short && bash tools/pre-push-fast`
-- **evidence_delta:** (1) `commit_executor.py:2511` no longer uses `git pull`; the post-merge verify step is read-only on HEAD. (2) `check-reasoning-depth.sh:167` regex uses character-class word boundaries; false-positive on hyphenated prose eliminated. (3) All 9 `git pull` mock sites in `mu/tests/tools/test_executor_dispatch.py` updated to mock `git fetch` + ff-only merge; `pull_cwds` assertion replaced with `fetch` verification.
+- **evidence_command:** Phase B-local: `PYTHONHASHSEED=0 python3 -m pytest mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_commit_executor_receipt.py -q --tb=short`; executor-owned: `bash tools/pre-push-fast`.
+- **evidence_delta:** (1) `commit_executor.py:2511` no longer uses `git pull`; the post-merge verify step uses `git fetch` followed by an explicit `git merge --ff-only` when the verify root is clean, and uses `origin/<base_branch>` as the merged tip without mutating HEAD when the verify root is already dirty. (2) `check-reasoning-depth.sh:167` regex uses character-class word boundaries; false-positive on hyphenated prose eliminated. (3) All 9 `git pull` mock sites in `mu/tests/tools/test_executor_dispatch.py` updated to mock `git fetch` + ff-only merge; `pull_cwds` assertion replaced with `fetch` verification.
 - **progress_proof_before:** `commit_executor.py:2511` invokes `git pull`; `check-reasoning-depth.sh:167` has unbounded alternation; hook false-positives block legitimate prose; post-merge verify step has hidden HEAD side-effects.
-- **progress_proof_after:** `commit_executor.py:2511` invokes `git fetch` (+ ff-only merge); `check-reasoning-depth.sh:167` regex has character-class boundaries; hook no longer false-positives on hyphenated words; post-merge verify step is read-only on HEAD until explicit ff-only merge.
+- **progress_proof_after:** `commit_executor.py:2511` invokes `git fetch` plus an explicit ff-only merge on clean verify roots; `check-reasoning-depth.sh:167` regex has character-class boundaries; hook no longer false-positives on hyphenated words; post-merge verify no longer hides a `git pull` side effect or destructive reset path.
 
 ## 7. Open questions / decision points
 

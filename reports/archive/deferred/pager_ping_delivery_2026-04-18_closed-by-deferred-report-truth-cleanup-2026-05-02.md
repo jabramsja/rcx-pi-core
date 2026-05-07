@@ -1,5 +1,12 @@
 # pager-ping-delivery-2026-04-18 — NO_OP Close Note
 
+> Historical line-range disclosure (2026-05-07): the deterministic proof and
+> observed values below remain historical evidence, but later pager growth moved
+> `_dispatch_claude`, `_dispatch_target`, and `_dispatch_pending_locked` to
+> `mu/tools/observability/pipeline_agent_pager.py:1434-1481`, `:1496-1511`,
+> and `:1542-1635`, and moved the integration test to
+> `mu/tests/tools/test_pipeline_agent_pager.py:1829-1867`.
+
 **Wave:** pager-ping-delivery-2026-04-18
 **Task:** [PIPELINE-AGENT-PAGER]
 **Class:** MAINTENANCE

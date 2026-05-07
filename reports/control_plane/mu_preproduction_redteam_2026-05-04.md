@@ -119,13 +119,14 @@ Stop and report immediately if:
 
 Production-forward movement was blocked at the original audit stop.
 
-The audit hit stop condition 4: a production-preparation gate can pass without
-enforcing the claimed test-theater invariant. The redteam startup guard runs
-`python3 tools/checks/check_gate_behavioral_pairs.py` without
-`--fail-on-theater`; the checker therefore exits green while reporting
+The audit hit stop condition 4 at the time: a production-preparation gate could
+pass without enforcing the claimed test-theater invariant. The then-current
+redteam startup guard ran `python3 tools/checks/check_gate_behavioral_pairs.py`
+without `--fail-on-theater`; the checker therefore exited green while reporting
 `theater_risk` methods. Strict reproduction with
-`python3 tools/checks/check_gate_behavioral_pairs.py --fail-on-theater` exits
-`1` with `FAIL: 85 theater_risk method(s) found`.
+`python3 tools/checks/check_gate_behavioral_pairs.py --fail-on-theater` exited
+`1` with `FAIL: 85 theater_risk method(s) found`. The follow-up blocker was
+resolved by the archived theater-ratchet packet listed below.
 
 Resolved blocker packet, now archived:
 `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`.

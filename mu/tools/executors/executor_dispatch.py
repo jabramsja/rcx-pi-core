@@ -3090,7 +3090,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--routing-record",
         type=Path,
-        help="Path to routing record JSON (default: .agent_bus/meta/post_merge_routing.json)",
+        help=(
+            "Path to routing record JSON "
+            "(default: active bus meta/post_merge_routing.json)"
+        ),
     )
     parser.add_argument(
         "--config",

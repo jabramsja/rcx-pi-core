@@ -42,11 +42,13 @@ authorizes:
    `baseRefName,mergeStateStatus` query `fix_pr_merge_conflict` issues at
    `recovery_gate.py:1119`, because this fixer needs the head ref to thread
    into `_try_auto_resolve_pr_conflict`'s required `branch_name` argument
-   while that sibling does not), (c) lazy-loads `commit_executor` via
+   while that sibling does not), (c) proves the currently checked-out branch
+   equals the resolved PR head branch before the helper can merge or push,
+   (d) lazy-loads `commit_executor` via
    `_load_executor_module_from_repo` and delegates to the already-landed
-   `_try_auto_resolve_pr_conflict` helper, (d) translates the helper's
+   `_try_auto_resolve_pr_conflict` helper, (e) translates the helper's
    `resolved/action/detail` return into the recovery-gate
-   `fixed/action/detail` `_fix_result` contract, and (e) is registered in
+   `fixed/action/detail` `_fix_result` contract, and (f) is registered in
    `_TIER2_FIXES`.
 2. `mu/tests/tools/test_recovery_gate.py` — add regression tests for
    classifier match (for each signature), classifier miss (unrelated error
@@ -281,11 +283,21 @@ The fixer therefore must:
        `headRefName`) is still empty after (a) and (b), return
        `_fix_result(False, "missing_branch_context", ...)` **without
        invoking the helper**.
-4. Invoke `_try_auto_resolve_pr_conflict(repo_root, pr_number=<str>,
+4. **Checked-out-branch invariant.** Before invoking the helper, run
+   `git rev-parse --abbrev-ref HEAD` with `cwd=repo_root`. If the command
+   fails, returns non-zero, or produces an empty value, return
+   `_fix_result(False, "current_branch_failed", ...)` without invoking the
+   helper. If the current branch differs from resolved `branch_name`, return
+   `_fix_result(False, "branch_mismatch", ...)` without invoking the helper.
+   Detached `HEAD` is a mismatch. This guard is load-bearing because
+   `_try_auto_resolve_pr_conflict` merges into implicit `HEAD` and then pushes
+   `branch_name`; recovery must prove those names refer to the same checked-out
+   branch before delegating.
+5. Invoke `_try_auto_resolve_pr_conflict(repo_root, pr_number=<str>,
    base_branch=<str>, branch_name=<str>, log=None)` via the lazy loader
    defined in Work Item D, using the exact keyword-only signature at
    `commit_executor.py:1783-1790`.
-5. Translate the helper's return into the `_fix_result` shape **explicitly**:
+6. Translate the helper's return into the `_fix_result` shape **explicitly**:
    `return _fix_result(fixed=helper["resolved"], action=helper["action"],
    detail=helper["detail"])`. Do NOT construct an ad-hoc dict; use
    `_fix_result` so the contract stays aligned with the rest of the Tier-2
