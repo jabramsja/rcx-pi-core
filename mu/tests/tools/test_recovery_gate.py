@@ -6899,6 +6899,23 @@ esac
 
         assert any("REQUEST_CHANGES" in event["label"] for event in timeline["events"])
 
+    def test_pipeline_dashboard_web_skips_json_non_object_agent_envelope(self):
+        content = (
+            "BEGIN_AGENT_ENVELOPE\n"
+            + json.dumps({
+                "decision": "REQUEST_CHANGES",
+                "summary": "real review",
+                "findings": [{"disposition": "blocking"}],
+            })
+            + "\nEND_AGENT_ENVELOPE\n\n"
+            "BEGIN_AGENT_ENVELOPE\n[]\nEND_AGENT_ENVELOPE\n"
+        )
+
+        env = web_mod.latest_agent_envelope_from_text(content)
+
+        assert env is not None
+        assert env["decision"] == "REQUEST_CHANGES"
+
     def test_ensure_codex_autoping_skips_pipeline_worker_sessions(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -7393,6 +7410,77 @@ esac
         clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
         assert "REQUEST_CHANGES" in clean_stdout
         assert "Fix quoted path parsing" in clean_stdout
+
+    def test_pane_findings_skips_json_non_object_agent_envelope(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        raw_dir = repo_root / ".agent_bus" / "raw" / "phase-b-r1-nonobject"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "phase-b-r1-nonobject--r1-reviewer.txt").write_text(
+            "BEGIN_AGENT_ENVELOPE\n"
+            '{\n'
+            '  "decision": "REQUEST_CHANGES",\n'
+            '  "summary": "Earlier valid envelope still renders.",\n'
+            '  "findings": [\n'
+            '    {"disposition": "blocking", "severity": "medium", "title": "Use valid envelope"}\n'
+            '  ]\n'
+            '}\n'
+            "END_AGENT_ENVELOPE\n"
+            "BEGIN_AGENT_ENVELOPE\n"
+            "[]\n"
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "REQUEST_CHANGES" in clean_stdout
+        assert "Use valid envelope" in clean_stdout
+
+    def test_pane_findings_skips_json_non_object_meta_envelope(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        meta_dir = repo_root / ".agent_bus" / "meta" / "raw"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        (repo_root / ".scratch").mkdir(parents=True, exist_ok=True)
+        (meta_dir / "meta-wave.txt").write_text(
+            "BEGIN_META_ENVELOPE\n"
+            '{\n'
+            '  "decision": "COMMIT_GO",\n'
+            '  "summary": "Earlier meta envelope still renders.",\n'
+            '  "findings": []\n'
+            '}\n'
+            "END_META_ENVELOPE\n"
+            "BEGIN_META_ENVELOPE\n"
+            "[]\n"
+            "END_META_ENVELOPE\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        assert "Latest meta review" in result.stdout
+        assert "COMMIT_GO" in result.stdout
+        assert "Earlier meta envelope still renders." in result.stdout
 
     def test_pane_findings_renders_latest_meta_review_when_bridge_rounds_are_idle(self, tmp_path):
         repo_root = tmp_path / "repo"
