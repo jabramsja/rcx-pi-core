@@ -7787,6 +7787,234 @@ def _run_commit_pipeline_impl(
     )
 
 
+COMMIT_RETRY_PENDING_STATUS = "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT"
+
+
+def _safe_tracked_control_packet_path(
+    repo_root: Path,
+    tracked_packet: str,
+) -> tuple[Path | None, str]:
+    clean = str(tracked_packet or "").strip()
+    if not clean:
+        return None, "tracked_packet is empty"
+    if os.path.isabs(clean) or ".." in clean.split("/"):
+        return None, f"tracked_packet is unsafe: {clean}"
+    if not clean.startswith("reports/control_plane/"):
+        return None, f"tracked_packet is outside reports/control_plane: {clean}"
+    packet_path = (repo_root / clean).resolve()
+    control_dir = (repo_root / "reports" / "control_plane").resolve()
+    try:
+        packet_path.relative_to(control_dir)
+    except ValueError:
+        return None, f"tracked_packet escapes control plane: {clean}"
+    if not packet_path.is_file():
+        return None, f"tracked_packet is not a file: {clean}"
+    return packet_path, ""
+
+
+def _rewrite_packet_status_line(packet_path: Path, new_status: str) -> bool:
+    text = packet_path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    for idx, line in enumerate(lines[:40]):
+        clean = line.replace("**", "").strip()
+        if clean.lower().startswith("status:"):
+            replacement = f"Status: {new_status}"
+            if lines[idx] == replacement:
+                return False
+            lines[idx] = replacement
+            packet_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return True
+    return False
+
+
+def _pending_commit_queue_state(current_state: str) -> str:
+    upper = current_state.upper()
+    evidence = " / LOCAL EVIDENCE" if "LOCAL EVIDENCE" in upper else ""
+    date_match = re.search(r"\(\d{4}-\d{2}-\d{2}\)", current_state)
+    date_suffix = f" {date_match.group(0)}" if date_match else ""
+    return f"{COMMIT_RETRY_PENDING_STATUS}{evidence}{date_suffix}"
+
+
+def _demote_tasks_queue_state_for_commit_retry(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    tracked_packet: str,
+) -> bool:
+    tasks_path = repo_root / "TASKS.md"
+    if not tasks_path.is_file():
+        return False
+    wanted_wave = normalize_wave_id(wave_id)
+    wanted_packet = str(tracked_packet or "").strip()
+    lines = tasks_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    changed = False
+    state_re = re.compile(
+        r"^(?P<prefix>\s*\d+\.\s+\*\*\[[^\]]+\]\s+)"
+        r"(?P<state>.*?)"
+        r"(?P<suffix>\.\*\*.*)$"
+    )
+    for idx, line in enumerate(lines):
+        if "FOUNDER-ORDERED-REDTEAM-" not in line:
+            continue
+        if "Wave ID:" not in line or "Packet:" not in line:
+            continue
+        entry_wave = normalize_wave_id(_queue_entry_backtick_value(line, "Wave ID"))
+        entry_packet = _queue_entry_backtick_value(line, "Packet")
+        if wanted_wave and entry_wave != wanted_wave:
+            if not wanted_packet or entry_packet != wanted_packet:
+                continue
+        elif wanted_packet and entry_packet != wanted_packet:
+            continue
+        match = state_re.match(line.rstrip("\n"))
+        if not match:
+            continue
+        state = match.group("state").strip()
+        if not packet_status_is_completed(state):
+            continue
+        newline = "\n" if line.endswith("\n") else ""
+        new_state = _pending_commit_queue_state(state)
+        lines[idx] = (
+            f"{match.group('prefix')}{new_state}{match.group('suffix')}{newline}"
+        )
+        changed = True
+        break
+    if changed:
+        tasks_path.write_text("".join(lines), encoding="utf-8")
+    return changed
+
+
+def _demote_completed_handoff_state_for_commit_retry(
+    repo_root: Path,
+    handoff: dict[str, Any],
+) -> dict[str, Any]:
+    """Make pre-commit failures routable again before any local commit exists."""
+    tracked_packet = str(handoff.get("tracked_packet") or "").strip()
+    wave_id = str(handoff.get("wave_id") or "").strip()
+    outcome: dict[str, Any] = {"changed": [], "errors": []}
+    packet_path, packet_error = _safe_tracked_control_packet_path(
+        repo_root,
+        tracked_packet,
+    )
+    if packet_error:
+        outcome["errors"].append(packet_error)
+    elif packet_path is not None:
+        status = read_control_plane_packet_status(repo_root, tracked_packet)
+        if packet_status_is_completed(status):
+            if _rewrite_packet_status_line(packet_path, COMMIT_RETRY_PENDING_STATUS):
+                _run(["git", "add", "--", tracked_packet], cwd=repo_root, timeout=30)
+                outcome["changed"].append(tracked_packet)
+
+    if wave_id or tracked_packet:
+        if _demote_tasks_queue_state_for_commit_retry(
+            repo_root,
+            wave_id=wave_id,
+            tracked_packet=tracked_packet,
+        ):
+            _run(["git", "add", "--", "TASKS.md"], cwd=repo_root, timeout=30)
+            outcome["changed"].append("TASKS.md")
+    return outcome
+
+
+def _invalidate_durable_handoff_pre_commit_receipt_for_commit_retry(
+    repo_root: Path,
+    handoff: dict[str, Any],
+) -> tuple[bool, str]:
+    """Clear stale supervisor receipt evidence after staged retry demotion."""
+    handoff_path = agent_bus_path(
+        repo_root,
+        _active_bus_dir(),
+        "executors",
+        "phase_b_handoff.json",
+    )
+    if not handoff_path.is_file():
+        return False, ""
+    try:
+        payload = json.loads(handoff_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return False, f"failed to read durable Phase B handoff for receipt invalidation: {exc}"
+    if not isinstance(payload, dict):
+        return False, "durable Phase B handoff is not a JSON object"
+
+    expected_wave = normalize_wave_id(str(handoff.get("wave_id") or ""))
+    actual_wave = normalize_wave_id(str(payload.get("wave_id") or ""))
+    if expected_wave and actual_wave and expected_wave != actual_wave:
+        return False, ""
+    expected_packet = str(handoff.get("tracked_packet") or "").strip()
+    actual_packet = str(payload.get("tracked_packet") or "").strip()
+    if expected_packet and actual_packet and expected_packet != actual_packet:
+        return False, ""
+
+    evidence_handles = payload.get("evidence_handles")
+    if not isinstance(evidence_handles, dict) or "pre_commit_receipt" not in evidence_handles:
+        return False, ""
+    refreshed_evidence = {
+        key: value
+        for key, value in evidence_handles.items()
+        if key != "pre_commit_receipt"
+    }
+    payload["evidence_handles"] = refreshed_evidence
+    tracker_note_text = payload.get("tracker_note_text")
+    if isinstance(tracker_note_text, str) and tracker_note_text.strip():
+        payload["tracker_note_text"] = _mark_tracker_note_pre_commit_receipt_pending(
+            tracker_note_text
+        )
+
+    valid_handoff, validation_errors = validate_handoff(payload)
+    if not valid_handoff:
+        return (
+            False,
+            "durable Phase B handoff invalid after retry receipt invalidation: "
+            + "; ".join(validation_errors),
+        )
+    try:
+        handoff_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        return False, f"failed to persist durable Phase B handoff receipt invalidation: {exc}"
+    return True, ""
+
+
+def _maybe_demote_completed_handoff_state_for_commit_retry(
+    *,
+    repo_root: Path,
+    handoff: dict[str, Any],
+    result: dict[str, Any],
+) -> None:
+    if str(result.get("status") or "") != "error":
+        return
+    steps_completed = result.get("steps_completed")
+    if not isinstance(steps_completed, list):
+        steps_completed = []
+    if "git_commit" in steps_completed or result.get("commit_sha"):
+        return
+    try:
+        outcome = _demote_completed_handoff_state_for_commit_retry(repo_root, handoff)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        warnings = result.setdefault("warnings", [])
+        if isinstance(warnings, list):
+            warnings.append(f"commit retry state demotion failed: {exc}")
+        return
+    if outcome.get("changed"):
+        invalidated, invalidation_error = (
+            _invalidate_durable_handoff_pre_commit_receipt_for_commit_retry(
+                repo_root,
+                handoff,
+            )
+        )
+        if invalidated:
+            outcome["handoff_receipt_invalidated"] = True
+        if invalidation_error:
+            outcome["handoff_receipt_invalidation_error"] = invalidation_error
+    if outcome.get("changed") or outcome.get("errors"):
+        result["commit_retry_state_demotion"] = outcome
+    if outcome.get("changed"):
+        warnings = result.setdefault("warnings", [])
+        if isinstance(warnings, list):
+            warnings.append(
+                "Demoted completed packet/task state to pending commit after "
+                "commit executor failed before git_commit."
+            )
+
+
 def run_commit_pipeline(
     handoff: dict[str, Any],
     *,
@@ -7858,6 +8086,11 @@ def run_commit_pipeline(
         repo_root=repo_root,
         verbose=verbose,
         skip_supervisor=skip_supervisor,
+    )
+    _maybe_demote_completed_handoff_state_for_commit_retry(
+        repo_root=repo_root,
+        handoff=handoff,
+        result=result,
     )
     status = str(result.get("status") or "error")
     event_type = _commit_outcome_event_type(status)

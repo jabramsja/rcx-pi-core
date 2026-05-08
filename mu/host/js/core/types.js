@@ -2,10 +2,11 @@
 /**
  * RCX Type Validation and Hashing
  *
- * Depends on: core/constants.js, crypto (Node built-in)
+ * Depends on: core/constants.js, crypto/util (Node built-ins)
  */
 
 const crypto = require('crypto');
+const { types: utilTypes } = require('util');
 const { MAX_DEPTH, RcxError } = require('./constants');
 
 const MAX_MU_WIDTH = 1000;
@@ -78,6 +79,7 @@ function isVar(mu) {
   return (
     mu !== null &&
     typeof mu === 'object' &&
+    !utilTypes.isProxy(mu) &&
     !Array.isArray(mu) &&
     Object.keys(mu).length === 1 &&
     Object.hasOwn(mu, 'var') && typeof mu.var === 'string'
@@ -106,13 +108,22 @@ function isValidMu(value, _depth = 0, _seen, _budget = _NO_BUDGET) {
     if (t === 'boolean' || t === 'string') return true;
     if (t === 'number') return isValidNumber(value);
     if (t === 'function' || t === 'symbol') return false;
+    if (utilTypes.isProxy(value)) return false;
 
     if (!_seen) _seen = new WeakSet();  // AST_OK_JS: cycle detection for is_mu budget path (matches Python _seen set)
     if (_seen.has(value)) return false;
     _seen.add(value);
 
     if (Array.isArray(value)) {
+      if (Object.getPrototypeOf(value) !== Array.prototype) { _seen.delete(value); return false; }
       if (value.length > MAX_MU_WIDTH) { _seen.delete(value); return false; }
+      if (Object.getOwnPropertySymbols(value).length > 0) { _seen.delete(value); return false; }
+      if (Object.keys(value).length !== value.length) { _seen.delete(value); return false; }
+      if (Object.getOwnPropertyNames(value).length !== value.length + 1) { _seen.delete(value); return false; }
+      for (let i = 0; i < value.length; i++) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
+        if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) { _seen.delete(value); return false; }
+      }
       // Depth-only: same 'remaining' passed to all siblings
       const result = value.every(v => isValidMu(v, _depth, _seen, remaining));
       _seen.delete(value);
@@ -120,10 +131,17 @@ function isValidMu(value, _depth = 0, _seen, _budget = _NO_BUDGET) {
     }
 
     if (t === 'object') {
+      const prototype = Object.getPrototypeOf(value);
+      if (prototype !== Object.prototype && prototype !== null) { _seen.delete(value); return false; }
       const keys = Object.keys(value);
       if (keys.length > MAX_MU_WIDTH) { _seen.delete(value); return false; }
       if (Object.getOwnPropertySymbols(value).length > 0) { _seen.delete(value); return false; }
+      if (Object.getOwnPropertyNames(value).length !== keys.length) { _seen.delete(value); return false; }
       if (!keys.every(k => typeof k === 'string')) { _seen.delete(value); return false; }
+      for (const k of keys) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, k);
+        if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) { _seen.delete(value); return false; }
+      }
       const result = keys.every(k => isValidMu(value[k], _depth, _seen, remaining));
       _seen.delete(value);
       return result;
@@ -143,6 +161,7 @@ function isValidMu(value, _depth = 0, _seen, _budget = _NO_BUDGET) {
   if (t === 'boolean' || t === 'string') return true;
   if (t === 'number') return isValidNumber(value);
   if (t === 'function' || t === 'symbol') return false;
+  if (utilTypes.isProxy(value)) return false;
 
   // Cycle detection for objects and arrays (matches Python is_mu's _seen set with backtracking).
   // Backtracking (delete after subtree check) allows DAGs (shared references) while catching cycles.
@@ -151,21 +170,36 @@ function isValidMu(value, _depth = 0, _seen, _budget = _NO_BUDGET) {
   _seen.add(value);
 
   if (Array.isArray(value)) {
+    if (Object.getPrototypeOf(value) !== Array.prototype) { _seen.delete(value); return false; }
     // Width guard (matches Python MAX_MU_WIDTH)
     if (value.length > MAX_MU_WIDTH) { _seen.delete(value); return false; }
+    if (Object.getOwnPropertySymbols(value).length > 0) { _seen.delete(value); return false; }
+    if (Object.keys(value).length !== value.length) { _seen.delete(value); return false; }
+    if (Object.getOwnPropertyNames(value).length !== value.length + 1) { _seen.delete(value); return false; }
+    for (let i = 0; i < value.length; i++) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
+      if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) { _seen.delete(value); return false; }
+    }
     const ok = value.every(v => isValidMu(v, _depth + 1, _seen));
     _seen.delete(value);
     return ok;
   }
 
   if (t === 'object') {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) { _seen.delete(value); return false; }
     const keys = Object.keys(value);
     // Width guard (matches Python MAX_MU_WIDTH)
     if (keys.length > MAX_MU_WIDTH) { _seen.delete(value); return false; }
     // Reject Symbol keys (not valid Mu - Object.keys ignores them but we check explicitly)
     if (Object.getOwnPropertySymbols(value).length > 0) { _seen.delete(value); return false; }
+    if (Object.getOwnPropertyNames(value).length !== keys.length) { _seen.delete(value); return false; }
     // Validate all string keys are actually strings (defensive)
     if (!keys.every(k => typeof k === 'string')) { _seen.delete(value); return false; }
+    for (const k of keys) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, k);
+      if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) { _seen.delete(value); return false; }
+    }
     const ok = keys.every(k => isValidMu(value[k], _depth + 1, _seen));
     _seen.delete(value);
     return ok;
@@ -207,6 +241,23 @@ function compareMuStringKeysByCodepoint(a, b) {
 }
 
 /**
+ * Canonical Mu JSON string used by hashing and hash-cache keys.
+ */
+function canonicalize(v) {
+  if (v === null) return 'null';
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'number') return Object.is(v, -0) ? '-0.0' : JSON.stringify(v);
+  if (typeof v === 'string') return JSON.stringify(v);
+  if (Array.isArray(v)) {
+    return '[' + v.map(canonicalize).join(', ') + ']';
+  }
+  // Object: sort keys, use Python separators
+  const keys = Object.keys(v).sort(compareMuStringKeysByCodepoint);
+  const pairs = keys.map(k => JSON.stringify(k) + ': ' + canonicalize(v[k]));
+  return '{' + pairs.join(', ') + '}';
+}
+
+/**
  * Compute deterministic SHA-256 hash of a Mu value.
  * Matches Python mu_hash() for all JSON-native types: canonical JSON with sorted keys.
  * NOTE: Integral floats diverge cross-substrate (Python json.dumps(1.0) -> "1.0",
@@ -220,19 +271,6 @@ function muHash(value) {
   }
   // Must match Python: json.dumps(value, sort_keys=True, ensure_ascii=False)
   // Python uses `, ` between items and `: ` between key/value (separators=(', ', ': '))
-  function canonicalize(v) {
-    if (v === null) return 'null';
-    if (typeof v === 'boolean') return v ? 'true' : 'false';
-    if (typeof v === 'number') return Object.is(v, -0) ? '-0.0' : JSON.stringify(v);
-    if (typeof v === 'string') return JSON.stringify(v);
-    if (Array.isArray(v)) {
-      return '[' + v.map(canonicalize).join(', ') + ']';
-    }
-    // Object: sort keys, use Python separators
-    const keys = Object.keys(v).sort(compareMuStringKeysByCodepoint);
-    const pairs = keys.map(k => JSON.stringify(k) + ': ' + canonicalize(v[k]));
-    return '{' + pairs.join(', ') + '}';
-  }
   return crypto.createHash('sha256').update(canonicalize(value), 'utf8').digest('hex');
 }
 
@@ -244,32 +282,19 @@ function muHash(value) {
 const MAX_MU_HASH_CACHE = 10000;
 const _muHashCache = new Map();
 function muHashCached(value) {
-  // Deterministic cache key: sorted-key JSON.
-  // F-14 fix: -0 position is not encoded in JSON (JSON.stringify(-0) → "0"),
-  // so {x:0,y:-0} and {x:-0,y:0} produce the same JSON key despite having
-  // different muHash values. Bypass cache entirely when value contains -0.
-  // muHash handles -0 correctly via Object.is(v, -0) ? '-0.0'.
-  // Performance: -0 is rare in practice; bypass has negligible impact.
-  let hasNegZero = false;
-  const json = JSON.stringify(value, (_, v) => {
-    if (typeof v === 'number' && Object.is(v, -0)) hasNegZero = true;
-    if (v && typeof v === 'object' && !Array.isArray(v)) {
-      const sorted = {};
-      for (const k of Object.keys(v).sort(compareMuStringKeysByCodepoint)) sorted[k] = v[k];
-      return sorted;
-    }
-    return v;
-  });
-  if (hasNegZero) return muHash(value);
-  const cached = _muHashCache.get(json);
+  if (!isValidMu(value)) {
+    throw new RcxError('input.invalid_type', 'muHashCached: value is not valid Mu');
+  }
+  const canonical = canonicalize(value);
+  const cached = _muHashCache.get(canonical);
   if (cached !== undefined) {
     // LRU: delete and re-insert to move to end (most recently used)
-    _muHashCache.delete(json);
-    _muHashCache.set(json, cached);
+    _muHashCache.delete(canonical);
+    _muHashCache.set(canonical, cached);
     return cached;
   }
-  const hash = muHash(value);
-  _muHashCache.set(json, hash);
+  const hash = crypto.createHash('sha256').update(canonical, 'utf8').digest('hex');
+  _muHashCache.set(canonical, hash);
   // Evict oldest if over limit
   if (_muHashCache.size > MAX_MU_HASH_CACHE) {
     const oldest = _muHashCache.keys().next().value;

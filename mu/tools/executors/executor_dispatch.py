@@ -433,6 +433,78 @@ def _routing_record_tracked_packet(record: dict[str, Any]) -> str:
     return ""
 
 
+def _tasks_backtick_value(line: str, label: str) -> str:
+    match = re.search(rf"{re.escape(label)}:\s*`([^`]+)`", line)
+    return match.group(1).strip() if match else ""
+
+
+def _founder_ordered_task_packet_for_wave(repo_root: Path, wave_id: str) -> str:
+    normalized_wave = normalize_wave_id(wave_id)
+    if not normalized_wave:
+        return ""
+    try:
+        lines = (repo_root / "TASKS.md").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    for line in lines:
+        if "FOUNDER-ORDERED-REDTEAM-" not in line:
+            continue
+        entry_wave = normalize_wave_id(_tasks_backtick_value(line, "Wave ID"))
+        if entry_wave != normalized_wave:
+            continue
+        packet = _tasks_backtick_value(line, "Packet")
+        if not packet.startswith("reports/control_plane/"):
+            return ""
+        candidate = Path(packet)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            return ""
+        full_path = (repo_root / packet).resolve()
+        try:
+            full_path.relative_to((repo_root / "reports" / "control_plane").resolve())
+        except ValueError:
+            return ""
+        if full_path.is_file():
+            return packet
+        return ""
+    return ""
+
+
+def _enrich_founder_ordered_tracked_packets(
+    repo_root: Path,
+    record: dict[str, Any],
+) -> dict[str, Any]:
+    """Fill missing tracked_packet from TASKS.md to avoid date-slug duplicates."""
+    candidates = record.get("next_candidates")
+    if not isinstance(candidates, list):
+        return record
+    changed = False
+    enriched_candidates: list[Any] = []
+    record_wave = str(record.get("wave_name") or record.get("wave_id") or "").strip()
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            enriched_candidates.append(candidate)
+            continue
+        enriched = dict(candidate)
+        if not str(enriched.get("tracked_packet") or "").strip():
+            wave = str(
+                enriched.get("wave_name")
+                or enriched.get("wave_id")
+                or enriched.get("candidate")
+                or record_wave
+                or ""
+            ).strip()
+            packet = _founder_ordered_task_packet_for_wave(repo_root, wave)
+            if packet:
+                enriched["tracked_packet"] = packet
+                changed = True
+        enriched_candidates.append(enriched)
+    if not changed:
+        return record
+    enriched_record = dict(record)
+    enriched_record["next_candidates"] = enriched_candidates
+    return enriched_record
+
+
 def _completed_routing_candidates(
     repo_root: Path,
     record: dict[str, Any],
@@ -2755,6 +2827,7 @@ def dispatch(
             "message": str(exc),
         }
     cfg = config or load_config()
+    record = _enrich_founder_ordered_tracked_packets(repo, record)
     decision = record.get("decision", "")
 
     # Stop tokens — require human intervention
@@ -2864,6 +2937,7 @@ def dispatch(
                 }
             # Use the refreshed record for the rest of dispatch
             record = refresh_record
+            record = _enrich_founder_ordered_tracked_packets(repo, record)
             decision = record.get("decision", "")
             # Re-check stop tokens after refresh
             if decision in STOP_TOKENS:
