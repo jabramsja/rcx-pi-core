@@ -19,34 +19,37 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-07 truth sweep):
+Current inventory refresh (2026-05-08 generated bridge closure):
 
 - Evidence commands:
   `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' ! -name README.md -print | sort`.
 - `reports/deferred/blocking/` currently contains `README.md` plus one active
   blocker packet:
   `founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md`. The packet
-  remains a `/mu` structural hard stop; this truth sweep documented status only
-  and did not route or implement `/mu` structural remediation.
+  remains a `/mu` structural hard stop; this inventory refresh documents status
+  only and does not route or implement `/mu` structural remediation.
 - The resolved mu preproduction gate-theater blocker was moved to
   `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`.
   The 2026-05-05 follow-up aligns the redteam startup guard with the curated
   theater-risk ratchet; `/mu` production-forward movement is no longer blocked
   by this gate-theater finding.
-- `reports/deferred/non_blocking/` currently contains `README.md` plus six
-  active or partially active advisory/follow-up packets:
-  `deferred-non-mu-deferred-lane-truth-sweep-2026-05-07_bridge_nonblockers.md`,
-  `deferred-non-mu-docs-control-plane-remediation-2026-05-07_bridge_nonblockers.md`,
-  `deferred-non-mu-tooling-control-plane-remediation-2026-05-07_bridge_nonblockers.md`,
+- `reports/deferred/non_blocking/` currently contains `README.md` plus three
+  active or partially active `/mu` structural advisory packets:
   `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
   `redteam_2026-03-14_repo_non_blockers.md`, and
   `repo_truth_non_blockers_2026-03-14.md`.
+- The 2026-05-08 generated bridge closure archived the three active generated
+  non-`/mu` bridge packets under `reports/archive/deferred/` with
+  `_closed-by-deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.md`
+  suffixes after bounded verification closed or staled their findings and fixed
+  the live observability non-object JSON envelope parser crash.
 - The truth sweep archived routed non-`/mu` deferred source packets under
   `reports/archive/deferred/` with
   `_closed-by-deferred-non-mu-deferred-lane-truth-sweep-2026-05-07.md`
   suffixes, including stale Phase B generated packets and the closed
   `w5a_reentry_gate_coverage.md` source packet.
-- Remaining non-`/mu` work is routed into bounded control-plane packets:
+- The 2026-05-07 truth sweep routed then-remaining non-`/mu` work into bounded
+  control-plane packets:
   `reports/control_plane/deferred-non-mu-docs-control-plane-remediation-2026-05-07_2026-05-07.md`,
   `reports/control_plane/deferred-non-mu-tooling-control-plane-remediation-2026-05-07_2026-05-07.md`,
   and
@@ -75,9 +78,8 @@ Current inventory refresh (2026-05-07 truth sweep):
   low-severity README wording finding. The 2026-05-07 deferred folder cleanup
   also archived the tests/tooling generated remediation bridge packets whose
   stale wording and evidence-command findings no longer reproduce.
-- The current active non-blocking inventory is `README.md` plus six active or
-  partially active advisory/follow-up packets: three deferred non-`/mu`
-  follow-up bridge packets and three retained `/mu` structural advisory packets.
+- The current active non-blocking inventory is `README.md` plus three active or
+  partially active retained `/mu` structural advisory packets.
 
 Closed-parent exclusions for this index:
 

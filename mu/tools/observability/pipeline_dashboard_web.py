@@ -322,6 +322,8 @@ def latest_agent_envelope_from_text(content):
             candidate = json.loads(match.group(1))
         except (json.JSONDecodeError, TypeError):
             continue
+        if not isinstance(candidate, dict):
+            continue
         decision = str(candidate.get("decision", "") or "")
         if decision and "|" not in decision:
             return candidate

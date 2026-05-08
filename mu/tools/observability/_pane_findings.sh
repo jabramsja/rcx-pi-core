@@ -86,6 +86,8 @@ def _latest_json_envelope(content):
             candidate = json.loads(match.group(1))
         except (json.JSONDecodeError, KeyError, TypeError):
             continue
+        if not isinstance(candidate, dict):
+            continue
         dec = candidate.get("decision", "")
         if dec and "|" not in dec:
             return candidate
@@ -173,6 +175,8 @@ for match in reversed(matches):
     try:
         candidate = json.loads(match.group(1))
     except (json.JSONDecodeError, KeyError, TypeError):
+        continue
+    if not isinstance(candidate, dict):
         continue
     dec = candidate.get("decision", "")
     if dec and "|" not in dec:

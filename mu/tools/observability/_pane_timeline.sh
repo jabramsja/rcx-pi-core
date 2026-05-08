@@ -244,17 +244,20 @@ repo_has_bridge_role() {
     esac
     is_control_plane_resume_command "$cmd" && continue
     bridge_agent_name_for_command "$cmd" >/dev/null || continue
-    case "$cmd" in
-      *"$REPO_ROOT"* ) ;;
-      *)
-        cwd="$(pid_cwd "$pid")"
-        [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ] || continue
-        ;;
-    esac
     if [ "$wanted_role" = "review" ] && pid_has_ancestor_matching "$pid" 'bridge_supervisor\.py review|meta_bridge_supervisor'; then
+      case "$cmd" in
+        *"$REPO_ROOT"*) return 0 ;;
+      esac
+      cwd="$(pid_cwd "$pid")"
+      [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ] || continue
       return 0
     fi
     if [ "$wanted_role" = "implement" ] && pid_has_ancestor_matching "$pid" 'phase_b_executor\.py|phase_a_executor\.py|commit_executor\.py'; then
+      case "$cmd" in
+        *"$REPO_ROOT"*) return 0 ;;
+      esac
+      cwd="$(pid_cwd "$pid")"
+      [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ] || continue
       return 0
     fi
   done < <(pgrep_limited "codex.*exec|claude.*--print")

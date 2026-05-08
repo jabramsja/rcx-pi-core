@@ -100,7 +100,7 @@ Archived source snapshots for extracted non-blocking residue live in:
 
 - Evidence command:
   `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' ! -name README.md -print | sort`.
-- Current non-blocking inventory after routing/archive cleanup: `README.md` plus
+- Inventory after the 2026-05-07 routing/archive cleanup: `README.md` plus
   six active or partially active advisory/follow-up packets:
   `deferred-non-mu-deferred-lane-truth-sweep-2026-05-07_bridge_nonblockers.md`,
   `deferred-non-mu-docs-control-plane-remediation-2026-05-07_bridge_nonblockers.md`,
@@ -109,10 +109,29 @@ Archived source snapshots for extracted non-blocking residue live in:
   `redteam_2026-03-14_repo_non_blockers.md`, and
   `repo_truth_non_blockers_2026-03-14.md`.
 - Routed non-`/mu` source packets were moved to `reports/archive/deferred/`
-  with same-wave `closed-by` suffixes. Remaining non-`/mu` work is tracked by
-  the bounded control-plane packets for docs/control-plane, tooling/control-plane,
-  and tests/proof-integrity remediation, plus the generated bridge advisories
-  retained above while their current findings remain active or partially active.
+  with same-wave `closed-by` suffixes. At that point, remaining non-`/mu` work
+  was tracked by the bounded control-plane packets for docs/control-plane,
+  tooling/control-plane, and tests/proof-integrity remediation, plus the
+  generated bridge advisories retained above while their findings remained active
+  or partially active.
 - `w5a_reentry_gate_coverage.md` was archived as closed by current direct test
   evidence in `mu/tests/l4_gates/test_boot1_step_monotonicity_gate.py`.
 - Claude-related files were not edited.
+
+2026-05-08 generated bridge closure note:
+
+- Evidence command:
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
+- Current non-blocking inventory after generated bridge closure:
+  `README.md` plus three active or partially active `/mu` structural advisory
+  packets:
+  `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
+  `redteam_2026-03-14_repo_non_blockers.md`, and
+  `repo_truth_non_blockers_2026-03-14.md`.
+- The generated non-`/mu` bridge packets for the 2026-05-07 deferred-lane truth
+  sweep, docs/control-plane remediation, and tooling/control-plane remediation
+  were archived under `reports/archive/deferred/` with
+  `_closed-by-deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.md`
+  suffixes after bounded verification.
+- Remaining active non-blocking deferred packets are `/mu` structural advisory
+  records only; this closure did not implement `/mu` structural remediation.

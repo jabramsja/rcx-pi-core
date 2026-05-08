@@ -6899,6 +6899,23 @@ esac
 
         assert any("REQUEST_CHANGES" in event["label"] for event in timeline["events"])
 
+    def test_pipeline_dashboard_web_skips_json_non_object_agent_envelope(self):
+        content = (
+            "BEGIN_AGENT_ENVELOPE\n"
+            + json.dumps({
+                "decision": "REQUEST_CHANGES",
+                "summary": "real review",
+                "findings": [{"disposition": "blocking"}],
+            })
+            + "\nEND_AGENT_ENVELOPE\n\n"
+            "BEGIN_AGENT_ENVELOPE\n[]\nEND_AGENT_ENVELOPE\n"
+        )
+
+        env = web_mod.latest_agent_envelope_from_text(content)
+
+        assert env is not None
+        assert env["decision"] == "REQUEST_CHANGES"
+
     def test_ensure_codex_autoping_skips_pipeline_worker_sessions(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -7394,6 +7411,77 @@ esac
         assert "REQUEST_CHANGES" in clean_stdout
         assert "Fix quoted path parsing" in clean_stdout
 
+    def test_pane_findings_skips_json_non_object_agent_envelope(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        raw_dir = repo_root / ".agent_bus" / "raw" / "phase-b-r1-nonobject"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "phase-b-r1-nonobject--r1-reviewer.txt").write_text(
+            "BEGIN_AGENT_ENVELOPE\n"
+            '{\n'
+            '  "decision": "REQUEST_CHANGES",\n'
+            '  "summary": "Earlier valid envelope still renders.",\n'
+            '  "findings": [\n'
+            '    {"disposition": "blocking", "severity": "medium", "title": "Use valid envelope"}\n'
+            '  ]\n'
+            '}\n'
+            "END_AGENT_ENVELOPE\n"
+            "BEGIN_AGENT_ENVELOPE\n"
+            "[]\n"
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "REQUEST_CHANGES" in clean_stdout
+        assert "Use valid envelope" in clean_stdout
+
+    def test_pane_findings_skips_json_non_object_meta_envelope(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        meta_dir = repo_root / ".agent_bus" / "meta" / "raw"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        (repo_root / ".scratch").mkdir(parents=True, exist_ok=True)
+        (meta_dir / "meta-wave.txt").write_text(
+            "BEGIN_META_ENVELOPE\n"
+            '{\n'
+            '  "decision": "COMMIT_GO",\n'
+            '  "summary": "Earlier meta envelope still renders.",\n'
+            '  "findings": []\n'
+            '}\n'
+            "END_META_ENVELOPE\n"
+            "BEGIN_META_ENVELOPE\n"
+            "[]\n"
+            "END_META_ENVELOPE\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        assert "Latest meta review" in result.stdout
+        assert "COMMIT_GO" in result.stdout
+        assert "Earlier meta envelope still renders." in result.stdout
+
     def test_pane_findings_renders_latest_meta_review_when_bridge_rounds_are_idle(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -7721,7 +7809,124 @@ printf 'n{repo_root}\\n'
         assert "← Codex reviewing now" in clean_stdout
         assert "← idle" not in clean_stdout
 
-    def test_pane_timeline_bounds_live_process_scan_candidates(self, tmp_path):
+    def test_pane_timeline_rejects_repo_ancestor_when_candidate_cwd_differs(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_timeline.sh")
+        (repo_root / "mu" / "tools" / "observability" / "pipeline_agents_config.py").write_text(
+            """
+def configured_role_agents(_repo_root):
+    return {
+        "reviewer": {"display_name": "Codex 5.5 xhigh", "status_name": "Codex"},
+        "implementer": {"display_name": "Codex 5.5 xhigh", "status_name": "Codex"},
+    }
+""".strip()
+            + "\n",
+            encoding="utf-8",
+        )
+
+        proc_bin = tmp_path / "proc-bin"
+        proc_bin.mkdir()
+        self._write_executable(
+            proc_bin / "pgrep",
+            """#!/usr/bin/env bash
+set -eu
+pattern="${2:-}"
+case "$pattern" in
+  "codex.*exec|claude.*--print")
+    printf '2222\\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "ps",
+            f"""#!/usr/bin/env bash
+set -eu
+case "$*" in
+  "-p 2222 -o command=")
+    printf '%s\\n' 'node /Users/test/.npm-global/bin/codex exec - --json -m gpt-5.5'
+    ;;
+  "-p 2222 -o ppid=")
+    printf '1111\\n'
+    ;;
+  "-p 1111 -o command=")
+    printf '%s\\n' 'python {repo_root}/tools/agents/bridge_supervisor.py review --reviewer codex'
+    ;;
+  "-p 1111 -o ppid=")
+    printf '1000\\n'
+    ;;
+  "-p 1000 -o command=")
+    printf '%s\\n' 'python {repo_root}/mu/tools/executors/phase_b_executor.py --plan reports/control_plane/pager.md'
+    ;;
+  "-p 1000 -o ppid=")
+    printf '1\\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        lsof_log = tmp_path / "lsof_calls.log"
+        self._write_executable(
+            proc_bin / "lsof",
+            """#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >> "$RCX_TEST_LSOF_LOG"
+printf 'n/tmp/other-repo\\n'
+""",
+        )
+
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\\nHEAD 1111111111111111\\nbranch refs/heads/jabramsja/repo-wave\\n",
+        )
+        env = os.environ | {
+            "PATH": f"{proc_bin}:{bin_dir}:{os.environ['PATH']}",
+            "RCX_TEST_LSOF_LOG": str(lsof_log),
+            "TERM": "xterm",
+        }
+        timeline_script = repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh"
+        timeline_helpers = tmp_path / "probe_timeline_cross_repo_helpers.sh"
+        timeline_helpers.write_text(
+            timeline_script.read_text(encoding="utf-8").split("while true; do", 1)[0],
+            encoding="utf-8",
+        )
+        timeline_helpers.chmod(timeline_helpers.stat().st_mode | 0o111)
+        probe_script = tmp_path / "probe_timeline_cross_repo.sh"
+        probe_script.write_text(
+            f"""#!/usr/bin/env bash
+set -eu
+source {timeline_helpers}
+REPO_ROOT={repo_root}
+if repo_has_bridge_role review; then
+  exit 42
+fi
+""",
+            encoding="utf-8",
+        )
+        probe_script.chmod(probe_script.stat().st_mode | 0o111)
+
+        result = subprocess.run(
+            ["bash", str(probe_script)],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        assert lsof_log.exists()
+
+    def test_pane_timeline_skips_cwd_probe_for_unrelated_codex_candidates(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
         self._minimal_bus(repo_root)
@@ -7818,8 +8023,7 @@ repo_has_bridge_role implement >/dev/null || true
         )
 
         assert result.returncode == 0
-        lsof_calls = lsof_log.read_text(encoding="utf-8").splitlines()
-        assert 1 <= len(lsof_calls) <= 6
+        assert not lsof_log.exists()
 
     def test_pane_timeline_shows_last_pager_wake_summary(self, tmp_path):
         repo_root = tmp_path / "repo"
