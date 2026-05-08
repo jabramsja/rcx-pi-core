@@ -930,10 +930,14 @@ class TestJSSecurityParity:
             keyedArraySubclass.extra = 2;
             const keyedArray = [1];
             keyedArray.extra = 2;
-            const proxyRecord = new Proxy({ a: 1 }, {});
-            const proxyArray = new Proxy([1], {});
+            const proxyThrowRecord = new Proxy({}, {
+              getPrototypeOf() { throw new Error('host trap'); },
+            });
+            const proxyThrowArray = new Proxy([1], {
+              getPrototypeOf() { throw new Error('host trap'); },
+            });
             const proxyTrapRecord = new Proxy({}, {
-              getPrototypeOf() { return Object.prototype; },
+              getPrototypeOf() { throw new Error('host trap'); },
               ownKeys() { return ['a']; },
               getOwnPropertyDescriptor(_target, key) {
                 if (key === 'a') return { value: 1, enumerable: true, configurable: true };
@@ -951,8 +955,9 @@ class TestJSSecurityParity:
               ['array_subclass', arraySubclass, [1], [{ var: 'x' }]],
               ['keyed_array_subclass', keyedArraySubclass, [1], [{ var: 'x' }]],
               ['keyed_array', keyedArray, [1], [{ var: 'x' }]],
-              ['proxy_record', proxyRecord, { a: 1 }, { a: { var: 'x' } }],
-              ['proxy_array', proxyArray, [1], [{ var: 'x' }]],
+              ['bigint', 1n, {}, {}],
+              ['proxy_throw_record', proxyThrowRecord, { a: 1 }, { a: { var: 'x' } }],
+              ['proxy_throw_array', proxyThrowArray, [1], [{ var: 'x' }]],
               ['proxy_trap_record', proxyTrapRecord, { a: 1 }, { a: { var: 'x' } }],
             ];
 
@@ -1026,8 +1031,9 @@ class TestJSSecurityParity:
             "array_subclass",
             "keyed_array_subclass",
             "keyed_array",
-            "proxy_record",
-            "proxy_array",
+            "bigint",
+            "proxy_throw_record",
+            "proxy_throw_array",
             "proxy_trap_record",
         }
         for row in rows["rejected"]:

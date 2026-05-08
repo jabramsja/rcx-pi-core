@@ -192,22 +192,24 @@ for the bounded scope below.
     `list`/`dict` compound types.
   - Lines 55-98: direct JavaScript/Python output proves the JS/Python boundary
     mismatch for host objects and subclasses.
-- Implementation code truth after re-entry closes the bridge-reproduced Proxy
-  contradiction:
-  - `mu/host/js/core/types.js:8` through `mu/host/js/core/types.js:9` imports
-    Node's proxy detector alongside the existing Node crypto boundary.
-  - `mu/host/js/core/types.js:107` through `mu/host/js/core/types.js:111` and
-    `mu/host/js/core/types.js:160` through `mu/host/js/core/types.js:164`
-    reject JavaScript `Proxy` objects before WeakSet tracking, array handling,
-    object key enumeration, or recursive value validation in both `isValidMu`
-    paths.
-  - `mu/host/js/core/types.js:268` through `mu/host/js/core/types.js:352`
+- Implementation code truth after pre-push purity correction removes the
+  host-oracle Proxy detector and narrows the claim to structural fail-closed
+  inspection:
+  - `mu/host/js/core/types.js` keeps only the existing Node `crypto` boundary.
+  - `mu/host/js/core/types.js` wraps object and array structural inspection so
+    hostile/trapping JavaScript host artifacts fail closed in both `isValidMu`
+    paths without adding a new stdlib import.
+  - Transparent JavaScript Proxy rejection is not claimed here because pure
+    structural reflection cannot distinguish `new Proxy({a: 1}, {})` from its
+    target without invoking a host proxy oracle.
+  - `mu/host/js/core/types.js:281` through `mu/host/js/core/types.js:365`
     keep `muHash`, `muHashCached`, `muHashControl`, and
     `muHashControlCached` behind the validator boundary.
   - `mu/host/python/rcx_pi/selfhost/mu_type.py:203` through
     `mu/host/python/rcx_pi/selfhost/mu_type.py:251` remains the read-only exact
     compound-type parity reference for Python Mu.
-- Current direct probes during re-entry show object and array `Proxy` values
+- Current direct probes during re-entry show hostile/trapping Proxy values,
+  BigInt, object host artifacts, array host artifacts, and hidden-key artifacts
   reporting `defaultValid:false`, `budgetValid:false`, and all four JS hash
   entry points returning `input.invalid_type`, while plain records remain valid
   and hashable; Python still rejects arbitrary objects and `dict` subclasses.
@@ -262,20 +264,26 @@ for the bounded scope below.
   mu/tools/executors/phase_b_executor.py mu/tools/executors/recovery_gate.py`
   exits `0`.
 
-## Re-entry Proxy Closure (2026-05-08)
+## Re-entry Host-Oracle Purity Correction (2026-05-08)
 
-- Reproduced blocker: staged code rejected the original Date/Map/class/custom
-  prototype inventory, but `new Proxy({a: 1}, {})` still returned
-  `defaultValid:true`, `budgetValid:true`, and hashed successfully through all
-  four JS hash entry points.
-- Mechanical fix: `mu/host/js/core/types.js` now rejects Node-detected
-  JavaScript Proxy objects before cycle tracking, array validation, object
-  validation, key enumeration, or canonical hashing in both validation paths.
+- Reproduced blocker: pre-push purity rejected the staged Node `util` import
+  used only for `util.types.isProxy` as a new JavaScript kernel stdlib import.
+- Root-cause evidence: `mu/host/js/core/types.js` imported
+  `const { types: utilTypes } = require('util');`, and pre-push-fast reported
+  `FAIL: NEW stdlib/Node.js imports in JavaScript kernel: ['util']`.
+- Mechanical fix: `mu/host/js/core/types.js` removes the host proxy oracle and
+  wraps structural array/object inspection in a fail-closed boundary, so
+  BigInt and hostile/trapping host artifacts reject through `isValidMu` without
+  expanding JS kernel authority.
 - Regression: `mu/tests/l4_gates/test_d009_production_depth_gate.py` and
-  `mu/tests/parity/test_js_parity_automated.py` now cover plain object Proxies, array Proxies, and trap-shaped Proxies across default
+  `mu/tests/parity/test_js_parity_automated.py` cover BigInt, throwing object
+  Proxies, throwing array Proxies, and trap-shaped Proxies across default
   validation, structural-budget validation, and all four hash entry points.
-- Local evidence: direct JS re-entry probe reports `proxyRecord` and
-  `proxyArray` as `defaultValid:false`, `budgetValid:false`, and
+- Deferred boundary: transparent JavaScript Proxy rejection remains
+  non-blocking/policy-bound because it requires either structural provenance or
+  an explicit host-oracle override.
+- Local evidence: direct JS re-entry probe reports BigInt and hostile/trapping
+  Proxy cases as `defaultValid:false`, `budgetValid:false`, and
   `input.invalid_type` for `muHash`, `muHashCached`, `muHashControl`, and
   `muHashControlCached`; `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/l4_gates/test_d009_production_depth_gate.py::TestJSMuHostObjectBoundaryGate::test_js_host_artifacts_reject_before_budget_or_hash_semantics --tb=short && PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/parity/test_js_parity_automated.py -k "host_artifacts or poisoning_cache or exact_compound_boundary" --tb=short` exits `0` with `1 passed` plus `3 passed, 302 deselected`.
 
