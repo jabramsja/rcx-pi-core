@@ -312,6 +312,22 @@ def read_json_safe(path):
         return None
 
 
+AGENT_ENVELOPE_RE = re.compile(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", re.DOTALL)
+
+
+def latest_agent_envelope_from_text(content):
+    """Return the newest parseable non-template agent envelope from raw text."""
+    for match in reversed(list(AGENT_ENVELOPE_RE.finditer(content))):
+        try:
+            candidate = json.loads(match.group(1))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        decision = str(candidate.get("decision", "") or "")
+        if decision and "|" not in decision:
+            return candidate
+    return None
+
+
 def bridge_round_history():
     raw_dir = active_bus_path("raw")
     if not raw_dir.exists():
@@ -325,18 +341,7 @@ def bridge_round_history():
                 continue
             try:
                 content = f.read_text()
-                matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", content, re.DOTALL))
-                if not matches:
-                    continue
-                env = None
-                for m in reversed(matches):
-                    try:
-                        candidate = json.loads(m.group(1))
-                        if "|" not in candidate.get("decision", ""):
-                            env = candidate
-                            break
-                    except (json.JSONDecodeError, KeyError):
-                        continue
+                env = latest_agent_envelope_from_text(content)
                 if env is None:
                     continue
                 dec = env.get("decision", "")
@@ -575,7 +580,7 @@ def model_activity():
     raw_dir = active_bus_path("raw")
     if raw_dir.exists():
         reviewer_file, reviewer_mtime = _newest_file(
-            p for d in sorted(raw_dir.iterdir(), reverse=True)[:3]
+            p for d in raw_dir.iterdir()
             if d.is_dir()
             for p in d.glob("*reviewer*.txt")
         )
@@ -873,11 +878,10 @@ def session_timeline():
                 ts = rf.stat().st_mtime
                 try:
                     content = rf.read_text(errors="replace")
-                    matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", content, re.DOTALL))
-                    if not matches:
+                    env = latest_agent_envelope_from_text(content)
+                    if env is None:
                         add(ts, f"{reviewer_short} reviewing...", "active")
                         continue
-                    env = json.loads(matches[-1].group(1))
                     dec = env.get("decision", "?")
                     findings = env.get("findings", [])
                     blk = sum(1 for f in findings if f.get("disposition") == "blocking")

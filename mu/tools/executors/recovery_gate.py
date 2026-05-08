@@ -3367,6 +3367,36 @@ def _has_shell_metacharacters(cmd: str) -> bool:
     return bool(_SHELL_METACHAR_PATTERN.search(cmd))
 
 
+def _is_command_lookup_only_normalized(cmd_lower: str) -> bool:
+    """Return True for inert shell ``command -v/-V NAME`` lookups.
+
+    ``command curl`` and ``command -p curl`` execute the target and must keep
+    flowing through the denylist.  The lookup forms only ask the shell to
+    describe/resolve command names, so checking whether a dangerous tool exists
+    must not be treated as executing that tool.
+    """
+    tokens = cmd_lower.split()
+    if not tokens:
+        return False
+    i = 0
+    while i < len(tokens) and _is_env_assignment(tokens[i]):
+        i += 1
+    if i >= len(tokens) or tokens[i].rsplit("/", 1)[-1] != "command":
+        return False
+    i += 1
+    saw_lookup_flag = False
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "-v":
+            saw_lookup_flag = True
+            i += 1
+            continue
+        if token in {"-p", "--"} or token.startswith("-"):
+            return False
+        return saw_lookup_flag
+    return False
+
+
 def _uses_network_command_normalized(cmd_lower: str) -> bool:
     """Return True if pre-lowered cmd invokes a network egress tool."""
     tokens = cmd_lower.split()
@@ -3693,6 +3723,12 @@ def _is_dangerous_command(cmd: str) -> bool:
     # Quote-stripped text for remaining checks
     normalized_raw = _strip_shell_quotes(cmd).strip()
     normalized_lower = normalized_raw.lower()
+
+    # Query-only ``command -v/-V`` probes are inert even when the queried name
+    # is otherwise denylisted.  This must run before substring/pattern layers
+    # so lookups like ``command -v rm`` do not trip execution-oriented rules.
+    if _is_command_lookup_only_normalized(normalized_lower):
+        return False
 
     # Layer 2: exact-match denylist
     for denied in _DANGEROUS_COMMANDS:

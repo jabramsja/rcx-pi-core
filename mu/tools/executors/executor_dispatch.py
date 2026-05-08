@@ -1024,14 +1024,44 @@ def build_surface_command(
     return cmd
 
 
-def run_surface_command(cmd: list[str], *, repo_root: Path) -> int:
-    result = subprocess.run(
-        cmd,
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def _surface_forward_timeout(args: argparse.Namespace, config: dict[str, Any]) -> int | float:
+    key = str(args.surface).replace("-", "_")
+    fallback = DEFAULT_EXECUTOR_CONFIG["timeouts"].get(key, 900)
+    value = config.get("timeouts", {}).get(key, fallback)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    if parsed <= 0:
+        return fallback
+    return int(parsed) if parsed.is_integer() else parsed
+
+
+def run_surface_command(
+    cmd: list[str],
+    *,
+    repo_root: Path,
+    timeout: int | float | None = None,
+) -> int:
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        if exc.stdout:
+            sys.stdout.write(exc.stdout if isinstance(exc.stdout, str) else exc.stdout.decode(errors="replace"))
+        if exc.stderr:
+            sys.stderr.write(exc.stderr if isinstance(exc.stderr, str) else exc.stderr.decode(errors="replace"))
+        print(
+            f"[executor-dispatch] Surface command timed out after {timeout}s: {cmd[0]}",
+            file=sys.stderr,
+        )
+        return 124
     if result.stdout:
         sys.stdout.write(result.stdout)
     if result.stderr:
@@ -2298,6 +2328,7 @@ def _retry_commit_only(
     commit_args = [
         sys.executable,
         str(executor_script_dir / "commit_executor.py"),
+        "--json",
         "--handoff", str(handoff_path),
     ]
     if bus_dir is not None:
@@ -3079,10 +3110,12 @@ def main(argv: list[str] | None = None) -> int:
                     config=config,
                 )
             cmd = build_surface_command(args)
+            config = load_config()
+            timeout = _surface_forward_timeout(args, config)
         except (ControlSurfaceError, DispatchError) as exc:
             print(f"[executor-dispatch] Error: {exc}", file=sys.stderr)
             return 1
-        return run_surface_command(cmd, repo_root=repo_root)
+        return run_surface_command(cmd, repo_root=repo_root, timeout=timeout)
 
     parser = argparse.ArgumentParser(
         description="Executor dispatcher: reads routing record and invokes executor",

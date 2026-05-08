@@ -1101,6 +1101,44 @@ def bind_note_from_touched_wave_ids(
     return None
 
 
+def bind_note_from_changed_indicator_artifacts(
+    notes: list[dict[str, str | None]],
+    changed_files: list[str],
+) -> dict[str, str | None] | None:
+    """Bind diff-backed scope to a tracker note via changed indicator artifacts.
+
+    Canonical ``--staged`` checks often run after the tracker note already landed
+    in ``TASKS.md``. In that case TASKS.md is not itself staged, so the checker
+    must not inherit the latest note blindly. A changed indicator artifact is a
+    wave-owned anchor because the tracker note names the exact artifact path.
+    Bind only on a single exact note/artifact match; ambiguity stays fail-closed.
+    """
+    matches: list[dict[str, str | None]] = []
+    seen_wave_ids: set[str] = set()
+    changed_set = set(changed_files)
+    for path in changed_files:
+        if not path.startswith("reports/l4_wave_indicators/"):
+            continue
+        if not path.endswith(".json"):
+            continue
+        wave_id = Path(path).stem
+        for note in notes:
+            if note.get("wave_id") != wave_id:
+                continue
+            if note.get("indicator_artifact_ref") != path:
+                continue
+            if path not in changed_set:
+                continue
+            if wave_id in seen_wave_ids:
+                continue
+            seen_wave_ids.add(wave_id)
+            matches.append(note)
+
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Anti-stagnation checks
 # ---------------------------------------------------------------------------
@@ -2243,6 +2281,23 @@ def main() -> int:
 
     runtime_count = sum(1 for f in changed_files if is_runtime_file(f))
     control_plane_count = sum(1 for f in changed_files if is_control_plane_file(f))
+
+    if (
+        not bound_note
+        and not tracker_note_touched
+        and not wave_class
+        and (args.staged or args.range)
+        and (runtime_count or control_plane_count)
+    ):
+        bound_note = bind_note_from_changed_indicator_artifacts(
+            all_notes, changed_files,
+        )
+        if bound_note:
+            notes = [
+                bound_note,
+                *[n for n in all_notes if n["wave_id"] != bound_note["wave_id"]],
+            ]
+            wave_class = bound_note["wave_class"]
 
     # Derive old_ref for preimage resolution (P1 #1 fix).
     # Context-driven: --staged => HEAD, --range => parsed, --files => HEAD.

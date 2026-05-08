@@ -154,6 +154,14 @@ VERIFIED: Yes
         assert any("missing NOT_CHECKED section" in v for v in result["violations"])
         assert any("missing explicit VERDICT line" in v for v in result["violations"])
 
+    def test_strict_mode_rejects_nonsense_even_without_findings(self):
+        """Non-Claude strict validation must reject unstructured no-finding text."""
+        result = check_compliance("nonsense\n", strict=True)
+
+        assert result["compliant"] is False
+        assert result["findings"] == 0
+        assert any("missing CHECKED section" in v for v in result["violations"])
+
     def test_strict_mode_accepts_backticked_verdict_line(self):
         """Strict mode should accept verdict lines wrapped in backticks."""
         output = """

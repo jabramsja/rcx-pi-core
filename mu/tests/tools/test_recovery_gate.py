@@ -6836,6 +6836,69 @@ esac
         finally:
             web_mod.configure_dashboard_identity(old_identity)
 
+    def test_pipeline_dashboard_web_activity_uses_newest_raw_reviewer_by_mtime(self, tmp_path, monkeypatch):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        old_identity = web_mod.ACTIVE_IDENTITY
+        monkeypatch.setattr(web_mod, "REPO_ROOT", repo_root)
+        try:
+            identity = web_mod.resolve_monitor_identity(repo_root, bus_dir=".agent_bus")
+            web_mod.configure_dashboard_identity(identity)
+            raw_root = repo_root / ".agent_bus" / "raw"
+            newest_dir = raw_root / "phase-a-r1-oldname"
+            newest_dir.mkdir(parents=True)
+            newest_file = newest_dir / "phase-a-r1-oldname--r1-reviewer.txt"
+            newest_file.write_text("newest reviewer output\n", encoding="utf-8")
+            now = time.time()
+            os.utime(newest_file, (now, now))
+            for idx, name in enumerate(["phase-z-r9-a", "phase-y-r9-b", "phase-x-r9-c"]):
+                stale_dir = raw_root / name
+                stale_dir.mkdir()
+                stale_file = stale_dir / f"{name}--r1-reviewer.txt"
+                stale_file.write_text(f"stale {name}\n", encoding="utf-8")
+                os.utime(stale_file, (now - 100 - idx, now - 100 - idx))
+
+            reviewer_feeds = [
+                feed for feed in web_mod.model_activity()
+                if feed.get("role") == "reviewer_raw"
+            ]
+        finally:
+            web_mod.configure_dashboard_identity(old_identity)
+
+        assert reviewer_feeds
+        assert reviewer_feeds[0]["file"] == newest_file.name
+
+    def test_pipeline_dashboard_web_timeline_uses_latest_valid_reviewer_envelope(self, tmp_path, monkeypatch):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        old_identity = web_mod.ACTIVE_IDENTITY
+        monkeypatch.setattr(web_mod, "REPO_ROOT", repo_root)
+        try:
+            identity = web_mod.resolve_monitor_identity(repo_root, bus_dir=".agent_bus")
+            web_mod.configure_dashboard_identity(identity)
+            raw_dir = repo_root / ".agent_bus" / "raw" / "phase-b-reentry-r2-deadbeef"
+            raw_dir.mkdir(parents=True)
+            reviewer = raw_dir / "phase-b-reentry-r2-deadbeef--r2-reviewer.txt"
+            reviewer.write_text(
+                "BEGIN_AGENT_ENVELOPE\n"
+                + json.dumps({
+                    "decision": "REQUEST_CHANGES",
+                    "summary": "real reentry",
+                    "findings": [{"disposition": "blocking"}],
+                })
+                + "\nEND_AGENT_ENVELOPE\n\n"
+                "BEGIN_AGENT_ENVELOPE\n{not json}\nEND_AGENT_ENVELOPE\n",
+                encoding="utf-8",
+            )
+            now = time.time()
+            os.utime(reviewer, (now, now))
+
+            timeline = web_mod.session_timeline()
+        finally:
+            web_mod.configure_dashboard_identity(old_identity)
+
+        assert any("REQUEST_CHANGES" in event["label"] for event in timeline["events"])
+
     def test_ensure_codex_autoping_skips_pipeline_worker_sessions(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -7297,6 +7360,39 @@ esac
         assert "Why it stopped: bridge reviewer turn is FAILED / ERROR." in clean_stdout
         assert "Bridge job status: AWAITING_REVIEWER_APPROVAL" in clean_stdout
         assert "In progress..." not in clean_stdout
+
+    def test_pane_findings_parses_reviewer_file_when_path_contains_quote(self, tmp_path):
+        repo_root = tmp_path / "repo'quoted"
+        repo_root.mkdir()
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        raw_dir = repo_root / ".agent_bus" / "raw" / "phase-b-r1-quote"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "phase-b-r1-quote--r1-reviewer.txt").write_text(
+            "BEGIN_AGENT_ENVELOPE\n"
+            '{\n'
+            '  "decision": "REQUEST_CHANGES",\n'
+            '  "summary": "Quoted path parsed structurally.",\n'
+            '  "findings": [\n'
+            '    {"disposition": "blocking", "severity": "high", "title": "Fix quoted path parsing"}\n'
+            '  ]\n'
+            '}\n'
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"RCX_PANE_ONESHOT": "1", "TERM": "xterm"},
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "REQUEST_CHANGES" in clean_stdout
+        assert "Fix quoted path parsing" in clean_stdout
 
     def test_pane_findings_renders_latest_meta_review_when_bridge_rounds_are_idle(self, tmp_path):
         repo_root = tmp_path / "repo"
@@ -9993,13 +10089,21 @@ class TestShellDispatchBuiltinsAsPrefixes:
         "command env -P /tmp printf hi",
         # Flag variations
         "command -p curl http://evil.com",
-        "command -v curl",
-        "command -V curl",
         "command -- curl http://evil.com",
     ])
     def test_command_dispatch_to_dangerous_targets_blocked(self, cmd):
         """``command [flags] DANGEROUS``: resolver must reach the real target."""
         assert rg_mod._is_dangerous_command(cmd) is True  # ANTICHEAT_OK
+
+    @pytest.mark.parametrize("cmd", [
+        "command -v curl",
+        "command -V curl",
+        "command -v rm",
+        "FOO=1 command -v git reset",
+    ])
+    def test_command_lookup_only_probes_allowed(self, cmd):
+        """``command -v/-V`` probes are inert lookups, not target execution."""
+        assert rg_mod._is_dangerous_command(cmd) is False  # ANTICHEAT_OK
 
     # ---- exec dispatching to dangerous targets (all 13 layers) ----
 

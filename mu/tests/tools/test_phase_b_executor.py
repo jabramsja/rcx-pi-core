@@ -3180,7 +3180,7 @@ class TestPhaseBHardFailPagerEvents:
                     pb_mod._phase_b_hard_fail_transition_key(  # ANTICHEAT_OK: testing internal executor functions
                         repo_root,
                         state=kwargs["state"],
-                        changed_files=["f.py"],
+                        changed_files=["f.py", "reports/control_plane/plan.md"],
                         reentry=False,
                     )
                 )
@@ -3218,6 +3218,7 @@ class TestPhaseBHardFailPagerEvents:
         assert hard_fail_events[0]["state"] == "max_rounds_reached"
         assert hard_fail_events[0]["transition_key"] == hard_fail_keys[0]
         assert "did not converge" in hard_fail_events[0]["summary"].lower()
+        assert mock_impl.invoke_implementer.call_count == 1
 
     def test_run_phase_b_emits_hard_fail_when_reentry_hits_max_rounds(self, tmp_path):
         repo = tmp_path / "repo"
@@ -3302,6 +3303,7 @@ class TestPhaseBHardFailPagerEvents:
         assert hard_fail_events[0]["state"] == "max_rounds_reached"
         assert hard_fail_events[0]["transition_key"] == hard_fail_keys[0]
         assert "re-entry path" in hard_fail_events[0]["summary"].lower()
+        assert mock_impl.invoke_implementer.call_count == 2
 
     def test_run_phase_b_emits_hard_fail_when_reentry_stops_on_needs_phase_b(self, tmp_path):
         repo = tmp_path / "repo"

@@ -852,6 +852,11 @@ PY
     echo -e "${BOLD}Pane 4: session timeline${RESET}  $(date '+%H:%M:%S')"
   fi
 
+  if [ "$ONESHOT" = "1" ]; then
+    rm -f "$TMPOUT"
+    exit 0
+  fi
+
   # Auto-reload: re-exec if script changed on disk
   _SELF="${BASH_SOURCE[0]}"
   _NEW_MTIME=$(stat -f%m "$_SELF" 2>/dev/null || stat -c%Y "$_SELF" 2>/dev/null || echo 0)
@@ -861,11 +866,6 @@ PY
     exec bash "$_SELF"
   fi
   _SELF_MTIME="$_NEW_MTIME"
-
-  if [ "$ONESHOT" = "1" ]; then
-    rm -f "$TMPOUT"
-    exit 0
-  fi
 
   sleep 5
 done

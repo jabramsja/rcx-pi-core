@@ -2189,6 +2189,33 @@ class TestPhaseAPlanCreation:
         assert "Status: of the first item is draft" in body
         assert "Status: Phase A (example text)" in body
 
+    def test_lock_plan_missing_header_status_does_not_rewrite_body_status(self, tmp_path, capsys):
+        """A body-only Status line is not promoted to authoritative header status."""
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        plan = tmp_path / "reports" / "control_plane" / "test.md"
+        plan.write_text(
+            "# Test Plan\n"
+            "Phase-A-Lock: UNLOCKED\n"
+            "\n"
+            "## 1. Scope\n"
+            "Status: Body example should remain untouched.\n",
+            encoding="utf-8",
+        )
+
+        phase_a_mod.lock_plan(tmp_path, "reports/control_plane/test.md")
+
+        content = plan.read_text(encoding="utf-8")
+        header, body = content.split("## 1. Scope")
+        captured = capsys.readouterr()
+        assert "found no Status: line" in captured.err
+        assert "Phase-A-Lock: LOCKED" in header
+        assert "Status: Phase B (locked, implementing)" not in header
+        assert "Status: Body example should remain untouched." in body
+
+    def test_parse_phase_a_findings_zero_match_returns_empty(self):
+        """Missing agent envelopes must produce no findings, not template proof."""
+        assert phase_a_mod._parse_phase_a_findings("no envelope here") == []  # ANTICHEAT_OK: zero-envelope parser regression
+
 
 class TestStandaloneCommitMode:
     """Tests for --standalone and --skip-supervisor commit executor flags."""
@@ -9794,6 +9821,32 @@ class TestModularSurfaceEntrypoints:
         assert str(handoff_path) in cmd
         assert "--json" in cmd
 
+    def test_retry_commit_only_uses_structured_json_surface(self, tmp_path):
+        handoff_dir = tmp_path / ".agent_bus" / "executors"
+        handoff_dir.mkdir(parents=True)
+        _write_phase_b_handoff(handoff_dir / "phase_b_handoff.json")
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=json.dumps({"status": "success"}),
+                stderr="",
+            )
+
+        with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=fake_run):
+            result = dispatch_mod._retry_commit_only(  # ANTICHEAT_OK: testing structured commit retry surface
+                tmp_path,
+                {"timeouts": {"commit_executor": 300}},
+            )
+
+        assert result["status"] == "success"
+        assert calls
+        assert "--json" in calls[0]
+        assert calls[0].index("--json") < calls[0].index("--handoff")
+
     def test_classify_commit_executor_result_detects_json_held(self):
         commit_result = subprocess.CompletedProcess(
             ["commit"], 0, json.dumps({"status": "held"}), ""
@@ -9887,6 +9940,7 @@ class TestModularSurfaceEntrypoints:
         package_path.write_text("{}", encoding="utf-8")
         with patch.object(dispatch_mod, "run_recoverable_surface_command") as mock_recoverable, \
              patch.object(dispatch_mod, "run_surface_command", return_value=0) as mock_run, \
+             patch.object(dispatch_mod, "load_config", return_value={"timeouts": {"pre_commit_supervisor": 77}}), \
              patch.object(dispatch_mod, "resolve_repo_root_for_dispatch", return_value=REPO_ROOT):
             exit_code = dispatch_mod.main(
                 ["pre-commit-supervisor", "--package", str(package_path)]
@@ -9894,6 +9948,7 @@ class TestModularSurfaceEntrypoints:
         assert exit_code == 0
         mock_recoverable.assert_not_called()
         mock_run.assert_called_once()
+        assert mock_run.call_args.kwargs["timeout"] == 77
 
 
 class TestDispatcherExecutorGroupCleanup:
