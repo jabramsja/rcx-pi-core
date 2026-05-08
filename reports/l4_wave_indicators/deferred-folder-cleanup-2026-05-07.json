@@ -1,24 +1,24 @@
 {
   "wave_id": "deferred-folder-cleanup-2026-05-07",
-  "repeat_run_speedup_ratio": 1.23823,
+  "repeat_run_speedup_ratio": 1.019673,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.422373,
+  "step_growth_slope": 0.423065,
   "repeat_run_raw_seconds": [
-    0.522995,
-    0.422373
+    0.431388,
+    0.423065
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.522995
+      "elapsed_seconds": 0.431388
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.945368
+      "elapsed_seconds": 0.854453
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-07T16:04:42Z",
+  "collection_timestamp_utc": "2026-05-08T04:11:05Z",
   "collector_version": "2.2.0"
 }

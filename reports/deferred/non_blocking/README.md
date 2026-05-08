@@ -62,9 +62,10 @@ Archived source snapshots for extracted non-blocking residue live in:
   `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
 - Current inventory after retained-residue cleanup, the routed
   docs-root/mu-docs retained-candidate follow-up,
-  `docs-root-mu-docs-audit-closeout-2026-05-07`, and the 2026-05-07
-	  deferred folder cleanup: 28 markdown files, including this README and 27
-	  active or partially active advisory packets.
+  `docs-root-mu-docs-audit-closeout-2026-05-07`, the 2026-05-07 deferred
+  folder cleanup, and the deferred non-`/mu` truth sweep: 7 markdown files,
+  including this README and 6 active or partially active advisory/follow-up
+  packets.
 - Whole-file archive:
   `reports/archive/deferred/pager-deterministic-session-2026-04-18_bridge_nonblockers_closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`.
 - Partial closed-section extraction:
@@ -78,9 +79,9 @@ Archived source snapshots for extracted non-blocking residue live in:
   `docs-root-mu-docs-audit-closeout-2026-05-07` resolved the duplicate
   same-wave tracker note and moved that advisory to
   `reports/archive/deferred/docs-root-mu-docs-retained-packet-cleanup-2026-05-06_bridge_nonblockers_closed-by-docs-root-mu-docs-audit-closeout-2026-05-07.md`.
-- `docs-root-mu-docs-audit-closeout-2026-05-07_non_blocking.md` remains active
-  with one DOC_ACCURACY advisory for stale pre-S1 no-production-reduction
-  wording in active L4 G8 docs.
+- `docs-root-mu-docs-audit-closeout-2026-05-07_non_blocking.md` was archived
+  by the deferred non-`/mu` truth sweep at
+  `reports/archive/deferred/docs-root-mu-docs-audit-closeout-2026-05-07_non_blocking_closed-by-deferred-non-mu-deferred-lane-truth-sweep-2026-05-07.md`.
 - The generated `docs-root-mu-docs-audit-closeout-2026-05-07` bridge packet was
   archived to
   `reports/archive/deferred/docs-root-mu-docs-audit-closeout-2026-05-07_bridge_nonblockers_closed-by-non-blocking-folder-cleanup-2026-05-07.md`
@@ -100,14 +101,18 @@ Archived source snapshots for extracted non-blocking residue live in:
 - Evidence command:
   `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' ! -name README.md -print | sort`.
 - Current non-blocking inventory after routing/archive cleanup: `README.md` plus
-  three active `/mu` structural advisory packets:
+  six active or partially active advisory/follow-up packets:
+  `deferred-non-mu-deferred-lane-truth-sweep-2026-05-07_bridge_nonblockers.md`,
+  `deferred-non-mu-docs-control-plane-remediation-2026-05-07_bridge_nonblockers.md`,
+  `deferred-non-mu-tooling-control-plane-remediation-2026-05-07_bridge_nonblockers.md`,
   `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
   `redteam_2026-03-14_repo_non_blockers.md`, and
   `repo_truth_non_blockers_2026-03-14.md`.
-- Routed non-`/mu` source packets were moved to `reports/archive/deferred/` with
-  same-wave `routed-by` suffixes, and remaining work is tracked by the bounded
-  control-plane packets for docs/control-plane, tooling/control-plane, and
-  tests/proof-integrity remediation.
+- Routed non-`/mu` source packets were moved to `reports/archive/deferred/`
+  with same-wave `closed-by` suffixes. Remaining non-`/mu` work is tracked by
+  the bounded control-plane packets for docs/control-plane, tooling/control-plane,
+  and tests/proof-integrity remediation, plus the generated bridge advisories
+  retained above while their current findings remain active or partially active.
 - `w5a_reentry_gate_coverage.md` was archived as closed by current direct test
   evidence in `mu/tests/l4_gates/test_boot1_step_monotonicity_gate.py`.
 - Claude-related files were not edited.

@@ -33,8 +33,11 @@ Current inventory refresh (2026-05-07 truth sweep):
   The 2026-05-05 follow-up aligns the redteam startup guard with the curated
   theater-risk ratchet; `/mu` production-forward movement is no longer blocked
   by this gate-theater finding.
-- `reports/deferred/non_blocking/` currently contains `README.md` plus three
-  active `/mu` structural advisory packets:
+- `reports/deferred/non_blocking/` currently contains `README.md` plus six
+  active or partially active advisory/follow-up packets:
+  `deferred-non-mu-deferred-lane-truth-sweep-2026-05-07_bridge_nonblockers.md`,
+  `deferred-non-mu-docs-control-plane-remediation-2026-05-07_bridge_nonblockers.md`,
+  `deferred-non-mu-tooling-control-plane-remediation-2026-05-07_bridge_nonblockers.md`,
   `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
   `redteam_2026-03-14_repo_non_blockers.md`, and
   `repo_truth_non_blockers_2026-03-14.md`.
@@ -64,17 +67,17 @@ Current inventory refresh (2026-05-07 truth sweep):
   advisory, and the 2026-05-07 root/mu-docs audit closeout archived that
   advisory at
   `reports/archive/deferred/docs-root-mu-docs-retained-packet-cleanup-2026-05-06_bridge_nonblockers_closed-by-docs-root-mu-docs-audit-closeout-2026-05-07.md`
-  and added
-  `reports/deferred/non_blocking/docs-root-mu-docs-audit-closeout-2026-05-07_non_blocking.md`
-  for the remaining active L4 G8 docs DOC_ACCURACY advisory. The 2026-05-07
-  non-blocking folder cleanup also archived the same-wave
+  and added a non-blocking L4 G8 docs DOC_ACCURACY advisory that was later
+  archived by the deferred non-`/mu` truth sweep at
+  `reports/archive/deferred/docs-root-mu-docs-audit-closeout-2026-05-07_non_blocking_closed-by-deferred-non-mu-deferred-lane-truth-sweep-2026-05-07.md`.
+  The 2026-05-07 non-blocking folder cleanup also archived the same-wave
   `docs-root-mu-docs-audit-closeout-2026-05-07` bridge packet after closing its
   low-severity README wording finding. The 2026-05-07 deferred folder cleanup
   also archived the tests/tooling generated remediation bridge packets whose
-  stale wording and evidence-command findings no longer reproduce. The current
-  non-blocking inventory was 28 markdown files before the 2026-05-07 truth
-  sweep. The current active non-blocking inventory is `README.md` plus three
-  `/mu` structural advisory packets.
+  stale wording and evidence-command findings no longer reproduce.
+- The current active non-blocking inventory is `README.md` plus six active or
+  partially active advisory/follow-up packets: three deferred non-`/mu`
+  follow-up bridge packets and three retained `/mu` structural advisory packets.
 
 Closed-parent exclusions for this index:
 
