@@ -396,21 +396,8 @@ execution was run during Phase B-local validation.
   - `indicator`: `reports/l4_wave_indicators/deferred-non-mu-tooling-control-plane-remediation-2026-05-07.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/tools/test_executor_dispatch.py`
-  - `mu/tests/tools/test_l4_execution_contract_enforcement.py`
-  - `mu/tests/tools/test_meta_bridge_supervisor.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
-  - `mu/tests/tools/test_recovery_gate.py`
-  - `mu/tests/tools/test_run_review.py`
-  - `mu/tests/tools/test_validate_agent_compliance.py`
-  - `mu/tools/checks/enforce_l4_execution_contract.py`
-  - `mu/tools/executors/executor_common.py`
-  - `mu/tools/executors/executor_dispatch.py`
-  - `mu/tools/executors/phase_b_executor.py`
-  - `mu/tools/executors/recovery_gate.py`
-  - `mu/tools/observability/_pane_findings.sh`
-  - `mu/tools/observability/pipeline_dashboard_web.py`
+  - `mu/tools/executors/executor_config.json`
+  - `mu/tools/observability/_pane_timeline.sh`
   - `reports/control_plane/deferred-non-mu-tooling-control-plane-remediation-2026-05-07_2026-05-07.md`
-  - `reports/deferred/non_blocking/deferred-non-mu-tooling-control-plane-remediation-2026-05-07_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/deferred-non-mu-tooling-control-plane-remediation-2026-05-07.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
