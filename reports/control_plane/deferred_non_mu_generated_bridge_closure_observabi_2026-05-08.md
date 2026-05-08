@@ -1,7 +1,7 @@
 # Deferred Non Mu Generated Bridge Closure Observability Parser Fix
 
 Date: 2026-05-08
-Status: COMMIT PATH REPAIR IN PROGRESS (same-wave pre-push timeout fix folded in)
+Status: COMMIT READY (bot-review remediation validated)
 Task: [NEXT-CODEX-POST-REDTEAM]
 Wave ID: deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08
 Class: L4_ENABLER
@@ -110,18 +110,22 @@ test executes `mu/tools/observability/_pane_timeline.sh` with `timeout=10`.
 The source-side risk was bounded to the timeline bridge-role detector. The
 prior implementation could cwd-probe unrelated Codex candidates before
 bridge-role ancestry discarded them; the repaired detector now lives at
-`_pane_timeline.sh:252-280` and moves cwd probing behind role-ancestry proof.
+`_pane_timeline.sh:235-264` and moves cwd probing behind role-ancestry proof.
 
 Same-wave mechanical repair:
 
-- `_pane_timeline.sh:235-250` adds a bounded `pid_has_repo_ancestor()` helper so
-  repo-root ancestry can be proven from parent command lines before cwd probing.
-- `_pane_timeline.sh:264-280` now proves bridge-role ancestry before any
-  repository check and only falls back to `pid_cwd` for role-matching bridge
-  processes not already bound by command or ancestor.
-- `mu/tests/tools/test_recovery_gate.py:7812-7909` now verifies unrelated Codex
-  candidates do not call the fake `lsof` probe, while the live review-chain and
-  autoping one-shot timeline tests preserve the positive behavior.
+- `_pane_timeline.sh:247-260` now proves bridge-role ancestry before any cwd
+  probe, accepts a direct candidate command containing `REPO_ROOT`, and otherwise
+  falls back to `pid_cwd` for exact worktree ownership.
+- Bot review P2 on PR #909 rejected the earlier ancestor-command repo shortcut
+  because a parent command can mention this repo while the candidate process cwd
+  belongs to another repo. The shortcut was removed; ancestor command paths are
+  not positive repo-ownership proof.
+- `mu/tests/tools/test_recovery_gate.py:7812-7908` now verifies an ancestor
+  command mentioning this repo plus a candidate cwd outside the repo renders
+  idle, and `:7910-8007` verifies unrelated Codex candidates do not call the
+  fake `lsof` probe. The live review-chain and autoping one-shot timeline tests
+  preserve positive behavior.
 
 ### Archive And Inventory Actions
 
@@ -150,7 +154,7 @@ packets; no generated non-`/mu` bridge packet remains active.
 | `bash -n mu/tools/observability/_pane_timeline.sh` | `0` | Timeline-pane shell script parses after the pre-push timeout repair. |
 | `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pipeline_dashboard_web_skips_json_non_object_agent_envelope mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_findings_skips_json_non_object_agent_envelope mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_findings_skips_json_non_object_meta_envelope` | `0` | `3 passed`; focused regressions prove non-object JSON envelopes are skipped and the earlier valid envelope still renders. |
 | `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_shows_last_pager_wake_summary --tb=short` | `0` | `1 passed`; focused reproduction of the pre-push timeout test now completes under its 10s budget. |
-| `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_shows_last_pager_wake_summary mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_detects_live_codex_review_chain mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_skips_cwd_probe_for_unrelated_codex_candidates --tb=short` | `0` | `3 passed`; regression coverage keeps the autoping one-shot, live review-chain detection, and unrelated-process cwd-probe skip behavior together. |
+| `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_shows_last_pager_wake_summary mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_detects_live_codex_review_chain mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_rejects_repo_ancestor_when_candidate_cwd_differs mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_skips_cwd_probe_for_unrelated_codex_candidates --tb=short` | `0` | `4 passed`; bot-review remediation adds the negative repo-ancestor/cwd regression to the previous three-test timeline proof. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY' ... latest_agent_envelope_from_text(valid envelope followed by []) ... PY` | `0` | Direct dashboard proof returned `{'decision': 'GO', 'summary': 'ok', 'findings': []}`. |
 | `tmpdir=$(mktemp -d); ... RCX_PANE_ONESHOT=1 TERM=xterm bash mu/tools/observability/_pane_findings.sh ...` | `0` | Direct findings-pane proof rendered `Decision: GO`, `0B`, `0NB`, and summary `ok` from a valid envelope followed by `[]`. |
 | `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' ! -name README.md -print | sort` | `0` | Active deferred lane contains only `founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md`, `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`, `redteam_2026-03-14_repo_non_blockers.md`, and `repo_truth_non_blockers_2026-03-14.md`. |
@@ -187,10 +191,10 @@ packets; no generated non-`/mu` bridge packet remains active.
 - Refresh wave: `deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08`
 - Active packet: `reports/control_plane/deferred_non_mu_generated_bridge_closure_observabi_2026-05-08.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `d8e6a37f7ccd8663b9e3229fe4e9ffecbf66bc8cec3b5b23b2ea1ff6a625c101`
+- Tracker note sha256: `ea16575b3030d25d4a959dbc36c1d90c7248b29806618ae527ffb65b942af324`
 - Indicator artifact: `reports/l4_wave_indicators/deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.json`
-- Evidence command: `bash -n mu/tools/observability/_pane_timeline.sh && PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_shows_last_pager_wake_summary mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_detects_live_codex_review_chain mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_skips_cwd_probe_for_unrelated_codex_candidates --tb=short && PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_recovery_gate.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/deferred_non_mu_generated_bridge_closure_observabi_2026-05-08.md and archived the three generated non-/mu bridge packets after code/doc truth checks. (2) Parser regressions now prove non-object dashboard/findings-pane envelopes are skipped. (3) Pre-push then failed at run_pre_push_script with `TimeoutExpired` at `mu/tests/tools/test_recovery_gate.py:8003` under the autoping pane one-shot test, while the prior `_pane_timeline.sh` implementation could cwd-probe unrelated Codex candidates before bridge-role ancestry discarded them; current `_pane_timeline.sh:252-280` is the repaired gate. The same-wave mechanical fix now proves unrelated candidates do not call `lsof` and keeps role-ancestor positives intact.
+- Evidence command: `bash -n mu/tools/observability/_pane_timeline.sh && PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_shows_last_pager_wake_summary mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_detects_live_codex_review_chain mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_rejects_repo_ancestor_when_candidate_cwd_differs mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_skips_cwd_probe_for_unrelated_codex_candidates --tb=short && PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_recovery_gate.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/deferred_non_mu_generated_bridge_closure_observabi_2026-05-08.md and archived the three generated non-/mu bridge packets after code/doc truth checks. (2) Parser regressions now prove non-object dashboard/findings-pane envelopes are skipped. (3) Pre-push then failed at run_pre_push_script with `TimeoutExpired` at `mu/tests/tools/test_recovery_gate.py:8003` under the autoping pane one-shot test, while the prior `_pane_timeline.sh` implementation could cwd-probe unrelated Codex candidates before bridge-role ancestry discarded them; current `_pane_timeline.sh:235-264` is the repaired gate. Bot-review remediation removed ancestor-command repo ownership inference, and the same-wave mechanical fix now proves unrelated candidates do not call `lsof`, cross-repo cwd candidates render idle, and role-ancestor positives stay intact.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.json`
 - Current staged files:

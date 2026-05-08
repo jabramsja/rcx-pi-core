@@ -1,24 +1,24 @@
 {
   "wave_id": "deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08",
-  "repeat_run_speedup_ratio": 1.024736,
+  "repeat_run_speedup_ratio": 0.988102,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.405116,
+  "step_growth_slope": 0.404592,
   "repeat_run_raw_seconds": [
-    0.415137,
-    0.405116
+    0.399778,
+    0.404592
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.415137
+      "elapsed_seconds": 0.399778
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.820253
+      "elapsed_seconds": 0.80437
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-08T05:33:39Z",
+  "collection_timestamp_utc": "2026-05-08T06:01:21Z",
   "collector_version": "2.2.0"
 }

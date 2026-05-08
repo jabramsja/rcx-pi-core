@@ -7809,6 +7809,104 @@ printf 'n{repo_root}\\n'
         assert "← Codex reviewing now" in clean_stdout
         assert "← idle" not in clean_stdout
 
+    def test_pane_timeline_rejects_repo_ancestor_when_candidate_cwd_differs(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_timeline.sh")
+        (repo_root / "mu" / "tools" / "observability" / "pipeline_agents_config.py").write_text(
+            """
+def configured_role_agents(_repo_root):
+    return {
+        "reviewer": {"display_name": "Codex 5.5 xhigh", "status_name": "Codex"},
+        "implementer": {"display_name": "Codex 5.5 xhigh", "status_name": "Codex"},
+    }
+""".strip()
+            + "\n",
+            encoding="utf-8",
+        )
+
+        proc_bin = tmp_path / "proc-bin"
+        proc_bin.mkdir()
+        self._write_executable(
+            proc_bin / "pgrep",
+            """#!/usr/bin/env bash
+set -eu
+pattern="${2:-}"
+case "$pattern" in
+  "codex.*exec|claude.*--print")
+    printf '2222\\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "ps",
+            f"""#!/usr/bin/env bash
+set -eu
+case "$*" in
+  "-p 2222 -o command=")
+    printf '%s\\n' 'node /Users/test/.npm-global/bin/codex exec - --json -m gpt-5.5'
+    ;;
+  "-p 2222 -o ppid=")
+    printf '1111\\n'
+    ;;
+  "-p 1111 -o command=")
+    printf '%s\\n' 'python {repo_root}/tools/agents/bridge_supervisor.py review --reviewer codex'
+    ;;
+  "-p 1111 -o ppid=")
+    printf '1000\\n'
+    ;;
+  "-p 1000 -o command=")
+    printf '%s\\n' 'python {repo_root}/mu/tools/executors/phase_b_executor.py --plan reports/control_plane/pager.md'
+    ;;
+  "-p 1000 -o ppid=")
+    printf '1\\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+        )
+        self._write_executable(
+            proc_bin / "lsof",
+            """#!/usr/bin/env bash
+set -eu
+printf 'n/tmp/other-repo\\n'
+""",
+        )
+
+        bin_dir = self._fake_git_dir(
+            tmp_path,
+            show_toplevel=str(repo_root),
+            branch="jabramsja/repo-wave",
+            worktree_output=f"worktree {repo_root}\\nHEAD 1111111111111111\\nbranch refs/heads/jabramsja/repo-wave\\n",
+        )
+        env = os.environ | {
+            "PATH": f"{proc_bin}:{bin_dir}:{os.environ['PATH']}",
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "Watching: jabramsja/repo-wave" in clean_stdout
+        assert "← idle" in clean_stdout
+        assert "← Codex reviewing now" not in clean_stdout
+
     def test_pane_timeline_skips_cwd_probe_for_unrelated_codex_candidates(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()

@@ -232,23 +232,6 @@ pid_has_ancestor_matching() {
   return 1
 }
 
-pid_has_repo_ancestor() {
-  local pid="$1" depth=0 parent="" cmd=""
-  [ -n "${REPO_ROOT:-}" ] || return 1
-  while [ "$depth" -lt 8 ]; do
-    parent="$(pid_ppid "$pid")"
-    [ -n "$parent" ] || return 1
-    [ "$parent" = "1" ] && return 1
-    cmd="$(pid_command "$parent")"
-    case "$cmd" in
-      *"$REPO_ROOT"*) return 0 ;;
-    esac
-    pid="$parent"
-    depth=$((depth + 1))
-  done
-  return 1
-}
-
 repo_has_bridge_role() {
   local wanted_role="$1" pid="" cmd="" cwd=""
   while IFS= read -r pid; do
@@ -265,7 +248,6 @@ repo_has_bridge_role() {
       case "$cmd" in
         *"$REPO_ROOT"*) return 0 ;;
       esac
-      pid_has_repo_ancestor "$pid" && return 0
       cwd="$(pid_cwd "$pid")"
       [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ] || continue
       return 0
@@ -274,7 +256,6 @@ repo_has_bridge_role() {
       case "$cmd" in
         *"$REPO_ROOT"*) return 0 ;;
       esac
-      pid_has_repo_ancestor "$pid" && return 0
       cwd="$(pid_cwd "$pid")"
       [ -n "$cwd" ] && [ "$cwd" = "$REPO_ROOT" ] || continue
       return 0
