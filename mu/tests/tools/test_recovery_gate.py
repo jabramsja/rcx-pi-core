@@ -7809,7 +7809,7 @@ printf 'n{repo_root}\\n'
         assert "← Codex reviewing now" in clean_stdout
         assert "← idle" not in clean_stdout
 
-    def test_pane_timeline_bounds_live_process_scan_candidates(self, tmp_path):
+    def test_pane_timeline_skips_cwd_probe_for_unrelated_codex_candidates(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
         self._minimal_bus(repo_root)
@@ -7906,8 +7906,7 @@ repo_has_bridge_role implement >/dev/null || true
         )
 
         assert result.returncode == 0
-        lsof_calls = lsof_log.read_text(encoding="utf-8").splitlines()
-        assert 1 <= len(lsof_calls) <= 6
+        assert not lsof_log.exists()
 
     def test_pane_timeline_shows_last_pager_wake_summary(self, tmp_path):
         repo_root = tmp_path / "repo"

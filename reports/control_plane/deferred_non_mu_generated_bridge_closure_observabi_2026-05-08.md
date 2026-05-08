@@ -1,7 +1,7 @@
 # Deferred Non Mu Generated Bridge Closure Observability Parser Fix
 
 Date: 2026-05-08
-Status: COMPLETED (commit-ready, supervisor COMMIT_GO)
+Status: COMMIT PATH REPAIR IN PROGRESS (same-wave pre-push timeout fix folded in)
 Task: [NEXT-CODEX-POST-REDTEAM]
 Wave ID: deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08
 Class: L4_ENABLER
@@ -98,8 +98,30 @@ patching or archiving:
   not crash the pane's meta-review fallback.
 
 No `/mu` structural runtime, Stage0, seed, registry, scheduler, parity, or
-production remediation was implemented. No Claude-owned file was edited. No
-manual pipeline repair was needed.
+production remediation was implemented. No Claude-owned file was edited.
+
+### Pre-Push Timeline Repair
+
+Commit executor reached local commit `a3f6b966` and then failed at the
+`run_pre_push_script` step. The pre-push failure evidence was the targeted
+timeout in
+`mu/tests/tools/test_recovery_gate.py:8003`, where the pane timeline one-shot
+test executes `mu/tools/observability/_pane_timeline.sh` with `timeout=10`.
+The source-side risk was bounded to the timeline bridge-role detector. The
+prior implementation could cwd-probe unrelated Codex candidates before
+bridge-role ancestry discarded them; the repaired detector now lives at
+`_pane_timeline.sh:252-280` and moves cwd probing behind role-ancestry proof.
+
+Same-wave mechanical repair:
+
+- `_pane_timeline.sh:235-250` adds a bounded `pid_has_repo_ancestor()` helper so
+  repo-root ancestry can be proven from parent command lines before cwd probing.
+- `_pane_timeline.sh:264-280` now proves bridge-role ancestry before any
+  repository check and only falls back to `pid_cwd` for role-matching bridge
+  processes not already bound by command or ancestor.
+- `mu/tests/tools/test_recovery_gate.py:7812-7909` now verifies unrelated Codex
+  candidates do not call the fake `lsof` probe, while the live review-chain and
+  autoping one-shot timeline tests preserve the positive behavior.
 
 ### Archive And Inventory Actions
 
@@ -125,7 +147,10 @@ packets; no generated non-`/mu` bridge packet remains active.
 | `python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08` | `0` | Wave-bound check finds the exact tracker sync note and passes the same staged scope. |
 | `python3 -m py_compile mu/tools/observability/pipeline_dashboard_web.py` | `0` | Dashboard parser module compiles. |
 | `bash -n mu/tools/observability/_pane_findings.sh` | `0` | Findings-pane shell script parses. |
+| `bash -n mu/tools/observability/_pane_timeline.sh` | `0` | Timeline-pane shell script parses after the pre-push timeout repair. |
 | `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pipeline_dashboard_web_skips_json_non_object_agent_envelope mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_findings_skips_json_non_object_agent_envelope mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_findings_skips_json_non_object_meta_envelope` | `0` | `3 passed`; focused regressions prove non-object JSON envelopes are skipped and the earlier valid envelope still renders. |
+| `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_shows_last_pager_wake_summary --tb=short` | `0` | `1 passed`; focused reproduction of the pre-push timeout test now completes under its 10s budget. |
+| `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_shows_last_pager_wake_summary mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_detects_live_codex_review_chain mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_skips_cwd_probe_for_unrelated_codex_candidates --tb=short` | `0` | `3 passed`; regression coverage keeps the autoping one-shot, live review-chain detection, and unrelated-process cwd-probe skip behavior together. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY' ... latest_agent_envelope_from_text(valid envelope followed by []) ... PY` | `0` | Direct dashboard proof returned `{'decision': 'GO', 'summary': 'ok', 'findings': []}`. |
 | `tmpdir=$(mktemp -d); ... RCX_PANE_ONESHOT=1 TERM=xterm bash mu/tools/observability/_pane_findings.sh ...` | `0` | Direct findings-pane proof rendered `Decision: GO`, `0B`, `0NB`, and summary `ok` from a valid envelope followed by `[]`. |
 | `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' ! -name README.md -print | sort` | `0` | Active deferred lane contains only `founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md`, `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`, `redteam_2026-03-14_repo_non_blockers.md`, and `repo_truth_non_blockers_2026-03-14.md`. |
@@ -145,6 +170,7 @@ packets; no generated non-`/mu` bridge packet remains active.
   - `TASKS.md`
   - `mu/tests/tools/test_recovery_gate.py`
   - `mu/tools/observability/_pane_findings.sh`
+  - `mu/tools/observability/_pane_timeline.sh`
   - `mu/tools/observability/pipeline_dashboard_web.py`
   - `reports/archive/deferred/deferred-non-mu-deferred-lane-truth-sweep-2026-05-07_bridge_nonblockers_closed-by-deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.md`
   - `reports/archive/deferred/deferred-non-mu-docs-control-plane-remediation-2026-05-07_bridge_nonblockers_closed-by-deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.md`
@@ -161,22 +187,16 @@ packets; no generated non-`/mu` bridge packet remains active.
 - Refresh wave: `deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08`
 - Active packet: `reports/control_plane/deferred_non_mu_generated_bridge_closure_observabi_2026-05-08.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `1e0c10e6f36bc0ced0fe82d437d12cd8dac338a8691e8f64314bb79496fe6f3c`
+- Tracker note sha256: `d8e6a37f7ccd8663b9e3229fe4e9ffecbf66bc8cec3b5b23b2ea1ff6a625c101`
 - Indicator artifact: `reports/l4_wave_indicators/deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_recovery_gate.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/deferred_non_mu_generated_bridge_closure_observabi_2026-05-08.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence command: `bash -n mu/tools/observability/_pane_timeline.sh && PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_shows_last_pager_wake_summary mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_detects_live_codex_review_chain mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_skips_cwd_probe_for_unrelated_codex_candidates --tb=short && PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_recovery_gate.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/deferred_non_mu_generated_bridge_closure_observabi_2026-05-08.md and archived the three generated non-/mu bridge packets after code/doc truth checks. (2) Parser regressions now prove non-object dashboard/findings-pane envelopes are skipped. (3) Pre-push then failed at run_pre_push_script with `TimeoutExpired` at `mu/tests/tools/test_recovery_gate.py:8003` under the autoping pane one-shot test, while the prior `_pane_timeline.sh` implementation could cwd-probe unrelated Codex candidates before bridge-role ancestry discarded them; current `_pane_timeline.sh:252-280` is the repaired gate. The same-wave mechanical fix now proves unrelated candidates do not call `lsof` and keeps role-ancestor positives intact.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.json`
 - Current staged files:
   - `TASKS.md`
   - `mu/tests/tools/test_recovery_gate.py`
-  - `mu/tools/observability/_pane_findings.sh`
-  - `mu/tools/observability/pipeline_dashboard_web.py`
-  - `reports/archive/deferred/deferred-non-mu-deferred-lane-truth-sweep-2026-05-07_bridge_nonblockers_closed-by-deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.md`
-  - `reports/archive/deferred/deferred-non-mu-docs-control-plane-remediation-2026-05-07_bridge_nonblockers_closed-by-deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.md`
-  - `reports/archive/deferred/deferred-non-mu-tooling-control-plane-remediation-2026-05-07_bridge_nonblockers_closed-by-deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.md`
+  - `mu/tools/observability/_pane_timeline.sh`
   - `reports/control_plane/deferred_non_mu_generated_bridge_closure_observabi_2026-05-08.md`
-  - `reports/deferred/README.md`
-  - `reports/deferred/non_blocking/README.md`
   - `reports/l4_wave_indicators/deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
