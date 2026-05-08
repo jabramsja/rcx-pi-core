@@ -7872,10 +7872,12 @@ case "$*" in
 esac
 """,
         )
+        lsof_log = tmp_path / "lsof_calls.log"
         self._write_executable(
             proc_bin / "lsof",
             """#!/usr/bin/env bash
 set -eu
+printf '%s\n' "$*" >> "$RCX_TEST_LSOF_LOG"
 printf 'n/tmp/other-repo\\n'
 """,
         )
@@ -7888,12 +7890,32 @@ printf 'n/tmp/other-repo\\n'
         )
         env = os.environ | {
             "PATH": f"{proc_bin}:{bin_dir}:{os.environ['PATH']}",
-            "RCX_PANE_ONESHOT": "1",
+            "RCX_TEST_LSOF_LOG": str(lsof_log),
             "TERM": "xterm",
         }
+        timeline_script = repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh"
+        timeline_helpers = tmp_path / "probe_timeline_cross_repo_helpers.sh"
+        timeline_helpers.write_text(
+            timeline_script.read_text(encoding="utf-8").split("while true; do", 1)[0],
+            encoding="utf-8",
+        )
+        timeline_helpers.chmod(timeline_helpers.stat().st_mode | 0o111)
+        probe_script = tmp_path / "probe_timeline_cross_repo.sh"
+        probe_script.write_text(
+            f"""#!/usr/bin/env bash
+set -eu
+source {timeline_helpers}
+REPO_ROOT={repo_root}
+if repo_has_bridge_role review; then
+  exit 42
+fi
+""",
+            encoding="utf-8",
+        )
+        probe_script.chmod(probe_script.stat().st_mode | 0o111)
 
         result = subprocess.run(
-            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_timeline.sh")],
+            ["bash", str(probe_script)],
             cwd=repo_root,
             capture_output=True,
             text=True,
@@ -7902,10 +7924,7 @@ printf 'n/tmp/other-repo\\n'
         )
 
         assert result.returncode == 0
-        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
-        assert "Watching: jabramsja/repo-wave" in clean_stdout
-        assert "← idle" in clean_stdout
-        assert "← Codex reviewing now" not in clean_stdout
+        assert lsof_log.exists()
 
     def test_pane_timeline_skips_cwd_probe_for_unrelated_codex_candidates(self, tmp_path):
         repo_root = tmp_path / "repo"

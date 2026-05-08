@@ -121,11 +121,11 @@ Same-wave mechanical repair:
   because a parent command can mention this repo while the candidate process cwd
   belongs to another repo. The shortcut was removed; ancestor command paths are
   not positive repo-ownership proof.
-- `mu/tests/tools/test_recovery_gate.py:7812-7908` now verifies an ancestor
-  command mentioning this repo plus a candidate cwd outside the repo renders
-  idle, and `:7910-8007` verifies unrelated Codex candidates do not call the
-  fake `lsof` probe. The live review-chain and autoping one-shot timeline tests
-  preserve positive behavior.
+- `mu/tests/tools/test_recovery_gate.py:7812-7922` now verifies an ancestor
+  command mentioning this repo plus a candidate cwd outside the repo is rejected
+  by `repo_has_bridge_role`, and `:7924-8021` verifies unrelated Codex
+  candidates do not call the fake `lsof` probe. The live review-chain and
+  autoping one-shot timeline tests preserve positive behavior.
 
 ### Archive And Inventory Actions
 
@@ -191,16 +191,15 @@ packets; no generated non-`/mu` bridge packet remains active.
 - Refresh wave: `deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08`
 - Active packet: `reports/control_plane/deferred_non_mu_generated_bridge_closure_observabi_2026-05-08.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `ea16575b3030d25d4a959dbc36c1d90c7248b29806618ae527ffb65b942af324`
+- Tracker note sha256: `00259bfd5793d47d87aab9b089bcc277f8c6a297749799ee6843ed022a497dc9`
 - Indicator artifact: `reports/l4_wave_indicators/deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.json`
 - Evidence command: `bash -n mu/tools/observability/_pane_timeline.sh && PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_shows_last_pager_wake_summary mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_detects_live_codex_review_chain mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_rejects_repo_ancestor_when_candidate_cwd_differs mu/tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_timeline_skips_cwd_probe_for_unrelated_codex_candidates --tb=short && PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_recovery_gate.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/deferred_non_mu_generated_bridge_closure_observabi_2026-05-08.md and archived the three generated non-/mu bridge packets after code/doc truth checks. (2) Parser regressions now prove non-object dashboard/findings-pane envelopes are skipped. (3) Pre-push then failed at run_pre_push_script with `TimeoutExpired` at `mu/tests/tools/test_recovery_gate.py:8003` under the autoping pane one-shot test, while the prior `_pane_timeline.sh` implementation could cwd-probe unrelated Codex candidates before bridge-role ancestry discarded them; current `_pane_timeline.sh:235-264` is the repaired gate. Bot-review remediation removed ancestor-command repo ownership inference, and the same-wave mechanical fix now proves unrelated candidates do not call `lsof`, cross-repo cwd candidates render idle, and role-ancestor positives stay intact.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/deferred_non_mu_generated_bridge_closure_observabi_2026-05-08.md and archived the three generated non-/mu bridge packets after code/doc truth checks. (2) Parser regressions now prove non-object dashboard/findings-pane envelopes are skipped. (3) Pre-push then failed at run_pre_push_script with `TimeoutExpired` at `mu/tests/tools/test_recovery_gate.py:8003` under the autoping pane one-shot test, while the prior `_pane_timeline.sh` implementation could cwd-probe unrelated Codex candidates before bridge-role ancestry discarded them; current `_pane_timeline.sh:235-264` is the repaired gate. Bot-review remediation removed ancestor-command repo ownership inference, and the same-wave mechanical fix now proves unrelated candidates do not call `lsof`, cross-repo cwd candidates are rejected, and role-ancestor positives stay intact.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.json`
 - Current staged files:
   - `TASKS.md`
   - `mu/tests/tools/test_recovery_gate.py`
-  - `mu/tools/observability/_pane_timeline.sh`
   - `reports/control_plane/deferred_non_mu_generated_bridge_closure_observabi_2026-05-08.md`
   - `reports/l4_wave_indicators/deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
