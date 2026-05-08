@@ -35,6 +35,7 @@ from enforce_l4_execution_contract import (
     VALID_WORKLOAD_TARGETS,
     VALID_WAVE_CLASSES,
     WORKLOAD_TARGET_EVIDENCE,
+    bind_note_from_changed_indicator_artifacts,
     _check_proof_binding,
     bind_note_from_touched_wave_ids,
     check_consecutive_maintenance,
@@ -1190,6 +1191,216 @@ class TestWaveBinding:
 
         assert bound is not None
         assert bound["wave_id"] == "current-wave"
+
+    def test_bind_note_from_changed_indicator_artifacts_matches_exact_ref(self) -> None:
+        notes = [
+            {
+                "wave_id": "unrelated-wave",
+                "wave_class": "L4_ENABLER",
+                "indicator_artifact_ref": "reports/l4_wave_indicators/unrelated-wave.json",
+            },
+            {
+                "wave_id": "current-wave",
+                "wave_class": "L4_ENABLER",
+                "indicator_artifact_ref": "reports/l4_wave_indicators/current-wave.json",
+            },
+        ]
+
+        bound = bind_note_from_changed_indicator_artifacts(
+            notes,
+            [
+                "mu/tools/executors/executor_dispatch.py",
+                "reports/l4_wave_indicators/current-wave.json",
+            ],
+        )
+
+        assert bound is not None
+        assert bound["wave_id"] == "current-wave"
+
+    def test_bind_note_from_changed_indicator_artifacts_rejects_ambiguity(self) -> None:
+        notes = [
+            {
+                "wave_id": "first-wave",
+                "wave_class": "L4_ENABLER",
+                "indicator_artifact_ref": "reports/l4_wave_indicators/first-wave.json",
+            },
+            {
+                "wave_id": "second-wave",
+                "wave_class": "L4_ENABLER",
+                "indicator_artifact_ref": "reports/l4_wave_indicators/second-wave.json",
+            },
+        ]
+
+        bound = bind_note_from_changed_indicator_artifacts(
+            notes,
+            [
+                "mu/tools/executors/executor_dispatch.py",
+                "reports/l4_wave_indicators/first-wave.json",
+                "reports/l4_wave_indicators/second-wave.json",
+            ],
+        )
+
+        assert bound is None
+
+
+def _write_fake_l4_ratchet(repo: Path) -> None:
+    checker = repo / "tools" / "checks" / "check_host_semantics_ratchet.py"
+    checker.write_text(
+        "import json\n"
+        "data = {\n"
+        "    'baseline_counts': {\n"
+        "        'python': {'host_builtin': 0, 'host_iteration': 0, 'host_mutation': 0, 'host_recursion': 0},\n"
+        "        'javascript': {'host_builtin': 0, 'host_iteration': 0, 'host_mutation': 0, 'host_recursion': 0},\n"
+        "    },\n"
+        "    'current': {\n"
+        "        'python': {'host_builtin': 0, 'host_iteration': 0, 'host_mutation': 0, 'host_recursion': 0},\n"
+        "        'javascript': {'host_builtin': 0, 'host_iteration': 0, 'host_mutation': 0, 'host_recursion': 0},\n"
+        "    },\n"
+        "}\n"
+        "print(json.dumps(data))\n",
+        encoding="utf-8",
+    )
+
+
+def _write_l4_indicator(repo: Path, wave_id: str) -> None:
+    indicator = repo / "reports" / "l4_wave_indicators" / f"{wave_id}.json"
+    indicator.parent.mkdir(parents=True, exist_ok=True)
+    indicator.write_text(
+        "{\n"
+        f'  "wave_id": "{wave_id}",\n'
+        '  "repeat_run_speedup_ratio": 1.0,\n'
+        '  "parity_diff_count": 0,\n'
+        '  "net_host_semantic_delta": 0,\n'
+        '  "step_growth_slope": 1.0,\n'
+        '  "repeat_run_raw_seconds": [1.0, 1.0],\n'
+        '  "step_growth_points": [\n'
+        '    {"step": 1, "elapsed_seconds": 1.0},\n'
+        '    {"step": 2, "elapsed_seconds": 2.0}\n'
+        "  ],\n"
+        '  "parity_diff_source": "tools/checks/check_js_debt.sh",\n'
+        '  "collection_timestamp_utc": "2026-05-07T00:00:00Z",\n'
+        '  "collector_version": "test"\n'
+        "}\n",
+        encoding="utf-8",
+    )
+
+
+def _init_staged_l4_checker_repo(tmp_path: Path, wave_id: str) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "tools" / "checks").mkdir(parents=True)
+    (repo / "tools" / "checks" / "enforce_l4_execution_contract.py").write_text(
+        (REPO_ROOT / "tools" / "checks" / "enforce_l4_execution_contract.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    _write_fake_l4_ratchet(repo)
+
+    (repo / "mu" / "tools" / "executors").mkdir(parents=True)
+    (repo / "mu" / "tools" / "executors" / "example.py").write_text(
+        "# baseline\n",
+        encoding="utf-8",
+    )
+    (repo / "TASKS.md").write_text(
+        "## Ra\n\n"
+        f"- Tracker sync note (2026-05-07, {wave_id}): **CURRENT.** "
+        "Class: L4_ENABLER. Category: tooling/control-plane. target_gate_id: G8. "
+        "evidence_command: python3 tools/checks/enforce_l4_execution_contract.py --staged. "
+        "evidence_delta: changed control-plane staged binding. "
+        "progress_proof_before: canonical staged checker reported no wave class for changed control-plane files. "
+        "progress_proof_after: canonical staged checker binds the same-wave indicator artifact to this tracker note. "
+        f"FOUNDER_OVERRIDE:{wave_id}. "
+        "primary_blocker_class: INTEGRATION. "
+        "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+        f"indicator_artifact_ref: reports/l4_wave_indicators/{wave_id}.json. "
+        f"indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} "
+        f"--output reports/l4_wave_indicators/{wave_id}.json. "
+        "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+        "boot0_track_id: V1. boot0_progress_state: HOLD.\n",
+        encoding="utf-8",
+    )
+
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True, text=True)
+    return repo
+
+
+class TestStagedIndicatorBinding:
+    """Canonical --staged binding must not require TASKS.md to be staged."""
+
+    def test_staged_control_plane_with_changed_indicator_binds_tracker_note(self, tmp_path: Path) -> None:
+        wave_id = "current-control-plane-wave"
+        repo = _init_staged_l4_checker_repo(tmp_path, wave_id)
+        (repo / "mu" / "tools" / "executors" / "example.py").write_text(
+            "# changed\n",
+            encoding="utf-8",
+        )
+        _write_l4_indicator(repo, wave_id)
+        subprocess.run(
+            [
+                "git",
+                "add",
+                "--",
+                "mu/tools/executors/example.py",
+                f"reports/l4_wave_indicators/{wave_id}.json",
+            ],
+            cwd=repo,
+            check=True,
+        )
+
+        result = subprocess.run(
+            [sys.executable, "tools/checks/enforce_l4_execution_contract.py", "--staged"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Wave class: L4_ENABLER" in result.stdout
+        assert "L4 Execution Contract v2: L4_ENABLER compliant" in result.stdout
+
+    def test_staged_control_plane_without_changed_indicator_stays_no_class(self, tmp_path: Path) -> None:
+        wave_id = "current-control-plane-wave"
+        repo = _init_staged_l4_checker_repo(tmp_path, wave_id)
+        (repo / "mu" / "tools" / "executors" / "example.py").write_text(
+            "# changed\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "--", "mu/tools/executors/example.py"], cwd=repo, check=True)
+
+        result = subprocess.run(
+            [sys.executable, "tools/checks/enforce_l4_execution_contract.py", "--staged"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 1
+        assert "Wave class: (none)" in result.stdout
+        assert "no wave class marker found" in result.stdout
+
+    def test_files_mode_with_indicator_artifact_does_not_bind_tracker_note(self, tmp_path: Path) -> None:
+        wave_id = "historical-control-plane-wave"
+        repo = _init_staged_l4_checker_repo(tmp_path, wave_id)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "tools/checks/enforce_l4_execution_contract.py",
+                "--files",
+                "mu/tools/executors/example.py",
+                f"reports/l4_wave_indicators/{wave_id}.json",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 1
+        assert "Wave class: (none)" in result.stdout
+        assert "no wave class marker found" in result.stdout
 
 
 # =============================================================================

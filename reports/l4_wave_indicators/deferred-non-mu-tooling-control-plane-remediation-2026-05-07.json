@@ -1,24 +1,24 @@
 {
   "wave_id": "deferred-non-mu-tooling-control-plane-remediation-2026-05-07",
-  "repeat_run_speedup_ratio": 1.006256,
+  "repeat_run_speedup_ratio": 0.982141,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.465619,
+  "step_growth_slope": 0.454797,
   "repeat_run_raw_seconds": [
-    0.468532,
-    0.465619
+    0.446675,
+    0.454797
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.468532
+      "elapsed_seconds": 0.446675
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.934151
+      "elapsed_seconds": 0.901472
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-07T18:40:54Z",
+  "collection_timestamp_utc": "2026-05-08T01:49:51Z",
   "collector_version": "2.2.0"
 }

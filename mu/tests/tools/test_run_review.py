@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import importlib
 import inspect
 import json
@@ -922,3 +923,31 @@ class TestLearningStoreWarming:
         """Verify load_relevant_learnings is importable in run_review."""
         assert hasattr(rr_mod, 'load_relevant_learnings')
         assert callable(rr_mod.load_relevant_learnings)
+
+    def test_learning_store_import_failure_keeps_agent_memory_available(self):
+        """Learning-store fallback must not disable agent-memory helpers."""
+        module_path = _MU_ROOT / "tools" / "runners" / "run_review.py"
+        spec = importlib.util.spec_from_file_location(
+            "tools.runners.run_review_learning_fallback_test",
+            module_path,
+        )
+        mod = importlib.util.module_from_spec(spec)
+        real_import = builtins.__import__
+        saved_recovery = sys.modules.pop("tools.executors.recovery_gate", None)
+
+        def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "tools.executors.recovery_gate":
+                raise ImportError("blocked learning-store import")
+            return real_import(name, globals, locals, fromlist, level)
+
+        builtins.__import__ = blocked_import
+        try:
+            spec.loader.exec_module(mod)
+        finally:
+            builtins.__import__ = real_import
+            if saved_recovery is not None:
+                sys.modules["tools.executors.recovery_gate"] = saved_recovery
+
+        assert mod.AGENT_MEMORY_AVAILABLE is True
+        assert mod.LEARNING_STORE_AVAILABLE is False
+        assert callable(mod.get_context_for_files)

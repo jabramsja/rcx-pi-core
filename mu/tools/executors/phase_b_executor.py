@@ -5975,6 +5975,13 @@ def run_phase_b(
                 # Couldn't parse structured findings — send raw text
                 findings_for_impl = findings_text[:4000]
 
+            if round_num >= max_bridge_rounds:
+                log(
+                    f"Bridge: {bridge_decision} on final allowed round "
+                    f"{round_num}/{max_bridge_rounds}; not re-invoking implementer"
+                )
+                break
+
             _checkpoint_bridge_fix_pending(
                 repo_root,
                 plan_path=plan_path,
@@ -6884,6 +6891,13 @@ def run_phase_b(
                     )
                 else:
                     findings_for_impl = findings_text[:4000]
+
+                if reentry_round >= max_bridge_rounds:
+                    log(
+                        f"Reentry bridge: {bridge_decision} on final allowed round "
+                        f"{reentry_round}/{max_bridge_rounds}; not re-invoking implementer"
+                    )
+                    break
 
                 log(f"Reentry bridge: {bridge_decision} — {len(blocking_findings)} blocking, "
                     f"{len(non_blocking_findings)} non-blocking — will re-invoke implementer")

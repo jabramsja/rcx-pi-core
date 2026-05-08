@@ -53,8 +53,212 @@ ONESHOT="${RCX_PANE_ONESHOT:-0}"
 
 notify() {
   local title="$1" msg="$2" round="$3"
-  osascript -e "display notification \"$msg\" with title \"$title\" sound name \"Glass\"" 2>/dev/null &
+  if command -v osascript >/dev/null 2>&1; then
+    osascript - "$title" "$msg" >/dev/null 2>&1 <<'APPLESCRIPT' &
+on run argv
+  display notification (item 2 of argv) with title (item 1 of argv) sound name "Glass"
+end run
+APPLESCRIPT
+  fi
   echo "$round" > "$NOTIFY_MARKER"
+}
+
+parse_agent_envelope_file() {
+  python3 - "$1" "${2:-}" <<'PY'
+import json
+import re
+import sys
+
+review_source = sys.argv[1]
+reviewer_file = sys.argv[2] if len(sys.argv) > 2 else ""
+
+def _read(path):
+    try:
+        with open(path, errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+def _latest_json_envelope(content):
+    matches = list(re.finditer(r"BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE", content, re.DOTALL))
+    for match in reversed(matches):
+        try:
+            candidate = json.loads(match.group(1))
+        except (json.JSONDecodeError, KeyError, TypeError):
+            continue
+        dec = candidate.get("decision", "")
+        if dec and "|" not in dec:
+            return candidate
+    return None
+
+def _markdown_envelope(content):
+    sections = list(re.finditer(r"(?ms)^### .*? — reviewer\n(.*?)(?=^### |\Z)", content))
+    decision_re = re.compile(r"(?m)^\s*-\s*Decision:\s*(GO|REQUEST_CHANGES|NO_GO|QUESTION|STALE|ERROR|SYNTHETIC)\b")
+    summary_re = re.compile(r"(?m)^\s*-\s*Summary:\s*(.*)")
+    finding_re = re.compile(r"(?m)^\s*\d+\.\s+\*\*(DEFECT|POLICY_BOUND|DOC_ACCURACY)\*\* \(([^)]+)\):\s*(.*)$")
+    for section in reversed(sections):
+        block = section.group(1)
+        decision_match = decision_re.search(block)
+        if not decision_match:
+            continue
+        dec = decision_match.group(1)
+        if dec == "SYNTHETIC":
+            continue
+        summary_match = summary_re.search(block)
+
+        def _md_disposition(cls, sev, dec):
+            severity = sev.strip().lower()
+            if severity in ("critical", "high"):
+                return "blocking"
+            if cls in ("DOC_ACCURACY", "POLICY_BOUND") and severity in ("medium", "low"):
+                return "non_blocking"
+            return "non_blocking" if dec == "GO" else "blocking"
+
+        return {
+            "decision": dec,
+            "summary": summary_match.group(1).strip() if summary_match else "",
+            "findings": [
+                {
+                    "class": cls,
+                    "severity": sev.strip().lower(),
+                    "title": title.strip(),
+                    "disposition": _md_disposition(cls, sev, dec),
+                }
+                for cls, sev, title in finding_re.findall(block)
+            ],
+        }
+    return None
+
+content = _read(review_source)
+env = _latest_json_envelope(content)
+if env is None and reviewer_file and reviewer_file != review_source:
+    env = _latest_json_envelope(_read(reviewer_file))
+if env is None:
+    env = _markdown_envelope(content)
+if env is None:
+    sys.exit(0)
+
+findings = env.get("findings", []) or []
+blocking = [finding for finding in findings if finding.get("disposition") == "blocking"]
+non_blocking = [finding for finding in findings if finding.get("disposition") != "blocking"]
+print(f"DECISION={env.get('decision', '?')}")
+print(f"SUMMARY={(env.get('summary', '') or '')[:120]}")
+print(f"BLOCKING={len(blocking)}")
+print(f"NONBLOCKING={len(non_blocking)}")
+for finding in blocking:
+    sev = finding.get("severity", "?")
+    title = (finding.get("title") or finding.get("description") or "?")[:100]
+    print(f"BLK|{sev}|{title}")
+for finding in non_blocking:
+    sev = finding.get("severity", "?")
+    title = (finding.get("title") or finding.get("description") or "?")[:100]
+    print(f"NB|{sev}|{title}")
+PY
+}
+
+parse_meta_envelope_file() {
+  python3 - "$1" <<'PY'
+import json
+import re
+import sys
+
+try:
+    content = open(sys.argv[1], errors="replace").read()
+except OSError:
+    sys.exit(0)
+
+matches = list(re.finditer(r"BEGIN_META_ENVELOPE\s*\n(.*?)\nEND_META_ENVELOPE", content, re.DOTALL))
+env = None
+for match in reversed(matches):
+    try:
+        candidate = json.loads(match.group(1))
+    except (json.JSONDecodeError, KeyError, TypeError):
+        continue
+    dec = candidate.get("decision", "")
+    if dec and "|" not in dec:
+        env = candidate
+        break
+if env is None:
+    sys.exit(0)
+
+print(f"DECISION={env.get('decision', '?')}")
+print(f"SUMMARY={(env.get('summary', '') or '')[:120]}")
+findings = env.get("findings", []) or []
+if findings:
+    print(f"FINDING={((findings[0].get('title', '') or '')[:120])}")
+request = (env.get("request_for_claude", "") or "")[:120]
+if request:
+    print(f"NEXT={request}")
+PY
+}
+
+latest_commit_state() {
+  python3 - "$1" <<'PY'
+import sys
+
+lines = []
+try:
+    with open(sys.argv[1], errors="replace") as fh:
+        for raw in fh:
+            raw = raw.strip()
+            if not raw.startswith("[commit-executor]"):
+                continue
+            if "Waiting for chatgpt-codex-connector review signal" in raw:
+                continue
+            lines.append(raw.replace("[commit-executor] ", "", 1))
+except OSError:
+    pass
+if lines:
+    print(lines[-1][:160])
+PY
+}
+
+agent_status_label() {
+  python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+try:
+    data = json.load(open(sys.argv[1]))
+except (OSError, json.JSONDecodeError):
+    print("?")
+    sys.exit(0)
+
+status = data.get("status", "?")
+alive = bool(sys.argv[2])
+if status == "running" and not alive:
+    print("completed")
+elif status == "completed":
+    print("completed")
+elif status == "running":
+    print("running")
+else:
+    print(status)
+PY
+}
+
+render_agent_status_details() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+
+try:
+    data = json.load(open(sys.argv[1]))
+except (OSError, json.JSONDecodeError):
+    sys.exit(0)
+
+status = data.get("status", "?")
+completed = data.get("completed_agents", {})
+running = data.get("running_agents", [])
+if running:
+    print("  Running: " + ", ".join(running))
+for name, info in completed.items():
+    mark = "\033[32m\u2713\033[0m" if info.get("passed") else "\033[31m\u2717\033[0m"
+    verdict = info.get("verdict", "?")
+    print(f"  {mark} {name}: {verdict}")
+if not completed and not running:
+    print(f"  Status: {status}")
+PY
 }
 
 decision_meaning() {
@@ -238,161 +442,12 @@ while true; do
       REVIEW_SOURCE="$RENDERED_FILE"
     fi
 
-    ENVELOPE=$(python3 -c "
-import json, re, sys
-content = open('$REVIEW_SOURCE', errors='replace').read()
-matches = list(re.finditer(r'BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE', content, re.DOTALL))
-env = None
-for m in reversed(matches):
-    try:
-        candidate = json.loads(m.group(1))
-        dec = candidate.get('decision', '')
-        if '|' not in dec and dec:  # Skip 'GO|NO_GO|...' schema examples
-            env = candidate
-            break
-    except (json.JSONDecodeError, KeyError):
-        continue
-if env is None and '$REVIEW_SOURCE' != '$REVIEWER_FILE':
-    # No JSON envelope in rendered file — try raw reviewer file before markdown fallback
-    raw_content = open('$REVIEWER_FILE', errors='replace').read()
-    for m in reversed(list(re.finditer(r'BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE', raw_content, re.DOTALL))):
-        try:
-            candidate = json.loads(m.group(1))
-            dec = candidate.get('decision', '')
-            if '|' not in dec and dec:
-                env = candidate
-                break
-        except (json.JSONDecodeError, KeyError):
-            continue
-if env is None:
-    # Last resort: parse rendered markdown (loses disposition precision)
-    sections = list(re.finditer(r'(?ms)^### .*? — reviewer\n(.*?)(?=^### |\Z)', content))
-    decision_re = re.compile(r'(?m)^\s*-\s*Decision:\s*(GO|REQUEST_CHANGES|NO_GO|QUESTION|STALE|ERROR|SYNTHETIC)\b')
-    summary_re = re.compile(r'(?m)^\s*-\s*Summary:\s*(.*)')
-    finding_re = re.compile(r'(?m)^\s*\d+\.\s+\*\*(DEFECT|POLICY_BOUND|DOC_ACCURACY)\*\* \(([^)]+)\):\s*(.*)$')
-    for section in reversed(sections):
-        block = section.group(1)
-        decision_match = decision_re.search(block)
-        if not decision_match:
-            continue
-        dec = decision_match.group(1)
-        if dec == 'SYNTHETIC':
-            continue
-        summary_match = summary_re.search(block)
-        def _md_disposition(cls, sev, dec):
-            s = sev.strip().lower()
-            if s in ('critical', 'high'):
-                return 'blocking'
-            if cls in ('DOC_ACCURACY', 'POLICY_BOUND') and s in ('medium', 'low'):
-                return 'non_blocking'
-            return 'non_blocking' if dec == 'GO' else 'blocking'
-        env = {
-            'decision': dec,
-            'summary': summary_match.group(1).strip() if summary_match else '',
-            'findings': [
-                {
-                    'class': cls,
-                    'severity': sev.strip().lower(),
-                    'title': title.strip(),
-                    'disposition': _md_disposition(cls, sev, dec),
-                }
-                for cls, sev, title in finding_re.findall(block)
-            ],
-        }
-        break
-if env is None:
-    sys.exit(0)
-dec = env.get('decision', '?')
-summary = env.get('summary', '')[:120]
-findings = env.get('findings', [])
-blk = [f for f in findings if f.get('disposition') == 'blocking']
-nb = [f for f in findings if f.get('disposition') != 'blocking']
-print(f'DECISION={dec}')
-print(f'SUMMARY={summary}')
-print(f'BLOCKING={len(blk)}')
-print(f'NONBLOCKING={len(nb)}')
-for f in blk:
-    sev = f.get('severity', '?')
-    title = (f.get('title') or f.get('description') or '?')[:100]
-    print(f'BLK|{sev}|{title}')
-for f in nb:
-    sev = f.get('severity', '?')
-    title = (f.get('title') or f.get('description') or '?')[:100]
-    print(f'NB|{sev}|{title}')
-" 2>/dev/null)
+    ENVELOPE=$(parse_agent_envelope_file "$REVIEW_SOURCE" "$REVIEWER_FILE" 2>/dev/null)
 
     if [ -z "$ENVELOPE" ] && [ "$REVIEW_SOURCE" != "$REVIEWER_FILE" ]; then
       # Rendered file had no envelope — retry with the raw reviewer file
       REVIEW_SOURCE="$REVIEWER_FILE"
-      ENVELOPE=$(python3 -c "
-import json, re, sys
-content = open('$REVIEW_SOURCE', errors='replace').read()
-matches = list(re.finditer(r'BEGIN_AGENT_ENVELOPE\s*\n(.*?)\nEND_AGENT_ENVELOPE', content, re.DOTALL))
-env = None
-for m in reversed(matches):
-    try:
-        candidate = json.loads(m.group(1))
-        dec = candidate.get('decision', '')
-        if '|' not in dec and dec:
-            env = candidate
-            break
-    except (json.JSONDecodeError, KeyError):
-        continue
-if env is None:
-    sections = list(re.finditer(r'(?ms)^### .*? — reviewer\n(.*?)(?=^### |\Z)', content))
-    decision_re = re.compile(r'(?m)^\s*-\s*Decision:\s*(GO|REQUEST_CHANGES|NO_GO|QUESTION|STALE|ERROR|SYNTHETIC)\b')
-    summary_re = re.compile(r'(?m)^\s*-\s*Summary:\s*(.*)')
-    finding_re = re.compile(r'(?m)^\s*\d+\.\s+\*\*(DEFECT|POLICY_BOUND|DOC_ACCURACY)\*\* \(([^)]+)\):\s*(.*)$')
-    for section in reversed(sections):
-        block = section.group(1)
-        decision_match = decision_re.search(block)
-        if not decision_match:
-            continue
-        dec = decision_match.group(1)
-        if dec == 'SYNTHETIC':
-            continue
-        summary_match = summary_re.search(block)
-        def _md_disposition(cls, sev, dec):
-            s = sev.strip().lower()
-            if s in ('critical', 'high'):
-                return 'blocking'
-            if cls in ('DOC_ACCURACY', 'POLICY_BOUND') and s in ('medium', 'low'):
-                return 'non_blocking'
-            return 'non_blocking' if dec == 'GO' else 'blocking'
-        env = {
-            'decision': dec,
-            'summary': summary_match.group(1).strip() if summary_match else '',
-            'findings': [
-                {
-                    'class': cls,
-                    'severity': sev.strip().lower(),
-                    'title': title.strip(),
-                    'disposition': _md_disposition(cls, sev, dec),
-                }
-                for cls, sev, title in finding_re.findall(block)
-            ],
-        }
-        break
-if env is None:
-    sys.exit(0)
-dec = env.get('decision', '?')
-summary = env.get('summary', '')[:120]
-findings = env.get('findings', [])
-blk = [f for f in findings if f.get('disposition') == 'blocking']
-nb = [f for f in findings if f.get('disposition') != 'blocking']
-print(f'DECISION={dec}')
-print(f'SUMMARY={summary}')
-print(f'BLOCKING={len(blk)}')
-print(f'NONBLOCKING={len(nb)}')
-for f in blk:
-    sev = f.get('severity', '?')
-    title = (f.get('title') or f.get('description') or '?')[:100]
-    print(f'BLK|{sev}|{title}')
-for f in nb:
-    sev = f.get('severity', '?')
-    title = (f.get('title') or f.get('description') or '?')[:100]
-    print(f'NB|{sev}|{title}')
-" 2>/dev/null)
+      ENVELOPE=$(parse_agent_envelope_file "$REVIEW_SOURCE" "$REVIEWER_FILE" 2>/dev/null)
     fi
 
     if [ -z "$ENVELOPE" ]; then
@@ -504,31 +559,7 @@ for f in nb:
         meta_age_str="$(( meta_age / 3600 ))h ago"
       fi
 
-      META_ENVELOPE=$(python3 -c "
-import json, re, sys
-content = open('$META_FILE', errors='replace').read()
-matches = list(re.finditer(r'BEGIN_META_ENVELOPE\s*\n(.*?)\nEND_META_ENVELOPE', content, re.DOTALL))
-env = None
-for m in reversed(matches):
-    try:
-        candidate = json.loads(m.group(1))
-        dec = candidate.get('decision', '')
-        if '|' not in dec and dec:
-            env = candidate
-            break
-    except (json.JSONDecodeError, KeyError):
-        continue
-if env is None:
-    sys.exit(0)
-print(f'DECISION={env.get(\"decision\", \"?\")}')
-print(f'SUMMARY={(env.get(\"summary\", \"\") or \"\")[:120]}')
-findings = env.get('findings', []) or []
-if findings:
-    print(f'FINDING={((findings[0].get(\"title\", \"\") or \"\")[:120])}')
-request = (env.get('request_for_claude', '') or '')[:120]
-if request:
-    print(f'NEXT={request}')
-" 2>/dev/null)
+      META_ENVELOPE=$(parse_meta_envelope_file "$META_FILE" 2>/dev/null)
 
       if [ -n "$META_ENVELOPE" ]; then
         META_DECISION=$(echo "$META_ENVELOPE" | grep "^DECISION=" | cut -d= -f2-)
@@ -573,21 +604,7 @@ if request:
 
     COMMIT_LOG="$REPO_ROOT/.scratch/commit_executor_live.log"
     if [ -f "$COMMIT_LOG" ]; then
-      COMMIT_STATE=$(python3 -c "
-import sys
-path = '$COMMIT_LOG'
-lines = []
-with open(path, errors='replace') as fh:
-    for raw in fh:
-        raw = raw.strip()
-        if not raw.startswith('[commit-executor]'):
-            continue
-        if 'Waiting for chatgpt-codex-connector review signal' in raw:
-            continue
-        lines.append(raw.replace('[commit-executor] ', '', 1))
-if lines:
-    print(lines[-1][:160])
-" 2>/dev/null)
+      COMMIT_STATE=$(latest_commit_state "$COMMIT_LOG" 2>/dev/null)
       if [ -n "$COMMIT_STATE" ]; then
         echo ""
         echo -e "  ${CYAN}Commit path${RESET}"
@@ -608,34 +625,10 @@ if lines:
       # Cross-check status file with live processes — if no run_review.py
       # is alive, the status file is stale even if it says "running"
       agent_process_alive=$(pgrep -f "run_review.py" 2>/dev/null | head -1)
-      agent_status_label=$(python3 -c "
-import json
-d = json.load(open('$AGENT_STATUS'))
-s = d.get('status', '?')
-alive = bool('$agent_process_alive')
-if s == 'running' and not alive:
-    print('completed')  # process died but status not updated
-elif s == 'completed': print('completed')
-elif s == 'running': print('running')
-else: print(s)
-" 2>/dev/null) || agent_status_label="?"
+      agent_status_label=$(agent_status_label "$AGENT_STATUS" "$agent_process_alive" 2>/dev/null) || agent_status_label="?"
       echo -e "${BOLD}SDK AGENTS${RESET}  ${DIM}($agent_status_label, $(( agent_age / 60 ))m ago)${RESET}" >> "$TMPOUT"
       echo "─────────────────────────────────────" >> "$TMPOUT"
-      python3 -c "
-import json
-d = json.load(open('$AGENT_STATUS'))
-status = d.get('status', '?')
-completed = d.get('completed_agents', {})
-running = d.get('running_agents', [])
-if running:
-    print('  Running: ' + ', '.join(running))
-for name, info in completed.items():
-    mark = '\033[32m\u2713\033[0m' if info.get('passed') else '\033[31m\u2717\033[0m'
-    verdict = info.get('verdict', '?')
-    print(f'  {mark} {name}: {verdict}')
-if not completed and not running:
-    print(f'  Status: {status}')
-" >> "$TMPOUT" 2>/dev/null
+      render_agent_status_details "$AGENT_STATUS" >> "$TMPOUT" 2>/dev/null
     fi
   fi
 
