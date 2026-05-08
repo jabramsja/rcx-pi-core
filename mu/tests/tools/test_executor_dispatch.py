@@ -496,6 +496,92 @@ class TestDispatcherFreshnessRefresh:
         assert result["completed_candidates"][0]["tracked_packet"] == packet_rel
         assert calls == []
 
+    def test_dispatch_refreshes_stale_canonical_completed_candidate_before_stop(
+        self, tmp_path, monkeypatch,
+    ):
+        repo, _ = _init_builder_repo(tmp_path)
+        completed_packet = "reports/control_plane/completed_packet.md"
+        open_packet = "reports/control_plane/open_packet.md"
+        (repo / completed_packet).write_text(
+            "# completed packet\n\nStatus: COMPLETED (commit-ready, supervisor COMMIT_GO)\n",
+            encoding="utf-8",
+        )
+        (repo / open_packet).write_text(
+            "# open packet\n\nStatus: Routed - Phase A required before implementation\n",
+            encoding="utf-8",
+        )
+        stale_record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "stale completed route",
+            "wave_name": "completed-wave-2026-05-07",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "state_sha": "stale-state",
+            "next_candidates": [
+                {
+                    "candidate": "completed-wave-2026-05-07",
+                    "bounded": True,
+                    "tracked_packet": completed_packet,
+                }
+            ],
+        }
+        canonical_dir = repo / ".agent_bus" / "meta"
+        canonical_dir.mkdir(parents=True, exist_ok=True)
+        (canonical_dir / "post_merge_routing.json").write_text(
+            json.dumps(stale_record),
+            encoding="utf-8",
+        )
+        refreshed_record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "refreshed open route",
+            "wave_name": "open-wave-2026-05-07",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "state_sha": "fresh-state",
+            "next_candidates": [
+                {
+                    "candidate": "open-wave-2026-05-07",
+                    "bounded": True,
+                    "tracked_packet": open_packet,
+                }
+            ],
+        }
+        refresh_calls = []
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "validate_routing_record_freshness",
+            lambda *a, **k: (False, "stale for proof"),
+        )
+
+        def fake_refresh(*args, **kwargs):
+            refresh_calls.append((args, kwargs))
+            return True, refreshed_record
+
+        monkeypatch.setattr(dispatch_mod, "_auto_refresh_routing", fake_refresh)
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout='{"status":"success"}', stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_continue_successful_executor_chain",
+            lambda *a, **k: {
+                "status": "success",
+                "decision": refreshed_record["decision"],
+                "executor": "phase_a_executor",
+            },
+        )
+
+        result = dispatch_mod.dispatch(stale_record, repo_root=repo)
+
+        assert result["status"] == "success"
+        assert refresh_calls
+        assert calls
+        assert completed_packet not in calls[0]
+        assert calls[0][calls[0].index("--plan-name") + 1] == "open_packet"
+
     def test_dispatch_stops_completed_bounded_candidate_before_tracker_update(
         self, tmp_path, monkeypatch,
     ):

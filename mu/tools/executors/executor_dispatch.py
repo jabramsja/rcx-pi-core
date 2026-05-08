@@ -2755,15 +2755,6 @@ def dispatch(
                        f"Manual execution required.",
         }
 
-    completed_stop = _completed_candidate_stop_result(
-        repo,
-        record,
-        decision=decision,
-        executor_name=executor_name,
-    )
-    if completed_stop is not None:
-        return completed_stop
-
     # Validate freshness — auto-refresh via post-merge supervisor if stale
     if not skip_freshness:
         fresh, msg = validate_routing_record_freshness(record, repo)
@@ -2877,6 +2868,15 @@ def dispatch(
                 return empty_tracker_update
             if verbose:
                 print(f"[dispatch] Refreshed: decision={decision}, executor={executor_name}")
+
+    completed_stop = _completed_candidate_stop_result(
+        repo,
+        record,
+        decision=decision,
+        executor_name=executor_name,
+    )
+    if completed_stop is not None:
+        return completed_stop
 
     empty_tracker_update = _empty_tracker_update_hold_result(
         record,
