@@ -757,6 +757,65 @@ time.sleep(10.0)
     assert elapsed < 2.0
 
 
+def test_run_adapter_meta_envelope_survives_zero_match_probe(tmp_path: Path) -> None:
+    zero_match_agent = tmp_path / "zero_match_meta_agent.py"
+    zero_match_agent.write_text(
+        """\
+import subprocess
+import sys
+import time
+
+sys.stdin.read()
+probe = subprocess.run(
+    [sys.executable, "-c", "import sys; sys.exit(1)"],
+    capture_output=True,
+    text=True,
+    check=False,
+)
+print(f"zero-match probe exit={probe.returncode}", flush=True)
+print("BEGIN_META_ENVELOPE", flush=True)
+print("{", flush=True)
+print('  "decision": "ROUTE_PHASE_A",', flush=True)
+print('  "summary": "zero-match probe still emitted envelope",', flush=True)
+print('  "findings": [],', flush=True)
+print('  "request_for_claude": "Continue"', flush=True)
+print("}", flush=True)
+print("END_META_ENVELOPE", flush=True)
+time.sleep(10.0)
+""",
+        encoding="utf-8",
+    )
+
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("review prompt", encoding="utf-8")
+    raw_output_path = tmp_path / "raw.txt"
+    spec = adapters.AdapterSpec(
+        name="codex",
+        cmd=[sys.executable, str(zero_match_agent)],
+        timeout_s=30,
+        prompt_via_stdin=True,
+    )
+
+    start = time.monotonic()
+    output = adapters.run_adapter(
+        spec,
+        prompt_text="review prompt",
+        prompt_path=prompt_path,
+        repo_root=tmp_path,
+        job_id="job-1",
+        turn_id="r1-meta",
+        agent_role="meta-reviewer",
+        raw_output_path=raw_output_path,
+        stop_after_envelope=True,
+    )
+    elapsed = time.monotonic() - start
+
+    assert "zero-match probe exit=1" in output
+    assert '"decision": "ROUTE_PHASE_A"' in output
+    assert '"summary": "zero-match probe still emitted envelope"' in output
+    assert elapsed < 2.0
+
+
 def test_run_adapter_buffered_stop_after_stderr_meta_envelope_uses_raw_transcript_fallback(
     tmp_path: Path,
 ) -> None:

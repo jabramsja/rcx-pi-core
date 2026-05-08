@@ -7974,6 +7974,7 @@ class TestCommitContinuationAndBotFreshness:
         }
         merge_cwds = []
         fetch_cwds = []
+        merge_cmds = []
 
         def completed(cmd, stdout="", stderr=""):
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
@@ -8037,6 +8038,7 @@ class TestCommitContinuationAndBotFreshness:
             if cmd[:4] == ["git", "ls-files", "--others", "--exclude-standard"]:
                 return completed(cmd)
             if cmd[:3] == ["git", "merge", "--ff-only"]:
+                merge_cmds.append(list(cmd))
                 return completed(cmd)
             if cmd[:2] == ["git", "pull"]:
                 raise AssertionError("git pull must not be used in post-merge verify path; use git fetch + git merge --ff-only")
@@ -8063,6 +8065,7 @@ class TestCommitContinuationAndBotFreshness:
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert merge_cwds == [repo.parent]
         assert fetch_cwds == [dev_worktree]
+        assert merge_cmds == [["git", "merge", "--ff-only", "origin/dev"]]
 
     def test_post_commit_warns_when_linked_base_worktree_is_already_dirty(self, tmp_path, monkeypatch):
         repo = tmp_path / "feature-worktree"
@@ -12378,6 +12381,93 @@ class TestRecoveryGateWiring:
             mock_rec.assert_called_once()
             assert mock_d.call_count == 2  # original + recovery retry
             assert exit_code == 0
+
+    def test_chained_phase_b_live_timeout_attribution_and_cap(self, tmp_path, monkeypatch):
+        """A real chained Phase B timeout stays in its executor bucket and caps retries."""
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        cfg_path = cfg_dir / "executor_config.json"
+        cfg_path.write_text(
+            json.dumps({"timeouts": {"phase_b_executor": 100}}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        script_dir = tmp_path / "script_root" / "mu" / "tools" / "executors"
+        script_dir.mkdir(parents=True)
+        (script_dir / "phase_b_executor.py").write_text(
+            "import time\ntime.sleep(10)\n",
+            encoding="utf-8",
+        )
+        plan_rel = "reports/control_plane/timeout-plan.md"
+        plan_path = tmp_path / plan_rel
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text(
+            "# Timeout Plan\n\nStatus: Phase B (locked, implementing)\n",
+            encoding="utf-8",
+        )
+        completed_phase_a = subprocess.CompletedProcess(
+            [sys.executable, "phase_a_executor.py"],
+            0,
+            stdout=json.dumps({"plan_path": plan_rel}) + "\n",
+            stderr="",
+        )
+        record = {"decision": "ROUTE_PHASE_A", "wave_name": "timeout-wave"}
+
+        for key in (
+            "RCX_RECOVERY_TIMEOUT_OVERRIDE",
+            "RCX_RECOVERY_TIMEOUT_KEY",
+            "RCX_RECOVERY_ORIGINAL_TIMEOUT_phase_b_executor",
+        ):
+            monkeypatch.delenv(key, raising=False)
+
+        def run_chained_timeout() -> dict[str, object]:
+            return dispatch_mod._continue_successful_executor_chain(  # ANTICHEAT_OK: live chained timeout regression
+                "phase_a_executor",
+                completed_phase_a,
+                repo_root=tmp_path,
+                config={
+                    "timeouts": {"phase_b_executor": 0.05},
+                    "bridge_loop_limits": {"phase_b": 1},
+                },
+                record=record,
+                script_repo_root=tmp_path / "script_root",
+            )
+
+        first_timeout = run_chained_timeout()
+        assert first_timeout["status"] == "timeout"
+        assert "step" not in first_timeout
+
+        first_recovery = recovery_mod.attempt_recovery(
+            tmp_path,
+            first_timeout,
+            "timeout-wave",
+        )
+        assert first_recovery["recovered"] is True
+        assert os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] == "150"
+
+        retry_config = {"timeouts": {"phase_b_executor": 100}}
+        dispatch_mod._apply_recovery_overrides(  # ANTICHEAT_OK: dispatcher applies live recovery override
+            retry_config,
+            repo_root=tmp_path,
+        )
+        assert json.loads(cfg_path.read_text(encoding="utf-8"))["timeouts"]["phase_b_executor"] == 150
+
+        second_timeout = run_chained_timeout()
+        second_recovery = recovery_mod.attempt_recovery(
+            tmp_path,
+            second_timeout,
+            "timeout-wave",
+        )
+        assert second_recovery["recovered"] is True
+        assert os.environ["RCX_RECOVERY_TIMEOUT_OVERRIDE"] == "200"
+
+        third_timeout = run_chained_timeout()
+        third_recovery = recovery_mod.attempt_recovery(
+            tmp_path,
+            third_timeout,
+            "timeout-wave",
+        )
+        assert third_recovery["exhausted"] is True
+        assert "phase_b_executor, process_timeout" in third_recovery["detail"]
 
     def test_sequential_recovery_preserves_original_timeouts(
         self, tmp_path, monkeypatch,
