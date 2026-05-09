@@ -4,7 +4,7 @@
 #
 # Usage:
 #   bash tools/checks/check_stale_next_items.sh          # Check TASKS.md
-#   bash tools/checks/check_stale_next_items.sh --fix     # Show what needs updating
+#   bash tools/checks/check_stale_next_items.sh --fix     # Mark stale merged PR refs Landed
 #
 # Exit codes:
 #   0 -> all NEXT items with merged PRs are properly marked
@@ -46,6 +46,7 @@ fi
 
 STALE_COUNT=0
 CHECKED=0
+STALE_PR_NUMBERS=""
 
 while IFS= read -r pr_num; do
     [ -z "$pr_num" ] && continue
@@ -79,10 +80,11 @@ while IFS= read -r pr_num; do
 
         # Stale item found
         STALE_COUNT=$((STALE_COUNT + 1))
+        STALE_PR_NUMBERS="${STALE_PR_NUMBERS} ${pr_num}"
         echo "STALE: PR #${pr_num} is MERGED but NEXT item not marked Landed:"
         echo "  Line: $LINE_TEXT"
         if [ "$FIX_MODE" = true ]; then
-            echo "  FIX: Strike through this item and add **Landed** marker"
+            echo "  FIX: Add **Landed** marker; non-tracker items may be struck through"
         fi
         echo ""
     done <<< "$LINES_WITH_PR"
@@ -92,6 +94,67 @@ done <<< "$PR_NUMBERS"
 echo "Checked $CHECKED PR references in NEXT section"
 
 if [ "$STALE_COUNT" -gt 0 ]; then
+    if [ "$FIX_MODE" = true ]; then
+        STALE_PR_NUMBERS="$STALE_PR_NUMBERS" python3 - "$TASKS_FILE" <<'PY'
+import os
+import re
+import sys
+from pathlib import Path
+
+tasks_path = Path(sys.argv[1])
+stale_prs = {
+    pr
+    for pr in os.environ.get("STALE_PR_NUMBERS", "").split()
+    if pr.isdigit()
+}
+if not stale_prs:
+    raise SystemExit("ERROR: --fix had no stale PR numbers to apply")
+
+lines = tasks_path.read_text(encoding="utf-8").splitlines(keepends=True)
+try:
+    next_start = next(i for i, line in enumerate(lines) if line.startswith("## NEXT"))
+except StopIteration:
+    raise SystemExit("ERROR: Could not find ## NEXT in TASKS.md")
+
+try:
+    next_end = next(
+        i for i in range(next_start + 1, len(lines))
+        if lines[i].startswith("## VECTOR")
+    )
+except StopIteration:
+    next_end = len(lines)
+
+marker_re = re.compile(r"~~|Landed|COMPLETE|CLOSED|Resolved")
+changed = 0
+for index in range(next_start, next_end):
+    line = lines[index]
+    line_body = line[:-1] if line.endswith("\n") else line
+    newline = "\n" if line.endswith("\n") else ""
+    if marker_re.search(line_body):
+        continue
+    if not any(f"PR #{pr}" in line_body for pr in stale_prs):
+        continue
+
+    indent_len = len(line_body) - len(line_body.lstrip())
+    indent = line_body[:indent_len]
+    content = line_body[indent_len:]
+    if content.startswith("- Tracker sync note"):
+        lines[index] = f"{indent}{content} **Landed**{newline}"
+    elif content.startswith("- "):
+        lines[index] = f"{indent}- ~~{content[2:]}~~ **Landed**{newline}"
+    else:
+        lines[index] = f"{indent}~~{content}~~ **Landed**{newline}"
+    changed += 1
+
+if changed == 0:
+    raise SystemExit("ERROR: --fix found stale PRs but made no TASKS.md changes")
+
+tasks_path.write_text("".join(lines), encoding="utf-8")
+print(f"FIXED: marked {changed} stale NEXT item(s) as Landed in TASKS.md")
+PY
+        exec "$0"
+    fi
+
     echo ""
     echo "❌ $STALE_COUNT stale NEXT item(s) found — merged PRs not marked Landed"
     echo "   Update TASKS.md to mark these as Landed before pushing."

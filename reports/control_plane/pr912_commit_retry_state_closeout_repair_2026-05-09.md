@@ -28,6 +28,9 @@ Founder override: FOUNDER_OVERRIDE:pr912-commit-retry-state-closeout-repair-2026
 - `reports/deferred/**`
   - Archive the now-closed blocking source snapshot and sync active deferred
     inventory.
+- `tools/checks/check_stale_next_items.sh`
+  - Make `--fix` apply the mechanical stale-NEXT repair advertised by the
+    pre-push hook, while preserving canonical tracker-note prefixes.
 
 ## Root Cause
 
@@ -61,6 +64,11 @@ Restoration is skipped when a legacy or standalone handoff has no tracked
 control-plane packet, so receipt-chain paths without packet state do not fail
 with a false `tracked_packet is empty` error.
 
+The pre-push stale-NEXT checker now applies its advertised `--fix` mode instead
+of only printing advice. The fixer marks merged PR references in the active
+NEXT section as `**Landed**`, and preserves `- Tracker sync note` prefixes so
+commit-executor tracker parsing remains canonical.
+
 ## Closeout Sync
 
 - PR #912 merged the structural blocking remediation.
@@ -71,6 +79,8 @@ with a false `tracked_packet is empty` error.
 - Active deferred blocking inventory is now README-only.
 - Remaining active deferred non-blocking packets are `/mu` structural advisory
   records and remain hard-stopped before production implementation.
+- The stale PR #912 NEXT references are marked `**Landed**` by
+  `bash tools/checks/check_stale_next_items.sh --fix`.
 
 ## Validation
 
@@ -91,6 +101,20 @@ Result: exit `0`.
 ```
 
 Result: exit `0`; all checks passed.
+
+```text
+bash -n tools/checks/check_stale_next_items.sh
+```
+
+Result: exit `0`.
+
+```text
+bash tools/checks/check_stale_next_items.sh --fix
+```
+
+Result: exit `0`; printed
+`FIXED: marked 2 stale NEXT item(s) as Landed in TASKS.md`, then re-ran the
+checker and printed `All NEXT items with merged PRs are properly marked`.
 
 ```text
 git diff --check
@@ -118,13 +142,7 @@ that wave.
   - `indicator`: `reports/l4_wave_indicators/pr912-commit-retry-state-closeout-repair-2026-05-09.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/tools/test_commit_executor_receipt.py`
-  - `mu/tools/executors/commit_executor.py`
-  - `reports/archive/deferred/founder_ordered_redteam_repo_code_audit_2026-05-05_blocking_closed-by-founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_PR912.md`
-  - `reports/control_plane/founder_ordered_redteam_mu_structural_blocking_remediation_2026-05-06.md`
+  - `mu/tools/checks/check_stale_next_items.sh`
   - `reports/control_plane/pr912_commit_retry_state_closeout_repair_2026-05-09.md`
-  - `reports/deferred/README.md`
-  - `reports/deferred/blocking/README.md`
-  - `reports/deferred/non_blocking/README.md`
   - `reports/l4_wave_indicators/pr912-commit-retry-state-closeout-repair-2026-05-09.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
