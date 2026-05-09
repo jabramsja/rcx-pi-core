@@ -7394,10 +7394,9 @@ def _run_commit_pipeline_impl(
             )
 
     # ── Step 5d: restore retry-demoted packet state before receipt ──────
-    # Retry demotion makes completed packets dispatchable again after a
-    # post-receipt, pre-commit failure. Before the final supervisor receipt is
-    # minted, restore that state so the committed branch cannot leave the queue
-    # looking open after merge.
+    # Restore before the final supervisor package so the receipt binds the
+    # exact staged content. If Step 6 or early Step 7 fails afterward, the
+    # retry wrapper demotes again because restore_commit_retry_state is recorded.
     try:
         restore_outcome = _restore_pending_handoff_state_for_commit_ready(
             repo_root,
@@ -7418,6 +7417,8 @@ def _run_commit_pipeline_impl(
             "steps_completed": result["steps_completed"],
         }
     if restore_outcome.get("changed"):
+        result["commit_retry_state_restoration"] = restore_outcome
+        result["steps_completed"].append("restore_commit_retry_state")
         changed_paths = [
             str(path)
             for path in restore_outcome.get("changed", [])
@@ -7437,19 +7438,22 @@ def _run_commit_pipeline_impl(
                 [*list(handoff.get("scope_items") or []), *changed_paths]
             ),
         }
+        restored_handoff_sha = _handoff_sha(handoff)
+        result["commit_retry_restored_handoff_sha"] = restored_handoff_sha
+        if _can_rekey_continuation_to_refreshed_handoff(handoff):
+            handoff_sha = restored_handoff_sha
+            result["handoff_sha"] = handoff_sha
         persist_error = _persist_phase_b_handoff_for_commit_path(repo_root, handoff)
         if persist_error:
             return {
+                **result,
                 "status": "error",
                 "step": "restore_commit_retry_state",
                 "errors": [persist_error],
-                "steps_completed": result["steps_completed"],
             }
-        result["commit_retry_state_restoration"] = restore_outcome
-        result["steps_completed"].append("restore_commit_retry_state")
         log(
             "Step 5d: restored commit-retry packet/task state before "
-            "pre-commit supervisor"
+            "receipt review"
         )
 
     # ── Steps 6-7: supervisor review + receipt validation ───────────
@@ -7716,7 +7720,6 @@ def _run_commit_pipeline_impl(
             "Step 7: receipt chain verified "
             f"(handoff={handoff_receipt_decision}, supervisor={receipt_decision})"
         )
-
 
     # ── Step 8: run_pre_commit_script ─────────────────────────────────
     pre_commit_script = repo_root / "mu" / "tools" / "hooks" / "pre-commit-doc-check"
@@ -8037,7 +8040,7 @@ def _restore_pending_handoff_state_for_commit_ready(
     repo_root: Path,
     handoff: dict[str, Any],
 ) -> dict[str, Any]:
-    """Restore retry-demoted packet/TASKS state before the final supervisor receipt."""
+    """Restore retry-demoted packet/TASKS state for commit-ready staging."""
     tracked_packet = str(handoff.get("tracked_packet") or "").strip()
     wave_id = str(handoff.get("wave_id") or "").strip()
     outcome: dict[str, Any] = {"changed": [], "errors": []}
@@ -8139,7 +8142,8 @@ def _maybe_demote_completed_handoff_state_for_commit_retry(
         return
     if "git_commit" in steps_completed or result.get("commit_sha"):
         return
-    if "validate_receipt" not in steps_completed:
+    retry_state_restored = "restore_commit_retry_state" in steps_completed
+    if "validate_receipt" not in steps_completed and not retry_state_restored:
         return
     try:
         outcome = _demote_completed_handoff_state_for_commit_retry(repo_root, handoff)
@@ -8166,7 +8170,8 @@ def _maybe_demote_completed_handoff_state_for_commit_retry(
         if isinstance(warnings, list):
             warnings.append(
                 "Demoted completed packet/task state to pending commit after "
-                "commit executor failed after receipt validation before git_commit."
+                "commit executor failed after retry-state restoration before "
+                "git_commit."
             )
 
 

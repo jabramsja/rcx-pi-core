@@ -14,12 +14,14 @@ Founder override: FOUNDER_OVERRIDE:pr912-commit-retry-state-closeout-repair-2026
 
 - `mu/tools/executors/commit_executor.py`
   - Restore retry-demoted packet and `TASKS.md` queue state before the final
-    pre-commit supervisor receipt is minted.
+    supervisor receipt review, then demote it again on any later failure before
+    `git_commit`.
   - Keep the fix bounded to control-plane retry state; do not add Python or
     JavaScript runtime semantics.
 - `mu/tests/tools/test_commit_executor_receipt.py`
-  - Regression for an `L4_STRUCTURAL` retry-demoted packet/TASKS pair restoring
-    before the final supervisor package.
+  - Regressions for an `L4_STRUCTURAL` retry-demoted packet/TASKS pair restoring
+    before receipt review, and for demoting back to retry-pending state when
+    receipt validation or handoff persistence fails after restoration.
 - `TASKS.md`
   - Close PR #912 structural blocking state and record this pipeline closeout
     repair.
@@ -48,17 +50,37 @@ retry-demoted state before commit, so the post-merge package mechanically
 selected the already-merged structural blocking packet as the next open queue
 entry.
 
+PR #913 bot review then found the first closeout repair restored retry-demoted
+state before the final supervisor receipt chain had validated, while retry
+demotion was only armed for post-validation failures. A Step 6 or early Step 7
+failure could therefore leave packet/TASKS state completed without a fresh
+commit. The same-wave repair keeps restoration before receipt review so the
+receipt binds the restored staged content, and records `restore_commit_retry_state`
+as the demotion arming point for any later failure before `git_commit`.
+
+The next supervisor pass found one remaining ordering gap: restoration was
+recorded only after the fallible durable handoff persist succeeded. A persist
+failure after packet/TASKS restoration but before recording
+`restore_commit_retry_state` could leave completed state restored without arming
+the retry demotion wrapper.
+
 ## Mechanical Fix
 
 `commit_executor.py` now restores retry-demoted packet and `TASKS.md` queue
-state to `IMPLEMENTED / LOCAL EVIDENCE` before the final pre-commit supervisor
-package is written. The executor stages the restored paths, persists the
-refreshed handoff scope, and records `restore_commit_retry_state` in
-`steps_completed`.
+state to `IMPLEMENTED / LOCAL EVIDENCE` before the final supervisor receipt
+review. The executor records `restore_commit_retry_state` immediately after
+restoration succeeds, before persisting the refreshed handoff scope or invoking
+the supervisor; it also records the restored handoff sha and rekeys the
+continuation when safe.
 
 This keeps demotion available for dispatcher re-entry after the failure, but
 prevents the committed branch from leaving the founder queue open after a
 successful retry.
+
+The retry-demotion guard now also treats `restore_commit_retry_state` as the
+arming point for later failures before `git_commit`, so a post-restore
+pre-commit or pre-push failure demotes packet/TASKS state back to
+`IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT`.
 
 Restoration is skipped when a legacy or standalone handoff has no tracked
 control-plane packet, so receipt-chain paths without packet state do not fail
@@ -85,13 +107,25 @@ commit-executor tracker parsing remains canonical.
 ## Validation
 
 ```text
+PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py::TestReceiptChainEndToEnd::test_commit_retry_pending_state_restored_before_receipt_review mu/tests/tools/test_commit_executor_receipt.py::TestReceiptChainEndToEnd::test_commit_retry_pending_state_demotes_again_when_receipt_validation_fails mu/tests/tools/test_commit_executor_receipt.py::TestReceiptChainEndToEnd::test_commit_retry_pending_state_demotes_again_when_handoff_persist_fails --tb=short
+```
+
+Result: exit `0`; `3 passed in 2.09s`.
+
+```text
 PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py --tb=short
 ```
 
-Result: `108 passed in 21.31s`.
+Result: exit `0`; `110 passed in 22.96s`.
 
 ```text
 python3 -m py_compile mu/tools/executors/commit_executor.py mu/tests/tools/test_commit_executor_receipt.py
+```
+
+Result: exit `0`.
+
+```text
+python3 mu/tools/checks/linters/check_private_attr_access.py mu/tests/tools/test_commit_executor_receipt.py
 ```
 
 Result: exit `0`.
@@ -134,15 +168,16 @@ that wave.
 - Refresh wave: `pr912-commit-retry-state-closeout-repair-2026-05-09`
 - Active packet: `reports/control_plane/pr912_commit_retry_state_closeout_repair_2026-05-09.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `81582b705c96aed71b53d66099ae4c8389f7badece4aa41db1c8937c1ed8db5a`
+- Tracker note sha256: `17f93360a20e6f7dd4d38a2d7d38841aefd58ccfef1813d390d9118ef788f06d`
 - Indicator artifact: `reports/l4_wave_indicators/pr912-commit-retry-state-closeout-repair-2026-05-09.json`
 - Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py --tb=short && python3 -m py_compile mu/tools/executors/commit_executor.py mu/tests/tools/test_commit_executor_receipt.py && ./tools/checks/check_docs_consistency.sh && git diff --check`.
-- Evidence delta: (1) Commit executor restores retry-demoted packet/TASKS state before final supervisor receipt minting, so successful retry commits cannot leave completed founder queue packets open. (2) Empty `tracked_packet` handoffs skip restoration instead of failing the full receipt-chain proof. (3) PR #912 structural blocking packet and TASKS queue state are closed. (4) The closed blocking source snapshot moved to `reports/archive/deferred/`, leaving `reports/deferred/blocking/` README-only and four active `/mu` structural non-blocking advisory packets.
+- Evidence delta: (1) Commit executor restores retry-demoted packet/TASKS state before final supervisor receipt review and records retry-demotion authority immediately after restoration succeeds, so the supervisor receipt binds the restored staged content and post-restoration handoff-persist, pre-commit, and pre-push failures demote state again before dispatcher re-entry. (2) Empty `tracked_packet` handoffs skip restoration instead of failing the full receipt-chain proof. (3) PR #912 structural blocking packet and TASKS queue state are closed. (4) The closed blocking source snapshot moved to `reports/archive/deferred/`, leaving `reports/deferred/blocking/` README-only and four active `/mu` structural non-blocking advisory packets.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/pr912-commit-retry-state-closeout-repair-2026-05-09.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tools/checks/check_stale_next_items.sh`
+  - `mu/tests/tools/test_commit_executor_receipt.py`
+  - `mu/tools/executors/commit_executor.py`
   - `reports/control_plane/pr912_commit_retry_state_closeout_repair_2026-05-09.md`
   - `reports/l4_wave_indicators/pr912-commit-retry-state-closeout-repair-2026-05-09.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
