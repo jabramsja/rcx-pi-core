@@ -7197,6 +7197,42 @@ class TestWaveOwnedFilesIncludesDeferredPackets:
         assert source_rel in refreshed_changed_files
         assert deferred_rel not in refreshed_changed_files
 
+    def test_stage_files_skips_already_staged_delete_source_path(self, tmp_path):
+        """Bridge staging must not re-add a missing source path from an already-staged delete."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+
+        source_rel = "reports/deferred/non_blocking/wave_bridge_nonblockers.md"
+        archive_rel = "reports/archive/deferred/wave_bridge_nonblockers_closed.md"
+        (repo / "reports" / "deferred" / "non_blocking").mkdir(parents=True)
+        (repo / "reports" / "archive" / "deferred").mkdir(parents=True)
+        (repo / source_rel).write_text("# Deferred\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", source_rel], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "rm", "--", source_rel], cwd=repo, check=True, capture_output=True)
+        (repo / archive_rel).write_text("# Deferred\n\nClosed by archive.\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", archive_rel], cwd=repo, check=True)
+
+        assert not (repo / source_rel).exists()
+        assert source_rel in pb_mod._collect_staged_files(repo)  # ANTICHEAT_OK: testing staged delete source truth
+
+        staged_ok, stage_detail = pb_mod._stage_files_for_pipeline(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            [source_rel, archive_rel],
+        )
+
+        assert staged_ok, stage_detail
+        status = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert f"D  {source_rel}" in status
+        assert f"A  {archive_rel}" in status
+
     def test_baseline_wave_files_preserved_when_tracking_active(self, tmp_path):
         """Dirty-wave baseline files remain in scope even if the last implementer delta is narrow."""
         repo = tmp_path / "repo"

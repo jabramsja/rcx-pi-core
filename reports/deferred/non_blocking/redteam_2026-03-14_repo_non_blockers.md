@@ -14,6 +14,21 @@ to
 The active packet now retains only N1 as `/mu` structural hard-stop advisory
 status. This wave does not authorize `/mu` structural implementation.
 
+Cleanup note (2026-05-09): current code still stores `capture_path` values in
+the per-attempt capture table before materialization:
+`mu/host/python/rcx_pi/selfhost/stage0_vm.py:794` through
+`mu/host/python/rcx_pi/selfhost/stage0_vm.py:805` and
+`mu/host/js/core/stage0_vm.js:831` through
+`mu/host/js/core/stage0_vm.js:841`. Current materialization then deep-copies
+`capture_ref` through `_safe_mu_copy` / `safeMuCopy` at
+`mu/host/python/rcx_pi/selfhost/stage0_vm.py:372` through
+`mu/host/python/rcx_pi/selfhost/stage0_vm.py:381` and
+`mu/host/js/core/stage0_vm.js:369` through
+`mu/host/js/core/stage0_vm.js:380`. The advisory remains open only as a
+separate `/mu` structural hardening question. Next-wave task required before
+implementation: `stage0-capture-path-provenance-boundary-2026-05-09` as a
+separate bounded packet.
+
 ## N1 `DEFECT` — Stage0 direct APIs still retain raw hostile leaves in capture slots before materialization **PARTIALLY RESOLVED** (2026-03-14)
 
 **Fix applied:** `capture_ref` now deep-copies via `_safe_mu_copy`/`safeMuCopy`. Python `_mu_copy` rejects non-Mu types (returns None). JS `muCopy` uses `_isPlainArray`/`_isPlainObject` and rejects non-Mu types (returns null).

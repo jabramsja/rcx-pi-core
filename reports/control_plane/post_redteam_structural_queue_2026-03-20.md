@@ -65,13 +65,22 @@ In scope for this packet:
   `reports/control_plane/founder_ordered_redteam_mu_structural_blocking_remediation_2026-05-06.md`,
   and
   `reports/control_plane/founder_ordered_redteam_mu_structural_non_blocking_remediation_2026-05-06.md`.
+- Later same-task routed tracker entries that are queue-grounding references,
+  not this packet's own Wave ID:
+  `reports/control_plane/deferred-non-mu-deferred-lane-truth-sweep-2026-05-07_2026-05-07.md`,
+  `reports/control_plane/deferred-non-mu-docs-control-plane-remediation-2026-05-07_2026-05-07.md`,
+  `reports/control_plane/deferred-non-mu-tooling-control-plane-remediation-2026-05-07_2026-05-07.md`,
+  and
+  `reports/control_plane/deferred-non-mu-tests-proof-remediation-2026-05-07_2026-05-07.md`.
 - Deferred/archive evidence lanes named by the tracker entry only when needed
   to preserve routing status, not to reopen closed findings.
 - Pipeline/dispatcher/commit/recovery surfaces only when the current bounded
   packet requires a same-wave mechanical pipeline unblocker.
 
-- `reports/deferred/non_blocking/deferred-mu-structural-residue-reconciliation-2026-05-09_bridge_nonblockers.md`
-  - Same-wave Phase B/commit generated deferred non-blocking bridge findings packet only; no unrelated deferred report is authorized by this wave.
+- `reports/archive/deferred/deferred-mu-structural-residue-reconciliation-2026-05-09_bridge_nonblockers_closed-by-deferred-active-mu-structural-nonblocking-cleanup-2026-05-09.md`
+  - Archived same-wave Phase B/commit generated deferred non-blocking bridge
+    findings packet only; no unrelated deferred report is authorized by this
+    wave.
 
 ## Work items
 
@@ -219,7 +228,7 @@ conditions, and acceptance criteria before execution.
 - Current staged files:
   - `TASKS.md`
   - `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`
-  - `reports/deferred/non_blocking/deferred-mu-structural-residue-reconciliation-2026-05-09_bridge_nonblockers.md`
+  - `reports/archive/deferred/deferred-mu-structural-residue-reconciliation-2026-05-09_bridge_nonblockers_closed-by-deferred-active-mu-structural-nonblocking-cleanup-2026-05-09.md`
   - `reports/l4_wave_indicators/deferred-mu-structural-residue-reconciliation-2026-05-09.json`
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
 
@@ -229,7 +238,7 @@ conditions, and acceptance criteria before execution.
 - Refresh wave: `deferred-mu-structural-residue-reconciliation-2026-05-09`
 - Purpose: Phase B and commit automation may stage the same-wave non-blocking bridge findings packet as deferred follow-up instead of blocking an otherwise commit-ready wave.
 - Authorized deferred packet(s):
-  - `reports/deferred/non_blocking/deferred-mu-structural-residue-reconciliation-2026-05-09_bridge_nonblockers.md`
+  - `reports/archive/deferred/deferred-mu-structural-residue-reconciliation-2026-05-09_bridge_nonblockers_closed-by-deferred-active-mu-structural-nonblocking-cleanup-2026-05-09.md`
 - Scope binding: the packet(s) above are in scope only as generated same-wave non-blocking bridge findings packets.
 - Acceptance binding: the final touched-file set may include the packet(s) above when they are also present in `deferred_items` or current staged files.
 <!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->
@@ -249,6 +258,6 @@ conditions, and acceptance criteria before execution.
 - Current staged files:
   - `TASKS.md`
   - `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`
-  - `reports/deferred/non_blocking/deferred-mu-structural-residue-reconciliation-2026-05-09_bridge_nonblockers.md`
+  - `reports/archive/deferred/deferred-mu-structural-residue-reconciliation-2026-05-09_bridge_nonblockers_closed-by-deferred-active-mu-structural-nonblocking-cleanup-2026-05-09.md`
   - `reports/l4_wave_indicators/deferred-mu-structural-residue-reconciliation-2026-05-09.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

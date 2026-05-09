@@ -29,11 +29,12 @@ Archived source snapshots for extracted non-blocking residue live in:
 
 2026-05-05 repo-code audit note:
 
-- `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md` records
-  the non-blocking proof-class mismatch from
+- The then-active `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`
+  packet recorded the non-blocking proof-class mismatch from
   `founder-ordered-redteam-repo-code-audit-2026-05-05`: JS ontology evidence
   collection source-locks/registers `evidence_walker.v1.json` but still drains
-  runtime traces with host code.
+  runtime traces with host code. It is now archived at
+  `reports/archive/deferred/founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking_closed-by-deferred-active-mu-structural-nonblocking-cleanup-2026-05-09.md`.
 
 2026-05-06 cleanup note:
 
@@ -125,7 +126,8 @@ Archived source snapshots for extracted non-blocking residue live in:
 - Current non-blocking inventory after generated bridge closure:
   `README.md` plus three active or partially active `/mu` structural advisory
   packets:
-  `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
+  then-active source (archived later at)
+  `reports/archive/deferred/founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking_closed-by-deferred-active-mu-structural-nonblocking-cleanup-2026-05-09.md`,
   `redteam_2026-03-14_repo_non_blockers.md`, and
   `repo_truth_non_blockers_2026-03-14.md`.
 - The generated non-`/mu` bridge packets for the 2026-05-07 deferred-lane truth
@@ -144,10 +146,30 @@ Archived source snapshots for extracted non-blocking residue live in:
   `README.md` plus four active or partially active `/mu` structural advisory
   packets:
   `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`,
-  `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
+  then-active source (archived later at)
+  `reports/archive/deferred/founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking_closed-by-deferred-active-mu-structural-nonblocking-cleanup-2026-05-09.md`,
   `redteam_2026-03-14_repo_non_blockers.md`, and
   `repo_truth_non_blockers_2026-03-14.md`.
 - The blocking source packet for `B1 - JavaScript Mu Validation Admits Host
   Objects` moved to `reports/archive/deferred/`; the retained items here are
   non-blocking `/mu` structural advisory records and remain hard-stopped before
   production implementation.
+
+2026-05-09 active `/mu` structural non-blocking cleanup note:
+
+- Evidence command:
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
+- Current non-blocking inventory after PR #915, PR #916, and this cleanup:
+  `README.md` plus three active or partially active `/mu` structural advisory
+  packets:
+  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`,
+  `redteam_2026-03-14_repo_non_blockers.md`, and
+  `repo_truth_non_blockers_2026-03-14.md`.
+- Archived as closed by current tracker/report truth:
+  `reports/archive/deferred/deferred-mu-structural-residue-reconciliation-2026-05-09_bridge_nonblockers_closed-by-deferred-active-mu-structural-nonblocking-cleanup-2026-05-09.md`,
+  `reports/archive/deferred/founder-ordered-redteam-mu-structural-non-blocking-remediation-2026-05-06_bridge_nonblockers_closed-by-deferred-active-mu-structural-nonblocking-cleanup-2026-05-09.md`,
+  and
+  `reports/archive/deferred/founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking_closed-by-deferred-active-mu-structural-nonblocking-cleanup-2026-05-09.md`.
+- The retained active packets require separate bounded `/mu` structural packets
+  before implementation; this cleanup only refreshed current evidence and
+  archive state.

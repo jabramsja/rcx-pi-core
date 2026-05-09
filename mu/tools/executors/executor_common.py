@@ -894,6 +894,26 @@ def read_control_plane_packet_status(repo_root: Path, tracked_packet: str) -> st
     return None
 
 
+def read_control_plane_packet_wave_id(repo_root: Path, tracked_packet: str) -> str | None:
+    """Return a packet's explicit Wave ID metadata, normalized when present."""
+    packet_err = _validate_tracked_packet_for_builder(tracked_packet, repo_root)
+    if packet_err:
+        return None
+    packet_path = (repo_root / tracked_packet).resolve()
+    try:
+        lines = packet_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in lines[:_PACKET_STATUS_SCAN_LIMIT]:
+        clean = line.strip()
+        lower = clean.lower()
+        if lower.startswith("wave id:") or lower.startswith("wave_id:"):
+            value = clean.partition(":")[2].strip().strip("`")
+            normalized = normalize_wave_id(value) if value else ""
+            return normalized if normalized != "wave-unknown" else None
+    return None
+
+
 def _tasks_queue_backtick_value(line: str, label: str) -> str:
     match = re.search(rf"{re.escape(label)}:\s*`([^`]+)`", line)
     return match.group(1).strip() if match else ""
@@ -945,6 +965,25 @@ def _completed_tracked_packet_error(tracked_packet: str, repo_root: Path) -> str
     )
 
 
+def _tracked_packet_wave_conflict_error(
+    wave_name: str,
+    tracked_packet: str,
+    repo_root: Path,
+) -> str | None:
+    clean_wave = str(wave_name or "").strip()
+    expected_wave = normalize_wave_id(clean_wave) if clean_wave else ""
+    packet_wave = read_control_plane_packet_wave_id(repo_root, tracked_packet)
+    if expected_wave == "wave-unknown":
+        expected_wave = ""
+    if not expected_wave or not packet_wave or expected_wave == packet_wave:
+        return None
+    return (
+        "tracked_packet Wave ID does not match routed wave_name: "
+        f"{tracked_packet} declares Wave ID {packet_wave}, "
+        f"but routing requested {expected_wave}"
+    )
+
+
 def build_post_merge_routing_record(
     *,
     wave_name: str,
@@ -977,6 +1016,7 @@ def build_post_merge_routing_record(
         request_for_claude, summary
       - decision in POST_MERGE_AUTHORIZED_DECISIONS (lazy-imported)
       - tracked_packet passes _validate_tracked_packet_for_builder
+      - explicit tracked_packet Wave ID, when present, matches wave_name
     """
     errors: list[str] = []
 
@@ -1020,6 +1060,14 @@ def build_post_merge_routing_record(
         )
         if completed_packet_err:
             errors.append(completed_packet_err)
+        else:
+            packet_wave_err = _tracked_packet_wave_conflict_error(
+                wave_name if isinstance(wave_name, str) else "",
+                tracked_packet if isinstance(tracked_packet, str) else "",
+                effective_repo_root,
+            )
+            if packet_wave_err:
+                errors.append(packet_wave_err)
 
     if errors:
         return {}, errors

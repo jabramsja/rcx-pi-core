@@ -3228,8 +3228,47 @@ def _stage_files_with_diagnostics(repo_root: Path, files: list[str]) -> tuple[bo
     """
     if not files:
         return False, "no files supplied"
-    claude_files = [f for f in files if f.startswith(".claude/") or f.startswith(".claude\\")]
-    other_files = [f for f in files if f not in claude_files]
+    try:
+        staged_files = set(_collect_staged_files(repo_root))
+    except subprocess.CalledProcessError as exc:
+        detail_parts = [
+            f"git add failed with exit={exc.returncode}",
+            (exc.stderr or "").strip(),
+            (exc.stdout or "").strip(),
+        ]
+        return False, " | ".join(part for part in detail_parts if part)
+    stageable_files: list[str] = []
+    for f in files:
+        if (repo_root / f).exists():
+            stageable_files.append(f)
+            continue
+        try:
+            in_index = subprocess.run(
+                ["git", "ls-files", "--error-unmatch", "--", f],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except subprocess.CalledProcessError as exc:
+            detail_parts = [
+                f"git add failed with exit={exc.returncode}",
+                (exc.stderr or "").strip(),
+                (exc.stdout or "").strip(),
+            ]
+            return False, " | ".join(part for part in detail_parts if part)
+        if in_index.returncode == 0:
+            stageable_files.append(f)
+            continue
+        if f in staged_files:
+            # Already-staged deletions/renames have no index path left; re-adding
+            # that missing source path fails with "pathspec did not match".
+            continue
+        stageable_files.append(f)
+    if not stageable_files:
+        return True, ""
+    claude_files = [f for f in stageable_files if f.startswith(".claude/") or f.startswith(".claude\\")]
+    other_files = [f for f in stageable_files if f not in claude_files]
     try:
         if other_files:
             subprocess.run(
