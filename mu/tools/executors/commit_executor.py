@@ -7393,6 +7393,65 @@ def _run_commit_pipeline_impl(
                 f"{len(refreshed_staged_paths)} file(s)"
             )
 
+    # ── Step 5d: restore retry-demoted packet state before receipt ──────
+    # Retry demotion makes completed packets dispatchable again after a
+    # post-receipt, pre-commit failure. Before the final supervisor receipt is
+    # minted, restore that state so the committed branch cannot leave the queue
+    # looking open after merge.
+    try:
+        restore_outcome = _restore_pending_handoff_state_for_commit_ready(
+            repo_root,
+            handoff,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        return {
+            "status": "error",
+            "step": "restore_commit_retry_state",
+            "errors": [f"commit retry state restoration failed: {exc}"],
+            "steps_completed": result["steps_completed"],
+        }
+    if restore_outcome.get("errors"):
+        return {
+            "status": "error",
+            "step": "restore_commit_retry_state",
+            "errors": list(restore_outcome["errors"]),
+            "steps_completed": result["steps_completed"],
+        }
+    if restore_outcome.get("changed"):
+        changed_paths = [
+            str(path)
+            for path in restore_outcome.get("changed", [])
+            if isinstance(path, str) and path.strip()
+        ]
+        staged_after_restore = _current_staged_diff_paths(repo_root)
+        handoff = {
+            **handoff,
+            "files_to_stage": _dedupe_repo_paths(
+                [
+                    *list(handoff.get("files_to_stage") or []),
+                    *changed_paths,
+                    *staged_after_restore,
+                ]
+            ),
+            "scope_items": _dedupe_repo_paths(
+                [*list(handoff.get("scope_items") or []), *changed_paths]
+            ),
+        }
+        persist_error = _persist_phase_b_handoff_for_commit_path(repo_root, handoff)
+        if persist_error:
+            return {
+                "status": "error",
+                "step": "restore_commit_retry_state",
+                "errors": [persist_error],
+                "steps_completed": result["steps_completed"],
+            }
+        result["commit_retry_state_restoration"] = restore_outcome
+        result["steps_completed"].append("restore_commit_retry_state")
+        log(
+            "Step 5d: restored commit-retry packet/task state before "
+            "pre-commit supervisor"
+        )
+
     # ── Steps 6-7: supervisor review + receipt validation ───────────
     if not skip_supervisor:
         # ── Step 6: build_and_run_supervisor ──────────────────────────────
@@ -7788,6 +7847,7 @@ def _run_commit_pipeline_impl(
 
 
 COMMIT_RETRY_PENDING_STATUS = "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT"
+COMMIT_RETRY_RESTORED_STATUS = "IMPLEMENTED / LOCAL EVIDENCE"
 
 
 def _safe_tracked_control_packet_path(
@@ -7833,6 +7893,64 @@ def _pending_commit_queue_state(current_state: str) -> str:
     date_match = re.search(r"\(\d{4}-\d{2}-\d{2}\)", current_state)
     date_suffix = f" {date_match.group(0)}" if date_match else ""
     return f"{COMMIT_RETRY_PENDING_STATUS}{evidence}{date_suffix}"
+
+
+def _commit_ready_state_from_pending_retry(current_state: str) -> str:
+    date_match = re.search(r"\(\d{4}-\d{2}-\d{2}\)", current_state)
+    date_suffix = f" {date_match.group(0)}" if date_match else ""
+    return f"{COMMIT_RETRY_RESTORED_STATUS}{date_suffix}"
+
+
+def _is_commit_retry_pending_state(state: str | None) -> bool:
+    return COMMIT_RETRY_PENDING_STATUS in str(state or "")
+
+
+def _restore_tasks_queue_state_for_commit_ready(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    tracked_packet: str,
+) -> bool:
+    tasks_path = repo_root / "TASKS.md"
+    if not tasks_path.is_file():
+        return False
+    wanted_wave = normalize_wave_id(wave_id)
+    wanted_packet = str(tracked_packet or "").strip()
+    lines = tasks_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    changed = False
+    state_re = re.compile(
+        r"^(?P<prefix>\s*\d+\.\s+\*\*\[[^\]]+\]\s+)"
+        r"(?P<state>.*?)"
+        r"(?P<suffix>\.\*\*.*)$"
+    )
+    for idx, line in enumerate(lines):
+        if "FOUNDER-ORDERED-REDTEAM-" not in line:
+            continue
+        if "Wave ID:" not in line or "Packet:" not in line:
+            continue
+        entry_wave = normalize_wave_id(_queue_entry_backtick_value(line, "Wave ID"))
+        entry_packet = _queue_entry_backtick_value(line, "Packet")
+        if wanted_wave and entry_wave != wanted_wave:
+            if not wanted_packet or entry_packet != wanted_packet:
+                continue
+        elif wanted_packet and entry_packet != wanted_packet:
+            continue
+        match = state_re.match(line.rstrip("\n"))
+        if not match:
+            continue
+        state = match.group("state").strip()
+        if not _is_commit_retry_pending_state(state):
+            continue
+        newline = "\n" if line.endswith("\n") else ""
+        new_state = _commit_ready_state_from_pending_retry(state)
+        lines[idx] = (
+            f"{match.group('prefix')}{new_state}{match.group('suffix')}{newline}"
+        )
+        changed = True
+        break
+    if changed:
+        tasks_path.write_text("".join(lines), encoding="utf-8")
+    return changed
 
 
 def _demote_tasks_queue_state_for_commit_retry(
@@ -7906,6 +8024,41 @@ def _demote_completed_handoff_state_for_commit_retry(
 
     if wave_id or tracked_packet:
         if _demote_tasks_queue_state_for_commit_retry(
+            repo_root,
+            wave_id=wave_id,
+            tracked_packet=tracked_packet,
+        ):
+            _run(["git", "add", "--", "TASKS.md"], cwd=repo_root, timeout=30)
+            outcome["changed"].append("TASKS.md")
+    return outcome
+
+
+def _restore_pending_handoff_state_for_commit_ready(
+    repo_root: Path,
+    handoff: dict[str, Any],
+) -> dict[str, Any]:
+    """Restore retry-demoted packet/TASKS state before the final supervisor receipt."""
+    tracked_packet = str(handoff.get("tracked_packet") or "").strip()
+    wave_id = str(handoff.get("wave_id") or "").strip()
+    outcome: dict[str, Any] = {"changed": [], "errors": []}
+    if not tracked_packet:
+        return outcome
+    packet_path, packet_error = _safe_tracked_control_packet_path(
+        repo_root,
+        tracked_packet,
+    )
+    if packet_error:
+        outcome["errors"].append(packet_error)
+    elif packet_path is not None:
+        status = read_control_plane_packet_status(repo_root, tracked_packet)
+        if _is_commit_retry_pending_state(status):
+            restored_status = _commit_ready_state_from_pending_retry(str(status or ""))
+            if _rewrite_packet_status_line(packet_path, restored_status):
+                _run(["git", "add", "--", tracked_packet], cwd=repo_root, timeout=30)
+                outcome["changed"].append(tracked_packet)
+
+    if wave_id or tracked_packet:
+        if _restore_tasks_queue_state_for_commit_ready(
             repo_root,
             wave_id=wave_id,
             tracked_packet=tracked_packet,

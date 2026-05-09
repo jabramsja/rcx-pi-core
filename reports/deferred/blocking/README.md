@@ -6,12 +6,10 @@ promotion narratives.
 
 Active blockers:
 
-- `founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md` records the
-  active repo-code blocker from
-  `founder-ordered-redteam-repo-code-audit-2026-05-05`: JS Mu validation
-  accepts host objects that Python rejects at the JSON-compatible Mu boundary.
-  The 2026-05-07 deferred non-`/mu` truth sweep classifies it as
-  `MU_STRUCTURAL_HARD_STOP`; it remains active and unimplemented.
+- No active blocking deferred packets remain in this folder after PR #912
+  remediated the founder-ordered `/mu` structural blocking finding.
+- The former repo-code blocking source packet moved to
+  `reports/archive/deferred/founder_ordered_redteam_repo_code_audit_2026-05-05_blocking_closed-by-founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_PR912.md`.
 - The docs-audit blocking-lane packet recorded no blocking findings and was
   moved to
   `reports/archive/deferred/founder_ordered_redteam_docs_audit_2026-05-05_blocking_closed-by-docs-root-mu-docs-audit-closeout-2026-05-07.md`.

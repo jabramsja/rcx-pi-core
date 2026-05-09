@@ -1,7 +1,7 @@
 # Founder Ordered Redteam Repo Code Audit - Blocking Findings
 
 Date: 2026-05-05
-Status: CLASSIFIED - BLOCKING
+Status: CLOSED - REMEDIATED BY PR #912
 Task: [NEXT-CODEX-POST-REDTEAM]
 Wave ID: founder-ordered-redteam-repo-code-audit-2026-05-05
 Class: L4_ENABLER
@@ -11,6 +11,13 @@ Founder override: FOUNDER_OVERRIDE:founder-ordered-redteam-repo-code-audit-2026-
 
 This packet records blocking repo-code findings only. The audit wave did not
 implement remediation.
+
+Closure note (2026-05-09): PR #912 merged the bounded `/mu` structural
+blocking remediation for `B1 - JavaScript Mu Validation Admits Host Objects` and
+the same-wave pipeline repairs. The active source snapshot moved from
+`reports/deferred/blocking/` to this archive path; retained `/mu` structural
+non-blocking packets remain separate and are still hard-stopped before
+production implementation.
 
 ## Scope Executed
 

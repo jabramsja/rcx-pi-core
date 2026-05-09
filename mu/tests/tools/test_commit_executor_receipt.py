@@ -804,6 +804,147 @@ class TestReceiptChainEndToEnd:
         )
         assert tasks_file.read_text(encoding="utf-8") == original_tasks
 
+    def test_commit_retry_pending_state_restored_before_final_structural_supervisor(
+        self,
+        tmp_path,
+    ):
+        from collections import namedtuple
+        import types
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06"
+        packet_path = (
+            "reports/control_plane/"
+            "founder_ordered_redteam_mu_structural_blocking_remediation_2026-05-06.md"
+        )
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Packet\n\n"
+            f"Status: {commit_mod.COMMIT_RETRY_PENDING_STATUS}\n"
+            f"Wave ID: {wave_id}\n"
+            "Class: L4_STRUCTURAL\n",
+            encoding="utf-8",
+        )
+        (repo / "TASKS.md").write_text(
+            "## Ra\n"
+            "  6. **[FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-BLOCKING-REMEDIATION] "
+            "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT / LOCAL EVIDENCE "
+            "(2026-05-08).** "
+            "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            f"Wave ID: `{wave_id}`. "
+            "Class: `L4_STRUCTURAL`. "
+            f"Packet: `{packet_path}`.\n",
+            encoding="utf-8",
+        )
+        (repo / "file.py").write_text("# structural retry restoration\n", encoding="utf-8")
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(
+            json.dumps(
+                {
+                    "decision": "COMMIT_GO",
+                    "staged_sha": "fresh_sha_from_step6",
+                    "timestamp_utc": "2026-05-09T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+        captured_package = {}
+
+        def mock_supervisor(package_path, *args, **kwargs):
+            captured_package.update(json.loads(Path(package_path).read_text(encoding="utf-8")))
+            return SupervisorResult(
+                decision="COMMIT_GO",
+                summary="test",
+                receipt_path=sup_receipt_path,
+            )
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = mock_supervisor
+        mock_client.MetaBridgeClientError = Exception
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            wave_class="L4_STRUCTURAL",
+            files_to_stage=["file.py", packet_path, "TASKS.md"],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_run_post_commit_pipeline",
+            side_effect=lambda **kwargs: {**kwargs["result"], "status": "success"},
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "success", result
+        assert "restore_commit_retry_state" in result["steps_completed"]
+        assert set(result["commit_retry_state_restoration"]["changed"]) == {
+            packet_path,
+            "TASKS.md",
+        }
+        assert (
+            f"Status: {commit_mod.COMMIT_RETRY_RESTORED_STATUS}"
+            in packet_file.read_text(encoding="utf-8")
+        )
+        assert (
+            "IMPLEMENTED / LOCAL EVIDENCE (2026-05-08)"
+            in (repo / "TASKS.md").read_text(encoding="utf-8")
+        )
+        assert packet_path in captured_package["changed_files"]
+        assert "TASKS.md" in captured_package["changed_files"]
+        assert captured_package["wave_class"] == "L4_STRUCTURAL"
+
+    def test_commit_retry_restore_skips_handoff_without_tracked_packet(self, tmp_path):
+        from collections import namedtuple
+        import types
+
+        repo = _setup_repo(tmp_path)
+        (repo / "file.py").write_text("# legacy handoff\n", encoding="utf-8")
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(
+            json.dumps(
+                {
+                    "decision": "COMMIT_GO",
+                    "staged_sha": "fresh_sha_from_step6",
+                    "timestamp_utc": "2026-05-09T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+
+        def mock_supervisor(*args, **kwargs):
+            return SupervisorResult(
+                decision="COMMIT_GO",
+                summary="test",
+                receipt_path=sup_receipt_path,
+            )
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = mock_supervisor
+        mock_client.MetaBridgeClientError = Exception
+        handoff = _make_new_schema_handoff(
+            wave_id="legacy-wave",
+            files_to_stage=["file.py"],
+        )
+
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_run_post_commit_pipeline",
+            side_effect=lambda **kwargs: {**kwargs["result"], "status": "success"},
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "success", result
+        assert "restore_commit_retry_state" not in result["steps_completed"]
+        assert "commit_retry_state_restoration" not in result
+
     def test_tracker_note_refresh_retries_self_cleared_index_lock_once(self, tmp_path):
         import subprocess
 
