@@ -1,7 +1,7 @@
 # Post-Red-Team Structural Queue
 
 Date: 2026-03-20
-Status: COMPLETED (commit-ready, supervisor COMMIT_GO)
+Status: ACTIVE / ROUTING OPEN (commit-ready evidence recorded for current staged package)
 Task: [NEXT-CODEX-POST-REDTEAM]
 Wave ID: deferred-mu-structural-residue-reconciliation-2026-05-09
 Phase-A-Lock: LOCKED
@@ -13,6 +13,9 @@ control-surface/meta-bridge rollout (all 7 rollout steps complete)
 
 - Queue UNPARKED (2026-03-28). The tracked packet is this file:
   `reports/control_plane/post_redteam_structural_queue_2026-03-20.md`.
+- The packet header must remain routing-open while `[NEXT-CODEX-POST-REDTEAM]`
+  remains the active queue anchor; commit-ready evidence for a bounded wave does
+  not close this queue controller.
 - Current phase: OPEN only for separate bounded packets not already proven by
   landed or implemented work.
 - The historical Phase A structural gap sweep landed as findings. PR #701
