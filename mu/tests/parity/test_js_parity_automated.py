@@ -12,6 +12,7 @@ This test provides actual verification that JS behavior matches Python.
 
 import json
 import subprocess
+import textwrap
 import pytest
 from pathlib import Path
 
@@ -29,6 +30,18 @@ def _read_all_js_source() -> str:
     for f in sorted(js_dir.rglob("*.js")):
         parts.append(f.read_text())
     return "\n".join(parts)
+
+
+def _run_node_json(script: str):
+    result = subprocess.run(
+        ["node", "-e", textwrap.dedent(script)],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
 
 
 class TestJSTestSuitePasses:
@@ -892,6 +905,230 @@ class TestJSSecurityParity:
         assert js_response['max_width'] == MAX_MU_WIDTH, (
             f"MAX_WIDTH mismatch: Python={MAX_MU_WIDTH}, JS={js_response['max_width']}"
         )
+
+    def test_js_mu_boundary_rejects_object_and_array_host_artifacts(self):
+        rows = _run_node_json(
+            r"""
+            const t = require('./mu/host/js/core/types');
+            const { match } = require('./mu/host/js/core/bootstrap_core');
+
+            class EmptyClass {}
+            class KeyedClass { constructor() { this.a = 1; } }
+            class ArraySubclass extends Array {}
+
+            const customProto = Object.create({ inherited: true });
+            customProto.a = 1;
+
+            const hiddenToJSON = { a: 2 };
+            Object.defineProperty(hiddenToJSON, 'toJSON', {
+              enumerable: false,
+              value() { return { a: 1 }; },
+            });
+
+            const arraySubclass = new ArraySubclass(1);
+            const keyedArraySubclass = new ArraySubclass(1);
+            keyedArraySubclass.extra = 2;
+            const keyedArray = [1];
+            keyedArray.extra = 2;
+            const proxyThrowRecord = new Proxy({}, {
+              getPrototypeOf() { throw new Error('host trap'); },
+            });
+            const proxyThrowArray = new Proxy([1], {
+              getPrototypeOf() { throw new Error('host trap'); },
+            });
+            const proxyTrapRecord = new Proxy({}, {
+              getPrototypeOf() { throw new Error('host trap'); },
+              ownKeys() { return ['a']; },
+              getOwnPropertyDescriptor(_target, key) {
+                if (key === 'a') return { value: 1, enumerable: true, configurable: true };
+              },
+              get(_target, key) { return key === 'a' ? 1 : undefined; },
+            });
+
+            const rejected = [
+              ['date', new Date('2026-05-08T00:00:00Z'), {}, {}],
+              ['map', new Map([['a', 1]]), {}, {}],
+              ['empty_class', new EmptyClass(), {}, {}],
+              ['keyed_class', new KeyedClass(), { a: 1 }, { a: { var: 'x' } }],
+              ['custom_proto', customProto, { a: 1 }, { a: { var: 'x' } }],
+              ['hidden_to_json', hiddenToJSON, { a: 2 }, { a: { var: 'x' } }],
+              ['array_subclass', arraySubclass, [1], [{ var: 'x' }]],
+              ['keyed_array_subclass', keyedArraySubclass, [1], [{ var: 'x' }]],
+              ['keyed_array', keyedArray, [1], [{ var: 'x' }]],
+              ['bigint', 1n, {}, {}],
+              ['proxy_throw_record', proxyThrowRecord, { a: 1 }, { a: { var: 'x' } }],
+              ['proxy_throw_array', proxyThrowArray, [1], [{ var: 'x' }]],
+              ['proxy_trap_record', proxyTrapRecord, { a: 1 }, { a: { var: 'x' } }],
+            ];
+
+            const hashFns = ['muHash', 'muHashCached', 'muHashControl', 'muHashControlCached'];
+            function hashOutcome(fn, value) {
+              try {
+                t[fn](value, 'mu_host_object_boundary_gate');
+                return { rejected: false, error_code: null };
+              } catch (err) {
+                return { rejected: true, error_code: err.error_code || null };
+              }
+            }
+            function matchOutcome(pattern, input, budgeted) {
+              try {
+                const result = budgeted
+                  ? match(pattern, input, 0, false, t._STRUCTURAL_DEPTH_BUDGET)
+                  : match(pattern, input);
+                return { rejected: false, result };
+              } catch (err) {
+                return { rejected: true, error_code: err.error_code || null };
+              }
+            }
+
+            const validRecord = { a: [1, { b: false }], c: null };
+            const validArray = [1, { a: 2 }];
+
+            console.log(JSON.stringify({
+              rejected: rejected.map(([name, value, validPeer, patternForInvalidInput]) => ({
+                name,
+                defaultValid: t.isValidMu(value),
+                budgetValid: t.isValidMu(value, 0, undefined, t._STRUCTURAL_DEPTH_BUDGET),
+                hashes: Object.fromEntries(hashFns.map(fn => [fn, hashOutcome(fn, value)])),
+                matches: {
+                  defaultPattern: matchOutcome(value, validPeer, false),
+                  budgetPattern: matchOutcome(value, validPeer, true),
+                  defaultInput: matchOutcome(patternForInvalidInput, value, false),
+                  budgetInput: matchOutcome(patternForInvalidInput, value, true),
+                },
+              })),
+              accepted: {
+                record: {
+                  defaultValid: t.isValidMu(validRecord),
+                  budgetValid: t.isValidMu(validRecord, 0, undefined, t._STRUCTURAL_DEPTH_BUDGET),
+                  hash: t.muHash(validRecord),
+                  cached: t.muHashCached(validRecord),
+                  control: t.muHashControl(validRecord),
+                  controlCached: t.muHashControlCached(validRecord),
+                  matchDefault: matchOutcome({ a: { var: 'x' }, c: null }, validRecord, false),
+                  matchBudget: matchOutcome({ a: { var: 'x' }, c: null }, validRecord, true),
+                },
+                array: {
+                  defaultValid: t.isValidMu(validArray),
+                  budgetValid: t.isValidMu(validArray, 0, undefined, t._STRUCTURAL_DEPTH_BUDGET),
+                  hash: t.muHash(validArray),
+                  cached: t.muHashCached(validArray),
+                  control: t.muHashControl(validArray),
+                  controlCached: t.muHashControlCached(validArray),
+                },
+              },
+            }));
+            """
+        )
+
+        assert {row["name"] for row in rows["rejected"]} == {
+            "date",
+            "map",
+            "empty_class",
+            "keyed_class",
+            "custom_proto",
+            "hidden_to_json",
+            "array_subclass",
+            "keyed_array_subclass",
+            "keyed_array",
+            "bigint",
+            "proxy_throw_record",
+            "proxy_throw_array",
+            "proxy_trap_record",
+        }
+        for row in rows["rejected"]:
+            assert row["defaultValid"] is False, row
+            assert row["budgetValid"] is False, row
+            for outcome in row["hashes"].values():
+                assert outcome == {"rejected": True, "error_code": "input.invalid_type"}
+            for outcome in row["matches"].values():
+                assert outcome == {"rejected": True, "error_code": "input.invalid_type"}
+
+        record = rows["accepted"]["record"]
+        assert record["matchDefault"] == {
+            "rejected": False,
+            "result": {"x": [1, {"b": False}]},
+        }
+        assert record["matchBudget"] == record["matchDefault"]
+
+        for accepted in rows["accepted"].values():
+            assert accepted["defaultValid"] is True
+            assert accepted["budgetValid"] is True
+            assert len(accepted["hash"]) == 64
+            assert accepted["hash"] == accepted["cached"]
+            assert len(accepted["control"]) == 64
+            assert accepted["control"] == accepted["controlCached"]
+
+    def test_js_mu_hash_cached_rejects_hidden_to_json_without_poisoning_cache(self):
+        row = _run_node_json(
+            r"""
+            const t = require('./mu/host/js/core/types');
+
+            const poisoned = { a: 2 };
+            Object.defineProperty(poisoned, 'toJSON', {
+              enumerable: false,
+              value() { return { a: 1 }; },
+            });
+
+            function rejectOutcome(fn, value) {
+              try {
+                t[fn](value);
+                return { rejected: false, error_code: null };
+              } catch (err) {
+                return { rejected: true, error_code: err.error_code || null };
+              }
+            }
+
+            const poisonedOutcome = rejectOutcome('muHashCached', poisoned);
+            const plain1 = { a: 1 };
+            const plain2 = { a: 2 };
+            const plain1Hash = t.muHash(plain1);
+            const plain2Hash = t.muHash(plain2);
+            const cachedPlain1 = t.muHashCached(plain1);
+            const cachedPlain2 = t.muHashCached(plain2);
+
+            console.log(JSON.stringify({
+              poisonedValid: t.isValidMu(poisoned),
+              poisonedOutcome,
+              cachedPlain1EqualsHashPlain1: cachedPlain1 === plain1Hash,
+              cachedPlain1EqualsHashPlain2: cachedPlain1 === plain2Hash,
+              cachedPlain2EqualsHashPlain2: cachedPlain2 === plain2Hash,
+              plainHashesDiffer: plain1Hash !== plain2Hash,
+              muEqualPlain1Plain2: t.muEqual(plain1, plain2),
+            }));
+            """
+        )
+
+        assert row == {
+            "poisonedValid": False,
+            "poisonedOutcome": {"rejected": True, "error_code": "input.invalid_type"},
+            "cachedPlain1EqualsHashPlain1": True,
+            "cachedPlain1EqualsHashPlain2": False,
+            "cachedPlain2EqualsHashPlain2": True,
+            "plainHashesDiffer": True,
+            "muEqualPlain1Plain2": False,
+        }
+
+    def test_python_exact_compound_boundary_remains_parity_reference(self):
+        from rcx_pi.selfhost.mu_type import is_mu, mu_hash
+
+        class ArbitraryObject:
+            pass
+
+        class DictSubclass(dict):
+            pass
+
+        class ListSubclass(list):
+            pass
+
+        for value in [ArbitraryObject(), DictSubclass({"a": 1}), ListSubclass([1])]:
+            assert is_mu(value) is False
+            with pytest.raises(TypeError):
+                mu_hash(value)
+
+        for value in [{"a": 1}, [1, {"a": 2}]]:
+            assert is_mu(value) is True
+            assert len(mu_hash(value)) == 64
 
 
 class TestJSRecurrenceParity:

@@ -1791,6 +1791,110 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert indicator_path in packet_text
         assert "No indicator file is in scope" not in packet_text
 
+    def test_reentry_supervisor_package_refreshes_wave_class_from_live_packet(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / ".agent_bus").mkdir()
+        (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+        wave_id = "phase-b-reentry-structural-class-2026-05-08"
+        plan_path = "reports/control_plane/plan.md"
+        plan = repo / plan_path
+
+        def packet_text(wave_class: str) -> str:
+            return (
+                "# Plan\n"
+                f"Wave ID: {wave_id}\n"
+                "Phase-A-Lock: LOCKED\n"
+                "Status: ACTIVE\n"
+                "Task: [PIPELINE-RECOVERY]\n"
+                f"Class: {wave_class}\n"
+                "Target Gate: G8\n"
+                f"FOUNDER_OVERRIDE:{wave_id}\n"
+            )
+
+        plan.write_text(packet_text("L4_ENABLER"), encoding="utf-8")
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        (repo / indicator_path).parent.mkdir(parents=True)
+        (repo / indicator_path).write_text(json.dumps({"wave_id": wave_id}) + "\n", encoding="utf-8")
+        captured_packages: list[dict[str, object]] = []
+
+        def supervisor_side(_repo_root, package_path, **_kwargs):
+            captured_packages.append(json.loads(Path(package_path).read_text(encoding="utf-8")))
+            if len(captured_packages) == 1:
+                return {
+                    "exit_code": 0,
+                    "parsed": {
+                        "decision": "NEEDS_PHASE_B",
+                        "summary": "reclassify runtime-changing package as structural",
+                        "status": "success",
+                        "findings": [],
+                    },
+                    "receipt_path": "",
+                }
+            return {
+                "exit_code": 0,
+                "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            }
+
+        mock_impl = _make_mock_impl()
+        impl_success = dict(mock_impl.invoke_implementer.return_value)
+
+        def implementer_side(*_args, **_kwargs):
+            if mock_impl.invoke_implementer.call_count == 2:
+                plan.write_text(packet_text("L4_STRUCTURAL"), encoding="utf-8")
+            return impl_success
+
+        mock_impl.invoke_implementer.side_effect = implementer_side
+        routing = {
+            **_VALID_ROUTING_RECORD,
+            "task_id": "[PIPELINE-RECOVERY]",
+            "wave_name": wave_id,
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+        }
+        changed = [
+            "mu/tools/executors/phase_b_executor.py",
+            "mu/tests/tools/test_phase_b_executor.py",
+            indicator_path,
+            plan_path,
+        ]
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "load_routing_record", return_value=routing), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=list(changed)), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=list(changed)), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files: list(files)), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0,
+                 "passed": True,
+                 "stdout": "",
+                 "stderr": "",
+             }), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=[
+                 {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1"},
+                 {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j2"},
+             ]), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=False), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor_side), \
+             patch.object(
+                 pb_mod,
+                 "prepare_commit_handoff",
+                 return_value=repo / ".agent_bus" / "handoff.json",
+             ) as mock_handoff:
+            result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
+
+        assert result["status"] == "commit_ready", result
+        assert len(captured_packages) == 2
+        assert captured_packages[0]["wave_class"] == "L4_ENABLER"
+        reentry_package = captured_packages[-1]
+        assert reentry_package["wave_class"] == "L4_STRUCTURAL"
+        assert "founder_override_token" not in reentry_package
+        assert mock_handoff.call_args.kwargs["wave_class"] == "L4_STRUCTURAL"
+
     def test_l4_indicator_collection_reruns_after_tracker_only_crash(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()

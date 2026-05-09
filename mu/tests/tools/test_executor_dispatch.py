@@ -672,6 +672,97 @@ class TestDispatcherFreshnessRefresh:
         )
         assert calls == []
 
+    def test_dispatch_derives_missing_tracked_packet_from_founder_tasks_before_phase_a(
+        self, tmp_path, monkeypatch,
+    ):
+        repo, _ = _init_builder_repo(tmp_path)
+        wave_id = "founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06"
+        packet_rel = (
+            "reports/control_plane/"
+            "founder_ordered_redteam_mu_structural_blocking_remediation_2026-05-06.md"
+        )
+        (repo / packet_rel).write_text(
+            "# packet\n\nStatus: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT\n",
+            encoding="utf-8",
+        )
+        (repo / "TASKS.md").write_text(
+            (
+                "## Ra\n"
+                "  6. **[FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-BLOCKING-REMEDIATION] "
+                "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT / LOCAL EVIDENCE "
+                "(2026-05-08).** Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+                f"Wave ID: `{wave_id}`. Packet: `{packet_rel}`.\n"
+            ),
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "founder queue route without tracked packet",
+            "wave_name": wave_id,
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "next_candidates": [{"candidate": wave_id, "bounded": True}],
+        }
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout='{"status":"success"}', stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_continue_successful_executor_chain",
+            lambda *a, **k: {"status": "success", "executor": "phase_a_executor"},
+        )
+
+        result = dispatch_mod.dispatch(record, repo_root=repo, skip_freshness=True)
+
+        assert result["status"] == "success"
+        assert calls
+        assert calls[0][calls[0].index("--plan-name") + 1] == Path(packet_rel).stem
+
+    def test_dispatch_stops_completed_tasks_state_even_when_record_lacks_tracked_packet(
+        self, tmp_path, monkeypatch,
+    ):
+        repo, _ = _init_builder_repo(tmp_path)
+        wave_id = "founder-ordered-redteam-docs-non-blocking-remediation-2026-05-06"
+        packet_rel = "reports/control_plane/docs_packet.md"
+        (repo / packet_rel).write_text(
+            "# packet\n\nStatus: QUEUED - STALE HEADER\n",
+            encoding="utf-8",
+        )
+        (repo / "TASKS.md").write_text(
+            (
+                "## Ra\n"
+                "  4. **[FOUNDER-ORDERED-REDTEAM-DOCS-NON-BLOCKING-REMEDIATION] "
+                "IMPLEMENTED / LOCAL EVIDENCE (2026-05-06).** "
+                "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+                f"Wave ID: `{wave_id}`. Packet: `{packet_rel}`.\n"
+            ),
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "completed task route without tracked packet",
+            "wave_name": wave_id,
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "next_candidates": [{"candidate": wave_id, "bounded": True}],
+        }
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout='{"status":"success"}', stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+
+        result = dispatch_mod.dispatch(record, repo_root=repo, skip_freshness=True)
+
+        assert result["status"] == "stopped"
+        assert "already-complete bounded candidate" in result["message"]
+        assert result["completed_candidates"][0]["tracked_packet"] == packet_rel
+        assert calls == []
+
     def test_dispatch_ignores_completed_unbounded_candidate_when_bounded_open_exists(
         self, tmp_path, monkeypatch,
     ):
@@ -824,6 +915,86 @@ class TestDispatcherFreshnessRefresh:
 
         assert result["status"] == "success"
         assert result["decision"] == "ROUTE_PHASE_A"
+        assert auto_refresh_calls
+
+    def test_canonical_inline_record_matches_before_tracked_packet_enrichment(
+        self, tmp_path, monkeypatch,
+    ):
+        canonical_dir = tmp_path / ".agent_bus" / "meta"
+        canonical_dir.mkdir(parents=True)
+        wave_id = "founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06"
+        packet_rel = (
+            "reports/control_plane/"
+            "founder_ordered_redteam_mu_structural_blocking_remediation_2026-05-06.md"
+        )
+        (tmp_path / "reports" / "control_plane").mkdir(parents=True)
+        (tmp_path / packet_rel).write_text(
+            "# packet\n\nStatus: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "TASKS.md").write_text(
+            (
+                "## Ra\n"
+                "  6. **[FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-BLOCKING-REMEDIATION] "
+                "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT / LOCAL EVIDENCE "
+                "(2026-05-08).** Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+                f"Wave ID: `{wave_id}`. Packet: `{packet_rel}`.\n"
+            ),
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "canonical record missing tracked_packet before enrichment",
+            "wave_name": wave_id,
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "state_sha": "stale-state",
+            "next_candidates": [{"candidate": wave_id, "bounded": True}],
+        }
+        (canonical_dir / "post_merge_routing.json").write_text(
+            json.dumps(record),
+            encoding="utf-8",
+        )
+        refreshed_record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "refreshed canonical record",
+            "wave_name": wave_id,
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "state_sha": "fresh-state",
+            "next_candidates": [{"candidate": wave_id, "bounded": True}],
+        }
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "validate_routing_record_freshness",
+            lambda *a, **k: (False, "stale for proof"),
+        )
+        auto_refresh_calls = []
+
+        def fake_refresh(*args, **kwargs):
+            auto_refresh_calls.append((args, kwargs))
+            return True, refreshed_record
+
+        monkeypatch.setattr(dispatch_mod, "_auto_refresh_routing", fake_refresh)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_run_executor_in_group",
+            lambda args, cwd, timeout: subprocess.CompletedProcess(
+                args, 0, stdout='{"status":"success"}', stderr=""
+            ),
+        )
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_continue_successful_executor_chain",
+            lambda *a, **k: {
+                "status": "success",
+                "decision": refreshed_record["decision"],
+                "executor": "phase_a_executor",
+            },
+        )
+
+        result = dispatch_mod.dispatch(record, repo_root=tmp_path)
+
+        assert result["status"] == "success"
         assert auto_refresh_calls
 
     def test_stale_empty_tracker_update_refreshes_before_hold(
@@ -5265,16 +5436,10 @@ class TestReceiptAndCommit:
             ).stdout.splitlines()
         )
         assert durable_handoff["pre_commit_receipt_path"] == stale_receipt
-        assert (
-            durable_handoff["evidence_handles"]["pre_commit_receipt"]
-            == ".agent_bus/meta/pre_commit_receipts/fresh.json"
-        )
-        receipt = json.loads(
-            (repo / durable_handoff["evidence_handles"]["pre_commit_receipt"]).read_text(
-                encoding="utf-8",
-            )
-        )
-        assert receipt["staged_sha"] == _compute_staged_sha(repo)
+        assert result["commit_retry_state_demotion"]["changed"] == [packet_rel]
+        assert result["commit_retry_state_demotion"]["handoff_receipt_invalidated"] is True
+        assert "pre_commit_receipt" not in durable_handoff["evidence_handles"]
+        assert (repo / ".agent_bus/meta/pre_commit_receipts/fresh.json").is_file()
 
     def test_step7_reads_supervisor_receipt_decision_only(self, tmp_path):
         """Step 7 validates the full receipt chain but does NOT check staged_sha.

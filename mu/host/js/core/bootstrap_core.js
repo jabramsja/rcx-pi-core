@@ -25,6 +25,15 @@ const { assertNotLambdaCalculus } = require('./security');
 function match(pattern, input, _depth = 0, _validated = false, _budget = _NO_BUDGET) {
   // --- Structural budget path (opt-in) ---
   if (_budget !== _NO_BUDGET) {
+    if (_depth === 0 && !_validated) {
+      if (!isValidMu(pattern)) {
+        throw new RcxError('input.invalid_type', 'Invalid Mu pattern in match()');
+      }
+      if (!isValidMu(input)) {
+        throw new RcxError('input.invalid_type', 'Invalid Mu input in match()');
+      }
+    }
+
     const [ok, remaining] = consumeBudget(_budget);
     if (!ok) return NO_MATCH;
 
@@ -39,7 +48,7 @@ function match(pattern, input, _depth = 0, _validated = false, _budget = _NO_BUD
       if (!Array.isArray(input) || pattern.length !== input.length) return NO_MATCH;
       const bindings = Object.create(null);
       for (let i = 0; i < pattern.length; i++) {
-        const sub = match(pattern[i], input[i], _depth, false, remaining);
+        const sub = match(pattern[i], input[i], _depth, true, remaining);
         if (sub === NO_MATCH) return NO_MATCH;
         for (const [k, v] of Object.entries(sub)) {
           if (Object.hasOwn(bindings, k) && muHashCached(bindings[k]) !== muHashCached(v)) return NO_MATCH;
@@ -63,7 +72,7 @@ function match(pattern, input, _depth = 0, _validated = false, _budget = _NO_BUD
       }
       const bindings = Object.create(null);
       for (const k of pKeys) {
-        const sub = match(pattern[k], input[k], _depth, false, remaining);
+        const sub = match(pattern[k], input[k], _depth, true, remaining);
         if (sub === NO_MATCH) return NO_MATCH;
         for (const [bk, bv] of Object.entries(sub)) {
           if (Object.hasOwn(bindings, bk) && muHashCached(bindings[bk]) !== muHashCached(bv)) return NO_MATCH;
