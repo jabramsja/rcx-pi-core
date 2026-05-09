@@ -2,14 +2,14 @@
 
 Date: 2026-05-06
 Plan rewrite date: 2026-05-08
-Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT
+Status: CLOSED - MERGED BY PR #912 (2026-05-09)
 Task: [NEXT-CODEX-POST-REDTEAM]
 Wave ID: founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06
 Phase-A-Lock: LOCKED
 Class: L4_STRUCTURAL
 Category: /mu structural
 Severity: BLOCKING
-Source audit packet: `reports/deferred/blocking/founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md`
+Source audit packet: `reports/archive/deferred/founder_ordered_redteam_repo_code_audit_2026-05-05_blocking_closed-by-founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_PR912.md`
 Founder override: FOUNDER_OVERRIDE:founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06
 Source queue override: FOUNDER_OVERRIDE:founder-ordered-redteam-remediation-queue-organization-2026-05-05
 
@@ -184,7 +184,7 @@ for the bounded scope below.
   audit packet, and finding inventory for `B1 - JavaScript Mu Validation Admits
   Host Objects`.
 - The source audit packet
-  `reports/deferred/blocking/founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md`
+  `reports/archive/deferred/founder_ordered_redteam_repo_code_audit_2026-05-05_blocking_closed-by-founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_PR912.md`
   preserves the original defect evidence:
   - Lines 36-43: JavaScript accepts any `typeof === "object"` value before key
     validation, with no plain-object or prototype restriction.
@@ -420,3 +420,36 @@ for the bounded scope below.
   mu/tests/parity/test_js_parity_automated.py -k "host_artifacts or
   poisoning_cache or exact_compound_boundary" --tb=short` exits `0` with
   `1 passed in 0.13s` plus `3 passed, 302 deselected in 0.32s`.
+
+## PR #912 Closeout State Repair (2026-05-09)
+
+- Reproduced closeout gap: PR #912 merged successfully, but this packet and the
+  matching `TASKS.md` queue entry still carried `IMPLEMENTED - PIPELINE REPAIR
+  PENDING COMMIT`, so the mechanically refreshed post-merge package still named
+  this already-merged structural blocking packet as the next open queue packet.
+- Root-cause evidence: `mu/tools/executors/commit_executor.py` demotes
+  completed packet/TASKS state for post-receipt, pre-commit failures, while the
+  final commit path did not restore that retry-demoted state before the fresh
+  pre-commit supervisor receipt. `refresh_commit_path_packet_truth()` also
+  returns early for non-`L4_ENABLER` handoffs, so this `L4_STRUCTURAL` retry did
+  not get an equivalent packet truth refresh.
+- Mechanical fix: `commit_executor.py` now restores retry-demoted packet and
+  `TASKS.md` state to `IMPLEMENTED / LOCAL EVIDENCE` before the final
+  pre-commit supervisor package is minted, stages both files, persists the
+  refreshed handoff scope, and records `restore_commit_retry_state` in the
+  completed step list.
+- Closeout sync: this packet now records `CLOSED - MERGED BY PR #912
+  (2026-05-09)`, the matching `TASKS.md` entry is closed, and the source
+  blocking audit snapshot moved from `reports/deferred/blocking/` to
+  `reports/archive/deferred/`.
+- Regression: `mu/tests/tools/test_commit_executor_receipt.py::TestReceiptChainEndToEnd::test_commit_retry_pending_state_restored_before_final_structural_supervisor`
+  proves an `L4_STRUCTURAL` retry-demoted packet/TASKS pair is restored before
+  the supervisor package sees the final staged state.
+- Local evidence: `PYTHONHASHSEED=0 python3 -m pytest -q
+  mu/tests/tools/test_commit_executor_receipt.py::TestReceiptChainEndToEnd::test_commit_retry_pending_state_restored_before_final_structural_supervisor
+  mu/tests/tools/test_commit_executor_receipt.py::TestReceiptChainEndToEnd::test_pre_commit_failure_demotes_completed_packet_and_task_for_dispatch_retry
+  mu/tests/tools/test_commit_executor_receipt.py::TestReceiptChainEndToEnd::test_pre_validation_failure_does_not_demote_completed_packet_state
+  --tb=short` exits `0` with `3 passed in 1.23s`; `python3 -m py_compile
+  mu/tools/executors/commit_executor.py
+  mu/tests/tools/test_commit_executor_receipt.py` exits `0`;
+  `./tools/checks/check_docs_consistency.sh` exits `0` with all checks passed.

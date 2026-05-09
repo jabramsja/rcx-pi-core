@@ -19,22 +19,23 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-08 generated bridge closure):
+Current inventory refresh (2026-05-09 structural blocking closeout):
 
 - Evidence commands:
   `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' ! -name README.md -print | sort`.
-- `reports/deferred/blocking/` currently contains `README.md` plus one active
-  blocker packet:
-  `founder_ordered_redteam_repo_code_audit_2026-05-05_blocking.md`. The packet
-  remains a `/mu` structural hard stop; this inventory refresh documents status
-  only and does not route or implement `/mu` structural remediation.
+- `reports/deferred/blocking/` currently contains `README.md` only; no active
+  blocking deferred packets remain after PR #912 closed the founder-ordered
+  `/mu` structural blocking finding.
+- The closed founder-ordered repo-code blocking source packet moved to
+  `reports/archive/deferred/founder_ordered_redteam_repo_code_audit_2026-05-05_blocking_closed-by-founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_PR912.md`.
 - The resolved mu preproduction gate-theater blocker was moved to
   `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`.
   The 2026-05-05 follow-up aligns the redteam startup guard with the curated
   theater-risk ratchet; `/mu` production-forward movement is no longer blocked
   by this gate-theater finding.
-- `reports/deferred/non_blocking/` currently contains `README.md` plus three
+- `reports/deferred/non_blocking/` currently contains `README.md` plus four
   active or partially active `/mu` structural advisory packets:
+  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`,
   `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
   `redteam_2026-03-14_repo_non_blockers.md`, and
   `repo_truth_non_blockers_2026-03-14.md`.
@@ -78,7 +79,7 @@ Current inventory refresh (2026-05-08 generated bridge closure):
   low-severity README wording finding. The 2026-05-07 deferred folder cleanup
   also archived the tests/tooling generated remediation bridge packets whose
   stale wording and evidence-command findings no longer reproduce.
-- The current active non-blocking inventory is `README.md` plus three active or
+- The current active non-blocking inventory is `README.md` plus four active or
   partially active retained `/mu` structural advisory packets.
 
 Closed-parent exclusions for this index:

@@ -135,3 +135,19 @@ Archived source snapshots for extracted non-blocking residue live in:
   suffixes after bounded verification.
 - Remaining active non-blocking deferred packets are `/mu` structural advisory
   records only; this closure did not implement `/mu` structural remediation.
+
+2026-05-09 structural blocking closeout note:
+
+- Evidence command:
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
+- Current non-blocking inventory after PR #912 structural blocking closeout:
+  `README.md` plus four active or partially active `/mu` structural advisory
+  packets:
+  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`,
+  `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
+  `redteam_2026-03-14_repo_non_blockers.md`, and
+  `repo_truth_non_blockers_2026-03-14.md`.
+- The blocking source packet for `B1 - JavaScript Mu Validation Admits Host
+  Objects` moved to `reports/archive/deferred/`; the retained items here are
+  non-blocking `/mu` structural advisory records and remain hard-stopped before
+  production implementation.
