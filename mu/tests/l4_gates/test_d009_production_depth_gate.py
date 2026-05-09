@@ -374,3 +374,149 @@ class TestCrossSubstrateBudgetParity:
         assert _match_inner({"a": {"var": "x"}}, {"a": 42}, 0, _budget=tiny_py) is NO_MATCH
 
         assert js_results["budget_is_mu"] is True
+
+
+class TestJSMuHostObjectBoundaryGate:
+    """JS Mu boundary rejects host artifacts in both validation paths."""
+
+    def test_js_host_artifacts_reject_before_budget_or_hash_semantics(self):
+        js_code = """
+        'use strict';
+        const t = require('./mu/host/js/core/types');
+        const { match } = require('./mu/host/js/core/bootstrap_core');
+
+        class EmptyClass {}
+        class KeyedClass { constructor() { this.a = 1; } }
+        class ArraySubclass extends Array {}
+
+        const customProto = Object.create({ inherited: true });
+        customProto.a = 1;
+
+        const hiddenToJSON = { a: 2 };
+        Object.defineProperty(hiddenToJSON, 'toJSON', {
+          enumerable: false,
+          value() { return { a: 1 }; },
+        });
+
+        const arraySubclass = new ArraySubclass(1);
+        const keyedArraySubclass = new ArraySubclass(1);
+        keyedArraySubclass.extra = 2;
+        const keyedArray = [1];
+        keyedArray.extra = 2;
+        const proxyThrowRecord = new Proxy({}, {
+          getPrototypeOf() { throw new Error('host trap'); },
+        });
+        const proxyThrowArray = new Proxy([1], {
+          getPrototypeOf() { throw new Error('host trap'); },
+        });
+        const proxyTrapRecord = new Proxy({}, {
+          getPrototypeOf() { throw new Error('host trap'); },
+          ownKeys() { return ['a']; },
+          getOwnPropertyDescriptor(_target, key) {
+            if (key === 'a') return { value: 1, enumerable: true, configurable: true };
+          },
+          get(_target, key) { return key === 'a' ? 1 : undefined; },
+        });
+
+        const cases = [
+          ['date', new Date('2026-05-08T00:00:00Z'), {}, {}],
+          ['map', new Map([['a', 1]]), {}, {}],
+          ['empty_class', new EmptyClass(), {}, {}],
+          ['keyed_class', new KeyedClass(), { a: 1 }, { a: { var: 'x' } }],
+          ['custom_proto', customProto, { a: 1 }, { a: { var: 'x' } }],
+          ['hidden_to_json', hiddenToJSON, { a: 2 }, { a: { var: 'x' } }],
+          ['array_subclass', arraySubclass, [1], [{ var: 'x' }]],
+          ['keyed_array_subclass', keyedArraySubclass, [1], [{ var: 'x' }]],
+          ['keyed_array', keyedArray, [1], [{ var: 'x' }]],
+          ['bigint', 1n, {}, {}],
+          ['proxy_throw_record', proxyThrowRecord, { a: 1 }, { a: { var: 'x' } }],
+          ['proxy_throw_array', proxyThrowArray, [1], [{ var: 'x' }]],
+          ['proxy_trap_record', proxyTrapRecord, { a: 1 }, { a: { var: 'x' } }],
+        ];
+
+        const hashFns = ['muHash', 'muHashCached', 'muHashControl', 'muHashControlCached'];
+        function hashOutcome(fn, value) {
+          try {
+            t[fn](value, 'l4_host_object_boundary_gate');
+            return { rejected: false, error_code: null };
+          } catch (err) {
+            return { rejected: true, error_code: err.error_code || null };
+          }
+        }
+        function matchOutcome(pattern, input, budgeted) {
+          try {
+            const result = budgeted
+              ? match(pattern, input, 0, false, t._STRUCTURAL_DEPTH_BUDGET)
+              : match(pattern, input);
+            return { rejected: false, result };
+          } catch (err) {
+            return { rejected: true, error_code: err.error_code || null };
+          }
+        }
+
+        const accepted = { a: [1, { b: false }], c: null };
+        console.log(JSON.stringify({
+          rejected: cases.map(([name, value, validPeer, patternForInvalidInput]) => ({
+            name,
+            defaultValid: t.isValidMu(value),
+            budgetValid: t.isValidMu(value, 0, undefined, t._STRUCTURAL_DEPTH_BUDGET),
+            hashes: Object.fromEntries(hashFns.map(fn => [fn, hashOutcome(fn, value)])),
+            matches: {
+              defaultPattern: matchOutcome(value, validPeer, false),
+              budgetPattern: matchOutcome(value, validPeer, true),
+              defaultInput: matchOutcome(patternForInvalidInput, value, false),
+              budgetInput: matchOutcome(patternForInvalidInput, value, true),
+            },
+          })),
+          accepted: {
+            defaultValid: t.isValidMu(accepted),
+            budgetValid: t.isValidMu(accepted, 0, undefined, t._STRUCTURAL_DEPTH_BUDGET),
+            hash: t.muHash(accepted),
+            cached: t.muHashCached(accepted),
+            matchDefault: matchOutcome({ a: { var: 'x' }, c: null }, accepted, false),
+            matchBudget: matchOutcome({ a: { var: 'x' }, c: null }, accepted, true),
+          },
+        }));
+        """
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+            timeout=30,
+        )
+        assert result.returncode == 0, f"JS failed:\n{result.stderr}"
+
+        import json
+        results = json.loads(result.stdout.strip())
+        assert {row["name"] for row in results["rejected"]} == {
+            "date",
+            "map",
+            "empty_class",
+            "keyed_class",
+            "custom_proto",
+            "hidden_to_json",
+            "array_subclass",
+            "keyed_array_subclass",
+            "keyed_array",
+            "bigint",
+            "proxy_throw_record",
+            "proxy_throw_array",
+            "proxy_trap_record",
+        }
+        for row in results["rejected"]:
+            assert row["defaultValid"] is False, row
+            assert row["budgetValid"] is False, row
+            for outcome in row["hashes"].values():
+                assert outcome == {"rejected": True, "error_code": "input.invalid_type"}
+            for outcome in row["matches"].values():
+                assert outcome == {"rejected": True, "error_code": "input.invalid_type"}
+
+        assert results["accepted"]["defaultValid"] is True
+        assert results["accepted"]["budgetValid"] is True
+        assert results["accepted"]["hash"] == results["accepted"]["cached"]
+        assert results["accepted"]["matchDefault"] == {
+            "rejected": False,
+            "result": {"x": [1, {"b": False}]},
+        }
+        assert results["accepted"]["matchBudget"] == results["accepted"]["matchDefault"]

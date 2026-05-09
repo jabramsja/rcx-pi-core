@@ -7257,6 +7257,7 @@ def run_phase_b(
             }
 
         # Refresh ALL supervisor package truth for re-entry
+        supervisor_package["wave_class"] = wave_class
         supervisor_package["changed_files"] = changed_files
         supervisor_package["fenced_files"] = _collect_fenced_dirty_files(repo_root, changed_files)
         supervisor_package["deferred_items"] = _collect_supervisor_deferred_items(

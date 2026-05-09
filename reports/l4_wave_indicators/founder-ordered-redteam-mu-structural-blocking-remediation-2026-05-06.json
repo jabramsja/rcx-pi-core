@@ -1,0 +1,24 @@
+{
+  "wave_id": "founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06",
+  "repeat_run_speedup_ratio": 1.02158,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.445793,
+  "repeat_run_raw_seconds": [
+    0.455413,
+    0.445793
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.455413
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.901206
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-09T00:08:24Z",
+  "collector_version": "2.2.0"
+}

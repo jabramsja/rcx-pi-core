@@ -662,6 +662,148 @@ class TestReceiptChainEndToEnd:
         assert f"  - `reports/l4_wave_indicators/{wave_id}.json`" in packet_text
         assert "  - `TASKS.md`" in packet_text
 
+    def test_pre_commit_failure_demotes_completed_packet_and_task_for_dispatch_retry(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06"
+        packet_path = (
+            "reports/control_plane/"
+            "founder_ordered_redteam_mu_structural_blocking_remediation_2026-05-06.md"
+        )
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Packet\n\n"
+            "Status: COMPLETED (commit-ready, supervisor COMMIT_GO)\n"
+            f"Wave ID: {wave_id}\n",
+            encoding="utf-8",
+        )
+        (repo / "TASKS.md").write_text(
+            "## Ra\n"
+            "  6. **[FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-BLOCKING-REMEDIATION] "
+            "IMPLEMENTED / LOCAL EVIDENCE (2026-05-08).** "
+            "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            f"Wave ID: `{wave_id}`. "
+            f"Packet: `{packet_path}`.\n",
+            encoding="utf-8",
+        )
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            tracked_packet=packet_path,
+            files_to_stage=[packet_path, "TASKS.md"],
+            scope_items=[packet_path],
+        )
+        handoff_path = repo / ".agent_bus" / "executors" / "phase_b_handoff.json"
+        handoff_path.parent.mkdir(parents=True, exist_ok=True)
+        handoff_path.write_text(
+            json.dumps({
+                **handoff,
+                "evidence_handles": {
+                    "indicator": f"reports/l4_wave_indicators/{wave_id}.json",
+                    "pre_commit_receipt": ".agent_bus/meta/pre_commit_receipts/fresh.json",
+                },
+            }, indent=2)
+            + "\n",
+            encoding="utf-8",
+        )
+
+        with patch.object(
+            commit_mod,
+            "_run_commit_pipeline_impl",
+            return_value={
+                "status": "error",
+                "step": "run_pre_commit_script",
+                "errors": ["pre-commit-doc-check failed"],
+                "steps_completed": [
+                    "validate_inputs",
+                    "ensure_feature_branch",
+                    "build_and_run_supervisor",
+                    "validate_receipt",
+                ],
+            },
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "error"
+        assert set(result["commit_retry_state_demotion"]["changed"]) == {
+            packet_path,
+            "TASKS.md",
+        }
+        assert result["commit_retry_state_demotion"]["handoff_receipt_invalidated"] is True
+        assert (
+            f"Status: {commit_mod.COMMIT_RETRY_PENDING_STATUS}"
+            in packet_file.read_text(encoding="utf-8")
+        )
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        assert (
+            "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT / LOCAL EVIDENCE "
+            "(2026-05-08)"
+        ) in tasks_text
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.splitlines()
+        assert packet_path in staged
+        assert "TASKS.md" in staged
+        durable_handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+        assert durable_handoff["pre_commit_receipt_path"] == handoff["pre_commit_receipt_path"]
+        assert "pre_commit_receipt" not in durable_handoff["evidence_handles"]
+
+    def test_pre_validation_failure_does_not_demote_completed_packet_state(self, tmp_path):
+        repo = _setup_repo(tmp_path)
+        wave_id = "founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06"
+        packet_path = (
+            "reports/control_plane/"
+            "founder_ordered_redteam_mu_structural_blocking_remediation_2026-05-06.md"
+        )
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Packet\n\n"
+            "Status: COMPLETED (commit-ready, supervisor COMMIT_GO)\n"
+            f"Wave ID: {wave_id}\n",
+            encoding="utf-8",
+        )
+        tasks_file = repo / "TASKS.md"
+        original_tasks = (
+            "## Ra\n"
+            "  6. **[FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-BLOCKING-REMEDIATION] "
+            "IMPLEMENTED / LOCAL EVIDENCE (2026-05-08).** "
+            "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            f"Wave ID: `{wave_id}`. "
+            f"Packet: `{packet_path}`.\n"
+        )
+        tasks_file.write_text(original_tasks, encoding="utf-8")
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            tracked_packet=packet_path,
+            files_to_stage=[packet_path, "TASKS.md"],
+            scope_items=[packet_path],
+        )
+        result = {
+            "status": "error",
+            "step": "validate_inputs",
+            "errors": ["invalid handoff"],
+            "steps_completed": ["validate_inputs"],
+        }
+
+        getattr(commit_mod, "_maybe_demote_completed_handoff_state_for_commit_retry")(
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+        )
+
+        assert "commit_retry_state_demotion" not in result
+        assert (
+            "Status: COMPLETED (commit-ready, supervisor COMMIT_GO)"
+            in packet_file.read_text(encoding="utf-8")
+        )
+        assert tasks_file.read_text(encoding="utf-8") == original_tasks
+
     def test_tracker_note_refresh_retries_self_cleared_index_lock_once(self, tmp_path):
         import subprocess
 
