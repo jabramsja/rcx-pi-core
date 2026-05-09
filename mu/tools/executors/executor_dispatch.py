@@ -45,6 +45,7 @@ try:
         packet_status_is_completed,
         process_descendants,
         read_control_plane_packet_status,
+        read_control_plane_packet_wave_id,
         read_founder_ordered_task_state,
         resolve_agent_bus_dir,
         routing_record_path as _common_routing_record_path,
@@ -72,6 +73,7 @@ except ImportError:
     packet_status_is_completed = _mod.packet_status_is_completed
     process_descendants = _mod.process_descendants
     read_control_plane_packet_status = _mod.read_control_plane_packet_status
+    read_control_plane_packet_wave_id = _mod.read_control_plane_packet_wave_id
     read_founder_ordered_task_state = _mod.read_founder_ordered_task_state
     resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     _common_routing_record_path = _mod.routing_record_path
@@ -575,6 +577,58 @@ def _completed_candidate_stop_result(
         "request_for_claude": (
             "Refresh post-merge routing from the canonical open queue before "
             "retrying dispatcher; do not rerun completed packets."
+        ),
+    }
+
+
+def _routing_candidate_wave_id(
+    record: dict[str, Any],
+    candidate: dict[str, Any],
+) -> str:
+    wave = str(
+        candidate.get("wave_name")
+        or candidate.get("wave_id")
+        or candidate.get("candidate")
+        or ""
+    ).strip()
+    normalized = normalize_wave_id(wave) if wave else ""
+    return normalized if normalized != "wave-unknown" else ""
+
+
+def _tracked_packet_wave_conflict_result(
+    repo_root: Path,
+    record: dict[str, Any],
+    *,
+    decision: str,
+    executor_name: str,
+) -> dict[str, Any] | None:
+    conflicts: list[str] = []
+    for candidate in _selected_routing_candidate_dicts(record):
+        tracked_packet = str(candidate.get("tracked_packet") or "").strip()
+        if not tracked_packet:
+            continue
+        routed_wave = _routing_candidate_wave_id(record, candidate)
+        packet_wave = read_control_plane_packet_wave_id(repo_root, tracked_packet)
+        if not routed_wave or not packet_wave or routed_wave == packet_wave:
+            continue
+        conflicts.append(
+            f"{tracked_packet} declares Wave ID {packet_wave}, "
+            f"but the routed candidate is {routed_wave}"
+        )
+    if not conflicts:
+        return None
+    return {
+        "status": "error",
+        "decision": decision,
+        "executor": executor_name,
+        "summary": "Routing stopped because the selected tracked packet has a conflicting Wave ID.",
+        "message": (
+            "Refusing to dispatch a bounded candidate whose tracked_packet "
+            "declares a different Wave ID. " + "; ".join(conflicts)
+        ),
+        "request_for_claude": (
+            "Regenerate routing against the correct same-wave packet, or update "
+            "the packet identity through a bounded Phase A packet before dispatch."
         ),
     }
 
@@ -2056,6 +2110,41 @@ def _continue_successful_executor_chain(
 
         phase_b_wave_name = (record or {}).get("wave_name", "")
         plan_wave_id = _phase_b_plan_declared_wave_id(repo_root, plan_path)
+        routed_wave_candidates: list[str] = []
+        for candidate in _selected_routing_candidate_dicts(record or {}):
+            if candidate.get("wave_name") or candidate.get("wave_id"):
+                routed_wave_candidates.append(_routing_candidate_wave_id(record or {}, candidate))
+                continue
+            if candidate.get("tracked_packet"):
+                candidate_wave = _routing_candidate_wave_id(record or {}, candidate)
+                if candidate_wave:
+                    routed_wave_candidates.append(candidate_wave)
+                    continue
+                packet_wave = read_control_plane_packet_wave_id(
+                    repo_root,
+                    str(candidate.get("tracked_packet") or ""),
+                )
+                if packet_wave:
+                    routed_wave_candidates.append(packet_wave)
+        routed_wave_candidates = [wave for wave in routed_wave_candidates if wave]
+        expected_wave = (
+            routed_wave_candidates[0]
+            if len(set(routed_wave_candidates)) == 1
+            else ""
+        )
+        if plan_wave_id and expected_wave and plan_wave_id != expected_wave:
+            return {
+                "status": "error",
+                "decision": "ROUTE_PHASE_B",
+                "executor": "phase_b_executor",
+                "message": (
+                    "Phase A produced a tracked packet whose Wave ID conflicts "
+                    f"with the routed candidate: {plan_path} declares "
+                    f"{plan_wave_id}, routed candidate is {expected_wave}. "
+                    "Refusing to chain Phase B."
+                ),
+                "chained_from": "phase_a_executor",
+            }
         if plan_wave_id:
             # The surface plan name can omit the dated wave suffix; commit
             # identity must follow the converged locked packet Phase B uses.
@@ -2966,6 +3055,14 @@ def dispatch(
             )
             if completed_stop is not None:
                 return completed_stop
+            packet_wave_conflict = _tracked_packet_wave_conflict_result(
+                repo,
+                record,
+                decision=decision,
+                executor_name=executor_name,
+            )
+            if packet_wave_conflict is not None:
+                return packet_wave_conflict
             empty_tracker_update = _empty_tracker_update_hold_result(
                 record,
                 decision=decision,
@@ -2984,6 +3081,14 @@ def dispatch(
     )
     if completed_stop is not None:
         return completed_stop
+    packet_wave_conflict = _tracked_packet_wave_conflict_result(
+        repo,
+        record,
+        decision=decision,
+        executor_name=executor_name,
+    )
+    if packet_wave_conflict is not None:
+        return packet_wave_conflict
 
     empty_tracker_update = _empty_tracker_update_hold_result(
         record,

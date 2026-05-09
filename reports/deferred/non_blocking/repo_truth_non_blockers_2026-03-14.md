@@ -21,6 +21,33 @@ to
 The active packet now retains only current `/mu` structural advisory status and
 does not authorize `/mu` implementation.
 
+2026-05-09 cleanup evidence refresh:
+
+- N1 remains advisory because `_step_kernel_with_vm` reconstructs coverage
+  events in host code at `mu/host/python/rcx_pi/selfhost/step_mu.py:1035`
+  through `mu/host/python/rcx_pi/selfhost/step_mu.py:1105`; any exact
+  bookkeeping proof belongs in a separate bounded packet, not this cleanup.
+- N2 remains advisory because current JS evidence includes bridge-mode VM smoke
+  and parity surfaces (`mu/host/js/tests/self_tests.js:461` through
+  `mu/host/js/tests/self_tests.js:514`,
+  `mu/tests/parity/test_js_vm_bridge_parity.py:1` through
+  `mu/tests/parity/test_js_vm_bridge_parity.py:18`) while
+  `mu/host/js/engine/kernel.js:23` through `mu/host/js/engine/kernel.js:27`
+  still documents no JS coverage system.
+- N3 remains an architectural progress boundary, not a single implementable
+  defect; current host-semantics and authority ratchet startup checks passed
+  with no inventory increases.
+- N5 remains advisory because `mu/host/js/engine/pipeline.js` is still a large
+  single engine pipeline file (`wc -l` reports 1160 lines) and no decomposition
+  contract is present in this active packet.
+- N14 overlaps the active Stage0 capture advisory retained in
+  `redteam_2026-03-14_repo_non_blockers.md`; current capture/materialization
+  evidence is refreshed there.
+- Next-wave task required before implementation:
+  `repo-truth-mu-structural-advisory-triage-2026-05-09` as a separate bounded
+  packet that splits coverage-proof, JS bridge evidence, pipeline governance,
+  and Stage0 capture questions before any `/mu` structural edits.
+
 ## Active Non-Blockers
 
 ### N1. Python VM cutover coverage reconstruction is not directly locked

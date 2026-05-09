@@ -1,3 +1,16 @@
+# Archived Deferred Non-Blocking Findings: founder-ordered-redteam-mu-structural-non-blocking-remediation-2026-05-06
+
+Archive status: CLOSED by `deferred-active-mu-structural-nonblocking-cleanup-2026-05-09`.
+Closure evidence: `TASKS.md` records
+`founder-ordered-redteam-mu-structural-non-blocking-remediation-2026-05-06`
+as implemented/local evidence and separately tracker-synced. The governing
+packet records same-wave deferred bridge authorization and current staged-file
+truth for this generated bridge artifact. This packet is no longer active
+pending work and must not relist the intentionally Python-only
+`evidence_walker.v1` proof-class outcome as unresolved.
+
+Original packet follows.
+
 # Deferred Non-Blocking Findings: founder-ordered-redteam-mu-structural-non-blocking-remediation-2026-05-06
 
 Wave: founder-ordered-redteam-mu-structural-non-blocking-remediation-2026-05-06

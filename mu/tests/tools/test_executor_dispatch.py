@@ -819,6 +819,46 @@ class TestDispatcherFreshnessRefresh:
         assert calls[0][calls[0].index("--plan-name") + 1] == "open_packet"
         assert "completed_packet" not in calls[0]
 
+    def test_dispatch_rejects_tracked_packet_wave_id_mismatch_before_phase_a(
+        self, tmp_path, monkeypatch,
+    ):
+        repo, _ = _init_builder_repo(tmp_path)
+        packet_rel = "reports/control_plane/stale_queue_packet.md"
+        (repo / packet_rel).write_text(
+            (
+                "# Stale Queue Packet\n\n"
+                "Status: ACTIVE / ROUTING OPEN\n"
+                "Wave ID: previous-wave-2026-05-09\n"
+                "Phase-A-Lock: LOCKED\n"
+            ),
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "cleanup should not inherit stale packet identity",
+            "wave_name": "current-cleanup-wave-2026-05-09",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "next_candidates": [
+                {
+                    "candidate": "current-cleanup-wave-2026-05-09",
+                    "bounded": True,
+                    "tracked_packet": packet_rel,
+                }
+            ],
+        }
+
+        def fail_if_executor_runs(*_args, **_kwargs):
+            pytest.fail("Phase A must not start for a mismatched tracked packet")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fail_if_executor_runs)
+
+        result = dispatch_mod.dispatch(record, repo_root=repo, skip_freshness=True)
+
+        assert result["status"] == "error"
+        assert "tracked_packet declares a different Wave ID" in result["message"]
+        assert "previous-wave-2026-05-09" in result["message"]
+        assert "current-cleanup-wave-2026-05-09" in result["message"]
+
     def test_inline_stale_record_without_path_fails_closed_when_not_canonical(
         self, tmp_path, monkeypatch,
     ):
@@ -12884,6 +12924,62 @@ class TestRecoveryGateWiring:
         assert packet_rel in result["message"]
         assert len(executor_calls) == 1
 
+    def test_chained_phase_a_rejects_packet_wave_id_mismatch_before_phase_b(
+        self, tmp_path, monkeypatch,
+    ):
+        packet_rel = "reports/control_plane/reused_queue_controller.md"
+        packet = tmp_path / packet_rel
+        packet.parent.mkdir(parents=True)
+        packet.write_text(
+            (
+                "# Reused Queue Controller\n\n"
+                "Date: 2026-05-09\n"
+                "Status: ACTIVE / ROUTING OPEN\n"
+                "Wave ID: previous-wave-2026-05-09\n"
+                "Phase-A-Lock: LOCKED\n"
+            ),
+            encoding="utf-8",
+        )
+        phase_a_ok = subprocess.CompletedProcess(
+            ["phase-a"],
+            0,
+            stdout=json.dumps({"plan_path": packet_rel}),
+            stderr="",
+        )
+
+        def fail_if_phase_b_runs(*_args, **_kwargs):
+            pytest.fail("Phase B must not start from a mismatched packet Wave ID")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fail_if_phase_b_runs)
+
+        result = dispatch_mod._continue_successful_executor_chain(  # ANTICHEAT_OK: direct chain identity regression
+            "phase_a_executor",
+            phase_a_ok,
+            repo_root=tmp_path,
+            config={
+                "timeouts": {"phase_b_executor": 10},
+                "bridge_loop_limits": {"phase_b": 1},
+            },
+            record={
+                "decision": "ROUTE_PHASE_A",
+                "wave_name": "current-cleanup-wave-2026-05-09",
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "next_candidates": [
+                    {
+                        "candidate": "current-cleanup-wave-2026-05-09",
+                        "bounded": True,
+                        "tracked_packet": packet_rel,
+                    }
+                ],
+            },
+        )
+
+        assert result["status"] == "error"
+        assert result["executor"] == "phase_b_executor"
+        assert "Wave ID conflicts with the routed candidate" in result["message"]
+        assert "previous-wave-2026-05-09" in result["message"]
+        assert "current-cleanup-wave-2026-05-09" in result["message"]
+
     def test_phase_b_tracker_guard_requires_canonical_tracker_note(self, tmp_path):
         """Arbitrary TASKS prose must not satisfy a locked packet tracker gate."""
         packet_rel = "reports/control_plane/fake.md"
@@ -13306,6 +13402,28 @@ class TestRoutingRecordBuilderCompletedPacketRejection:
         assert record["next_candidates"][0]["tracked_packet"] == (
             "reports/control_plane/seed_packet.md"
         )
+
+
+class TestRoutingRecordBuilderPacketWaveIdentity:
+    def test_rejects_tracked_packet_with_conflicting_wave_id(self, tmp_path):
+        repo, _ = _init_builder_repo(tmp_path)
+        packet = repo / "reports" / "control_plane" / "seed_packet.md"
+        packet.write_text(
+            (
+                "# seed packet\n\n"
+                "Status: ACTIVE / ROUTING OPEN\n"
+                "Wave ID: previous-wave-2026-05-09\n"
+            ),
+            encoding="utf-8",
+        )
+
+        record, errors = common_mod.build_post_merge_routing_record(
+            **_valid_kwargs(repo, wave_name="current-cleanup-wave-2026-05-09")
+        )
+
+        assert errors
+        assert any("Wave ID does not match" in error for error in errors)
+        assert record == {}
 
 
 class TestRoutingRecordBuilderBlockerReadmeExclusion:
