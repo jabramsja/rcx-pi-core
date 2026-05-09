@@ -1,8 +1,9 @@
 """
-L4 Gate: evidence_walker.v1.json structural walker verification.
+L4 Gate: evidence_walker.v1.json proof-class verification.
 
-Proves the L4_STRUCTURAL semantic shift: trace walking for ontology
-evidence collection is now structural (no host iteration loop).
+Python proves structural trace walking for ontology evidence collection.
+JavaScript source-locks the same seed registry entries but intentionally does
+not load evidence_walker.v1 into the JS runtime path.
 
 Usage:
     PYTHONHASHSEED=0 pytest tests/l4_gates/test_evidence_walker_gate.py -v
@@ -44,7 +45,7 @@ class TestEvidenceWalkerSeedGate:
 
 
 class TestEvidenceWalkerJsRegistryGate:
-    """Gate: evidence_walker.v1.json registered in JS registries (source-lock, not runtime parity)."""
+    """Gate: JS registry source-lock for evidence_walker.v1, not runtime parity."""
 
     def test_js_seed_checksums_contains_evidence_walker(self):
         """JS SEED_CHECKSUMS must include evidence_walker.v1.json."""
@@ -69,6 +70,19 @@ class TestEvidenceWalkerJsRegistryGate:
         py_ids = EXPECTED_PROJECTION_IDS["evidence_walker.v1.json"]
         for pid in py_ids:
             assert pid in source, f"JS missing projection ID: {pid}"
+
+    def test_js_runtime_seed_projection_map_does_not_load_evidence_walker(self):
+        """JS must not imply runtime parity by loading evidence_walker.v1."""
+        import re
+        js_main = REPO_ROOT / "mu" / "host" / "js" / "cli" / "main.js"
+        source = js_main.read_text()
+        match = re.search(
+            r"const seedProjectionMap = Object\.assign\(Object\.create\(null\), \{(?P<body>.*?)\n\}\);",
+            source,
+            re.DOTALL,
+        )
+        assert match, "JS seedProjectionMap block not found"
+        assert "evidence_walker.v1.json" not in match.group("body")
 
 
 @pytest.mark.slow

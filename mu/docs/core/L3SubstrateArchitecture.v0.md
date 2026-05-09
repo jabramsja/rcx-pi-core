@@ -44,7 +44,7 @@ L3 is defined as **projections run on minimal, auditable substrate**:
 | **Substrate (Core)** | kernel.v1, match.v1, match.v2, subst.v1, subst.v2 | v2 seeds: Yes; v1 seeds: Python-only | match.v1/subst.v1 are self-hosting POC; v2 is production |
 | **Closures (Core)** | recurrence.v1, recurrence.v2, exhaustion.v1, fix.v1 | Yes | v1 is POC; v2 is hash-accelerated production; fix.v1 is edge/vertex repair |
 | **Bridge** | bootstrap_structural.v1 | Yes | Non-linear pattern support |
-| **Utilities** | classify.v1, eval.v1, terminal_classify.v1, evidence_walker.v1 | terminal_classify: Yes; others: Python-only | terminal_classify JS-loaded via seed_loader.js; evidence_walker Python-only |
+| **Utilities** | classify.v1, eval.v1, terminal_classify.v1, evidence_walker.v1 | terminal_classify: Yes; evidence_walker: JS source-lock only; others: Python-only | terminal_classify JS-loaded via seed_loader.js; evidence_walker structural runtime remains Python-only |
 | **Programs** | rcx_engine.v1, hemispheres.v1, metabolization.v1, metabolize_cycle.v1, paxos_demo.v1 | rcx_engine + hemispheres + metabolization + metabolize_cycle: Yes | paxos_demo application |
 
 ### JS Debt Tracking (AST-level host markers)
