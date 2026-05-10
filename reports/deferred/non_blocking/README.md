@@ -173,3 +173,24 @@ Archived source snapshots for extracted non-blocking residue live in:
 - The retained active packets require separate bounded `/mu` structural packets
   before implementation; this cleanup only refreshed current evidence and
   archive state.
+
+2026-05-10 repo-truth `/mu` structural advisory triage note:
+
+- Evidence command:
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
+- Current non-blocking inventory remains `README.md` plus three active or
+  partially active `/mu` structural advisory packets:
+  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`,
+  `redteam_2026-03-14_repo_non_blockers.md`, and
+  `repo_truth_non_blockers_2026-03-14.md`.
+- No active packet was archived by the triage wave because current code did not
+  prove any retained advisory closed.
+- Stage0 capture overlap was deduplicated: `redteam_2026-03-14_repo_non_blockers.md`
+  remains the canonical active Stage0 capture advisory, and the overlapping
+  N14 in `repo_truth_non_blockers_2026-03-14.md` routes to the same packet.
+- Follow-up control-plane packets routed for dispatcher-first Phase A work:
+  `reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`,
+  `reports/control_plane/js_bridge_vm_ordering_evidence_2026-05-09.md`,
+  `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`,
+  `reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`,
+  and `reports/control_plane/transparent_js_proxy_provenance_boundary_2026-05-09.md`.

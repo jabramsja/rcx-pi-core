@@ -14,20 +14,23 @@ to
 The active packet now retains only N1 as `/mu` structural hard-stop advisory
 status. This wave does not authorize `/mu` structural implementation.
 
-Cleanup note (2026-05-09): current code still stores `capture_path` values in
+Triage note (2026-05-10): current code still stores `capture_path` values in
 the per-attempt capture table before materialization:
-`mu/host/python/rcx_pi/selfhost/stage0_vm.py:794` through
-`mu/host/python/rcx_pi/selfhost/stage0_vm.py:805` and
+`mu/host/python/rcx_pi/selfhost/stage0_vm.py:796` through
+`mu/host/python/rcx_pi/selfhost/stage0_vm.py:807` and
 `mu/host/js/core/stage0_vm.js:831` through
 `mu/host/js/core/stage0_vm.js:841`. Current materialization then deep-copies
 `capture_ref` through `_safe_mu_copy` / `safeMuCopy` at
-`mu/host/python/rcx_pi/selfhost/stage0_vm.py:372` through
-`mu/host/python/rcx_pi/selfhost/stage0_vm.py:381` and
+`mu/host/python/rcx_pi/selfhost/stage0_vm.py:374` through
+`mu/host/python/rcx_pi/selfhost/stage0_vm.py:383` and
 `mu/host/js/core/stage0_vm.js:369` through
 `mu/host/js/core/stage0_vm.js:380`. The advisory remains open only as a
-separate `/mu` structural hardening question. Next-wave task required before
-implementation: `stage0-capture-path-provenance-boundary-2026-05-09` as a
-separate bounded packet.
+separate `/mu` structural hardening question. Direct repro commands exited 0
+with Python `match / NoneType / False / None` and JS
+`match / false / true / null`. Next-wave packet required before implementation:
+`reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.
+The overlapping N14 in `repo_truth_non_blockers_2026-03-14.md` is deduplicated
+to this canonical Stage0 route.
 
 ## N1 `DEFECT` — Stage0 direct APIs still retain raw hostile leaves in capture slots before materialization **PARTIALLY RESOLVED** (2026-03-14)
 
@@ -118,10 +121,14 @@ Why this remains advisory:
 - Current production callers validate Mu before entering the VM-backed kernel
   path, so this is still a direct-API hardening gap rather than a reproduced
   production exploit.
+- Current routed packet:
+  `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.
 
 ## Validation Used
 
 - Stage0 direct-API repros above
+- 2026-05-10 direct Python and JS repros above re-run successfully with the
+  same output.
 
 ## Classification Summary
 

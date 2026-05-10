@@ -2089,6 +2089,57 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert f"FOUNDER_OVERRIDE:{wave_id}" in tasks_text
         assert "with 4 wave-owned file(s)" in tasks_text
 
+    def test_pre_supervisor_tracker_note_rejects_packet_body_source_authorization(
+        self,
+        tmp_path,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+        wave_id = "source-authorized-phase-b-wave-2026-05-10"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        plan_content = (
+            f"Source authorization: FOUNDER_OVERRIDE:{wave_id}\n"
+        )
+
+        with patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files: sorted(set(files))):
+            (
+                note,
+                raw_override,
+                package_override,
+                modified,
+                final_scope,
+                error,
+            ) = pb_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: rejects packet-body source authorization
+                repo,
+                wave_id=wave_id,
+                task_id="[NEXT-CODEX-POST-REDTEAM]",
+                wave_class="L4_ENABLER",
+                target_gate_id="G8",
+                plan_path="reports/control_plane/source_authorized.md",
+                plan_content=plan_content,
+                changed_files=[
+                    "mu/tools/executors/phase_b_executor.py",
+                    "reports/control_plane/source_authorized.md",
+                    indicator_path,
+                ],
+                test_files=[],
+                receipt_path=".scratch/phase_b_supervisor_package.json",
+                bridge_status={"rounds": 2},
+                reentry=False,
+                founder_override="",
+            )
+
+        assert error is None
+        assert modified is True
+        assert "TASKS.md" in final_scope
+        assert f"FOUNDER_OVERRIDE:{wave_id}" not in note
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        assert f"FOUNDER_OVERRIDE:{wave_id}" not in tasks_text
+        assert raw_override == ""
+        assert package_override == ""
+
     def test_pre_supervisor_tracker_note_verification_rejects_stale_top_note(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
