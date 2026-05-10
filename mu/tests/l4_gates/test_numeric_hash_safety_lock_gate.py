@@ -656,6 +656,7 @@ class TestMuHashCachedNegZeroCorrectness:
         full = (
             "const t = require('./mu/host/js/core/types');\n"
             "const bc = require('./mu/host/js/core/bootstrap_core');\n"
+            "const vm = require('./mu/host/js/core/stage0_vm');\n"
             f"console.log(JSON.stringify({code}));"
         )
         result = subprocess.run(
@@ -705,6 +706,19 @@ class TestMuHashCachedNegZeroCorrectness:
         assert data["same_pos"] is True, "Same -0 positions must be equal"
         assert data["diff_pos"] is False, (
             "F-14: muEqual must distinguish different -0 positions"
+        )
+
+    def test_stage0_vm_deep_equal_no_neg_zero_false_positive(self):
+        """Stage0 VM equality must preserve content equality for -0."""
+        data = self._run_js(
+            "{"
+            "  same: vm.muDeepEqual(-0, -0),"
+            "  diff: vm.muDeepEqual(0, -0)"
+            "}"
+        )
+        assert data["same"] is True, "Same -0 values must be equal"
+        assert data["diff"] is False, (
+            "Stage0 VM equality must distinguish 0 from -0 for binding conflicts"
         )
 
     def test_match_nonlinear_conflict_detection(self):

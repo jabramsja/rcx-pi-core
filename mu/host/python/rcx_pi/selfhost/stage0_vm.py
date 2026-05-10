@@ -167,7 +167,9 @@ def _mu_deep_equal(a, b):
     t = type(a)
     if t is not type(b):
         return False
-    if t is bool or t is int or t is float or t is str:
+    if t is float:
+        return a == b and (a != 0.0 or str(a) == str(b))
+    if t is bool or t is int or t is str:
         return a == b  # Safe: exact-type means plain primitive __eq__
     if t is dict:
         if a.keys() != b.keys():
