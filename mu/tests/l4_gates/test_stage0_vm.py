@@ -196,6 +196,10 @@ class TestMuDeepEqual:
     def test_float_equal(self):
         assert _mu_deep_equal(3.14, 3.14)
 
+    def test_negative_zero_not_equal_positive_zero(self):
+        assert _mu_deep_equal(-0.0, -0.0)
+        assert not _mu_deep_equal(0.0, -0.0)
+
     def test_string_equal(self):
         assert _mu_deep_equal("hello", "hello")
 

@@ -152,7 +152,7 @@ function muDeepEqual(a, b) {
     // int vs float distinction: both are 'number' in JS.
     // Use Number.isInteger to distinguish.
     if (Number.isInteger(a) !== Number.isInteger(b)) return false;
-    return a === b;
+    return a === b && Object.is(a, b);
   }
   if (Array.isArray(a)) {
     if (!Array.isArray(b) || a.length !== b.length) return false;

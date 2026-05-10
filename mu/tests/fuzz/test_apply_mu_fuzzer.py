@@ -610,6 +610,17 @@ def test_nonlinear_pattern_conflict_detection(conflict_pair):
     assert mu_result is NO_MATCH, f"apply_mu should NO_MATCH on conflict, got {mu_result}"
 
 
+def test_nonlinear_conflict_distinguishes_positive_and_negative_zero():
+    projection = {
+        "pattern": {"k0": {"var": "x"}, "k1": {"var": "x"}},
+        "body": "matched",
+    }
+    value = {"k0": 0.0, "k1": -0.0}
+
+    assert apply_projection(projection, value) is NO_MATCH
+    assert apply_mu(projection, value) is NO_MATCH
+
+
 @given(mu_nonlinear_agreement_inputs())
 @settings(
     deadline=5000,
