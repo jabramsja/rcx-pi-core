@@ -21,12 +21,13 @@ to
 The active packet now retains only current `/mu` structural advisory status and
 does not authorize `/mu` implementation.
 
-2026-05-09 cleanup evidence refresh:
+2026-05-10 triage evidence refresh:
 
 - N1 remains advisory because `_step_kernel_with_vm` reconstructs coverage
   events in host code at `mu/host/python/rcx_pi/selfhost/step_mu.py:1035`
-  through `mu/host/python/rcx_pi/selfhost/step_mu.py:1105`; any exact
-  bookkeeping proof belongs in a separate bounded packet, not this cleanup.
+  through `mu/host/python/rcx_pi/selfhost/step_mu.py:1142`; exact bookkeeping
+  proof is routed to
+  `reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`.
 - N2 remains advisory because current JS evidence includes bridge-mode VM smoke
   and parity surfaces (`mu/host/js/tests/self_tests.js:461` through
   `mu/host/js/tests/self_tests.js:514`,
@@ -35,18 +36,26 @@ does not authorize `/mu` implementation.
   `mu/host/js/engine/kernel.js:23` through `mu/host/js/engine/kernel.js:27`
   still documents no JS coverage system.
 - N3 remains an architectural progress boundary, not a single implementable
-  defect; current host-semantics and authority ratchet startup checks passed
-  with no inventory increases.
+  defect; `python3 mu/tools/checks/check_host_semantics_ratchet.py --json`
+  exits 0 with no increases/decreases and
+  `python3 tools/checks/check_host_authority_inventory_ratchet.py` exits 0
+  with `312 total` / `217 authority`.
 - N5 remains advisory because `mu/host/js/engine/pipeline.js` is still a large
   single engine pipeline file (`wc -l` reports 1160 lines) and no decomposition
-  contract is present in this active packet.
+  contract is present in this active packet. It is routed to
+  `reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`.
 - N14 overlaps the active Stage0 capture advisory retained in
   `redteam_2026-03-14_repo_non_blockers.md`; current capture/materialization
-  evidence is refreshed there.
-- Next-wave task required before implementation:
-  `repo-truth-mu-structural-advisory-triage-2026-05-09` as a separate bounded
-  packet that splits coverage-proof, JS bridge evidence, pipeline governance,
-  and Stage0 capture questions before any `/mu` structural edits.
+  evidence is canonical there and routed once to
+  `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.
+- Next-wave packet routing emitted by
+  `repo-truth-mu-structural-advisory-triage-2026-05-09`:
+  `reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`,
+  `reports/control_plane/js_bridge_vm_ordering_evidence_2026-05-09.md`,
+  `reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`,
+  and `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.
+  This packet remains advisory evidence only and does not authorize direct
+  `/mu` structural implementation.
 
 ## Active Non-Blockers
 
@@ -59,8 +68,8 @@ does not authorize `/mu` implementation.
 **Why deferred:** The cutover gate tests prove behavioral equivalence (same input → same
 output) and polarity (VM path produces same match/subst results as host path). Adding
 exact bookkeeping parity tests requires instrumenting the VM to emit coverage events,
-which is a new capability in the Stage0 VM. **Target wave:** VM cutover production-flip
-wave (when cutover is promoted from shadow to default).
+which is a new capability in the Stage0 VM. **Target packet:**
+`reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`.
 
 ### N2. JS bridge-mode VM shadow evidence is still thinner than the core lane
 
@@ -71,7 +80,8 @@ wave (when cutover is promoted from shadow to default).
 execution path. The core lane (Python) has deeper evidence because it's the primary
 development surface. Thickening JS shadow evidence requires writing JS-specific
 ordering tests that exercise the bridge composition path end-to-end. **Target wave:**
-JS bridge-mode evidence wave (requires JS test infrastructure expansion).
+`reports/control_plane/js_bridge_vm_ordering_evidence_2026-05-09.md`
+(requires JS test infrastructure expansion if Phase A proves the gap remains live).
 
 ### N3. P7-d is execution-path progress, not broad host-surface reduction
 
@@ -96,12 +106,14 @@ ontology promotion, algorithm routing, and evidence collection. These are logica
 related functions that share state (seedProjectionMap, kernelProjections). Splitting
 into smaller files would create circular dependency issues or require a module loader.
 The file is well-sectioned with clear function boundaries. A LOC cap without
-decomposition guidance would be arbitrary. **Target wave:** JS architecture refactor
-wave (requires Wave A design for module decomposition strategy).
+decomposition guidance would be arbitrary. **Target packet:**
+`reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`.
 
 ### N14. Stage0 capture_ref returns null/None for hostile leaves (design gap)
 
 - capture_ref deep-copies via _safe_mu_copy. Non-Mu types (subclasses) are canonicalized to null/None.
 - Bridge considers this a "successful match on hostile input" since the VM returns match with root=null.
 - Design decision: null/None is the correct fail-closed canonical value for non-Mu inputs. The alternative (stall on non-Mu capture) would require type-checking at capture_path time, which is a larger change.
-- Status: documented design gap, not a production exploit path.
+- Status: duplicate advisory, not a separate pending packet. Canonical active
+  Stage0 capture route:
+  `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.
