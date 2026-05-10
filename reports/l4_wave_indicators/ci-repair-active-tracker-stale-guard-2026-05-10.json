@@ -1,24 +1,24 @@
 {
   "wave_id": "ci-repair-active-tracker-stale-guard-2026-05-10",
-  "repeat_run_speedup_ratio": 1.009511,
+  "repeat_run_speedup_ratio": 1.003623,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.399424,
+  "step_growth_slope": 0.405194,
   "repeat_run_raw_seconds": [
-    0.403223,
-    0.399424
+    0.406662,
+    0.405194
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.403223
+      "elapsed_seconds": 0.406662
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.802647
+      "elapsed_seconds": 0.811856
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-10T23:13:32Z",
+  "collection_timestamp_utc": "2026-05-10T23:36:41Z",
   "collector_version": "2.2.0"
 }

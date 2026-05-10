@@ -50,6 +50,55 @@ STALE_PR_NUMBERS=""
 STALE_WAVE_IDS=""
 MARKER_RE='~~|Landed|COMPLETE|CLOSED|Resolved|CLEARED|IMPLEMENTED'
 
+merged_pr_for_wave_branch() {
+    local wave_id="$1"
+    local merged_pr
+    local branch_filter
+
+    if ! merged_pr=$(gh pr list --state merged --head "$wave_id" --json number --jq '.[0].number // empty' --limit 1 2>&1); then
+        printf '%s\n' "$merged_pr"
+        return 2
+    fi
+    if [ -n "$merged_pr" ]; then
+        printf '%s\n' "$merged_pr"
+        return 0
+    fi
+
+    # Accept both plain wave branches and contributor-prefixed wave branches.
+    branch_filter="map(select(.headRefName == \"${wave_id}\" or (.headRefName | endswith(\"/${wave_id}\")))) | .[0].number // empty"
+    if ! merged_pr=$(
+        gh pr list \
+            --state merged \
+            --search "$wave_id" \
+            --json number,headRefName \
+            --jq "$branch_filter" \
+            --limit 50 \
+            2>&1
+    ); then
+        printf '%s\n' "$merged_pr"
+        return 2
+    fi
+
+    if [ -n "$merged_pr" ]; then
+        printf '%s\n' "$merged_pr"
+        return 0
+    fi
+
+    if ! merged_pr=$(
+        gh pr list \
+            --state merged \
+            --json number,headRefName \
+            --jq "$branch_filter" \
+            --limit 500 \
+            2>&1
+    ); then
+        printf '%s\n' "$merged_pr"
+        return 2
+    fi
+
+    printf '%s\n' "$merged_pr"
+}
+
 if [ -n "$PR_NUMBERS" ]; then
     while IFS= read -r pr_num; do
         [ -z "$pr_num" ] && continue
@@ -95,8 +144,8 @@ if [ -n "$PR_NUMBERS" ]; then
 fi
 
 # Slashed task labels such as [CI-REPAIR/<wave-id>] are active queue entries
-# without PR text. Treat a merged same-name branch as stale unless the entry is
-# already closed/struck through.
+# without PR text. Treat a merged same-name or contributor-prefixed branch as
+# stale unless the entry is already closed/struck through.
 ACTIVE_TASK_LINES=$(
     echo "$ACTIVE_SECTION" \
         | grep -nE '^- (~~)?\*\*\[[^]]+/[a-z0-9][a-z0-9_-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\]\*\*' \
@@ -111,8 +160,8 @@ while IFS= read -r line; do
     WAVE_ID=$(echo "$LINE_TEXT" | sed -nE 's/^- (~~)?\*\*\[[^]]+\/([^]]+)\]\*\*.*/\2/p')
     [ -z "$WAVE_ID" ] && continue
     CHECKED=$((CHECKED + 1))
-    if ! MERGED_PR=$(gh pr list --state merged --head "jabramsja/${WAVE_ID}" --json number --jq '.[0].number // empty' --limit 1 2>&1); then
-        echo "ERROR: Failed to check merged PR for branch jabramsja/${WAVE_ID}: $MERGED_PR" >&2
+    if ! MERGED_PR=$(merged_pr_for_wave_branch "$WAVE_ID"); then
+        echo "ERROR: Failed to check merged PR for wave branch ${WAVE_ID}: $MERGED_PR" >&2
         echo "   Ensure gh CLI is authenticated and network is available."
         exit 2
     fi
@@ -121,7 +170,7 @@ while IFS= read -r line; do
     fi
     STALE_COUNT=$((STALE_COUNT + 1))
     STALE_WAVE_IDS="${STALE_WAVE_IDS} ${WAVE_ID}"
-    echo "STALE: branch jabramsja/${WAVE_ID} merged as PR #${MERGED_PR} but active item not marked Landed:"
+    echo "STALE: wave branch ${WAVE_ID} merged as PR #${MERGED_PR} but active item not marked Landed:"
     echo "  Line: $LINE_TEXT"
     if [ "$FIX_MODE" = true ]; then
         echo "  FIX: Add **Landed** marker; non-tracker items may be struck through"
