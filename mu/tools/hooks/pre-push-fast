@@ -46,12 +46,12 @@ if [ -n "$RANGE" ]; then
             echo "   Add STATUS.md or TASKS.md updates for core structural changes."
             exit 1
         fi
-        # Check for stale NEXT items (merged PRs not marked Landed)
+        # Check for stale active items (merged PRs/branches not marked Landed)
         if [ -f "$REPO_ROOT/tools/checks/check_stale_next_items.sh" ]; then
             if ! bash "$REPO_ROOT/tools/checks/check_stale_next_items.sh"; then
                 echo ""
-                echo "⚠️  Stale NEXT items detected — merged PRs not marked Landed."
-                echo "   Update TASKS.md NEXT section before pushing."
+                echo "⚠️  Stale active items detected — merged PRs/branches not marked Landed."
+                echo "   Update TASKS.md active sections before pushing."
                 echo "   Run: bash tools/checks/check_stale_next_items.sh --fix"
                 exit 1
             fi
