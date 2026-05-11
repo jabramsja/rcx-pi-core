@@ -67,7 +67,8 @@ Read-only grounding surfaces:
 - The generated non-blocker is archived only when targeted evidence proves the finding is closed; if not proven, it remains active with the proof gap stated.
 - Retained `/mu` structural advisories remain active, hard-stopped, and semantically unchanged.
 - Final proof includes:
-  - `rg -n "post-js-bridge-doc-accuracy-residue-closeout-2026-05-11|post_js_bridge_doc_accuracy_residue_closeout_2026__2026-05-11" TASKS.md reports/control_plane/post_js_bridge_doc_accuracy_residue_closeout_2026__2026-05-11.md`
+  - `rg -n 'Tracker sync note \(2026-05-11, post-js-bridge-doc-accuracy-residue-closeout-2026-05-11\).*Packet: .*post_js_bridge_doc_accuracy_residue_closeout_2026__2026-05-11.md' TASKS.md`
+  - `rg -n 'Wave ID: post-js-bridge-doc-accuracy-residue-closeout-2026-05-11|FOUNDER_OVERRIDE:post-js-bridge-doc-accuracy-residue-closeout-2026-05-11' reports/control_plane/post_js_bridge_doc_accuracy_residue_closeout_2026__2026-05-11.md`
   - `./tools/checks/check_docs_consistency.sh`
   - `python3 tools/metrics/collect_l4_wave_indicators.py --wave-id post-js-bridge-doc-accuracy-residue-closeout-2026-05-11 --output reports/l4_wave_indicators/post-js-bridge-doc-accuracy-residue-closeout-2026-05-11.json`
   - `python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id post-js-bridge-doc-accuracy-residue-closeout-2026-05-11`
