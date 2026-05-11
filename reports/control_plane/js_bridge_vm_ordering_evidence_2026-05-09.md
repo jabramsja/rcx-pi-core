@@ -7,15 +7,33 @@ Wave ID: js-bridge-vm-ordering-evidence-2026-05-09
 Phase-A-Lock: LOCKED
 Class: L4_ENABLER
 Category: /mu structural evidence
-Source authorization: TASKS.md:510; routed-by-repo-truth-mu-structural-advisory-triage-2026-05-09
+Source authorization: TASKS.md routed tracker notes; routed-by-repo-truth-mu-structural-advisory-triage-2026-05-09
 Routing source: reports/control_plane/repo_truth_mu_structural_advisory_triage_2026-05-09.md
 Same-wave override: FOUNDER_OVERRIDE:js-bridge-vm-ordering-evidence-2026-05-09
 
+## 2026-05-11 Reconciliation Result
+
+Result: CLOSED / SUPERSEDED by PR #927.
+
+- PR #927 merged at
+  `8334c369d7a302cca568de0a088ea9ca1bd1c2f5`; the implementation commit was
+  `ee69f0a0b9b9023bc278b91e7b72419eede6f813`.
+- Current `mu/tests/parity/test_js_vm_bridge_parity.py` drives the JS ordering
+  proof through the public `stepKernel(..., {returnMeta:true, vmConfig})`
+  entrypoint, instruments Stage0 bundles passed through `vmConfig`, records
+  `bundle.programs` access, and asserts ordering-sensitive group signatures
+  plus same-output negative controls.
+- Current `mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py` scans both
+  `_stage0VmStepTrusted` and `StepTrusted` fragments, closing the split private
+  trusted-step source-lock bypass.
+- The 2026-05-10 proof-gap text below is historical. Do not carry the JS
+  bridge source-lock/e2e ordering slice forward as unresolved pending work.
+
 ## Phase B Evidence Result
 
-Result: PROOF GAP REMAINS.
+Historical result before PR #927: PROOF GAP REMAINED.
 
-Current code truth:
+2026-05-10 code truth before PR #927:
 
 - `mu/host/js/engine/kernel.js:44` through `mu/host/js/engine/kernel.js:63`
   source-locks `_stepKernelWithVM()` to try the Stage0 bundles in this order:
@@ -50,7 +68,7 @@ Reproduced local evidence:
 
 Decision:
 
-- Current parity tests do not close the exact advisory. They prove individual
+- At that time, parity tests did not close the exact advisory. They proved individual
   Stage0 bundle parity and JS bridge-mode smoke, but not an end-to-end JS
   behavioral proof that the live Stage0 VM kernel path depends on
   `kernel.v1 -> bridge -> match.v2 -> subst.v2` ordering.
@@ -61,24 +79,23 @@ Decision:
   registration, scheduler, Stage0 VM, or production behavior change is
   authorized by this packet.
 
-Follow-up routing:
+Follow-up routing (closed by PR #927):
 
-- A later evidence-only packet should name `mu/tests/parity/test_js_vm_bridge_parity.py`
-  as the exact pytest evidence file for the missing end-to-end JS bridge-ordering
-  proof.
-- The proof should execute the existing JS Mu projections and Stage0 VM bundles
-  through the existing JS runtime entrypoint, using the already-loaded
-  `kernel_v1.compiled.v1.json`, `bootstrap_structural_v1.compiled.v1.json`,
-  `match_v2.compiled.v1.json`, and `subst_v2.compiled.v1.json` bundles with
-  bridge mode enabled.
-- The proof must not import host ordering semantics or add JavaScript ordering
-  shortcuts. It should demonstrate that the live JS bridge-mode VM path needs the
-  existing bridge bundle before `match.v2` and `subst.v2`, rather than merely
-  asserting projection array order or individual bundle parity.
+- Closed by `js-bridge-vm-ordering-source-lock-repair-2026-05-11`, merged in
+  PR #927. The closing proof uses `mu/tests/parity/test_js_vm_bridge_parity.py`
+  as the exact pytest evidence file and exercises existing JS Mu projections
+  and Stage0 VM bundles through the public runtime entrypoint.
+- No JavaScript runtime semantics, seed registration, scheduler, Stage0 VM
+  behavior, compiled bundles, or production behavior changed as part of that
+  closure.
 
-## Scope
+## Historical Scope
 
-Phase A scope is limited to these files:
+This scope records the 2026-05-10 Phase A packet before PR #927 closed the
+follow-up slice. It is retained for provenance, not as active implementation
+routing.
+
+Phase A scope was limited to these files:
 
 - `mu/host/js/engine/kernel.js`
 - `mu/host/js/tests/self_tests.js`
@@ -86,24 +103,22 @@ Phase A scope is limited to these files:
 - `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`
 - `reports/control_plane/repo_truth_mu_structural_advisory_triage_2026-05-09.md`
 - `reports/control_plane/js_bridge_vm_ordering_evidence_2026-05-09.md`
-- `TASKS.md` line 510 for `[NEXT-CODEX-POST-REDTEAM]` authorization.
+- `TASKS.md` routed tracker notes for `[NEXT-CODEX-POST-REDTEAM]`
+  authorization.
 
-No unnamed focused JS parity test file or directory is in Phase A scope. If
-Phase A proves a still-live gap, a later implementation packet must name the
-exact evidence file(s) or directory before work begins.
+No unnamed focused JS parity test file or directory was in Phase A scope.
 
-## Work Items
+## Historical Work Items
 
 1. Reproduce current JS bridge-mode smoke and ordering evidence.
 2. Decide whether the missing proof is an end-to-end JS test for
    `kernel.v1 -> bridge -> match.v2 -> subst.v2` ordering under the Stage0 VM,
    or whether current parity tests already close the advisory.
-3. If a proof gap remains, route a later implementation packet limited to
-   explicitly named JS/pytest evidence files or directories. The later packet
-   must exercise existing Mu projections and Stage0 VM bundles rather than
-   adding JavaScript semantic shortcuts.
+3. If a proof gap remained, route a later implementation packet limited to
+   explicitly named JS/pytest evidence files or directories. PR #927 supplied
+   that closure evidence.
 
-## Constraints
+## Historical Constraints
 
 - No JS runtime semantics, seed registration, scheduler, Stage0 VM, or
   production behavior changes in Phase A.
@@ -111,7 +126,7 @@ exact evidence file(s) or directory before work begins.
 - Preserve the fact that `mu/host/js/engine/kernel.js` has no coverage system.
 - Do not edit Claude-related files.
 
-## Stop Conditions
+## Historical Stop Conditions
 
 - Stop if current JS parity tests already prove the exact bridge ordering claim.
 - Stop if the proof would require runtime behavior changes instead of focused
@@ -119,7 +134,7 @@ exact evidence file(s) or directory before work begins.
 - Stop if Phase A discovers the advisory is actually a coverage-system request;
   route that back to the coverage packet instead of merging scopes.
 
-## Acceptance Criteria
+## Historical Acceptance Criteria
 
 - Phase A identifies the exact remaining JS bridge evidence gap or closes it
   with current command/file evidence.
@@ -131,7 +146,7 @@ exact evidence file(s) or directory before work begins.
 ## Grounding / Authorization
 
 - TASKS.md authorization:
-  `TASKS.md:510` binds `[NEXT-CODEX-POST-REDTEAM]` to
+  `TASKS.md` routed tracker notes bind `[NEXT-CODEX-POST-REDTEAM]` to
   `js-bridge-vm-ordering-evidence-2026-05-09`, this packet path,
   Phase A-only JS bridge ordering evidence work, and
   `FOUNDER_OVERRIDE:js-bridge-vm-ordering-evidence-2026-05-09`.

@@ -218,3 +218,24 @@ Archived source snapshots for extracted non-blocking residue live in:
 - This cleanup did not implement `/mu` structural production changes; the
   remaining three active packets still require separate bounded `/mu` structural
   routing before implementation.
+
+2026-05-11 post-JS-bridge remaining `/mu` non-blocking reconciliation note:
+
+- Evidence command:
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" ! -name README.md -print | sort`.
+- Current non-blocking inventory remains `README.md` plus three active or
+  partially active `/mu` structural advisory packets:
+  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`,
+  `redteam_2026-03-14_repo_non_blockers.md`, and
+  `repo_truth_non_blockers_2026-03-14.md`.
+- Closed/superseded repo-truth N2 JS bridge ordering slice archived to
+  `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_partial-closed-by-post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11.md`
+  after PR #927 / merge
+  `8334c369d7a302cca568de0a088ea9ca1bd1c2f5` closed the public-entrypoint
+  JS bridge ordering proof and trusted-step source-lock slice.
+- Retained live advisories now name their governing route, current proof gap,
+  hard stop before runtime implementation, and `/mu` doctrine boundary:
+  VM cutover coverage bookkeeping, Stage0 capture provenance, JS engine
+  pipeline shape governance, transparent JS Proxy provenance, and the broad
+  host-surface progress boundary.
+- The reconciliation did not implement `/mu` structural production changes.
