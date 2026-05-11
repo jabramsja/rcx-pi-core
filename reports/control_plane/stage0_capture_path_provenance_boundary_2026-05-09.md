@@ -7,7 +7,7 @@ Wave ID: stage0-capture-path-provenance-boundary-2026-05-09
 Phase-A-Lock: LOCKED
 Class: L4_ENABLER
 Category: /mu structural Stage0 boundary
-Source authorization: TASKS.md:512 FOUNDER_OVERRIDE:stage0-capture-path-provenance-boundary-2026-05-09; routed-by-repo-truth-mu-structural-advisory-triage-2026-05-09
+Source authorization: TASKS.md tracker notes for stage0-capture-path-provenance-boundary-2026-05-09; routed-by-repo-truth-mu-structural-advisory-triage-2026-05-09
 Routing source: reports/control_plane/repo_truth_mu_structural_advisory_triage_2026-05-09.md
 ## Scope
 
@@ -86,9 +86,9 @@ Exact runtime write set for a separate implementation packet:
 
 Exact focused test write set for that later packet:
 
-- `mu/tests/l4_gates/test_stage0_vm.py`
-- one existing JS parity or L4 gate test surface under `mu/tests/` that can
-  construct JavaScript host objects directly in Node.
+- `mu/tests/l4_gates/test_stage0_vm.py`, extended with a direct `node` subprocess
+  case that requires `mu/host/js/core/stage0_vm.js` and constructs JavaScript host
+  objects directly before calling `stage0VmStep`.
 
 Required later behavior proof:
 
@@ -148,12 +148,13 @@ Required later behavior proof:
 - Routing triage:
   `reports/control_plane/repo_truth_mu_structural_advisory_triage_2026-05-09.md`.
 - TASKS authorization:
-  `TASKS.md:512` authorizes `[NEXT-CODEX-POST-REDTEAM]` for this packet as
-  `Class: L4_ENABLER`, Category: `/mu` structural Stage0 boundary,
-  `target_gate_id: G8`, and `workload_target: stage0_boundary`.
+  current `rg -n "stage0-capture-path-provenance-boundary-2026-05-09|stage0_capture_path_provenance_boundary_2026-05-09.md" TASKS.md`
+  output records `[NEXT-CODEX-POST-REDTEAM]` for this packet as `Class:
+  L4_ENABLER`, Category: `/mu` structural Stage0 boundary, `target_gate_id:
+  G8`, and `workload_target: stage0_boundary`.
 - Authorization:
   Same-wave `FOUNDER_OVERRIDE:stage0-capture-path-provenance-boundary-2026-05-09`
-  from `TASKS.md:512`, plus the
+  from TASKS.md tracker authority, plus the
   repo-truth-mu-structural-advisory-triage-2026-05-09 routing packet.
   This authorizes routed Phase A planning only; it does not authorize Stage0
   implementation edits.
