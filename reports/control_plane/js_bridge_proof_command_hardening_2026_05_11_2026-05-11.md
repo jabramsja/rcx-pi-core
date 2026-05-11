@@ -64,8 +64,8 @@ The routed next-candidate summary is to close the active generated DOC_ACCURACY 
 
 ## Grounding / Authorization
 
-- `TASKS.md:468-472` keeps `[NEXT-CODEX-POST-REDTEAM]` open and founder-authorized while warning not to relist already-landed engine-state/scheduler work as unresolved.
-- `TASKS.md:529` records the predecessor `post-js-bridge-doc-accuracy-residue-closeout-2026-05-11` L4_ENABLER tracker note, packet path, evidence command, and wave-bound override for that prior residue closeout wave.
+- `TASKS.md (rg evidence: js-bridge-proof-command-hardening-2026-05-11)` records `[NEXT-CODEX-POST-REDTEAM]` tracker authority for `js-bridge-proof-command-hardening-2026-05-11` as `Class: L4_ENABLER`, `Category: docs/control-plane proof-command hardening`, with packet `reports/control_plane/js_bridge_proof_command_hardening_2026_05_11_2026-05-11.md`.
+- `TASKS.md:532` records the predecessor proof-command hardening result: the predecessor packet requires an independent TASKS-only tracker query, the generated non-blocker was archived only after that query matched TASKS, and the same-wave tracker note binds the control packet, archive move, and indicator artifact.
 - Governing packet for this wave: `reports/control_plane/js_bridge_proof_command_hardening_2026_05_11_2026-05-11.md`.
 - Related predecessor packet: `reports/control_plane/post_js_bridge_doc_accuracy_residue_closeout_2026__2026-05-11.md`.
 - FOUNDER_OVERRIDE:js-bridge-proof-command-hardening-2026-05-11
@@ -82,7 +82,7 @@ The routed next-candidate summary is to close the active generated DOC_ACCURACY 
 ## Phase B Local Validation Commands
 
 - `rg -n 'Tracker sync note \(2026-05-11, post-js-bridge-doc-accuracy-residue-closeout-2026-05-11\).*Packet: .*post_js_bridge_doc_accuracy_residue_closeout_2026__2026-05-11.md' TASKS.md`
-- `nl -ba reports/control_plane/post_js_bridge_doc_accuracy_residue_closeout_2026__2026-05-11.md | sed -n '69,74p'`
+- `rg -n "rg -n 'Tracker sync note .*post-js-bridge-doc-accuracy-residue-closeout-2026-05-11.*Packet: .*post_js_bridge_doc_accuracy_residue_closeout_2026__2026-05-11[.]md' TASKS[.]md" reports/control_plane/post_js_bridge_doc_accuracy_residue_closeout_2026__2026-05-11.md`
 - `test ! -e reports/deferred/non_blocking/post-js-bridge-doc-accuracy-residue-closeout-2026-05-11_bridge_nonblockers.md`
 - `test -f reports/archive/deferred/post-js-bridge-doc-accuracy-residue-closeout-2026-05-11_bridge_nonblockers_closed-by-js-bridge-proof-command-hardening-2026-05-11.md`
 - `./tools/checks/check_docs_consistency.sh`

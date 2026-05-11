@@ -1,0 +1,24 @@
+{
+  "wave_id": "js-bridge-proof-command-hardening-residue-closeout-2026-05-11",
+  "repeat_run_speedup_ratio": 1.014822,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.443521,
+  "repeat_run_raw_seconds": [
+    0.450095,
+    0.443521
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.450095
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.893616
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-11T08:00:38Z",
+  "collector_version": "2.2.0"
+}
