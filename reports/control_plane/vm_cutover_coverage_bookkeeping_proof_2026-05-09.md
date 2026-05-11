@@ -63,10 +63,11 @@ Routing source: reports/control_plane/repo_truth_mu_structural_advisory_triage_2
 ## Grounding / Authorization
 
 - TASKS.md authorization:
-  `TASKS.md:508` routes `[NEXT-CODEX-POST-REDTEAM]` to this packet as
+  current `rg -n "vm-cutover-coverage-bookkeeping-proof-2026-05-09|vm_cutover_coverage_bookkeeping_proof_2026-05-09.md" TASKS.md`
+  output routes `[NEXT-CODEX-POST-REDTEAM]` to this packet as
   `vm-cutover-coverage-bookkeeping-proof-2026-05-09`, class `L4_ENABLER`,
-  category `/mu` structural evidence, and states that the packet is Phase
-  A-only with no runtime or Stage0 edit authorization.
+  category `/mu` structural evidence, and states that the packet is Phase A-only
+  with no runtime or Stage0 edit authorization.
 - Same-wave override:
   `FOUNDER_OVERRIDE:vm-cutover-coverage-bookkeeping-proof-2026-05-09`.
 - Source advisory:
@@ -191,6 +192,7 @@ No runtime, Stage0, coverage, seed, scheduler, registry, parity, production
 - Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before pre-commit supervisor review so the tracker note, Gate 8 package, and governing packet describe one staged scope.
 - Scope binding: no indicator file other than the artifact above is in scope for this wave.
 - Current staged files:
+  - `TASKS.md`
   - `reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`
   - `reports/deferred/non_blocking/vm-cutover-coverage-bookkeeping-proof-2026-05-09_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/vm-cutover-coverage-bookkeeping-proof-2026-05-09.json`

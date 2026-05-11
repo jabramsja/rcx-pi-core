@@ -194,3 +194,27 @@ Archived source snapshots for extracted non-blocking residue live in:
   `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`,
   `reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`,
   and `reports/control_plane/transparent_js_proxy_provenance_boundary_2026-05-09.md`.
+
+2026-05-10 generated `/mu` structural bridge cleanup note:
+
+- Evidence command:
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort | nl -ba`.
+- Current non-blocking inventory after bridge cleanup remains `README.md` plus
+  three active or partially active `/mu` structural advisory packets:
+  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`,
+  `redteam_2026-03-14_repo_non_blockers.md`, and
+  `repo_truth_non_blockers_2026-03-14.md`.
+- Archived generated same-wave bridge packets after direct verification and
+  packet drift repair:
+  `reports/archive/deferred/repo-truth-mu-structural-advisory-triage-2026-05-09_bridge_nonblockers_closed-by-deferred-generated-mu-structural-bridge-cleanup-2026-05-10.md`,
+  `reports/archive/deferred/stage0-capture-path-provenance-boundary-2026-05-09_bridge_nonblockers_closed-by-deferred-generated-mu-structural-bridge-cleanup-2026-05-10.md`,
+  and
+  `reports/archive/deferred/vm-cutover-coverage-bookkeeping-proof-2026-05-09_bridge_nonblockers_closed-by-deferred-generated-mu-structural-bridge-cleanup-2026-05-10.md`.
+- The cleanup repaired doc-accuracy drift only: Stage0 later test scope now names
+  `mu/tests/l4_gates/test_stage0_vm.py` as the exact Python/JS proof surface,
+  VM cutover packet staged-file truth includes `TASKS.md`, and repo-truth
+  indicator scope distinguishes the tracker-binding triage indicator from the
+  adjacent transparent-Proxy routed follow-up artifact.
+- This cleanup did not implement `/mu` structural production changes; the
+  remaining three active packets still require separate bounded `/mu` structural
+  routing before implementation.

@@ -149,7 +149,10 @@ structural proof boundary without adding host-only semantics.
 - Active packet: `reports/control_plane/repo_truth_mu_structural_advisory_triage_2026-05-09.md`
 - Indicator artifact: `reports/l4_wave_indicators/repo-truth-mu-structural-advisory-triage-2026-05-09.json`
 - Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before pre-commit supervisor review so the tracker note, Gate 8 package, and governing packet describe one staged scope.
-- Scope binding: no indicator file other than the artifact above is in scope for this wave.
+- Scope binding: the artifact above is the only tracker-binding indicator for
+  this wave. The transparent Proxy indicator listed in the historical staged-file
+  snapshot below was an adjacent routed follow-up artifact generated in the same
+  package, not a second tracker-binding indicator for this triage wave.
 - Current staged files:
   - `TASKS.md`
   - `mu/tests/tools/test_phase_b_executor.py`
@@ -165,7 +168,7 @@ structural proof boundary without adding host-only semantics.
   - `reports/deferred/non_blocking/repo-truth-mu-structural-advisory-triage-2026-05-09_bridge_nonblockers.md`
   - `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`
   - `reports/l4_wave_indicators/repo-truth-mu-structural-advisory-triage-2026-05-09.json`
-  - `reports/l4_wave_indicators/transparent-js-proxy-provenance-boundary-2026-05-09.json`
+  - `reports/l4_wave_indicators/transparent-js-proxy-provenance-boundary-2026-05-09.json` (adjacent routed follow-up artifact; not tracker-binding for this wave)
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
 
 <!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->
@@ -191,6 +194,10 @@ structural proof boundary without adding host-only semantics.
 - Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/repo_truth_mu_structural_advisory_triage_2026-05-09.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/repo-truth-mu-structural-advisory-triage-2026-05-09.json`
+- Scope note: `reports/l4_wave_indicators/transparent-js-proxy-provenance-boundary-2026-05-09.json`
+  in the historical staged-file snapshot below is an adjacent routed follow-up
+  artifact; the evidence handle above remains the only tracker-binding indicator
+  for this wave.
 - Current staged files:
   - `TASKS.md`
   - `mu/tests/tools/test_phase_b_executor.py`
@@ -206,5 +213,5 @@ structural proof boundary without adding host-only semantics.
   - `reports/deferred/non_blocking/repo-truth-mu-structural-advisory-triage-2026-05-09_bridge_nonblockers.md`
   - `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`
   - `reports/l4_wave_indicators/repo-truth-mu-structural-advisory-triage-2026-05-09.json`
-  - `reports/l4_wave_indicators/transparent-js-proxy-provenance-boundary-2026-05-09.json`
+  - `reports/l4_wave_indicators/transparent-js-proxy-provenance-boundary-2026-05-09.json` (adjacent routed follow-up artifact; not tracker-binding for this wave)
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
