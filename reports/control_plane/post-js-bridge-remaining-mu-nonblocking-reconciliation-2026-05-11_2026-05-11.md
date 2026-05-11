@@ -28,8 +28,8 @@ Files and directories in scope for the executor wave:
 
 Recent merged evidence to treat as closure/supersedence input: PR #927 / merge SHA `8334c369d7a302cca568de0a088ea9ca1bd1c2f5` closed the JS bridge source-lock/e2e ordering proof slice via commit `ee69f0a0b9b9023bc278b91e7b72419eede6f813`. That evidence updated `mu/tests/parity/test_js_vm_bridge_parity.py` to use public `stepKernel(..., {returnMeta:true, vmConfig})` evidence and updated `mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py` to mechanically scan both `_stage0VmStepTrusted` and `StepTrusted` fragments. Do not carry that source-lock/e2e slice forward as unresolved pending work.
 
-- `reports/deferred/non_blocking/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11_bridge_nonblockers.md`
-  - Same-wave Phase B/commit generated deferred non-blocking bridge findings packet only; no unrelated deferred report is authorized by this wave.
+- `reports/archive/deferred/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11_bridge_nonblockers_closed-by-post-js-bridge-doc-accuracy-closeout-2026-05-11.md`
+  - Archived same-wave Phase B/commit generated deferred non-blocking bridge findings packet only; no unrelated deferred report is authorized by this wave.
 
 ## Work items
 
@@ -112,7 +112,7 @@ post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11
   - `reports/control_plane/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11_2026-05-11.md`
   - `reports/deferred/non_blocking/README.md`
   - `reports/deferred/non_blocking/founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`
-  - `reports/deferred/non_blocking/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11_bridge_nonblockers.md`
+  - `reports/archive/deferred/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11_bridge_nonblockers_closed-by-post-js-bridge-doc-accuracy-closeout-2026-05-11.md`
   - `reports/deferred/non_blocking/redteam_2026-03-14_repo_non_blockers.md`
   - `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`
   - `reports/l4_wave_indicators/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11.json`
@@ -123,10 +123,10 @@ post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11
 
 - Refresh wave: `post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11`
 - Purpose: Phase B and commit automation may stage the same-wave non-blocking bridge findings packet as deferred follow-up instead of blocking an otherwise commit-ready wave.
-- Authorized deferred packet(s):
-  - `reports/deferred/non_blocking/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11_bridge_nonblockers.md`
-- Scope binding: the packet(s) above are in scope only as generated same-wave non-blocking bridge findings packets.
-- Acceptance binding: the final touched-file set may include the packet(s) above when they are also present in `deferred_items` or current staged files.
+- Archived deferred packet(s):
+  - `reports/archive/deferred/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11_bridge_nonblockers_closed-by-post-js-bridge-doc-accuracy-closeout-2026-05-11.md`
+- Scope binding: the packet(s) above are retained as archived generated same-wave non-blocking bridge findings packets.
+- Acceptance binding: the historical final touched-file set included the generated packet before archive; current references use the archive path above.
 <!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->
 
 <!-- COMMIT_PATH_TRUTH_REFRESH:start -->
@@ -148,7 +148,7 @@ post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11
   - `reports/control_plane/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11_2026-05-11.md`
   - `reports/deferred/non_blocking/README.md`
   - `reports/deferred/non_blocking/founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`
-  - `reports/deferred/non_blocking/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11_bridge_nonblockers.md`
+  - `reports/archive/deferred/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11_bridge_nonblockers_closed-by-post-js-bridge-doc-accuracy-closeout-2026-05-11.md`
   - `reports/deferred/non_blocking/redteam_2026-03-14_repo_non_blockers.md`
   - `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`
   - `reports/l4_wave_indicators/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11.json`
