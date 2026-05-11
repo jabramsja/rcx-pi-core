@@ -1971,11 +1971,13 @@ def refresh_commit_path_packet_truth(
                 else []
             ),
         ]
+        # Commit contents come from the staged index; worktree presence can
+        # drift after a deferred packet has already been staged.
         deferred_path_candidates = [
             path
             for path in _dedupe_repo_paths(raw_deferred_path_candidates)
             if not path.startswith("reports/deferred/non_blocking/")
-            or (repo_root / path).is_file()
+            or _git_index_contains_repo_path(repo_root, path)
         ]
         packet_text = _refresh_same_wave_deferred_packet_authorization(
             packet_text,
