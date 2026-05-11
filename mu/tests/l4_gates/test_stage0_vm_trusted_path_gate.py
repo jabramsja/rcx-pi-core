@@ -194,38 +194,39 @@ class TestJsSourceLock:
     """Exhaustive source-lock for JS trusted paths."""
 
     def test_js_trusted_step_allowlist(self):
-        """All _stage0VmStepTrusted occurrences must be in allowlist."""
+        """All JS trusted-step symbol/fragments must be in allowlist."""
         allowlist = {
             "mu/host/js/core/stage0_vm.js",   # Definition
             "mu/host/js/engine/kernel.js",    # Loader-cached caller
             "mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py",  # This test
         }
 
-        result = subprocess.run(
-            ["grep", "-rn", "--include=*.js", "--include=*.py", "_stage0VmStepTrusted", str(REPO_ROOT)],
-            capture_output=True, text=True
-        )
-
         violations = []
-        for line in result.stdout.strip().split("\n"):
-            if not line or line.startswith("Binary file"):
-                continue
-            file_path = line.split(":")[0]
-            try:
-                rel_path = str(Path(file_path).relative_to(REPO_ROOT))
-            except ValueError:
-                continue
+        for token in ("_stage0VmStepTrusted", "StepTrusted"):
+            result = subprocess.run(
+                ["grep", "-rn", "--include=*.js", "--include=*.py", token, str(REPO_ROOT)],
+                capture_output=True, text=True
+            )
 
-            if any(skip in rel_path for skip in [".scratch", ".agent_bus", "node_modules"]):
-                continue
+            for line in result.stdout.strip().split("\n"):
+                if not line or line.startswith("Binary file"):
+                    continue
+                file_path = line.split(":")[0]
+                try:
+                    rel_path = str(Path(file_path).relative_to(REPO_ROOT))
+                except ValueError:
+                    continue
 
-            # Normalize path to handle symlink resolution
-            norm_path = _normalize_path(rel_path)
-            if norm_path not in allowlist:
-                violations.append(f"{norm_path}: {line.split(':', 2)[-1][:60]}")
+                if any(skip in rel_path for skip in [".scratch", ".agent_bus", "node_modules"]):
+                    continue
+
+                # Normalize path to handle symlink resolution
+                norm_path = _normalize_path(rel_path)
+                if norm_path not in allowlist:
+                    violations.append(f"{token} in {norm_path}: {line.split(':', 2)[-1][:60]}")
 
         assert not violations, (
-            f"_stage0VmStepTrusted found outside allowlist:\n" +
+            f"JS trusted-step symbol/fragments found outside allowlist:\n" +
             "\n".join(violations)
         )
 

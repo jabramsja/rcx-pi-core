@@ -200,6 +200,396 @@ class TestSubstVmBridgeParity:
 
 KERNEL_COMPILED_REL = "mu/stage0/compiled/kernel_v1.compiled.v1.json"
 BRIDGE_COMPILED_REL = "mu/stage0/compiled/bootstrap_structural_v1.compiled.v1.json"
+JS_BRIDGE_FIXTURE_REL = "mu/host/js/tests/self_tests.js"
+
+
+def _run_js_bridge_vm_ordering_probe():
+    """Run JS kernel VM ordering proof through the public bridge-mode entrypoint."""
+    script = r"""
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
+const repoRoot = process.cwd();
+const { validateBundle } = require('./mu/host/js/core/stage0_vm');
+const MAX_STEPS = 80;
+const vmStepCallLog = [];
+const vmAccessLog = [];
+const activeCallsByBundleId = new Map();
+let traceEnabled = false;
+let nextVmCallIndex = 0;
+
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+
+function traceEvent(event) {
+  if (traceEnabled) {
+    vmAccessLog.push(event);
+  }
+}
+
+function startBundleCall(bundle) {
+  const call = {
+    call_index: nextVmCallIndex,
+    bundle_id: bundle.bundle_id,
+    bundle: bundleLabel(bundle.bundle_id),
+    status: null,
+  };
+  nextVmCallIndex += 1;
+  activeCallsByBundleId.set(bundle.bundle_id, call);
+  vmStepCallLog.push(call);
+  traceEvent({
+    event: 'bundle.programs',
+    call_index: call.call_index,
+    bundle_id: call.bundle_id,
+    bundle: call.bundle,
+  });
+  return call;
+}
+
+function activeBundleCall(bundle) {
+  return activeCallsByBundleId.get(bundle.bundle_id) || startBundleCall(bundle);
+}
+
+function finishBundleCall(call, status, eventName) {
+  if (!call || call.status !== null) return;
+  call.status = status;
+  activeCallsByBundleId.delete(call.bundle_id);
+  traceEvent({
+    event: eventName,
+    call_index: call.call_index,
+    bundle_id: call.bundle_id,
+    bundle: call.bundle,
+    status,
+  });
+}
+
+function instrumentProgramOrder(bundle, order, call) {
+  return new Proxy(order, {
+    get(target, prop, receiver) {
+      if (prop !== Symbol.iterator) {
+        return Reflect.get(target, prop, receiver);
+      }
+      return function tracedProgramOrderIterator() {
+        traceEvent({
+          event: 'bundle.program_order.iterate',
+          call_index: call.call_index,
+          bundle_id: bundle.bundle_id,
+          bundle: call.bundle,
+        });
+        let index = 0;
+        let closed = false;
+        const iterator = {
+          next() {
+            if (index < target.length) {
+              return { value: target[index++], done: false };
+            }
+            if (!closed) {
+              closed = true;
+              finishBundleCall(call, 'stall', 'bundle.program_order.exhausted');
+            }
+            return { value: undefined, done: true };
+          },
+          return() {
+            if (!closed) {
+              closed = true;
+              finishBundleCall(call, 'match', 'bundle.program_order.closed');
+            }
+            return { done: true };
+          },
+          [Symbol.iterator]() {
+            return this;
+          },
+        };
+        return iterator;
+      };
+    },
+  });
+}
+
+function instrumentBundle(rawBundle) {
+  const bundle = {};
+  for (const [key, value] of Object.entries(rawBundle)) {
+    if (key !== 'programs' && key !== 'program_order') {
+      bundle[key] = value;
+    }
+  }
+  Object.defineProperty(bundle, 'programs', {
+    enumerable: true,
+    configurable: false,
+    get() {
+      if (traceEnabled) {
+        startBundleCall(bundle);
+      }
+      return rawBundle.programs;
+    },
+  });
+  Object.defineProperty(bundle, 'program_order', {
+    enumerable: true,
+    configurable: false,
+    get() {
+      if (!traceEnabled) {
+        return rawBundle.program_order;
+      }
+      const call = activeBundleCall(bundle);
+      traceEvent({
+        event: 'bundle.program_order',
+        call_index: call.call_index,
+        bundle_id: bundle.bundle_id,
+        bundle: call.bundle,
+      });
+      return instrumentProgramOrder(bundle, rawBundle.program_order, call);
+    },
+  });
+  return bundle;
+}
+
+function loadBundle(relPath) {
+  const bundlePath = path.join(repoRoot, relPath);
+  const rawBundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
+  validateBundle(rawBundle);
+  return instrumentBundle(rawBundle);
+}
+
+function readConstInitializer(source, constName) {
+  const needle = `const ${constName} =`;
+  const declarationStart = source.indexOf(needle);
+  if (declarationStart === -1) {
+    throw new Error(`Missing ${constName} fixture initializer in self_tests.js`);
+  }
+
+  let index = declarationStart + needle.length;
+  while (/\s/.test(source[index])) index++;
+  const literalStart = index;
+  const opening = source[index];
+  const closing = opening === '{' ? '}' : opening === '[' ? ']' : null;
+  if (!closing) {
+    throw new Error(`Unsupported ${constName} fixture initializer in self_tests.js`);
+  }
+
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  for (; index < source.length; index++) {
+    const ch = source[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === opening) depth++;
+    if (ch === closing) {
+      depth--;
+      if (depth === 0) return source.slice(literalStart, index + 1);
+    }
+  }
+  throw new Error(`Unterminated ${constName} fixture initializer in self_tests.js`);
+}
+
+function loadSelfTestsBridgeFixture() {
+  const fixturePath = path.join(repoRoot, 'mu/host/js/tests/self_tests.js');
+  const source = fs.readFileSync(fixturePath, 'utf8');
+  const context = Object.create(null);
+  const projection = JSON.parse(
+    JSON.stringify(
+      vm.runInNewContext(
+        `(${readConstInitializer(source, 'testProjection')})`,
+        context,
+        { timeout: 1000 }
+      )
+    )
+  );
+  const input = JSON.parse(
+    JSON.stringify(
+      vm.runInNewContext(
+        `(${readConstInitializer(source, 'testInput')})`,
+        context,
+        { timeout: 1000 }
+      )
+    )
+  );
+  if (!projection || typeof projection !== 'object' || !projection.pattern || !projection.body) {
+    throw new Error('self_tests.js testProjection fixture is not a projection object');
+  }
+  return {
+    file: 'mu/host/js/tests/self_tests.js',
+    input,
+    projection,
+  };
+}
+
+function runPublicStep(input, projection, vmConfig) {
+  vmStepCallLog.length = 0;
+  vmAccessLog.length = 0;
+  activeCallsByBundleId.clear();
+  nextVmCallIndex = 0;
+  traceEnabled = true;
+  try {
+    return stepKernel(
+      [],
+      input,
+      [projection],
+      { maxSteps: MAX_STEPS, returnMeta: true, vmConfig }
+    );
+  } finally {
+    traceEnabled = false;
+  }
+}
+
+function bundleLabel(bundleId) {
+  return BUNDLE_LABELS[bundleId] || bundleId;
+}
+
+function groupVmCalls(calls, kernelBundleId) {
+  const groups = [];
+  for (const call of calls) {
+    if (call.bundle_id === kernelBundleId || groups.length === 0) {
+      groups.push([]);
+    }
+    groups[groups.length - 1].push({
+      bundle: bundleLabel(call.bundle_id),
+      status: call.status,
+    });
+  }
+  return groups;
+}
+
+function firstBundleSuccessGroup(groups, bundle) {
+  return groups.find(group =>
+    group.some(call => call.bundle === bundle && call.status === 'match')
+  ) || null;
+}
+
+function groupSignatures(groups) {
+  return groups.map(group => group.map(call => `${call.bundle}:${call.status}`).join('>'));
+}
+
+function countGroupSignatures(signatures) {
+  const counts = Object.create(null);
+  for (const signature of signatures) {
+    counts[signature] = (counts[signature] || 0) + 1;
+  }
+  return counts;
+}
+
+function runPublicStepWithTrace(input, projection, vmConfig) {
+  const result = runPublicStep(input, projection, vmConfig);
+  const unresolvedCalls = vmStepCallLog.filter(call => call.status === null);
+  if (unresolvedCalls.length > 0) {
+    throw new Error(`VM trace did not resolve call status: ${JSON.stringify(unresolvedCalls)}`);
+  }
+  const vmCallGroups = groupVmCalls(vmStepCallLog, vmConfig.kernelBundle.bundle_id);
+  const vmGroupSignatures = groupSignatures(vmCallGroups);
+  const bundleProgramsAccesses = vmAccessLog.filter(event => event.event === 'bundle.programs');
+  return Object.assign({}, result, {
+    public_entrypoint_trace: {
+      entrypoint: 'stepKernel',
+      return_meta: true,
+      vm_config_bundle_keys: ['kernelBundle', 'bridgeBundle', 'matchBundle', 'substBundle'],
+      bundle_programs_accesses: bundleProgramsAccesses,
+      access_events: vmAccessLog.slice(),
+    },
+    vm_call_groups: vmCallGroups,
+    vm_group_signatures: vmGroupSignatures,
+    vm_group_signature_counts: countGroupSignatures(vmGroupSignatures),
+    first_match_bundle_success_group: firstBundleSuccessGroup(vmCallGroups, 'match'),
+    first_subst_bundle_success_group: firstBundleSuccessGroup(vmCallGroups, 'subst'),
+  });
+}
+
+const kernelBundle = loadBundle('mu/stage0/compiled/kernel_v1.compiled.v1.json');
+const bridgeBundle = loadBundle('mu/stage0/compiled/bootstrap_structural_v1.compiled.v1.json');
+const matchBundle = loadBundle('mu/stage0/compiled/match_v2.compiled.v1.json');
+const substBundle = loadBundle('mu/stage0/compiled/subst_v2.compiled.v1.json');
+const BUNDLE_LABELS = {
+  [kernelBundle.bundle_id]: 'kernel',
+  [bridgeBundle.bundle_id]: 'bridge',
+  [matchBundle.bundle_id]: 'match',
+  [substBundle.bundle_id]: 'subst',
+};
+
+const fixture = loadSelfTestsBridgeFixture();
+const orderedVmConfig = { kernelBundle, bridgeBundle, matchBundle, substBundle };
+const bridgeAbsentVmConfig = { kernelBundle, bridgeBundle: null, matchBundle, substBundle };
+const bridgeAfterMatchVmConfig = {
+  kernelBundle,
+  bridgeBundle: matchBundle,
+  matchBundle: bridgeBundle,
+  substBundle,
+};
+const matchAfterSubstVmConfig = {
+  kernelBundle,
+  bridgeBundle,
+  matchBundle: substBundle,
+  substBundle: matchBundle,
+};
+
+const ordered = runPublicStepWithTrace(fixture.input, fixture.projection, orderedVmConfig);
+const bridgeAbsent = runPublicStepWithTrace(fixture.input, fixture.projection, bridgeAbsentVmConfig);
+const bridgeAfterMatch = runPublicStepWithTrace(fixture.input, fixture.projection, bridgeAfterMatchVmConfig);
+const matchAfterSubst = runPublicStepWithTrace(fixture.input, fixture.projection, matchAfterSubstVmConfig);
+const kernelReplacedByBridge = runPublicStep(
+  fixture.input,
+  fixture.projection,
+  { kernelBundle: bridgeBundle, bridgeBundle, matchBundle, substBundle }
+);
+const matchReplacedByBridge = runPublicStep(
+  fixture.input,
+  fixture.projection,
+  { kernelBundle, bridgeBundle, matchBundle: bridgeBundle, substBundle }
+);
+const substReplacedByBridge = runPublicStep(
+  fixture.input,
+  fixture.projection,
+  { kernelBundle, bridgeBundle, matchBundle, substBundle: bridgeBundle }
+);
+
+process.stdout.write(JSON.stringify({
+  max_steps: MAX_STEPS,
+  fixture,
+  bundle_order: [
+    kernelBundle.bundle_id,
+    bridgeBundle.bundle_id,
+    matchBundle.bundle_id,
+    substBundle.bundle_id,
+  ],
+  bridge_after_match_bundle_order: [
+    kernelBundle.bundle_id,
+    matchBundle.bundle_id,
+    bridgeBundle.bundle_id,
+    substBundle.bundle_id,
+  ],
+  match_after_subst_bundle_order: [
+    kernelBundle.bundle_id,
+    bridgeBundle.bundle_id,
+    substBundle.bundle_id,
+    matchBundle.bundle_id,
+  ],
+  ordered,
+  bridge_absent: bridgeAbsent,
+  bridge_after_match: bridgeAfterMatch,
+  match_after_subst: matchAfterSubst,
+  kernel_replaced_by_bridge: kernelReplacedByBridge,
+  match_replaced_by_bridge: matchReplacedByBridge,
+  subst_replaced_by_bridge: substReplacedByBridge,
+}));
+"""
+    result = subprocess.run(
+        ["node", "-e", script],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
 
 
 class TestKernelVmBridgeParity:
@@ -262,3 +652,153 @@ class TestBridgeVmParity:
         js_result = run_js_stage0("step", BRIDGE_COMPILED_REL, inp)
         assert py_result["status"] == "stall"
         assert js_result["status"] == "stall"
+
+
+class TestJsBridgeVmOrderingE2E:
+    """End-to-end JS kernel VM ordering proof with bridge mode enabled."""
+
+    def test_live_vm_kernel_path_depends_on_kernel_bridge_match_subst_order(self):
+        """Negative controls prove the live JS VM path is order-sensitive."""
+        proof = _run_js_bridge_vm_ordering_probe()
+
+        assert proof["fixture"]["file"] == JS_BRIDGE_FIXTURE_REL
+        assert proof["fixture"]["input"] == {"op": "double", "value": 42}
+        assert proof["fixture"]["projection"] == {
+            "pattern": {"op": "double", "value": {"var": "n"}},
+            "body": {"result": {"var": "n"}, "doubled": {"var": "n"}},
+        }
+        assert proof["bundle_order"] == [
+            "rcx.stage0.kernel_v1.compiled.v1",
+            "rcx.stage0.bootstrap_structural_v1.compiled.v1",
+            "rcx.stage0.match_v2.compiled.v1",
+            "rcx.stage0.subst_v2.compiled.v1",
+        ]
+        assert proof["bridge_after_match_bundle_order"] == [
+            "rcx.stage0.kernel_v1.compiled.v1",
+            "rcx.stage0.match_v2.compiled.v1",
+            "rcx.stage0.bootstrap_structural_v1.compiled.v1",
+            "rcx.stage0.subst_v2.compiled.v1",
+        ]
+        assert proof["match_after_subst_bundle_order"] == [
+            "rcx.stage0.kernel_v1.compiled.v1",
+            "rcx.stage0.bootstrap_structural_v1.compiled.v1",
+            "rcx.stage0.subst_v2.compiled.v1",
+            "rcx.stage0.match_v2.compiled.v1",
+        ]
+
+        assert proof["ordered"]["output"] == {"result": 42, "doubled": 42}
+        assert proof["ordered"]["stall"] is False
+        assert proof["ordered"]["termination_reason"] == "projection_applied"
+        ordered_trace = proof["ordered"]["public_entrypoint_trace"]
+        assert ordered_trace["entrypoint"] == "stepKernel"
+        assert ordered_trace["return_meta"] is True
+        assert ordered_trace["vm_config_bundle_keys"] == [
+            "kernelBundle", "bridgeBundle", "matchBundle", "substBundle",
+        ]
+        ordered_program_accesses = ordered_trace["bundle_programs_accesses"]
+        assert {event["bundle"] for event in ordered_program_accesses} >= {
+            "kernel", "bridge", "match", "subst",
+        }
+        assert len(ordered_program_accesses) == sum(
+            len(group) for group in proof["ordered"]["vm_call_groups"]
+        )
+        assert proof["ordered"]["first_match_bundle_success_group"] == [
+            {"bundle": "kernel", "status": "stall"},
+            {"bundle": "bridge", "status": "stall"},
+            {"bundle": "match", "status": "match"},
+        ]
+        assert proof["ordered"]["first_subst_bundle_success_group"] == [
+            {"bundle": "kernel", "status": "stall"},
+            {"bundle": "bridge", "status": "stall"},
+            {"bundle": "match", "status": "stall"},
+            {"bundle": "subst", "status": "match"},
+        ]
+        assert proof["ordered"]["vm_group_signature_counts"]["kernel:stall>bridge:match"] > 0
+        assert (
+            proof["ordered"]["vm_group_signature_counts"][
+                "kernel:stall>bridge:stall>match:stall>subst:match"
+            ]
+            > 0
+        )
+
+        # Same-output controls prove output smoke alone would miss the ordering claim.
+        assert proof["bridge_absent"]["output"] == proof["ordered"]["output"]
+        assert proof["bridge_absent"]["stall"] is False
+        assert proof["bridge_absent"]["steps_used"] == proof["ordered"]["steps_used"] - 1
+        assert all(
+            "bridge:" not in signature
+            for signature in proof["bridge_absent"]["vm_group_signatures"]
+        )
+        assert (
+            proof["bridge_absent"]["vm_group_signature_counts"]
+            != proof["ordered"]["vm_group_signature_counts"]
+        )
+        assert proof["bridge_absent"]["first_match_bundle_success_group"] == [
+            {"bundle": "kernel", "status": "stall"},
+            {"bundle": "match", "status": "match"},
+        ]
+        assert proof["bridge_absent"]["first_subst_bundle_success_group"] == [
+            {"bundle": "kernel", "status": "stall"},
+            {"bundle": "match", "status": "stall"},
+            {"bundle": "subst", "status": "match"},
+        ]
+
+        assert proof["bridge_after_match"]["output"] == proof["ordered"]["output"]
+        assert proof["bridge_after_match"]["stall"] is False
+        assert proof["bridge_after_match"]["steps_used"] == proof["bridge_absent"]["steps_used"]
+        assert proof["bridge_after_match"]["first_match_bundle_success_group"] == [
+            {"bundle": "kernel", "status": "stall"},
+            {"bundle": "match", "status": "match"},
+        ]
+        assert proof["bridge_after_match"]["first_subst_bundle_success_group"] == [
+            {"bundle": "kernel", "status": "stall"},
+            {"bundle": "match", "status": "stall"},
+            {"bundle": "bridge", "status": "stall"},
+            {"bundle": "subst", "status": "match"},
+        ]
+        assert "kernel:stall>bridge:match" not in proof["bridge_after_match"]["vm_group_signature_counts"]
+        assert (
+            proof["bridge_after_match"]["vm_group_signature_counts"]
+            != proof["ordered"]["vm_group_signature_counts"]
+        )
+
+        assert proof["match_after_subst"]["output"] == proof["ordered"]["output"]
+        assert proof["match_after_subst"]["stall"] is False
+        assert proof["match_after_subst"]["termination_reason"] == "projection_applied"
+        assert proof["match_after_subst"]["first_match_bundle_success_group"] == [
+            {"bundle": "kernel", "status": "stall"},
+            {"bundle": "bridge", "status": "stall"},
+            {"bundle": "subst", "status": "stall"},
+            {"bundle": "match", "status": "match"},
+        ]
+        assert (
+            proof["match_after_subst"]["first_match_bundle_success_group"]
+            != proof["ordered"]["first_match_bundle_success_group"]
+        )
+        assert proof["match_after_subst"]["first_subst_bundle_success_group"] == [
+            {"bundle": "kernel", "status": "stall"},
+            {"bundle": "bridge", "status": "stall"},
+            {"bundle": "subst", "status": "match"},
+        ]
+        assert (
+            proof["match_after_subst"]["first_subst_bundle_success_group"]
+            != proof["ordered"]["first_subst_bundle_success_group"]
+        )
+        assert (
+            proof["match_after_subst"]["vm_group_signature_counts"]
+            != proof["ordered"]["vm_group_signature_counts"]
+        )
+
+        assert proof["kernel_replaced_by_bridge"]["output"] == {"op": "double", "value": 42}
+        assert proof["kernel_replaced_by_bridge"]["stall"] is True
+        assert proof["kernel_replaced_by_bridge"]["termination_reason"] == "hash_stall"
+
+        assert proof["match_replaced_by_bridge"]["output"] == {"op": "double", "value": 42}
+        assert proof["match_replaced_by_bridge"]["stall"] is True
+        assert proof["match_replaced_by_bridge"]["termination_reason"] == "max_steps_exhausted"
+        assert proof["match_replaced_by_bridge"]["steps_used"] == proof["max_steps"]
+
+        assert proof["subst_replaced_by_bridge"]["output"] == {"op": "double", "value": 42}
+        assert proof["subst_replaced_by_bridge"]["stall"] is True
+        assert proof["subst_replaced_by_bridge"]["termination_reason"] == "max_steps_exhausted"
+        assert proof["subst_replaced_by_bridge"]["steps_used"] == proof["max_steps"]
