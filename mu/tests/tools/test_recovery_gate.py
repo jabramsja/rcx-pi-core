@@ -728,6 +728,26 @@ class TestStagePathSymlinkAliasRecovery:
             {"status": "failed", "executor": "commit_executor", "stdout": payload}
         ) == FailureClass.TEST_FAILURE
 
+    def test_stale_active_items_pre_push_failure_is_tier2(self):
+        payload = json.dumps({
+            "status": "error",
+            "step": "run_pre_push_script",
+            "errors": [
+                "pre-push-fast failed: STALE: PR #927 is MERGED but NEXT item not marked Landed\n"
+                "2 stale active item(s) found — merged PRs/branches not marked Landed\n"
+                "Run: bash tools/checks/check_stale_next_items.sh --fix"
+            ],
+        })
+
+        fc = rg_mod.classify_failure({
+            "status": "failed",
+            "executor": "commit_executor",
+            "stdout": payload,
+        })
+
+        assert fc == FailureClass.STALE_ACTIVE_ITEMS
+        assert rg_mod.tier_for(fc) == 2
+
     def test_pre_push_pytest_timeout_failure_wins_over_l4_audit_chatter(self):
         payload = json.dumps({
             "status": "error",
@@ -2859,12 +2879,210 @@ class TestTier2FixesMap:
             rg_mod.FailureClass.IMPLEMENTER_STALE,
             rg_mod.FailureClass.PR_MERGE_CONFLICT,
             rg_mod.FailureClass.PR_CONFLICTING,
+            rg_mod.FailureClass.STALE_ACTIVE_ITEMS,
             rg_mod.FailureClass.UPSTREAM_CONNECTIVITY,
             rg_mod.FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP,
             rg_mod.FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP,
             rg_mod.FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP,
         }
         assert set(rg_mod._TIER2_FIXES.keys()) == expected  # ANTICHEAT_OK
+
+
+class TestFixStaleActiveItems:
+    def _init_repo_with_checker(self, repo_root: Path) -> str:
+        subprocess.run(["git", "init"], cwd=repo_root, check=True, capture_output=True, text=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "RCX Test"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        (repo_root / ".gitignore").write_text(".agent_bus/\n", encoding="utf-8")
+        (repo_root / "TASKS.md").write_text(
+            "- Tracker sync note (2026-05-11, wave-stale): NEXT item still active\n",
+            encoding="utf-8",
+        )
+        checker = repo_root / "tools" / "checks" / "check_stale_next_items.sh"
+        checker.parent.mkdir(parents=True)
+        checker.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "if [ \"${1:-}\" = \"--fix\" ]; then\n"
+            "  if ! grep -q 'Landed' TASKS.md; then\n"
+            "    printf ' **Landed**\\n' >> TASKS.md\n"
+            "  fi\n"
+            "  exit 0\n"
+            "fi\n"
+            "if grep -q 'Landed' TASKS.md; then\n"
+            "  printf 'ok\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf 'STALE: PR #927 is MERGED but NEXT item not marked Landed\\n'\n"
+            "printf '1 stale active item(s) found - merged PRs/branches not marked Landed\\n'\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "add", ".gitignore", "TASKS.md", "tools/checks/check_stale_next_items.sh"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "init"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return head.stdout.strip()
+
+    def _current_branch(self, repo_root: Path) -> str:
+        return subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def _write_continuation(self, repo_root: Path, wave_id: str, commit_sha: str, **overrides) -> None:
+        path = repo_root / ".agent_bus" / "executors" / f"commit_executor_{wave_id}.json"
+        path.parent.mkdir(parents=True)
+        payload = {
+            "version": 1,
+            "status": "post_commit_pending",
+            "wave_id": wave_id,
+            "handoff_sha": "a" * 64,
+            "target_branch": self._current_branch(repo_root),
+            "receipt_decision": "COMMIT_GO",
+            "commit_sha": commit_sha,
+            "steps_completed": ["validate_inputs", "git_commit"],
+        }
+        for key, value in overrides.items():
+            if value is None:
+                payload.pop(key, None)
+            else:
+                payload[key] = value
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_commits_tasks_repair_when_post_commit_continuation_active(self, tmp_path):
+        wave_id = "wave-stale-2026-05-11"
+        commit_sha = self._init_repo_with_checker(tmp_path)
+        self._write_continuation(tmp_path, wave_id, commit_sha)
+
+        result = rg_mod.fix_stale_active_items(tmp_path, wave_id=wave_id)
+
+        assert result["fixed"] is True, result
+        assert result["action"] == "commit_stale_active_items_repair"
+        log = subprocess.run(
+            ["git", "log", "--oneline", "-1"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert f"fix: mark stale active items landed for {wave_id}" in log
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert status == ""
+
+    def test_refuses_without_post_commit_continuation(self, tmp_path):
+        self._init_repo_with_checker(tmp_path)
+
+        result = rg_mod.fix_stale_active_items(tmp_path, wave_id="wave-stale-2026-05-11")
+
+        assert result["fixed"] is False
+        assert result["action"] == "continuation_not_ready"
+
+    def test_refuses_missing_continuation_version(self, tmp_path):
+        wave_id = "wave-stale-2026-05-11"
+        commit_sha = self._init_repo_with_checker(tmp_path)
+        self._write_continuation(tmp_path, wave_id, commit_sha, version=None)
+
+        result = rg_mod.fix_stale_active_items(tmp_path, wave_id=wave_id)
+
+        assert result["fixed"] is False
+        assert result["action"] == "continuation_not_ready"
+        assert "version" in result["detail"]
+
+    def test_refuses_missing_continuation_receipt_decision(self, tmp_path):
+        wave_id = "wave-stale-2026-05-11"
+        commit_sha = self._init_repo_with_checker(tmp_path)
+        self._write_continuation(tmp_path, wave_id, commit_sha, receipt_decision=None)
+
+        result = rg_mod.fix_stale_active_items(tmp_path, wave_id=wave_id)
+
+        assert result["fixed"] is False
+        assert result["action"] == "continuation_not_ready"
+        assert "receipt_decision" in result["detail"]
+
+    def test_refuses_nonexistent_continuation_commit_sha(self, tmp_path):
+        wave_id = "wave-stale-2026-05-11"
+        self._init_repo_with_checker(tmp_path)
+        self._write_continuation(tmp_path, wave_id, "a" * 40)
+
+        result = rg_mod.fix_stale_active_items(tmp_path, wave_id=wave_id)
+
+        assert result["fixed"] is False
+        assert result["action"] == "continuation_not_ready"
+        assert "local git proof failed" in result["detail"]
+
+    def test_refuses_non_ancestor_continuation_commit_sha(self, tmp_path):
+        wave_id = "wave-stale-2026-05-11"
+        self._init_repo_with_checker(tmp_path)
+        original_branch = self._current_branch(tmp_path)
+        subprocess.run(["git", "checkout", "-b", "side"], cwd=tmp_path, check=True, capture_output=True, text=True)
+        (tmp_path / "side.txt").write_text("side\n", encoding="utf-8")
+        subprocess.run(["git", "add", "side.txt"], cwd=tmp_path, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", "side"], cwd=tmp_path, check=True, capture_output=True, text=True)
+        side_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        subprocess.run(["git", "checkout", original_branch], cwd=tmp_path, check=True, capture_output=True, text=True)
+        self._write_continuation(tmp_path, wave_id, side_sha)
+
+        result = rg_mod.fix_stale_active_items(tmp_path, wave_id=wave_id)
+
+        assert result["fixed"] is False
+        assert result["action"] == "continuation_not_ready"
+        assert "not an ancestor" in result["detail"]
+
+    def test_refuses_wrong_continuation_target_branch(self, tmp_path):
+        wave_id = "wave-stale-2026-05-11"
+        commit_sha = self._init_repo_with_checker(tmp_path)
+        self._write_continuation(tmp_path, wave_id, commit_sha, target_branch="other-branch")
+
+        result = rg_mod.fix_stale_active_items(tmp_path, wave_id=wave_id)
+
+        assert result["fixed"] is False
+        assert result["action"] == "continuation_not_ready"
+        assert "does not match continuation target_branch" in result["detail"]
 
 
 class TestTier2AttemptRecovery:

@@ -28,13 +28,6 @@ does not authorize `/mu` implementation.
   through `mu/host/python/rcx_pi/selfhost/step_mu.py:1142`; exact bookkeeping
   proof is routed to
   `reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`.
-- N2 remains advisory because current JS evidence includes bridge-mode VM smoke
-  and parity surfaces (`mu/host/js/tests/self_tests.js:461` through
-  `mu/host/js/tests/self_tests.js:514`,
-  `mu/tests/parity/test_js_vm_bridge_parity.py:1` through
-  `mu/tests/parity/test_js_vm_bridge_parity.py:18`) while
-  `mu/host/js/engine/kernel.js:23` through `mu/host/js/engine/kernel.js:27`
-  still documents no JS coverage system.
 - N3 remains an architectural progress boundary, not a single implementable
   defect; `python3 mu/tools/checks/check_host_semantics_ratchet.py --json`
   exits 0 with no increases/decreases and
@@ -57,9 +50,50 @@ does not authorize `/mu` implementation.
   This packet remains advisory evidence only and does not authorize direct
   `/mu` structural implementation.
 
+2026-05-11 reconciliation:
+
+- N2 is closed/superseded by PR #927 / merge
+  `8334c369d7a302cca568de0a088ea9ca1bd1c2f5` and commit
+  `ee69f0a0b9b9023bc278b91e7b72419eede6f813`.
+  Current `mu/tests/parity/test_js_vm_bridge_parity.py` uses the public
+  `stepKernel(..., {returnMeta:true, vmConfig})` entrypoint with instrumented
+  Stage0 bundles and ordering-sensitive negative controls, while
+  `mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py` scans both
+  `_stage0VmStepTrusted` and `StepTrusted` fragments. The old JS bridge
+  source-lock/e2e ordering slice is archived at
+  `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_partial-closed-by-post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11.md`
+  and is no longer live pending work.
+- N1 remains live under
+  `reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`.
+- N3 remains a broad architectural boundary observation with no direct
+  implementation route; any broad host-surface reduction requires a separate
+  bounded packet.
+- N5 remains live under
+  `reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`.
+- N14 remains a duplicate pointer to the canonical Stage0 route
+  `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.
+- Transparent JS Proxy provenance is classified in
+  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`
+  and governed by
+  `reports/control_plane/transparent_js_proxy_provenance_boundary_2026-05-09.md`;
+  it is not a separate section in this repo-truth source packet.
+
 ## Active Non-Blockers
 
 ### N1. Python VM cutover coverage reconstruction is not directly locked
+
+- **Outcome:** retained live advisory.
+- **Governing route:** `reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`.
+- **Current proof gap:** the completed Phase A packet reproduced that
+  `_step_kernel_with_vm` still reconstructs coverage bookkeeping from host-side
+  bundle order because Stage0 results do not emit ordered attempted-program
+  traces or no-match/match events.
+- **Hard stop before implementation:** no runtime, Stage0, coverage, seed,
+  scheduler, registry, parity, or production `/mu` edits are authorized by this
+  source packet or by the completed Phase A evidence packet.
+- **Doctrine boundary:** future work must derive bookkeeping proof from
+  Mu/Stage0 structural execution or a parity-preserving VM trace; it must not
+  add host-only coverage semantics.
 
 - `_step_kernel_with_vm()` reconstructs coverage semantics for compiled
   `match.v2` / `subst.v2`
@@ -71,26 +105,28 @@ exact bookkeeping parity tests requires instrumenting the VM to emit coverage ev
 which is a new capability in the Stage0 VM. **Target packet:**
 `reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`.
 
-### N2. JS bridge-mode VM shadow evidence is still thinner than the core lane
-
-- JS self-tests prove bridge-mode smoke behavior and bridge ordering validation
-- they do not yet directly lock the full `kernel.v1 -> bridge -> match.v2 ->
-  subst.v2` ordering semantics under the VM-shadow lane
-**Why deferred:** The JS substrate's VM shadow mode was added in P7-d as a parallel
-execution path. The core lane (Python) has deeper evidence because it's the primary
-development surface. Thickening JS shadow evidence requires writing JS-specific
-ordering tests that exercise the bridge composition path end-to-end. **Target wave:**
-`reports/control_plane/js_bridge_vm_ordering_evidence_2026-05-09.md`
-(requires JS test infrastructure expansion if Phase A proves the gap remains live).
-
 ### N3. P7-d is execution-path progress, not broad host-surface reduction
+
+- **Outcome:** retained architectural boundary observation.
+- **Governing route:** no direct implementation route; future broad
+  host-surface reduction must be authorized by a separate bounded control-plane
+  packet from the structural lane.
+- **Current proof gap:** tracked markers remain much smaller than the broader
+  authority and total inventory ledgers, so execution-path progress must not be
+  reported as broad host-surface elimination.
+- **Hard stop before implementation:** do not implement broad host-surface
+  reduction from this observation; route exact runtime/control-plane work in a
+  successor packet with file scope and validation.
+- **Doctrine boundary:** future reductions must program in Mu or narrow
+  bootstrap assumptions, not move more semantic authority into Python or
+  JavaScript host code.
 
 - tracked markers are flat
 - the broader authority and total inventory ledgers remain much larger than the
   narrow tracked-marker ledger
 **Why deferred:** This is an honest observation, not a fixable defect. P7-d reduces
 host-semantic debt on the kernel execution path (match/subst/step), but the broader
-authority inventory (218 sites) and total inventory (305 sites) include all runtime
+authority inventory (217 sites) and total inventory (312 sites) include all runtime
 functions — most of which are not on the kernel path. Reducing the broader inventory
 requires eliminating host constructs in engine pipeline, hemisphere routing, ontology
 promotion, etc. — each of which is a separate L4 workstream.
@@ -98,7 +134,20 @@ promotion, etc. — each of which is a separate L4 workstream.
 
 ### N5. `pipeline.js` still has no explicit size/shape governance
 
-- the file remains large (~800 lines)
+- **Outcome:** retained live governance advisory.
+- **Governing route:** `reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`.
+- **Current proof gap:** the completed Phase A packet reproduced that
+  `mu/host/js/engine/pipeline.js` remains a 1160-line engine pipeline and that
+  scoped docs/tests do not define a sufficient module ownership or
+  decomposition contract.
+- **Hard stop before implementation:** no JS runtime, Stage0, coverage, Proxy
+  provenance, scheduler, seed, or module-split implementation is authorized by
+  this source packet or by the completed Phase A governance packet.
+- **Doctrine boundary:** future governance must preserve seed-driven boundary
+  operations and must not move Mu semantic decisions into JavaScript module
+  structure.
+
+- the file remains large (`wc -l` reports 1160 lines)
 - there is no explicit cap or decomposition contract comparable to the JS
   bootstrap-core governance gate
 **Why deferred:** pipeline.js is the JS engine pipeline — it handles boundary dispatch,
@@ -110,6 +159,17 @@ decomposition guidance would be arbitrary. **Target packet:**
 `reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`.
 
 ### N14. Stage0 capture_ref returns null/None for hostile leaves (design gap)
+
+- **Outcome:** retained only as duplicate pointer; not a separate active packet.
+- **Governing route:** `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.
+- **Current proof gap:** see the canonical Stage0 advisory in
+  `redteam_2026-03-14_repo_non_blockers.md`; this source packet must not
+  duplicate Stage0 implementation routing.
+- **Hard stop before implementation:** no Stage0, seed, scheduler, registry,
+  parity, or production `/mu` edits are authorized from this duplicate pointer.
+- **Doctrine boundary:** any later fix must update Python and JavaScript Stage0
+  together and narrow direct-API capture provenance without host-only object
+  semantics.
 
 - capture_ref deep-copies via _safe_mu_copy. Non-Mu types (subclasses) are canonicalized to null/None.
 - Bridge considers this a "successful match on hostile input" since the VM returns match with root=null.

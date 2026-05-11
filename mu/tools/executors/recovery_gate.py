@@ -108,6 +108,7 @@ class FailureClass(Enum):
     IMPLEMENTER_STALE = "implementer_stale"
     PR_MERGE_CONFLICT = "pr_merge_conflict"
     PR_CONFLICTING = "pr_conflicting"
+    STALE_ACTIVE_ITEMS = "stale_active_items"
     # Tier 3 -- LLM diagnosis (small focused prompt)
     GIT_STAGING_CONFLICT = "git_staging_conflict"
     TEST_FAILURE = "test_failure"
@@ -146,6 +147,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.AGGREGATION_HANG: 2, FailureClass.IMPLEMENTER_STALE: 2,
     FailureClass.PR_MERGE_CONFLICT: 2,
     FailureClass.PR_CONFLICTING: 2,
+    FailureClass.STALE_ACTIVE_ITEMS: 2,
     FailureClass.GIT_STAGING_CONFLICT: 3, FailureClass.TEST_FAILURE: 3,
     FailureClass.PRIVATE_ATTR_TEST_INTEGRITY: 3,
     FailureClass.AGENT_REVIEW_CRASH: 3, FailureClass.UNKNOWN_ERROR: 3,
@@ -350,6 +352,8 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.PR_MERGE_CONFLICT
 
     l4_signal = f"{reason_lower} {combined_lower}"
+    if status_failed and _looks_like_stale_active_items_failure(l4_signal):
+        return FailureClass.STALE_ACTIVE_ITEMS
     if status_failed and _looks_like_pre_push_pytest_failure(step_lower, l4_signal):
         return FailureClass.TEST_FAILURE
     if status_failed and (
@@ -473,6 +477,18 @@ def _looks_like_pre_push_pytest_failure(step_lower: str, signal: str) -> bool:
         or ("timeoutexpired" in signal and test_path)
         or ("timed out after" in signal and test_path)
         or "=================================== failures ===================================" in signal
+    )
+
+
+def _looks_like_stale_active_items_failure(signal: str) -> bool:
+    text = signal.lower()
+    return (
+        "check_stale_next_items.sh" in text
+        and (
+            "stale active item" in text
+            or "merged prs/branches not marked landed" in text
+            or "not marked landed" in text
+        )
     )
 
 
@@ -1472,6 +1488,196 @@ def fix_mixed_staging(repo_root: Path) -> dict[str, Any]:
                            f"reset {len(mixed_files)} mixed-state file(s): {mixed_files}")
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
         return _fix_result(False, "reset_failed", f"git reset failed: {exc}")
+
+
+def _porcelain_dirty_paths(output: str) -> set[str]:
+    paths: set[str] = set()
+    for raw_line in output.splitlines():
+        if not raw_line.strip():
+            continue
+        path_text = raw_line[3:] if len(raw_line) >= 4 else raw_line.strip()
+        if " -> " in path_text:
+            old_path, new_path = path_text.split(" -> ", 1)
+            paths.add(old_path)
+            paths.add(new_path)
+        else:
+            paths.add(path_text)
+    return paths
+
+
+def _commit_continuation_has_local_commit(path: Path, repo_root: Path) -> tuple[bool, str]:
+    if not path.exists():
+        return False, f"commit continuation missing at {path}"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return False, f"commit continuation unreadable at {path}: {exc}"
+    if not isinstance(payload, dict):
+        return False, f"commit continuation at {path} is not a JSON object"
+    if payload.get("version") != 1:
+        return False, "commit continuation version is not 1"
+    status = str(payload.get("status", "") or "").strip()
+    if status != "post_commit_pending":
+        return False, f"commit continuation status is {status or '(missing)'}, expected post_commit_pending"
+    receipt_decision = str(payload.get("receipt_decision", "") or "").strip()
+    if receipt_decision not in {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH"}:
+        return False, f"commit continuation receipt_decision is {receipt_decision or '(missing)'}"
+    target_branch = str(payload.get("target_branch", "") or "").strip()
+    if not target_branch:
+        return False, "commit continuation missing target_branch"
+    steps_completed = payload.get("steps_completed", [])
+    if not isinstance(steps_completed, list) or "git_commit" not in steps_completed:
+        return False, "commit continuation has not completed git_commit"
+    handoff_sha = str(payload.get("handoff_sha", "") or "").strip()
+    if not handoff_sha:
+        return False, "commit continuation missing handoff_sha"
+    commit_sha = str(payload.get("commit_sha", "") or "").strip()
+    if not commit_sha:
+        return False, "commit continuation missing commit_sha"
+    try:
+        current_branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout.strip()
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{commit_sha}^{{commit}}"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", commit_sha, head_sha],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        return False, f"commit continuation local git proof failed: {exc}"
+    if current_branch != target_branch:
+        return False, f"current branch {current_branch} does not match continuation target_branch {target_branch}"
+    if ancestor.returncode != 0:
+        return False, f"commit continuation commit_sha {commit_sha} is not an ancestor of HEAD {head_sha}"
+    return True, f"post-commit continuation has local commit {commit_sha} on {target_branch}"
+
+
+def fix_stale_active_items(repo_root: Path, *, wave_id: str = "", result: Any = None) -> dict[str, Any]:
+    """Run the stale NEXT checker autofix and commit the resulting TASKS.md repair.
+
+    This only applies after commit_executor has already created a local commit.
+    A new repair commit keeps that original commit as an ancestor, allowing the
+    post-commit continuation loader to resume safely at pre-push.
+    """
+    del result
+    repo_root = Path(repo_root)
+    checker = repo_root / "tools" / "checks" / "check_stale_next_items.sh"
+    if not checker.exists():
+        return _fix_result(False, "checker_missing", f"stale NEXT checker missing at {checker}")
+    if not wave_id:
+        return _fix_result(False, "wave_id_missing", "stale active item repair requires wave_id")
+
+    continuation = _bus_path(repo_root, "executors", f"commit_executor_{wave_id}.json")
+    continuation_ok, continuation_detail = _commit_continuation_has_local_commit(continuation, repo_root)
+    if not continuation_ok:
+        return _fix_result(False, "continuation_not_ready", continuation_detail)
+
+    try:
+        fix_proc = subprocess.run(
+            ["bash", str(checker), "--fix"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "checker_fix_failed", f"stale NEXT autofix could not run: {exc}")
+    if fix_proc.returncode != 0:
+        detail = (fix_proc.stderr or fix_proc.stdout or "").strip()
+        return _fix_result(
+            False,
+            "checker_fix_failed",
+            f"stale NEXT autofix exited {fix_proc.returncode}: {detail[-1000:]}",
+        )
+
+    try:
+        verify_proc = subprocess.run(
+            ["bash", str(checker)],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "checker_verify_failed", f"stale NEXT verify could not run: {exc}")
+    if verify_proc.returncode != 0:
+        detail = (verify_proc.stderr or verify_proc.stdout or "").strip()
+        return _fix_result(
+            False,
+            "checker_verify_failed",
+            f"stale NEXT verify exited {verify_proc.returncode}: {detail[-1000:]}",
+        )
+
+    try:
+        status_proc = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "status_failed", f"git status failed after stale NEXT autofix: {exc}")
+
+    dirty_paths = _porcelain_dirty_paths(status_proc.stdout)
+    if not dirty_paths:
+        return _fix_result(True, "stale_active_items_already_fixed", "stale NEXT checker passes with clean worktree")
+    if dirty_paths != {"TASKS.md"}:
+        return _fix_result(
+            False,
+            "unexpected_dirty_paths",
+            f"stale NEXT autofix dirtied unexpected paths: {sorted(dirty_paths)}",
+        )
+
+    try:
+        subprocess.run(
+            ["git", "add", "TASKS.md"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        commit_proc = subprocess.run(
+            ["git", "commit", "-m", f"fix: mark stale active items landed for {wave_id}"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        return _fix_result(False, "commit_failed", f"could not commit stale NEXT repair: {exc}")
+
+    commit_line = next((line for line in commit_proc.stdout.splitlines() if line.strip()), "").strip()
+    detail = f"{continuation_detail}; committed TASKS.md stale NEXT repair"
+    if commit_line:
+        detail = f"{detail}: {commit_line}"
+    return _fix_result(True, "commit_stale_active_items_repair", detail)
 
 
 def _load_executor_module_from_repo(repo_root: Path, module_name: str) -> Any:
@@ -2764,6 +2970,7 @@ _TIER2_FIXES: dict[FailureClass, Any] = {
     FailureClass.IMPLEMENTER_STALE: fix_implementer_stale,
     FailureClass.PR_MERGE_CONFLICT: fix_pr_merge_conflict,
     FailureClass.PR_CONFLICTING: fix_pr_conflicting,
+    FailureClass.STALE_ACTIVE_ITEMS: fix_stale_active_items,
     FailureClass.PHASE_B_WAVE_CLASS_PACKAGE_GAP: fix_phase_b_wave_class_package_gap,
     FailureClass.COMMIT_SUPERVISOR_STRUCTURAL_OVERRIDE_PACKAGE_GAP: fix_commit_supervisor_structural_override_package_gap,
     FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP: fix_phase_b_l4_structural_tracker_note_gap,

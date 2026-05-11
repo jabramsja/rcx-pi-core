@@ -32,6 +32,25 @@ with Python `match / NoneType / False / None` and JS
 The overlapping N14 in `repo_truth_non_blockers_2026-03-14.md` is deduplicated
 to this canonical Stage0 route.
 
+2026-05-11 reconciliation:
+
+- **Outcome:** retained live Stage0 capture advisory.
+- **Governing route:** `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.
+- **Current proof gap:** the routed packet reproduced that `capture_path`
+  stores raw direct-API host leaves before later `capture_ref` materialization
+  canonicalizes them to `None` / `null`; no production exploit path was
+  reproduced.
+- **Hard stop before implementation:** this advisory authorizes no Stage0,
+  seed, scheduler, registry, parity, or production `/mu` edits. Any later
+  implementation must use a locked successor packet with the exact Python/JS
+  Stage0 write set and focused parity proof.
+- **Doctrine boundary:** future work must narrow the direct Stage0 bootstrap
+  boundary by validating, copying, or tagging Mu/provenance at capture time;
+  it must update Python and JavaScript together and must not add host-only
+  object semantics.
+- **Deduplication:** `repo_truth_non_blockers_2026-03-14.md` N14 remains only a
+  duplicate pointer to this route and must not open a second Stage0 packet.
+
 ## N1 `DEFECT` — Stage0 direct APIs still retain raw hostile leaves in capture slots before materialization **PARTIALLY RESOLVED** (2026-03-14)
 
 **Fix applied:** `capture_ref` now deep-copies via `_safe_mu_copy`/`safeMuCopy`. Python `_mu_copy` rejects non-Mu types (returns None). JS `muCopy` uses `_isPlainArray`/`_isPlainObject` and rejects non-Mu types (returns null).
@@ -121,7 +140,7 @@ Why this remains advisory:
 - Current production callers validate Mu before entering the VM-backed kernel
   path, so this is still a direct-API hardening gap rather than a reproduced
   production exploit.
-- Current routed packet:
+- Governing route:
   `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.
 
 ## Validation Used
