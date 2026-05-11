@@ -22,8 +22,8 @@ In-scope files and directories:
 
 The routed next-candidate summary is to close the active generated DOC_ACCURACY proof-command-hardening non-blocker from the residue closeout wave. This Phase A packet does not claim that the underlying implementation has already landed; Phase B must prove closure before archiving the generated non-blocker.
 
-- `reports/deferred/non_blocking/js-bridge-proof-command-hardening-2026-05-11_bridge_nonblockers.md`
-  - Same-wave Phase B/commit generated deferred non-blocking bridge findings packet only; no unrelated deferred report is authorized by this wave.
+- `reports/archive/deferred/js-bridge-proof-command-hardening-2026-05-11_bridge_nonblockers_closed-by-js-bridge-proof-command-hardening-residue-closeout-2026-05-11.md`
+  - Same-wave Phase B/commit generated bridge findings packet archived by the residue-closeout repair; no unrelated deferred report is authorized by this wave.
 
 ## Work Items
 
@@ -65,7 +65,7 @@ The routed next-candidate summary is to close the active generated DOC_ACCURACY 
 ## Grounding / Authorization
 
 - `TASKS.md (rg evidence: js-bridge-proof-command-hardening-2026-05-11)` records `[NEXT-CODEX-POST-REDTEAM]` tracker authority for `js-bridge-proof-command-hardening-2026-05-11` as `Class: L4_ENABLER`, `Category: docs/control-plane proof-command hardening`, with packet `reports/control_plane/js_bridge_proof_command_hardening_2026_05_11_2026-05-11.md`.
-- `TASKS.md:532` records the predecessor proof-command hardening result: the predecessor packet requires an independent TASKS-only tracker query, the generated non-blocker was archived only after that query matched TASKS, and the same-wave tracker note binds the control packet, archive move, and indicator artifact.
+- `TASKS.md` targeted predecessor tracker proof records the predecessor proof-command hardening result: the predecessor packet requires an independent TASKS-only tracker query, the generated non-blocker was archived only after that query matched TASKS, and the same-wave tracker note binds the control packet, archive move, and indicator artifact.
 - Governing packet for this wave: `reports/control_plane/js_bridge_proof_command_hardening_2026_05_11_2026-05-11.md`.
 - Related predecessor packet: `reports/control_plane/post_js_bridge_doc_accuracy_residue_closeout_2026__2026-05-11.md`.
 - FOUNDER_OVERRIDE:js-bridge-proof-command-hardening-2026-05-11
@@ -102,7 +102,7 @@ The routed next-candidate summary is to close the active generated DOC_ACCURACY 
   - `reports/archive/deferred/post-js-bridge-doc-accuracy-residue-closeout-2026-05-11_bridge_nonblockers_closed-by-js-bridge-proof-command-hardening-2026-05-11.md`
   - `reports/control_plane/js_bridge_proof_command_hardening_2026_05_11_2026-05-11.md`
   - `reports/control_plane/post_js_bridge_doc_accuracy_residue_closeout_2026__2026-05-11.md`
-  - `reports/deferred/non_blocking/js-bridge-proof-command-hardening-2026-05-11_bridge_nonblockers.md`
+  - `reports/archive/deferred/js-bridge-proof-command-hardening-2026-05-11_bridge_nonblockers_closed-by-js-bridge-proof-command-hardening-residue-closeout-2026-05-11.md`
   - `reports/l4_wave_indicators/js-bridge-proof-command-hardening-2026-05-11.json`
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
 
@@ -110,11 +110,11 @@ The routed next-candidate summary is to close the active generated DOC_ACCURACY 
 ## Same-Wave Deferred Non-Blocking Authorization
 
 - Refresh wave: `js-bridge-proof-command-hardening-2026-05-11`
-- Purpose: Phase B and commit automation may stage the same-wave non-blocking bridge findings packet as deferred follow-up instead of blocking an otherwise commit-ready wave.
-- Authorized deferred packet(s):
-  - `reports/deferred/non_blocking/js-bridge-proof-command-hardening-2026-05-11_bridge_nonblockers.md`
-- Scope binding: the packet(s) above are in scope only as generated same-wave non-blocking bridge findings packets.
-- Acceptance binding: the final touched-file set may include the packet(s) above when they are also present in `deferred_items` or current staged files.
+- Purpose: Phase B and commit automation may stage the same-wave generated bridge findings packet only as an archived closed record after targeted evidence proves closure.
+- Authorized archived packet(s):
+  - `reports/archive/deferred/js-bridge-proof-command-hardening-2026-05-11_bridge_nonblockers_closed-by-js-bridge-proof-command-hardening-residue-closeout-2026-05-11.md`
+- Scope binding: the packet above is in scope only as an archived generated bridge findings record.
+- Acceptance binding: the active `reports/deferred/non_blocking/` path must remain absent after the residue-closeout repair.
 <!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->
 
 <!-- COMMIT_PATH_TRUTH_REFRESH:start -->
@@ -134,6 +134,6 @@ The routed next-candidate summary is to close the active generated DOC_ACCURACY 
   - `reports/archive/deferred/post-js-bridge-doc-accuracy-residue-closeout-2026-05-11_bridge_nonblockers_closed-by-js-bridge-proof-command-hardening-2026-05-11.md`
   - `reports/control_plane/js_bridge_proof_command_hardening_2026_05_11_2026-05-11.md`
   - `reports/control_plane/post_js_bridge_doc_accuracy_residue_closeout_2026__2026-05-11.md`
-  - `reports/deferred/non_blocking/js-bridge-proof-command-hardening-2026-05-11_bridge_nonblockers.md`
+  - `reports/archive/deferred/js-bridge-proof-command-hardening-2026-05-11_bridge_nonblockers_closed-by-js-bridge-proof-command-hardening-residue-closeout-2026-05-11.md`
   - `reports/l4_wave_indicators/js-bridge-proof-command-hardening-2026-05-11.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

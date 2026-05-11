@@ -1191,6 +1191,26 @@ def _render_same_wave_deferred_authorization_block(wave_id: str, paths: list[str
     return "\n".join(lines) + "\n"
 
 
+def _render_no_same_wave_deferred_authorization_block(wave_id: str) -> str:
+    lines = [
+        DEFERRED_AUTH_REFRESH_START,
+        "## Same-Wave Deferred Non-Blocking Authorization",
+        "",
+        f"- Refresh wave: `{wave_id}`",
+        "- Purpose: no active same-wave deferred non-blocking bridge findings "
+        "packet is authorized for this commit package.",
+        "- Authorized deferred packet(s): none",
+        "- Scope binding: no generated bridge packet for this wave is authorized "
+        "in `reports/deferred/non_blocking/` unless it exists as a staged file "
+        "and is listed in `deferred_items`.",
+        "- Acceptance binding: generated bridge packet paths for this wave must "
+        "remain absent from active deferred lanes unless the package carries an "
+        "existing staged deferred packet.",
+        DEFERRED_AUTH_REFRESH_END,
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def _replace_same_wave_deferred_authorization_block(packet_text: str, block: str) -> str:
     start = packet_text.find(DEFERRED_AUTH_REFRESH_START)
     end = packet_text.find(DEFERRED_AUTH_REFRESH_END)
@@ -1247,6 +1267,12 @@ def _refresh_same_wave_deferred_packet_authorization(
 ) -> str:
     paths = _same_wave_deferred_non_blocking_paths(wave_id, deferred_paths)
     if not paths:
+        if (
+            DEFERRED_AUTH_REFRESH_START in packet_text
+            or DEFERRED_AUTH_REFRESH_END in packet_text
+        ):
+            block = _render_no_same_wave_deferred_authorization_block(wave_id)
+            return _replace_same_wave_deferred_authorization_block(packet_text, block)
         return packet_text
 
     had_final_newline = packet_text.endswith("\n")
@@ -1937,13 +1963,19 @@ def refresh_commit_path_packet_truth(
         ),
     )
     try:
-        deferred_path_candidates = [
+        raw_deferred_path_candidates = [
             *staged_paths_for_block,
             *(
                 list(handoff.get("deferred_items"))
                 if isinstance(handoff.get("deferred_items"), list)
                 else []
             ),
+        ]
+        deferred_path_candidates = [
+            path
+            for path in _dedupe_repo_paths(raw_deferred_path_candidates)
+            if not path.startswith("reports/deferred/non_blocking/")
+            or (repo_root / path).is_file()
         ]
         packet_text = _refresh_same_wave_deferred_packet_authorization(
             packet_text,

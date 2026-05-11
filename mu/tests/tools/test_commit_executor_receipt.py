@@ -1557,6 +1557,37 @@ class TestReceiptChainEndToEnd:
         assert f"`{deferred_path}`" in stop_line
         assert f"`{deferred_path}`" in acceptance_line
 
+    def test_same_wave_deferred_authorization_refresh_clears_stale_auth_without_paths(self):
+        wave_id = "deferred-auth-wave"
+        deferred_path = "reports/deferred/non_blocking/deferred-auth-wave_bridge_nonblockers.md"
+        packet_text = (
+            "# Deferred Auth Wave\n\n"
+            f"Wave ID: {wave_id}\n\n"
+            f"{commit_mod.DEFERRED_AUTH_REFRESH_START}\n"
+            "## Same-Wave Deferred Non-Blocking Authorization\n\n"
+            f"- Refresh wave: `{wave_id}`\n"
+            "- Purpose: stale active authorization.\n"
+            "- Authorized deferred packet(s):\n"
+            f"  - `{deferred_path}`\n"
+            "- Scope binding: stale.\n"
+            "- Acceptance binding: stale.\n"
+            f"{commit_mod.DEFERRED_AUTH_REFRESH_END}\n"
+        )
+
+        refreshed = commit_mod._refresh_same_wave_deferred_packet_authorization(  # ANTICHEAT_OK: testing bounded packet refresh helper
+            packet_text,
+            wave_id=wave_id,
+            deferred_paths=[],
+        )
+
+        auth_block = refreshed[
+            refreshed.index(commit_mod.DEFERRED_AUTH_REFRESH_START):
+            refreshed.index(commit_mod.DEFERRED_AUTH_REFRESH_END)
+            + len(commit_mod.DEFERRED_AUTH_REFRESH_END)
+        ]
+        assert "- Authorized deferred packet(s): none" in auth_block
+        assert f"`{deferred_path}`" not in auth_block
+
     def test_commit_packet_truth_refresh_authorizes_staged_same_wave_deferred_packet(self, tmp_path):
         import subprocess
 
@@ -1638,6 +1669,72 @@ class TestReceiptChainEndToEnd:
 
         assert error_again is None
         assert "## Same-Wave Deferred Non-Blocking Authorization" in packet_file.read_text(encoding="utf-8")
+
+    def test_commit_packet_truth_refresh_does_not_authorize_deleted_same_wave_deferred_packet(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "deferred-auth-wave"
+        packet_path = "reports/control_plane/deferred_auth_wave.md"
+        deferred_path = "reports/deferred/non_blocking/deferred-auth-wave_bridge_nonblockers.md"
+        packet_file = repo / packet_path
+        deferred_file = repo / deferred_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        deferred_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Deferred Auth Wave\n\n"
+            "Wave ID: deferred-auth-wave\n\n"
+            f"{commit_mod.DEFERRED_AUTH_REFRESH_START}\n"
+            "## Same-Wave Deferred Non-Blocking Authorization\n\n"
+            "- Refresh wave: `deferred-auth-wave`\n"
+            "- Purpose: stale active authorization.\n"
+            "- Authorized deferred packet(s):\n"
+            f"  - `{deferred_path}`\n"
+            "- Scope binding: stale.\n"
+            "- Acceptance binding: stale.\n"
+            f"{commit_mod.DEFERRED_AUTH_REFRESH_END}\n",
+            encoding="utf-8",
+        )
+        deferred_file.write_text("# Deferred\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", packet_path, deferred_path], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True)
+
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        indicator_file = repo / indicator_path
+        indicator_file.parent.mkdir(parents=True, exist_ok=True)
+        indicator_file.write_text(json.dumps({"wave_id": wave_id}), encoding="utf-8")
+        packet_file.write_text(packet_file.read_text(encoding="utf-8") + "\n## Touch\n", encoding="utf-8")
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        deferred_file.unlink()
+        subprocess.run(["git", "add", "--", "file.py", packet_path], cwd=repo, check=True)
+        subprocess.run(["git", "add", "-u", "--", deferred_path], cwd=repo, check=True)
+        subprocess.run(["git", "add", "-f", "--", indicator_path], cwd=repo, check=True)
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path, deferred_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+            deferred_items=[],
+        )
+
+        _refreshed, staged, error = commit_mod.refresh_commit_path_packet_truth(
+            repo_root=repo,
+            handoff=handoff,
+            indicator_path=indicator_path,
+            commit_status="pre_commit_supervisor_pending",
+        )
+
+        assert error is None
+        assert deferred_path in staged
+        packet_text = packet_file.read_text(encoding="utf-8")
+        auth_block = packet_text[
+            packet_text.index(commit_mod.DEFERRED_AUTH_REFRESH_START):
+            packet_text.index(commit_mod.DEFERRED_AUTH_REFRESH_END)
+            + len(commit_mod.DEFERRED_AUTH_REFRESH_END)
+        ]
+        assert "- Authorized deferred packet(s): none" in auth_block
+        assert f"`{deferred_path}`" not in auth_block
 
     def test_commit_packet_truth_refresh_uses_documented_bridge_round_floor(self, tmp_path):
         import subprocess
