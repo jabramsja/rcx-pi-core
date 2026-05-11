@@ -87,11 +87,12 @@ Expected validation for the executor wave:
 
 - TASKS.md:299 grounds the prior deferred-generated cleanup result: the active deferred non-blocking lane retained the three canonical `/mu` structural advisory records.
 - TASKS.md:301 grounds the already-landed JS bridge source-lock repair packet and PR #927 closure evidence. It is not same-wave authorization for this packet.
-- TASKS.md:518 routes `vm-cutover-coverage-bookkeeping-proof-2026-05-09` as Phase A-only proof work with no runtime authorization.
-- TASKS.md:519 routes `js-bridge-vm-ordering-evidence-2026-05-09` as Phase A-only proof work. Reconcile it against PR #927/source-lock closure before retaining any live JS ordering gap.
-- TASKS.md:520 routes `stage0-capture-path-provenance-boundary-2026-05-09` as a deduplicated Stage0 capture provenance Phase A packet with no Stage0 implementation authorization.
-- TASKS.md:521 routes `js-engine-pipeline-shape-governance-2026-05-09` as Phase A-only governance work with no runtime authorization.
-- TASKS.md:522 routes `transparent-js-proxy-provenance-boundary-2026-05-09` as Phase A-only policy work with no host-oracle runtime authorization.
+- TASKS.md:519 routes `vm-cutover-coverage-bookkeeping-proof-2026-05-09` as Phase A-only proof work with no runtime authorization.
+- TASKS.md:520 records `js-bridge-vm-ordering-evidence-2026-05-09` as closed/landed by PR #927 source-lock proof, including merge `8334c369d7a302cca568de0a088ea9ca1bd1c2f5`, commit `ee69f0a0b9b9023bc278b91e7b72419eede6f813`, and the closed repo-truth N2 slice archived at `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_partial-closed-by-post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11.md`. Treat that route as closure evidence only; do not retain it as unresolved Phase A-only proof work.
+- TASKS.md:521 routes `stage0-capture-path-provenance-boundary-2026-05-09` as a deduplicated Stage0 capture provenance Phase A packet with no Stage0 implementation authorization.
+- TASKS.md:522 routes `js-engine-pipeline-shape-governance-2026-05-09` as Phase A-only governance work with no runtime authorization.
+- TASKS.md:523 routes `transparent-js-proxy-provenance-boundary-2026-05-09` as Phase A-only policy work with no host-oracle runtime authorization.
+- TASKS.md:524 records `post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11` as landed docs/control-plane deferred reconciliation that archived only the closed JS bridge ordering slice and retained the live `/mu` advisory lane.
 - This packet is the governing same-wave control surface for `post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11` and carries `Class: L4_ENABLER`, `FOUNDER_OVERRIDE:post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11`, and `Authorization: standing pipeline-bug-fix authorization ...` so commit automation can derive same-wave override mechanically.
 
 Routed next-candidate:
