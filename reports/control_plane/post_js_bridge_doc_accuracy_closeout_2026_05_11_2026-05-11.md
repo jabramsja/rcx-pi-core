@@ -116,9 +116,6 @@ No downstream runtime, substrate, Stage0, seed, scheduler, registry, parity, pro
   - `indicator`: `reports/l4_wave_indicators/post-js-bridge-doc-accuracy-closeout-2026-05-11.json`
 - Current staged files:
   - `TASKS.md`
-  - `reports/archive/deferred/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11_bridge_nonblockers_closed-by-post-js-bridge-doc-accuracy-closeout-2026-05-11.md`
-  - `reports/control_plane/post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11_2026-05-11.md`
   - `reports/control_plane/post_js_bridge_doc_accuracy_closeout_2026_05_11_2026-05-11.md`
-  - `reports/deferred/non_blocking/post-js-bridge-doc-accuracy-closeout-2026-05-11_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/post-js-bridge-doc-accuracy-closeout-2026-05-11.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
