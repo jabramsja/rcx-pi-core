@@ -997,8 +997,8 @@ _JS_ENGINE_DIR = _REPO / "mu" / "host" / "js" / "engine"
 _JS_CORE_DIR = _REPO / "mu" / "host" / "js" / "core"
 _ENGINE_SEED_PATH = _REPO / "mu" / "programs" / "rcx_engine.v1.json"
 
-_REQUIRE_RE = re.compile(r"""\brequire\(\s*['"]([^'"]+)['"]\s*\)""")
-_DYNAMIC_REQUIRE_RE = re.compile(r"""\brequire\(\s*(?!['"])""")
+_REQUIRE_RE = re.compile(r"""\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)""")
+_DYNAMIC_REQUIRE_RE = re.compile(r"""\brequire\s*\((?!\s*['"])""")
 
 _EXPECTED_ENGINE_REQUIRES = {
     "routing.js": {
@@ -1130,6 +1130,15 @@ def _function_region(source: str, start_name: str, next_name: str) -> str:
 
 class TestJsEnginePipelineShapeGovernance:
     """JS engine module shape must remain a structural guard, not JS semantics."""
+
+    def test_require_scanners_include_whitespace_before_call_paren(self) -> None:
+        """Require scanners must catch spaced calls without hiding dynamic imports."""
+        static_source = "const fs = require ('fs');\nconst local = require ( './kernel' );"
+        dynamic_source = "const moduleName = './kernel';\nconst local = require (moduleName);"
+
+        assert _REQUIRE_RE.findall(static_source) == ["fs", "./kernel"]
+        assert _DYNAMIC_REQUIRE_RE.findall(static_source) == []
+        assert _DYNAMIC_REQUIRE_RE.findall(dynamic_source) == ["require ("]
 
     def test_dependency_direction_and_boundary_authority(self) -> None:
         engine_files = {path.name: path for path in _JS_ENGINE_DIR.glob("*.js")}
