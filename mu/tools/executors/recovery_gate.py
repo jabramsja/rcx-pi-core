@@ -1662,9 +1662,12 @@ def fix_stale_active_items(repo_root: Path, *, wave_id: str = "", result: Any = 
             timeout=30,
             check=True,
         )
+        commit_env = os.environ.copy()
+        commit_env["RCX_SKIP_RECEIPT_CHECK"] = "1"
         commit_proc = subprocess.run(
             ["git", "commit", "-m", f"fix: mark stale active items landed for {wave_id}"],
             cwd=repo_root,
+            env=commit_env,
             capture_output=True,
             text=True,
             timeout=120,

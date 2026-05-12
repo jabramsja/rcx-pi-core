@@ -2889,7 +2889,7 @@ class TestTier2FixesMap:
 
 
 class TestFixStaleActiveItems:
-    def _init_repo_with_checker(self, repo_root: Path) -> str:
+    def _init_repo_with_checker(self, repo_root: Path, *, dirty_extra_path: str = "") -> str:
         subprocess.run(["git", "init"], cwd=repo_root, check=True, capture_output=True, text=True)
         subprocess.run(
             ["git", "config", "user.email", "test@example.com"],
@@ -2912,12 +2912,14 @@ class TestFixStaleActiveItems:
         )
         checker = repo_root / "tools" / "checks" / "check_stale_next_items.sh"
         checker.parent.mkdir(parents=True)
+        dirty_extra_line = f"    printf 'extra\\n' > {shlex.quote(dirty_extra_path)}\n" if dirty_extra_path else ""
         checker.write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
             "if [ \"${1:-}\" = \"--fix\" ]; then\n"
             "  if ! grep -q 'Landed' TASKS.md; then\n"
             "    printf ' **Landed**\\n' >> TASKS.md\n"
+            f"{dirty_extra_line}"
             "  fi\n"
             "  exit 0\n"
             "fi\n"
@@ -2953,6 +2955,23 @@ class TestFixStaleActiveItems:
         )
         return head.stdout.strip()
 
+    def _install_receipt_skip_required_hook(self, repo_root: Path) -> Path:
+        hook = repo_root / ".git" / "hooks" / "pre-commit"
+        marker = repo_root / ".agent_bus" / "recovery" / "receipt-skip-env.txt"
+        hook.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "if [ \"${RCX_SKIP_RECEIPT_CHECK:-}\" != \"1\" ]; then\n"
+            "  printf 'missing RCX_SKIP_RECEIPT_CHECK\\n' >&2\n"
+            "  exit 1\n"
+            "fi\n"
+            "mkdir -p .agent_bus/recovery\n"
+            "printf '%s\\n' \"${RCX_SKIP_RECEIPT_CHECK:-}\" > .agent_bus/recovery/receipt-skip-env.txt\n",
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+        return marker
+
     def _current_branch(self, repo_root: Path) -> str:
         return subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -2982,15 +3001,19 @@ class TestFixStaleActiveItems:
                 payload[key] = value
         path.write_text(json.dumps(payload), encoding="utf-8")
 
-    def test_commits_tasks_repair_when_post_commit_continuation_active(self, tmp_path):
+    def test_commits_tasks_repair_when_post_commit_continuation_active(self, tmp_path, monkeypatch):
         wave_id = "wave-stale-2026-05-11"
         commit_sha = self._init_repo_with_checker(tmp_path)
         self._write_continuation(tmp_path, wave_id, commit_sha)
+        monkeypatch.delenv("RCX_SKIP_RECEIPT_CHECK", raising=False)
+        marker = self._install_receipt_skip_required_hook(tmp_path)
 
         result = rg_mod.fix_stale_active_items(tmp_path, wave_id=wave_id)
 
         assert result["fixed"] is True, result
         assert result["action"] == "commit_stale_active_items_repair"
+        assert marker.read_text(encoding="utf-8").strip() == "1"
+        assert os.environ.get("RCX_SKIP_RECEIPT_CHECK") is None
         log = subprocess.run(
             ["git", "log", "--oneline", "-1"],
             cwd=tmp_path,
@@ -3007,6 +3030,27 @@ class TestFixStaleActiveItems:
             text=True,
         ).stdout
         assert status == ""
+
+    def test_refuses_to_commit_when_stale_fix_dirties_non_tasks_path(self, tmp_path):
+        wave_id = "wave-stale-2026-05-11"
+        commit_sha = self._init_repo_with_checker(tmp_path, dirty_extra_path="EXTRA.md")
+        self._write_continuation(tmp_path, wave_id, commit_sha)
+        marker = self._install_receipt_skip_required_hook(tmp_path)
+
+        result = rg_mod.fix_stale_active_items(tmp_path, wave_id=wave_id)
+
+        assert result["fixed"] is False
+        assert result["action"] == "unexpected_dirty_paths"
+        assert "EXTRA.md" in result["detail"]
+        assert not marker.exists()
+        log = subprocess.run(
+            ["git", "log", "--oneline", "-1"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert f"fix: mark stale active items landed for {wave_id}" not in log
 
     def test_refuses_without_post_commit_continuation(self, tmp_path):
         self._init_repo_with_checker(tmp_path)
