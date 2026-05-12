@@ -1459,8 +1459,10 @@ def run_recoverable_surface_command(
 
             new_orig = _apply_recovery_overrides(
                 config, repo_root=repo_root, verbose=getattr(args, "verbose", False))
-            if original_timeouts is None:
-                original_timeouts = new_orig
+            original_timeouts = _merge_recovery_original_config(
+                original_timeouts,
+                new_orig,
+            )
             _clear_phase_b_state_for_retry(repo_root, result, verbose=getattr(args, "verbose", False), bus_dir=bus_dir)
 
         return 1
@@ -2524,7 +2526,7 @@ def _apply_recovery_overrides(
     config: dict[str, Any],
     repo_root: Path | None = None,
     verbose: bool = False,
-) -> dict[str, dict[str, Any]] | None:
+) -> dict[str, Any] | None:
     """Apply Tier 2 recovery env var overrides to config for retry.
 
     fix_process_timeout sets RCX_RECOVERY_TIMEOUT_OVERRIDE (and
@@ -2537,19 +2539,27 @@ def _apply_recovery_overrides(
     Dispatcher-owned timeout keys stay in memory because the dispatcher itself
     enforces that subprocess timeout and tracked default drift is not needed.
 
-    Returns original disk timeout sections if disk was modified (caller
-    should pass to _restore_config_on_disk after retry), or None.
+    Returns original in-memory timeout sections if any override was applied so
+    loop callers can restore the live config between waves. The snapshot also
+    records original disk timeout sections when disk was modified; callers may
+    pass it to _restore_config_on_disk after retry.
     """
     disk_config = None
-    original_config = None
+    original_config: dict[str, Any] = {
+        "timeouts": dict(config.get("timeouts", {})),
+        "bridge_turn_timeouts": dict(config.get("bridge_turn_timeouts", {})),
+        "_restore_disk": False,
+    }
+    original_disk_config = None
     config_path = None
     disk_modified = False
+    config_modified = False
 
     if repo_root is not None:
         config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
         try:
             disk_config = json.loads(config_path.read_text(encoding="utf-8"))
-            original_config = {
+            original_disk_config = {
                 "timeouts": dict(disk_config.get("timeouts", {})),
                 "bridge_turn_timeouts": dict(disk_config.get("bridge_turn_timeouts", {})),
             }
@@ -2563,6 +2573,7 @@ def _apply_recovery_overrides(
             timeout_key = os.environ.get(
                 "RCX_RECOVERY_TIMEOUT_KEY", "phase_b_executor")
             config.setdefault("timeouts", {})[timeout_key] = val
+            config_modified = True
             if (
                 disk_config is not None
                 and timeout_key not in _DISPATCHER_ONLY_TIMEOUT_KEYS
@@ -2584,6 +2595,7 @@ def _apply_recovery_overrides(
             val = int(bridge_turn_timeout_override)
             phase_key = os.environ.get("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", "phase_b")
             config.setdefault("bridge_turn_timeouts", {})[phase_key] = val
+            config_modified = True
             if disk_config is not None:
                 disk_config.setdefault("bridge_turn_timeouts", {})[phase_key] = val
                 disk_modified = True
@@ -2602,6 +2614,7 @@ def _apply_recovery_overrides(
         try:
             val = int(stale_override)
             config.setdefault("timeouts", {})["phase_b_implementer_stale"] = val
+            config_modified = True
             if disk_config is not None:
                 disk_config.setdefault("timeouts", {})["phase_b_implementer_stale"] = val
                 disk_modified = True
@@ -2622,7 +2635,32 @@ def _apply_recovery_overrides(
         except OSError:
             pass
 
-    return original_config if disk_modified else None
+    if disk_modified:
+        original_config["_restore_disk"] = True
+        if original_disk_config is not None:
+            original_config["_disk_timeouts"] = original_disk_config["timeouts"]
+            original_config["_disk_bridge_turn_timeouts"] = original_disk_config[
+                "bridge_turn_timeouts"
+            ]
+
+    return original_config if config_modified or disk_modified else None
+
+
+def _merge_recovery_original_config(
+    original_config: dict[str, Any] | None,
+    new_config: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Keep the first in-memory baseline and later disk restore data."""
+    if new_config is None:
+        return original_config
+    if original_config is None:
+        return new_config
+    if new_config.get("_restore_disk") and not original_config.get("_restore_disk"):
+        original_config["_restore_disk"] = True
+        for key in ("_disk_timeouts", "_disk_bridge_turn_timeouts"):
+            if key in new_config:
+                original_config[key] = new_config[key]
+    return original_config
 
 
 def _recovery_original_section(
@@ -2644,16 +2682,27 @@ def _recovery_original_section(
 
 def _restore_config_on_disk(
     repo_root: Path,
-    original_config: dict[str, dict[str, Any]],
+    original_config: dict[str, Any],
     verbose: bool = False,
 ) -> None:
     """Restore original timeout sections to executor_config.json after recovery retry."""
+    if original_config.get("_restore_disk") is False:
+        return
+
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
     try:
         disk_config = json.loads(config_path.read_text(encoding="utf-8"))
-        disk_config["timeouts"] = _recovery_original_section(original_config, "timeouts")
-        disk_config["bridge_turn_timeouts"] = _recovery_original_section(
-            original_config, "bridge_turn_timeouts"
+        disk_timeouts = original_config.get("_disk_timeouts")
+        disk_bridge_turn_timeouts = original_config.get("_disk_bridge_turn_timeouts")
+        disk_config["timeouts"] = (
+            dict(disk_timeouts)
+            if isinstance(disk_timeouts, dict)
+            else _recovery_original_section(original_config, "timeouts")
+        )
+        disk_config["bridge_turn_timeouts"] = (
+            dict(disk_bridge_turn_timeouts)
+            if isinstance(disk_bridge_turn_timeouts, dict)
+            else _recovery_original_section(original_config, "bridge_turn_timeouts")
         )
         config_path.write_text(
             json.dumps(disk_config, indent=2) + "\n", encoding="utf-8")
@@ -3531,13 +3580,16 @@ def main(argv: list[str] | None = None) -> int:
                               f"— retrying with adjusted parameters")
                 if recovery.get("recovered"):
                     # Apply Tier 2 env var overrides to config + disk before retry.
-                    # Only capture original_timeouts on the FIRST recovery to
-                    # prevent sequential recoveries from overwriting the true
-                    # pre-recovery baseline (Finding 2 fix).
+                    # Keep the first in-memory baseline so sequential
+                    # recoveries cannot overwrite the true pre-recovery
+                    # config; merge disk metadata only when a later override
+                    # actually touches executor_config.json.
                     new_orig = _apply_recovery_overrides(
                         config, repo_root=repo_root, verbose=args.verbose)
-                    if _recovery_original_timeouts is None:
-                        _recovery_original_timeouts = new_orig
+                    _recovery_original_timeouts = _merge_recovery_original_config(
+                        _recovery_original_timeouts,
+                        new_orig,
+                    )
                     # Recovery succeeded — grant one extra attempt (don't increment counter)
                     _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
                     retry_record = _recovered_retry_record(result)
@@ -3608,9 +3660,9 @@ def main(argv: list[str] | None = None) -> int:
                         record = refresh_record
             attempt += 1
 
-        # Restore disk AND in-memory config if recovery overrides were written.
-        # Both must be restored to prevent leakage to --loop waves
-        # (Bridge R4 Finding fix).
+        # Restore in-memory config after recovery overrides. Disk restore is
+        # gated by the snapshot metadata so dispatcher-only overrides do not
+        # write executor_config.json.
         if _recovery_original_timeouts is not None:
             _restore_config_on_disk(
                 repo_root, _recovery_original_timeouts,

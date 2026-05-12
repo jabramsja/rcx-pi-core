@@ -12475,10 +12475,16 @@ class TestRecoveryGateWiring:
             repo_root=tmp_path,
         )
 
-        assert orig is None
+        assert orig is not None
+        assert orig["timeouts"]["commit_executor"] == 3600
         assert in_memory["timeouts"]["commit_executor"] == 5400
         disk = json.loads(cfg_path.read_text())
         assert disk["timeouts"]["commit_executor"] == 3600
+        dispatch_mod._restore_config_on_disk(tmp_path, orig)  # ANTICHEAT_OK
+        in_memory["timeouts"] = dispatch_mod._recovery_original_section(  # ANTICHEAT_OK
+            orig, "timeouts"
+        )
+        assert in_memory["timeouts"]["commit_executor"] == 3600
         assert os.environ.get("RCX_RECOVERY_TIMEOUT_OVERRIDE") is None
         assert os.environ.get("RCX_RECOVERY_TIMEOUT_KEY") is None
 
@@ -12622,6 +12628,7 @@ class TestRecoveryGateWiring:
             def capture_config(*a, **kw):
                 c = original_load(*a, **kw)
                 config_ref["config"] = c
+                config_ref["phase_b_executor_baseline"] = c["timeouts"]["phase_b_executor"]
                 return c
 
             with patch.object(dispatch_mod, "load_config",
@@ -12631,8 +12638,11 @@ class TestRecoveryGateWiring:
         # Disk must be restored
         disk = json.loads(cfg_path.read_text())
         assert disk["timeouts"]["phase_b_executor"] == 3600
-        # In-memory config must also be restored (not still 5400)
-        assert config_ref["config"]["timeouts"]["phase_b_executor"] == 3600
+        # In-memory config must also be restored to its own pre-recovery baseline.
+        assert (
+            config_ref["config"]["timeouts"]["phase_b_executor"]
+            == config_ref["phase_b_executor_baseline"]
+        )
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
 
     def test_timeout_status_routed_to_recovery(self, tmp_path):

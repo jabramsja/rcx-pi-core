@@ -69,17 +69,16 @@ Founder-facing handoff: Questions? Concerns? Thoughts? -- Think hard
 - Refresh wave: `vm-cutover-coverage-trace-prepush-repair-2026-05-12`
 - Active packet: `reports/control_plane/vm-cutover-coverage-trace-prepush-repair-2026-05-12.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `764f36a8b307d56e924e5d819226ea69196854b0e9979b8651111c4ec9035211`
+- Tracker note sha256: `2976627c1110712ba1fe61c1ee5deff5ab781ea3e8b44d46665557100d39c8a6`
 - Indicator artifact: `reports/l4_wave_indicators/vm-cutover-coverage-trace-prepush-repair-2026-05-12.json`
 - Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_executor_dispatch.py`.
-- Evidence delta: (1) Routed commit handoff scopes 6 wave-owned file(s). (2) Evidence gate exercises 1 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/vm-cutover-coverage-trace-prepush-repair-2026-05-12.json..
+- Evidence delta: (1) Routed commit handoff scopes 5 wave-owned file(s). (2) Evidence gate exercises 1 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/vm-cutover-coverage-trace-prepush-repair-2026-05-12.json..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/vm-cutover-coverage-trace-prepush-repair-2026-05-12.json`
 - Current staged files:
   - `TASKS.md`
   - `mu/tests/tools/test_executor_dispatch.py`
   - `mu/tools/executors/executor_dispatch.py`
-  - `reports/control_plane/vm-cutover-coverage-trace-implementation-2026-05-12_2026-05-12.md`
   - `reports/control_plane/vm-cutover-coverage-trace-prepush-repair-2026-05-12.md`
   - `reports/l4_wave_indicators/vm-cutover-coverage-trace-prepush-repair-2026-05-12.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
