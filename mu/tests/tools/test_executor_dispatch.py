@@ -11323,6 +11323,54 @@ class TestCommitExecutorRoutingRecordAcceptance:
         )
         assert handoff["caller"] == "standalone"
 
+    def test_standalone_routing_record_prefers_same_wave_override_over_predecessor_token(
+        self,
+        tmp_path,
+    ):
+        repo, env = _init_git_repo(tmp_path)
+        wave_id = "post-js-pipeline-governance-deferred-cleanup-2026-05-12"
+        predecessor = "js-engine-pipeline-shape-governance-test-2026-05-12"
+        packet = repo / "reports" / "control_plane" / f"{wave_id}.md"
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Post JS pipeline cleanup\n\n"
+            f"Wave ID: {wave_id}\n"
+            "Class: L4_ENABLER\n"
+            "Lane: control-surface (agent automation / observability)\n"
+            f"- Predecessor closure evidence: FOUNDER_OVERRIDE:{predecessor}\n"
+            f"- Same-wave authority: FOUNDER_OVERRIDE:{wave_id}\n"
+            "Founder authorization: standing pipeline-bug-fix authorization.\n",
+            encoding="utf-8",
+        )
+        changed = repo / "file1.py"
+        changed.write_text("x = 2\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "file1.py", f"reports/control_plane/{wave_id}.md"],
+            cwd=repo,
+            capture_output=True,
+            env=env,
+        )
+        record = {
+            "decision": "COMMIT_GO",
+            "summary": "post JS pipeline cleanup",
+            "wave_name": wave_id,
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+            "next_candidates": [{"tracked_packet": f"reports/control_plane/{wave_id}.md"}],
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert not errors, errors
+        assert handoff is not None
+        assert f"FOUNDER_OVERRIDE:{wave_id}" in handoff["tracker_note_text"]
+        assert f"FOUNDER_OVERRIDE:{predecessor}" not in handoff["tracker_note_text"]
+
     def test_standalone_routing_record_accepts_explicit_founder_override_field(
         self,
         tmp_path,

@@ -19,7 +19,7 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-12 Stage0 cleanup bridge doc accuracy closeout):
+Current inventory refresh (2026-05-12 post-JS pipeline governance deferred cleanup):
 
 - Evidence command:
   `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' -print | sort`.
@@ -42,7 +42,11 @@ reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md
   `reports/archive/deferred/stage0-capture-provenance-deferred-cleanup-2026-05-12_bridge_nonblockers_closed-by-stage0-cleanup-bridge-doc-accuracy-closeout-2026-05-12.md`.
 - Retained `/mu` structural advisories remain active and are not implemented by
   this inventory refresh: transparent JS Proxy provenance, N1 VM coverage
-  bookkeeping, N3 broad host-surface boundary, and N5 JS pipeline governance.
+  bookkeeping, and N3 broad host-surface boundary.
+- Closed N5 JS pipeline governance residue is preserved as historical evidence
+  at
+  `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N5_js_pipeline_governance_closed-by-post-js-pipeline-governance-deferred-cleanup-2026-05-12.md`
+  after PR #937 and the tracked structural guard landed.
 
 Closed-parent exclusions for this index:
 
