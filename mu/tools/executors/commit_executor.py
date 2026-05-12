@@ -343,14 +343,37 @@ for _sub_name, _sub_val in [
         )
 
 
-def _extract_founder_override_token(text: str) -> str:
+def _extract_founder_override_token(text: Any) -> str:
     """Extract a bounded FOUNDER_OVERRIDE token from untrusted text."""
-    if not text:
+    if not isinstance(text, str) or not text:
         return ""
     match = re.search(r"FOUNDER_OVERRIDE:\s*(\S+)", text)
     if not match:
         return ""
     return match.group(1).strip().rstrip("`.,;")
+
+
+def _extract_founder_override_tokens(text: Any) -> list[str]:
+    """Extract every bounded FOUNDER_OVERRIDE token from untrusted text."""
+    if not isinstance(text, str) or not text:
+        return []
+    tokens: list[str] = []
+    for match in re.finditer(r"FOUNDER_OVERRIDE:\s*(\S+)", text):
+        token = _normalize_founder_override_token(match.group(1))
+        if token:
+            tokens.append(token)
+    return tokens
+
+
+def _extract_same_wave_founder_override_token(text: str, wave_id: str) -> str:
+    """Return the first token in text that is bound to wave_id."""
+    normalized_wave_id = normalize_wave_id(wave_id)
+    if not normalized_wave_id:
+        return ""
+    for token in _extract_founder_override_tokens(text):
+        if normalize_wave_id(token) == normalized_wave_id:
+            return token
+    return ""
 
 
 def _extract_founder_override_from_tracker_note(text: str) -> str:
@@ -369,6 +392,59 @@ def _normalize_founder_override_token(token: str | None) -> str:
     if extracted:
         return extracted
     return clean.split()[0].strip().rstrip("`.,;")
+
+
+def _replace_founder_override_token(text: str, token: str) -> str:
+    """Replace the first existing override token, or append one if absent."""
+    normalized = _normalize_founder_override_token(token)
+    if not normalized or not isinstance(text, str):
+        return text
+    if _extract_founder_override_from_tracker_note(text):
+        return re.sub(
+            r"FOUNDER_OVERRIDE:\s*\S+",
+            f"FOUNDER_OVERRIDE:{normalized}",
+            text,
+            count=1,
+        )
+    return _append_founder_override_to_tracker_note(text, normalized)
+
+
+def _repair_handoff_same_wave_founder_override(
+    handoff: dict[str, Any],
+    repo_root: Path,
+) -> dict[str, Any]:
+    """Repair stale override text before tracker sync or supervisor packaging."""
+    wave_id = str(handoff.get("wave_id") or "")
+    wave_class = str(handoff.get("wave_class") or "")
+    if not wave_id or not _wave_class_allows_founder_override(wave_class):
+        return handoff
+    tracker_note_text = handoff.get("tracker_note_text")
+    if not isinstance(tracker_note_text, str) or not tracker_note_text.strip():
+        return handoff
+    existing = _extract_founder_override_from_tracker_note(tracker_note_text)
+    if existing and normalize_wave_id(existing) == normalize_wave_id(wave_id):
+        return handoff
+
+    replacement = _extract_same_wave_founder_override_from_tasks(repo_root, wave_id)
+    if not replacement:
+        replacement = _resolve_control_surface_founder_override_token(
+            {
+                "wave_id": wave_id,
+                "wave_name": wave_id,
+                "tracked_packet": handoff.get("tracked_packet", ""),
+                "tracker_note_text": tracker_note_text,
+            },
+            repo_root,
+            embedded_handoff=handoff,
+            wave_id=wave_id,
+            wave_class=wave_class,
+        )
+    if not replacement:
+        return handoff
+    repaired = _replace_founder_override_token(tracker_note_text, replacement)
+    if repaired == tracker_note_text:
+        return handoff
+    return {**handoff, "tracker_note_text": repaired}
 
 
 def _wave_class_allows_founder_override(wave_class: Any) -> bool:
@@ -832,13 +908,19 @@ def _resolve_control_surface_founder_override_token(
     wave_id: str,
     wave_class: str,
 ) -> str:
-    token = _extract_founder_override_from_routing_record(
-        record,
-        repo_root,
-        embedded_handoff=embedded_handoff,
-    )
-    if token:
-        return token if _wave_class_allows_founder_override(wave_class) else ""
+    if not _wave_class_allows_founder_override(wave_class):
+        return ""
+    text_candidates = [
+        str(record.get("founder_override_token") or ""),
+        str(record.get("founder_override") or ""),
+        str(record.get("tracker_note_text") or ""),
+        str((embedded_handoff or {}).get("tracker_note_text") or ""),
+        _tracked_packet_text_from_record(record, repo_root),
+    ]
+    for text in text_candidates:
+        token = _extract_same_wave_founder_override_token(text, wave_id)
+        if token:
+            return token
     if _is_authorized_control_surface_l4_enabler(
         record,
         embedded_handoff=embedded_handoff,
@@ -847,6 +929,13 @@ def _resolve_control_surface_founder_override_token(
         repo_root=repo_root,
     ):
         return normalize_wave_id(wave_id)
+    token = _extract_founder_override_from_routing_record(
+        record,
+        repo_root,
+        embedded_handoff=embedded_handoff,
+    )
+    if token and normalize_wave_id(token) == normalize_wave_id(wave_id):
+        return token
     return ""
 
 
@@ -5604,17 +5693,26 @@ def build_commit_handoff(
         )
 
     effective_founder_override_token = _normalize_founder_override_token(founder_override_token)
-    if not effective_founder_override_token and isinstance(tracker_note_text, str):
-        effective_founder_override_token = _extract_founder_override_from_tracker_note(
+    tracker_note_founder_override_token = ""
+    if isinstance(tracker_note_text, str):
+        tracker_note_founder_override_token = _extract_founder_override_from_tracker_note(
             tracker_note_text
         )
+        if (
+            not effective_founder_override_token
+            and normalize_wave_id(tracker_note_founder_override_token) == normalize_wave_id(wave_id)
+        ):
+            effective_founder_override_token = tracker_note_founder_override_token
     if (
-        not effective_founder_override_token
+        (
+            not effective_founder_override_token
+            or normalize_wave_id(effective_founder_override_token) != normalize_wave_id(wave_id)
+        )
         and tracked_packet
         and repo_root is not None
         and str(wave_class or "").strip() == "L4_ENABLER"
     ):
-        effective_founder_override_token = _resolve_control_surface_founder_override_token(
+        resolved_control_surface_token = _resolve_control_surface_founder_override_token(
             {
                 "wave_id": wave_id,
                 "wave_name": wave_id,
@@ -5625,6 +5723,10 @@ def build_commit_handoff(
             wave_id=wave_id,
             wave_class=wave_class,
         )
+        if resolved_control_surface_token:
+            effective_founder_override_token = resolved_control_surface_token
+    if not effective_founder_override_token and tracker_note_founder_override_token:
+        effective_founder_override_token = tracker_note_founder_override_token
 
     if (
         caller == "standalone"
@@ -5643,10 +5745,23 @@ def build_commit_handoff(
         unblocks_wave_id=unblocks_wave_id,
         unblocks_runtime_blocker=unblocks_runtime_blocker,
     )
-    effective_tracker_note = _append_founder_override_to_tracker_note(
-        effective_tracker_note,
-        effective_founder_override_token,
+    existing_tracker_override = _extract_founder_override_from_tracker_note(
+        effective_tracker_note
     )
+    if (
+        effective_founder_override_token
+        and existing_tracker_override
+        and normalize_wave_id(existing_tracker_override) != normalize_wave_id(effective_founder_override_token)
+    ):
+        effective_tracker_note = _replace_founder_override_token(
+            effective_tracker_note,
+            effective_founder_override_token,
+        )
+    else:
+        effective_tracker_note = _append_founder_override_to_tracker_note(
+            effective_tracker_note,
+            effective_founder_override_token,
+        )
 
     handoff = {
         "wave_id": wave_id,
@@ -7102,6 +7217,13 @@ def _run_commit_pipeline_impl(
         )
 
     # ── Step 3: ensure_tracker_note ──────────────────────────────────
+    repaired_handoff = _repair_handoff_same_wave_founder_override(
+        handoff,
+        repo_root,
+    )
+    if repaired_handoff is not handoff:
+        handoff = repaired_handoff
+        log(f"Step 3: repaired stale FOUNDER_OVERRIDE token for {wave_id}")
     tracker_note_text = handoff["tracker_note_text"]
     tasks_path = repo_root / "TASKS.md"
     if not tasks_path.exists():

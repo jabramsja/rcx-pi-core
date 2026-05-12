@@ -24,8 +24,11 @@ does not authorize `/mu` implementation.
 2026-05-12 cleanup note: closed duplicate Stage0 capture provenance pointer
 N14 was moved to
 `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N14_stage0_duplicate_pointer_closed-by-stage0-capture-provenance-deferred-cleanup-2026-05-12.md`.
-N1 VM coverage bookkeeping, N3 broad host-surface boundary, and N5 JS pipeline
-shape governance remain live in this active packet.
+N1 VM coverage bookkeeping and N3 broad host-surface boundary remain live in
+this active packet. N5 JS pipeline shape governance is closed by
+`js-engine-pipeline-shape-governance-test-2026-05-12` / PR #937 and archived
+as historical evidence at
+`reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N5_js_pipeline_governance_closed-by-post-js-pipeline-governance-deferred-cleanup-2026-05-12.md`.
 
 2026-05-10 triage evidence refresh:
 
@@ -39,10 +42,11 @@ shape governance remain live in this active packet.
   exits 0 with no increases/decreases and
   `python3 tools/checks/check_host_authority_inventory_ratchet.py` exits 0
   with `312 total` / `217 authority`.
-- N5 remains advisory because `mu/host/js/engine/pipeline.js` is still a large
-  single engine pipeline file (`wc -l` reports 1160 lines) and no decomposition
-  contract is present in this active packet. It is routed to
-  `reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`.
+- N5 was still advisory in this 2026-05-10 snapshot because
+  `mu/host/js/engine/pipeline.js` was a large single engine pipeline file
+  (`wc -l` reported 1160 lines) and no decomposition contract was present in
+  this active packet. Current closure is recorded below and archived after the
+  focused structural guard landed.
 - N14 overlapped the then-active Stage0 capture advisory retained in
   `redteam_2026-03-14_repo_non_blockers.md`; the 2026-05-12 cleanup closed
   and archived that duplicate pointer after
@@ -74,8 +78,9 @@ shape governance remain live in this active packet.
 - N3 remains a broad architectural boundary observation with no direct
   implementation route; any broad host-surface reduction requires a separate
   bounded packet.
-- N5 remains live under
-  `reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`.
+- N5 is now closed by
+  `js-engine-pipeline-shape-governance-test-2026-05-12` and archived as
+  historical evidence; it is not a live advisory in this active packet.
 - N14 was a duplicate pointer to the canonical Stage0 route and is now closed
   by `stage0-capture-path-provenance-implementation-2026-05-12`; the archived
   duplicate pointer is
@@ -85,6 +90,20 @@ shape governance remain live in this active packet.
   and governed by
   `reports/control_plane/transparent_js_proxy_provenance_boundary_2026-05-09.md`;
   it is not a separate section in this repo-truth source packet.
+
+2026-05-12 post-JS pipeline governance cleanup:
+
+- N5 JS pipeline shape governance is closed after PR #937 and the same-wave
+  structural guard recorded in `TASKS.md` under
+  `js-engine-pipeline-shape-governance-test-2026-05-12`.
+- The preserved N5 historical text was moved to
+  `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N5_js_pipeline_governance_closed-by-post-js-pipeline-governance-deferred-cleanup-2026-05-12.md`.
+- Active repo-truth retained advisories in this packet are now N1 VM coverage
+  bookkeeping and N3 broad host-surface boundary. Transparent JS Proxy
+  provenance remains active in
+  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`.
+- This cleanup performed no runtime, Stage0, seed, scheduler, registry, parity,
+  production `/mu`, host-oracle, or Claude-related implementation work.
 
 ## Active Non-Blockers
 
@@ -139,29 +158,3 @@ functions — most of which are not on the kernel path. Reducing the broader inv
 requires eliminating host constructs in engine pipeline, hemisphere routing, ontology
 promotion, etc. — each of which is a separate L4 workstream.
 **No single fix** — this is the nature of incremental reduction.
-
-### N5. `pipeline.js` still has no explicit size/shape governance
-
-- **Outcome:** retained live governance advisory.
-- **Governing route:** `reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`.
-- **Current proof gap:** the completed Phase A packet reproduced that
-  `mu/host/js/engine/pipeline.js` remains a 1160-line engine pipeline and that
-  scoped docs/tests do not define a sufficient module ownership or
-  decomposition contract.
-- **Hard stop before implementation:** no JS runtime, Stage0, coverage, Proxy
-  provenance, scheduler, seed, or module-split implementation is authorized by
-  this source packet or by the completed Phase A governance packet.
-- **Doctrine boundary:** future governance must preserve seed-driven boundary
-  operations and must not move Mu semantic decisions into JavaScript module
-  structure.
-
-- the file remains large (`wc -l` reports 1160 lines)
-- there is no explicit cap or decomposition contract comparable to the JS
-  bootstrap-core governance gate
-**Why deferred:** pipeline.js is the JS engine pipeline — it handles boundary dispatch,
-ontology promotion, algorithm routing, and evidence collection. These are logically
-related functions that share state (seedProjectionMap, kernelProjections). Splitting
-into smaller files would create circular dependency issues or require a module loader.
-The file is well-sectioned with clear function boundaries. A LOC cap without
-decomposition guidance would be arbitrary. **Target packet:**
-`reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`.

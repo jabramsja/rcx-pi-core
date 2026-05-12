@@ -76,6 +76,56 @@ def _with_founder_override(note: str, token: str) -> str:
     return f"{note} FOUNDER_OVERRIDE:{token} (test authorization)"
 
 
+def test_build_commit_handoff_replaces_stale_tracker_override_with_same_wave_packet(
+    tmp_path,
+):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    wave_id = "post-js-pipeline-governance-deferred-cleanup-2026-05-12"
+    predecessor = "js-engine-pipeline-shape-governance-test-2026-05-12"
+    packet_path = f"reports/control_plane/{wave_id}.md"
+    packet = repo / packet_path
+    packet.parent.mkdir(parents=True, exist_ok=True)
+    packet.write_text(
+        "# Post JS pipeline cleanup\n\n"
+        f"Wave ID: {wave_id}\n"
+        "Class: L4_ENABLER\n"
+        "Lane: control-surface (agent automation / observability)\n"
+        f"- Predecessor closure evidence: FOUNDER_OVERRIDE:{predecessor}\n"
+        f"- Same-wave authority: FOUNDER_OVERRIDE:{wave_id}\n"
+        "Founder authorization: standing pipeline-bug-fix authorization.\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", packet_path],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+    stale_note = _with_founder_override(
+        _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"],
+        predecessor,
+    )
+
+    handoff, errors = commit_mod.build_commit_handoff(
+        wave_id=wave_id,
+        task_id="[NEXT-CODEX-POST-REDTEAM]",
+        files_to_stage=["file.py"],
+        commit_message="fix: post JS pipeline cleanup",
+        fixes_implemented=["test fix"],
+        wave_class="L4_ENABLER",
+        target_gate_id="G8",
+        tracked_packet=packet_path,
+        tracker_note_text=stale_note,
+        repo_root=repo,
+    )
+
+    assert not errors, errors
+    assert f"FOUNDER_OVERRIDE:{wave_id}" in handoff["tracker_note_text"]
+    assert f"FOUNDER_OVERRIDE:{predecessor}" not in handoff["tracker_note_text"]
+
+
 def _setup_repo(tmp_path):
     """Create a minimal git repo for pipeline tests."""
     import subprocess
