@@ -19,68 +19,30 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-09 structural blocking closeout):
+Current inventory refresh (2026-05-12 Stage0 cleanup bridge doc accuracy closeout):
 
-- Evidence commands:
-  `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' ! -name README.md -print | sort`.
+- Evidence command:
+  `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' -print | sort`.
+- Current active deferred files:
+
+```text
+reports/deferred/blocking/README.md
+reports/deferred/non_blocking/README.md
+reports/deferred/non_blocking/founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md
+reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md
+```
+
 - `reports/deferred/blocking/` currently contains `README.md` only; no active
-  blocking deferred packets remain after PR #912 closed the founder-ordered
-  `/mu` structural blocking finding.
-- The closed founder-ordered repo-code blocking source packet moved to
-  `reports/archive/deferred/founder_ordered_redteam_repo_code_audit_2026-05-05_blocking_closed-by-founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_PR912.md`.
-- The resolved mu preproduction gate-theater blocker was moved to
-  `reports/archive/deferred/mu_preproduction_gate_theater_blocker_2026-05-04_closed-by-mu-preproduction-theater-ratchet-resolution-2026-05-05.md`.
-  The 2026-05-05 follow-up aligns the redteam startup guard with the curated
-  theater-risk ratchet; `/mu` production-forward movement is no longer blocked
-  by this gate-theater finding.
-- `reports/deferred/non_blocking/` currently contains `README.md` plus four
-  active or partially active `/mu` structural advisory packets:
-  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`,
-  `founder_ordered_redteam_repo_code_audit_2026-05-05_non_blocking.md`,
-  `redteam_2026-03-14_repo_non_blockers.md`, and
-  `repo_truth_non_blockers_2026-03-14.md`.
-- The 2026-05-08 generated bridge closure archived the three active generated
-  non-`/mu` bridge packets under `reports/archive/deferred/` with
-  `_closed-by-deferred-non-mu-generated-bridge-closure-observability-parser-fix-2026-05-08.md`
-  suffixes after bounded verification closed or staled their findings and fixed
-  the live observability non-object JSON envelope parser crash.
-- The truth sweep archived routed non-`/mu` deferred source packets under
-  `reports/archive/deferred/` with
-  `_closed-by-deferred-non-mu-deferred-lane-truth-sweep-2026-05-07.md`
-  suffixes, including stale Phase B generated packets and the closed
-  `w5a_reentry_gate_coverage.md` source packet.
-- The 2026-05-07 truth sweep routed then-remaining non-`/mu` work into bounded
-  control-plane packets:
-  `reports/control_plane/deferred-non-mu-docs-control-plane-remediation-2026-05-07_2026-05-07.md`,
-  `reports/control_plane/deferred-non-mu-tooling-control-plane-remediation-2026-05-07_2026-05-07.md`,
-  and
-  `reports/control_plane/deferred-non-mu-tests-proof-remediation-2026-05-07_2026-05-07.md`.
-- The 2026-05-06 non-blocking cleanup archived 12 closed, stale, or historical
-  whole packets and extracted closed sections from 5 partial packets under
-  `reports/archive/deferred/`.
-- The retained-residue follow-up
-  `deferred-non-blocking-retained-residue-cleanup-2026-05-06` archived one
-  additional closed whole packet,
-  `reports/archive/deferred/pager-deterministic-session-2026-04-18_bridge_nonblockers_closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`,
-  and extracted the now-closed docs-root inventory-count section to
-  `reports/archive/deferred/docs-root-mu-docs-redteam-cleanup-2026-05-06_bridge_nonblockers_partial-closed-by-deferred-non-blocking-retained-residue-cleanup-2026-05-06.md`.
-  Bridge Round 1 then generated a same-wave retained non-blocking packet that
-  was later archived by the 2026-05-07 non-blocking folder cleanup at
-  `reports/archive/deferred/deferred-non-blocking-retained-residue-cleanup-2026-05-06_bridge_nonblockers_closed-by-non-blocking-folder-cleanup-2026-05-07.md`.
-  The routed retained-candidate follow-up generated an active duplicate-tracker
-  advisory, and the 2026-05-07 root/mu-docs audit closeout archived that
-  advisory at
-  `reports/archive/deferred/docs-root-mu-docs-retained-packet-cleanup-2026-05-06_bridge_nonblockers_closed-by-docs-root-mu-docs-audit-closeout-2026-05-07.md`
-  and added a non-blocking L4 G8 docs DOC_ACCURACY advisory that was later
-  archived by the deferred non-`/mu` truth sweep at
-  `reports/archive/deferred/docs-root-mu-docs-audit-closeout-2026-05-07_non_blocking_closed-by-deferred-non-mu-deferred-lane-truth-sweep-2026-05-07.md`.
-  The 2026-05-07 non-blocking folder cleanup also archived the same-wave
-  `docs-root-mu-docs-audit-closeout-2026-05-07` bridge packet after closing its
-  low-severity README wording finding. The 2026-05-07 deferred folder cleanup
-  also archived the tests/tooling generated remediation bridge packets whose
-  stale wording and evidence-command findings no longer reproduce.
-- The current active non-blocking inventory is `README.md` plus four active or
-  partially active retained `/mu` structural advisory packets.
+  blocking deferred packets remain.
+- `reports/deferred/non_blocking/` currently contains `README.md` plus two
+  active or partially active retained `/mu` structural advisory packets.
+- The generated same-wave DOC_ACCURACY bridge residue for
+  `stage0-capture-provenance-deferred-cleanup-2026-05-12` is closed and archived
+  at
+  `reports/archive/deferred/stage0-capture-provenance-deferred-cleanup-2026-05-12_bridge_nonblockers_closed-by-stage0-cleanup-bridge-doc-accuracy-closeout-2026-05-12.md`.
+- Retained `/mu` structural advisories remain active and are not implemented by
+  this inventory refresh: transparent JS Proxy provenance, N1 VM coverage
+  bookkeeping, N3 broad host-surface boundary, and N5 JS pipeline governance.
 
 Closed-parent exclusions for this index:
 

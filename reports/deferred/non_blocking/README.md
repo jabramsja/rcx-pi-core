@@ -261,3 +261,21 @@ Archived source snapshots for extracted non-blocking residue live in:
 - Retained live advisories remain active: N1 VM coverage bookkeeping, N3 broad
   host-surface boundary, N5 JS pipeline shape governance, and transparent JS
   Proxy provenance.
+
+2026-05-12 Stage0 cleanup bridge DOC_ACCURACY closeout note:
+
+- Evidence command:
+  `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
+- Current deferred inventory is `reports/deferred/blocking/README.md`, this
+  README, and two active or partially active retained `/mu` structural advisory
+  packets:
+  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`
+  and `repo_truth_non_blockers_2026-03-14.md`.
+- The generated same-wave DOC_ACCURACY residue
+  `stage0-capture-provenance-deferred-cleanup-2026-05-12_bridge_nonblockers.md`
+  moved to
+  `reports/archive/deferred/stage0-capture-provenance-deferred-cleanup-2026-05-12_bridge_nonblockers_closed-by-stage0-cleanup-bridge-doc-accuracy-closeout-2026-05-12.md`
+  after its three stale-doc findings were corrected.
+- Retained live advisories remain active: transparent JS Proxy provenance, N1 VM
+  coverage bookkeeping, N3 broad host-surface boundary, and N5 JS pipeline
+  governance.
