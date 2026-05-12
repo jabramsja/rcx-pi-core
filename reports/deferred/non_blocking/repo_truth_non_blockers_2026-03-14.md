@@ -21,6 +21,12 @@ to
 The active packet now retains only current `/mu` structural advisory status and
 does not authorize `/mu` implementation.
 
+2026-05-12 cleanup note: closed duplicate Stage0 capture provenance pointer
+N14 was moved to
+`reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N14_stage0_duplicate_pointer_closed-by-stage0-capture-provenance-deferred-cleanup-2026-05-12.md`.
+N1 VM coverage bookkeeping, N3 broad host-surface boundary, and N5 JS pipeline
+shape governance remain live in this active packet.
+
 2026-05-10 triage evidence refresh:
 
 - N1 remains advisory because `_step_kernel_with_vm` reconstructs coverage
@@ -37,10 +43,10 @@ does not authorize `/mu` implementation.
   single engine pipeline file (`wc -l` reports 1160 lines) and no decomposition
   contract is present in this active packet. It is routed to
   `reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`.
-- N14 overlaps the active Stage0 capture advisory retained in
-  `redteam_2026-03-14_repo_non_blockers.md`; current capture/materialization
-  evidence is canonical there and routed once to
-  `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.
+- N14 overlapped the then-active Stage0 capture advisory retained in
+  `redteam_2026-03-14_repo_non_blockers.md`; the 2026-05-12 cleanup closed
+  and archived that duplicate pointer after
+  `stage0-capture-path-provenance-implementation-2026-05-12` landed.
 - Next-wave packet routing emitted by
   `repo-truth-mu-structural-advisory-triage-2026-05-09`:
   `reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`,
@@ -70,8 +76,10 @@ does not authorize `/mu` implementation.
   bounded packet.
 - N5 remains live under
   `reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`.
-- N14 remains a duplicate pointer to the canonical Stage0 route
-  `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.
+- N14 was a duplicate pointer to the canonical Stage0 route and is now closed
+  by `stage0-capture-path-provenance-implementation-2026-05-12`; the archived
+  duplicate pointer is
+  `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N14_stage0_duplicate_pointer_closed-by-stage0-capture-provenance-deferred-cleanup-2026-05-12.md`.
 - Transparent JS Proxy provenance is classified in
   `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`
   and governed by
@@ -157,23 +165,3 @@ into smaller files would create circular dependency issues or require a module l
 The file is well-sectioned with clear function boundaries. A LOC cap without
 decomposition guidance would be arbitrary. **Target packet:**
 `reports/control_plane/js_engine_pipeline_shape_governance_2026-05-09.md`.
-
-### N14. Stage0 capture_ref returns null/None for hostile leaves (design gap)
-
-- **Outcome:** retained only as duplicate pointer; not a separate active packet.
-- **Governing route:** `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.
-- **Current proof gap:** see the canonical Stage0 advisory in
-  `redteam_2026-03-14_repo_non_blockers.md`; this source packet must not
-  duplicate Stage0 implementation routing.
-- **Hard stop before implementation:** no Stage0, seed, scheduler, registry,
-  parity, or production `/mu` edits are authorized from this duplicate pointer.
-- **Doctrine boundary:** any later fix must update Python and JavaScript Stage0
-  together and narrow direct-API capture provenance without host-only object
-  semantics.
-
-- capture_ref deep-copies via _safe_mu_copy. Non-Mu types (subclasses) are canonicalized to null/None.
-- Bridge considers this a "successful match on hostile input" since the VM returns match with root=null.
-- Design decision: null/None is the correct fail-closed canonical value for non-Mu inputs. The alternative (stall on non-Mu capture) would require type-checking at capture_path time, which is a larger change.
-- Status: duplicate advisory, not a separate pending packet. Canonical active
-  Stage0 capture route:
-  `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.

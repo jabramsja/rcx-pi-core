@@ -1,5 +1,23 @@
 # Repo Red-Team Non-Blockers (2026-03-14)
 
+Archived by `stage0-capture-provenance-deferred-cleanup-2026-05-12`.
+
+The only remaining active section in this packet was the Stage0
+`capture_path` provenance advisory. Current code/test truth closes that
+residue through `stage0-capture-path-provenance-implementation-2026-05-12`:
+Python now stores `_safe_mu_copy(..., reject_non_mu=True,
+context="capture_path")` at `mu/host/python/rcx_pi/selfhost/stage0_vm.py:825`
+through `mu/host/python/rcx_pi/selfhost/stage0_vm.py:826`, JavaScript now
+stores `safeMuCopy(val, true, 'capture_path')` at
+`mu/host/js/core/stage0_vm.js:889`, and
+`mu/tests/l4_gates/test_stage0_vm.py:1374` through
+`mu/tests/l4_gates/test_stage0_vm.py:1476` prove valid capture parity plus
+Python and Node direct non-Mu capture rejection at `capture_path`.
+
+No non-Stage0 active advisory content remained in this packet; earlier N2/N3
+sections were already archived by the 2026-05-06 and 2026-05-07 cleanup
+waves recorded below.
+
 This packet is the canonical active advisory packet from the 2026-03-14
 repo-wide verification sweep.
 

@@ -239,3 +239,25 @@ Archived source snapshots for extracted non-blocking residue live in:
   pipeline shape governance, transparent JS Proxy provenance, and the broad
   host-surface progress boundary.
 - The reconciliation did not implement `/mu` structural production changes.
+
+2026-05-12 Stage0 capture provenance deferred cleanup note:
+
+- Evidence command:
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
+- Current non-blocking inventory after the cleanup is `README.md` plus two
+  active or partially active `/mu` structural advisory packets:
+  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`
+  and `repo_truth_non_blockers_2026-03-14.md`.
+- Closed Stage0 capture provenance residue moved to the canonical deferred
+  archive lane:
+  `reports/archive/deferred/stage0-capture-path-provenance-implementation-2026-05-12_bridge_nonblockers_closed-by-stage0-capture-provenance-deferred-cleanup-2026-05-12.md`,
+  `reports/archive/deferred/redteam_2026-03-14_repo_non_blockers_closed-by-stage0-capture-provenance-deferred-cleanup-2026-05-12.md`,
+  and
+  `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N14_stage0_duplicate_pointer_closed-by-stage0-capture-provenance-deferred-cleanup-2026-05-12.md`.
+- `stage0-capture-path-provenance-implementation-2026-05-12` is treated as
+  landed predecessor runtime truth only. This cleanup did not reopen runtime,
+  Stage0, parity, coverage, seed, scheduler, registry, production `/mu`,
+  host-oracle, or Claude-related implementation work.
+- Retained live advisories remain active: N1 VM coverage bookkeeping, N3 broad
+  host-surface boundary, N5 JS pipeline shape governance, and transparent JS
+  Proxy provenance.
