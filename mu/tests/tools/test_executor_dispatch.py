@@ -12453,6 +12453,35 @@ class TestRecoveryGateWiring:
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", raising=False)
         monkeypatch.delenv("RCX_RECOVERY_TIMEOUT_KEY", raising=False)
 
+    def test_tier2_commit_timeout_override_stays_in_memory(self, tmp_path, monkeypatch):
+        """Commit executor timeout recovery must not drift the tracked config default."""
+        cfg_dir = tmp_path / "mu" / "tools" / "executors"
+        cfg_dir.mkdir(parents=True)
+        original_config = {
+            "timeouts": {
+                "phase_b_executor": 3600,
+                "commit_executor": 3600,
+            }
+        }
+        cfg_path = cfg_dir / "executor_config.json"
+        cfg_path.write_text(json.dumps(original_config, indent=2) + "\n")
+
+        monkeypatch.setenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", "5400")
+        monkeypatch.setenv("RCX_RECOVERY_TIMEOUT_KEY", "commit_executor")
+        in_memory = {"timeouts": dict(original_config["timeouts"])}
+
+        orig = dispatch_mod._apply_recovery_overrides(  # ANTICHEAT_OK
+            in_memory,
+            repo_root=tmp_path,
+        )
+
+        assert orig is None
+        assert in_memory["timeouts"]["commit_executor"] == 5400
+        disk = json.loads(cfg_path.read_text())
+        assert disk["timeouts"]["commit_executor"] == 3600
+        assert os.environ.get("RCX_RECOVERY_TIMEOUT_OVERRIDE") is None
+        assert os.environ.get("RCX_RECOVERY_TIMEOUT_KEY") is None
+
     def test_apply_overrides_writes_to_disk(self, tmp_path, monkeypatch):
         """_apply_recovery_overrides writes overrides to executor_config.json on disk."""
         cfg_dir = tmp_path / "mu" / "tools" / "executors"

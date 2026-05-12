@@ -2517,6 +2517,9 @@ def _retry_commit_only(
         }
 
 
+_DISPATCHER_ONLY_TIMEOUT_KEYS = frozenset({"commit_executor"})
+
+
 def _apply_recovery_overrides(
     config: dict[str, Any],
     repo_root: Path | None = None,
@@ -2528,10 +2531,11 @@ def _apply_recovery_overrides(
     RCX_RECOVERY_TIMEOUT_KEY to target the correct executor timeout).
     fix_implementer_stale sets RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE.
 
-    These are applied to the in-memory config dict AND written to
-    executor_config.json on disk (when repo_root is provided) so that
-    subprocesses which reload config from disk (e.g. phase_b_implementer)
-    pick up the adjusted values.
+    These are applied to the in-memory config dict. Overrides are also written
+    to executor_config.json on disk (when repo_root is provided) for executors
+    whose subprocesses reload config from disk (e.g. phase_b_implementer).
+    Dispatcher-owned timeout keys stay in memory because the dispatcher itself
+    enforces that subprocess timeout and tracked default drift is not needed.
 
     Returns original disk timeout sections if disk was modified (caller
     should pass to _restore_config_on_disk after retry), or None.
@@ -2559,7 +2563,10 @@ def _apply_recovery_overrides(
             timeout_key = os.environ.get(
                 "RCX_RECOVERY_TIMEOUT_KEY", "phase_b_executor")
             config.setdefault("timeouts", {})[timeout_key] = val
-            if disk_config is not None:
+            if (
+                disk_config is not None
+                and timeout_key not in _DISPATCHER_ONLY_TIMEOUT_KEYS
+            ):
                 disk_config.setdefault("timeouts", {})[timeout_key] = val
                 disk_modified = True
             if verbose:
