@@ -199,32 +199,50 @@ def _safe_mu_deep_equal(a, b):
 # Structural deep copy (no stdlib — Mu values only)
 # ---------------------------------------------------------------------------
 
-def _mu_copy(value):
+def _mu_copy(value, reject_non_mu=False, context="Deep copy"):
     """Deep-copy a Mu value using only primitives (no copy/json imports)."""
     if type(value) is dict:
-        return {k: _mu_copy(v) for k, v in value.items()}  # AST_OK: bootstrap structural copy of Mu dict
+        if reject_non_mu:
+            for k in value:
+                if type(k) is not str:
+                    raise Stage0VMError(
+                        f"{context}: non-Mu value cannot be captured")
+        return {k: _mu_copy(v, reject_non_mu, context) for k, v in value.items()}  # AST_OK: bootstrap structural copy of Mu dict
     if type(value) is list:
-        return [_mu_copy(item) for item in value]  # AST_OK: bootstrap structural copy of Mu list
+        return [_mu_copy(item, reject_non_mu, context) for item in value]  # AST_OK: bootstrap structural copy of Mu list
     # Exact-type check for primitives: reject subclasses (EvilStr, etc.)
-    if type(value) in (str, int, float, bool, type(None)):
+    if type(value) in (str, int, bool, type(None)):
         return value
+    if type(value) is float:
+        if reject_non_mu and value - value != 0.0:
+            raise Stage0VMError(f"{context}: non-Mu value cannot be captured")
+        return value
+    if reject_non_mu:
+        raise Stage0VMError(f"{context}: non-Mu value cannot be captured")
     # Non-Mu type (subclass or unknown) — fail-closed: return None
     # This prevents hostile leaf passthrough from capture_ref
     return None
 
 
-def _safe_mu_copy(value):
+def _safe_mu_copy(value, reject_non_mu=False, context="Deep copy"):
     # AST_OK: error boundary — translates ALL host errors to Stage0VMError (fail-closed)
     """Deep-copy with error boundary protection (parity: JS safeMuCopy)."""
     try:
-        return _mu_copy(value)
+        return _mu_copy(value, reject_non_mu, context)
+    except Stage0VMError:
+        raise
     except RecursionError:
-        raise Stage0VMError(
-            "Deep copy depth exceeded (recursion overflow)")
+        msg = "Deep copy depth exceeded (recursion overflow)"
+        if context != "Deep copy":
+            msg = f"{context}: {msg}"
+        raise Stage0VMError(msg)
     except Exception as e:
         # Fail-closed: hostile dict keys, __iter__ traps, etc. → VM error
         # Do NOT stringify e — hostile __str__ can throw secondary exceptions
-        raise Stage0VMError("Deep copy failed on hostile input")
+        msg = "Deep copy failed on hostile input"
+        if context != "Deep copy":
+            msg = f"{context}: {msg}"
+        raise Stage0VMError(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -804,7 +822,8 @@ def _stage0_vm_step_trusted(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
                     raise Stage0VMError(
                         f"capture_path: duplicate capture '{name}' "
                         f"in program '{program_id}'")
-                captures[name] = val
+                captures[name] = _safe_mu_copy(
+                    val, reject_non_mu=True, context="capture_path")
 
             # ---- write_path ----
             elif op == "write_path":

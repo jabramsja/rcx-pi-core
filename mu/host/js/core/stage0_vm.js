@@ -194,36 +194,84 @@ function safeMuDeepEqual(a, b) {
 // ---------------------------------------------------------------------------
 // Structural deep copy (Mu values only, no external deps)
 // ---------------------------------------------------------------------------
-function muCopy(value) {
+function muCopy(value, rejectNonMu = false, context = 'Deep copy') {
   if (value === null) return null;
-  if (value === undefined) return null;  // Mu has no undefined — canonicalize to null
-  if (_isPlainArray(value)) return value.map(muCopy);  // Reject Array subclasses
+  if (value === undefined) {
+    if (rejectNonMu) {
+      throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
+    }
+    return null;  // Mu has no undefined — canonicalize to null
+  }
+  if (_isPlainArray(value)) {
+    if (rejectNonMu) {
+      if (Object.getOwnPropertySymbols(value).length > 0) {
+        throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
+      }
+      if (Object.keys(value).length !== value.length ||
+          Object.getOwnPropertyNames(value).length !== value.length + 1) {
+        throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
+      }
+      for (let i = 0; i < value.length; i++) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
+        if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
+          throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
+        }
+      }
+    }
+    return value.map(item => muCopy(item, rejectNonMu, context));  // Reject Array subclasses
+  }
   if (_isPlainObject(value)) {
+    const keys = Object.keys(value);
+    if (rejectNonMu) {
+      if (Object.getOwnPropertySymbols(value).length > 0 ||
+          Object.getOwnPropertyNames(value).length !== keys.length) {
+        throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
+      }
+      for (const k of keys) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, k);
+        if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
+          throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
+        }
+      }
+    }
     const result = Object.create(null);
-    for (const k of Object.keys(value)) {
-      result[k] = muCopy(value[k]);
+    for (const k of keys) {
+      result[k] = muCopy(value[k], rejectNonMu, context);
     }
     return result;
   }
   // Exact-type check for Mu primitives (parity: Python _mu_copy)
   const t = typeof value;
-  if (t === 'string' || t === 'number' || t === 'boolean') return value;
+  if (t === 'string' || t === 'boolean') return value;
+  if (t === 'number') {
+    if (rejectNonMu && value - value !== 0) {
+      throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
+    }
+    return value;
+  }
+  if (rejectNonMu) {
+    throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
+  }
   // Non-Mu type (host object, Symbol, etc.) — fail-closed: return null
   return null;
 }
 
-function safeMuCopy(value) {
+function safeMuCopy(value, rejectNonMu = false, context = 'Deep copy') {
   // AST_OK: error boundary — translates ALL host errors to Stage0VMError (fail-closed)
   try {
-    return muCopy(value);
+    return muCopy(value, rejectNonMu, context);
   } catch (e) {
+    if (e instanceof Stage0VMError) throw e;
     if (e instanceof RangeError) {
-      throw new Stage0VMError(
-        'Deep copy depth exceeded (recursion overflow)');
+      let msg = 'Deep copy depth exceeded (recursion overflow)';
+      if (context !== 'Deep copy') msg = `${context}: ${msg}`;
+      throw new Stage0VMError(msg);
     }
     // Fail-closed: hostile getters, Proxy traps, etc. → VM error
     // Do NOT stringify e — hostile toString() can throw secondary exceptions
-    throw new Stage0VMError('Deep copy failed on hostile input');
+    let msg = 'Deep copy failed on hostile input';
+    if (context !== 'Deep copy') msg = `${context}: ${msg}`;
+    throw new Stage0VMError(msg);
   }
 }
 
@@ -838,7 +886,7 @@ function _stage0VmStepTrusted(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) 
             `capture_path: duplicate capture '${name}' ` +
             `in program '${programId}'`);
         }
-        captures[name] = val;
+        captures[name] = safeMuCopy(val, true, 'capture_path');
       }
 
       // ---- write_path ----

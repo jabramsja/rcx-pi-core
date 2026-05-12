@@ -1371,6 +1371,111 @@ def _make_bundle(ops, pid="p1"):
     }
 
 
+class TestCapturePathProvenance:
+    """Capture values must be Mu-domain values before they enter captures."""
+
+    def _capture_echo_bundle(self):
+        return _make_bundle([
+            {"op": "capture_path", "path": ["focus", "root", "x"], "name": "x"},
+            {"op": "write_path",
+             "template": {"kind": "capture_ref", "name": "x"}},
+            {"op": "return_projection_success"},
+        ])
+
+    def _run_node_direct(self, script):
+        completed = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+            timeout=30,
+        )
+        assert completed.returncode == 0, (
+            f"node exited {completed.returncode}\n"
+            f"stdout: {completed.stdout}\nstderr: {completed.stderr}")
+        lines = [line for line in completed.stdout.splitlines() if line.strip()]
+        assert lines, f"node produced no stdout; stderr: {completed.stderr}"
+        return json.loads(lines[-1])
+
+    def test_valid_mu_capture_matches_python_and_node_direct(self):
+        bundle = self._capture_echo_bundle()
+        inp = {"x": {"a": [1, 3.5, True, None, "ok"]}}
+
+        py_result = stage0_vm_step(bundle, inp)
+        script = """
+const { stage0VmStep } = require('./mu/host/js/core/stage0_vm.js');
+const bundle = __BUNDLE__;
+const input = __INPUT__;
+const result = stage0VmStep(bundle, input);
+console.log(JSON.stringify({ok: true, result}));
+""".replace("__BUNDLE__", json.dumps(bundle)).replace(
+            "__INPUT__", json.dumps(inp))
+        js_payload = self._run_node_direct(script)
+
+        assert js_payload["ok"] is True
+        assert py_result["status"] == "match"
+        assert js_payload["result"]["status"] == "match"
+        assert _mu_deep_equal(py_result["root"], js_payload["result"]["root"])
+        assert _mu_deep_equal(py_result["root"], inp["x"])
+
+    def test_python_non_mu_direct_capture_fails_at_capture_path(self):
+        class NonMuLeaf:
+            pass
+
+        bundle = self._capture_echo_bundle()
+        with pytest.raises(Stage0VMError, match="capture_path"):
+            stage0_vm_step(bundle, {"x": NonMuLeaf()})
+
+    @pytest.mark.parametrize("value", [
+        float("nan"),
+        float("inf"),
+        {1: "non-string-key", "ok": "yes"},
+    ])
+    def test_python_direct_capture_rejects_non_mu_values(self, value):
+        bundle = self._capture_echo_bundle()
+        with pytest.raises(Stage0VMError, match="capture_path"):
+            stage0_vm_step(bundle, {"x": value})
+
+    def test_node_non_mu_direct_capture_fails_at_capture_path(self):
+        bundle = self._capture_echo_bundle()
+        script = """
+const { stage0VmStep } = require('./mu/host/js/core/stage0_vm.js');
+const bundle = __BUNDLE__;
+const symbolKeyObject = {ok: 'yes'};
+symbolKeyObject[Symbol('non-mu-key')] = 'secret';
+const sparse = [];
+sparse[1] = 'value';
+const cases = [
+  ['symbol_leaf', Symbol('non-mu')],
+  ['nan', NaN],
+  ['infinity', Infinity],
+  ['symbol_key', symbolKeyObject],
+  ['sparse_array', sparse],
+];
+const results = [];
+for (const [label, value] of cases) {
+  try {
+    stage0VmStep(bundle, {x: value});
+    results.push({label, ok: false, accepted: true});
+  } catch (err) {
+    results.push({
+      label,
+      ok: err && err.name === 'Stage0VMError' &&
+          String(err.message).includes('capture_path'),
+      name: err && err.name,
+      message: err && err.message
+    });
+  }
+}
+console.log(JSON.stringify({
+  ok: results.every(item => item.ok),
+  results
+}));
+""".replace("__BUNDLE__", json.dumps(bundle))
+        payload = self._run_node_direct(script)
+        assert payload["ok"] is True, payload
+
+
 # ---------------------------------------------------------------------------
 # Per-opcode schema validation
 # ---------------------------------------------------------------------------
@@ -1905,9 +2010,8 @@ class TestSafeWrappers:
         b = {"x": EvilStr("hello")}
         assert _safe_mu_deep_equal(a, b) is False
 
-    def test_check_captured_equal_hostile_leaf_fail_closed(self):
-        """EvilStr leaves in plain dict must not leak RuntimeError through
-        check_captured_equal — _safe_mu_deep_equal catch-all handles it."""
+    def test_check_captured_equal_hostile_leaf_fails_at_capture_path(self):
+        """EvilStr leaves in plain dict fail closed before capture storage."""
         class EvilStr(str):
             def __eq__(self, other):
                 raise RuntimeError("evil-eq")
@@ -1922,9 +2026,8 @@ class TestSafeWrappers:
             {"op": "return_projection_success"},
         ])
         evil = EvilStr("hello")
-        # Must NOT raise — equality fail-closed → program fails → stall
-        result = stage0_vm_step(bundle, {"x": evil, "y": evil})
-        assert result["status"] == "stall"
+        with pytest.raises(Stage0VMError, match="capture_path"):
+            stage0_vm_step(bundle, {"x": evil, "y": evil})
 
 
 # ---------------------------------------------------------------------------
