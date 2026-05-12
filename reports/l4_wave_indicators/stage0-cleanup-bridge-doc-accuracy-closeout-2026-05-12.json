@@ -1,0 +1,24 @@
+{
+  "wave_id": "stage0-cleanup-bridge-doc-accuracy-closeout-2026-05-12",
+  "repeat_run_speedup_ratio": 1.018161,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.439449,
+  "repeat_run_raw_seconds": [
+    0.44743,
+    0.439449
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.44743
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.886879
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-12T12:18:06Z",
+  "collector_version": "2.2.0"
+}

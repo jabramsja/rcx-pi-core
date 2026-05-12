@@ -99,11 +99,11 @@ closure boundaries for this historical record:
 
 ## Grounding / Authorization
 
-- TASKS.md line 525 authorizes the retained predecessor route `stage0-capture-path-provenance-boundary-2026-05-09` as `Class: L4_ENABLER`, `Category: /mu structural Stage0 boundary`, `target_gate_id: G8`, `workload_target: stage0_boundary`, and `primary_invariant_id: INV_CROSS_SUBSTRATE_PARITY`.
-- TASKS.md line 525 keeps Stage0 implementation hard-stopped until a successor packet locks the exact Python/JS Stage0 write set and focused parity proof.
+- TASKS.md line 525 authorized the retained predecessor route `stage0-capture-path-provenance-boundary-2026-05-09` as `Class: L4_ENABLER`, `Category: /mu structural Stage0 boundary`, `target_gate_id: G8`, `workload_target: stage0_boundary`, and `primary_invariant_id: INV_CROSS_SUBSTRATE_PARITY`.
+- TASKS.md line 525 kept Stage0 implementation hard-stopped until this successor packet locked the exact Python/JS Stage0 write set and focused parity proof.
 - Governing predecessor packet: `reports/control_plane/stage0_capture_path_provenance_boundary_2026-05-09.md`.
 - Successor implementation packet: `reports/control_plane/stage0_capture_path_provenance_implementation_2026_05_12_2026-05-12.md`.
-- Exact same-wave commit-handoff control-surface paths, if Phase B reaches handoff: `TASKS.md`, `reports/control_plane/stage0_capture_path_provenance_implementation_2026_05_12_2026-05-12.md`, and `reports/l4_wave_indicators/stage0-capture-path-provenance-implementation-2026-05-12.json`.
+- Completed same-wave commit-handoff control-surface paths: `TASKS.md`, `reports/control_plane/stage0_capture_path_provenance_implementation_2026_05_12_2026-05-12.md`, and `reports/l4_wave_indicators/stage0-capture-path-provenance-implementation-2026-05-12.json`.
 - Same-wave detector authorization: `FOUNDER_OVERRIDE:stage0-capture-path-provenance-implementation-2026-05-12`.
 - Routed next-candidate: `stage0-capture-path-provenance-implementation-2026-05-12`.
 
