@@ -7,6 +7,7 @@ Verifies:
 3. Observer event schema enforcement (mandatory fields).
 4. Pipeline parameter defaults haven't drifted.
 5. Engine/hemisphere result shape contracts (cross-substrate).
+6. JS engine module shape and seed-derived boundary-operation authority.
 
 What this checker PROVES:
 - No new raw callers of run_engine_pipeline without inventory update.
@@ -14,6 +15,8 @@ What this checker PROVES:
 - Observer events always contain the 6 mandatory fields.
 - Pipeline defaults (max_engine_iterations, use_boot1_recursive) are stable.
 - Engine terminal keys and hemisphere keys match between Python and JS.
+- JS engine dependency direction stays acyclic and does not gain host-only
+  loaders or JS-only boundary-operation dispatch.
 
 What this checker does NOT prove:
 - Semantic correctness of pipeline execution.
@@ -985,3 +988,228 @@ class TestJsBoundaryContractLock:
         assert "!proj.pattern" not in func_body, "validateSeedStructure still uses falsy !proj.pattern"
         assert "!proj.body" not in func_body, "validateSeedStructure still uses falsy !proj.body"
         assert "!seed.meta" not in func_body, "validateSeedStructure still uses falsy !seed.meta"
+
+
+# ── JS engine pipeline shape governance ─────────────────────────────────
+
+
+_JS_ENGINE_DIR = _REPO / "mu" / "host" / "js" / "engine"
+_JS_CORE_DIR = _REPO / "mu" / "host" / "js" / "core"
+_ENGINE_SEED_PATH = _REPO / "mu" / "programs" / "rcx_engine.v1.json"
+
+_REQUIRE_RE = re.compile(r"""\brequire\(\s*['"]([^'"]+)['"]\s*\)""")
+_DYNAMIC_REQUIRE_RE = re.compile(r"""\brequire\(\s*(?!['"])""")
+
+_EXPECTED_ENGINE_REQUIRES = {
+    "routing.js": {
+        "../core/constants",
+        "../core/terminal_classification",
+        "./kernel",
+        "./pipeline",
+    },
+    "pipeline.js": {
+        "../core/bootstrap_core",
+        "../core/constants",
+        "../core/normalize",
+        "../core/security",
+        "../core/seed_loader",
+        "../core/terminal_classification",
+        "../core/types",
+        "./kernel",
+    },
+    "kernel.js": {
+        "../core/bootstrap_core",
+        "../core/constants",
+        "../core/normalize",
+        "../core/security",
+        "../core/stage0_vm",
+        "../core/types",
+    },
+}
+
+_EXPECTED_BOUNDARY_OPS = {"run_trace", "hash_trace", "run_algorithm"}
+
+
+def _read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _require_specs(path: Path) -> list[str]:
+    return _REQUIRE_RE.findall(_read_text(path))
+
+
+def _repo_relative(path: Path) -> str:
+    return str(path.relative_to(_REPO))
+
+
+def _resolve_local_require(path: Path, spec: str) -> Path | None:
+    if not spec.startswith("."):
+        return None
+    resolved = (path.parent / spec).resolve()
+    if resolved.suffix != ".js":
+        resolved = resolved.with_suffix(".js")
+    return resolved
+
+
+def _scoped_js_files() -> list[Path]:
+    return sorted(_JS_CORE_DIR.glob("*.js")) + sorted(_JS_ENGINE_DIR.glob("*.js"))
+
+
+def _local_dependency_graph() -> dict[Path, list[Path]]:
+    scoped = {path.resolve() for path in _scoped_js_files()}
+    graph: dict[Path, list[Path]] = {}
+    for path in _scoped_js_files():
+        deps = {
+            resolved
+            for spec in _require_specs(path)
+            if (resolved := _resolve_local_require(path, spec)) in scoped
+        }
+        graph[path.resolve()] = sorted(deps)
+    return graph
+
+
+def _find_local_cycles(graph: dict[Path, list[Path]]) -> list[str]:
+    color: dict[Path, str] = {}
+    stack: list[Path] = []
+    cycles: list[str] = []
+
+    def visit(node: Path) -> None:
+        color[node] = "gray"
+        stack.append(node)
+        for dep in graph.get(node, []):
+            if color.get(dep) == "gray":
+                cycle = stack[stack.index(dep) :] + [dep]
+                cycles.append(" -> ".join(_repo_relative(item) for item in cycle))
+            elif color.get(dep) is None:
+                visit(dep)
+        stack.pop()
+        color[node] = "black"
+
+    for node in sorted(graph):
+        if color.get(node) is None:
+            visit(node)
+    return cycles
+
+
+def _seed_boundary_ops() -> set[str]:
+    import json
+
+    seed = json.loads(_read_text(_ENGINE_SEED_PATH))
+    ops: set[str] = set()
+    for projection in seed.get("projections", []):
+        body = projection.get("body") if isinstance(projection, dict) else None
+        if not isinstance(body, dict):
+            continue
+        request = body.get("_boundary_request")
+        if isinstance(request, dict) and isinstance(request.get("operation"), str):
+            ops.add(request["operation"])
+    return ops
+
+
+def _boundary_dispatch_keys(source: str) -> set[str]:
+    match = re.search(
+        r"const\s+BOUNDARY_DISPATCH\s*=\s*Object\.freeze\(\{(?P<body>.*?)\}\);",
+        source,
+        re.DOTALL,
+    )
+    assert match, "BOUNDARY_DISPATCH map is missing from pipeline.js"
+    return set(
+        re.findall(
+            r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*boundaryOp[A-Za-z0-9_]+",
+            match.group("body"),
+            re.MULTILINE,
+        )
+    )
+
+
+def _function_region(source: str, start_name: str, next_name: str) -> str:
+    start = source.index(f"function {start_name}")
+    end = source.index(f"function {next_name}", start)
+    return source[start:end]
+
+
+class TestJsEnginePipelineShapeGovernance:
+    """JS engine module shape must remain a structural guard, not JS semantics."""
+
+    def test_dependency_direction_and_boundary_authority(self) -> None:
+        engine_files = {path.name: path for path in _JS_ENGINE_DIR.glob("*.js")}
+        assert set(engine_files) == set(_EXPECTED_ENGINE_REQUIRES), (
+            "JS engine module set drifted. Helper extraction requires an updated "
+            f"governance packet before landing. Actual: {sorted(engine_files)}"
+        )
+
+        actual_requires = {
+            name: set(_require_specs(path))
+            for name, path in sorted(engine_files.items())
+        }
+        assert actual_requires == _EXPECTED_ENGINE_REQUIRES, (
+            "JS engine dependency direction changed.\n"
+            f"Expected: {_EXPECTED_ENGINE_REQUIRES}\n"
+            f"Actual: {actual_requires}"
+        )
+
+        external_engine_requires = {
+            name: sorted(spec for spec in _require_specs(path) if not spec.startswith("."))
+            for name, path in sorted(engine_files.items())
+        }
+        assert not any(external_engine_requires.values()), (
+            "JS engine modules must not import host bootstrap loaders or Node "
+            f"builtins directly: {external_engine_requires}"
+        )
+
+        dynamic_requires = {
+            name: _DYNAMIC_REQUIRE_RE.findall(_read_text(path))
+            for name, path in sorted(engine_files.items())
+        }
+        assert not any(dynamic_requires.values()), (
+            "JS engine modules must keep loader dependencies statically visible: "
+            f"{dynamic_requires}"
+        )
+
+        graph = _local_dependency_graph()
+        cycles = _find_local_cycles(graph)
+        assert not cycles, "JS engine/core module graph must stay acyclic: " + "; ".join(cycles)
+
+        kernel_deps = {
+            dep.name
+            for dep in graph[(_JS_ENGINE_DIR / "kernel.js").resolve()]
+            if dep.parent == _JS_ENGINE_DIR
+        }
+        assert not (kernel_deps & {"pipeline.js", "routing.js"}), (
+            "kernel.js must not depend on pipeline.js or routing.js: "
+            f"{sorted(kernel_deps)}"
+        )
+
+        pipeline_source = _read_text(_JS_ENGINE_DIR / "pipeline.js")
+        seed_ops = _seed_boundary_ops()
+        assert seed_ops == _EXPECTED_BOUNDARY_OPS, (
+            "rcx_engine.v1.json boundary operations drifted; update the governance "
+            f"guard only with same-wave seed/projection authority. Actual: {sorted(seed_ops)}"
+        )
+        assert _boundary_dispatch_keys(pipeline_source) == seed_ops, (
+            "BOUNDARY_DISPATCH handlers must match seed-derived boundary operations"
+        )
+        assert "loadVerifiedSeed('rcx_engine.v1.json', 'programs')" in pipeline_source, (
+            "pipeline.js must derive boundary-operation authority from the engine seed"
+        )
+
+        service_source = _function_region(
+            pipeline_source,
+            "serviceBoundaryEffect",
+            "validateReentryPayload",
+        )
+        authority_index = service_source.index("const validOps = _ensureBoundaryOps();")
+        dispatch_index = service_source.index(
+            "const handler = (testDispatchOverride ?? BOUNDARY_DISPATCH)[operation];"
+        )
+        assert authority_index < dispatch_index, (
+            "Boundary operation authority must be checked before JS handler dispatch"
+        )
+        assert "validOps.has(operation)" in service_source
+        assert "setsEqual(dispatchKeys, validOps)" in service_source
+        assert not re.search(r"\bswitch\s*\(\s*operation\s*\)", service_source), (
+            "Boundary operations must not move to JS-only switch dispatch"
+        )
+        assert not re.search(r"operation\s*={2,3}\s*['\"]", service_source), (
+            "Boundary operations must not move to JS-only string branch dispatch"
+        )
