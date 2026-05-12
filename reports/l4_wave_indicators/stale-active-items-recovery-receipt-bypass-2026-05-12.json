@@ -1,0 +1,24 @@
+{
+  "wave_id": "stale-active-items-recovery-receipt-bypass-2026-05-12",
+  "repeat_run_speedup_ratio": 0.96787,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.493057,
+  "repeat_run_raw_seconds": [
+    0.477215,
+    0.493057
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.477215
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.970272
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-12T09:39:36Z",
+  "collector_version": "2.2.0"
+}
