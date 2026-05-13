@@ -44,6 +44,60 @@ def _run_node_json(script: str):
     return json.loads(result.stdout)
 
 
+class TestStage0VMAttemptTraceParity:
+    """Python and JS Stage0 step results expose the same structural trace."""
+
+    MATCH_BUNDLE_PATH = "mu/stage0/examples/match_v2_bundle.v1.json"
+
+    def _load_match_bundle(self):
+        return json.loads((ROOT / self.MATCH_BUNDLE_PATH).read_text())
+
+    def _run_js_step(self, input_value):
+        from tests.l4_gates.stage0_test_helpers import run_js_stage0
+
+        result = run_js_stage0("step", self.MATCH_BUNDLE_PATH, input_value)
+        assert "error" not in result, result
+        return result
+
+    def test_attempt_trace_match_shape_matches_js(self):
+        from rcx_pi.selfhost.stage0_vm import stage0_vm_step
+
+        inp = {
+            "mode": "match",
+            "pattern_focus": 42,
+            "value_focus": 42,
+            "bindings": None,
+            "stack": None,
+            "_match_ctx": {"projection_id": "test"},
+        }
+
+        py_result = stage0_vm_step(self._load_match_bundle(), inp)
+        js_result = self._run_js_step(inp)
+
+        assert py_result["attempt_trace"] == js_result["attempt_trace"]
+        assert py_result["attempt_trace"] == {
+            "attempted_program_ids": ["match.done", "match.sibling", "match.equal"],
+            "outcome": "match",
+            "matched_program_id": "match.equal",
+        }
+
+    def test_attempt_trace_stall_shape_matches_js(self):
+        from rcx_pi.selfhost.stage0_vm import stage0_vm_step
+
+        bundle = self._load_match_bundle()
+        inp = {"unrelated": True}
+
+        py_result = stage0_vm_step(bundle, inp)
+        js_result = self._run_js_step(inp)
+
+        assert py_result["attempt_trace"] == js_result["attempt_trace"]
+        assert py_result["attempt_trace"] == {
+            "attempted_program_ids": bundle["program_order"],
+            "outcome": "stall",
+            "matched_program_id": None,
+        }
+
+
 class TestJSTestSuitePasses:
     """Verify the JavaScript test suite passes completely."""
 

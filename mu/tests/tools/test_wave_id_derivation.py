@@ -56,7 +56,7 @@ class TestWaveIdDerivation:
         )
         return result.stdout.strip()
 
-    def test_range_mode_ignores_restart_branch_suffix_when_tracker_note_uses_canonical_wave_id(
+    def test_range_mode_normalizes_restart_branch_suffix_to_canonical_wave_id(
         self, tmp_path: Path
     ) -> None:
         repo = self._init_repo(tmp_path)
@@ -79,7 +79,37 @@ class TestWaveIdDerivation:
             "--range",
             "HEAD~1...HEAD",
         )
-        assert flag == ""
+        assert flag == "--wave-id=test-wave"
+
+    def test_staged_mode_prefers_exact_restart_wave_id_when_tracker_note_matches(
+        self, tmp_path: Path
+    ) -> None:
+        repo = self._init_repo(tmp_path)
+        (repo / "TASKS.md").write_text(
+            "## NOW\n\n## NEXT\n\n"
+            "- Tracker sync note (2026-04-21, test-wave): **TEST.** "
+            "Class: L4_STRUCTURAL. target_gate_id: G8. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/test-wave.json. "
+            "indicator_collection_command: python3 tools/checks/enforce_l4_execution_contract.py --range origin/dev...HEAD --wave-id test-wave. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD.\n"
+            "- Tracker sync note (2026-04-21, test-wave-restart-2026-04-21): **TEST.** "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/test-wave-restart-2026-04-21.json. "
+            "indicator_collection_command: python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id test-wave-restart-2026-04-21. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD.\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, check=True)
+
+        flag = self._derive_flag(
+            repo,
+            "jabramsja/test-wave-restart-2026-04-21",
+            "--staged",
+            "",
+        )
+        assert flag == "--wave-id=test-wave-restart-2026-04-21"
 
     def test_range_mode_uses_exact_branch_suffix_when_tracker_note_matches(
         self, tmp_path: Path

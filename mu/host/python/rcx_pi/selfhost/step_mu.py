@@ -1075,68 +1075,87 @@ def _step_kernel_with_vm(
     # 1. kernel.v1 via Stage0 VM (S1-C: was host _apply_projection_trusted)
     vm_result = _stage0_vm_step_trusted(kernel_bundle, input_value)
     if vm_result["status"] == "match":  # AST_OK:infra — type guard
-        matched_id = vm_result["matched_program_id"]
         if cov_on:
-            for pid in kernel_bundle["program_order"]:
-                if pid == matched_id:
-                    break
+            trace = vm_result["attempt_trace"]
+            attempted_ids = trace["attempted_program_ids"]
+            matched_id = trace["matched_program_id"]
+            if trace["outcome"] != "match" or not attempted_ids or attempted_ids[-1] != matched_id:
+                raise RuntimeError("Stage0 VM match trace does not end at matched program")
+            for pid in attempted_ids[:-1]:
                 coverage.record_no_match(pid)
             coverage.record_match(matched_id, input_value, vm_result["root"])
         return vm_result["root"]
     else:
         if cov_on:
-            for pid in kernel_bundle["program_order"]:
+            trace = vm_result["attempt_trace"]
+            if trace["outcome"] != "stall" or trace["matched_program_id"] is not None:
+                raise RuntimeError("Stage0 VM stall trace carried a matched program")
+            for pid in trace["attempted_program_ids"]:
                 coverage.record_no_match(pid)
 
     # 2. bridge via Stage0 VM (S1-C: was host _apply_projection_trusted)
     if bridge_bundle:
         vm_result = _stage0_vm_step_trusted(bridge_bundle, input_value)
         if vm_result["status"] == "match":  # AST_OK:infra — type guard
-            matched_id = vm_result["matched_program_id"]
             if cov_on:
-                for pid in bridge_bundle["program_order"]:
-                    if pid == matched_id:
-                        break
+                trace = vm_result["attempt_trace"]
+                attempted_ids = trace["attempted_program_ids"]
+                matched_id = trace["matched_program_id"]
+                if trace["outcome"] != "match" or not attempted_ids or attempted_ids[-1] != matched_id:
+                    raise RuntimeError("Stage0 VM match trace does not end at matched program")
+                for pid in attempted_ids[:-1]:
                     coverage.record_no_match(pid)
                 coverage.record_match(matched_id, input_value, vm_result["root"])
             return vm_result["root"]
         else:
             if cov_on:
-                for pid in bridge_bundle["program_order"]:
+                trace = vm_result["attempt_trace"]
+                if trace["outcome"] != "stall" or trace["matched_program_id"] is not None:
+                    raise RuntimeError("Stage0 VM stall trace carried a matched program")
+                for pid in trace["attempted_program_ids"]:
                     coverage.record_no_match(pid)
 
     # 3. match.v2 via Stage0 VM
     vm_result = _stage0_vm_step_trusted(match_bundle, input_value)
     if vm_result["status"] == "match":
-        matched_id = vm_result["matched_program_id"]
         if cov_on:
-            # Record no_match for programs tried before the match (dispatch order)
-            for pid in match_bundle["program_order"]:
-                if pid == matched_id:
-                    break
+            trace = vm_result["attempt_trace"]
+            attempted_ids = trace["attempted_program_ids"]
+            matched_id = trace["matched_program_id"]
+            if trace["outcome"] != "match" or not attempted_ids or attempted_ids[-1] != matched_id:
+                raise RuntimeError("Stage0 VM match trace does not end at matched program")
+            for pid in attempted_ids[:-1]:
                 coverage.record_no_match(pid)
             coverage.record_match(matched_id, input_value, vm_result["root"])
         return vm_result["root"]
     else:
         # Stall: all match.v2 programs tried and failed
         if cov_on:
-            for pid in match_bundle["program_order"]:
+            trace = vm_result["attempt_trace"]
+            if trace["outcome"] != "stall" or trace["matched_program_id"] is not None:
+                raise RuntimeError("Stage0 VM stall trace carried a matched program")
+            for pid in trace["attempted_program_ids"]:
                 coverage.record_no_match(pid)
 
     # 4. subst.v2 via Stage0 VM
     vm_result = _stage0_vm_step_trusted(subst_bundle, input_value)
     if vm_result["status"] == "match":
-        matched_id = vm_result["matched_program_id"]
         if cov_on:
-            for pid in subst_bundle["program_order"]:
-                if pid == matched_id:
-                    break
+            trace = vm_result["attempt_trace"]
+            attempted_ids = trace["attempted_program_ids"]
+            matched_id = trace["matched_program_id"]
+            if trace["outcome"] != "match" or not attempted_ids or attempted_ids[-1] != matched_id:
+                raise RuntimeError("Stage0 VM match trace does not end at matched program")
+            for pid in attempted_ids[:-1]:
                 coverage.record_no_match(pid)
             coverage.record_match(matched_id, input_value, vm_result["root"])
         return vm_result["root"]
     else:
         if cov_on:
-            for pid in subst_bundle["program_order"]:
+            trace = vm_result["attempt_trace"]
+            if trace["outcome"] != "stall" or trace["matched_program_id"] is not None:
+                raise RuntimeError("Stage0 VM stall trace carried a matched program")
+            for pid in trace["attempted_program_ids"]:
                 coverage.record_no_match(pid)
 
     return input_value  # stall
@@ -1852,4 +1871,3 @@ def _run_sub_algorithm(projs: list[Mu], initial: Mu, max_iterations: int) -> Mu:
         current = result
         current_hash = result_hash
     return current
-

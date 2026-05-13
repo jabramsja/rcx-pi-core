@@ -789,6 +789,7 @@ function _stage0VmStepTrusted(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) 
 
   let opCount = 0;
   let attemptCount = 0;
+  const attemptedProgramIds = [];
 
   for (const programId of order) {
     const program = programMap[programId];
@@ -799,6 +800,7 @@ function _stage0VmStepTrusted(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) 
     const captures = Object.create(null);
     let pendingRoot = _UNSET;
     attemptCount++;
+    attemptedProgramIds.push(programId);
     let failed = false;
 
     for (const opSpec of ops) {
@@ -904,6 +906,11 @@ function _stage0VmStepTrusted(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) 
           status: 'match',
           matched_program_id: programId,
           root: pendingRoot,
+          attempt_trace: {
+            attempted_program_ids: attemptedProgramIds,
+            outcome: 'match',
+            matched_program_id: programId,
+          },
           metrics: { program_attempts: attemptCount, op_steps: opCount },
         };
       }
@@ -937,6 +944,11 @@ function _stage0VmStepTrusted(bundle, inputValue, maxOps = MAX_VM_OPS_PER_STEP) 
     status: 'stall',
     matched_program_id: null,
     root: inputValue,
+    attempt_trace: {
+      attempted_program_ids: attemptedProgramIds,
+      outcome: 'stall',
+      matched_program_id: null,
+    },
     metrics: { program_attempts: attemptCount, op_steps: opCount },
   };
 }

@@ -1412,6 +1412,9 @@ class TestMaintenanceTrackerMetadataPropagation:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
         assert result["status"] == "commit_ready", result
+        assert "Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT" in plan.read_text(
+            encoding="utf-8",
+        )
         tracker_note_text = mock_handoff.call_args.kwargs["tracker_note_text"]
         assert "Class: MAINTENANCE" in tracker_note_text
         assert "unblocks_wave_id: wave-codex-startup-hardening-2026-04-14" in tracker_note_text
@@ -1955,6 +1958,104 @@ class TestMaintenanceTrackerMetadataPropagation:
             founder_override_token="",
             changed_files=[*changed_files, "TASKS.md", indicator_path],
         ) is False
+
+    def test_phase_b_tracker_sync_reconciles_same_wave_notes_across_task_sections(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wave_id = "vm-cutover-coverage-trace-implementation-2026-05-12"
+        stale_note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            wave_id=wave_id,
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path=f"reports/control_plane/{wave_id}.md",
+            plan_content="",
+            changed_files=[
+                "mu/host/js/core/stage0_vm.js",
+                "mu/host/python/rcx_pi/selfhost/stage0_vm.py",
+                "mu/host/python/rcx_pi/selfhost/step_mu.py",
+                f"reports/l4_wave_indicators/{wave_id}.json",
+            ],
+            test_files=["mu/tests/l4_gates/test_stage0_vm.py"],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=1,
+            reentry=False,
+            pre_supervisor=True,
+        )
+        canonical_note = (
+            f"- Tracker sync note (2026-05-12, {wave_id}): "
+            "**NEXT-CODEX-POST-REDTEAM - VM cutover coverage trace implementation.** "
+            "Class: L4_STRUCTURAL. Category: `/mu` structural coverage bookkeeping. "
+            "target_gate_id: G8. workload_target: host_debt_reduction. "
+            f"Packet: `reports/control_plane/{wave_id}.md`. "
+            "host_semantics_delta_before: Stage0 VM step results exposed no ordered attempted-program trace. "
+            "host_semantics_delta_after: Python and JS Stage0 VM step results emit the same structural `attempt_trace`. "
+            "structural_artifact_ref: `mu/host/python/rcx_pi/selfhost/stage0_vm.py`, "
+            "`mu/host/js/core/stage0_vm.js`, `mu/host/python/rcx_pi/selfhost/step_mu.py`. "
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/l4_gates/test_stage0_vm.py`. "
+            "evidence_delta: Stage0 emits deterministic trace output on both substrates. "
+            "progress_proof_before: coverage was reconstructed from host-side bundle order. "
+            "progress_proof_after: coverage consumes the VM-emitted trace. "
+            "post_gate_contract_sweep: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/parity/test_js_parity_automated.py`. "
+            f"FOUNDER_OVERRIDE:{wave_id}. primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: reports/l4_wave_indicators/{wave_id}.json. "
+            f"indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} "
+            f"--output reports/l4_wave_indicators/{wave_id}.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        )
+        (repo / "TASKS.md").write_text(
+            "## Ra\n\n"
+            f"{stale_note}\n"
+            "---\n\n"
+            "## Current\n\n"
+            f"{canonical_note}\n",
+            encoding="utf-8",
+        )
+
+        error, modified = pb_mod._sync_phase_b_tasks_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker binding helper
+            repo,
+            wave_id=wave_id,
+            tracker_note_text=canonical_note,
+        )
+
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        tracker_lines = [
+            line for line in tasks_text.splitlines()
+            if line.startswith("- Tracker sync note") and wave_id in line
+        ]
+        assert error is None
+        assert modified is True
+        assert tracker_lines == [canonical_note]
+        assert "pre-commit supervisor package" not in tasks_text
+
+    def test_stage0_trace_scope_infers_host_debt_reduction(self):
+        assert pb_mod._infer_structural_workload_target(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            [
+                "mu/host/js/core/stage0_vm.js",
+                "mu/host/python/rcx_pi/selfhost/step_mu.py",
+            ],
+            "Stage0 VM attempt_trace closes coverage reconstruction from host bundle order.",
+        ) == "host_debt_reduction"
+
+    def test_structural_workload_target_prioritizes_specific_targets_before_generic_coverage(self):
+        assert pb_mod._infer_structural_workload_target(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            [],
+            "coverage follow-up for recurrence exhaustion proof",
+        ) == "recurrence_exhaustion"
+        assert pb_mod._infer_structural_workload_target(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            [],
+            "coverage follow-up for seed_auto_execution proof",
+        ) == "seed_auto_execution"
+        assert pb_mod._infer_structural_workload_target(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            [],
+            "coverage follow-up for execution_layer_truth proof",
+        ) == "execution_layer_truth"
+        assert pb_mod._infer_structural_workload_target(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            [],
+            "coverage follow-up without a narrower structural target",
+        ) == "host_debt_reduction"
 
     def test_l4_indicator_collection_can_run_before_tracker_note_sync(self, tmp_path):
         repo = tmp_path / "repo"

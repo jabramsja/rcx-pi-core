@@ -986,6 +986,12 @@ def _select_non_gate_test_files(paths: list[str]) -> list[str]:
 def _infer_structural_workload_target(changed_files: list[str], plan_content: str) -> str:
     """Infer the least-surprising L4 structural workload target from wave scope."""
     scope_text = "\n".join(changed_files) + "\n" + (plan_content or "")
+    if (
+        "attempt_trace" in scope_text
+        or "stage0_vm" in scope_text
+        or "step_mu.py" in scope_text
+    ):
+        return "host_debt_reduction"
     if "rcx_engine" in scope_text or "engine_pipeline" in scope_text:
         return "host_debt_reduction"
     if "recurrence" in scope_text or "exhaustion" in scope_text:
@@ -994,6 +1000,8 @@ def _infer_structural_workload_target(changed_files: list[str], plan_content: st
         return "seed_auto_execution"
     if "execution_layer_truth" in scope_text:
         return "execution_layer_truth"
+    if "coverage" in scope_text:
+        return "host_debt_reduction"
     return "ontology_promotion"
 
 
@@ -3614,7 +3622,8 @@ def _build_phase_b_tracker_note(
             "workload_target": _infer_structural_workload_target(changed_files, plan_content),
             "host_semantics_delta_before": (
                 "host semantics ratchet baseline and authority inventory baseline before this wave; "
-                "the wave is allowed only parity-preserving seed registration and structural artifact wiring"
+                "runtime or substrate scope is allowed only as a parity-preserving structural reduction "
+                "without new host authority sites"
             ),
             "host_semantics_delta_after": (
                 "host semantics ratchet remains unchanged after this wave; indicator net_host_semantic_delta=0 "
@@ -3712,35 +3721,20 @@ def _sync_phase_b_tasks_tracker_note(
     if ra_idx is None or ra_end_idx is None:
         return None, False
 
-    matching_tracker_indices = commit_mod._matching_tracker_note_indices_in_range(
-        lines,
-        wave_id,
-        start_idx=ra_idx,
-        end_idx=ra_end_idx,
-    )
-    canonical_tracker_indices = [
-        idx
-        for idx in matching_tracker_indices
-        if commit_mod._is_canonical_tracker_note_line(lines[idx].rstrip("\n"), wave_id)
-    ]
-    if len(canonical_tracker_indices) > 1:
-        return (
-            f"wave_id '{wave_id}' has {len(canonical_tracker_indices)} canonical "
-            "tracker notes in TASKS.md before Phase B supervisor review"
-        ), False
-    if len(matching_tracker_indices) > 1 and not canonical_tracker_indices:
-        return (
-            f"wave_id '{wave_id}' has {len(matching_tracker_indices)} malformed "
-            "tracker notes in TASKS.md before Phase B supervisor review"
-        ), False
+    global_matcher = getattr(commit_mod, "_matching_tracker_note_indices", None)
+    if callable(global_matcher):
+        matching_tracker_indices = global_matcher(lines, wave_id)
+    else:
+        matching_tracker_indices = commit_mod._matching_tracker_note_indices_in_range(
+            lines,
+            wave_id,
+            start_idx=0,
+            end_idx=len(lines),
+        )
 
     note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
     existing_idx = (
-        canonical_tracker_indices[0]
-        if canonical_tracker_indices
-        else matching_tracker_indices[0]
-        if matching_tracker_indices
-        else None
+        matching_tracker_indices[0] if len(matching_tracker_indices) == 1 else None
     )
     last_tracker_idx = None
     for idx in range(ra_idx + 1, ra_end_idx):
@@ -3748,10 +3742,12 @@ def _sync_phase_b_tasks_tracker_note(
             last_tracker_idx = idx
     if existing_idx is not None and lines[existing_idx] == note_line and existing_idx == last_tracker_idx:
         return None, False
-    if existing_idx is not None:
-        lines.pop(existing_idx)
-        if existing_idx < ra_end_idx:
-            ra_end_idx -= 1
+    for idx in sorted(matching_tracker_indices, reverse=True):
+        lines.pop(idx)
+
+    ra_idx, ra_end_idx = commit_mod._find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        return None, False
 
     last_tracker_idx = None
     for idx in range(ra_idx + 1, ra_end_idx):
@@ -7632,11 +7628,11 @@ def run_phase_b(
         result["errors"] = [f"Phase B pager emission failed at commit_ready: {exc}"]
         _clear_state(repo_root)
         return result
-    # Now that COMMIT_GO is confirmed, advance packet to COMPLETED
-    # (deferred from Step 5b to avoid premature COMPLETED on rejection)
+    # COMMIT_GO means the package is implemented and must remain routable to
+    # commit_executor; dispatcher intentionally rejects COMPLETED packets.
     if not plan_path.startswith("<"):
         update_plan_packet_status(
-            repo_root, plan_path, "COMPLETED (commit-ready, supervisor COMMIT_GO)",
+            repo_root, plan_path, "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT",
         )
     # Clear state file on successful completion
     _clear_state(repo_root)

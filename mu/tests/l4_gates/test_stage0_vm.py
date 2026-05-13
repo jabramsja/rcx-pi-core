@@ -751,6 +751,63 @@ class TestTransactionModel:
         assert r["root"] is inp
 
 
+class TestAttemptTrace:
+    """Stage0 step results expose deterministic attempted-program trace."""
+
+    @staticmethod
+    def _trace_bundle():
+        return {
+            "stage0_ir_version": 1,
+            "bundle_id": "attempt-trace-test",
+            "source_seed": "test",
+            "machine_profile": "rcx.stage0.v1",
+            "hand_authored": True,
+            "program_order": ["p.fail", "p.match", "p.untried"],
+            "programs": [
+                {
+                    "id": "p.fail",
+                    "ops": [{"op": "return_projection_fail"}],
+                },
+                {
+                    "id": "p.match",
+                    "ops": [
+                        {
+                            "op": "write_path",
+                            "template": {"kind": "literal", "value": "matched"},
+                        },
+                        {"op": "return_projection_success"},
+                    ],
+                },
+                {
+                    "id": "p.untried",
+                    "ops": [{"op": "return_projection_fail"}],
+                },
+            ],
+        }
+
+    def test_attempt_trace_match_stops_at_winner(self):
+        r = stage0_vm_step(self._trace_bundle(), "input")
+        assert r["attempt_trace"] == {
+            "attempted_program_ids": ["p.fail", "p.match"],
+            "outcome": "match",
+            "matched_program_id": "p.match",
+        }
+        assert r["metrics"]["program_attempts"] == 2
+
+    def test_attempt_trace_stall_records_all_attempts(self):
+        bundle = self._trace_bundle()
+        bundle["program_order"] = ["p.fail", "p.untried"]
+        bundle["programs"] = [bundle["programs"][0], bundle["programs"][2]]
+
+        r = stage0_vm_step(bundle, "input")
+        assert r["attempt_trace"] == {
+            "attempted_program_ids": ["p.fail", "p.untried"],
+            "outcome": "stall",
+            "matched_program_id": None,
+        }
+        assert r["metrics"]["program_attempts"] == 2
+
+
 # =========================================================================
 # 6. Multi-step sequences
 # =========================================================================
@@ -1250,6 +1307,9 @@ class TestCrossSubstrateParity:
         assert py_result["matched_program_id"] == js_result["matched_program_id"], (
             f"Program mismatch: py={py_result['matched_program_id']}, "
             f"js={js_result['matched_program_id']}")
+        assert py_result["attempt_trace"] == js_result["attempt_trace"], (
+            f"Attempt trace mismatch:\npy={py_result['attempt_trace']}\n"
+            f"js={js_result['attempt_trace']}")
         assert _mu_deep_equal(py_result["root"], js_result["root"]), (
             f"Root mismatch:\npy={json.dumps(py_result['root'], indent=2)}\n"
             f"js={json.dumps(js_result['root'], indent=2)}")

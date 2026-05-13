@@ -45,6 +45,7 @@ class TestPythonSourceLock:
             "mu/tests/l4_gates/test_stage0_vm_trusted_path_gate.py",  # This test
             "mu/tests/l4_gates/test_meta_circular_evidence_gate.py",  # Routing lock test
             "mu/tests/l4_gates/test_match_vm_staged_dispatch_gate.py",  # VM fault test
+            "mu/tests/l4_gates/test_stage0_vm_cutover.py",  # Trace coverage monkeypatch
         }
 
         result = subprocess.run(

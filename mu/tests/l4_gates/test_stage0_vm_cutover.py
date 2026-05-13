@@ -448,6 +448,114 @@ class TestCutoverIntegration:
         assert result == "test_value"  # identity projection
 
 
+class TestVmCutoverCoverageFromAttemptTrace:
+    """Coverage bookkeeping derives from VM-emitted attempt traces."""
+
+    @staticmethod
+    def _bundle(host_only_id):
+        return {"program_order": [host_only_id], "programs": []}
+
+    @staticmethod
+    def _vm_result(status, attempted, matched, root):
+        return {
+            "status": status,
+            "matched_program_id": matched,
+            "root": root,
+            "attempt_trace": {
+                "attempted_program_ids": attempted,
+                "outcome": status,
+                "matched_program_id": matched,
+            },
+            "metrics": {
+                "program_attempts": len(attempted),
+                "op_steps": len(attempted),
+            },
+        }
+
+    def test_match_coverage_uses_vm_trace_not_host_bundle_order(self, monkeypatch):
+        from rcx_pi.projection_coverage import coverage
+        import rcx_pi.selfhost.stage0_vm as vm_mod
+
+        input_value = {"state": "input"}
+        output_value = {"state": "output"}
+        sequence = iter([
+            self._vm_result(
+                "match",
+                ["trace.no_match", "trace.match"],
+                "trace.match",
+                output_value,
+            ),
+        ])
+
+        monkeypatch.setattr(
+            vm_mod,
+            "_stage0_vm_step_trusted",
+            lambda _bundle, _input: next(sequence),
+        )
+
+        coverage.enable()
+        coverage.reset()
+        try:
+            result = _step_kernel_with_vm(
+                self._bundle("host.order.only"),
+                None,
+                self._bundle("host.match.unused"),
+                self._bundle("host.subst.unused"),
+                input_value,
+            )
+            report = coverage.report_json()
+        finally:
+            coverage.disable()
+            coverage.reset()
+
+        assert result == output_value
+        assert report["total_steps"] == 1
+        assert report["total_matches"] == 1
+        assert report["matched"] == ["trace.match"]
+        assert report["unmatched"] == ["trace.no_match"]
+        assert "host.order.only" not in report["projections"]
+
+    def test_stall_coverage_composes_trace_attempts_across_bundles(self, monkeypatch):
+        from rcx_pi.projection_coverage import coverage
+        import rcx_pi.selfhost.stage0_vm as vm_mod
+
+        input_value = {"state": "input"}
+        sequence = iter([
+            self._vm_result("stall", ["kernel.trace"], None, input_value),
+            self._vm_result("stall", ["match.trace.1", "match.trace.2"], None, input_value),
+            self._vm_result("stall", ["subst.trace"], None, input_value),
+        ])
+
+        monkeypatch.setattr(
+            vm_mod,
+            "_stage0_vm_step_trusted",
+            lambda _bundle, _input: next(sequence),
+        )
+
+        coverage.enable()
+        coverage.reset()
+        try:
+            result = _step_kernel_with_vm(
+                self._bundle("kernel.host"),
+                None,
+                self._bundle("match.host"),
+                self._bundle("subst.host"),
+                input_value,
+            )
+            report = coverage.report_json()
+        finally:
+            coverage.disable()
+            coverage.reset()
+
+        assert result is input_value
+        assert report["total_steps"] == 1
+        assert report["total_matches"] == 0
+        assert set(report["unmatched"]) == {
+            "kernel.trace", "match.trace.1", "match.trace.2", "subst.trace",
+        }
+        assert "kernel.host" not in report["projections"]
+
+
 # ---------------------------------------------------------------------------
 # NB10: JS VM result fail-closed assertion (gate evidence)
 # ---------------------------------------------------------------------------
