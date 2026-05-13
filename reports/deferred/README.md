@@ -19,7 +19,7 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-13 transparent Proxy provenance closure):
+Current inventory refresh (2026-05-13 bridge DOC_ACCURACY closeout):
 
 - Evidence command:
   `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' -print | sort`.
@@ -43,6 +43,14 @@ reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md
   `transparent-js-live-container-provenance-implementation-2026-05-13` and
   archived at
   `reports/archive/deferred/founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers_closed-by-transparent-js-live-container-provenance-implementation-2026-05-13.md`.
+- The generated PR #945 bridge DOC_ACCURACY residue for
+  `broad-host-surface-next-boundary-slice-2026-05-13` is closed and archived at
+  `reports/archive/deferred/broad-host-surface-next-boundary-slice-2026-05-13_bridge_nonblockers_closed-by-broad-host-surface-next-bridge-doc-accuracy-closeout-2026-05-13.md`.
+- The same-wave generated indicator reproducibility and staged-file scope bridge
+  residue for
+  `broad-host-surface-next-bridge-doc-accuracy-closeout-2026-05-13` is resolved
+  as historical residue and archived at
+  `reports/archive/deferred/broad-host-surface-next-bridge-doc-accuracy-closeout-2026-05-13_bridge_nonblockers_closed-by-broad-host-surface-next-bridge-doc-accuracy-closeout-2026-05-13.md`.
 - The retained `/mu` structural advisory still active in this lane is N3 broad
   host-surface boundary in
   `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`.

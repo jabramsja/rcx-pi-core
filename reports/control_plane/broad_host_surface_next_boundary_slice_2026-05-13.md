@@ -166,8 +166,10 @@ Selected bounded route:
     plain object/array prototype checks as non-Mu plainness failure.
   - `mu/host/js/core/stage0_vm.js:207` through `:277` now converts host
     own-key/descriptor/copy errors inside direct `muCopy` array and record
-    copying to Stage0 copy-boundary failure when `rejectNonMu=True`, or `null`
-    in lax copy mode.
+    copying to Stage0 copy-boundary failure when `rejectNonMu=True`. Lax copy
+    behavior is case-specific: bridge matrix evidence showed the lax
+    `array_ownKeys` and `array_descriptor` cases copied `[1]`, so this packet
+    does not claim every lax array trap returns `null`.
   - `mu/host/python/rcx_pi/selfhost/stage0_vm.py:202` through `:224` is already
     strict for the paired substrate: non-dict/list/primitive values raise
     `Stage0VMError` when `reject_non_mu=True` and return `None` otherwise.
@@ -237,11 +239,11 @@ python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id broad-h
 - Indicator artifact: `reports/l4_wave_indicators/broad-host-surface-next-boundary-slice-2026-05-13.json`
 - Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before pre-commit supervisor review so the tracker note, Gate 8 package, and governing packet describe one staged scope.
 - Scope binding: no indicator file other than the artifact above is in scope for this wave.
-- Current staged files:
+- Boundary-slice file set after deferred-residue closeout:
   - `TASKS.md`
   - `mu/host/js/core/stage0_vm.js`
   - `mu/tests/l4_gates/test_stage0_vm.py`
   - `reports/control_plane/broad_host_surface_next_boundary_slice_2026-05-13.md`
-  - `reports/deferred/non_blocking/broad-host-surface-next-boundary-slice-2026-05-13_bridge_nonblockers.md`
+  - `reports/archive/deferred/broad-host-surface-next-boundary-slice-2026-05-13_bridge_nonblockers_closed-by-broad-host-surface-next-bridge-doc-accuracy-closeout-2026-05-13.md`
   - `reports/l4_wave_indicators/broad-host-surface-next-boundary-slice-2026-05-13.json`
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->

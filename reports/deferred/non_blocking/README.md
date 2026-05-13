@@ -347,3 +347,25 @@ Archived source snapshots for extracted non-blocking residue live in:
 - Current open deferred/non-blocking work inside that source packet is N3 broad
   host-surface boundary only; earlier references to two or three active packets
   are historical point-in-time notes superseded by the later closure notes above.
+
+2026-05-13 bridge DOC_ACCURACY closeout note:
+
+- Evidence command:
+  `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
+- Current deferred inventory is `reports/deferred/blocking/README.md`, this
+  README, and one partially active retained `/mu` structural advisory packet:
+  `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`.
+- The generated PR #945 bridge DOC_ACCURACY residue
+  `broad-host-surface-next-boundary-slice-2026-05-13_bridge_nonblockers.md`
+  moved to
+  `reports/archive/deferred/broad-host-surface-next-boundary-slice-2026-05-13_bridge_nonblockers_closed-by-broad-host-surface-next-bridge-doc-accuracy-closeout-2026-05-13.md`
+  after the parent packet and TASKS wording no longer claimed every lax array
+  trap case returns `null`.
+- The same-wave generated indicator reproducibility and staged-file scope bridge
+  packet for this closeout is resolved as historical residue and archived at
+  `reports/archive/deferred/broad-host-surface-next-bridge-doc-accuracy-closeout-2026-05-13_bridge_nonblockers_closed-by-broad-host-surface-next-bridge-doc-accuracy-closeout-2026-05-13.md`;
+  it is not active deferred work.
+- N3 broad host-surface boundary remains active and hard-stopped in
+  `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`; this
+  closeout did not implement runtime, Stage0, seed, scheduler, registry, parity,
+  production `/mu`, host-oracle, or Claude-related changes.
