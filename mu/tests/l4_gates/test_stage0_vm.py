@@ -1535,6 +1535,76 @@ console.log(JSON.stringify({
         payload = self._run_node_direct(script)
         assert payload["ok"] is True, payload
 
+    def test_node_mu_copy_proxy_traps_fail_closed_without_native_error(self):
+        script = """
+const { muCopy } = require('./mu/host/js/core/stage0_vm.js');
+
+const proxyProtoRecord = new Proxy({a: 1}, {
+  getPrototypeOf() { throw new Error('host proto trap'); },
+});
+const proxyProtoArray = new Proxy([1], {
+  getPrototypeOf() { throw new Error('host array proto trap'); },
+});
+const proxyOwnKeysRecord = new Proxy({a: 1}, {
+  ownKeys() { throw new Error('host ownKeys trap'); },
+});
+const proxyOwnKeysArray = new Proxy([1], {
+  ownKeys() { throw new Error('host array ownKeys trap'); },
+});
+const revokedRecord = Proxy.revocable({a: 1}, {});
+const revokedArray = Proxy.revocable([1], {});
+revokedRecord.revoke();
+revokedArray.revoke();
+
+const cases = [
+  ['proxy_proto_record', proxyProtoRecord],
+  ['proxy_proto_array', proxyProtoArray],
+  ['proxy_own_keys_record', proxyOwnKeysRecord],
+  ['proxy_own_keys_array', proxyOwnKeysArray],
+  ['revoked_record', revokedRecord.proxy],
+  ['revoked_array', revokedArray.proxy],
+];
+const results = [];
+for (const [label, value] of cases) {
+  try {
+    muCopy(value, true, 'direct muCopy boundary');
+    results.push({label, rejected: false});
+  } catch (err) {
+    results.push({
+      label,
+      rejected: true,
+      name: err && err.name,
+      message: err && err.message,
+      hostTrapLeaked: String(err && err.message).includes('host '),
+    });
+  }
+}
+for (const [label, value] of cases) {
+  try {
+    muCopy(value, false, 'direct muCopy boundary');
+    results.push({label: `${label}_lax`, laxCompleted: true});
+  } catch (err) {
+    results.push({
+      label: `${label}_lax`,
+      laxCompleted: false,
+      name: err && err.name,
+      message: err && err.message,
+    });
+  }
+}
+console.log(JSON.stringify({
+  ok: results.every(item =>
+    item.laxCompleted === true ||
+    (item.rejected === true &&
+     item.name === 'Stage0VMError' &&
+     item.message === 'direct muCopy boundary: non-Mu value cannot be captured' &&
+     item.hostTrapLeaked === false)),
+  results
+}));
+"""
+        payload = self._run_node_direct(script)
+        assert payload["ok"] is True, payload
+
 
 # ---------------------------------------------------------------------------
 # Per-opcode schema validation
