@@ -10,6 +10,7 @@
 
 const { KERNEL_RESERVED_FIELDS, RcxError } = require('../core/constants');
 const { isValidMu, muHash, muHashCached, muHashControl, muHashControlCached } = require('../core/types');
+const muContainers = require('../core/container_factory');
 const { normalize, normalizeProjection, listToLinked } = require('../core/normalize');
 const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields } = require('../core/security');
 const { step } = require('../core/bootstrap_core');
@@ -118,10 +119,10 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps, vmConfig
 
   // Pre-normalize projections once (constant across all iterations).
   const normalizedProjs = domainProjs.map(normalizeProjection);
-  const kernelDomainProjs = normalizedProjs.map(proj => ({
-    pattern: proj.pattern,
-    body: proj.body
-  }));
+  const kernelDomainProjs = normalizedProjs.map(proj => muContainers.record([
+    ['pattern', proj.pattern],
+    ['body', proj.body],
+  ]));
   const linkedProjs = listToLinked(kernelDomainProjs);
 
   let current = input;
@@ -130,7 +131,10 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps, vmConfig
   const limit = maxSteps ?? 200;
   while (steps < limit) {
     const normalizedInput = normalize(current);
-    const kernelInput = { _step: normalizedInput, _projs: linkedProjs };
+    const kernelInput = muContainers.record([
+      ['_step', normalizedInput],
+      ['_projs', linkedProjs],
+    ]);
     // Wave 1: use canonical _stepKernelCore instead of retired _stepKernelCoreNonMeta
     const canonical = _stepKernelCore(allProjs, kernelInput, current, validator, 10000, vmConfig || null);
     const next = canonical.output;  // already extracted + denormalized by _stepKernelCore
@@ -190,7 +194,7 @@ function hashTraceForRecurrence(trace, maxEntries) {
       throw new RcxError('trace.malformed_entry',
         `hash_trace_for_recurrence: malformed trace entry (expected dict with 'state' key, got ${entryType}${detail})`);
     }
-    entry = Object.assign(Object.create(null), entry);
+    entry = muContainers.record(Object.entries(entry));
     if (isValidMu(entry.state)) {
       entry.state_hash = muHashControl(entry.state, 'hashTraceForRecurrence');
     }
@@ -199,7 +203,10 @@ function hashTraceForRecurrence(trace, maxEntries) {
   }
   let result = current;
   for (let i = entries.length - 1; i >= 0; i--) {
-    result = { head: entries[i], tail: result };
+    result = muContainers.record([
+      ['head', entries[i]],
+      ['tail', result],
+    ]);
   }
   return result;
 }
@@ -240,7 +247,11 @@ function boundaryOpRunTrace(kernelProjections, seedProjectionMap, request, reqIn
   if (traceMaxSteps < 0) traceMaxSteps = 100;
   if (traceMaxSteps > MAX_BOUNDARY_TRACE_STEPS) traceMaxSteps = MAX_BOUNDARY_TRACE_STEPS;
   const raw = runStructural(kernelProjections, projs, reqInput.value, traceMaxSteps, vmConfig || null);
-  return { result: raw.result, trace: raw.trace, stall: raw.stall };
+  return muContainers.record([
+    ['result', raw.result],
+    ['trace', raw.trace],
+    ['stall', raw.stall],
+  ]);
 }
 
 function boundaryOpHashTrace(kernelProjections, seedProjectionMap, request, reqInput, maxAlgorithmIterations, vmConfig) {
@@ -378,7 +389,7 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
       `boundary inject_key must be string, got ${typeof injectKey}`);
   }
   const reqInput = request.input;
-  const context = Object.assign(Object.create(null), request.context);
+  const context = muContainers.record(Object.entries(request.context));
 
   // SECURITY: inject_key must not be kernel-reserved or JS built-in.
   if (KERNEL_RESERVED_FIELDS.has(injectKey) || FORBIDDEN_INJECT_KEYS.has(injectKey)) {
@@ -430,7 +441,7 @@ function serviceBoundaryEffect(kernelProjections, seedProjectionMap, request, ma
         `but result already contains ontology_promotion`);
     }
     // F-44: Copy result before mutation to avoid poisoning handler return value (parity: engine_pipeline.py:825)
-    result = Object.assign(Object.create(null), result);
+    result = muContainers.record(Object.entries(result));
     result.ontology_promotion = buildOntologyPromotionCandidate(
       evidence, `boundary_result(${operation}).ontology_candidate_evidence`
     );
@@ -761,20 +772,23 @@ function buildOntologyPromotionCandidate(evidence, contextStr) {
       `for '${seedFile}' — seed not in CORE_SEED_CHECKSUMS registry`);
   }
 
-  return {
-    witness_traces: evidence.witness_traces,
-    seed_configs: evidence.seed_configs,
-    closure_structure: evidence.closure_structure,
-    perturbation_log: evidence.perturbation_log,
-    tau_lineage: evidence.tau_lineage,
-    derivation_timestamp: 'derived:' + checksum,  // CONTRABAND_OK: deterministic derivation from seed checksum (replaces wall-clock new Date())
-    substrate_versions: { python: checksum, js: checksum },
-    authority: {
-      source: 'seed',
-      seed_file: authority.seed_file,
-      projection_ids: authority.projection_ids,
-    },
-  };
+  return muContainers.record([
+    ['witness_traces', evidence.witness_traces],
+    ['seed_configs', evidence.seed_configs],
+    ['closure_structure', evidence.closure_structure],
+    ['perturbation_log', evidence.perturbation_log],
+    ['tau_lineage', evidence.tau_lineage],
+    ['derivation_timestamp', 'derived:' + checksum],  // CONTRABAND_OK: deterministic derivation from seed checksum (replaces wall-clock new Date())
+    ['substrate_versions', muContainers.record([
+      ['python', checksum],
+      ['js', checksum],
+    ])],
+    ['authority', muContainers.record([
+      ['source', 'seed'],
+      ['seed_file', authority.seed_file],
+      ['projection_ids', authority.projection_ids],
+    ])],
+  ]);
 }
 
 /**
@@ -811,14 +825,14 @@ function collectOntologyEvidence(result, operation) {
     stall = result.stall ?? null;
   }
 
-  return {
-    operation: operation,
-    trace_len: traceLen,
-    stall: stall,
-    projection_ids: projectionIds,
-    control_hash: controlHash,
-    collected_at: 'derived:' + controlHash,  // CONTRABAND_OK: deterministic derivation from control hash (replaces wall-clock new Date())
-  };
+  return muContainers.record([
+    ['operation', operation],
+    ['trace_len', traceLen],
+    ['stall', stall],
+    ['projection_ids', projectionIds === null ? null : muContainers.list(projectionIds)],
+    ['control_hash', controlHash],
+    ['collected_at', 'derived:' + controlHash],  // CONTRABAND_OK: deterministic derivation from control hash (replaces wall-clock new Date())
+  ]);
 }
 
 // Boot1 re-entry depth limit
@@ -916,14 +930,14 @@ function runEnginePipeline(kernelProjections, seedProjectionMap, engineProjectio
     obsTs++;
   }
 
-  let state = {
-    _run_engine: {
-      projections: projections,
-      input: inputValue,
-      max_steps: maxSteps,
-      frozen: frozen,
-    }
-  };
+  let state = muContainers.record([
+    ['_run_engine', muContainers.record([
+      ['projections', projections],
+      ['input', inputValue],
+      ['max_steps', maxSteps],
+      ['frozen', frozen],
+    ])],
+  ]);
 
   for (let iteration = 0; iteration < maxEngineIterations; iteration++) {
     const nextState = step(engineProjections, state);
@@ -956,11 +970,11 @@ function runEnginePipeline(kernelProjections, seedProjectionMap, engineProjectio
       continue;
     } else if (transition === 'reentry') {
       validateReentryPayload(payload, 'trampoline _run_engine');
-      state = { _run_engine: payload };
+      state = muContainers.record([['_run_engine', payload]]);
       continue;
     } else if (transition === 'tail_call') {
       validateReentryPayload(payload, 'trampoline _tail_call');
-      state = { _run_engine: payload };
+      state = muContainers.record([['_run_engine', payload]]);
       continue;
     } else if (transition === 'terminal') {
       if (typeof payload === 'object' && payload !== null) {
@@ -1055,14 +1069,14 @@ function runEnginePipelineRecursive(kernelProjections, seedProjectionMap, engine
     }
 
     // obsTs preserved across re-entry (monotonic per-run, like totalIterations).
-    let state = {
-      _run_engine: {
-        projections: curProjections,
-        input: curInput,
-        max_steps: curMaxSteps,
-        frozen: curFrozen,
-      }
-    };
+    let state = muContainers.record([
+      ['_run_engine', muContainers.record([
+        ['projections', curProjections],
+        ['input', curInput],
+        ['max_steps', curMaxSteps],
+        ['frozen', curFrozen],
+      ])],
+    ]);
 
     let reentry = false;
     for (let iteration = 0; iteration < remainingIterations; iteration++) {

@@ -7,6 +7,7 @@
  */
 
 const { RcxError } = require('../core/constants');
+const muContainers = require('../core/container_factory');
 const { HEMISPHERE_KEYS, HEMISPHERE_KEY_ORDER, setsEqual, defaultHemispheres, deriveEngineExitReason } = require('../core/terminal_classification');
 const { stepKernel } = require('./kernel');
 const { runEnginePipeline, runEnginePipelineRecursive } = require('./pipeline');
@@ -20,12 +21,12 @@ function runHemisphereRouting(allProjections, hemisphereProjections, engineResul
   if (engineResult === null || typeof engineResult !== 'object' || Array.isArray(engineResult)) {
     throw new RcxError('input.invalid_type', 'engine_result must be a dict');
   }
-  const wrapped = {
-    route_hemisphere: {
-      engine_result: engineResult,
-      hemispheres: hemispheres,
-    }
-  };
+  const wrapped = muContainers.record([
+    ['route_hemisphere', muContainers.record([
+      ['engine_result', engineResult],
+      ['hemispheres', hemispheres],
+    ])],
+  ]);
   let current = wrapped;
   const limit = 30;
   for (let i = 0; i < limit; i++) {
@@ -104,7 +105,11 @@ function runMetabolizationCycle(allProjections, metabolizeCycleProjections, hemi
   // Recursive list validation + budget calculation
   const entryCount = countHemisphereEntries(hemispheres);
 
-  const wrapped = { metabolize_cycle: { hemispheres: hemispheres } };
+  const wrapped = muContainers.record([
+    ['metabolize_cycle', muContainers.record([
+      ['hemispheres', hemispheres],
+    ])],
+  ]);
   const stepBudget = Math.max(20, 4 * entryCount + 10);
 
   let current = wrapped;
@@ -181,7 +186,10 @@ function runEngineWithRouting(allProjections, hemisphereProjections, kernelProje
     updatedHemispheres = runMetabolizationCycle(allProjections, metabolizeCycleProjections, updatedHemispheres, coreVmConfig);
   }
 
-  return { engine_result: engineResult, hemispheres: updatedHemispheres };
+  return muContainers.record([
+    ['engine_result', engineResult],
+    ['hemispheres', updatedHemispheres],
+  ]);
 }
 
 module.exports = {

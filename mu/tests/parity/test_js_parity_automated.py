@@ -354,8 +354,10 @@ class TestCrossSubstrateParity:
         js_script = (
             "const { match } = require('./mu/host/js/core/bootstrap_core');\n"
             "const { NO_MATCH } = require('./mu/host/js/core/constants');\n"
-            "const r1 = match({var: ''}, 42);\n"
-            "const r2 = match({var: ''}, 'hello');\n"
+            "const muContainers = require('./mu/host/js/core/container_factory');\n"
+            "const p = muContainers.record([['var', '']]);\n"
+            "const r1 = match(p, 42);\n"
+            "const r2 = match(p, 'hello');\n"
             "if (r1 !== NO_MATCH || r2 !== NO_MATCH) {\n"
             "  process.stderr.write('FAIL: r1=' + JSON.stringify(r1) + ' r2=' + JSON.stringify(r2));\n"
             "  process.exit(1);\n"
@@ -964,7 +966,20 @@ class TestJSSecurityParity:
         rows = _run_node_json(
             r"""
             const t = require('./mu/host/js/core/types');
+            const { containers } = t;
+            const muContainers = require('./mu/host/js/core/container_factory');
             const { match } = require('./mu/host/js/core/bootstrap_core');
+            const { normalizeProjection } = require('./mu/host/js/core/normalize');
+            const { deriveEngineExitReason } = require('./mu/host/js/core/terminal_classification');
+            function trustMu(value) {
+              if (Array.isArray(value)) {
+                return muContainers.list(value.map(item => trustMu(item)));
+              }
+              if (value !== null && typeof value === 'object') {
+                return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+              }
+              return value;
+            }
 
             class EmptyClass {}
             class KeyedClass { constructor() { this.a = 1; } }
@@ -998,21 +1013,25 @@ class TestJSSecurityParity:
               },
               get(_target, key) { return key === 'a' ? 1 : undefined; },
             });
+            const transparentProxyRecord = new Proxy({a: 1}, {});
+            const transparentProxyArray = new Proxy([1], {});
 
             const rejected = [
-              ['date', new Date('2026-05-08T00:00:00Z'), {}, {}],
-              ['map', new Map([['a', 1]]), {}, {}],
-              ['empty_class', new EmptyClass(), {}, {}],
-              ['keyed_class', new KeyedClass(), { a: 1 }, { a: { var: 'x' } }],
-              ['custom_proto', customProto, { a: 1 }, { a: { var: 'x' } }],
-              ['hidden_to_json', hiddenToJSON, { a: 2 }, { a: { var: 'x' } }],
-              ['array_subclass', arraySubclass, [1], [{ var: 'x' }]],
-              ['keyed_array_subclass', keyedArraySubclass, [1], [{ var: 'x' }]],
-              ['keyed_array', keyedArray, [1], [{ var: 'x' }]],
-              ['bigint', 1n, {}, {}],
-              ['proxy_throw_record', proxyThrowRecord, { a: 1 }, { a: { var: 'x' } }],
-              ['proxy_throw_array', proxyThrowArray, [1], [{ var: 'x' }]],
-              ['proxy_trap_record', proxyTrapRecord, { a: 1 }, { a: { var: 'x' } }],
+              ['date', new Date('2026-05-08T00:00:00Z'), trustMu({}), trustMu({})],
+              ['map', new Map([['a', 1]]), trustMu({}), trustMu({})],
+              ['empty_class', new EmptyClass(), trustMu({}), trustMu({})],
+              ['keyed_class', new KeyedClass(), trustMu({ a: 1 }), trustMu({ a: { var: 'x' } })],
+              ['custom_proto', customProto, trustMu({ a: 1 }), trustMu({ a: { var: 'x' } })],
+              ['hidden_to_json', hiddenToJSON, trustMu({ a: 2 }), trustMu({ a: { var: 'x' } })],
+              ['array_subclass', arraySubclass, trustMu([1]), trustMu([{ var: 'x' }])],
+              ['keyed_array_subclass', keyedArraySubclass, trustMu([1]), trustMu([{ var: 'x' }])],
+              ['keyed_array', keyedArray, trustMu([1]), trustMu([{ var: 'x' }])],
+              ['bigint', 1n, trustMu({}), trustMu({})],
+              ['proxy_throw_record', proxyThrowRecord, trustMu({ a: 1 }), trustMu({ a: { var: 'x' } })],
+              ['proxy_throw_array', proxyThrowArray, trustMu([1]), trustMu([{ var: 'x' }])],
+              ['proxy_trap_record', proxyTrapRecord, trustMu({ a: 1 }), trustMu({ a: { var: 'x' } })],
+              ['transparent_proxy_record', transparentProxyRecord, trustMu({ a: 1 }), trustMu({ a: { var: 'x' } })],
+              ['transparent_proxy_array', transparentProxyArray, trustMu([1]), trustMu([{ var: 'x' }])],
             ];
 
             const hashFns = ['muHash', 'muHashCached', 'muHashControl', 'muHashControlCached'];
@@ -1034,11 +1053,55 @@ class TestJSSecurityParity:
                 return { rejected: true, error_code: err.error_code || null };
               }
             }
+            function publicConstructorOutcome(kind, argument) {
+              if (typeof t.containers[kind] !== 'function') return { available: false };
+              try {
+                const candidate = t.containers[kind](argument);
+                return {
+                  available: true,
+                  defaultValid: t.isValidMu(candidate),
+                  hash: hashOutcome('muHash', candidate),
+                };
+              } catch (err) {
+                return { available: true, threw: true, error_code: err.error_code || null };
+              }
+            }
 
-            const validRecord = { a: [1, { b: false }], c: null };
-            const validArray = [1, { a: 2 }];
+            const validRecord = trustMu({ a: [1, { b: false }], c: null });
+            const validArray = trustMu([1, { a: 2 }]);
+            const validRecordPattern = trustMu({ a: { var: 'x' }, c: null });
+            const normalizedProjection = normalizeProjection(trustMu({
+              pattern: { op: 'ok', value: { var: 'x' } },
+              body: { result: { var: 'x' } },
+            }));
+            const terminalResult = trustMu({
+              closure_detected: false,
+              exhaustion_detected: false,
+              stall: false,
+            });
 
             console.log(JSON.stringify({
+              publicExports: {
+                trustedSet: t._TRUSTED_MU_CONTAINERS === undefined,
+                symbolProvenance: t[Symbol.for('rcx.mu.internalProvenance')] === undefined,
+                markTrustedMuContainer: t.markTrustedMuContainer === undefined,
+                markTrustedMuTree: t.markTrustedMuTree === undefined,
+                containerAdd: t.containers.add === undefined,
+                containerJson: t.containers.json === undefined,
+                containerList: t.containers.list === undefined,
+                containerRecord: t.containers.record === undefined,
+                containerKeys: JSON.stringify(Object.keys(t.containers)) === '["has"]',
+                enumerableTrustKeys: Object.keys(t).filter(k => /trust|provenance/i.test(k)).length === 0,
+              },
+              publicLaunder: {
+                recordFromProxyEntries: publicConstructorOutcome('record', Object.entries(transparentProxyRecord)),
+                listFromProxyArray: publicConstructorOutcome('list', transparentProxyArray),
+              },
+              producerOutputs: {
+                normalizedProjectionValid: t.isValidMu(normalizedProjection),
+                normalizedProjectionHash: hashOutcome('muHash', normalizedProjection),
+                engineExitReason: deriveEngineExitReason(terminalResult),
+              },
               rejected: rejected.map(([name, value, validPeer, patternForInvalidInput]) => ({
                 name,
                 defaultValid: t.isValidMu(value),
@@ -1059,8 +1122,8 @@ class TestJSSecurityParity:
                   cached: t.muHashCached(validRecord),
                   control: t.muHashControl(validRecord),
                   controlCached: t.muHashControlCached(validRecord),
-                  matchDefault: matchOutcome({ a: { var: 'x' }, c: null }, validRecord, false),
-                  matchBudget: matchOutcome({ a: { var: 'x' }, c: null }, validRecord, true),
+                  matchDefault: matchOutcome(validRecordPattern, validRecord, false),
+                  matchBudget: matchOutcome(validRecordPattern, validRecord, true),
                 },
                 array: {
                   defaultValid: t.isValidMu(validArray),
@@ -1075,6 +1138,27 @@ class TestJSSecurityParity:
             """
         )
 
+        assert rows["publicExports"] == {
+            "trustedSet": True,
+            "symbolProvenance": True,
+            "markTrustedMuContainer": True,
+            "markTrustedMuTree": True,
+            "containerAdd": True,
+            "containerJson": True,
+            "containerList": True,
+            "containerRecord": True,
+            "containerKeys": True,
+            "enumerableTrustKeys": True,
+        }
+        assert rows["publicLaunder"] == {
+            "recordFromProxyEntries": {"available": False},
+            "listFromProxyArray": {"available": False},
+        }
+        assert rows["producerOutputs"] == {
+            "normalizedProjectionValid": True,
+            "normalizedProjectionHash": {"rejected": False, "error_code": None},
+            "engineExitReason": "completed",
+        }
         assert {row["name"] for row in rows["rejected"]} == {
             "date",
             "map",
@@ -1089,6 +1173,8 @@ class TestJSSecurityParity:
             "proxy_throw_record",
             "proxy_throw_array",
             "proxy_trap_record",
+            "transparent_proxy_record",
+            "transparent_proxy_array",
         }
         for row in rows["rejected"]:
             assert row["defaultValid"] is False, row
@@ -1117,6 +1203,17 @@ class TestJSSecurityParity:
         row = _run_node_json(
             r"""
             const t = require('./mu/host/js/core/types');
+            const { containers } = t;
+            const muContainers = require('./mu/host/js/core/container_factory');
+            function trustMu(value) {
+              if (Array.isArray(value)) {
+                return muContainers.list(value.map(item => trustMu(item)));
+              }
+              if (value !== null && typeof value === 'object') {
+                return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+              }
+              return value;
+            }
 
             const poisoned = { a: 2 };
             Object.defineProperty(poisoned, 'toJSON', {
@@ -1134,8 +1231,8 @@ class TestJSSecurityParity:
             }
 
             const poisonedOutcome = rejectOutcome('muHashCached', poisoned);
-            const plain1 = { a: 1 };
-            const plain2 = { a: 2 };
+            const plain1 = trustMu({ a: 1 });
+            const plain2 = trustMu({ a: 2 });
             const plain1Hash = t.muHash(plain1);
             const plain2Hash = t.muHash(plain2);
             const cachedPlain1 = t.muHashCached(plain1);

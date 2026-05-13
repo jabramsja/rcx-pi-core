@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const muContainers = require('./container_factory');
 
 // Fail-closed: checksum + projection ID registries for seeds loaded by core modules.
 // Must mirror entries in cli/main.js and Python seed_integrity.py.
@@ -201,7 +202,13 @@ function loadVerifiedSeed(seedName, subdir) {
     }
   }
 
-  const seed = JSON.parse(raw);
+  const seed = JSON.parse(raw, (_key, value) => {
+    if (Array.isArray(value)) return muContainers.list(value);
+    if (value !== null && typeof value === 'object') {
+      return muContainers.record(Object.keys(value).map(key => [key, value[key]]));
+    }
+    return value;
+  });
 
   // Projection entry type guard (fail-closed — reject null/array/scalar before .id access)
   if (Array.isArray(seed.projections)) {

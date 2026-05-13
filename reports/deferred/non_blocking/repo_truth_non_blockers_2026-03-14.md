@@ -34,6 +34,14 @@ pipeline shape governance is closed by
 as historical evidence at
 `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N5_js_pipeline_governance_closed-by-post-js-pipeline-governance-deferred-cleanup-2026-05-12.md`.
 
+2026-05-13 transparent JS Proxy provenance closure: the separate retained
+transparent Proxy advisory is closed by
+`transparent-js-live-container-provenance-implementation-2026-05-13` and
+archived at
+`reports/archive/deferred/founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers_closed-by-transparent-js-live-container-provenance-implementation-2026-05-13.md`.
+The active repo-truth retained advisory in this packet remains N3 broad
+host-surface boundary only.
+
 2026-05-10 triage evidence refresh:
 
 - N1 was advisory in this 2026-05-10 snapshot because `_step_kernel_with_vm`
@@ -48,7 +56,7 @@ as historical evidence at
   defect; `python3 mu/tools/checks/check_host_semantics_ratchet.py --json`
   exits 0 with no increases/decreases and
   `python3 tools/checks/check_host_authority_inventory_ratchet.py` exits 0
-  with `312 total` / `217 authority`.
+  with `311 total` / `217 authority`.
 - N5 was still advisory in this 2026-05-10 snapshot because
   `mu/host/js/engine/pipeline.js` was a large single engine pipeline file
   (`wc -l` reported 1160 lines) and no decomposition contract was present in
@@ -107,11 +115,12 @@ as historical evidence at
   `js-engine-pipeline-shape-governance-test-2026-05-12`.
 - The preserved N5 historical text was moved to
   `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N5_js_pipeline_governance_closed-by-post-js-pipeline-governance-deferred-cleanup-2026-05-12.md`.
-- Active repo-truth retained advisories in this packet are now N3 broad
-  host-surface boundary only. N1 VM coverage bookkeeping is closed by PR #940 /
+- Active repo-truth retained advisory in this packet is N3 broad host-surface
+  boundary only. N1 VM coverage bookkeeping is closed by PR #940 /
   `vm-cutover-coverage-trace-implementation-2026-05-12`. Transparent JS Proxy
-  provenance remains active in
-  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`.
+  provenance is closed by
+  `transparent-js-live-container-provenance-implementation-2026-05-13` and
+  archived separately.
 - This cleanup performed no runtime, Stage0, seed, scheduler, registry, parity,
   production `/mu`, host-oracle, or Claude-related implementation work.
 
@@ -132,8 +141,9 @@ as historical evidence at
 - Historical N1 source text moved to
   `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N1_vm_coverage_bookkeeping_closed-by-vm-cutover-coverage-trace-implementation-2026-05-12.md`.
 - Active repo-truth retained advisory in this packet is now N3 broad
-  host-surface boundary only. Transparent JS Proxy provenance remains active in
-  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`.
+  host-surface boundary only. Transparent JS Proxy provenance is closed by
+  `transparent-js-live-container-provenance-implementation-2026-05-13` and
+  archived separately.
 
 ## Active Non-Blockers
 

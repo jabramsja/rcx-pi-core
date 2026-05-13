@@ -18,6 +18,7 @@ const crypto = require('crypto');
 
 // Core modules
 const { validateNoKernelReservedFields } = require('../core/security');
+const muContainers = require('../core/container_factory');
 
 // Seed integrity verification — parity with Python's seed_integrity.py
 const SEED_CHECKSUMS = {
@@ -243,7 +244,13 @@ function validateCombinedBridgeOrdering(projections) {
 function loadVerifiedSeed(seedPath, seedName) {
   const raw = fs.readFileSync(seedPath, 'utf8');
   verifySeedChecksum(seedName, raw);
-  const seed = JSON.parse(raw);
+  const seed = JSON.parse(raw, (_key, value) => {
+    if (Array.isArray(value)) return muContainers.list(value);
+    if (value !== null && typeof value === 'object') {
+      return muContainers.record(Object.keys(value).map(key => [key, value[key]]));
+    }
+    return value;
+  });
   validateSeedStructure(seedName, seed);
   validateProjectionIds(seedName, seed);
   return seed;
@@ -307,7 +314,7 @@ verifyBundleProvenance(substBundle);
 const kernelV1Projections = kernel.projections;
 
 // Compose projection arrays
-const allProjections = [...kernel.projections, ...matchSeed.projections, ...substSeed.projections];
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
 const bridgeProjections = bridgeSeed.projections;
 const recurrenceProjections = recurrenceSeed.projections;
 const exhaustionProjections = exhaustionSeed.projections;
@@ -318,45 +325,54 @@ const metabolizationProjections = metabolizationSeed.projections;
 const metabolizeCycleProjections = metabolizeCycleSeed.projections;
 const recurrenceV2Projections = recurrenceV2Seed.projections;
 
-const seedProjectionMap = Object.assign(Object.create(null), {
-  'recurrence.v1.json': recurrenceProjections,
-  'recurrence.v2.json': recurrenceV2Projections,
-  'exhaustion.v1.json': exhaustionProjections,
-  'fix.v1.json': fixProjections,
+const seedProjectionMap = muContainers.record([
+  ['recurrence.v1.json', recurrenceProjections],
+  ['recurrence.v2.json', recurrenceV2Projections],
+  ['exhaustion.v1.json', exhaustionProjections],
+  ['fix.v1.json', fixProjections],
   // Scheduler projections are verified and lazy-loaded by pipeline.js at the boundary.
-  'rcx_engine_scheduler.v1.json': null,
-});
+  ['rcx_engine_scheduler.v1.json', null],
+]);
 
-const allProjectionsWithBridge = [
+const allProjectionsWithBridge = muContainers.list([
   ...kernel.projections, ...bridgeProjections,
   ...matchSeed.projections, ...substSeed.projections
-];
+]);
 validateCombinedBridgeOrdering(allProjectionsWithBridge);
 
-const allProjectionsWithRecurrenceAndBridge = [
+const allProjectionsWithRecurrenceAndBridge = muContainers.list([
   ...recurrenceProjections, ...kernel.projections, ...bridgeProjections,
   ...matchSeed.projections, ...substSeed.projections
-];
+]);
 validateCombinedBridgeOrdering(allProjectionsWithRecurrenceAndBridge);
 
-const allProjectionsWithExhaustion = [
+const allProjectionsWithExhaustion = muContainers.list([
   ...exhaustionProjections, ...recurrenceProjections, ...allProjections
-];
+]);
 
-const allProjectionsWithExhaustionAndBridge = [
+const allProjectionsWithExhaustionAndBridge = muContainers.list([
   ...exhaustionProjections, ...recurrenceProjections,
   ...kernel.projections, ...bridgeProjections,
   ...matchSeed.projections, ...substSeed.projections
-];
+]);
 validateCombinedBridgeOrdering(allProjectionsWithExhaustionAndBridge);
 
 // Load parity vectors for tests and API
 const parityVectorsPath = path.join(muRoot, '..', 'tests', 'fixtures', 'parity_vectors.json');
 let parityVectors;
 try {
-  parityVectors = JSON.parse(fs.readFileSync(parityVectorsPath, 'utf8'));
+  parityVectors = JSON.parse(fs.readFileSync(parityVectorsPath, 'utf8'), (_key, value) => {
+    if (Array.isArray(value)) return muContainers.list(value);
+    if (value !== null && typeof value === 'object') {
+      return muContainers.record(Object.keys(value).map(key => [key, value[key]]));
+    }
+    return value;
+  });
 } catch (e) {
-  parityVectors = { vectors: [], security_vectors: [] };
+  parityVectors = muContainers.record([
+    ['vectors', muContainers.list()],
+    ['security_vectors', muContainers.list()],
+  ]);
 }
 
 // Seeds context — passed to self-tests and API handlers

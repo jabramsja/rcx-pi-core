@@ -19,7 +19,7 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-13 N1 closure cleanup):
+Current inventory refresh (2026-05-13 transparent Proxy provenance closure):
 
 - Evidence command:
   `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' -print | sort`.
@@ -28,21 +28,24 @@ Current inventory refresh (2026-05-13 N1 closure cleanup):
 ```text
 reports/deferred/blocking/README.md
 reports/deferred/non_blocking/README.md
-reports/deferred/non_blocking/founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md
 reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md
 ```
 
 - `reports/deferred/blocking/` currently contains `README.md` only; no active
   blocking deferred packets remain.
-- `reports/deferred/non_blocking/` currently contains `README.md` plus two
-  active or partially active retained `/mu` structural advisory packets.
+- `reports/deferred/non_blocking/` currently contains `README.md` plus one
+  partially active retained `/mu` structural advisory packet.
 - The generated same-wave DOC_ACCURACY bridge residue for
   `stage0-capture-provenance-deferred-cleanup-2026-05-12` is closed and archived
   at
   `reports/archive/deferred/stage0-capture-provenance-deferred-cleanup-2026-05-12_bridge_nonblockers_closed-by-stage0-cleanup-bridge-doc-accuracy-closeout-2026-05-12.md`.
-- Retained `/mu` structural advisories remain active and are not implemented by
-  this inventory refresh: transparent JS Proxy provenance and N3 broad
-  host-surface boundary.
+- Transparent JS Proxy provenance is closed by
+  `transparent-js-live-container-provenance-implementation-2026-05-13` and
+  archived at
+  `reports/archive/deferred/founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers_closed-by-transparent-js-live-container-provenance-implementation-2026-05-13.md`.
+- The retained `/mu` structural advisory still active in this lane is N3 broad
+  host-surface boundary in
+  `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`.
 - N1 VM coverage bookkeeping is closed by PR #940 /
   `vm-cutover-coverage-trace-implementation-2026-05-12` and is no longer active
   deferred work. Its historical repo-truth text is archived at

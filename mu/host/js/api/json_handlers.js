@@ -8,6 +8,7 @@
 
 const { classifyError, RcxError } = require('../core/constants');
 const { isValidMu, muHash, muHashCached, muHashControlCached } = require('../core/types');
+const muContainers = require('../core/container_factory');
 const { normalize, denormalize } = require('../core/normalize');
 const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields } = require('../core/security');
 const { step, run, match } = require('../core/bootstrap_core');
@@ -90,20 +91,14 @@ function handleJsonApi(apiArg, seeds) {
     bridgeBundle: bridgeBundle || null,
   } : null;
 
-  // Helper: run Recurrence on trace result
-  function runRecurrence(traceResult) {
-    const recurrenceInput = {
-      _detect_closure: {
-        trace: traceResult.trace,
-        result: traceResult.result
-      }
-    };
-    const { result } = run(recurrenceProjections, recurrenceInput, 1000);
-    return result;
-  }
-
   try {
-    const request = JSON.parse(apiArg);
+    const request = JSON.parse(apiArg, (_key, value) => {
+      if (Array.isArray(value)) return muContainers.list(value);
+      if (value !== null && typeof value === 'object') {
+        return muContainers.record(Object.keys(value).map(key => [key, value[key]]));
+      }
+      return value;
+    });
     let response;
 
     if (request.action === 'run_vector') {
@@ -136,7 +131,13 @@ function handleJsonApi(apiArg, seeds) {
       try {
         guardMaxSteps(maxSteps, 'maxSteps');
         const traceResult = runStructural(allProjectionsWithBridge, projections ?? [], input, maxSteps ?? 100, vmConfigBridge);
-        const closureResult = runRecurrence(traceResult);
+        const recurrenceInput = muContainers.record([
+          ['_detect_closure', muContainers.record([
+            ['trace', traceResult.trace],
+            ['result', traceResult.result],
+          ])],
+        ]);
+        const { result: closureResult } = run(recurrenceProjections, recurrenceInput, 1000);
         response = { success: true, result: closureResult };
       } catch (e) {
         response = { success: false, error_code: classifyError(e), error: e.message };
@@ -284,11 +285,12 @@ function handleJsonApi(apiArg, seeds) {
             observer: observerEvents,
             vmConfig: vmConfigBridge,
           };
+          const effectiveUserProjs = userProjs ?? muContainers.list();
           let result;
           if (boot1Mode) {
-            result = runEnginePipelineRecursive(allProjectionsWithBridge, seedProjectionMap, engineProjections, userProjs ?? [], input, opts);
+            result = runEnginePipelineRecursive(allProjectionsWithBridge, seedProjectionMap, engineProjections, effectiveUserProjs, input, opts);
           } else {
-            result = runEnginePipeline(allProjectionsWithBridge, seedProjectionMap, engineProjections, userProjs ?? [], input, opts);
+            result = runEnginePipeline(allProjectionsWithBridge, seedProjectionMap, engineProjections, effectiveUserProjs, input, opts);
           }
           response = { success: true, result };
           if (Array.isArray(observerEvents)) response.observer_events = observerEvents;
@@ -326,9 +328,10 @@ function handleJsonApi(apiArg, seeds) {
           guardMaxSteps(maxSteps, 'maxSteps');
           guardIterationCap(maxEngineIterations, 'maxEngineIterations', API_MAX_ENGINE_ITERATIONS);
           guardIterationCap(maxAlgorithmIterations, 'maxAlgorithmIterations', API_MAX_ALGORITHM_ITERATIONS);
+          const effectiveUserProjs = userProjs ?? muContainers.list();
           const result = runEngineWithRouting(
             allProjections, hemisphereProjections, allProjectionsWithBridge, seedProjectionMap, engineProjections,
-            userProjs ?? [], input,
+            effectiveUserProjs, input,
             hemispheres ?? null,
             {
               maxSteps: maxSteps ?? 100,
@@ -390,11 +393,12 @@ function handleJsonApi(apiArg, seeds) {
             observer: metaObserver,
             vmConfig: vmConfigBridge,
           };
+          const effectiveUserProjs = userProjs ?? muContainers.list();
           let engineResult;
           if (boot1Mode) {
-            engineResult = runEnginePipelineRecursive(allProjectionsWithBridge, seedProjectionMap, engineProjections, userProjs ?? [], input, opts);
+            engineResult = runEnginePipelineRecursive(allProjectionsWithBridge, seedProjectionMap, engineProjections, effectiveUserProjs, input, opts);
           } else {
-            engineResult = runEnginePipeline(allProjectionsWithBridge, seedProjectionMap, engineProjections, userProjs ?? [], input, opts);
+            engineResult = runEnginePipeline(allProjectionsWithBridge, seedProjectionMap, engineProjections, effectiveUserProjs, input, opts);
           }
           const iterationsUsed = Array.isArray(metaObserver)
             ? metaObserver.filter(e => e.event_name === 'step_boundary').length - baseline

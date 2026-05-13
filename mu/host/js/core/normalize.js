@@ -7,6 +7,7 @@
 
 const { MAX_DEPTH, MAX_DENORM_ITER, VALID_TYPE_TAGS, RcxError } = require('./constants');
 const { isValidNumber, isVar, compareMuStringKeysByCodepoint } = require('./types');
+const muContainers = require('./container_factory');
 
 /**
  * Check if object is EXACTLY a head/tail linked list node.
@@ -160,6 +161,10 @@ function normalize(value, _depth = 0) {
     return value;
   }
 
+  if (!muContainers.has(value)) {
+    throw new RcxError('input.invalid_type', 'normalize: compound value lacks trusted Mu provenance');
+  }
+
   // Variable site - preserve as-is
   if (isVar(value)) {
     return value;
@@ -168,13 +173,20 @@ function normalize(value, _depth = 0) {
   // Array
   if (Array.isArray(value)) {
     if (value.length === 0) {
-      return { _type: 'list' };
+      return muContainers.record([['_type', 'list']]);
     }
     let tail = null;
     for (let i = value.length - 1; i >= 0; i--) {
-      tail = { head: normalize(value[i], _depth + 1), tail: tail };
+      tail = muContainers.record([
+        ['head', normalize(value[i], _depth + 1)],
+        ['tail', tail],
+      ]);
     }
-    return { _type: 'list', ...tail };
+    return muContainers.record([
+      ['_type', 'list'],
+      ['head', tail.head],
+      ['tail', tail.tail],
+    ]);
   }
 
   // Object
@@ -182,7 +194,7 @@ function normalize(value, _depth = 0) {
     const keys = Object.keys(value);
 
     if (keys.length === 0) {
-      return { _type: 'dict' };
+      return muContainers.record([['_type', 'dict']]);
     }
 
     if (isTypedEmptySentinel(value)) {
@@ -192,18 +204,18 @@ function normalize(value, _depth = 0) {
     if (isLinkedListNode(value)) {
       // F-43: Only treat as typed linked list if _type is valid
       if ('_type' in value && VALID_TYPE_TAGS.has(value._type)) {
-        return {
-          _type: value._type,
-          head: normalize(value.head, _depth + 1),
-          tail: normalize(value.tail, _depth + 1)
-        };
+        return muContainers.record([
+          ['_type', value._type],
+          ['head', normalize(value.head, _depth + 1)],
+          ['tail', normalize(value.tail, _depth + 1)],
+        ]);
       }
       // Untyped head/tail — normalize both parts
       if (!('_type' in value)) {
-        return {
-          head: normalize(value.head, _depth + 1),
-          tail: normalize(value.tail, _depth + 1)
-        };
+        return muContainers.record([
+          ['head', normalize(value.head, _depth + 1)],
+          ['tail', normalize(value.tail, _depth + 1)],
+        ]);
       }
       // Invalid _type: fall through to regular dict normalization
     }
@@ -213,10 +225,23 @@ function normalize(value, _depth = 0) {
     let tail = null;
     for (let i = sortedKeys.length - 1; i >= 0; i--) {
       const k = sortedKeys[i];
-      const kv = { head: k, tail: { head: normalize(value[k], _depth + 1), tail: null } };
-      tail = { head: kv, tail: tail };
+      const kv = muContainers.record([
+        ['head', k],
+        ['tail', muContainers.record([
+          ['head', normalize(value[k], _depth + 1)],
+          ['tail', null],
+        ])],
+      ]);
+      tail = muContainers.record([
+        ['head', kv],
+        ['tail', tail],
+      ]);
     }
-    return { _type: 'dict', ...tail };
+    return muContainers.record([
+      ['_type', 'dict'],
+      ['head', tail.head],
+      ['tail', tail.tail],
+    ]);
   }
 
   return value;
@@ -303,6 +328,10 @@ function denormalize(value, _depth = 0) {
     return value;
   }
 
+  if (!muContainers.has(value)) {
+    throw new RcxError('input.invalid_type', 'denormalize: compound value lacks trusted Mu provenance');
+  }
+
   if (isVar(value)) {
     return value;
   }
@@ -322,18 +351,22 @@ function denormalize(value, _depth = 0) {
 
     if (typeof type === 'string' && VALID_TYPE_TAGS.has(type)) {
       if (!('head' in value)) {
-        if (type === 'list') return [];
-        if (type === 'dict') return {};
+        if (type === 'list') {
+          return muContainers.list();
+        }
+        if (type === 'dict') {
+          return muContainers.record();
+        }
       }
 
       if (type === 'list') {
         const elements = _collectListElements(value, 'typed');
-        return elements.map(elem => denormalize(elem, _depth + 1));
+        return muContainers.list(elements.map(elem => denormalize(elem, _depth + 1)));
       }
 
       if (type === 'dict') {
         const pairs = _collectDictKVPairs(value, 'typed');
-        const result = Object.create(null);
+        const result = muContainers.record();
         for (const [k, v] of pairs) {
           result[k] = denormalize(v, _depth + 1);
         }
@@ -348,19 +381,19 @@ function denormalize(value, _depth = 0) {
 
     if (isDictEncoding) {
       const pairs = _collectDictKVPairs(value, 'legacy');
-      const result = Object.create(null);
+      const result = muContainers.record();
       for (const [k, v] of pairs) {
         result[k] = denormalize(v, _depth + 1);
       }
       return result;
     } else {
       const elements = _collectListElements(value, 'legacy');
-      return elements.map(elem => denormalize(elem, _depth + 1));
+      return muContainers.list(elements.map(elem => denormalize(elem, _depth + 1)));
     }
   }
 
   // Regular object - denormalize values
-  const result = Object.create(null);
+  const result = muContainers.record();
   for (const [k, v] of Object.entries(value)) {
     result[k] = denormalize(v, _depth + 1);
   }
@@ -371,10 +404,10 @@ function denormalize(value, _depth = 0) {
  * Normalize a projection (pattern and body).
  */
 function normalizeProjection(proj) {
-  return {
-    pattern: normalize(proj.pattern),
-    body: normalize(proj.body)
-  };
+  return muContainers.record([
+    ['pattern', normalize(proj.pattern)],
+    ['body', normalize(proj.body)],
+  ]);
 }
 
 /**
@@ -387,7 +420,10 @@ function listToLinked(arr) {
   }
   let result = null;
   for (let i = arr.length - 1; i >= 0; i--) {
-    result = { head: arr[i], tail: result };
+    result = muContainers.record([
+      ['head', arr[i]],
+      ['tail', result],
+    ]);
   }
   return result;
 }
