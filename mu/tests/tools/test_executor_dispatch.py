@@ -11785,6 +11785,44 @@ class TestDispatcherPlanlessPhaseB:
         assert routing_record["wave_name"] == "codex-startup-hardening-2026-04-14"
 
 
+class TestDispatcherPhaseARecordForwarding:
+    """Dispatcher must not let Phase A reload stale canonical routing state."""
+
+    def test_phase_a_passes_selected_routing_record_to_executor(self, tmp_path):
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "transparent proxy structural provenance",
+            "wave_name": "transparent-js-proxy-provenance-implementation-2026-05-13",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "next_candidates": [
+                {
+                    "candidate": "transparent-js-proxy-provenance-implementation-2026-05-13",
+                    "bounded": True,
+                }
+            ],
+        }
+        with patch.object(dispatch_mod, "_run_executor_in_group") as mock_run, \
+             patch.object(dispatch_mod, "_continue_successful_executor_chain") as mock_chain:
+            mock_run.return_value = MagicMock(returncode=0, stdout='{"plan_path":"reports/control_plane/plan.md"}', stderr="")
+            mock_chain.return_value = {
+                "status": "success",
+                "decision": "ROUTE_PHASE_A",
+                "executor": "phase_a_executor",
+            }
+
+            result = dispatch_mod.dispatch(record, repo_root=tmp_path, skip_freshness=True)
+
+        assert result["status"] == "success"
+        call_args = mock_run.call_args[0][0]
+        assert "--routing-record" in call_args
+        payload = json.loads(call_args[call_args.index("--routing-record") + 1])
+        assert payload["wave_name"] == "transparent-js-proxy-provenance-implementation-2026-05-13"
+        assert payload["summary"] == "transparent proxy structural provenance"
+        assert payload["next_candidates"][0]["candidate"] == (
+            "transparent-js-proxy-provenance-implementation-2026-05-13"
+        )
+
+
 class TestTrackedPacketPathTraversal:
     """Finding 964: tracked_packet path traversal must be blocked fail-closed."""
 
