@@ -213,7 +213,8 @@ class TestDenormalizeTypedPathGuard:
         """Typed list denormalize with primitive tail raises (fail-closed)."""
         script = """
 const { denormalize } = require('./mu/host/js/core/normalize');
-const malformed = { _type: 'list', head: 42, tail: 'not_an_object' };
+const { muCopy } = require('./mu/host/js/core/stage0_vm');
+const malformed = muCopy({ _type: 'list', head: 42, tail: 'not_an_object' }, true, 'typed list guard fixture');
 try {
     denormalize(malformed);
     console.log('ERROR: should have thrown');
@@ -229,11 +230,12 @@ try {
         """Typed dict denormalize with primitive tail raises (fail-closed)."""
         script = """
 const { denormalize } = require('./mu/host/js/core/normalize');
-const malformed = {
+const { muCopy } = require('./mu/host/js/core/stage0_vm');
+const malformed = muCopy({
     _type: 'dict',
     head: { head: 'key1', tail: { head: 'val1', tail: null } },
     tail: 99
-};
+}, true, 'typed dict guard fixture');
 try {
     denormalize(malformed);
     console.log('ERROR: should have thrown');
@@ -299,7 +301,11 @@ try {
         """match() with valid Mu inputs succeeds (no regression)."""
         script = """
 const bc = require('./mu/host/js/core/bootstrap_core');
-const result = bc.match({a: 1}, {a: 1});
+const { muCopy } = require('./mu/host/js/core/stage0_vm');
+const result = bc.match(
+  muCopy({a: 1}, true, 'match pattern fixture'),
+  muCopy({a: 1}, true, 'match input fixture')
+);
 console.log(JSON.stringify(result));
 """
         parsed = json.loads(_js_eval(script))
