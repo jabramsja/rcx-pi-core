@@ -24,8 +24,12 @@ does not authorize `/mu` implementation.
 2026-05-12 cleanup note: closed duplicate Stage0 capture provenance pointer
 N14 was moved to
 `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N14_stage0_duplicate_pointer_closed-by-stage0-capture-provenance-deferred-cleanup-2026-05-12.md`.
-N1 VM coverage bookkeeping and N3 broad host-surface boundary remain live in
-this active packet. N5 JS pipeline shape governance is closed by
+N1 VM coverage bookkeeping is closed by
+`vm-cutover-coverage-trace-implementation-2026-05-12` and archived as
+historical evidence at
+`reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N1_vm_coverage_bookkeeping_closed-by-vm-cutover-coverage-trace-implementation-2026-05-12.md`.
+N3 broad host-surface boundary remains live in this active packet. N5 JS
+pipeline shape governance is closed by
 `js-engine-pipeline-shape-governance-test-2026-05-12` / PR #937 and archived
 as historical evidence at
 `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N5_js_pipeline_governance_closed-by-post-js-pipeline-governance-deferred-cleanup-2026-05-12.md`.
@@ -37,6 +41,8 @@ as historical evidence at
   through `mu/host/python/rcx_pi/selfhost/step_mu.py:1142`; exact bookkeeping
   proof is routed to
   `reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`.
+  Current closure is recorded in the 2026-05-12 VM cutover coverage trace
+  implementation note below.
 - N3 remains an architectural progress boundary, not a single implementable
   defect; `python3 mu/tools/checks/check_host_semantics_ratchet.py --json`
   exits 0 with no increases/decreases and
@@ -73,8 +79,10 @@ as historical evidence at
   source-lock/e2e ordering slice is archived at
   `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_partial-closed-by-post-js-bridge-remaining-mu-nonblocking-reconciliation-2026-05-11.md`
   and is no longer live pending work.
-- N1 remains live under
-  `reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`.
+- N1 was live under
+  `reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`
+  at this reconciliation point; current closure is recorded in the 2026-05-12
+  VM cutover coverage trace implementation note below.
 - N3 remains a broad architectural boundary observation with no direct
   implementation route; any broad host-surface reduction requires a separate
   bounded packet.
@@ -98,39 +106,35 @@ as historical evidence at
   `js-engine-pipeline-shape-governance-test-2026-05-12`.
 - The preserved N5 historical text was moved to
   `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N5_js_pipeline_governance_closed-by-post-js-pipeline-governance-deferred-cleanup-2026-05-12.md`.
-- Active repo-truth retained advisories in this packet are now N1 VM coverage
-  bookkeeping and N3 broad host-surface boundary. Transparent JS Proxy
+- Active repo-truth retained advisories in this packet are now N3 broad
+  host-surface boundary only. N1 VM coverage bookkeeping is closed by
+  `vm-cutover-coverage-trace-implementation-2026-05-12`. Transparent JS Proxy
   provenance remains active in
   `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`.
 - This cleanup performed no runtime, Stage0, seed, scheduler, registry, parity,
   production `/mu`, host-oracle, or Claude-related implementation work.
 
+2026-05-12 VM cutover coverage trace implementation closure:
+
+- N1 VM coverage bookkeeping is closed by
+  `vm-cutover-coverage-trace-implementation-2026-05-12`.
+- Python and JS Stage0 VM step results now emit the same structural
+  `attempt_trace` shape with ordered attempted program IDs, final
+  match/stall outcome, and matched program ID.
+- Python `_step_kernel_with_vm` now records `record_no_match` /
+  `record_match` from the VM-emitted attempt trace instead of deriving
+  coverage from host-side bundle order.
+- Evidence:
+  `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/l4_gates/test_stage0_vm.py mu/tests/l4_gates/test_stage0_vm_cutover.py --tb=short`,
+  `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/parity/test_js_parity_automated.py --tb=short`,
+  and `node mu/host/js/eval_step.js`.
+- Historical N1 source text moved to
+  `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N1_vm_coverage_bookkeeping_closed-by-vm-cutover-coverage-trace-implementation-2026-05-12.md`.
+- Active repo-truth retained advisory in this packet is now N3 broad
+  host-surface boundary only. Transparent JS Proxy provenance remains active in
+  `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`.
+
 ## Active Non-Blockers
-
-### N1. Python VM cutover coverage reconstruction is not directly locked
-
-- **Outcome:** retained live advisory.
-- **Governing route:** `reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`.
-- **Current proof gap:** the completed Phase A packet reproduced that
-  `_step_kernel_with_vm` still reconstructs coverage bookkeeping from host-side
-  bundle order because Stage0 results do not emit ordered attempted-program
-  traces or no-match/match events.
-- **Hard stop before implementation:** no runtime, Stage0, coverage, seed,
-  scheduler, registry, parity, or production `/mu` edits are authorized by this
-  source packet or by the completed Phase A evidence packet.
-- **Doctrine boundary:** future work must derive bookkeeping proof from
-  Mu/Stage0 structural execution or a parity-preserving VM trace; it must not
-  add host-only coverage semantics.
-
-- `_step_kernel_with_vm()` reconstructs coverage semantics for compiled
-  `match.v2` / `subst.v2`
-- the current cutover gate proves equivalence and polarity, but not exact
-  `record_no_match` / `record_match` bookkeeping parity
-**Why deferred:** The cutover gate tests prove behavioral equivalence (same input → same
-output) and polarity (VM path produces same match/subst results as host path). Adding
-exact bookkeeping parity tests requires instrumenting the VM to emit coverage events,
-which is a new capability in the Stage0 VM. **Target packet:**
-`reports/control_plane/vm_cutover_coverage_bookkeeping_proof_2026-05-09.md`.
 
 ### N3. P7-d is execution-path progress, not broad host-surface reduction
 

@@ -727,6 +727,7 @@ def _stage0_vm_step_trusted(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
 
     op_count = 0
     attempt_count = 0
+    attempted_program_ids = []
 
     for program_id in order:
         program = program_map[program_id]
@@ -737,6 +738,7 @@ def _stage0_vm_step_trusted(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
         captures = {}
         pending_root = _UNSET
         attempt_count += 1
+        attempted_program_ids.append(program_id)
         failed = False
 
         for op_spec in ops:
@@ -840,6 +842,11 @@ def _stage0_vm_step_trusted(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
                     "status": "match",
                     "matched_program_id": program_id,
                     "root": pending_root,
+                    "attempt_trace": {
+                        "attempted_program_ids": attempted_program_ids,
+                        "outcome": "match",
+                        "matched_program_id": program_id,
+                    },
                     "metrics": {
                         "program_attempts": attempt_count,
                         "op_steps": op_count,
@@ -877,6 +884,11 @@ def _stage0_vm_step_trusted(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
         "status": "stall",
         "matched_program_id": None,
         "root": input_value,
+        "attempt_trace": {
+            "attempted_program_ids": attempted_program_ids,
+            "outcome": "stall",
+            "matched_program_id": None,
+        },
         "metrics": {
             "program_attempts": attempt_count,
             "op_steps": op_count,
@@ -895,6 +907,11 @@ def stage0_vm_step(bundle, input_value, max_ops=MAX_VM_OPS_PER_STEP):
         {"status": "match" | "stall",
          "matched_program_id": str | None,
          "root": <Mu>,
+         "attempt_trace": {
+             "attempted_program_ids": [str, ...],
+             "outcome": "match" | "stall",
+             "matched_program_id": str | None,
+         },
          "metrics": {"program_attempts": int, "op_steps": int}}
 
     On "match": root is the committed pending_root from the winning program.
