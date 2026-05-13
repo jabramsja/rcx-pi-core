@@ -376,14 +376,7 @@ function makeUndefinedMotif(op, lhs, rhs, cause, details = null) {
     try { return muHashCached(value); }
     catch (_e) { return null; }
   }
-  return muContainers.record([
-    ['_undefined', true],
-    ['op', op],
-    ['lhs_hash', safeHash(lhs)],
-    ['rhs_hash', safeHash(rhs)],
-    ['cause', cause],
-    ['details', details],
-  ]);
+  return muContainers.record([['_undefined', true], ['op', op], ['lhs_hash', safeHash(lhs)], ['rhs_hash', safeHash(rhs)], ['cause', cause], ['details', details]]);
 }
 
 /**
@@ -427,31 +420,16 @@ function run(projections, input, maxSteps = MAX_RUN_STEPS) {
       }
     }
 
-    const traceEntry = muContainers.record([
-      ['step', i],
-      ['projection', matchedId],
-      ['state', current],
-    ]);
-    trace.push(traceEntry);
+    trace.push(muContainers.record([['step', i], ['projection', matchedId], ['state', current]]));
 
     const nextHash = muHashControlCached(next, 'run.stall');
     if (nextHash === currentHash) {
-      return muContainers.record([
-        ['result', current],
-        ['steps', i],
-        ['stalled', true],
-        ['trace', trace],
-      ]);
+      return muContainers.record([['result', current], ['steps', i], ['stalled', true], ['trace', trace]]);
     }
     current = next;
     currentHash = nextHash;
   }
-  return muContainers.record([
-    ['result', current],
-    ['steps', maxSteps],
-    ['stalled', false],
-    ['trace', trace],
-  ]);
+  return muContainers.record([['result', current], ['steps', maxSteps], ['stalled', false], ['trace', trace]]);
 }
 
 // ---------------------------------------------------------------------------

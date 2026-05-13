@@ -19,6 +19,7 @@ const crypto = require('crypto');
 // Core modules
 const { validateNoKernelReservedFields } = require('../core/security');
 const muContainers = require('../core/container_factory');
+const stage0Vm = require('../core/stage0_vm'); // CONTRABAND_OK: VM bundle loading and parse-tree Mu copy for trusted seed ingress
 
 // Seed integrity verification — parity with Python's seed_integrity.py
 const SEED_CHECKSUMS = {
@@ -244,13 +245,7 @@ function validateCombinedBridgeOrdering(projections) {
 function loadVerifiedSeed(seedPath, seedName) {
   const raw = fs.readFileSync(seedPath, 'utf8');
   verifySeedChecksum(seedName, raw);
-  const seed = JSON.parse(raw, (_key, value) => {
-    if (Array.isArray(value)) return muContainers.list(value);
-    if (value !== null && typeof value === 'object') {
-      return muContainers.record(Object.keys(value).map(key => [key, value[key]]));
-    }
-    return value;
-  });
+  const seed = stage0Vm.muCopy(JSON.parse(raw), true, 'Verified seed parse tree');
   validateSeedStructure(seedName, seed);
   validateProjectionIds(seedName, seed);
   return seed;
@@ -278,7 +273,7 @@ const metabolizeCycleSeed = loadVerifiedSeed(path.join(programsDir, 'metabolize_
 
 // S1-C: Load ALL compiled Stage0 bundles for VM execution path
 const compiledDir = path.join(muRoot, 'stage0', 'compiled');
-const { validateBundle, stage0VmStep, muDeepEqual } = require('../core/stage0_vm'); // CONTRABAND_OK: VM bundle loading for kernel step
+const { validateBundle, stage0VmStep, muDeepEqual } = stage0Vm; // CONTRABAND_OK: VM bundle loading for kernel step
 const kernelBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'kernel_v1.compiled.v1.json'), 'utf8'));
 const bridgeBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'bootstrap_structural_v1.compiled.v1.json'), 'utf8'));
 const matchBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'match_v2.compiled.v1.json'), 'utf8'));
@@ -325,14 +320,14 @@ const metabolizationProjections = metabolizationSeed.projections;
 const metabolizeCycleProjections = metabolizeCycleSeed.projections;
 const recurrenceV2Projections = recurrenceV2Seed.projections;
 
-const seedProjectionMap = muContainers.record([
-  ['recurrence.v1.json', recurrenceProjections],
-  ['recurrence.v2.json', recurrenceV2Projections],
-  ['exhaustion.v1.json', exhaustionProjections],
-  ['fix.v1.json', fixProjections],
+const seedProjectionMap = Object.assign(Object.create(null), {
+  'recurrence.v1.json': recurrenceProjections,
+  'recurrence.v2.json': recurrenceV2Projections,
+  'exhaustion.v1.json': exhaustionProjections,
+  'fix.v1.json': fixProjections,
   // Scheduler projections are verified and lazy-loaded by pipeline.js at the boundary.
-  ['rcx_engine_scheduler.v1.json', null],
-]);
+  'rcx_engine_scheduler.v1.json': null,
+});
 
 const allProjectionsWithBridge = muContainers.list([
   ...kernel.projections, ...bridgeProjections,
@@ -361,13 +356,7 @@ validateCombinedBridgeOrdering(allProjectionsWithExhaustionAndBridge);
 const parityVectorsPath = path.join(muRoot, '..', 'tests', 'fixtures', 'parity_vectors.json');
 let parityVectors;
 try {
-  parityVectors = JSON.parse(fs.readFileSync(parityVectorsPath, 'utf8'), (_key, value) => {
-    if (Array.isArray(value)) return muContainers.list(value);
-    if (value !== null && typeof value === 'object') {
-      return muContainers.record(Object.keys(value).map(key => [key, value[key]]));
-    }
-    return value;
-  });
+  parityVectors = stage0Vm.muCopy(JSON.parse(fs.readFileSync(parityVectorsPath, 'utf8')), true, 'Parity vector parse tree');
 } catch (e) {
   parityVectors = muContainers.record([
     ['vectors', muContainers.list()],

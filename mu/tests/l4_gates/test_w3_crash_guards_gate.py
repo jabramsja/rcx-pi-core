@@ -18,6 +18,17 @@ from rcx_pi.selfhost.match_mu import denormalize_from_match, bindings_to_dict
 from rcx_pi.selfhost.step_mu import _iter_normalized_dict_pairs  # ANTICHEAT_OK: founder-approved direct call for gate test
 from rcx_pi.selfhost.mu_type import MAX_MU_WIDTH
 
+JS_TRUST_MU_PRELUDE = """
+const muContainers = require('./mu/host/js/core/container_factory');
+function trustMu(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(trustMu));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+  }
+  return value;
+}
+"""
+
 
 # ---------------------------------------------------------------------------
 # F-10: denormalize_from_match malformed kv guards
@@ -93,9 +104,10 @@ class TestF10DenormalizeMalformedKv:
 
         js_script = (
             "const { denormalize } = require('./mu/host/js/core/normalize');\n"
+            f"{JS_TRUST_MU_PRELUDE}\n"
             f"const input = {json.dumps(malformed_input)};\n"
             "try {\n"
-            "  const result = denormalize(input);\n"
+            "  const result = denormalize(trustMu(input));\n"
             "  console.log(JSON.stringify(result));\n"
             "} catch (e) {\n"
             "  console.log(JSON.stringify({__error: e.message}));\n"
@@ -152,9 +164,10 @@ class TestF10LegacyListStructuralGuard:
         # JS also raises
         js_script = (
             "const { denormalize } = require('./mu/host/js/core/normalize');\n"
+            f"{JS_TRUST_MU_PRELUDE}\n"
             f"const input = {json.dumps(malformed_input)};\n"
             "try {\n"
-            "  denormalize(input);\n"
+            "  denormalize(trustMu(input));\n"
             "  console.log('ERROR: should have thrown');\n"
             "  process.exit(1);\n"
             "} catch (e) {\n"

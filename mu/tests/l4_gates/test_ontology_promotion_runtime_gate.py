@@ -42,6 +42,17 @@ from rcx_pi.selfhost.engine_pipeline import _collect_ontology_evidence  # ANTICH
 from rcx_pi.selfhost.step_mu import validate_no_kernel_reserved_fields  # ANTICHEAT_OK: A14 reserved-field re-validation check
 from rcx_pi.selfhost.seed_integrity import MU_SEED_LOCATIONS, SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS
 
+JS_TRUST_MU_PRELUDE = """
+const muContainers = require('./mu/host/js/core/container_factory');
+function trustMu(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(trustMu));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+  }
+  return value;
+}
+"""
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -76,7 +87,8 @@ def _run_js_validator(record_json: str, *, expect_pass: bool = True) -> subproce
     """Run the JS validator via node -e and return the result."""
     js_code = textwrap.dedent(f"""\
         const {{ validateOntologyPromotionRecord }} = require('./mu/host/js/engine/pipeline');
-        const record = {record_json};
+        {JS_TRUST_MU_PRELUDE}
+        const record = trustMu({record_json});
         try {{
             validateOntologyPromotionRecord(record, 'test');
             process.stdout.write('PASS');
@@ -101,7 +113,7 @@ def _run_js_expr(js_code: str, *, env: dict | None = None) -> subprocess.Complet
     if env is not None:
         run_env = {**os.environ, **env}
     return subprocess.run(
-        ["node", "-e", js_code],
+        ["node", "-e", f"{JS_TRUST_MU_PRELUDE}\n{js_code}"],
         cwd=str(REPO_ROOT),
         capture_output=True, text=True, check=False,
         env=run_env,
@@ -471,7 +483,7 @@ class TestEnvelopeTypeValidation:
                         ontology_promotion: {bad_value},
                     }}),
                 }});
-                const request = {{
+                const request = trustMu({{
                     operation: 'run_trace',
                     input: {{
                         projections: [{{ pattern: {{ var: 'x' }}, body: {{ var: 'x' }}, id: 'id.passthrough' }}],
@@ -480,7 +492,7 @@ class TestEnvelopeTypeValidation:
                     }},
                     context: {{}},
                     inject_key: 'boundary_result',
-                }};
+                }});
                 const noop = () => {{}};
                 try {{
                     pipeline.serviceBoundaryEffect([], {{}}, request, 50, noop, 0, 'test');
@@ -893,7 +905,8 @@ class TestBuilderJS:
     def _run_js_builder(self, evidence_json: str) -> subprocess.CompletedProcess:
         js_code = textwrap.dedent(f"""\
             const {{ buildOntologyPromotionCandidate }} = require('./mu/host/js/engine/pipeline');
-            const evidence = {evidence_json};
+            {JS_TRUST_MU_PRELUDE}
+            const evidence = trustMu({evidence_json});
             try {{
                 const record = buildOntologyPromotionCandidate(evidence, 'test');
                 process.stdout.write('PASS:' + JSON.stringify(record));
@@ -939,7 +952,7 @@ class TestBuilderJS:
         evidence = _make_valid_evidence()
         js_code = textwrap.dedent(f"""\
             const {{ buildOntologyPromotionCandidate, validateOntologyPromotionRecord }} = require('./mu/host/js/engine/pipeline');
-            const evidence = {json.dumps(evidence)};
+            const evidence = trustMu({json.dumps(evidence)});
             try {{
                 const record = buildOntologyPromotionCandidate(evidence, 'test');
                 validateOntologyPromotionRecord(record, 'test');
@@ -1112,8 +1125,8 @@ class TestBoundaryPathEmission:
         evidence = _make_valid_evidence()
         js_code = textwrap.dedent(f"""\
             const pipeline = require('./mu/host/js/engine/pipeline');
-            const evidence = {json.dumps(evidence)};
-            const request = {{
+            const evidence = trustMu({json.dumps(evidence)});
+            const request = trustMu({{
                 operation: 'run_trace',
                 input: {{
                     projections: [{{ pattern: {{ var: 'x' }}, body: {{ var: 'x' }}, id: 'id.passthrough' }}],
@@ -1125,7 +1138,7 @@ class TestBoundaryPathEmission:
                     ontology_candidate_evidence: evidence,
                 }},
                 inject_key: 'boundary_result',
-            }};
+            }});
             const noop = () => {{}};
             try {{
                 const kernelProjections = [];  // run_trace uses its own projections
@@ -1153,7 +1166,7 @@ class TestBoundaryPathEmission:
         evidence = _make_valid_evidence()
         js_code = textwrap.dedent(f"""\
             const pipeline = require('./mu/host/js/engine/pipeline');
-            const evidence = {json.dumps(evidence)};
+            const evidence = trustMu({json.dumps(evidence)});
 
             // Enable test mode + inject handler that returns a known object
             pipeline.enableTestMode();
@@ -1163,7 +1176,7 @@ class TestBoundaryPathEmission:
                 run_trace: () => handlerResult,
             }});
 
-            const request = {{
+            const request = trustMu({{
                 operation: 'run_trace',
                 input: {{ start: true }},
                 context: {{
@@ -1171,7 +1184,7 @@ class TestBoundaryPathEmission:
                     ontology_candidate_evidence: evidence,
                 }},
                 inject_key: 'boundary_result',
-            }};
+            }});
             const noop = () => {{}};
             try {{
                 const ctx = pipeline.serviceBoundaryEffect(
@@ -1205,7 +1218,7 @@ class TestBoundaryPathEmission:
         """JS: serviceBoundaryEffect without emit flag → no ontology_promotion."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
-            const request = {
+            const request = trustMu({
                 operation: 'run_trace',
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.passthrough' }],
@@ -1214,7 +1227,7 @@ class TestBoundaryPathEmission:
                 },
                 context: {},
                 inject_key: 'boundary_result',
-            };
+            });
             const noop = () => {};
             try {
                 const ctx = pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');
@@ -1354,7 +1367,8 @@ class TestCrossSubstrateMalformedEvidence:
     def _run_js_builder(self, evidence_json: str) -> subprocess.CompletedProcess:
         js_code = textwrap.dedent(f"""\
             const {{ buildOntologyPromotionCandidate }} = require('./mu/host/js/engine/pipeline');
-            const evidence = {evidence_json};
+            {JS_TRUST_MU_PRELUDE}
+            const evidence = trustMu({evidence_json});
             try {{
                 buildOntologyPromotionCandidate(evidence, 'test');
                 process.stdout.write('PASS');
@@ -1460,7 +1474,7 @@ class TestCrossSubstrateMalformedEvidence:
         js_code = textwrap.dedent(f"""\
             const pipeline = require('./mu/host/js/engine/pipeline');
             pipeline.enableTestMode();
-            const evidence = {json.dumps(evidence)};
+            const evidence = trustMu({json.dumps(evidence)});
             // Override run_trace handler to return result with ontology_promotion
             pipeline.setTestDispatchOverride({{
                 run_trace: (input, context, emitFn, iteration, state) => ({{
@@ -1470,7 +1484,7 @@ class TestCrossSubstrateMalformedEvidence:
                     ontology_promotion: {{ existing: true }},
                 }}),
             }});
-            const request = {{
+            const request = trustMu({{
                 operation: 'run_trace',
                 input: {{
                     projections: [{{ pattern: {{ var: 'x' }}, body: {{ var: 'x' }}, id: 'id.passthrough' }}],
@@ -1482,7 +1496,7 @@ class TestCrossSubstrateMalformedEvidence:
                     ontology_candidate_evidence: evidence,
                 }},
                 inject_key: 'boundary_result',
-            }};
+            }});
             const noop = () => {{}};
             try {{
                 pipeline.serviceBoundaryEffect([], {{}}, request, 50, noop, 0, 'test');
@@ -1876,7 +1890,7 @@ class TestEvidenceCollectorJS:
         """Valid run_trace result with trace → 6-field record."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
-            const trace = {
+            const trace = trustMu({
                 head: { step: 0, state: 's0', projection: 'proj_b' },
                 tail: {
                     head: { step: 1, state: 's1', projection: 'proj_a' },
@@ -1885,8 +1899,8 @@ class TestEvidenceCollectorJS:
                         tail: null
                     }
                 }
-            };
-            const result = { result: 'final', trace: trace, stall: true, steps: 2 };
+            });
+            const result = trustMu({ result: 'final', trace: trace, stall: true, steps: 2 });
             try {
                 const obs = pipeline.collectOntologyEvidence(result, 'run_trace');
                 const checks = [
@@ -1913,7 +1927,7 @@ class TestEvidenceCollectorJS:
         """Non-trace result → null trace fields."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
-            const result = { result: 'algo_output' };
+            const result = trustMu({ result: 'algo_output' });
             try {
                 const obs = pipeline.collectOntologyEvidence(result, 'run_algorithm');
                 const checks = [
@@ -1934,7 +1948,7 @@ class TestEvidenceCollectorJS:
         """JS: Flag consumed after collection (one-shot)."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
-            const request = {
+            const request = trustMu({
                 operation: 'run_trace',
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
@@ -1943,7 +1957,7 @@ class TestEvidenceCollectorJS:
                 },
                 context: { collect_ontology_candidate_evidence: true },
                 inject_key: 'boundary_result',
-            };
+            });
             const noop = () => {};
             try {
                 const ctx = pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');
@@ -1965,7 +1979,7 @@ class TestEvidenceCollectorJS:
         """Truthy non-true (1) → no collection."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
-            const request = {
+            const request = trustMu({
                 operation: 'run_trace',
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
@@ -1974,7 +1988,7 @@ class TestEvidenceCollectorJS:
                 },
                 context: { collect_ontology_candidate_evidence: 1 },
                 inject_key: 'boundary_result',
-            };
+            });
             const noop = () => {};
             try {
                 const ctx = pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');
@@ -2012,7 +2026,7 @@ class TestEvidenceCollectorJS:
         """C1: context already has ontology_candidate_observation → typed error."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
-            const request = {
+            const request = trustMu({
                 operation: 'run_trace',
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
@@ -2024,7 +2038,7 @@ class TestEvidenceCollectorJS:
                     ontology_candidate_observation: { old: 'obs' },
                 },
                 inject_key: 'boundary_result',
-            };
+            });
             const noop = () => {};
             try {
                 pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');
@@ -2043,7 +2057,7 @@ class TestEvidenceCollectorJS:
         """C2: Collector path does NOT add ontology_promotion to result."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
-            const request = {
+            const request = trustMu({
                 operation: 'run_trace',
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
@@ -2052,7 +2066,7 @@ class TestEvidenceCollectorJS:
                 },
                 context: { collect_ontology_candidate_evidence: true },
                 inject_key: 'boundary_result',
-            };
+            });
             const noop = () => {};
             try {
                 const ctx = pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');
@@ -2134,7 +2148,7 @@ class TestEvidenceCollectorMalformedTrace:
         """JS: int/dict projection IDs skipped, only strings collected."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
-            const trace = {
+            const trace = trustMu({
                 head: { step: 0, state: 's0', projection: 'valid_id' },
                 tail: {
                     head: { step: 1, state: 's1', projection: 42 },
@@ -2149,8 +2163,8 @@ class TestEvidenceCollectorMalformedTrace:
                         }
                     }
                 }
-            };
-            const result = { result: 'final', trace: trace, stall: false };
+            });
+            const result = trustMu({ result: 'final', trace: trace, stall: false });
             try {
                 const obs = pipeline.collectOntologyEvidence(result, 'run_trace');
                 const checks = [
@@ -2200,7 +2214,7 @@ class TestEvidenceCollectorBoundaryPath:
         """JS: serviceBoundaryEffect with collect flag → observation attached."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
-            const request = {
+            const request = trustMu({
                 operation: 'run_trace',
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
@@ -2209,7 +2223,7 @@ class TestEvidenceCollectorBoundaryPath:
                 },
                 context: { collect_ontology_candidate_evidence: true },
                 inject_key: 'boundary_result',
-            };
+            });
             const noop = () => {};
             try {
                 const ctx = pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');
@@ -2264,7 +2278,7 @@ class TestEvidenceCollectorBoundaryPath:
         """C1: JS overwrite guard — pre-existing observation + flag → typed error."""
         js_code = textwrap.dedent("""\
             const pipeline = require('./mu/host/js/engine/pipeline');
-            const request = {
+            const request = trustMu({
                 operation: 'run_trace',
                 input: {
                     projections: [{ pattern: { var: 'x' }, body: { var: 'x' }, id: 'id.pass' }],
@@ -2276,7 +2290,7 @@ class TestEvidenceCollectorBoundaryPath:
                     ontology_candidate_observation: { existing: true },
                 },
                 inject_key: 'boundary_result',
-            };
+            });
             const noop = () => {};
             try {
                 pipeline.serviceBoundaryEffect([], {}, request, 50, noop, 0, 'test');

@@ -15,7 +15,7 @@
  * Depends on: core/constants.js, core/bootstrap_core.js, core/seed_loader.js
  */
 
-const { step, _stepTrusted } = require('./bootstrap_core');
+const { step } = require('./bootstrap_core');
 const { RcxError } = require('./constants');
 const muContainers = require('./container_factory');
 
@@ -283,7 +283,7 @@ function deriveEngineExitReason(engineResult) {
       ['st', _muBool(engineResult.stall)],
     ])],
   ]);
-  const result = _stepTrusted(projs, wrapped);
+  const result = step(projs, wrapped);
   return typeof result === 'string' ? result : 'completed';
 }
 

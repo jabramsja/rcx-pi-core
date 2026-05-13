@@ -1,24 +1,24 @@
 {
   "wave_id": "transparent-js-live-container-provenance-implementation-2026-05-13",
-  "repeat_run_speedup_ratio": 1.252026,
+  "repeat_run_speedup_ratio": 1.220026,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.409982,
+  "step_growth_slope": 0.41561,
   "repeat_run_raw_seconds": [
-    0.513308,
-    0.409982
+    0.507055,
+    0.41561
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.513308
+      "elapsed_seconds": 0.507055
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.92329
+      "elapsed_seconds": 0.922665
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-13T15:19:20Z",
+  "collection_timestamp_utc": "2026-05-13T16:13:57Z",
   "collector_version": "2.2.0"
 }

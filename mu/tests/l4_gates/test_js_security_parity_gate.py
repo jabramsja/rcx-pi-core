@@ -22,6 +22,17 @@ import pytest
 
 from tests.repo_root import REPO_ROOT
 
+JS_TRUST_MU_PRELUDE = """
+const muContainers = require('./mu/host/js/core/container_factory');
+function trustMu(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(trustMu));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+  }
+  return value;
+}
+"""
+
 
 # ---------------------------------------------------------------------------
 # Source proof helpers
@@ -220,8 +231,9 @@ class TestLambdaCalcBehavioralParity:
         result = subprocess.run(
             ["node", "-e", """
 const { applyProjection } = require('./mu/host/js/core/bootstrap_core');
+""" + JS_TRUST_MU_PRELUDE + """
 try {
-  applyProjection({pattern: {pattern: 'literal', body: 'literal'}, body: {var: 'x'}}, 'test');
+  applyProjection(trustMu({pattern: {pattern: 'literal', body: 'literal'}, body: {var: 'x'}}), 'test');
   console.log(JSON.stringify({error: null}));
 } catch(e) {
   console.log(JSON.stringify({error: e.message}));
@@ -244,8 +256,9 @@ try {
         result = subprocess.run(
             ["node", "-e", """
 const { applyProjection } = require('./mu/host/js/core/bootstrap_core');
+""" + JS_TRUST_MU_PRELUDE + """
 try {
-  applyProjection({foo: 'bar'}, 'test');
+  applyProjection(trustMu({foo: 'bar'}), 'test');
   console.log(JSON.stringify({error: null}));
 } catch(e) {
   console.log(JSON.stringify({error: e.message}));
@@ -265,8 +278,9 @@ try {
         result = subprocess.run(
             ["node", "-e", """
 const { applyProjection, NO_MATCH } = require('./mu/host/js/core/bootstrap_core');
+""" + JS_TRUST_MU_PRELUDE + """
 try {
-  const r = applyProjection({pattern: {var: 'x'}, body: {var: 'x'}}, 42);
+  const r = applyProjection(trustMu({pattern: {var: 'x'}, body: {var: 'x'}}), 42);
   console.log(JSON.stringify({result: r, error: null}));
 } catch(e) {
   console.log(JSON.stringify({result: null, error: e.message}));
@@ -289,9 +303,10 @@ try {
         result = subprocess.run(
             ["node", "-e", """
 const { applyProjection } = require('./mu/host/js/core/bootstrap_core');
+""" + JS_TRUST_MU_PRELUDE + """
 try {
   // Non-Mu projection: pattern contains a function (not valid Mu)
-  applyProjection({pattern: function(){}, body: 'x'}, 'test');
+  applyProjection(trustMu({pattern: function(){}, body: 'x'}), 'test');
   console.log(JSON.stringify({error: null}));
 } catch(e) {
   console.log(JSON.stringify({error: e.message}));
@@ -311,9 +326,10 @@ try {
         result = subprocess.run(
             ["node", "-e", """
 const { run } = require('./mu/host/js/core/bootstrap_core');
+""" + JS_TRUST_MU_PRELUDE + """
 try {
-  const lambdaProj = {pattern: {pattern: 'literal', body: 'literal'}, body: {var: 'x'}};
-  run([lambdaProj], 'test', 10);
+  const lambdaProj = trustMu({pattern: {pattern: 'literal', body: 'literal'}, body: {var: 'x'}});
+  run(muContainers.list([lambdaProj]), 'test', 10);
   console.log(JSON.stringify({error: null}));
 } catch(e) {
   console.log(JSON.stringify({error: e.message}));

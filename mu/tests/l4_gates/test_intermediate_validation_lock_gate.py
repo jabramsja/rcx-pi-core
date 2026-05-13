@@ -43,6 +43,14 @@ class TestIntermediateValidationBehavior:
         # makes pipeline pick up the patched function.
         js_script = (
             "const kernel = require('./mu/host/js/engine/kernel');\n"
+            "const muContainers = require('./mu/host/js/core/container_factory');\n"
+            "function trustMu(value) {\n"
+            "  if (Array.isArray(value)) return muContainers.list(value.map(trustMu));\n"
+            "  if (value !== null && typeof value === 'object') {\n"
+            "    return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));\n"
+            "  }\n"
+            "  return value;\n"
+            "}\n"
             "kernel._stepKernelCore = function(_a, _k, _d, _v, _m, _vm) {\n"  # ANTICHEAT_OK: JS kernel module patch for behavioral gate test
             "  return { output: { _injected: true, value: 42 },\n"
             "           stall: false, termination_reason: 'projection_applied',\n"
@@ -51,8 +59,8 @@ class TestIntermediateValidationBehavior:
             "const { runAlgorithmWithBridge } = require('./mu/host/js/engine/pipeline');\n"
             "try {\n"
             "  runAlgorithmWithBridge(\n"
-            "    [], {value: 1},\n"
-            "    [{pattern: {var: 'x'}, body: {var: 'x'}, id: 'test.identity'}],\n"
+            "    muContainers.list(), trustMu({value: 1}),\n"
+            "    trustMu([{pattern: {var: 'x'}, body: {var: 'x'}, id: 'test.identity'}]),\n"
             "    10\n"
             "  );\n"
             "  console.log('NO_ERROR');\n"

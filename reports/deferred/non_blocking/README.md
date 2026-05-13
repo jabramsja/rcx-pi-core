@@ -337,3 +337,13 @@ Archived source snapshots for extracted non-blocking residue live in:
   archived at
   `reports/archive/deferred/founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers_closed-by-transparent-js-live-container-provenance-implementation-2026-05-13.md`.
 - The retained live advisory is now N3 broad host-surface boundary only.
+
+2026-05-13 direct inventory clarification:
+
+- Evidence command:
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
+- Current active non-blocking lane contents are this README plus
+  `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`.
+- Current open deferred/non-blocking work inside that source packet is N3 broad
+  host-surface boundary only; earlier references to two or three active packets
+  are historical point-in-time notes superseded by the later closure notes above.
