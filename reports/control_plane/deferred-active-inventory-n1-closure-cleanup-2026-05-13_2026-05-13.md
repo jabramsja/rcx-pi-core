@@ -115,20 +115,16 @@ The active deferred inventory target for this packet is narrow: N1 VM coverage b
 - Refresh wave: `deferred-active-inventory-n1-closure-cleanup-2026-05-13`
 - Active packet: `reports/control_plane/deferred-active-inventory-n1-closure-cleanup-2026-05-13_2026-05-13.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `39e8b717429dee02edc70f7a0bb938c0344584eacc45c3ecab6d95ae82f4961f`
+- Tracker note sha256: `745a1b814f353e852f3472e55b45aba378395d7e730f7015c24f8465ed22b93a`
 - Indicator artifact: `reports/l4_wave_indicators/deferred-active-inventory-n1-closure-cleanup-2026-05-13.json`
 - Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py`.
-- Evidence delta: (1) Routed commit handoff scopes 9 wave-owned file(s). (2) Evidence gate exercises 1 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/deferred-active-inventory-n1-closure-cleanup-2026-05-13.json..
+- Evidence delta: (1) Routed commit handoff scopes 5 wave-owned file(s). (2) Evidence gate exercises 1 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/deferred-active-inventory-n1-closure-cleanup-2026-05-13.json..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/deferred-active-inventory-n1-closure-cleanup-2026-05-13.json`
 - Current staged files:
   - `TASKS.md`
   - `mu/tests/tools/test_commit_executor_receipt.py`
   - `mu/tools/executors/commit_executor.py`
-  - `reports/archive/deferred/deferred-active-inventory-n1-closure-cleanup-2026-05-13_bridge_nonblockers_closed-by-deferred-active-inventory-n1-closure-cleanup-2026-05-13.md`
   - `reports/control_plane/deferred-active-inventory-n1-closure-cleanup-2026-05-13_2026-05-13.md`
-  - `reports/deferred/README.md`
-  - `reports/deferred/non_blocking/README.md`
-  - `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`
   - `reports/l4_wave_indicators/deferred-active-inventory-n1-closure-cleanup-2026-05-13.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

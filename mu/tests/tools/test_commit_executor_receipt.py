@@ -1656,6 +1656,24 @@ class TestReceiptChainEndToEnd:
         assert ok is False
         assert any("both active deferred and archived closed" in error for error in errors)
 
+    def test_validate_handoff_rejects_same_wave_active_packet_with_archive_without_deferred_items(self):
+        wave_id = "deferred-auth-wave"
+        deferred_path = "reports/deferred/non_blocking/deferred-auth-wave_bridge_nonblockers.md"
+        archive_path = (
+            "reports/archive/deferred/"
+            "deferred-auth-wave_bridge_nonblockers_closed-by-deferred-auth-wave.md"
+        )
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", deferred_path],
+            force_add_files=[archive_path],
+        )
+
+        ok, errors = commit_mod.validate_handoff(handoff)
+
+        assert ok is False
+        assert any("both active deferred and archived closed" in error for error in errors)
+
     def test_commit_packet_truth_refresh_authorizes_staged_same_wave_deferred_packet(self, tmp_path):
         import subprocess
 
