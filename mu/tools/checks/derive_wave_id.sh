@@ -71,6 +71,32 @@ _tasks_changed_for_mode() {
   esac
 }
 
+_tracker_note_line_for_wave() {
+  local wave_id="$1"
+  grep -E "Tracker sync note \([^,]+, ${wave_id}\):" TASKS.md 2>/dev/null | tail -1 || true
+}
+
+_tracker_note_class() {
+  sed -nE 's/.*Class: (L4_STRUCTURAL|L4_ENABLER|MAINTENANCE).*/\1/p'
+}
+
+_tracker_note_packet() {
+  sed -nE 's/.*Packet: `([^`]+)`.*/\1/p'
+}
+
+_range_has_runtime_files() {
+  [ -n "$MODE_VALUE" ] || return 1
+  git diff --name-only "$MODE_VALUE" 2>/dev/null | grep -Eq \
+    '^(mu/host/|mu/substrate/|mu/closures/|mu/bridge/|mu/programs/|rcx_pi/selfhost/|mu/tools/compilers/)'
+}
+
+_parent_wave_from_packet() {
+  local packet="$1"
+  [ -n "$packet" ] || return 1
+  [ -f "$packet" ] || return 1
+  sed -nE 's/^Parent wave:[[:space:]]*([A-Za-z0-9_-]+).*/\1/p' "$packet" | head -1
+}
+
 # Only set wave-id flag if TASKS.md is in scope AND the branch-derived suffix
 # exists in a tracker note exactly. Restart branches therefore fall back cleanly
 # when their suffix is not the authoritative wave id in TASKS.md.
@@ -80,6 +106,18 @@ if [ -n "$WAVE_ID_SUFFIX" ] && _tasks_changed_for_mode; then
     EFFECTIVE_WAVE_ID_SUFFIX="$(_canonical_wave_id_suffix "$WAVE_ID_SUFFIX")"
   fi
   if grep -qE "Tracker sync note \([^,]+, ${EFFECTIVE_WAVE_ID_SUFFIX}\):" TASKS.md 2>/dev/null; then
+    if [ "$MODE" = "--range" ] && _range_has_runtime_files; then
+      NOTE_LINE="$(_tracker_note_line_for_wave "$EFFECTIVE_WAVE_ID_SUFFIX")"
+      NOTE_CLASS="$(printf '%s\n' "$NOTE_LINE" | _tracker_note_class)"
+      if [ "$NOTE_CLASS" = "L4_ENABLER" ]; then
+        PACKET_PATH="$(printf '%s\n' "$NOTE_LINE" | _tracker_note_packet)"
+        PARENT_WAVE_ID="$(_parent_wave_from_packet "$PACKET_PATH" || true)"
+        if [ -n "$PARENT_WAVE_ID" ] && \
+           grep -qE "Tracker sync note \([^,]+, ${PARENT_WAVE_ID}\):" TASKS.md 2>/dev/null; then
+          EFFECTIVE_WAVE_ID_SUFFIX="$PARENT_WAVE_ID"
+        fi
+      fi
+    fi
     WAVE_ID_FLAG="--wave-id=$EFFECTIVE_WAVE_ID_SUFFIX"
   fi
 fi

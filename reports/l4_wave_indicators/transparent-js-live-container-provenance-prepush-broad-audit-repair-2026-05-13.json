@@ -1,24 +1,24 @@
 {
   "wave_id": "transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13",
-  "repeat_run_speedup_ratio": 0.988647,
+  "repeat_run_speedup_ratio": 1.067777,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.47637,
+  "step_growth_slope": 0.441934,
   "repeat_run_raw_seconds": [
-    0.470962,
-    0.47637
+    0.471887,
+    0.441934
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.470962
+      "elapsed_seconds": 0.471887
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.947332
+      "elapsed_seconds": 0.913821
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-13T16:53:55Z",
+  "collection_timestamp_utc": "2026-05-13T17:03:20Z",
   "collector_version": "2.2.0"
 }

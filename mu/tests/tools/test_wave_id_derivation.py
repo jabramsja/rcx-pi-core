@@ -136,6 +136,55 @@ class TestWaveIdDerivation:
         )
         assert flag == "--wave-id=test-wave"
 
+    def test_range_mode_uses_parent_wave_for_enabler_branch_with_runtime_range(
+        self, tmp_path: Path
+    ) -> None:
+        repo = self._init_repo(tmp_path)
+        packet = repo / "reports" / "control_plane" / "child-wave.md"
+        packet.parent.mkdir(parents=True)
+        packet.write_text(
+            "# Child repair\n\nParent wave: parent-wave\n",
+            encoding="utf-8",
+        )
+        runtime_file = repo / "mu" / "host" / "js" / "core" / "runtime.js"
+        runtime_file.parent.mkdir(parents=True)
+        runtime_file.write_text("module.exports = 1;\n", encoding="utf-8")
+        (repo / "TASKS.md").write_text(
+            "## NOW\n\n## NEXT\n\n"
+            "- Tracker sync note (2026-04-21, parent-wave): **TEST.** "
+            "Class: L4_STRUCTURAL. target_gate_id: G8. "
+            "evidence_command: `pytest tests/l4_gates/test_parent.py`. "
+            "evidence_delta: parent runtime wave. "
+            "host_semantics_delta_before: baseline. "
+            "host_semantics_delta_after: unchanged. "
+            "structural_artifact_ref: mu/host/js/core/runtime.js. "
+            "post_gate_contract_sweep: `pytest tests/l4_gates/test_parent.py`. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/parent-wave.json. "
+            "indicator_collection_command: python3 tools/checks/enforce_l4_execution_contract.py --range origin/dev...HEAD --wave-id parent-wave. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD.\n"
+            "- Tracker sync note (2026-04-21, child-wave): **TEST.** "
+            "Class: L4_ENABLER. target_gate_id: G8. "
+            "Packet: `reports/control_plane/child-wave.md`. "
+            "evidence_command: `pytest tests/tools/test_child.py`. "
+            "evidence_delta: child test/control repair. "
+            "indicator_artifact_ref: reports/l4_wave_indicators/child-wave.json. "
+            "indicator_collection_command: python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id child-wave. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD.\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "TASKS.md", str(packet), str(runtime_file)], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "range"], cwd=repo, check=True, capture_output=True)
+
+        flag = self._derive_flag(
+            repo,
+            "jabramsja/child-wave",
+            "--range",
+            "HEAD~1...HEAD",
+        )
+        assert flag == "--wave-id=parent-wave"
+
     def test_legacy_two_arg_range_call_uses_exact_branch_suffix_when_tracker_note_matches(
         self, tmp_path: Path
     ) -> None:
