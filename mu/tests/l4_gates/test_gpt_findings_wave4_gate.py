@@ -152,3 +152,18 @@ class TestSeedLoaderChecksumOrdering:
         assert "SECURITY: For known seeds, verify checksum BEFORE JSON.parse" in src, (
             "seed_loader.js must document the checksum-before-parse security rationale"
         )
+
+    def test_verified_seed_parse_reuses_mu_copy_without_bypass_marker(self):
+        """Source proof: verified seed ingress uses existing Mu copy without a new contraband bypass."""
+        src = _read_source("mu/host/js/core/seed_loader.js")
+        assert "const { muCopy } = require('./stage0_vm');" in src, (
+            "seed_loader.js must reuse the existing Stage0 muCopy boundary for verified parse-tree ingress"
+        )
+        assert "muCopy(JSON.parse(raw), true" in src, (
+            "checksum-verified seed parse-tree ingress must become trusted Mu through muCopy"
+        )
+        for line in src.splitlines():
+            if "stage0_vm" in line:
+                assert "CONTRABAND_OK" not in line, (
+                    "local stage0_vm imports should not need a new CONTRABAND_OK bypass"
+                )

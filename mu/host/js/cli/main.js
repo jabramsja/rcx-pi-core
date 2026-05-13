@@ -19,7 +19,7 @@ const crypto = require('crypto');
 // Core modules
 const { validateNoKernelReservedFields } = require('../core/security');
 const muContainers = require('../core/container_factory');
-const stage0Vm = require('../core/stage0_vm'); // CONTRABAND_OK: VM bundle loading and parse-tree Mu copy for trusted seed ingress
+const stage0Vm = require('../core/stage0_vm');
 
 // Seed integrity verification — parity with Python's seed_integrity.py
 const SEED_CHECKSUMS = {

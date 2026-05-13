@@ -115,8 +115,10 @@ check_pattern "require.*http" "Network access breaks determinism"
 check_pattern "require.*https" "Network access breaks determinism"
 check_pattern "fetch(" "Network access breaks determinism"
 
-# VM module (eval equivalent - CRITICAL)
-check_pattern "require.*vm" "vm module provides eval capabilities"
+# VM module (eval equivalent - CRITICAL). Match actual Node VM imports without
+# catching local modules such as ./stage0_vm.
+check_pattern "require[[:space:]]*([[:space:]]*['\"]vm['\"]" "vm module provides eval capabilities"
+check_pattern "require[[:space:]]*([[:space:]]*['\"]node:vm['\"]" "node:vm module provides eval capabilities"
 check_pattern "vm\.run" "vm.run* provides code execution"
 
 # Crypto randomness (non-determinism)
