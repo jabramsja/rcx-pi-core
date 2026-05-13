@@ -308,30 +308,40 @@ class TestCrossSubstrateBudgetParity:
         js_code = """
         'use strict';
         const { isValidMu, makeDepthBudget, consumeBudget, _STRUCTURAL_DEPTH_BUDGET } = require('./mu/host/js/core/types');
+        const muContainers = require('./mu/host/js/core/container_factory');
         const { match, substitute, NO_MATCH } = require('./mu/host/js/core/bootstrap_core');
+        function trustMu(value) {
+          if (Array.isArray(value)) {
+            return muContainers.list(value.map(item => trustMu(item)));
+          }
+          if (value !== null && typeof value === 'object') {
+            return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+          }
+          return value;
+        }
 
         const results = {};
 
         // is_mu parity
-        results.is_mu_shallow = isValidMu({a: [1, 2, 3]}, 0, undefined, _STRUCTURAL_DEPTH_BUDGET);
+        results.is_mu_shallow = isValidMu(trustMu({a: [1, 2, 3]}), 0, undefined, _STRUCTURAL_DEPTH_BUDGET);
         results.is_mu_invalid = isValidMu(undefined, 0, undefined, _STRUCTURAL_DEPTH_BUDGET);
 
         // match parity
-        const m1 = match({var: 'x'}, 42, 0, false, _STRUCTURAL_DEPTH_BUDGET);
+        const m1 = match(trustMu({var: 'x'}), 42, 0, false, _STRUCTURAL_DEPTH_BUDGET);
         results.match_var = JSON.stringify(m1);
-        const m2 = match([{var: 'x'}, {var: 'y'}], [1, 2], 0, false, _STRUCTURAL_DEPTH_BUDGET);
+        const m2 = match(trustMu([{var: 'x'}, {var: 'y'}]), trustMu([1, 2]), 0, false, _STRUCTURAL_DEPTH_BUDGET);
         results.match_list = JSON.stringify(m2);
         const m3 = match(42, 99, 0, false, _STRUCTURAL_DEPTH_BUDGET);
         results.match_fail = m3 === NO_MATCH ? 'NO_MATCH' : JSON.stringify(m3);
 
         // substitute parity
-        const s1 = substitute({result: {var: 'x'}}, {x: 'hello'}, 0, _STRUCTURAL_DEPTH_BUDGET);
+        const s1 = substitute(trustMu({result: {var: 'x'}}), {x: 'hello'}, 0, _STRUCTURAL_DEPTH_BUDGET);
         results.subst = JSON.stringify(s1);
 
         // exhaustion parity
         const tiny = makeDepthBudget(1);
-        results.exhaust_is_mu = isValidMu({a: {b: 42}}, 0, undefined, tiny);
-        const mexh = match({a: {var: 'x'}}, {a: 42}, 0, false, tiny);
+        results.exhaust_is_mu = isValidMu(trustMu({a: {b: 42}}), 0, undefined, tiny);
+        const mexh = match(trustMu({a: {var: 'x'}}), trustMu({a: 42}), 0, false, tiny);
         results.exhaust_match = mexh === NO_MATCH ? 'NO_MATCH' : JSON.stringify(mexh);
 
         // budget is valid Mu
@@ -383,7 +393,20 @@ class TestJSMuHostObjectBoundaryGate:
         js_code = """
         'use strict';
         const t = require('./mu/host/js/core/types');
+        const { containers } = t;
+        const muContainers = require('./mu/host/js/core/container_factory');
         const { match } = require('./mu/host/js/core/bootstrap_core');
+        const { normalizeProjection } = require('./mu/host/js/core/normalize');
+        const { deriveEngineExitReason } = require('./mu/host/js/core/terminal_classification');
+        function trustMu(value) {
+          if (Array.isArray(value)) {
+            return muContainers.list(value.map(item => trustMu(item)));
+          }
+          if (value !== null && typeof value === 'object') {
+            return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+          }
+          return value;
+        }
 
         class EmptyClass {}
         class KeyedClass { constructor() { this.a = 1; } }
@@ -417,21 +440,25 @@ class TestJSMuHostObjectBoundaryGate:
           },
           get(_target, key) { return key === 'a' ? 1 : undefined; },
         });
+        const transparentProxyRecord = new Proxy({a: 1}, {});
+        const transparentProxyArray = new Proxy([1], {});
 
         const cases = [
-          ['date', new Date('2026-05-08T00:00:00Z'), {}, {}],
-          ['map', new Map([['a', 1]]), {}, {}],
-          ['empty_class', new EmptyClass(), {}, {}],
-          ['keyed_class', new KeyedClass(), { a: 1 }, { a: { var: 'x' } }],
-          ['custom_proto', customProto, { a: 1 }, { a: { var: 'x' } }],
-          ['hidden_to_json', hiddenToJSON, { a: 2 }, { a: { var: 'x' } }],
-          ['array_subclass', arraySubclass, [1], [{ var: 'x' }]],
-          ['keyed_array_subclass', keyedArraySubclass, [1], [{ var: 'x' }]],
-          ['keyed_array', keyedArray, [1], [{ var: 'x' }]],
-          ['bigint', 1n, {}, {}],
-          ['proxy_throw_record', proxyThrowRecord, { a: 1 }, { a: { var: 'x' } }],
-          ['proxy_throw_array', proxyThrowArray, [1], [{ var: 'x' }]],
-          ['proxy_trap_record', proxyTrapRecord, { a: 1 }, { a: { var: 'x' } }],
+          ['date', new Date('2026-05-08T00:00:00Z'), trustMu({}), trustMu({})],
+          ['map', new Map([['a', 1]]), trustMu({}), trustMu({})],
+          ['empty_class', new EmptyClass(), trustMu({}), trustMu({})],
+          ['keyed_class', new KeyedClass(), trustMu({ a: 1 }), trustMu({ a: { var: 'x' } })],
+          ['custom_proto', customProto, trustMu({ a: 1 }), trustMu({ a: { var: 'x' } })],
+          ['hidden_to_json', hiddenToJSON, trustMu({ a: 2 }), trustMu({ a: { var: 'x' } })],
+          ['array_subclass', arraySubclass, trustMu([1]), trustMu([{ var: 'x' }])],
+          ['keyed_array_subclass', keyedArraySubclass, trustMu([1]), trustMu([{ var: 'x' }])],
+          ['keyed_array', keyedArray, trustMu([1]), trustMu([{ var: 'x' }])],
+          ['bigint', 1n, trustMu({}), trustMu({})],
+          ['proxy_throw_record', proxyThrowRecord, trustMu({ a: 1 }), trustMu({ a: { var: 'x' } })],
+          ['proxy_throw_array', proxyThrowArray, trustMu([1]), trustMu([{ var: 'x' }])],
+          ['proxy_trap_record', proxyTrapRecord, trustMu({ a: 1 }), trustMu({ a: { var: 'x' } })],
+          ['transparent_proxy_record', transparentProxyRecord, trustMu({ a: 1 }), trustMu({ a: { var: 'x' } })],
+          ['transparent_proxy_array', transparentProxyArray, trustMu([1]), trustMu([{ var: 'x' }])],
         ];
 
         const hashFns = ['muHash', 'muHashCached', 'muHashControl', 'muHashControlCached'];
@@ -453,9 +480,53 @@ class TestJSMuHostObjectBoundaryGate:
             return { rejected: true, error_code: err.error_code || null };
           }
         }
+        function publicConstructorOutcome(kind, argument) {
+          if (typeof t.containers[kind] !== 'function') return { available: false };
+          try {
+            const candidate = t.containers[kind](argument);
+            return {
+              available: true,
+              defaultValid: t.isValidMu(candidate),
+              hash: hashOutcome('muHash', candidate),
+            };
+          } catch (err) {
+            return { available: true, threw: true, error_code: err.error_code || null };
+          }
+        }
 
-        const accepted = { a: [1, { b: false }], c: null };
+        const accepted = trustMu({ a: [1, { b: false }], c: null });
+        const acceptedPattern = trustMu({ a: { var: 'x' }, c: null });
+        const normalizedProjection = normalizeProjection(trustMu({
+          pattern: { op: 'ok', value: { var: 'x' } },
+          body: { result: { var: 'x' } },
+        }));
+        const terminalResult = trustMu({
+          closure_detected: false,
+          exhaustion_detected: false,
+          stall: false,
+        });
         console.log(JSON.stringify({
+          publicExports: {
+            trustedSet: t._TRUSTED_MU_CONTAINERS === undefined,
+            symbolProvenance: t[Symbol.for('rcx.mu.internalProvenance')] === undefined,
+            markTrustedMuContainer: t.markTrustedMuContainer === undefined,
+            markTrustedMuTree: t.markTrustedMuTree === undefined,
+            containerAdd: t.containers.add === undefined,
+            containerJson: t.containers.json === undefined,
+            containerList: t.containers.list === undefined,
+            containerRecord: t.containers.record === undefined,
+            containerKeys: JSON.stringify(Object.keys(t.containers)) === '["has"]',
+            enumerableTrustKeys: Object.keys(t).filter(k => /trust|provenance/i.test(k)).length === 0,
+          },
+          publicLaunder: {
+            recordFromProxyEntries: publicConstructorOutcome('record', Object.entries(transparentProxyRecord)),
+            listFromProxyArray: publicConstructorOutcome('list', transparentProxyArray),
+          },
+          producerOutputs: {
+            normalizedProjectionValid: t.isValidMu(normalizedProjection),
+            normalizedProjectionHash: hashOutcome('muHash', normalizedProjection),
+            engineExitReason: deriveEngineExitReason(terminalResult),
+          },
           rejected: cases.map(([name, value, validPeer, patternForInvalidInput]) => ({
             name,
             defaultValid: t.isValidMu(value),
@@ -473,8 +544,8 @@ class TestJSMuHostObjectBoundaryGate:
             budgetValid: t.isValidMu(accepted, 0, undefined, t._STRUCTURAL_DEPTH_BUDGET),
             hash: t.muHash(accepted),
             cached: t.muHashCached(accepted),
-            matchDefault: matchOutcome({ a: { var: 'x' }, c: null }, accepted, false),
-            matchBudget: matchOutcome({ a: { var: 'x' }, c: null }, accepted, true),
+            matchDefault: matchOutcome(acceptedPattern, accepted, false),
+            matchBudget: matchOutcome(acceptedPattern, accepted, true),
           },
         }));
         """
@@ -489,6 +560,27 @@ class TestJSMuHostObjectBoundaryGate:
 
         import json
         results = json.loads(result.stdout.strip())
+        assert results["publicExports"] == {
+            "trustedSet": True,
+            "symbolProvenance": True,
+            "markTrustedMuContainer": True,
+            "markTrustedMuTree": True,
+            "containerAdd": True,
+            "containerJson": True,
+            "containerList": True,
+            "containerRecord": True,
+            "containerKeys": True,
+            "enumerableTrustKeys": True,
+        }
+        assert results["publicLaunder"] == {
+            "recordFromProxyEntries": {"available": False},
+            "listFromProxyArray": {"available": False},
+        }
+        assert results["producerOutputs"] == {
+            "normalizedProjectionValid": True,
+            "normalizedProjectionHash": {"rejected": False, "error_code": None},
+            "engineExitReason": "completed",
+        }
         assert {row["name"] for row in results["rejected"]} == {
             "date",
             "map",
@@ -503,6 +595,8 @@ class TestJSMuHostObjectBoundaryGate:
             "proxy_throw_record",
             "proxy_throw_array",
             "proxy_trap_record",
+            "transparent_proxy_record",
+            "transparent_proxy_array",
         }
         for row in results["rejected"]:
             assert row["defaultValid"] is False, row

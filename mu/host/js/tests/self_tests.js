@@ -10,6 +10,7 @@
 const { normalize, denormalize, normalizeProjection, listToLinked } = require('../core/normalize');
 const { step, run, match } = require('../core/bootstrap_core');
 const { isValidMu, muEqual, muHash, muHashCached } = require('../core/types');
+const muContainers = require('../core/container_factory');
 const { NO_MATCH } = require('../core/constants');
 const { validateNoKernelReservedFields } = require('../core/security');
 const { stepKernel, runStructural, stepKernelStructural } = require('../engine/kernel');
@@ -18,6 +19,20 @@ const { hashTraceForRecurrence } = require('../engine/pipeline');
 
 const path = require('path');
 const fs = require('fs');
+
+function trustTestMu(value) {
+  if (Array.isArray(value)) {
+    return muContainers.list(value.map(item => trustTestMu(item)));
+  }
+  if (value !== null && typeof value === 'object') {
+    const entries = [];
+    for (const key of Object.keys(value)) {
+      entries.push([key, trustTestMu(value[key])]);
+    }
+    return muContainers.record(entries);
+  }
+  return value;
+}
 
 module.exports = function runSelfTests(seeds) {
   const {
@@ -65,14 +80,14 @@ module.exports = function runSelfTests(seeds) {
 
   // === Test 1: Complete Kernel Cycle ===
   console.log('=== Test 1: Complete Kernel Cycle ===\n');
-  const testProjection = {
+  const testProjection = trustTestMu({
     pattern: { op: 'double', value: { var: 'n' } },
     body: { result: { var: 'n' }, doubled: { var: 'n' } }
-  };
+  });
   const normalizedProjection = normalizeProjection(testProjection);
-  const testInput = { op: 'double', value: 42 };
+  const testInput = trustTestMu({ op: 'double', value: 42 });
   const normalizedInput = normalize(testInput);
-  const kernelInput = { _step: normalizedInput, _projs: listToLinked([normalizedProjection]) };
+  const kernelInput = trustTestMu({ _step: normalizedInput, _projs: listToLinked([normalizedProjection]) });
   console.log('Original input:', JSON.stringify(testInput));
   console.log('Normalized input:', JSON.stringify(normalizedInput));
   console.log('Original projection pattern:', JSON.stringify(testProjection.pattern));
@@ -91,15 +106,15 @@ module.exports = function runSelfTests(seeds) {
   const denormalizedResult = denormalize(result);
   console.log(`\nRaw result:`, JSON.stringify(result));
   console.log(`Denormalized result:`, JSON.stringify(denormalizedResult));
-  const expectedResult = { result: 42, doubled: 42 };
+  const expectedResult = trustTestMu({ result: 42, doubled: 42 });
   const passed = muEqual(denormalizedResult, expectedResult);
   console.log(`\nExpected:`, JSON.stringify(expectedResult));
   console.log(`PASS: ${passed}`);
 
   // === Test 2: Stall Case ===
   console.log('\n=== Test 2: Stall Case (No Match) ===\n');
-  const testProjection2 = { pattern: { op: 'triple', value: { var: 'n' } }, body: { result: { var: 'n' } } };
-  const kernelInput2 = { _step: normalizedInput, _projs: listToLinked([normalizeProjection(testProjection2)]) };
+  const testProjection2 = trustTestMu({ pattern: { op: 'triple', value: { var: 'n' } }, body: { result: { var: 'n' } } });
+  const kernelInput2 = trustTestMu({ _step: normalizedInput, _projs: listToLinked([normalizeProjection(testProjection2)]) });
   const { result: result2, steps: steps2, stalled: stalled2 } = run(allProjections, kernelInput2, 100);
   const denorm2 = denormalize(result2);
   console.log('Input:', JSON.stringify(testInput));
@@ -112,24 +127,24 @@ module.exports = function runSelfTests(seeds) {
 
   // === Test 3: Multiple projections ===
   console.log('\n=== Test 3: Multiple Projections (First-Match-Wins) ===\n');
-  const projections3 = [
+  const projections3 = trustTestMu([
     { pattern: { op: 'add', a: { var: 'x' }, b: { var: 'y' } }, body: { sum: { var: 'x' } } },
     { pattern: { op: 'mul', a: { var: 'x' }, b: { var: 'y' } }, body: { product: { var: 'x' } } },
     { pattern: { var: 'anything' }, body: { error: 'unknown op' } }
-  ];
+  ]);
   const normalizedProjs3 = projections3.map(normalizeProjection);
-  const inputs3 = [{ op: 'add', a: 10, b: 20 }, { op: 'mul', a: 5, b: 6 }, { op: 'div', a: 1, b: 2 }];
+  const inputs3 = trustTestMu([{ op: 'add', a: 10, b: 20 }, { op: 'mul', a: 5, b: 6 }, { op: 'div', a: 1, b: 2 }]);
   const results3 = inputs3.map(inp => {
-    const ki = { _step: normalize(inp), _projs: listToLinked(normalizedProjs3) };
+    const ki = trustTestMu({ _step: normalize(inp), _projs: listToLinked(normalizedProjs3) });
     const { result } = run(allProjections, ki, 100);
     return denormalize(result);
   });
   console.log('Input: { op: "add", a: 10, b: 20 } ->', JSON.stringify(results3[0]));
   console.log('Input: { op: "mul", a: 5, b: 6 }  ->', JSON.stringify(results3[1]));
   console.log('Input: { op: "div", a: 1, b: 2 }  ->', JSON.stringify(results3[2]));
-  const pass3a = muEqual(results3[0], { sum: 10 });
-  const pass3b = muEqual(results3[1], { product: 5 });
-  const pass3c = muEqual(results3[2], { error: 'unknown op' });
+  const pass3a = muEqual(results3[0], trustTestMu({ sum: 10 }));
+  const pass3b = muEqual(results3[1], trustTestMu({ product: 5 }));
+  const pass3c = muEqual(results3[2], trustTestMu({ error: 'unknown op' }));
   console.log(`\nPASS add: ${pass3a}`);
   console.log(`PASS mul: ${pass3b}`);
   console.log(`PASS catchall: ${pass3c}`);
@@ -137,8 +152,8 @@ module.exports = function runSelfTests(seeds) {
   // === Test 4: NaN/Infinity ===
   console.log('\n=== Test 4: Security - NaN/Infinity Rejection ===\n');
   let nanRejected = false, infRejected = false;
-  try { normalize({ value: NaN }); } catch (e) { nanRejected = e.message.includes('NaN'); }
-  try { normalize({ value: Infinity }); } catch (e) { infRejected = e.message.includes('Infinity'); }
+  try { normalize(trustTestMu({ value: NaN })); } catch (e) { nanRejected = e.message.includes('NaN'); }
+  try { normalize(trustTestMu({ value: Infinity })); } catch (e) { infRejected = e.message.includes('Infinity'); }
   console.log(`NaN rejected: ${nanRejected}`);
   console.log(`Infinity rejected: ${infRejected}`);
   console.log(`PASS security: ${nanRejected && infRejected}`);
@@ -147,8 +162,8 @@ module.exports = function runSelfTests(seeds) {
   console.log('\n=== Test 5: Security - Depth Guard ===\n');
   function createDeep(depth) { let obj = { value: 'bottom' }; for (let i = 0; i < depth; i++) obj = { nested: obj }; return obj; }
   let shallowOk = false, deepRejected = false;
-  try { normalize(createDeep(50)); shallowOk = true; } catch (e) { console.log('Shallow failed:', e.message); }
-  try { normalize(createDeep(350)); } catch (e) { deepRejected = e.message.includes('Max depth'); }
+  try { normalize(trustTestMu(createDeep(50))); shallowOk = true; } catch (e) { console.log('Shallow failed:', e.message); }
+  try { normalize(trustTestMu(createDeep(350))); } catch (e) { deepRejected = e.message.includes('Max depth'); }
   console.log(`Shallow (50 levels) OK: ${shallowOk}`);
   console.log(`Deep (350 levels) rejected: ${deepRejected}`);
   console.log(`PASS depth guard: ${shallowOk && deepRejected}`);
@@ -156,13 +171,13 @@ module.exports = function runSelfTests(seeds) {
   // === Test 6: Reserved Fields ===
   console.log('\n=== Test 6: Security - Kernel Reserved Fields Rejection ===\n');
   let reservedFieldRejected = false, nestedReservedRejected = false, cleanDataAccepted = false;
-  try { stepKernel(allProjections, { op: 'test', _step: 'forged' }, [testProjection]); }
+  try { stepKernel(allProjections, trustTestMu({ op: 'test', _step: 'forged' }), [testProjection]); }
   catch (e) { reservedFieldRejected = e.message.includes('_step') && e.message.includes('reserved'); }
   console.log(`Direct _step in input rejected: ${reservedFieldRejected}`);
-  try { stepKernel(allProjections, { op: 'test', nested: { deep: { _mode: 'forged' } } }, [testProjection]); }
+  try { stepKernel(allProjections, trustTestMu({ op: 'test', nested: { deep: { _mode: 'forged' } } }), [testProjection]); }
   catch (e) { nestedReservedRejected = e.message.includes('_mode') && e.message.includes('reserved'); }
   console.log(`Nested _mode in input rejected: ${nestedReservedRejected}`);
-  try { stepKernel(allProjections, { op: 'double', value: 99 }, [testProjection], { maxSteps: 50 }); cleanDataAccepted = true; }
+  try { stepKernel(allProjections, trustTestMu({ op: 'double', value: 99 }), [testProjection], { maxSteps: 50 }); cleanDataAccepted = true; }
   catch (e) { console.log('Clean data failed:', e.message); }
   console.log(`Clean domain data accepted: ${cleanDataAccepted}`);
   const passReservedFields = reservedFieldRejected && nestedReservedRejected && cleanDataAccepted;
@@ -170,11 +185,11 @@ module.exports = function runSelfTests(seeds) {
 
   // === Test 7: Head/tail strict detection ===
   console.log('\n=== Test 7: Head/Tail Strict Detection ===\n');
-  const userDataWithExtra = { head: 'my data', tail: 'other', extra: 'field' };
+  const userDataWithExtra = trustTestMu({ head: 'my data', tail: 'other', extra: 'field' });
   const normalizedUserData = normalize(userDataWithExtra);
   const isNormalizedAsDict = normalizedUserData._type === 'dict';
   console.log('User data {head, tail, extra} normalized as dict:', isNormalizedAsDict);
-  const realLinkedList = { head: 1, tail: null };
+  const realLinkedList = trustTestMu({ head: 1, tail: null });
   const normalizedLinkedList = normalize(realLinkedList);
   const isPreservedAsHeadTail = 'head' in normalizedLinkedList && 'tail' in normalizedLinkedList && !('_type' in normalizedLinkedList);
   console.log('Real {head, tail} preserved:', isPreservedAsHeadTail);
@@ -226,14 +241,14 @@ module.exports = function runSelfTests(seeds) {
   console.log('\n=== Test 9: Structural Trace (Phase 8d) ===\n');
   let structuralTraceAllPassed = true;
   try {
-    const simpleProj = [{ id: 'double', pattern: { op: 'double', value: { var: 'n' } }, body: { result: { var: 'n' } } }];
-    const structResult = runStructural(allProjectionsWithBridge, simpleProj, { op: 'double', value: 42 }, 10);
+    const simpleProj = trustTestMu([{ id: 'double', pattern: { op: 'double', value: { var: 'n' } }, body: { result: { var: 'n' } } }]);
+    const structResult = runStructural(allProjectionsWithBridge, simpleProj, trustTestMu({ op: 'double', value: 42 }), 10);
     const hasAllFields = 'result' in structResult && 'trace' in structResult && 'stall' in structResult && 'steps' in structResult;
     console.log(`  Returns Mu-compatible structure: ${hasAllFields}`);
     structuralTraceAllPassed = structuralTraceAllPassed && hasAllFields;
   } catch (e) { console.log(`  Returns Mu-compatible structure: false (${e.message})`); structuralTraceAllPassed = false; }
   try {
-    const simpleProj = [{ id: 'identity', pattern: { var: 'x' }, body: { var: 'x' } }];
+    const simpleProj = trustTestMu([{ id: 'identity', pattern: { var: 'x' }, body: { var: 'x' } }]);
     const structResult = runStructural(allProjectionsWithBridge, simpleProj, 'test', 10);
     const isLinkedList = structResult.trace === null || ('head' in structResult.trace && 'tail' in structResult.trace);
     console.log(`  Trace is linked list: ${isLinkedList}`);
@@ -257,7 +272,7 @@ module.exports = function runSelfTests(seeds) {
     structuralTraceAllPassed = structuralTraceAllPassed && stallDetected && stepsCorrect;
   } catch (e) { console.log(`  Stall detected correctly: false (${e.message})`); structuralTraceAllPassed = false; }
   try {
-    const structResult = stepKernelStructural(allProjectionsWithBridge, [testProjection], { op: 'double', value: 99 }, { maxSteps: 100 });
+    const structResult = stepKernelStructural(allProjectionsWithBridge, [testProjection], trustTestMu({ op: 'double', value: 99 }), { maxSteps: 100 });
     const hasStructuralResult = 'result' in structResult && 'trace' in structResult;
     console.log(`  stepKernelStructural works: ${hasStructuralResult}`);
     structuralTraceAllPassed = structuralTraceAllPassed && hasStructuralResult;
@@ -267,15 +282,15 @@ module.exports = function runSelfTests(seeds) {
   // === Test 10: Recurrence ===
   console.log('\n=== Test 10: Recurrence Closure Detection (L3 Parity) ===\n');
   function runRecurrence(traceResult) {
-    const recurrenceInput = { _detect_closure: { trace: traceResult.trace, result: traceResult.result } };
+    const recurrenceInput = trustTestMu({ _detect_closure: { trace: traceResult.trace, result: traceResult.result } });
     const { result } = run(recurrenceProjections, recurrenceInput, 1000);
     return result;
   }
   const muRoot = path.join(__dirname, '..', '..', '..', '..');
   const recurrenceVectorsPath = path.join(muRoot, 'tests', 'fixtures', 'recurrence_vectors.json');
   let recurrenceVectors;
-  try { recurrenceVectors = JSON.parse(fs.readFileSync(recurrenceVectorsPath, 'utf8')); }
-  catch (e) { recurrenceVectors = { vectors: [] }; }
+  try { recurrenceVectors = trustTestMu(JSON.parse(fs.readFileSync(recurrenceVectorsPath, 'utf8'))); }
+  catch (e) { recurrenceVectors = trustTestMu({ vectors: [] }); }
   let recurrencePassed = 0, recurrenceFailed = 0;
   for (const vector of recurrenceVectors.vectors) {
     try {
@@ -323,7 +338,7 @@ module.exports = function runSelfTests(seeds) {
   // === Test: Engine-Hemisphere Helpers ===
   console.log('\n=== Test: Engine-Hemisphere Helpers ===\n');
   let engineHelpersPassed = true;
-  const terminalShape = { value: 'x', closure_detected: false, tau_step: 0, exhaustion_detected: false, operator_frozen: false, frozen_set: null, action: 'continue', stall: true };
+  const terminalShape = trustTestMu({ value: 'x', closure_detected: false, tau_step: 0, exhaustion_detected: false, operator_frozen: false, frozen_set: null, action: 'continue', stall: true });
   const terminalDetected = isEngineTerminal(terminalShape);
   const nonTerminalRejected = !isEngineTerminal({ partial: true });
   const nullRejected = !isEngineTerminal(null);
@@ -331,14 +346,14 @@ module.exports = function runSelfTests(seeds) {
   console.log(`  isEngineTerminal(partial): ${nonTerminalRejected} (expected: true)`);
   console.log(`  isEngineTerminal(null): ${nullRejected} (expected: true)`);
   engineHelpersPassed = engineHelpersPassed && terminalDetected && nonTerminalRejected && nullRejected;
-  const recTerminal = { closure_detected: true, final_result: 'x', tau_step: 2 };
-  const exhTerminal = { action: 'freeze', exhaustion_detected: true, frozen: null, operator_to_freeze: 'op1' };
+  const recTerminal = trustTestMu({ closure_detected: true, final_result: 'x', tau_step: 2 });
+  const exhTerminal = trustTestMu({ action: 'freeze', exhaustion_detected: true, frozen: null, operator_to_freeze: 'op1' });
   console.log(`  isTerminalShape(recurrence): ${isTerminalShape(recTerminal)} (expected: true)`);
   console.log(`  isTerminalShape(exhaustion): ${isTerminalShape(exhTerminal)} (expected: true)`);
-  console.log(`  isTerminalShape(other): ${!isTerminalShape({ random: 1 })} (expected: true)`);
-  engineHelpersPassed = engineHelpersPassed && isTerminalShape(recTerminal) && isTerminalShape(exhTerminal) && !isTerminalShape({ random: 1 });
+  console.log(`  isTerminalShape(other): ${!isTerminalShape(trustTestMu({ random: 1 }))} (expected: true)`);
+  engineHelpersPassed = engineHelpersPassed && isTerminalShape(recTerminal) && isTerminalShape(exhTerminal) && !isTerminalShape(trustTestMu({ random: 1 }));
   try {
-    const simpleTrace = { head: { step: 0, state: { x: 1 }, projection: 'test' }, tail: { head: { step: 1, state: { x: 1 }, stall: true }, tail: null } };
+    const simpleTrace = trustTestMu({ head: { step: 0, state: { x: 1 }, projection: 'test' }, tail: { head: { step: 1, state: { x: 1 }, stall: true }, tail: null } });
     const hashed = hashTraceForRecurrence(simpleTrace);
     const hasHash0 = 'state_hash' in hashed.head;
     const hasHash1 = 'state_hash' in hashed.tail.head;
@@ -346,8 +361,14 @@ module.exports = function runSelfTests(seeds) {
     engineHelpersPassed = engineHelpersPassed && hasHash0 && hasHash1;
   } catch (e) { console.log(`  hashTrace failed: ${e.message}`); engineHelpersPassed = false; }
   try {
-    const nodeA = { head: { state: 'A', step: 0 }, tail: null };
-    const nodeB = { head: { state: 'B', step: 1 }, tail: nodeA };
+    const nodeA = muContainers.record([
+      ['head', trustTestMu({ state: 'A', step: 0 })],
+      ['tail', null],
+    ]);
+    const nodeB = muContainers.record([
+      ['head', trustTestMu({ state: 'B', step: 1 })],
+      ['tail', nodeA],
+    ]);
     nodeA.tail = nodeB;
     hashTraceForRecurrence(nodeA);
     console.log(`  hashTrace cycle detection: false (should have thrown)`); engineHelpersPassed = false;
@@ -358,7 +379,7 @@ module.exports = function runSelfTests(seeds) {
   }
   try {
     let overcapTrace = null;
-    for (let i = 4; i >= 0; i--) overcapTrace = { head: { state: String(i), step: i }, tail: overcapTrace };
+    for (let i = 4; i >= 0; i--) overcapTrace = trustTestMu({ head: { state: String(i), step: i }, tail: overcapTrace });
     hashTraceForRecurrence(overcapTrace, 3);
     console.log(`  hashTrace overcap detection: false (should have thrown)`); engineHelpersPassed = false;
   } catch (e) {
@@ -389,7 +410,7 @@ module.exports = function runSelfTests(seeds) {
   console.log(`  Metabolization ID order matches: ${metabIdOrderMatch} (expected: true)`);
   metabolizationBehaviorPassed = metabolizationBehaviorPassed && metabIdOrderMatch;
 
-  function stepMetab(input) { return step(metabolizationProjections, input); }
+  function stepMetab(input) { return step(metabolizationProjections, trustTestMu(input)); }
 
   // Metabolization test cases (condensed)
   {
@@ -409,14 +430,14 @@ module.exports = function runSelfTests(seeds) {
   {
     const input = { recover_mode: 'check_stall', stalled_entry: { state: 'stalled_thing', origin: 'engine' }, hemispheres: { r_null: null, r_inf: null, r_a: null, lobes: { head: 'existing_lobe', tail: null }, sink: null } };
     const result = stepMetab(input);
-    const ok = typeof result === 'object' && result !== null && result.recover_result !== undefined && result.recover_result.lobes !== null && result.recover_result.lobes.head !== undefined && muEqual(result.recover_result.lobes.head, { state: 'stalled_thing', origin: 'engine' }) && result.recover_result.lobes.tail !== null && result.recover_result.lobes.tail.head === 'existing_lobe';
+    const ok = typeof result === 'object' && result !== null && result.recover_result !== undefined && result.recover_result.lobes !== null && result.recover_result.lobes.head !== undefined && muEqual(result.recover_result.lobes.head, trustTestMu({ state: 'stalled_thing', origin: 'engine' })) && result.recover_result.lobes.tail !== null && result.recover_result.lobes.tail.head === 'existing_lobe';
     console.log(`  stall_to_lobes (lobes non-null → prepend): ${ok} (expected: true)`);
     metabolizationBehaviorPassed = metabolizationBehaviorPassed && ok;
   }
   {
     const input = { recover_mode: 'check_stall', stalled_entry: { state: 'stalled_thing', origin: 'engine' }, hemispheres: { r_null: null, r_inf: null, r_a: null, lobes: null, sink: null } };
     const result = stepMetab(input);
-    const ok = typeof result === 'object' && result !== null && result.recover_result !== undefined && result.recover_result.lobes === null && result.recover_result.sink !== null && muEqual(result.recover_result.sink.head, { state: 'stalled_thing', origin: 'engine' });
+    const ok = typeof result === 'object' && result !== null && result.recover_result !== undefined && result.recover_result.lobes === null && result.recover_result.sink !== null && muEqual(result.recover_result.sink.head, trustTestMu({ state: 'stalled_thing', origin: 'engine' }));
     console.log(`  stall_to_sink (lobes null → sink fallback): ${ok} (expected: true)`);
     metabolizationBehaviorPassed = metabolizationBehaviorPassed && ok;
   }
@@ -430,14 +451,14 @@ module.exports = function runSelfTests(seeds) {
   {
     const input = { recycle_mode: 'drain', source_bucket: 'r_inf', unresolvable_entry: { type: 'unknown', data: 42 }, hemispheres: { r_null: null, r_inf: null, r_a: null, lobes: null, sink: null } };
     const result = stepMetab(input);
-    const ok = typeof result === 'object' && result !== null && result.recycle_result !== undefined && result.recycle_result.sink !== null && result.recycle_result.sink.head !== undefined && muEqual(result.recycle_result.sink.head.state, { type: 'unknown', data: 42 }) && result.recycle_result.sink.head.origin === 'recycled' && result.recycle_result.r_null === null && result.recycle_result.r_inf === null;
+    const ok = typeof result === 'object' && result !== null && result.recycle_result !== undefined && result.recycle_result.sink !== null && result.recycle_result.sink.head !== undefined && muEqual(result.recycle_result.sink.head.state, trustTestMu({ type: 'unknown', data: 42 })) && result.recycle_result.sink.head.origin === 'recycled' && result.recycle_result.r_null === null && result.recycle_result.r_inf === null;
     console.log(`  residual_to_sink (drain → sink recycled): ${ok} (expected: true)`);
     metabolizationBehaviorPassed = metabolizationBehaviorPassed && ok;
   }
   {
     const input = { unrecognized_mode: 'garbage', data: 123 };
     const result = stepMetab(input);
-    const ok = muEqual(result, input);
+    const ok = muEqual(result, trustTestMu(input));
     console.log(`  stall on non-matching input: ${ok} (expected: true)`);
     metabolizationBehaviorPassed = metabolizationBehaviorPassed && ok;
   }
@@ -469,8 +490,8 @@ module.exports = function runSelfTests(seeds) {
     try {
       // Run a simple kernel step through bridge path with VM shadow
       const bridgeResult = stepKernel(
-        allProjectionsWithBridge, { op: 'double', value: 42 },
-        [{ pattern: { op: 'double', value: { var: 'n' } }, body: { result: { var: 'n' } } }],
+        allProjectionsWithBridge, trustTestMu({ op: 'double', value: 42 }),
+        trustTestMu([{ pattern: { op: 'double', value: { var: 'n' } }, body: { result: { var: 'n' } } }]),
         { maxSteps: 50, vmConfig: vmConfigBridge }
       );
       const hasBridgeResult = bridgeResult && 'result' in bridgeResult;
@@ -484,8 +505,8 @@ module.exports = function runSelfTests(seeds) {
       // Run structural trace through bridge path with VM shadow
       const bridgeTraceResult = runStructural(
         allProjectionsWithBridge,
-        [{ id: 'test_double', pattern: { op: 'double', value: { var: 'n' } }, body: { result: { var: 'n' } } }],
-        { op: 'double', value: 99 }, 10, vmConfigBridge
+        trustTestMu([{ id: 'test_double', pattern: { op: 'double', value: { var: 'n' } }, body: { result: { var: 'n' } } }]),
+        trustTestMu({ op: 'double', value: 99 }), 10, vmConfigBridge
       );
       const hasTraceFields = 'result' in bridgeTraceResult && 'trace' in bridgeTraceResult;
       console.log(`  Bridge-mode runStructural with vmConfig: ${hasTraceFields} (expected: true)`);
@@ -498,7 +519,7 @@ module.exports = function runSelfTests(seeds) {
     try {
       const bridgeStallResult = stepKernel(
         allProjectionsWithBridge, 'no_match_input',
-        [{ pattern: { op: 'never', value: { var: 'x' } }, body: { var: 'x' } }],
+        trustTestMu([{ pattern: { op: 'never', value: { var: 'x' } }, body: { var: 'x' } }]),
         { maxSteps: 50, returnMeta: true, vmConfig: vmConfigBridge }
       );
       const stallDetected = bridgeStallResult.stall === true;

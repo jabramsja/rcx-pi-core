@@ -284,10 +284,11 @@ Archived source snapshots for extracted non-blocking residue live in:
   moved to
   `reports/archive/deferred/stage0-capture-provenance-deferred-cleanup-2026-05-12_bridge_nonblockers_closed-by-stage0-cleanup-bridge-doc-accuracy-closeout-2026-05-12.md`
   after its three stale-doc findings were corrected.
-- Retained live advisories remain active: transparent JS Proxy provenance and
-  N3 broad host-surface boundary. N1 VM coverage bookkeeping is closed by
-  PR #940 / `vm-cutover-coverage-trace-implementation-2026-05-12`; N5 JS
-  pipeline governance is now closed and archived by
+- At that closeout point, retained live advisories remained active: transparent
+  JS Proxy provenance and N3 broad host-surface boundary. N1 VM coverage
+  bookkeeping is closed by PR #940 /
+  `vm-cutover-coverage-trace-implementation-2026-05-12`; N5 JS pipeline
+  governance is now closed and archived by
   `post-js-pipeline-governance-deferred-cleanup-2026-05-12`.
 
 2026-05-12 post-JS pipeline governance deferred cleanup note:
@@ -303,9 +304,10 @@ Archived source snapshots for extracted non-blocking residue live in:
   `js-engine-pipeline-shape-governance-test-2026-05-12` structural guard.
   Its historical text is archived at
   `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N5_js_pipeline_governance_closed-by-post-js-pipeline-governance-deferred-cleanup-2026-05-12.md`.
-- Retained live advisories remain active: transparent JS Proxy provenance and
-  N3 broad host-surface boundary. N1 VM coverage bookkeeping is closed by
-  PR #940 / `vm-cutover-coverage-trace-implementation-2026-05-12`.
+- At that cleanup point, retained live advisories remained active: transparent
+  JS Proxy provenance and N3 broad host-surface boundary. N1 VM coverage
+  bookkeeping is closed by PR #940 /
+  `vm-cutover-coverage-trace-implementation-2026-05-12`.
 - This cleanup did not implement runtime, Stage0, seed, scheduler, registry,
   parity, production `/mu`, host-oracle, or Claude-related changes.
 
@@ -313,10 +315,35 @@ Archived source snapshots for extracted non-blocking residue live in:
 
 - Evidence command:
   `rg -n "N1 VM coverage bookkeeping|transparent JS Proxy provenance|N3 broad host-surface|vm-cutover-coverage-trace-implementation-2026-05-12|PR #940" reports/deferred/README.md reports/deferred/non_blocking/README.md reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`.
-- Current deferred inventory keeps transparent JS Proxy provenance and N3 broad
-  host-surface boundary active as `/mu` structural advisories.
+- At that cleanup point, deferred inventory kept transparent JS Proxy provenance
+  and N3 broad host-surface boundary active as `/mu` structural advisories; the
+  same-day transparent Proxy closure note below supersedes the transparent Proxy
+  status.
 - N1 VM coverage bookkeeping is closed by PR #940 /
   `vm-cutover-coverage-trace-implementation-2026-05-12` and is no longer routed
   as active deferred work.
 - This cleanup did not implement runtime, Stage0, seed, scheduler, registry,
   parity, production `/mu`, host-oracle, or Claude-related changes.
+
+2026-05-13 transparent JS Proxy provenance closure note:
+
+- Evidence command:
+  `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
+- Current deferred inventory is `reports/deferred/blocking/README.md`, this
+  README, and one partially active retained `/mu` structural advisory packet:
+  `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`.
+- Transparent JS Proxy provenance is closed by
+  `transparent-js-live-container-provenance-implementation-2026-05-13` and
+  archived at
+  `reports/archive/deferred/founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers_closed-by-transparent-js-live-container-provenance-implementation-2026-05-13.md`.
+- The retained live advisory is now N3 broad host-surface boundary only.
+
+2026-05-13 direct inventory clarification:
+
+- Evidence command:
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
+- Current active non-blocking lane contents are this README plus
+  `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`.
+- Current open deferred/non-blocking work inside that source packet is N3 broad
+  host-surface boundary only; earlier references to two or three active packets
+  are historical point-in-time notes superseded by the later closure notes above.

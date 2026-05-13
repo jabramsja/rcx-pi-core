@@ -45,6 +45,16 @@ from rcx_pi.selfhost.mu_type import (
 
 JS_DIR = REPO_ROOT / "mu" / "host" / "js"
 PY_DIR = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost"
+JS_TRUST_MU_PRELUDE = """
+const muContainers = require('./mu/host/js/core/container_factory');
+function trustMu(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(trustMu));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+  }
+  return value;
+}
+"""
 
 
 class TestPythonCanonnicalization:
@@ -210,7 +220,8 @@ class TestCrossSubstrateParity:
     def _js_hash(self, value_expr):
         code = (
             "const t = require('./mu/host/js/core/types');\n"
-            f"console.log(t.muHashControl({value_expr}));"
+            f"{JS_TRUST_MU_PRELUDE}\n"
+            f"console.log(t.muHashControl(trustMu({value_expr})));"
         )
         result = subprocess.run(
             ["node", "-e", code],
@@ -572,7 +583,8 @@ class TestNonLinearBindingContentHash:
         """JS: [x,x] with [1.0, 1] does not conflict (Number model: 1.0 === 1)."""
         script = (
             "const bc = require('./mu/host/js/core/bootstrap_core');\n"
-            "const result = bc.match([{var:'x'},{var:'x'}], [1.0, 1]);\n"
+            f"{JS_TRUST_MU_PRELUDE}\n"
+            "const result = bc.match(trustMu([{var:'x'},{var:'x'}]), trustMu([1.0, 1]));\n"
             "console.log(JSON.stringify({matched: result !== bc.NO_MATCH, bindings: result}));\n"
         )
         result = subprocess.run(
@@ -586,7 +598,8 @@ class TestNonLinearBindingContentHash:
         """JS: match([{var:x},{var:x}], [1, 2]) must still conflict."""
         script = (
             "const bc = require('./mu/host/js/core/bootstrap_core');\n"
-            "const result = bc.match([{var:'x'},{var:'x'}], [1, 2]);\n"
+            f"{JS_TRUST_MU_PRELUDE}\n"
+            "const result = bc.match(trustMu([{var:'x'},{var:'x'}]), trustMu([1, 2]));\n"
             "console.log(JSON.stringify({matched: result !== bc.NO_MATCH}));\n"
         )
         result = subprocess.run(
@@ -625,7 +638,8 @@ class TestNumericNonLinearPolicyLock:
         """POLICY: JS [x,x] with [1.0, 1] must not conflict (Number model)."""
         script = (
             "const bc = require('./mu/host/js/core/bootstrap_core');\n"
-            "const r = bc.match([{var:'x'},{var:'x'}], [1.0, 1]);\n"
+            f"{JS_TRUST_MU_PRELUDE}\n"
+            "const r = bc.match(trustMu([{var:'x'},{var:'x'}]), trustMu([1.0, 1]));\n"
             "console.log(JSON.stringify({matched: r !== bc.NO_MATCH}));\n"
         )
         result = subprocess.run(
@@ -657,6 +671,7 @@ class TestMuHashCachedNegZeroCorrectness:
             "const t = require('./mu/host/js/core/types');\n"
             "const bc = require('./mu/host/js/core/bootstrap_core');\n"
             "const vm = require('./mu/host/js/core/stage0_vm');\n"
+            f"{JS_TRUST_MU_PRELUDE}\n"
             f"console.log(JSON.stringify({code}));"
         )
         result = subprocess.run(
@@ -675,10 +690,10 @@ class TestMuHashCachedNegZeroCorrectness:
         """
         data = self._run_js(
             "{"
-            "  h_a: t.muHashCached({x: 0, y: -0}),"
-            "  h_b: t.muHashCached({x: -0, y: 0}),"
-            "  ref_a: t.muHash({x: 0, y: -0}),"
-            "  ref_b: t.muHash({x: -0, y: 0})"
+            "  h_a: t.muHashCached(trustMu({x: 0, y: -0})),"
+            "  h_b: t.muHashCached(trustMu({x: -0, y: 0})),"
+            "  ref_a: t.muHash(trustMu({x: 0, y: -0})),"
+            "  ref_b: t.muHash(trustMu({x: -0, y: 0}))"
             "}"
         )
         assert data["h_a"] != data["h_b"], (
@@ -699,8 +714,8 @@ class TestMuHashCachedNegZeroCorrectness:
         """
         data = self._run_js(
             "{"
-            "  same_pos: t.muEqual({x: 0, y: -0}, {x: 0, y: -0}),"
-            "  diff_pos: t.muEqual({x: 0, y: -0}, {x: -0, y: 0})"
+            "  same_pos: t.muEqual(trustMu({x: 0, y: -0}), trustMu({x: 0, y: -0})),"
+            "  diff_pos: t.muEqual(trustMu({x: 0, y: -0}), trustMu({x: -0, y: 0}))"
             "}"
         )
         assert data["same_pos"] is True, "Same -0 positions must be equal"
@@ -730,7 +745,7 @@ class TestMuHashCachedNegZeroCorrectness:
         """
         data = self._run_js(
             "{"
-            "  conflict: bc.match([{var:'z'},{var:'z'}], [{x:0,y:-0},{x:-0,y:0}]) === bc.NO_MATCH"
+            "  conflict: bc.match(trustMu([{var:'z'},{var:'z'}]), trustMu([{x:0,y:-0},{x:-0,y:0}])) === bc.NO_MATCH"
             "}"
         )
         assert data["conflict"] is True, (
@@ -744,7 +759,7 @@ class TestMuHashCachedNegZeroCorrectness:
         """
         data = self._run_js(
             "{"
-            "  conflict: bc.stage0Match([{var:'z'},{var:'z'}], [{x:0,y:-0},{x:-0,y:0}]) === bc.NO_MATCH"
+            "  conflict: bc.stage0Match(trustMu([{var:'z'},{var:'z'}]), trustMu([{x:0,y:-0},{x:-0,y:0}])) === bc.NO_MATCH"
             "}"
         )
         assert data["conflict"] is True, (
@@ -777,8 +792,8 @@ class TestMuHashCachedNegZeroCorrectness:
         """
         data = self._run_js(
             "(function() {"
-            "  const v1 = {a: -0, b: 1};"
-            "  const v2 = {a: 0, b: 1};"
+            "  const v1 = trustMu({a: -0, b: 1});"
+            "  const v2 = trustMu({a: 0, b: 1});"
             "  const h1 = t.muHashCached(v1);"
             "  const h2 = t.muHashCached(v2);"
             "  return {"

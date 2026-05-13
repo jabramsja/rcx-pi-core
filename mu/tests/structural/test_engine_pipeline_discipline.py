@@ -1003,6 +1003,7 @@ _DYNAMIC_REQUIRE_RE = re.compile(r"""\brequire\s*\((?!\s*['"])""")
 _EXPECTED_ENGINE_REQUIRES = {
     "routing.js": {
         "../core/constants",
+        "../core/container_factory",
         "../core/terminal_classification",
         "./kernel",
         "./pipeline",
@@ -1010,6 +1011,7 @@ _EXPECTED_ENGINE_REQUIRES = {
     "pipeline.js": {
         "../core/bootstrap_core",
         "../core/constants",
+        "../core/container_factory",
         "../core/normalize",
         "../core/security",
         "../core/seed_loader",
@@ -1020,6 +1022,7 @@ _EXPECTED_ENGINE_REQUIRES = {
     "kernel.js": {
         "../core/bootstrap_core",
         "../core/constants",
+        "../core/container_factory",
         "../core/normalize",
         "../core/security",
         "../core/stage0_vm",

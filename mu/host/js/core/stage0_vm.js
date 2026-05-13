@@ -24,6 +24,7 @@ const MAX_VM_PROGRAMS = 64;
 const MAX_VM_OPS_PER_STEP = 1024;
 const MAX_TEMPLATE_DEPTH = 32;
 const MAX_PATH_DEPTH = 64;
+const muContainers = require('./container_factory');
 
 // ---------------------------------------------------------------------------
 // Opcode schemas (single source of truth for per-opcode field validation)
@@ -218,7 +219,7 @@ function muCopy(value, rejectNonMu = false, context = 'Deep copy') {
         }
       }
     }
-    return value.map(item => muCopy(item, rejectNonMu, context));  // Reject Array subclasses
+    return muContainers.list(value.map(item => muCopy(item, rejectNonMu, context)));  // Reject Array subclasses
   }
   if (_isPlainObject(value)) {
     const keys = Object.keys(value);
@@ -234,7 +235,7 @@ function muCopy(value, rejectNonMu = false, context = 'Deep copy') {
         }
       }
     }
-    const result = Object.create(null);
+    const result = muContainers.record();
     for (const k of keys) {
       result[k] = muCopy(value[k], rejectNonMu, context);
     }
@@ -432,7 +433,7 @@ function materializeTemplate(template, captures, depth = 0) {
       throw new Stage0VMError(
         "Template 'object' missing or invalid 'fields' key");
     }
-    const result = Object.create(null);
+    const result = muContainers.record();
     for (const [key, val] of Object.entries(template.fields)) {
       result[key] = materializeTemplate(val, captures, depth + 1);
     }
@@ -443,8 +444,8 @@ function materializeTemplate(template, captures, depth = 0) {
     throw new Stage0VMError(
       "Template 'list' missing or invalid 'items' key");
   }
-  return template.items.map(item =>
-    materializeTemplate(item, captures, depth + 1));
+  return muContainers.list(template.items.map(item =>
+    materializeTemplate(item, captures, depth + 1)));
 }
 
 // ---------------------------------------------------------------------------

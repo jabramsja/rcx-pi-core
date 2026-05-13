@@ -10,6 +10,7 @@
 
 const { NO_MATCH, RcxError } = require('../core/constants');
 const { isValidMu, muHash, muHashCached, muHashControlCached } = require('../core/types');
+const muContainers = require('../core/container_factory');
 const { normalize, denormalize, normalizeProjection, listToLinked } = require('../core/normalize');
 const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields, rejectNonlinearProjections } = require('../core/security');
 const { step, match, isKernelTerminal, isKernelIntermediate, makeUndefinedMotif, _stepTrusted, _applyProjectionTrusted } = require('../core/bootstrap_core');
@@ -203,15 +204,15 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
   const normalizedProjs = shouldNormalize
     ? domainProjections.map(normalizeProjection)
     : domainProjections;
-  const kernelDomainProjs = normalizedProjs.map(proj => ({
-    pattern: proj.pattern,
-    body: proj.body
-  }));
+  const kernelDomainProjs = normalizedProjs.map(proj => muContainers.record([
+    ['pattern', proj.pattern],
+    ['body', proj.body],
+  ]));
 
-  const kernelInput = {
-    _step: normalizedInput,
-    _projs: listToLinked(kernelDomainProjs)
-  };
+  const kernelInput = muContainers.record([
+    ['_step', normalizedInput],
+    ['_projs', listToLinked(kernelDomainProjs)],
+  ]);
 
   // P7-d: Build vmConfig from options if bundles provided
   const vmConfig = options.vmConfig || null;
@@ -226,12 +227,12 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
   // stalled preserves legacy semantics (false on max-steps — NB4 public debt deferred).
   const canonical = _stepKernelCore(projections, kernelInput, domainInput, validator, maxSteps, vmConfig);
   const isLegacyStall = canonical.termination_reason === 'hash_stall' || canonical.termination_reason === 'kernel_stall';
-  return {
-    result: normalize(canonical.output),  // re-normalize so caller denormalize() works
-    steps: isLegacyStall ? canonical.steps_used - 1 : canonical.steps_used,  // legacy uses 0-indexed steps on stall
-    stalled: isLegacyStall,  // legacy: false on max-steps (NB4 public debt deferred)
-    trace: [],
-  };
+  return muContainers.record([
+    ['result', normalize(canonical.output)],  // re-normalize so caller denormalize() works
+    ['steps', isLegacyStall ? canonical.steps_used - 1 : canonical.steps_used],  // legacy uses 0-indexed steps on stall
+    ['stalled', isLegacyStall],  // legacy: false on max-steps (NB4 public debt deferred)
+    ['trace', muContainers.list()],
+  ]);
 }
 
 /**
@@ -273,19 +274,22 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
   // Pre-normalize projections once (constant across all trace steps).
   const validator = validateNoKernelReservedFields;
   const normalizedProjs = domainProjections.map(normalizeProjection);
-  const kernelDomainProjs = normalizedProjs.map(proj => ({
-    pattern: proj.pattern,
-    body: proj.body
-  }));
+  const kernelDomainProjs = normalizedProjs.map(proj => muContainers.record([
+    ['pattern', proj.pattern],
+    ['body', proj.body],
+  ]));
   const linkedProjs = listToLinked(kernelDomainProjs);
 
-  const traceEntries = [];
+  const traceEntries = muContainers.list();
   let current = input;
   let currentHash = muHashControlCached(input, 'runStructural');
 
   for (let i = 0; i < maxSteps; i++) {
     const normalizedCurrent = normalize(current);
-    const kernelInput = { _step: normalizedCurrent, _projs: linkedProjs };
+    const kernelInput = muContainers.record([
+      ['_step', normalizedCurrent],
+      ['_projs', linkedProjs],
+    ]);
     const meta = _stepKernelCore(kernelProjections, kernelInput, current, validator, 10000, vmConfig);
     const result = meta.output;
     // Resolve matched projection ID: use Stage 0 match (proven equivalent
@@ -306,44 +310,47 @@ function runStructural(kernelProjections, domainProjections, input, maxSteps = 1
     }
 
     validateNoKernelReservedFields(result, 'runStructural output');
-    traceEntries.push({
-      step: i,
-      state: current,
-      projection: matchedId
-    });
+    const traceEntry = muContainers.record([
+      ['step', i],
+      ['state', current],
+      ['projection', matchedId],
+    ]);
+    traceEntries.push(traceEntry);
 
     const resultHash = muHashControlCached(result, 'runStructural.stall');
     if (resultHash === currentHash) {
-      traceEntries.push({
-        step: i + 1,
-        state: result,
-        projection: null,
-        stall: true
-      });
-      return {
-        result: result,
-        trace: listToLinked(traceEntries),
-        stall: true,
-        steps: i + 1
-      };
+      const stallEntry = muContainers.record([
+        ['step', i + 1],
+        ['state', result],
+        ['projection', null],
+        ['stall', true],
+      ]);
+      traceEntries.push(stallEntry);
+      return muContainers.record([
+        ['result', result],
+        ['trace', listToLinked(traceEntries)],
+        ['stall', true],
+        ['steps', i + 1],
+      ]);
     }
 
     current = result;
     currentHash = resultHash;
   }
 
-  traceEntries.push({
-    step: maxSteps,
-    state: current,
-    projection: null,
-    max_steps: true
-  });
-  return {
-    result: current,
-    trace: listToLinked(traceEntries),
-    stall: false,
-    steps: maxSteps
-  };
+  const maxEntry = muContainers.record([
+    ['step', maxSteps],
+    ['state', current],
+    ['projection', null],
+    ['max_steps', true],
+  ]);
+  traceEntries.push(maxEntry);
+  return muContainers.record([
+    ['result', current],
+    ['trace', listToLinked(traceEntries)],
+    ['stall', false],
+    ['steps', maxSteps],
+  ]);
 }
 
 /**

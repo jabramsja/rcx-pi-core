@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { muCopy } = require('./stage0_vm');
 
 // Fail-closed: checksum + projection ID registries for seeds loaded by core modules.
 // Must mirror entries in cli/main.js and Python seed_integrity.py.
@@ -201,7 +202,7 @@ function loadVerifiedSeed(seedName, subdir) {
     }
   }
 
-  const seed = JSON.parse(raw);
+  const seed = muCopy(JSON.parse(raw), true, 'Verified seed parse tree');
 
   // Projection entry type guard (fail-closed — reject null/array/scalar before .id access)
   if (Array.isArray(seed.projections)) {

@@ -780,7 +780,8 @@ class TestF43JsNormalizeParity:
         result = subprocess.run(
             ["node", "-e", """
 const { normalize, denormalize } = require('./mu/host/js/core/normalize');
-const val = {_type: 'lambda', head: 1, tail: null};
+const { muCopy } = require('./mu/host/js/core/stage0_vm');
+const val = muCopy({_type: 'lambda', head: 1, tail: null}, true, 'F-43 invalid type fixture');
 const norm = normalize(val);
 const rt = denormalize(norm);
 // Must be treated as regular dict, not typed linked list
@@ -806,7 +807,8 @@ console.log('PASS');
         result = subprocess.run(
             ["node", "-e", """
 const { normalize, denormalize } = require('./mu/host/js/core/normalize');
-const listVal = {_type: 'list', head: 1, tail: null};
+const { muCopy } = require('./mu/host/js/core/stage0_vm');
+const listVal = muCopy({_type: 'list', head: 1, tail: null}, true, 'F-43 valid type fixture');
 const norm = normalize(listVal);
 if (norm['_type'] !== 'list') {
     console.error('FAIL: list _type not preserved');

@@ -17,6 +17,7 @@
 
 const { step } = require('./bootstrap_core');
 const { RcxError } = require('./constants');
+const muContainers = require('./container_factory');
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -107,7 +108,14 @@ function _loadTcProjections() {
     // One-time deep clone + deep freeze: closes mutation risk without
     // per-call overhead. Mirrors Python projection_loader.py's adversary-
     // hardened deep copy, but frozen instead of copied per call.
-    _tcProjections = _deepFreeze(JSON.parse(JSON.stringify(seed.projections)));
+    _tcProjections = JSON.parse(JSON.stringify(seed.projections), (_key, value) => {
+      if (Array.isArray(value)) return muContainers.list(value);
+      if (value !== null && typeof value === 'object') {
+        return muContainers.record(Object.keys(value).map(key => [key, value[key]]));
+      }
+      return value;
+    });
+    _tcProjections = _deepFreeze(_tcProjections);
   }
   return _tcProjections;
 }
@@ -231,7 +239,8 @@ function classifyTerminalKind(value) {
   }
   // Structural seed classification via projection matching
   const projs = _loadTcProjections();
-  const result = step(projs, { _tc: value });
+  const wrapped = muContainers.record([['_tc', value]]);
+  const result = step(projs, wrapped);
   return typeof result === 'string' ? result : 'non_terminal';
 }
 
@@ -267,20 +276,20 @@ function isEngineTerminal(value) {
  */
 function deriveEngineExitReason(engineResult) {
   const projs = _loadTcProjections();
-  const wrapped = {
-    _tc_exit: {
-      cd: _muBool(engineResult.closure_detected),
-      ed: _muBool(engineResult.exhaustion_detected),
-      st: _muBool(engineResult.stall),
-    },
-  };
+  const wrapped = muContainers.record([
+    ['_tc_exit', muContainers.record([
+      ['cd', _muBool(engineResult.closure_detected)],
+      ['ed', _muBool(engineResult.exhaustion_detected)],
+      ['st', _muBool(engineResult.stall)],
+    ])],
+  ]);
   const result = step(projs, wrapped);
   return typeof result === 'string' ? result : 'completed';
 }
 
 function defaultHemispheres() {
   _ensureHemiKeys();
-  const h = {};
+  const h = muContainers.record();
   for (const k of _hemiKeyOrder) h[k] = null;
   return h;
 }

@@ -13,6 +13,7 @@
 
 const { MAX_DEPTH, NO_MATCH, RcxError } = require('./constants');
 const { isVar, isValidMu, muHashCached, muHashControlCached, _NO_BUDGET, consumeBudget } = require('./types');
+const muContainers = require('./container_factory');
 const { normalize, denormalize } = require('./normalize');
 const { assertNotLambdaCalculus } = require('./security');
 
@@ -205,9 +206,9 @@ function substitute(body, bindings, _depth = 0, _budget = _NO_BUDGET) {
     }
     if (body === null || typeof body !== 'object') return body;
     if (Array.isArray(body)) {
-      return body.map(elem => substitute(elem, bindings, _depth, remaining));
+      return muContainers.list(body.map(elem => substitute(elem, bindings, _depth, remaining)));
     }
-    const result = Object.create(null);
+    const result = muContainers.record();
     for (const [k, v] of Object.entries(body)) {
       result[k] = substitute(v, bindings, _depth, remaining);
     }
@@ -239,10 +240,10 @@ function substitute(body, bindings, _depth = 0, _budget = _NO_BUDGET) {
   }
 
   if (Array.isArray(body)) {
-    return body.map(elem => substitute(elem, bindings, _depth + 1));
+    return muContainers.list(body.map(elem => substitute(elem, bindings, _depth + 1)));
   }
 
-  const result = Object.create(null);
+  const result = muContainers.record();
   for (const [k, v] of Object.entries(body)) {
     result[k] = substitute(v, bindings, _depth + 1);
   }
@@ -375,14 +376,7 @@ function makeUndefinedMotif(op, lhs, rhs, cause, details = null) {
     try { return muHashCached(value); }
     catch (_e) { return null; }
   }
-  return {
-    _undefined: true,
-    op: op,
-    lhs_hash: safeHash(lhs),
-    rhs_hash: safeHash(rhs),
-    cause: cause,
-    details: details,
-  };
+  return muContainers.record([['_undefined', true], ['op', op], ['lhs_hash', safeHash(lhs)], ['rhs_hash', safeHash(rhs)], ['cause', cause], ['details', details]]);
 }
 
 /**
@@ -413,7 +407,7 @@ function run(projections, input, maxSteps = MAX_RUN_STEPS) {
 
   let current = input;
   let currentHash = muHashControlCached(input, 'run');
-  const trace = [];
+  const trace = muContainers.list();
   for (let i = 0; i < maxSteps; i++) {
     let matchedId = null;
     let next = current;
@@ -426,16 +420,16 @@ function run(projections, input, maxSteps = MAX_RUN_STEPS) {
       }
     }
 
-    trace.push({ step: i, projection: matchedId, state: current });
+    trace.push(muContainers.record([['step', i], ['projection', matchedId], ['state', current]]));
 
     const nextHash = muHashControlCached(next, 'run.stall');
     if (nextHash === currentHash) {
-      return { result: current, steps: i, stalled: true, trace };
+      return muContainers.record([['result', current], ['steps', i], ['stalled', true], ['trace', trace]]);
     }
     current = next;
     currentHash = nextHash;
   }
-  return { result: current, steps: maxSteps, stalled: false, trace };
+  return muContainers.record([['result', current], ['steps', maxSteps], ['stalled', false], ['trace', trace]]);
 }
 
 // ---------------------------------------------------------------------------
@@ -537,9 +531,9 @@ function stage0Substitute(body, bindings, _depth = 0) {
     return bindings[name];
   }
   if (Array.isArray(body)) {
-    return body.map(elem => stage0Substitute(elem, bindings, _depth + 1));
+    return muContainers.list(body.map(elem => stage0Substitute(elem, bindings, _depth + 1)));
   }
-  const result = Object.create(null);
+  const result = muContainers.record();
   for (const [k, v] of Object.entries(body)) {
     result[k] = stage0Substitute(v, bindings, _depth + 1);
   }

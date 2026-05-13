@@ -59,9 +59,14 @@ def _run_js_scheduler(input_value: dict) -> dict:
 const fs = require('fs');
 const path = require('path');
 const pipeline = require('./mu/host/js/engine/pipeline');
+const { muCopy } = require('./mu/host/js/core/stage0_vm');
 
 function loadProjections(relPath) {
-  return JSON.parse(fs.readFileSync(path.join(process.cwd(), relPath), 'utf8')).projections;
+  return muCopy(
+    JSON.parse(fs.readFileSync(path.join(process.cwd(), relPath), 'utf8')).projections,
+    true,
+    `scheduler parity projections ${relPath}`
+  );
 }
 
 const kernel = loadProjections('mu/substrate/kernel.v1.json');
@@ -69,7 +74,7 @@ const bridge = loadProjections('mu/bridge/bootstrap_structural.v1.json');
 const match = loadProjections('mu/substrate/match.v2.json');
 const subst = loadProjections('mu/substrate/subst.v2.json');
 const allProjectionsWithBridge = [...kernel, ...bridge, ...match, ...subst];
-const inputValue = JSON.parse(process.argv[1]);
+const inputValue = muCopy(JSON.parse(process.argv[1]), true, 'scheduler parity input');
 
 const request = {
   operation: 'run_algorithm',

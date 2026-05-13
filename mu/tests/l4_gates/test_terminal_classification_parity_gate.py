@@ -269,11 +269,12 @@ class TestJSCacheHardening:
         """Mutating tc.RECURRENCE_TERMINAL_KEYS does not alter classifyTerminalKind."""
         script = """
 const tc = require('./mu/host/js/core/terminal_classification');
+const { muCopy } = require('./mu/host/js/core/stage0_vm');
 const rec = tc.RECURRENCE_TERMINAL_KEYS;
 rec.add('injected');
 rec.clear();
 const result = tc.classifyTerminalKind(
-  {closure_detected: true, final_result: 42, tau_step: 1}
+  muCopy({closure_detected: true, final_result: 42, tau_step: 1}, true, 'terminal cache fixture')
 );
 console.log(result);
 """
@@ -314,14 +315,15 @@ console.log(tc.ENGINE_EXIT_REASONS.size);
         """_clearTcCache clears and rebuilds without classification drift."""
         script = """
 const tc = require('./mu/host/js/core/terminal_classification');
-tc.classifyTerminalKind({closure_detected: true, final_result: 42, tau_step: 1});
+const { muCopy } = require('./mu/host/js/core/stage0_vm');
+tc.classifyTerminalKind(muCopy({closure_detected: true, final_result: 42, tau_step: 1}, true, 'terminal cache fixture'));
 tc._clearTcCache();  // # ANTICHEAT_OK: testing JS cache clear export
-const r1 = tc.classifyTerminalKind({closure_detected: true, final_result: 42, tau_step: 1});
-const r2 = tc.classifyTerminalKind({
+const r1 = tc.classifyTerminalKind(muCopy({closure_detected: true, final_result: 42, tau_step: 1}, true, 'terminal cache fixture'));
+const r2 = tc.classifyTerminalKind(muCopy({
   value: 1, closure_detected: false, tau_step: 0,
   exhaustion_detected: false, operator_frozen: false,
   frozen_set: [], action: null, stall: false,
-});
+}, true, 'terminal engine fixture'));
 console.log(JSON.stringify([r1, r2]));
 """
         assert self._js_eval(script) == '["recurrence_terminal","engine_terminal"]'

@@ -15,6 +15,17 @@ import textwrap
 
 import pytest
 
+JS_TRUST_MU_PRELUDE = """
+const muContainers = require('./mu/host/js/core/container_factory');
+function trustMu(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(trustMu));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trustMu(value[key])]));
+  }
+  return value;
+}
+"""
+
 
 # =============================================================================
 # R5: hash_trace_for_recurrence() fail-closed hardening
@@ -85,6 +96,7 @@ class TestR5HashTraceJsParity:
     def _run_js(self, code: str) -> subprocess.CompletedProcess:
         full = textwrap.dedent(f"""\
             const {{ hashTraceForRecurrence }} = require('./mu/host/js/engine/pipeline');
+            {JS_TRUST_MU_PRELUDE}
             try {{
                 {code}
             }} catch (e) {{
@@ -122,7 +134,7 @@ class TestR5HashTraceJsParity:
 
     def test_js_accepts_well_formed_entry(self):
         result = self._run_js(
-            "const r = hashTraceForRecurrence({head: {state: {v: 1}}, tail: null});\n"
+            "const r = hashTraceForRecurrence(trustMu({head: {state: {v: 1}}, tail: null}));\n"
             "console.log('OK:' + JSON.stringify(!!r.head.state_hash));"
         )
         assert "OK:true" in result.stdout

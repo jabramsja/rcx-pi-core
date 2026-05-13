@@ -181,6 +181,36 @@ class TestContrabandjsDetectsVm:
         result = run_contraband_on_js(code)
         assert result.returncode != 0, "Should fail on require('vm')"
 
+    def test_detects_require_node_vm(self):
+        """contraband_js.sh must fail when require('node:vm') found."""
+        code = "const vm = require('node:vm');"
+        result = run_contraband_on_js(code)
+        assert result.returncode != 0, "Should fail on require('node:vm')"
+
+    def test_detects_require_vm_with_call_whitespace(self):
+        """Whitespace around the require call must not bypass Node vm detection."""
+        code = "const vm = require ('vm');"
+        result = run_contraband_on_js(code)
+        assert result.returncode != 0, "Should fail on require ('vm')"
+
+    def test_detects_require_node_vm_with_argument_whitespace(self):
+        """Whitespace inside the require call must not bypass node:vm detection."""
+        code = "const vm = require( 'node:vm' );"
+        result = run_contraband_on_js(code)
+        assert result.returncode != 0, "Should fail on require( 'node:vm' )"
+
+    def test_detects_require_vm_with_tab_whitespace(self):
+        """Tab whitespace around require must not bypass Node vm detection."""
+        code = "const vm = require\t(\t\"vm\");"
+        result = run_contraband_on_js(code)
+        assert result.returncode != 0, "Should fail on tab-spaced require(\"vm\")"
+
+    def test_allows_local_stage0_vm_module_name(self):
+        """Local stage0_vm modules are not Node's vm capability."""
+        code = "const { muCopy } = require('./stage0_vm');"
+        result = run_contraband_on_js(code)
+        assert result.returncode == 0, f"Local stage0_vm require should pass: {result.stdout}"
+
 
 class TestContrabandjsDetectsCryptoRandom:
     """Verify contraband_js.sh catches crypto randomness."""

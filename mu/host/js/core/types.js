@@ -7,8 +7,14 @@
 
 const crypto = require('crypto');
 const { MAX_DEPTH, RcxError } = require('./constants');
+const muContainers = require('./container_factory');
 
 const MAX_MU_WIDTH = 1000;
+const containers = Object.freeze({
+  has(value) {
+    return muContainers.has(value);
+  },
+});
 
 // =============================================================================
 // Structural Depth Budget (D009 Productionization)
@@ -21,14 +27,16 @@ const MAX_MU_WIDTH = 1000;
 
 // Sentinel for "no budget provided" — distinct from null (= budget exhausted).
 const _NO_BUDGET = Object.freeze({ _sentinel: 'NO_BUDGET' });
-
 /**
  * Create a structural depth budget of given size. Returns frozen Mu linked-list.
  */
 function makeDepthBudget(depth) {
   let budget = null;
   for (let i = 0; i < depth; i++) {
-    budget = { head: null, tail: budget };
+    budget = muContainers.record([
+      ['head', null],
+      ['tail', budget],
+    ]);
   }
   // Recursively freeze (Q5: immutability enforcement)
   function deepFreeze(obj) {
@@ -114,6 +122,7 @@ function isValidMu(value, _depth = 0, _seen, _budget = _NO_BUDGET) {
     if (t !== 'object') return false;
 
     try {
+      if (!muContainers.has(value)) return false;
       if (!_seen) _seen = new WeakSet();  // AST_OK_JS: cycle detection for is_mu budget path (matches Python _seen set)
       if (_seen.has(value)) return false;
       _seen.add(value);
@@ -174,6 +183,7 @@ function isValidMu(value, _depth = 0, _seen, _budget = _NO_BUDGET) {
   // Cycle detection for objects and arrays (matches Python is_mu's _seen set with backtracking).
   // Backtracking (delete after subtree check) allows DAGs (shared references) while catching cycles.
   try {
+    if (!muContainers.has(value)) return false;
     if (!_seen) _seen = new WeakSet();  // AST_OK_JS: cycle detection for is_mu (matches Python _seen set)
     if (_seen.has(value)) return false;
     _seen.add(value);
@@ -330,9 +340,11 @@ function muHashCached(value) {
  */
 function canonicalizeHashNumeric(value) {
   if (typeof value === 'number') return Object.is(value, -0) ? 0 : value;
-  if (Array.isArray(value)) return value.map(canonicalizeHashNumeric);
+  if (Array.isArray(value)) {
+    return muContainers.list(value.map(canonicalizeHashNumeric));
+  }
   if (value !== null && typeof value === 'object') {
-    const out = Object.create(null);
+    const out = muContainers.record();
     for (const k of Object.keys(value)) out[k] = canonicalizeHashNumeric(value[k]);
     return out;
   }
@@ -375,6 +387,7 @@ module.exports = {
   compareMuStringKeysByCodepoint,
   muHash,
   muHashCached,
+  containers,
   canonicalizeHashNumeric,
   muHashControl,
   muHashControlCached,

@@ -18,6 +18,8 @@ const crypto = require('crypto');
 
 // Core modules
 const { validateNoKernelReservedFields } = require('../core/security');
+const muContainers = require('../core/container_factory');
+const stage0Vm = require('../core/stage0_vm');
 
 // Seed integrity verification — parity with Python's seed_integrity.py
 const SEED_CHECKSUMS = {
@@ -243,7 +245,7 @@ function validateCombinedBridgeOrdering(projections) {
 function loadVerifiedSeed(seedPath, seedName) {
   const raw = fs.readFileSync(seedPath, 'utf8');
   verifySeedChecksum(seedName, raw);
-  const seed = JSON.parse(raw);
+  const seed = stage0Vm.muCopy(JSON.parse(raw), true, 'Verified seed parse tree');
   validateSeedStructure(seedName, seed);
   validateProjectionIds(seedName, seed);
   return seed;
@@ -271,7 +273,7 @@ const metabolizeCycleSeed = loadVerifiedSeed(path.join(programsDir, 'metabolize_
 
 // S1-C: Load ALL compiled Stage0 bundles for VM execution path
 const compiledDir = path.join(muRoot, 'stage0', 'compiled');
-const { validateBundle, stage0VmStep, muDeepEqual } = require('../core/stage0_vm'); // CONTRABAND_OK: VM bundle loading for kernel step
+const { validateBundle, stage0VmStep, muDeepEqual } = stage0Vm; // CONTRABAND_OK: VM bundle loading for kernel step
 const kernelBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'kernel_v1.compiled.v1.json'), 'utf8'));
 const bridgeBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'bootstrap_structural_v1.compiled.v1.json'), 'utf8'));
 const matchBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'match_v2.compiled.v1.json'), 'utf8'));
@@ -307,7 +309,7 @@ verifyBundleProvenance(substBundle);
 const kernelV1Projections = kernel.projections;
 
 // Compose projection arrays
-const allProjections = [...kernel.projections, ...matchSeed.projections, ...substSeed.projections];
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
 const bridgeProjections = bridgeSeed.projections;
 const recurrenceProjections = recurrenceSeed.projections;
 const exhaustionProjections = exhaustionSeed.projections;
@@ -327,36 +329,39 @@ const seedProjectionMap = Object.assign(Object.create(null), {
   'rcx_engine_scheduler.v1.json': null,
 });
 
-const allProjectionsWithBridge = [
+const allProjectionsWithBridge = muContainers.list([
   ...kernel.projections, ...bridgeProjections,
   ...matchSeed.projections, ...substSeed.projections
-];
+]);
 validateCombinedBridgeOrdering(allProjectionsWithBridge);
 
-const allProjectionsWithRecurrenceAndBridge = [
+const allProjectionsWithRecurrenceAndBridge = muContainers.list([
   ...recurrenceProjections, ...kernel.projections, ...bridgeProjections,
   ...matchSeed.projections, ...substSeed.projections
-];
+]);
 validateCombinedBridgeOrdering(allProjectionsWithRecurrenceAndBridge);
 
-const allProjectionsWithExhaustion = [
+const allProjectionsWithExhaustion = muContainers.list([
   ...exhaustionProjections, ...recurrenceProjections, ...allProjections
-];
+]);
 
-const allProjectionsWithExhaustionAndBridge = [
+const allProjectionsWithExhaustionAndBridge = muContainers.list([
   ...exhaustionProjections, ...recurrenceProjections,
   ...kernel.projections, ...bridgeProjections,
   ...matchSeed.projections, ...substSeed.projections
-];
+]);
 validateCombinedBridgeOrdering(allProjectionsWithExhaustionAndBridge);
 
 // Load parity vectors for tests and API
 const parityVectorsPath = path.join(muRoot, '..', 'tests', 'fixtures', 'parity_vectors.json');
 let parityVectors;
 try {
-  parityVectors = JSON.parse(fs.readFileSync(parityVectorsPath, 'utf8'));
+  parityVectors = stage0Vm.muCopy(JSON.parse(fs.readFileSync(parityVectorsPath, 'utf8')), true, 'Parity vector parse tree');
 } catch (e) {
-  parityVectors = { vectors: [], security_vectors: [] };
+  parityVectors = muContainers.record([
+    ['vectors', muContainers.list()],
+    ['security_vectors', muContainers.list()],
+  ]);
 }
 
 // Seeds context — passed to self-tests and API handlers
