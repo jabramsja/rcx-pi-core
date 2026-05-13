@@ -211,7 +211,7 @@ const path = require('path');
 const vm = require('vm');
 
 const repoRoot = process.cwd();
-const { validateBundle } = require('./mu/host/js/core/stage0_vm');
+const { validateBundle, muCopy } = require('./mu/host/js/core/stage0_vm');
 const MAX_STEPS = 80;
 const vmStepCallLog = [];
 const vmAccessLog = [];
@@ -359,6 +359,15 @@ function readConstInitializer(source, constName) {
 
   let index = declarationStart + needle.length;
   while (/\s/.test(source[index])) index++;
+  if (source.startsWith('trustTestMu', index)) {
+    index += 'trustTestMu'.length;
+    while (/\s/.test(source[index])) index++;
+    if (source[index] !== '(') {
+      throw new Error(`Unsupported ${constName} trustTestMu wrapper in self_tests.js`);
+    }
+    index++;
+    while (/\s/.test(source[index])) index++;
+  }
   const literalStart = index;
   const opening = source[index];
   const closing = opening === '{' ? '}' : opening === '[' ? ']' : null;
@@ -398,7 +407,7 @@ function loadSelfTestsBridgeFixture() {
   const fixturePath = path.join(repoRoot, 'mu/host/js/tests/self_tests.js');
   const source = fs.readFileSync(fixturePath, 'utf8');
   const context = Object.create(null);
-  const projection = JSON.parse(
+  const projection = muCopy(JSON.parse(
     JSON.stringify(
       vm.runInNewContext(
         `(${readConstInitializer(source, 'testProjection')})`,
@@ -406,8 +415,8 @@ function loadSelfTestsBridgeFixture() {
         { timeout: 1000 }
       )
     )
-  );
-  const input = JSON.parse(
+  ), true, 'self_tests bridge projection fixture');
+  const input = muCopy(JSON.parse(
     JSON.stringify(
       vm.runInNewContext(
         `(${readConstInitializer(source, 'testInput')})`,
@@ -415,7 +424,7 @@ function loadSelfTestsBridgeFixture() {
         { timeout: 1000 }
       )
     )
-  );
+  ), true, 'self_tests bridge input fixture');
   if (!projection || typeof projection !== 'object' || !projection.pattern || !projection.body) {
     throw new Error('self_tests.js testProjection fixture is not a projection object');
   }

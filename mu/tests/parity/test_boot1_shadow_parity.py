@@ -1791,6 +1791,7 @@ class TestJsReentryPayloadValidation:
         """Call JS validateReentryPayload and return {ok, error_code, message}."""
         script = (
             "const p = require('./mu/host/js/engine/pipeline');\n"
+            "const { muCopy } = require('./mu/host/js/core/stage0_vm');\n"
             "try {\n"
             f"  p.validateReentryPayload({payload_js_expr}, '{context}');\n"
             "  console.log(JSON.stringify({ok: true}));\n"
@@ -1840,7 +1841,9 @@ class TestJsReentryPayloadValidation:
 
     def test_js_accepts_valid_payload(self):
         """JS accepts well-formed payload."""
-        r = self._run_js_validation('({projections: [], input: {}})')
+        r = self._run_js_validation(
+            "({projections: [], input: muCopy({}, true, 'valid reentry input')})"
+        )
         assert r["ok"]
 
     def test_js_rejects_non_mu_input(self):
@@ -1852,7 +1855,9 @@ class TestJsReentryPayloadValidation:
 
     def test_js_rejects_non_mu_frozen(self):
         """JS rejects non-Mu frozen (function) with input.invalid_type."""
-        r = self._run_js_validation('({projections: [], input: {}, frozen: function(){}})')
+        r = self._run_js_validation(
+            "({projections: [], input: muCopy({}, true, 'valid reentry input'), frozen: function(){}})"
+        )
         assert not r["ok"]
         assert r["error_code"] == "input.invalid_type"
         assert "not valid Mu" in r["message"]

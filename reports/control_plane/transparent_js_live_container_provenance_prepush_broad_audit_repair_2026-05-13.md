@@ -79,6 +79,50 @@ Representative root-cause evidence:
   `python3 tools/checks/enforce_l4_execution_contract.py --range origin/dev...HEAD --wave-id=transparent-js-live-container-provenance-implementation-2026-05-13`
   exits 0 with `L4_STRUCTURAL compliant`.
 
+## PR CI Repair Append
+
+After local commit `003253b5` pushed PR #943, required CI failed with four
+checks:
+
+- `orbit-svg` and `orbit-index` failed before repo checks at the Graphviz
+  install step with exit code `124`; both logs show `timeout 120s sudo apt-get
+  install -y graphviz`.
+- `test` and `green-gate` failed the same seven JS parity tests. The scheduler
+  failures hit `mu/host/js/core/types.js:374` from
+  `mu/host/js/engine/pipeline.js:158` with `runSubAlgorithm: value is not
+  valid Mu`.
+- The VM-ordering probe failed because `mu/host/js/tests/self_tests.js` now
+  wraps the shared fixture constants in `trustTestMu(...)`, while the probe
+  parser still expected a raw object or list literal.
+- The JS re-entry validation positive fixture still passed a raw `{}` input to
+  `validateReentryPayload`, which now correctly requires trusted Mu compound
+  provenance.
+
+Repair:
+
+- Keep runtime JS Mu provenance strict; do not add a public raw-object
+  admission path.
+- Convert the affected direct JS parity probes to construct trusted fixtures via
+  existing Stage0 `muCopy(..., true, ...)`.
+- Teach the VM-ordering probe parser to read the existing `trustTestMu(...)`
+  wrapper in `self_tests.js` while still feeding a trusted local probe fixture.
+- Keep the Graphviz install bounded, but widen the bound to
+  `timeout-minutes: 8`, add `Acquire::Retries=3`, and use `timeout 300s` for
+  each apt command.
+
+Evidence:
+
+- Exact PR CI failure set:
+  `PYTHONHASHSEED=0 python3 -m pytest -q tests/parity/test_rcx_engine_scheduler_parity.py::test_python_js_agree_on_scheduler_seed_path_selection tests/parity/test_rcx_engine_scheduler_parity.py::test_python_js_agree_on_scheduler_negative_order_rejection tests/parity/test_rcx_engine_scheduler_parity.py::test_python_js_agree_on_scheduler_fail_closed_pair_rejection tests/parity/test_rcx_engine_scheduler_parity.py::test_python_js_agree_on_scheduler_longer_pool_rejection tests/parity/test_rcx_engine_scheduler_parity.py::test_python_js_agree_on_scheduler_malformed_tail_rejection tests/parity/test_js_vm_bridge_parity.py::TestJsBridgeVmOrderingE2E::test_live_vm_kernel_path_depends_on_kernel_bridge_match_subst_order tests/parity/test_boot1_shadow_parity.py::TestJsReentryPayloadValidation::test_js_accepts_valid_payload --tb=short -p no:cacheprovider`
+  exits 0 with `7 passed in 10.37s`.
+- Affected parity surfaces:
+  `PYTHONHASHSEED=0 python3 -m pytest -q tests/parity/test_rcx_engine_scheduler_parity.py tests/parity/test_js_vm_bridge_parity.py::TestJsBridgeVmOrderingE2E tests/parity/test_boot1_shadow_parity.py::TestJsReentryPayloadValidation --tb=short -p no:cacheprovider`
+  exits 0 with `14 passed in 10.70s`.
+- Workflow parse/readback:
+  `python3 - <<'PY' ... PY` parsed `.github/workflows/fixture_gates.yml` and
+  printed `fixture_gates.yml graphviz install bounds parsed OK`.
+- Whitespace check: `git diff --check` exits 0.
+
 ## Stop Conditions
 
 - Stop if any runtime/substrate file enters this enabler wave.
@@ -92,22 +136,26 @@ Representative root-cause evidence:
 - Refresh wave: `transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13`
 - Active packet: `reports/control_plane/transparent_js_live_container_provenance_prepush_broad_audit_repair_2026-05-13.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `8ed0c475a5d91fabd36f9f002422c910680eeec183ce311ee078e71504a49c95`
+- Tracker note sha256: `6354df40cb37796222ad57e85b6d9c254e17c64944b3101fd911d2326e492ca3`
 - Indicator artifact: `reports/l4_wave_indicators/transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -q tests/engine/test_normalization_roundtrip.py::TestF43JsNormalizeParity::test_js_invalid_type_tag_roundtrips tests/engine/test_normalization_roundtrip.py::TestF43JsNormalizeParity::test_js_valid_type_tags_still_work tests/structural/test_engine_pipeline_discipline.py::TestJsEnginePipelineShapeGovernance::test_dependency_direction_and_boundary_authority tests/l4_gates/test_terminal_classification_parity_gate.py::TestJSCacheHardening::test_mutating_exported_set_does_not_affect_classification tests/l4_gates/test_terminal_classification_parity_gate.py::TestJSCacheHardening::test_clear_tc_cache_rebuilds_correctly tests/l4_gates/test_redteam_hardening_gate.py::TestDenormalizeTypedPathGuard::test_list_typed_path_primitive_tail tests/l4_gates/test_redteam_hardening_gate.py::TestDenormalizeTypedPathGuard::test_dict_typed_path_primitive_tail tests/l4_gates/test_redteam_hardening_gate.py::TestMatchSubstituteEntryValidation::test_match_accepts_valid_mu --tb=short -p no:cacheprovider && PYTHONHASHSEED=0 python3 -m pytest -q tests/engine/test_normalization_roundtrip.py tests/structural/test_engine_pipeline_discipline.py tests/l4_gates/test_terminal_classification_parity_gate.py tests/l4_gates/test_redteam_hardening_gate.py --tb=short -p no:cacheprovider && python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13`.
-- Evidence delta: (1) Broad pre-push failed after local parent commit `b36f18d3` with `8 failed, 6890 passed, 18 skipped in 348.19s`. (2) Raw JS compound fixtures were converted to existing Stage0 `muCopy` Mu-origin fixtures without weakening the public JS Mu boundary. (3) JS engine dependency inventory now records the intentional `container_factory` producer dependency.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/parity/test_boot1_shadow_parity.py mu/tests/parity/test_js_vm_bridge_parity.py mu/tests/parity/test_rcx_engine_scheduler_parity.py`.
+- Evidence delta: (1) Routed commit handoff scopes 7 wave-owned file(s). (2) Evidence gate exercises 3 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13.json..
 - Evidence handles:
-  - `current_branch_derivation`: `exit=0; WAVE_ID_FLAG=--wave-id=transparent-js-live-container-provenance-implementation-2026-05-13`
-  - `derive_regression`: `exit=0; mu/tests/tools/test_wave_id_derivation.py 5 passed in 1.77s`
-  - `docs`: `exit=0; check_docs_consistency.sh all checks passed`
+  - `affected_parity_surfaces`: `exit=0; 14 passed in 10.90s`
+  - `diff_check`: `exit=0; git diff --cached --check`
+  - `docs_consistency`: `exit=0; All checks passed. Docs are consistent.`
+  - `exact_ci_failure_set`: `exit=0; 7 passed in 10.37s`
+  - `host_authority_inventory`: `exit=0; PASS no new total-inventory or authority-subset sites detected`
+  - `host_semantics_ratchet`: `exit=0; passed=true; no increases`
   - `indicator`: `reports/l4_wave_indicators/transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13.json`
-  - `prepush_range_failure`: `pre-push after c0b5d899 failed L4 because branch-derived enabler wave id was applied to full range with 13 runtime files`
-  - `range_l4`: `exit=0; origin/dev...HEAD bound to parent L4_STRUCTURAL wave; 38 changed files / 13 runtime files; compliant`
-  - `staged_l4`: `exit=0; L4_ENABLER compliant; 5 changed files / 0 runtime files / 1 control-plane file`
+  - `staged_l4`: `exit=0; L4_ENABLER compliant; 7 changed files / 0 runtime files / 1 control-plane file`
+  - `workflow_parse`: `exit=0; fixture_gates.yml graphviz install bounds parsed OK`
 - Current staged files:
+  - `.github/workflows/fixture_gates.yml`
   - `TASKS.md`
-  - `mu/tests/tools/test_wave_id_derivation.py`
-  - `mu/tools/checks/derive_wave_id.sh`
+  - `mu/tests/parity/test_boot1_shadow_parity.py`
+  - `mu/tests/parity/test_js_vm_bridge_parity.py`
+  - `mu/tests/parity/test_rcx_engine_scheduler_parity.py`
   - `reports/control_plane/transparent_js_live_container_provenance_prepush_broad_audit_repair_2026-05-13.md`
   - `reports/l4_wave_indicators/transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
