@@ -3245,6 +3245,10 @@ def dispatch(
                     f"plan_{record.get('wave_name', 'unknown')}",
                 )
             executor_args.extend(["--plan-name", plan_name])
+            # Phase A must receive the dispatcher-selected record. Without this
+            # override, phase_a_executor falls back to the canonical routing file
+            # and can plan against a stale completed packet.
+            executor_args.extend(["--routing-record", json.dumps(record)])
         elif executor_name == "phase_b_executor":
             # Phase B: prefer --plan from next_candidates tracked_packet,
             # then recovery-seeded --plan, then planless routing authority.

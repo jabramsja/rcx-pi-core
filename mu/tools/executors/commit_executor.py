@@ -1910,7 +1910,7 @@ def _git_index_lock_self_cleared_without_owner(
     repo_root: Path,
     diagnostic: str,
 ) -> tuple[bool, str]:
-    """Classify git-add index.lock failures without touching .git internals.
+    """Classify git index.lock failures without touching .git internals.
 
     Git's index writer owns the lock by keeping index.lock present. Retry is
     allowed only when the failure named index.lock and every candidate lock path
@@ -1935,6 +1935,37 @@ def _git_index_lock_self_cleared_without_owner(
             + "; ".join(owners[:3]),
         )
     return True, "index.lock self-cleared before retry; no lock owner remained"
+
+
+def _run_git_commit_with_self_cleared_index_lock_retry(
+    repo_root: Path,
+    commit_message: str,
+    *,
+    env: dict[str, str],
+) -> tuple[subprocess.CompletedProcess[str], str | None]:
+    """Run git commit, retrying once only when index.lock already self-cleared."""
+    cmd = ["git", "commit", "-m", commit_message]
+    try:
+        return _run(cmd, cwd=repo_root, timeout=60, env=env), None
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.strip()
+        retry, detail = _git_index_lock_self_cleared_without_owner(repo_root, stderr)
+        if not retry:
+            raise
+        try:
+            return _run(cmd, cwd=repo_root, timeout=60, env=env), detail
+        except subprocess.CalledProcessError as retry_exc:
+            retry_stderr = retry_exc.stderr.strip()
+            augmented_stderr = (
+                f"{retry_stderr} "
+                f"(after self-cleared index.lock retry: {detail})"
+            ).strip()
+            raise subprocess.CalledProcessError(
+                retry_exc.returncode,
+                retry_exc.cmd,
+                output=retry_exc.output,
+                stderr=augmented_stderr,
+            ) from retry_exc
 
 
 def refresh_commit_path_packet_truth(
@@ -7973,10 +8004,16 @@ def _run_commit_pipeline_impl(
     # ── Step 9: git_commit ────────────────────────────────────────────
     step9_env = _commit_subprocess_env(skip_receipt_check=False)
     try:
-        commit_out = _run(
-            ["git", "commit", "-m", handoff["commit_message"]],
-            cwd=repo_root, timeout=60, env=step9_env,
+        _commit_out, retry_detail = _run_git_commit_with_self_cleared_index_lock_retry(
+            repo_root,
+            handoff["commit_message"],
+            env=step9_env,
         )
+        if retry_detail:
+            log(
+                "Step 9: git commit retried after self-cleared index.lock "
+                f"({retry_detail})"
+            )
         commit_sha = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
         result["commit_sha"] = commit_sha
         result["steps_completed"].append("git_commit")

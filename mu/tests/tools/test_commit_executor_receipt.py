@@ -1293,6 +1293,73 @@ class TestReceiptChainEndToEnd:
         assert len(add_calls) == 1
         assert not lock_path.exists()
 
+    def test_git_commit_retries_self_cleared_index_lock_once(self, tmp_path):
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        git_dir = repo / ".git"
+        git_dir.mkdir()
+        lock_path = git_dir / "index.lock"
+        commit_calls = []
+
+        def fake_run(args, **kwargs):
+            if args == ["git", "commit", "-m", "test commit"]:
+                commit_calls.append(args)
+                if len(commit_calls) == 1:
+                    raise subprocess.CalledProcessError(
+                        128,
+                        args,
+                        output="",
+                        stderr=f"fatal: Unable to create '{lock_path}': File exists",
+                    )
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod, "_git_owner_processes_for_repo", return_value=[]):
+            _completed, retry_detail = commit_mod._run_git_commit_with_self_cleared_index_lock_retry(  # ANTICHEAT_OK: regression for transient git index lock at commit step
+                repo,
+                "test commit",
+                env={},
+            )
+
+        assert len(commit_calls) == 2
+        assert retry_detail == "index.lock self-cleared before retry; no lock owner remained"
+
+    def test_git_commit_fails_closed_when_index_lock_persists(self, tmp_path):
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        git_dir = repo / ".git"
+        git_dir.mkdir()
+        lock_path = git_dir / "index.lock"
+        lock_path.write_text("locked", encoding="utf-8")
+        commit_calls = []
+
+        def fake_run(args, **kwargs):
+            if args == ["git", "commit", "-m", "test commit"]:
+                commit_calls.append(args)
+                raise subprocess.CalledProcessError(
+                    128,
+                    args,
+                    output="",
+                    stderr=f"fatal: Unable to create '{lock_path}': File exists",
+                )
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run), \
+             patch.object(commit_mod, "_git_owner_processes_for_repo", return_value=[]):
+            with pytest.raises(subprocess.CalledProcessError):
+                commit_mod._run_git_commit_with_self_cleared_index_lock_retry(  # ANTICHEAT_OK: fail-closed persistent git index lock regression
+                    repo,
+                    "test commit",
+                    env={},
+                )
+
+        assert len(commit_calls) == 1
+        assert lock_path.exists()
+
     def test_commit_packet_truth_refresh_binds_continuation_to_persisted_handoff(self, tmp_path):
         from collections import namedtuple
         import subprocess
