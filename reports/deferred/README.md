@@ -19,7 +19,7 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-12 post-JS pipeline governance deferred cleanup):
+Current inventory refresh (2026-05-13 N1 closure cleanup):
 
 - Evidence command:
   `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' -print | sort`.
@@ -41,8 +41,12 @@ reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md
   at
   `reports/archive/deferred/stage0-capture-provenance-deferred-cleanup-2026-05-12_bridge_nonblockers_closed-by-stage0-cleanup-bridge-doc-accuracy-closeout-2026-05-12.md`.
 - Retained `/mu` structural advisories remain active and are not implemented by
-  this inventory refresh: transparent JS Proxy provenance, N1 VM coverage
-  bookkeeping, and N3 broad host-surface boundary.
+  this inventory refresh: transparent JS Proxy provenance and N3 broad
+  host-surface boundary.
+- N1 VM coverage bookkeeping is closed by PR #940 /
+  `vm-cutover-coverage-trace-implementation-2026-05-12` and is no longer active
+  deferred work. Its historical repo-truth text is archived at
+  `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N1_vm_coverage_bookkeeping_closed-by-vm-cutover-coverage-trace-implementation-2026-05-12.md`.
 - Closed N5 JS pipeline governance residue is preserved as historical evidence
   at
   `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N5_js_pipeline_governance_closed-by-post-js-pipeline-governance-deferred-cleanup-2026-05-12.md`
