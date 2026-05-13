@@ -126,6 +126,33 @@ def test_build_commit_handoff_replaces_stale_tracker_override_with_same_wave_pac
     assert f"FOUNDER_OVERRIDE:{predecessor}" not in handoff["tracker_note_text"]
 
 
+def test_build_commit_handoff_default_tracker_note_includes_tracked_packet(tmp_path):
+    repo = _setup_repo(tmp_path)
+    wave_id = "default-tracker-packet-wave"
+    packet_path = f"reports/control_plane/{wave_id}.md"
+    packet = repo / packet_path
+    packet.parent.mkdir(parents=True, exist_ok=True)
+    packet.write_text(
+        f"# Packet\n\nWave ID: {wave_id}\nClass: L4_ENABLER\n",
+        encoding="utf-8",
+    )
+
+    handoff, errors = commit_mod.build_commit_handoff(
+        wave_id=wave_id,
+        task_id="[NEXT-CODEX-POST-REDTEAM]",
+        files_to_stage=["file.py", packet_path],
+        commit_message="fix: default tracker packet",
+        fixes_implemented=["test fix"],
+        wave_class="L4_ENABLER",
+        target_gate_id="G8",
+        tracked_packet=packet_path,
+        repo_root=repo,
+    )
+
+    assert not errors, errors
+    assert f"Packet: `{packet_path}`" in handoff["tracker_note_text"]
+
+
 def _setup_repo(tmp_path):
     """Create a minimal git repo for pipeline tests."""
     import subprocess

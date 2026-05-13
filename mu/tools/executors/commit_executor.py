@@ -2880,6 +2880,7 @@ def _build_default_tracker_note_text(
     founder_override_token: str | None = None,
     unblocks_wave_id: str = "",
     unblocks_runtime_blocker: str = "",
+    tracked_packet: str = "",
 ) -> str:
     """Render a contract-complete tracker note for ad hoc commit handoffs.
 
@@ -2898,6 +2899,8 @@ def _build_default_tracker_note_text(
     )
     wave_files = [path for path in files_to_stage if isinstance(path, str)]
     test_files = _collect_wave_test_files(wave_files)
+    packet_ref = _normalize_repo_relpath(tracked_packet) if tracked_packet else ""
+    packet_text = f"Packet: `{packet_ref}`. " if packet_ref else ""
 
     if wave_class == "MAINTENANCE":
         if _tracker_sync_note is not None:
@@ -2906,6 +2909,7 @@ def _build_default_tracker_note_text(
                 title=summary,
                 wave_class=wave_class,
                 target_gate_id=target_gate_id,
+                packet_ref=packet_ref,
                 no_op_proof=(
                     "control-surface/docs/test-only wave-owned scope; no runtime/substrate files "
                     "declared in this handoff"
@@ -2925,6 +2929,7 @@ def _build_default_tracker_note_text(
         note = (
             f"- Tracker sync note ({datetime.now(timezone.utc).strftime('%Y-%m-%d')}, {wave_id}): "
             f"**{summary}.**. Class: {wave_class}. target_gate_id: {target_gate_id}. "
+            f"{packet_text}"
             "no_op_proof: control-surface/docs/test-only wave-owned scope; no runtime/substrate files "
             "declared in this handoff. defer_reason_code: PIPELINE_HARDENING. "
         )
@@ -2972,6 +2977,7 @@ def _build_default_tracker_note_text(
             title=summary,
             wave_class="L4_ENABLER" if wave_class == "MAINTENANCE" else wave_class,
             target_gate_id=target_gate_id,
+            packet_ref=packet_ref,
             evidence_command=evidence_command,
             evidence_delta=evidence_delta,
             progress_proof_before=progress_before,
@@ -2989,6 +2995,7 @@ def _build_default_tracker_note_text(
     return _append_founder_override_to_tracker_note(
         f"- Tracker sync note ({datetime.now(timezone.utc).strftime('%Y-%m-%d')}, {wave_id}): "
         f"**{summary}.**. Class: {wave_class}. target_gate_id: {target_gate_id}. "
+        f"{packet_text}"
         f"evidence_command: `{evidence_command}`. evidence_delta: {evidence_delta}. "
         f"progress_proof_before: {progress_before}. progress_proof_after: {progress_after}. "
         "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
@@ -5788,6 +5795,7 @@ def build_commit_handoff(
         founder_override_token=effective_founder_override_token,
         unblocks_wave_id=unblocks_wave_id,
         unblocks_runtime_blocker=unblocks_runtime_blocker,
+        tracked_packet=tracked_packet or "",
     )
     existing_tracker_override = _extract_founder_override_from_tracker_note(
         effective_tracker_note

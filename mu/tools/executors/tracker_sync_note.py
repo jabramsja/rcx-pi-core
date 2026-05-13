@@ -89,6 +89,7 @@ class TrackerSyncNoteFields:
 
     # Optional
     founder_override: str = ""
+    packet_ref: str = ""
 
     # Date (defaults to today UTC)
     date: str = ""
@@ -161,6 +162,8 @@ def render_tracker_sync_note(fields: TrackerSyncNoteFields) -> str:
     parts.append(f"- Tracker sync note ({fields.date}, {fields.wave_id}): **{fields.title}.**")
     parts.append(f"Class: {fields.wave_class}")
     parts.append(f"target_gate_id: {fields.target_gate_id}")
+    if fields.packet_ref:
+        parts.append(f"Packet: `{fields.packet_ref}`")
 
     # STRUCTURAL-specific fields
     if fields.workload_target:

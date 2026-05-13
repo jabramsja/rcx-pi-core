@@ -123,6 +123,45 @@ Evidence:
   printed `fixture_gates.yml graphviz install bounds parsed OK`.
 - Whitespace check: `git diff --check` exits 0.
 
+## Pre-Push Range Binding Fallback Repair Append
+
+After local commit `5816d918`, commit executor pre-push failed before push at
+the L4 range gate. Root-cause evidence:
+
+- `pre-push-fast` ran `tools/checks/enforce_l4_execution_contract.py --range
+  origin/dev...HEAD` and reported `Wave class: L4_ENABLER`, `Changed files:
+  44`, `Runtime files: 13`, then rejected runtime files under the enabler
+  class.
+- `TASKS.md` held the canonical enabler tracker note without `Packet:` while
+  the later same-wave PR CI append held `Packet:
+  reports/control_plane/transparent_js_live_container_provenance_prepush_broad_audit_repair_2026-05-13.md`.
+- Reproducing `source tools/checks/derive_wave_id.sh "$BRANCH" --range
+  origin/dev...HEAD` before this repair printed
+  `--wave-id=transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13`
+  instead of the packet-declared parent structural wave.
+
+Mechanical repair:
+
+- `derive_wave_id.sh` now falls back from the canonical tracker-note line to a
+  same-wave `Packet:` append line before reading `Parent wave:`.
+- Commit handoff default tracker-note generation now includes `Packet:` when
+  `tracked_packet` is present, preventing future routed follow-up notes from
+  dropping the packet reference.
+- Regression coverage locks both behaviors.
+
+Evidence:
+
+- `PYTHONHASHSEED=0 python3 -m pytest -q
+  mu/tests/tools/test_wave_id_derivation.py
+  mu/tests/tools/test_commit_executor_receipt.py::test_build_commit_handoff_default_tracker_note_includes_tracked_packet
+  --tb=short -p no:cacheprovider` exits 0 with `7 passed in 2.43s`.
+- `python3 -m py_compile mu/tools/executors/commit_executor.py
+  mu/tools/executors/tracker_sync_note.py` exits 0.
+- `git diff --check` exits 0.
+- Reproducing the full L4 range gate now exits 0 with `Wave class:
+  L4_STRUCTURAL`, `Changed files: 44`, `Runtime files: 13`, and
+  `L4_STRUCTURAL compliant`.
+
 ## Stop Conditions
 
 - Stop if any runtime/substrate file enters this enabler wave.
@@ -136,26 +175,19 @@ Evidence:
 - Refresh wave: `transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13`
 - Active packet: `reports/control_plane/transparent_js_live_container_provenance_prepush_broad_audit_repair_2026-05-13.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `6354df40cb37796222ad57e85b6d9c254e17c64944b3101fd911d2326e492ca3`
+- Tracker note sha256: `2246738fe7fce159886ff8639fd9fd376b10a94c59cb8a3b448392464d3bfa28`
 - Indicator artifact: `reports/l4_wave_indicators/transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/parity/test_boot1_shadow_parity.py mu/tests/parity/test_js_vm_bridge_parity.py mu/tests/parity/test_rcx_engine_scheduler_parity.py`.
-- Evidence delta: (1) Routed commit handoff scopes 7 wave-owned file(s). (2) Evidence gate exercises 3 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13.json..
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_wave_id_derivation.py`.
+- Evidence delta: (1) Routed commit handoff scopes 8 wave-owned file(s). (2) Evidence gate exercises 2 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13.json..
 - Evidence handles:
-  - `affected_parity_surfaces`: `exit=0; 14 passed in 10.90s`
-  - `diff_check`: `exit=0; git diff --cached --check`
-  - `docs_consistency`: `exit=0; All checks passed. Docs are consistent.`
-  - `exact_ci_failure_set`: `exit=0; 7 passed in 10.37s`
-  - `host_authority_inventory`: `exit=0; PASS no new total-inventory or authority-subset sites detected`
-  - `host_semantics_ratchet`: `exit=0; passed=true; no increases`
   - `indicator`: `reports/l4_wave_indicators/transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13.json`
-  - `staged_l4`: `exit=0; L4_ENABLER compliant; 7 changed files / 0 runtime files / 1 control-plane file`
-  - `workflow_parse`: `exit=0; fixture_gates.yml graphviz install bounds parsed OK`
 - Current staged files:
-  - `.github/workflows/fixture_gates.yml`
   - `TASKS.md`
-  - `mu/tests/parity/test_boot1_shadow_parity.py`
-  - `mu/tests/parity/test_js_vm_bridge_parity.py`
-  - `mu/tests/parity/test_rcx_engine_scheduler_parity.py`
+  - `mu/tests/tools/test_commit_executor_receipt.py`
+  - `mu/tests/tools/test_wave_id_derivation.py`
+  - `mu/tools/checks/derive_wave_id.sh`
+  - `mu/tools/executors/commit_executor.py`
+  - `mu/tools/executors/tracker_sync_note.py`
   - `reports/control_plane/transparent_js_live_container_provenance_prepush_broad_audit_repair_2026-05-13.md`
   - `reports/l4_wave_indicators/transparent-js-live-container-provenance-prepush-broad-audit-repair-2026-05-13.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

@@ -16,7 +16,7 @@
 #   $3 — mode payload for --range / --files
 #
 # Output: Sets WAVE_ID_FLAG environment variable.
-# Note: pre-push-fast still has its own inline logic (not yet migrated).
+# pre-push-fast and audit_fast source this helper for the same wave binding.
 
 set -euo pipefail
 
@@ -84,6 +84,11 @@ _tracker_note_packet() {
   sed -nE 's/.*Packet: `([^`]+)`.*/\1/p'
 }
 
+_packet_line_for_wave() {
+  local wave_id="$1"
+  grep -F "$wave_id" TASKS.md 2>/dev/null | grep -F "Packet:" | tail -1 || true
+}
+
 _range_has_runtime_files() {
   [ -n "$MODE_VALUE" ] || return 1
   git diff --name-only "$MODE_VALUE" 2>/dev/null | grep -Eq \
@@ -111,6 +116,9 @@ if [ -n "$WAVE_ID_SUFFIX" ] && _tasks_changed_for_mode; then
       NOTE_CLASS="$(printf '%s\n' "$NOTE_LINE" | _tracker_note_class)"
       if [ "$NOTE_CLASS" = "L4_ENABLER" ]; then
         PACKET_PATH="$(printf '%s\n' "$NOTE_LINE" | _tracker_note_packet)"
+        if [ -z "$PACKET_PATH" ]; then
+          PACKET_PATH="$(_packet_line_for_wave "$EFFECTIVE_WAVE_ID_SUFFIX" | _tracker_note_packet)"
+        fi
         PARENT_WAVE_ID="$(_parent_wave_from_packet "$PACKET_PATH" || true)"
         if [ -n "$PARENT_WAVE_ID" ] && \
            grep -qE "Tracker sync note \([^,]+, ${PARENT_WAVE_ID}\):" TASKS.md 2>/dev/null; then
