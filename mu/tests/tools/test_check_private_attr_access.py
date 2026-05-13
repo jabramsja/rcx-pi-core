@@ -184,6 +184,20 @@ class TestScanIntegration:
         assert "_real_violation" in violations[0]
         assert "test_dirty.py" in violations[0]
 
+    def test_scan_includes_physical_mu_tests_tree(self, tmp_path):
+        tests_dir = tmp_path / "mu" / "tests" / "tools"
+        tests_dir.mkdir(parents=True)
+        (tests_dir / "test_dirty.py").write_text(
+            "from module import foo\n"
+            "foo._real_violation()\n"
+        )
+
+        violations = checker.scan(tmp_path)
+
+        assert len(violations) == 1
+        assert "_real_violation" in violations[0]
+        assert "mu/tests/tools/test_dirty.py" in violations[0]
+
     def test_scan_skips_pycache_dir(self, tmp_path):
         tests_dir = tmp_path / "tests" / "__pycache__"
         tests_dir.mkdir(parents=True)

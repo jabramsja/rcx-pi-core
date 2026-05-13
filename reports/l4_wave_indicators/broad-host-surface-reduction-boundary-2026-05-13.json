@@ -1,0 +1,24 @@
+{
+  "wave_id": "broad-host-surface-reduction-boundary-2026-05-13",
+  "repeat_run_speedup_ratio": 0.880317,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.513983,
+  "repeat_run_raw_seconds": [
+    0.452468,
+    0.513983
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.452468
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.966451
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-13T20:21:27Z",
+  "collector_version": "2.2.0"
+}

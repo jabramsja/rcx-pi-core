@@ -875,6 +875,20 @@ def select_private_attr_gate_files(changed_files: list[str]) -> list[str]:
     })
 
 
+def _resolve_private_attr_checker(repo_root: Path) -> Path | None:
+    """Resolve the tracked private-attr checker from repo or executor paths."""
+    candidates = [
+        repo_root / "mu" / "tools" / "checks" / "linters" / "check_private_attr_access.py",
+        repo_root / "tools" / "checks" / "linters" / "check_private_attr_access.py",
+        SCRIPT_DIR.parents[1] / "tools" / "checks" / "linters" / "check_private_attr_access.py",
+        SCRIPT_DIR.parents[2] / "tools" / "checks" / "linters" / "check_private_attr_access.py",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def run_private_attr_gate(
     repo_root: Path,
     changed_files: list[str],
@@ -892,16 +906,14 @@ def run_private_attr_gate(
             "stderr": "",
             "test_files": [],
         }
-    checker = repo_root / "tools" / "checks" / "linters" / "check_private_attr_access.py"
-    if not checker.exists():
-        checker = SCRIPT_DIR.parents[2] / "tools" / "checks" / "linters" / "check_private_attr_access.py"
-    if not checker.exists():
+    checker = _resolve_private_attr_checker(repo_root)
+    if checker is None:
         return {
             "passed": False,
             "skipped": False,
             "exit_code": 127,
             "stdout": "",
-            "stderr": f"private-attr checker not found: {checker}",
+            "stderr": "private-attr checker not found",
             "test_files": gate_files,
         }
     try:
@@ -1024,6 +1036,85 @@ def _build_structural_post_gate_sweep(test_files: list[str], changed_files: list
     if non_gate_tests:
         return "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short " + " ".join(non_gate_tests)
     return "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/structural/ mu/tests/parity/"
+
+
+def _phase_b_scope_has_runtime_substrate_file(changed_files: list[str]) -> bool:
+    return any(path.startswith(_MAINTENANCE_FORBIDDEN_PREFIXES) for path in changed_files)
+
+
+def _plan_declares_routing_boundary(plan_content: str) -> bool:
+    text = (plan_content or "").lower()
+    return (
+        "not an implementation packet" in text
+        or "phase a routing boundary" in text
+        or "locked later phase b plan" in text
+    )
+
+
+def _effective_phase_b_tracker_wave_class(
+    wave_class: str,
+    *,
+    plan_content: str,
+    changed_files: list[str],
+) -> str:
+    """Classify planning-only structural packets as enablers for final packaging.
+
+    L4_STRUCTURAL is reserved for executable runtime/substrate deltas plus L4 gate
+    evidence. A control-plane packet that only selects a later structural route is
+    an enabler, even when the selected future route is structural.
+    """
+    if wave_class != "L4_STRUCTURAL":
+        return wave_class
+    if _phase_b_scope_has_runtime_substrate_file(changed_files):
+        return wave_class
+    if _plan_declares_routing_boundary(plan_content):
+        return "L4_ENABLER"
+    return wave_class
+
+
+def build_phase_b_tracker_note(
+    *,
+    wave_id: str,
+    task_id: str,
+    wave_class: str = "L4_ENABLER",
+    target_gate_id: str,
+    plan_path: str,
+    plan_content: str = "",
+    changed_files: list[str],
+    test_files: list[str],
+    receipt_path: str,
+    bridge_rounds: int,
+    reentry: bool,
+    post_gate_contract_sweep: str = "",
+    founder_override: str = "",
+    unblocks_wave_id: str = "",
+    unblocks_runtime_blocker: str = "",
+    pre_supervisor: bool = False,
+) -> str:
+    """Render a Phase B tracker note through the public package-class seam."""
+    effective_wave_class = _effective_phase_b_tracker_wave_class(
+        wave_class,
+        plan_content=plan_content,
+        changed_files=changed_files,
+    )
+    return _build_phase_b_tracker_note(
+        wave_id=wave_id,
+        task_id=task_id,
+        wave_class=effective_wave_class,
+        target_gate_id=target_gate_id,
+        plan_path=plan_path,
+        plan_content=plan_content,
+        changed_files=changed_files,
+        test_files=test_files,
+        receipt_path=receipt_path,
+        bridge_rounds=bridge_rounds,
+        reentry=reentry,
+        post_gate_contract_sweep=post_gate_contract_sweep,
+        founder_override=founder_override,
+        unblocks_wave_id=unblocks_wave_id,
+        unblocks_runtime_blocker=unblocks_runtime_blocker,
+        pre_supervisor=pre_supervisor,
+    )
 
 
 def _summarize_bounded_output(label: str, text: str, *, limit: int) -> list[str]:
@@ -3541,19 +3632,22 @@ def _build_phase_b_tracker_note(
         display_task = wave_id
 
     indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
-    if test_files:
-        evidence_command = "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short " + " ".join(test_files)
+    effective_test_files = list(test_files)
+    if not effective_test_files and wave_class == "L4_STRUCTURAL":
+        effective_test_files = _select_pytest_gate_files(changed_files)
+    if effective_test_files:
+        evidence_command = "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short " + " ".join(effective_test_files)
         if pre_supervisor:
             evidence_delta = (
                 f"(1) Phase B converged on the locked plan at {plan_path}. "
-                f"(2) Final pytest gate covered {len(test_files)} test file(s) from the wave-owned diff. "
+                f"(2) Final pytest gate covered {len(effective_test_files)} test file(s) from the wave-owned diff. "
                 f"(3) Pre-commit supervisor package is staged at {receipt_path}; "
                 "commit handoff receipt remains pending the supervisor decision."
             )
         else:
             evidence_delta = (
                 f"(1) Phase B converged on the locked plan at {plan_path}. "
-                f"(2) Final pytest gate covered {len(test_files)} test file(s) from the wave-owned diff. "
+                f"(2) Final pytest gate covered {len(effective_test_files)} test file(s) from the wave-owned diff. "
                 f"(3) Commit handoff carries explicit receipt authority at {receipt_path}."
             )
     else:
@@ -3632,7 +3726,7 @@ def _build_phase_b_tracker_note(
             "structural_artifact_ref": _summarize_structural_artifacts(changed_files),
             "post_gate_contract_sweep": (
                 post_gate_contract_sweep
-                or _build_structural_post_gate_sweep(test_files, changed_files)
+                or _build_structural_post_gate_sweep(effective_test_files, changed_files)
             ),
         })
     if wave_class == "MAINTENANCE":
@@ -6422,6 +6516,35 @@ def run_phase_b(
                 f"{len(package_changed_files) - len(changed_files)} staged commit-bound file(s)"
             )
             changed_files = package_changed_files
+        if indicator_path:
+            packet_scope_modified, packet_scope_error = _refresh_phase_b_indicator_packet_scope(
+                repo_root,
+                plan_path=plan_path,
+                wave_id=wave_id,
+                indicator_path=indicator_path,
+                changed_files=changed_files,
+            )
+            if packet_scope_error is not None:
+                _clear_state(repo_root)
+                return {
+                    "status": "error",
+                    "step": "pre_supervisor_l4_indicator_scope",
+                    "errors": [packet_scope_error],
+                }
+            if packet_scope_modified and plan_path not in changed_files:
+                changed_files.append(plan_path)
+                changed_files = sorted(set(changed_files))
+        effective_wave_class = _effective_phase_b_tracker_wave_class(
+            wave_class,
+            plan_content=plan.get("content", ""),
+            changed_files=changed_files,
+        )
+        if effective_wave_class != wave_class:
+            log(
+                "Phase B packaging class adjusted from "
+                f"{wave_class} to {effective_wave_class} for planning-only scope"
+            )
+            wave_class = effective_wave_class
         (
             pre_supervisor_tracker_note,
             pre_supervisor_raw_founder_override_token,
@@ -7211,6 +7334,7 @@ def run_phase_b(
                     f"{len(changed_files)} to {len(refreshed_changed_files)} file(s)"
                 )
                 changed_files = refreshed_changed_files
+        indicator_path = ""
         reentry_should_collect_l4_indicator = _should_collect_l4_indicator_artifact(
             repo_root,
             wave_id=wave_id,
@@ -7259,6 +7383,35 @@ def run_phase_b(
                 f"{len(reentry_package_changed_files) - len(changed_files)} staged commit-bound file(s)"
             )
             changed_files = reentry_package_changed_files
+        if indicator_path:
+            packet_scope_modified, packet_scope_error = _refresh_phase_b_indicator_packet_scope(
+                repo_root,
+                plan_path=plan_path,
+                wave_id=wave_id,
+                indicator_path=indicator_path,
+                changed_files=changed_files,
+            )
+            if packet_scope_error is not None:
+                _clear_state(repo_root)
+                return {
+                    "status": "error",
+                    "step": "reentry_pre_supervisor_l4_indicator_scope",
+                    "errors": [packet_scope_error],
+                }
+            if packet_scope_modified and plan_path not in changed_files:
+                changed_files.append(plan_path)
+                changed_files = sorted(set(changed_files))
+        effective_wave_class = _effective_phase_b_tracker_wave_class(
+            wave_class,
+            plan_content=plan.get("content", ""),
+            changed_files=changed_files,
+        )
+        if effective_wave_class != wave_class:
+            log(
+                "Re-entry Phase B packaging class adjusted from "
+                f"{wave_class} to {effective_wave_class} for planning-only scope"
+            )
+            wave_class = effective_wave_class
         (
             reentry_pre_supervisor_tracker_note,
             reentry_pre_supervisor_raw_founder_override_token,

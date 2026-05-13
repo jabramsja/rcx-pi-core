@@ -75,6 +75,14 @@ class TestR5HashTraceFailClosed:
         assert result["head"]["state_hash"] is not None
         assert result["head"]["state"] == {"value": 1}
 
+    def test_rejects_invalid_state_value(self):
+        """Entry state must be valid Mu, not just present."""
+        from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
+
+        invalid_state_trace = {"head": {"state": object()}, "tail": None}
+        with pytest.raises(TypeError, match="hash_trace_for_recurrence must be a Mu"):
+            hash_trace_for_recurrence(invalid_state_trace)
+
     def test_multi_entry_trace_rejects_any_malformed(self):
         """Mixed trace with one malformed entry must fail on the malformed one."""
         from rcx_pi.selfhost.engine_pipeline import hash_trace_for_recurrence
@@ -132,12 +140,22 @@ class TestR5HashTraceJsParity:
         assert "ERROR:" in result.stdout
         assert "malformed trace entry" in result.stdout
 
+    def test_js_rejects_invalid_state_value(self):
+        result = self._run_js(
+            "const trace = {head: muContainers.record([['state', undefined]]), tail: null};\n"
+            "const r = hashTraceForRecurrence(trace);\n"
+            "console.log('OK:' + JSON.stringify(Object.hasOwn(r.head, 'state_hash')));"
+        )
+        assert "ERROR:" in result.stdout
+        assert "trace entry state is not valid Mu" in result.stdout
+        assert "OK:false" not in result.stdout
+
     def test_js_accepts_well_formed_entry(self):
         result = self._run_js(
             "const r = hashTraceForRecurrence(trustMu({head: {state: {v: 1}}, tail: null}));\n"
-            "console.log('OK:' + JSON.stringify(!!r.head.state_hash));"
+            "console.log('OK:' + [Object.hasOwn(r.head, 'state_hash'), typeof r.head.state_hash, r.head.state.v].join(':'));"
         )
-        assert "OK:true" in result.stdout
+        assert "OK:true:string:1" in result.stdout
 
 
 # =============================================================================

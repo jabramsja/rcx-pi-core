@@ -153,6 +153,57 @@ def test_build_commit_handoff_default_tracker_note_includes_tracked_packet(tmp_p
     assert f"Packet: `{packet_path}`" in handoff["tracker_note_text"]
 
 
+def test_bot_remediation_tracker_followup_appends_tasks_for_tracker_relevant_scope(tmp_path):
+    repo = _setup_repo(tmp_path)
+    wave_id = "bot-remediation-tracker-wave"
+    tracker_note = _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"]
+    (repo / "TASKS.md").write_text(f"## Ra\n\n{tracker_note}\n\n---\n", encoding="utf-8")
+
+    result = commit_mod.ensure_bot_remediation_tracker_followup(
+        repo,
+        wave_id=wave_id,
+        scoped_files=["mu/tools/executors/phase_b_executor.py"],
+    )
+
+    assert result == {
+        "updated": True,
+        "tracker_paths": ["mu/tools/executors/phase_b_executor.py"],
+        "path": "TASKS.md",
+    }
+    tasks_content = (repo / "TASKS.md").read_text(encoding="utf-8")
+    assert tasks_content.count(f"Tracker sync follow-up") == 1
+    assert f"Tracker sync follow-up" in tasks_content
+    assert wave_id in tasks_content
+    assert "mu/tools/executors/phase_b_executor.py" in tasks_content
+
+    second_result = commit_mod.ensure_bot_remediation_tracker_followup(
+        repo,
+        wave_id=wave_id,
+        scoped_files=["mu/tools/executors/phase_b_executor.py"],
+    )
+    assert "errors" not in second_result
+    assert (repo / "TASKS.md").read_text(encoding="utf-8").count("Tracker sync follow-up") == 1
+
+
+def test_bot_remediation_tracker_followup_skips_when_tracker_file_scoped(tmp_path):
+    repo = _setup_repo(tmp_path)
+    wave_id = "bot-remediation-tracker-scoped-wave"
+    tracker_note = _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"]
+    (repo / "TASKS.md").write_text(f"## Ra\n\n{tracker_note}\n\n---\n", encoding="utf-8")
+
+    result = commit_mod.ensure_bot_remediation_tracker_followup(
+        repo,
+        wave_id=wave_id,
+        scoped_files=["TASKS.md", "mu/tools/executors/phase_b_executor.py"],
+    )
+
+    assert result == {
+        "updated": False,
+        "tracker_paths": ["mu/tools/executors/phase_b_executor.py"],
+    }
+    assert "Tracker sync follow-up" not in (repo / "TASKS.md").read_text(encoding="utf-8")
+
+
 def _setup_repo(tmp_path):
     """Create a minimal git repo for pipeline tests."""
     import subprocess
@@ -3424,17 +3475,17 @@ class TestCommitExecutorPytestGate:
         import types
 
         repo = _setup_repo(tmp_path)
-        (repo / "tests").mkdir(parents=True, exist_ok=True)
-        (repo / "tests" / "test_file.py").write_text(
+        (repo / "mu" / "tests").mkdir(parents=True, exist_ok=True)
+        (repo / "mu" / "tests" / "test_file.py").write_text(
             "def test_smoke():\n    assert True\n",
             encoding="utf-8",
         )
-        checker = repo / "tools" / "checks" / "linters" / "check_private_attr_access.py"
+        checker = repo / "mu" / "tools" / "checks" / "linters" / "check_private_attr_access.py"
         checker.parent.mkdir(parents=True, exist_ok=True)
         checker.write_text(
             "import sys\n"
-            "print('ERROR: Found private attr access in tests/:')\n"
-            "print('  tests/test_file.py:3: ._private_helper')\n"
+            "print('ERROR: Found private attr access in tests/ or mu/tests/:')\n"
+            "print('  mu/tests/test_file.py:3: ._private_helper')\n"
             "sys.exit(1)\n",
             encoding="utf-8",
         )
@@ -3469,7 +3520,7 @@ class TestCommitExecutorPytestGate:
             return real_subprocess_run(args, *run_args, **run_kwargs)
 
         handoff = _make_new_schema_handoff(
-            files_to_stage=["file.py", "tests/test_file.py"],
+            files_to_stage=["file.py", "mu/tests/test_file.py"],
         )
         with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), \
              patch.object(

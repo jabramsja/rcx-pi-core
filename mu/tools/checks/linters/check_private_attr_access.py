@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AST-based checker for private-attr access in tests/.
+"""AST-based checker for private-attr access in tests/ and mu/tests/.
 
 Replaces the grep-based scan at `tools/audits/audit_fast.sh:113` and
 `tools/audits/audit_all.sh:157` which was docstring-blind: the legacy
@@ -39,7 +39,7 @@ FILE_ALLOWLIST = frozenset({
     "test_contraband_detection.py",
 })
 
-SCAN_DIRS = ("tests",)
+SCAN_DIRS = ("tests", "mu/tests")
 
 _SYS_PRIVATES = frozenset({"_getframe", "_current_frames"})
 
@@ -100,6 +100,7 @@ def check_file(filepath: Path) -> list[str]:
 def scan(root: Path) -> list[str]:
     """Scan all Python files under SCAN_DIRS below ``root``."""
     all_violations: list[str] = []
+    seen_files: set[Path] = set()
     for scan_dir in SCAN_DIRS:
         dirpath = root / scan_dir
         if not dirpath.exists():
@@ -107,6 +108,10 @@ def scan(root: Path) -> list[str]:
         for pyfile in sorted(dirpath.rglob("*.py")):
             if "__pycache__" in pyfile.parts:
                 continue
+            resolved = pyfile.resolve()
+            if resolved in seen_files:
+                continue
+            seen_files.add(resolved)
             all_violations.extend(check_file(pyfile))
     return all_violations
 
@@ -115,7 +120,7 @@ def main(argv: list[str]) -> int:
     root = Path(argv[1]).resolve() if len(argv) > 1 else ROOT
     violations = scan(root)
     if violations:
-        print("ERROR: Found private attr access in tests/:")
+        print("ERROR: Found private attr access in tests/ or mu/tests/:")
         for v in violations:
             print(v)
         return 1
