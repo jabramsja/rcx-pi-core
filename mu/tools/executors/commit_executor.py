@@ -1257,6 +1257,19 @@ def _same_wave_deferred_non_blocking_paths(wave_id: str, paths: list[str]) -> li
     return [expected] if expected in set(_dedupe_repo_paths(paths)) else []
 
 
+def _same_wave_closed_deferred_archive_paths(wave_id: str, paths: list[str]) -> list[str]:
+    normalized_wave = normalize_wave_id(str(wave_id or ""))
+    if not normalized_wave:
+        return []
+    prefix = f"reports/archive/deferred/{normalized_wave}_bridge_nonblockers"
+    return sorted(
+        path for path in _dedupe_repo_paths(paths)
+        if path.startswith(prefix)
+        and "_closed-by-" in Path(path).name
+        and path.endswith(".md")
+    )
+
+
 def _render_same_wave_deferred_authorization_block(wave_id: str, paths: list[str]) -> str:
     lines = [
         DEFERRED_AUTH_REFRESH_START,
@@ -5923,6 +5936,23 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
                     errors.append(f"Absolute path in deferred_items: {item}")
                 if _has_path_traversal(item):
                     errors.append(f"Path traversal in deferred_items: {item}")
+
+    deferred_stage_paths = deferred_items if isinstance(deferred_items, list) else []
+    same_wave_active = _same_wave_deferred_non_blocking_paths(
+        wave_id,
+        [*fts, *faf, *deferred_stage_paths],
+    ) if isinstance(fts, list) and isinstance(faf, list) else []
+    same_wave_archive = _same_wave_closed_deferred_archive_paths(
+        wave_id,
+        [*fts, *faf, *deferred_stage_paths],
+    ) if isinstance(fts, list) and isinstance(faf, list) else []
+    if same_wave_active and same_wave_archive:
+        errors.append(
+            "same-wave generated bridge packet is both active deferred "
+            f"and archived closed for {wave_id}: active={same_wave_active}, "
+            f"archive={same_wave_archive}. Remove the active deferred packet "
+            "or reopen the archive before commit."
+        )
 
     bridge_status = handoff.get("bridge_status")
     if bridge_status is not None and not isinstance(bridge_status, dict):

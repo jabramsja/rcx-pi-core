@@ -24,7 +24,7 @@ does not authorize `/mu` implementation.
 2026-05-12 cleanup note: closed duplicate Stage0 capture provenance pointer
 N14 was moved to
 `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N14_stage0_duplicate_pointer_closed-by-stage0-capture-provenance-deferred-cleanup-2026-05-12.md`.
-N1 VM coverage bookkeeping is closed by
+N1 VM coverage bookkeeping is closed by PR #940 /
 `vm-cutover-coverage-trace-implementation-2026-05-12` and archived as
 historical evidence at
 `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N1_vm_coverage_bookkeeping_closed-by-vm-cutover-coverage-trace-implementation-2026-05-12.md`.
@@ -36,7 +36,8 @@ as historical evidence at
 
 2026-05-10 triage evidence refresh:
 
-- N1 remains advisory because `_step_kernel_with_vm` reconstructs coverage
+- N1 was advisory in this 2026-05-10 snapshot because `_step_kernel_with_vm`
+  reconstructed coverage
   events in host code at `mu/host/python/rcx_pi/selfhost/step_mu.py:1035`
   through `mu/host/python/rcx_pi/selfhost/step_mu.py:1142`; exact bookkeeping
   proof is routed to
@@ -107,7 +108,7 @@ as historical evidence at
 - The preserved N5 historical text was moved to
   `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N5_js_pipeline_governance_closed-by-post-js-pipeline-governance-deferred-cleanup-2026-05-12.md`.
 - Active repo-truth retained advisories in this packet are now N3 broad
-  host-surface boundary only. N1 VM coverage bookkeeping is closed by
+  host-surface boundary only. N1 VM coverage bookkeeping is closed by PR #940 /
   `vm-cutover-coverage-trace-implementation-2026-05-12`. Transparent JS Proxy
   provenance remains active in
   `founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers.md`.
@@ -116,7 +117,7 @@ as historical evidence at
 
 2026-05-12 VM cutover coverage trace implementation closure:
 
-- N1 VM coverage bookkeeping is closed by
+- N1 VM coverage bookkeeping is closed by PR #940 /
   `vm-cutover-coverage-trace-implementation-2026-05-12`.
 - Python and JS Stage0 VM step results now emit the same structural
   `attempt_trace` shape with ordered attempted program IDs, final

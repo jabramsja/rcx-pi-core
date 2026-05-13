@@ -235,12 +235,14 @@ Archived source snapshots for extracted non-blocking residue live in:
   after PR #927 / merge
   `8334c369d7a302cca568de0a088ea9ca1bd1c2f5` closed the public-entrypoint
   JS bridge ordering proof and trusted-step source-lock slice.
-- Retained live advisories now name their governing route, current proof gap,
-  hard stop before runtime implementation, and `/mu` doctrine boundary:
-  VM cutover coverage bookkeeping, Stage0 capture provenance, then-active JS
-  engine pipeline shape governance, transparent JS Proxy provenance, and the
-  broad host-surface progress boundary. The JS pipeline governance item is now
-  closed and archived by
+- Retained live advisories from that reconciliation named their governing route,
+  current proof gap, hard stop before runtime implementation, and `/mu` doctrine
+  boundary: VM cutover coverage bookkeeping, Stage0 capture provenance,
+  then-active JS engine pipeline shape governance, transparent JS Proxy
+  provenance, and the broad host-surface progress boundary. VM cutover coverage
+  bookkeeping is now closed by PR #940 /
+  `vm-cutover-coverage-trace-implementation-2026-05-12`; the JS pipeline
+  governance item is now closed and archived by
   `post-js-pipeline-governance-deferred-cleanup-2026-05-12`.
 - The reconciliation did not implement `/mu` structural production changes.
 
@@ -262,9 +264,10 @@ Archived source snapshots for extracted non-blocking residue live in:
   landed predecessor runtime truth only. This cleanup did not reopen runtime,
   Stage0, parity, coverage, seed, scheduler, registry, production `/mu`,
   host-oracle, or Claude-related implementation work.
-- Retained live advisories remain active: N1 VM coverage bookkeeping, N3 broad
-  host-surface boundary, and transparent JS Proxy provenance. N5 JS pipeline
-  shape governance is now closed and archived by
+- Retained live advisories remain active: N3 broad host-surface boundary and
+  transparent JS Proxy provenance. N1 VM coverage bookkeeping is closed by
+  PR #940 / `vm-cutover-coverage-trace-implementation-2026-05-12`; N5 JS
+  pipeline shape governance is now closed and archived by
   `post-js-pipeline-governance-deferred-cleanup-2026-05-12`.
 
 2026-05-12 Stage0 cleanup bridge DOC_ACCURACY closeout note:
@@ -281,9 +284,10 @@ Archived source snapshots for extracted non-blocking residue live in:
   moved to
   `reports/archive/deferred/stage0-capture-provenance-deferred-cleanup-2026-05-12_bridge_nonblockers_closed-by-stage0-cleanup-bridge-doc-accuracy-closeout-2026-05-12.md`
   after its three stale-doc findings were corrected.
-- Retained live advisories remain active: transparent JS Proxy provenance, N1 VM
-  coverage bookkeeping, and N3 broad host-surface boundary. N5 JS pipeline
-  governance is now closed and archived by
+- Retained live advisories remain active: transparent JS Proxy provenance and
+  N3 broad host-surface boundary. N1 VM coverage bookkeeping is closed by
+  PR #940 / `vm-cutover-coverage-trace-implementation-2026-05-12`; N5 JS
+  pipeline governance is now closed and archived by
   `post-js-pipeline-governance-deferred-cleanup-2026-05-12`.
 
 2026-05-12 post-JS pipeline governance deferred cleanup note:
@@ -299,7 +303,20 @@ Archived source snapshots for extracted non-blocking residue live in:
   `js-engine-pipeline-shape-governance-test-2026-05-12` structural guard.
   Its historical text is archived at
   `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N5_js_pipeline_governance_closed-by-post-js-pipeline-governance-deferred-cleanup-2026-05-12.md`.
-- Retained live advisories remain active: transparent JS Proxy provenance, N1 VM
-  coverage bookkeeping, and N3 broad host-surface boundary.
+- Retained live advisories remain active: transparent JS Proxy provenance and
+  N3 broad host-surface boundary. N1 VM coverage bookkeeping is closed by
+  PR #940 / `vm-cutover-coverage-trace-implementation-2026-05-12`.
+- This cleanup did not implement runtime, Stage0, seed, scheduler, registry,
+  parity, production `/mu`, host-oracle, or Claude-related changes.
+
+2026-05-13 N1 VM coverage active-inventory closure cleanup note:
+
+- Evidence command:
+  `rg -n "N1 VM coverage bookkeeping|transparent JS Proxy provenance|N3 broad host-surface|vm-cutover-coverage-trace-implementation-2026-05-12|PR #940" reports/deferred/README.md reports/deferred/non_blocking/README.md reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`.
+- Current deferred inventory keeps transparent JS Proxy provenance and N3 broad
+  host-surface boundary active as `/mu` structural advisories.
+- N1 VM coverage bookkeeping is closed by PR #940 /
+  `vm-cutover-coverage-trace-implementation-2026-05-12` and is no longer routed
+  as active deferred work.
 - This cleanup did not implement runtime, Stage0, seed, scheduler, registry,
   parity, production `/mu`, host-oracle, or Claude-related changes.
