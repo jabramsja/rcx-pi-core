@@ -990,7 +990,6 @@ def _infer_structural_workload_target(changed_files: list[str], plan_content: st
         "attempt_trace" in scope_text
         or "stage0_vm" in scope_text
         or "step_mu.py" in scope_text
-        or "coverage" in scope_text
     ):
         return "host_debt_reduction"
     if "rcx_engine" in scope_text or "engine_pipeline" in scope_text:
@@ -1001,6 +1000,8 @@ def _infer_structural_workload_target(changed_files: list[str], plan_content: st
         return "seed_auto_execution"
     if "execution_layer_truth" in scope_text:
         return "execution_layer_truth"
+    if "coverage" in scope_text:
+        return "host_debt_reduction"
     return "ontology_promotion"
 
 

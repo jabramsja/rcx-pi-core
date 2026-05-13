@@ -45,6 +45,15 @@ elif [[ "$BRANCH" == jabramsja/* ]]; then
   WAVE_ID_SUFFIX="${BRANCH#jabramsja/}"
 fi
 
+_canonical_wave_id_suffix() {
+  local suffix="$1"
+  if [[ "$suffix" =~ ^(.+)-restart(-.+)?$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  printf '%s' "$suffix"
+}
+
 _tasks_changed_for_mode() {
   case "$MODE" in
     --staged)
@@ -66,8 +75,12 @@ _tasks_changed_for_mode() {
 # exists in a tracker note exactly. Restart branches therefore fall back cleanly
 # when their suffix is not the authoritative wave id in TASKS.md.
 if [ -n "$WAVE_ID_SUFFIX" ] && _tasks_changed_for_mode; then
-  if grep -qE "Tracker sync note \([^,]+, ${WAVE_ID_SUFFIX}\):" TASKS.md 2>/dev/null; then
-    WAVE_ID_FLAG="--wave-id=$WAVE_ID_SUFFIX"
+  EFFECTIVE_WAVE_ID_SUFFIX="$WAVE_ID_SUFFIX"
+  if [ "$MODE" = "--range" ]; then
+    EFFECTIVE_WAVE_ID_SUFFIX="$(_canonical_wave_id_suffix "$WAVE_ID_SUFFIX")"
+  fi
+  if grep -qE "Tracker sync note \([^,]+, ${EFFECTIVE_WAVE_ID_SUFFIX}\):" TASKS.md 2>/dev/null; then
+    WAVE_ID_FLAG="--wave-id=$EFFECTIVE_WAVE_ID_SUFFIX"
   fi
 fi
 

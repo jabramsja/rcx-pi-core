@@ -1,0 +1,24 @@
+{
+  "wave_id": "vm-cutover-coverage-trace-implementation-2026-05-12-restart",
+  "repeat_run_speedup_ratio": 1.056232,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.407632,
+  "repeat_run_raw_seconds": [
+    0.430554,
+    0.407632
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.430554
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.838186
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-13T01:27:48Z",
+  "collector_version": "2.2.0"
+}

@@ -2039,6 +2039,24 @@ class TestMaintenanceTrackerMetadataPropagation:
             "Stage0 VM attempt_trace closes coverage reconstruction from host bundle order.",
         ) == "host_debt_reduction"
 
+    def test_structural_workload_target_prioritizes_specific_targets_before_generic_coverage(self):
+        assert pb_mod._infer_structural_workload_target(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            [],
+            "coverage follow-up for recurrence exhaustion proof",
+        ) == "recurrence_exhaustion"
+        assert pb_mod._infer_structural_workload_target(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            [],
+            "coverage follow-up for seed_auto_execution proof",
+        ) == "seed_auto_execution"
+        assert pb_mod._infer_structural_workload_target(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            [],
+            "coverage follow-up for execution_layer_truth proof",
+        ) == "execution_layer_truth"
+        assert pb_mod._infer_structural_workload_target(  # ANTICHEAT_OK: testing Phase B tracker-note helper
+            [],
+            "coverage follow-up without a narrower structural target",
+        ) == "host_debt_reduction"
+
     def test_l4_indicator_collection_can_run_before_tracker_note_sync(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
