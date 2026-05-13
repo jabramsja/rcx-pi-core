@@ -79,15 +79,24 @@ class Stage0VMError extends Error {
 // Both are valid Mu dicts. Non-plain objects (Set, Map, Date, etc.) are rejected.
 // ---------------------------------------------------------------------------
 function _isPlainObject(v) {
-  if (v === null || typeof v !== 'object' || Array.isArray(v)) return false;
-  const proto = Object.getPrototypeOf(v);
-  return proto === Object.prototype || proto === null;
+  if (v === null || typeof v !== 'object') return false;
+  try {
+    if (Array.isArray(v)) return false;
+    const proto = Object.getPrototypeOf(v);
+    return proto === Object.prototype || proto === null;
+  } catch (_) {
+    return false;
+  }
 }
 
 // Plain-array check (rejects Array subclasses — parity with Python type(x) is list)
 // JSON.parse only produces plain arrays; Array subclasses are non-Mu host artifacts.
 function _isPlainArray(v) {
-  return Array.isArray(v) && Object.getPrototypeOf(v) === Array.prototype;
+  try {
+    return Array.isArray(v) && Object.getPrototypeOf(v) === Array.prototype;
+  } catch (_) {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -204,42 +213,68 @@ function muCopy(value, rejectNonMu = false, context = 'Deep copy') {
     return null;  // Mu has no undefined — canonicalize to null
   }
   if (_isPlainArray(value)) {
-    if (rejectNonMu) {
-      if (Object.getOwnPropertySymbols(value).length > 0) {
-        throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
-      }
-      if (Object.keys(value).length !== value.length ||
-          Object.getOwnPropertyNames(value).length !== value.length + 1) {
-        throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
-      }
-      for (let i = 0; i < value.length; i++) {
-        const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
-        if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
+    try {
+      if (rejectNonMu) {
+        if (Object.getOwnPropertySymbols(value).length > 0) {
           throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
         }
+        if (Object.keys(value).length !== value.length ||
+            Object.getOwnPropertyNames(value).length !== value.length + 1) {
+          throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
+        }
+        for (let i = 0; i < value.length; i++) {
+          const descriptor = Object.getOwnPropertyDescriptor(value, String(i));
+          if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
+            throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
+          }
+        }
       }
+      return muContainers.list(value.map(item => muCopy(item, rejectNonMu, context)));  // Reject Array subclasses
+    } catch (e) {
+      if (e instanceof Stage0VMError) throw e;
+      if (e instanceof RangeError) {
+        let msg = 'Deep copy depth exceeded (recursion overflow)';
+        if (context !== 'Deep copy') msg = `${context}: ${msg}`;
+        throw new Stage0VMError(msg);
+      }
+      if (rejectNonMu) {
+        throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
+      }
+      return null;
     }
-    return muContainers.list(value.map(item => muCopy(item, rejectNonMu, context)));  // Reject Array subclasses
   }
   if (_isPlainObject(value)) {
-    const keys = Object.keys(value);
-    if (rejectNonMu) {
-      if (Object.getOwnPropertySymbols(value).length > 0 ||
-          Object.getOwnPropertyNames(value).length !== keys.length) {
-        throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
-      }
-      for (const k of keys) {
-        const descriptor = Object.getOwnPropertyDescriptor(value, k);
-        if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
+    try {
+      const keys = Object.keys(value);
+      if (rejectNonMu) {
+        if (Object.getOwnPropertySymbols(value).length > 0 ||
+            Object.getOwnPropertyNames(value).length !== keys.length) {
           throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
         }
+        for (const k of keys) {
+          const descriptor = Object.getOwnPropertyDescriptor(value, k);
+          if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
+            throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
+          }
+        }
       }
+      const result = muContainers.record();
+      for (const k of keys) {
+        result[k] = muCopy(value[k], rejectNonMu, context);
+      }
+      return result;
+    } catch (e) {
+      if (e instanceof Stage0VMError) throw e;
+      if (e instanceof RangeError) {
+        let msg = 'Deep copy depth exceeded (recursion overflow)';
+        if (context !== 'Deep copy') msg = `${context}: ${msg}`;
+        throw new Stage0VMError(msg);
+      }
+      if (rejectNonMu) {
+        throw new Stage0VMError(`${context}: non-Mu value cannot be captured`);
+      }
+      return null;
     }
-    const result = muContainers.record();
-    for (const k of keys) {
-      result[k] = muCopy(value[k], rejectNonMu, context);
-    }
-    return result;
   }
   // Exact-type check for Mu primitives (parity: Python _mu_copy)
   const t = typeof value;
