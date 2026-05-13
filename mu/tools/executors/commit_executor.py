@@ -2389,6 +2389,20 @@ def _collect_private_attr_gate_files(repo_root: Path, staged_files: list[str]) -
     return sorted(candidates)
 
 
+def _resolve_private_attr_checker(repo_root: Path) -> Path | None:
+    """Resolve the tracked private-attr checker from repo or executor paths."""
+    candidates = [
+        repo_root / "mu" / "tools" / "checks" / "linters" / "check_private_attr_access.py",
+        repo_root / "tools" / "checks" / "linters" / "check_private_attr_access.py",
+        SCRIPT_DIR.parents[1] / "tools" / "checks" / "linters" / "check_private_attr_access.py",
+        SCRIPT_DIR.parents[2] / "tools" / "checks" / "linters" / "check_private_attr_access.py",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def run_private_attr_test_gate(
     repo_root: Path,
     staged_files: list[str],
@@ -2406,16 +2420,14 @@ def run_private_attr_test_gate(
             "stderr": "",
             "test_files": [],
         }
-    checker = repo_root / "tools" / "checks" / "linters" / "check_private_attr_access.py"
-    if not checker.exists():
-        checker = SCRIPT_DIR.parents[2] / "tools" / "checks" / "linters" / "check_private_attr_access.py"
-    if not checker.exists():
+    checker = _resolve_private_attr_checker(repo_root)
+    if checker is None:
         return {
             "passed": False,
             "skipped": False,
             "exit_code": 127,
             "stdout": "",
-            "stderr": f"private-attr checker not found: {checker}",
+            "stderr": "private-attr checker not found",
             "test_files": gate_files,
         }
     try:
@@ -2810,7 +2822,20 @@ def _is_tracker_relevant_path(path: str) -> bool:
     normalized = _normalize_repo_relpath(path)
     if not normalized or normalized in {"STATUS.md", "TASKS.md"}:
         return False
-    if normalized.startswith("mu/tools/agents/"):
+    if normalized.startswith(".github/workflows/"):
+        return True
+    if normalized.startswith("tools/checks/"):
+        return True
+    if normalized.startswith(
+        (
+            "mu/tools/agents/",
+            "mu/tools/executors/",
+            "mu/tools/checks/",
+            "mu/tools/hooks/",
+            "mu/tools/observability/",
+            "mu/tools/recovery/",
+        )
+    ):
         return True
     if normalized.startswith("rcx_pi/selfhost/"):
         return True
@@ -3370,6 +3395,89 @@ def _matching_tracker_followup_indices_in_range(
         for idx in range(start_idx, end_idx)
         if _is_tracker_followup_note_line(lines[idx].rstrip("\n"), wave_id)
     ]
+
+
+def ensure_bot_remediation_tracker_followup(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    scoped_files: list[str],
+) -> dict[str, Any]:
+    """Stage a same-wave TASKS follow-up when bot remediation touches tracked surfaces."""
+    tracker_paths = _tracker_relevant_paths_for_handoff(scoped_files, [])
+    if not tracker_paths:
+        return {"updated": False, "tracker_paths": []}
+    if any(path in {"TASKS.md", "STATUS.md"} for path in scoped_files):
+        return {"updated": False, "tracker_paths": tracker_paths}
+
+    tasks_path = repo_root / "TASKS.md"
+    if not tasks_path.exists():
+        return {"updated": False, "tracker_paths": tracker_paths, "errors": ["TASKS.md not found"]}
+
+    lines = tasks_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    ra_idx, ra_end_idx = _find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        return {
+            "updated": False,
+            "tracker_paths": tracker_paths,
+            "errors": ["## Ra section not found in TASKS.md"],
+        }
+
+    canonical_tracker_indices = [
+        idx
+        for idx in _matching_tracker_note_indices_in_range(
+            lines,
+            wave_id,
+            start_idx=ra_idx,
+            end_idx=ra_end_idx,
+        )
+        if _is_canonical_tracker_note_line(lines[idx].rstrip("\n"), wave_id)
+    ]
+    if len(canonical_tracker_indices) != 1:
+        return {
+            "updated": False,
+            "tracker_paths": tracker_paths,
+            "errors": [
+                f"wave_id '{wave_id}' must have exactly one canonical tracker note before bot-remediation follow-up"
+            ],
+        }
+
+    tracker_followup_indices = _matching_tracker_followup_indices_in_range(
+        lines,
+        wave_id,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+    if len(tracker_followup_indices) > 1:
+        return {
+            "updated": False,
+            "tracker_paths": tracker_paths,
+            "errors": [
+                f"wave_id '{wave_id}' has {len(tracker_followup_indices)} tracker follow-up notes in TASKS.md (duplicate)"
+            ],
+        }
+
+    followup_line = _build_tracker_followup_note(
+        wave_id=wave_id,
+        tracker_paths=tracker_paths,
+    )
+    updated = False
+    if tracker_followup_indices:
+        followup_idx = tracker_followup_indices[0]
+        if lines[followup_idx] != followup_line:
+            lines[followup_idx] = followup_line
+            updated = True
+    else:
+        lines.insert(canonical_tracker_indices[0] + 1, followup_line)
+        updated = True
+
+    if updated:
+        tasks_path.write_text("".join(lines), encoding="utf-8")
+    return {
+        "updated": updated,
+        "tracker_paths": tracker_paths,
+        "path": "TASKS.md",
+    }
 
 
 def _find_ra_section_range(lines: list[str]) -> tuple[int | None, int | None]:
@@ -5086,6 +5194,28 @@ def _attempt_bot_finding_remediation(
                 _run(["git", "add", "--"] + _other_files, cwd=repo_root, timeout=30)
             for _cf in _claude_files:
                 _run(["git", "add", "--", _cf], cwd=repo_root, timeout=30)
+            tracker_followup = ensure_bot_remediation_tracker_followup(
+                repo_root,
+                wave_id=wave_id,
+                scoped_files=scoped_files,
+            )
+            if tracker_followup.get("errors"):
+                return {
+                    "status": "bot_findings_pending",
+                    "bot_findings": current_findings,
+                    "pr_number": pr_number,
+                    "steps_completed": result["steps_completed"],
+                    "remediation_rounds_attempted": round_num,
+                    "errors": list(tracker_followup.get("errors") or []),
+                }
+            if tracker_followup.get("updated"):
+                _run(["git", "add", "--", "TASKS.md"], cwd=repo_root, timeout=30)
+                if "TASKS.md" not in scoped_files:
+                    scoped_files = sorted({*scoped_files, "TASKS.md"})
+                log(
+                    "Step 15: tracker follow-up staged for bot remediation "
+                    f"({len(tracker_followup.get('tracker_paths') or [])} tracker-relevant file(s))"
+                )
 
             # Mint bot-remediation receipt (type B) so the pre-commit hook
             # sees a valid receipt for this staged state.  This is a

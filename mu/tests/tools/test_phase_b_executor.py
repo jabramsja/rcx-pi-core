@@ -86,25 +86,105 @@ class TestPrivateAttrGate:
     def test_private_attr_gate_failure_reports_checker_output(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
-        checker = repo / "tools" / "checks" / "linters" / "check_private_attr_access.py"
+        checker = repo / "mu" / "tools" / "checks" / "linters" / "check_private_attr_access.py"
         checker.parent.mkdir(parents=True)
         checker.write_text(
             "import sys\n"
-            "print('ERROR: Found private attr access in tests/:')\n"
-            "print('  tests/tools/test_phase_b_executor.py:10: ._helper')\n"
+            "print('ERROR: Found private attr access in tests/ or mu/tests/:')\n"
+            "print('  mu/tests/tools/test_phase_b_executor.py:10: ._helper')\n"
             "sys.exit(1)\n",
             encoding="utf-8",
         )
 
         result = pb_mod.run_private_attr_gate(
             repo,
-            ["tests/tools/test_phase_b_executor.py"],
+            ["mu/tests/tools/test_phase_b_executor.py"],
         )
 
         assert result["passed"] is False
         assert result["skipped"] is False
-        assert result["test_files"] == ["tests/tools/test_phase_b_executor.py"]
+        assert result["test_files"] == ["mu/tests/tools/test_phase_b_executor.py"]
         assert "ERROR: Found private attr access in tests/" in result["stdout"]
+
+
+class TestPhaseBWaveClassResolution:
+    def test_planning_only_structural_packet_packages_as_enabler(self):
+        plan = (
+            "Class: L4_STRUCTURAL\n"
+            "\n"
+            "This packet is a Phase A routing boundary, not an implementation packet.\n"
+            "\n"
+            "## Locked Later Phase B Plan\n"
+        )
+
+        note = pb_mod.build_phase_b_tracker_note(
+            wave_id="planning-only-structural-wave",
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/packet.md",
+            plan_content=plan,
+            changed_files=[
+                "TASKS.md",
+                "reports/control_plane/packet.md",
+                "reports/l4_wave_indicators/packet.json",
+            ],
+            test_files=[],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=1,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        assert "Class: L4_ENABLER" in note
+
+    def test_runtime_structural_packet_stays_structural(self):
+        note = pb_mod.build_phase_b_tracker_note(
+            wave_id="runtime-structural-wave",
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/packet.md",
+            plan_content="This packet is a Phase A routing boundary, not an implementation packet.",
+            changed_files=[
+                "mu/host/js/engine/pipeline.js",
+                "mu/tests/l4_gates/test_wave11_hardening_gate.py",
+            ],
+            test_files=[],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=1,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        assert "Class: L4_STRUCTURAL" in note
+
+    def test_structural_tracker_note_uses_package_l4_gate_from_changed_scope(self):
+        note = pb_mod.build_phase_b_tracker_note(
+            wave_id="structural-wave-2026-05-13",
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/structural-wave.md",
+            changed_files=[
+                "mu/host/js/engine/pipeline.js",
+                "mu/tests/l4_gates/test_wave11_hardening_gate.py",
+                "mu/tests/tools/test_phase_b_executor.py",
+                "reports/control_plane/structural-wave.md",
+            ],
+            test_files=[],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=1,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        assert (
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+            "mu/tests/l4_gates/test_wave11_hardening_gate.py "
+            "mu/tests/tools/test_phase_b_executor.py`"
+        ) in note
+        assert "Final pytest gate covered 2 test file(s)" in note
 
 
 class TestBuildImplementationPrompt:
