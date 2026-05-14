@@ -194,6 +194,29 @@ class TestPythonSourceLock:
 class TestJsSourceLock:
     """Exhaustive source-lock for JS trusted paths."""
 
+    def _stage0_vm_source(self):
+        return (REPO_ROOT / "mu" / "host" / "js" / "core" / "stage0_vm.js").read_text()
+
+    def _stage0_vm_export_block(self):
+        src = self._stage0_vm_source()
+        start = src.index("module.exports = {")
+        end = src.index("\n};", start)
+        return src[start:end]
+
+    def _stage0_vm_export_names(self):
+        names = set()
+        for line in self._stage0_vm_export_block().splitlines():
+            if not line.startswith("  ") or line.startswith("    "):
+                continue
+            stripped = line.split("//", 1)[0].strip().rstrip(",")
+            if not stripped or stripped in {"}", "};"}:
+                continue
+            if "(" in stripped and "{" in stripped:
+                names.add(stripped.split("(", 1)[0].strip())
+            else:
+                names.add(stripped.split(":", 1)[0].strip())
+        return names
+
     def test_js_trusted_step_allowlist(self):
         """All JS trusted-step symbol/fragments must be in allowlist."""
         allowlist = {
@@ -230,6 +253,38 @@ class TestJsSourceLock:
             f"JS trusted-step symbol/fragments found outside allowlist:\n" +
             "\n".join(violations)
         )
+
+    def test_js_public_mu_copy_export_forces_strict_mode(self):
+        """The public JS Stage0 copy export must not expose lax rejectNonMu=false."""
+        block = self._stage0_vm_export_block()
+        assert "\n  muCopy,\n" not in block, (
+            "public stage0_vm export must not expose the internal lax muCopy helper"
+        )
+        start = block.index("  muCopy(value, rejectNonMu = true")
+        end = block.index("\n  },", start)
+        wrapper = block[start:end]
+        assert "rejectNonMu !== true" in wrapper
+        assert "safeMuCopy(value, true, context)" in wrapper
+        assert "safeMuCopy(value, rejectNonMu" not in wrapper
+
+    def test_js_stage0_vm_exports_do_not_expose_copy_laundering_paths(self):
+        """Public Stage0 VM exports must not expose lax copy/trust constructors."""
+        names = self._stage0_vm_export_names()
+        assert "muCopy" in names
+        assert names & {
+            "safeMuCopy",
+            "materializeTemplate",
+            "muContainers",
+            "containers",
+            "containerFactory",
+            "record",
+            "list",
+            "trustMu",
+        } == set()
+        copy_exports = {name for name in names if "copy" in name.lower()}
+        assert copy_exports == {"muCopy"}
+        trust_exports = {name for name in names if "trust" in name.lower()}
+        assert trust_exports == {"_stage0VmStepTrusted"}
 
 
 # =============================================================================

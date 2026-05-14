@@ -1049,8 +1049,13 @@ module.exports = {
   resolvePath,
   classifyKind,
   muDeepEqual,
-  muCopy,
-  materializeTemplate,
+  muCopy(value, rejectNonMu = true, context = 'Deep copy') {
+    if (rejectNonMu !== true) {
+      const label = typeof context === 'string' ? context : 'Deep copy';
+      throw new Stage0VMError(`${label}: public muCopy requires rejectNonMu=true`);
+    }
+    return safeMuCopy(value, true, context);
+  },
   MAX_VM_PROGRAMS,
   MAX_VM_OPS_PER_STEP,
   MAX_TEMPLATE_DEPTH,
