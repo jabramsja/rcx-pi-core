@@ -11,6 +11,7 @@ Source-lock is EXHAUSTIVE per Codex B2.2: grep for ALL occurrences (not just
 import patterns), ban module-level imports outside allowlist.
 """
 
+import re
 import subprocess
 import pytest
 from pathlib import Path
@@ -203,18 +204,255 @@ class TestJsSourceLock:
         end = src.index("\n};", start)
         return src[start:end]
 
-    def _stage0_vm_export_names(self):
+    def _mask_js_non_code(self, src):
+        """Replace JS comments/strings with spaces while preserving offsets."""
+        chars = list(src)
+        i = 0
+        while i < len(src):
+            c = src[i]
+            nxt = src[i + 1] if i + 1 < len(src) else ""
+            if c in {"'", '"', "`"}:
+                quote = c
+                chars[i] = " "
+                i += 1
+                while i < len(src):
+                    if src[i] == "\\":
+                        chars[i] = " "
+                        if i + 1 < len(src):
+                            chars[i + 1] = " "
+                        i += 2
+                        continue
+                    chars[i] = "\n" if src[i] == "\n" else " "
+                    if src[i] == quote:
+                        i += 1
+                        break
+                    i += 1
+                continue
+            if c == "/" and nxt == "/":
+                chars[i] = chars[i + 1] = " "
+                i += 2
+                while i < len(src) and src[i] != "\n":
+                    chars[i] = " "
+                    i += 1
+                continue
+            if c == "/" and nxt == "*":
+                chars[i] = chars[i + 1] = " "
+                i += 2
+                while i + 1 < len(src):
+                    if src[i] == "*" and src[i + 1] == "/":
+                        chars[i] = chars[i + 1] = " "
+                        i += 2
+                        break
+                    chars[i] = "\n" if src[i] == "\n" else " "
+                    i += 1
+                continue
+            i += 1
+        return "".join(chars)
+
+    def _matching_js_delimiter(self, masked_src, open_index, open_char, close_char):
+        depth = 0
+        for index in range(open_index, len(masked_src)):
+            char = masked_src[index]
+            if char == open_char:
+                depth += 1
+            elif char == close_char:
+                depth -= 1
+                if depth == 0:
+                    return index
+        raise AssertionError(f"unterminated JS export literal starting at offset {open_index}")
+
+    def _add_js_object_property_name(self, property_src, names):
+        masked = self._mask_js_non_code(property_src)
+        leading = len(masked) - len(masked.lstrip())
+        stripped = property_src[leading:].strip()
+        if not stripped:
+            return
+        if stripped.startswith("...") or stripped.startswith("["):
+            raise AssertionError(f"unsupported computed/spread export property: {stripped[:80]}")
+
+        quoted = re.match(r"""(['"])([^'"]+)\1\s*(?::|\(|$)""", stripped)
+        if quoted:
+            names.add(quoted.group(2))
+            return
+
+        accessor = re.match(r"(?:async|get|set)\s+([A-Za-z_$][\w$]*)\s*\(", stripped)
+        if accessor:
+            names.add(accessor.group(1))
+            return
+
+        identifier = re.match(r"([A-Za-z_$][\w$]*)\s*(?::|\(|$)", stripped)
+        if identifier:
+            names.add(identifier.group(1))
+            return
+
+        raise AssertionError(f"unsupported export property syntax: {stripped[:80]}")
+
+    def _js_object_property_names(self, src, open_index, close_index):
+        original = src[open_index:close_index + 1]
+        masked = self._mask_js_non_code(original)
         names = set()
-        for line in self._stage0_vm_export_block().splitlines():
-            if not line.startswith("  ") or line.startswith("    "):
+        brace_depth = 0
+        paren_depth = 0
+        bracket_depth = 0
+        property_start = 1
+        for index, char in enumerate(masked):
+            if char == "{":
+                brace_depth += 1
+            elif char == "}":
+                brace_depth -= 1
+            elif char == "(":
+                paren_depth += 1
+            elif char == ")":
+                paren_depth -= 1
+            elif char == "[":
+                bracket_depth += 1
+            elif char == "]":
+                bracket_depth -= 1
+            elif (
+                char == ","
+                and brace_depth == 1
+                and paren_depth == 0
+                and bracket_depth == 0
+            ):
+                self._add_js_object_property_name(
+                    original[property_start:index],
+                    names,
+                )
+                property_start = index + 1
+
+        self._add_js_object_property_name(original[property_start:-1], names)
+        return names
+
+    def _object_literal_exports_from_call(self, src, masked_src, call_start, call_end):
+        names = set()
+        index = call_start
+        found_object_literal = False
+        while index < call_end:
+            char = masked_src[index]
+            if char.isspace() or char == ",":
+                index += 1
                 continue
-            stripped = line.split("//", 1)[0].strip().rstrip(",")
-            if not stripped or stripped in {"}", "};"}:
+            if char == "{":
+                close_index = self._matching_js_delimiter(masked_src, index, "{", "}")
+                names.update(self._js_object_property_names(src, index, close_index))
+                found_object_literal = True
+                index = close_index + 1
                 continue
-            if "(" in stripped and "{" in stripped:
-                names.add(stripped.split("(", 1)[0].strip())
-            else:
-                names.add(stripped.split(":", 1)[0].strip())
+            raise AssertionError("export mutation uses non-literal object; cannot source-lock names")
+
+        if not found_object_literal:
+            raise AssertionError("export mutation uses non-literal object; cannot source-lock names")
+        return names
+
+    def _stage0_vm_export_names(self):
+        src = self._stage0_vm_source()
+        masked_src = self._mask_js_non_code(src)
+        names = set()
+        name_locations = {}
+        duplicate_exports = []
+        parsed_spans = []
+
+        def line_number(offset):
+            return src.count("\n", 0, offset) + 1
+
+        def record_export_names(export_names, location):
+            for name in export_names:
+                if name in name_locations:
+                    duplicate_exports.append(
+                        f"{name}: {name_locations[name]} and {location}"
+                    )
+                    continue
+                name_locations[name] = location
+                names.add(name)
+
+        for match in re.finditer(r"module\s*\.\s*exports\s*=\s*{", masked_src):
+            open_index = masked_src.index("{", match.start(), match.end())
+            close_index = self._matching_js_delimiter(masked_src, open_index, "{", "}")
+            record_export_names(
+                self._js_object_property_names(src, open_index, close_index),
+                f"module.exports object at line {line_number(match.start())}",
+            )
+            parsed_spans.append((match.start(), close_index + 1))
+
+        direct_assignment = re.compile(
+            r"(?:module\s*\.\s*exports|exports)\s*"
+            r"(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*(['\"])([^'\"]+)\2\s*\])\s*="
+        )
+        for match in direct_assignment.finditer(src):
+            if masked_src[match.start()].isspace():
+                continue
+            record_export_names(
+                {match.group(1) or match.group(3)},
+                f"direct assignment at line {line_number(match.start())}",
+            )
+            parsed_spans.append(match.span())
+
+        for match in re.finditer(
+            r"Object\s*\.\s*assign\s*\(\s*(?:module\s*\.\s*exports|exports)\s*,",
+            masked_src,
+        ):
+            open_paren = masked_src.index("(", match.start(), match.end())
+            close_paren = self._matching_js_delimiter(masked_src, open_paren, "(", ")")
+            record_export_names(
+                self._object_literal_exports_from_call(
+                    src,
+                    masked_src,
+                    match.end(),
+                    close_paren,
+                ),
+                f"Object.assign at line {line_number(match.start())}",
+            )
+            parsed_spans.append((match.start(), close_paren + 1))
+
+        for match in re.finditer(
+            r"Object\s*\.\s*defineProperties\s*\(\s*(?:module\s*\.\s*exports|exports)\s*,",
+            masked_src,
+        ):
+            open_paren = masked_src.index("(", match.start(), match.end())
+            close_paren = self._matching_js_delimiter(masked_src, open_paren, "(", ")")
+            record_export_names(
+                self._object_literal_exports_from_call(
+                    src,
+                    masked_src,
+                    match.end(),
+                    close_paren,
+                ),
+                f"Object.defineProperties at line {line_number(match.start())}",
+            )
+            parsed_spans.append((match.start(), close_paren + 1))
+
+        define_property = re.compile(
+            r"Object\s*\.\s*defineProperty\s*\(\s*"
+            r"(?:module\s*\.\s*exports|exports)\s*,\s*(['\"])([^'\"]+)\1"
+        )
+        for match in define_property.finditer(src):
+            if masked_src[match.start()].isspace():
+                continue
+            open_paren = masked_src.index("(", match.start(), match.end())
+            close_paren = self._matching_js_delimiter(masked_src, open_paren, "(", ")")
+            record_export_names(
+                {match.group(2)},
+                f"Object.defineProperty at line {line_number(match.start())}",
+            )
+            parsed_spans.append((match.start(), close_paren + 1))
+
+        export_target = re.compile(r"module\s*\.\s*exports|(?<![.\w$])exports\b")
+        unparsed = []
+        for match in export_target.finditer(masked_src):
+            if any(start <= match.start() < end for start, end in parsed_spans):
+                continue
+            line_no = line_number(match.start())
+            line = src.splitlines()[line_no - 1].strip()
+            unparsed.append(f"line {line_no}: {line}")
+
+        assert not unparsed, (
+            "stage0_vm.js has unsupported export mutations; update the "
+            "source-lock parser before allowing them:\n" + "\n".join(unparsed)
+        )
+        assert not duplicate_exports, (
+            "stage0_vm.js has duplicate export mutations; later mutations may "
+            "override the source-locked public surface:\n" + "\n".join(duplicate_exports)
+        )
         return names
 
     def test_js_trusted_step_allowlist(self):
