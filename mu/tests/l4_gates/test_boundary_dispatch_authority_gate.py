@@ -754,6 +754,27 @@ class TestJsSeedLoaderMalformedProjection:
             f"'id' in proj check (pos {id_pos})"
         )
 
+    def test_core_seed_loader_type_guard_precedes_unknown_and_id_map(self):
+        """seed_loader.js rejects malformed projection entries before registry/id access."""
+        source = (
+            REPO_ROOT / "mu" / "host" / "js" / "core" / "seed_loader.js"
+        ).read_text()
+        guard = "p === null || typeof p !== 'object' || Array.isArray(p)"
+        unknown_seed_check = "if (!expected)"
+        id_map = "seed.projections.map(p => p.id)"
+
+        assert guard in source, "seed_loader.js missing projection entry type guard"
+        assert unknown_seed_check in source, "seed_loader.js missing unknown-seed fail-closed check"
+        assert id_map in source, "seed_loader.js missing projection-id map verification"
+
+        guard_pos = source.index(guard)
+        assert guard_pos < source.index(unknown_seed_check), (
+            "seed_loader.js projection type guard must run before unknown-seed rejection"
+        )
+        assert guard_pos < source.index(id_map), (
+            "seed_loader.js projection type guard must run before projection id access"
+        )
+
 
 
 # ===========================================================================
@@ -764,14 +785,17 @@ class TestJsSeedLoaderMalformedProjection:
 class TestF2ProductionBindingLock:
     """Lock: F2 tests must use production code paths, not inline simulation."""
 
-    def test_f2_tests_require_production_seed_loader(self):
-        """TestJsSeedLoaderMalformedProjection must call production seed_loader."""
+    @staticmethod
+    def _malformed_projection_class_source():
         test_file = REPO_ROOT / "mu" / "tests" / "l4_gates" / "test_boundary_dispatch_authority_gate.py"
         source = test_file.read_text()
-        # Extract TestJsSeedLoaderMalformedProjection class body
         class_start = source.index("class TestJsSeedLoaderMalformedProjection")
         next_class = source.find("\nclass ", class_start + 1)
-        class_source = source[class_start:next_class] if next_class != -1 else source[class_start:]
+        return source[class_start:next_class] if next_class != -1 else source[class_start:]
+
+    def test_f2_tests_require_production_seed_loader(self):
+        """TestJsSeedLoaderMalformedProjection must call production seed_loader."""
+        class_source = self._malformed_projection_class_source()
         # Must contain production binding
         assert "require('./mu/host/js/core/seed_loader')" in class_source, (
             "TestJsSeedLoaderMalformedProjection must invoke production seed_loader "
@@ -784,6 +808,25 @@ class TestF2ProductionBindingLock:
             assert needle not in class_source, (
                 f"TestJsSeedLoaderMalformedProjection must not define inline "
                 f"{fn_name} — use production code"
+            )
+
+    def test_f2_lock_references_production_loaders_not_d010_research(self):
+        """Malformed projection coverage must bind production loader paths, not D010."""
+        class_source = self._malformed_projection_class_source()
+
+        assert "mu/host/js/core/seed_loader" in class_source
+        assert '"cli" / "main.js"' in class_source
+
+        forbidden_fragments = [
+            "test_" + "d010" + "_h5_projection_loader_binary.py",
+            "d" + "010",
+            "h5_projection_loader_binary",
+        ]
+        lower_source = class_source.lower()
+        for fragment in forbidden_fragments:
+            assert fragment not in lower_source, (
+                "TestJsSeedLoaderMalformedProjection must not rely on "
+                "research-only D010 projection-loader artifacts"
             )
 
 

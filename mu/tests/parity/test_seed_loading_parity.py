@@ -21,6 +21,8 @@ What this checker does NOT prove:
 from __future__ import annotations
 
 import functools
+import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -30,6 +32,8 @@ from rcx_pi.selfhost.seed_integrity import (
     SEED_CHECKSUMS,
     EXPECTED_PROJECTION_IDS,
     MU_SEED_LOCATIONS,
+    get_seed_path,
+    load_verified_seed,
 )
 
 # ── Locate JS source ────────────────────────────────────────────────────
@@ -79,6 +83,45 @@ def _extract_js_seed_checksums(source: str) -> dict[str, str]:
 
 def _extract_js_projection_ids(source: str) -> dict[str, list[str]]:
     return _extract_js_list_dict(source, "EXPECTED_PROJECTION_IDS")
+
+
+def _python_load_verified_seed_result(seed_path: Path) -> dict[str, object]:
+    try:
+        seed = load_verified_seed(seed_path, verify=True)
+    except Exception as exc:  # tests compare fail-closed behavior across substrates
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "ids": [proj["id"] for proj in seed["projections"]]}
+
+
+def _js_load_verified_seed_result(seed_name: str, subdir: str) -> dict[str, object]:
+    js_script = f"""
+    const {{ loadVerifiedSeed }} = require('./mu/host/js/core/seed_loader');
+    try {{
+      const seed = loadVerifiedSeed({json.dumps(seed_name)}, {json.dumps(subdir)});
+      console.log(JSON.stringify({{
+        ok: true,
+        ids: seed.projections.map(p => p.id),
+      }}));
+    }} catch (e) {{
+      console.log(JSON.stringify({{
+        ok: false,
+        error: e.message,
+      }}));
+    }}
+    """
+    proc = subprocess.run(
+        ["node", "-e", js_script],
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO),
+        timeout=10,
+    )
+    assert proc.returncode == 0, f"JS seed loader probe failed: {proc.stderr}"
+    return json.loads(proc.stdout)
+
+
+def _subdir_relative_to_mu(seed_dir: Path) -> str:
+    return os.path.relpath(seed_dir, _REPO / "mu")
 
 
 # ── Checksum parity ──────────────────────────────────────────────────────
@@ -180,6 +223,59 @@ class TestSeedLocationCoverage:
         valid_dirs = {"substrate", "closures", "bridge", "programs", "utilities"}
         for seed, loc in MU_SEED_LOCATIONS.items():
             assert loc in valid_dirs, f"{seed} has invalid location '{loc}'"
+
+
+class TestProductionLoaderBoundaryParity:
+    """Python and JS production loaders must agree on accept/reject boundaries."""
+
+    def test_valid_rcx_engine_seed_loads_same_projection_ids(self):
+        """Both substrates load the current rcx_engine JSON seed through production loaders."""
+        py_result = _python_load_verified_seed_result(get_seed_path("rcx_engine.v1.json"))
+        js_result = _js_load_verified_seed_result("rcx_engine.v1.json", "programs")
+
+        expected_ids = EXPECTED_PROJECTION_IDS["rcx_engine.v1.json"]
+        assert py_result == {"ok": True, "ids": expected_ids}
+        assert js_result == {"ok": True, "ids": expected_ids}
+
+    def test_tampered_known_seed_fails_closed_in_both_loaders(self, tmp_path):
+        """The same tampered known seed image is rejected on both substrates."""
+        seed_name = "rcx_engine.v1.json"
+        seed_path = tmp_path / seed_name
+        seed_path.write_text(
+            '{"meta": {"version": "1.0", "name": "RCX_ENGINE", '
+            '"description": "tampered"}, "projections": [null]}'
+        )
+
+        py_result = _python_load_verified_seed_result(seed_path)
+        js_result = _js_load_verified_seed_result(
+            seed_name, _subdir_relative_to_mu(tmp_path)
+        )
+
+        assert py_result["ok"] is False
+        assert "integrity check failed" in str(py_result["error"])
+        assert js_result["ok"] is False
+        assert "checksum mismatch" in str(js_result["error"])
+
+    def test_unknown_malformed_projection_seed_fails_closed_in_both_loaders(
+        self, tmp_path
+    ):
+        """The same unknown malformed projection image is not accepted by either loader."""
+        seed_name = "malformed_projection_control.v1.json"
+        seed_path = tmp_path / seed_name
+        seed_path.write_text(
+            '{"meta": {"version": "1.0", "name": "MALFORMED", '
+            '"description": "projection type control"}, "projections": [null]}'
+        )
+
+        py_result = _python_load_verified_seed_result(seed_path)
+        js_result = _js_load_verified_seed_result(
+            seed_name, _subdir_relative_to_mu(tmp_path)
+        )
+
+        assert py_result["ok"] is False
+        assert "Unknown seed" in str(py_result["error"])
+        assert js_result["ok"] is False
+        assert "projection[0]" in str(js_result["error"])
 
 
 # ---------------------------------------------------------------------------

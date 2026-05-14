@@ -320,6 +320,50 @@ class TestVerifiedLoad:
         with pytest.raises(ValueError, match="Unknown seed"):
             load_verified_seed(unknown_seed, verify=True)
 
+    def test_load_current_kernel_seed_checksum_and_projection_ids(self):
+        """Production JSON rcx_load boundary verifies current kernel seed bytes."""
+        seed_path = get_seed_path("kernel.v1.json")
+        content = seed_path.read_bytes()
+
+        assert compute_checksum(content) == SEED_CHECKSUMS["kernel.v1.json"]
+
+        seed = load_verified_seed(seed_path, verify=True)
+        actual_ids = [proj["id"] for proj in seed["projections"]]
+        assert actual_ids == EXPECTED_PROJECTION_IDS["kernel.v1.json"]
+
+    def test_load_verified_seed_rejects_tampered_known_seed_before_json_parse(
+        self, tmp_path
+    ):
+        """Tampered known seed bytes fail checksum before malformed JSON parsing."""
+        tampered_seed = tmp_path / "kernel.v1.json"
+        tampered_seed.write_bytes(b'{"meta": ')
+
+        with pytest.raises(ValueError, match="integrity check failed"):
+            load_verified_seed(tampered_seed, verify=True)
+
+    def test_load_verified_seed_rejects_malformed_projection_after_checksum(
+        self, tmp_path, monkeypatch
+    ):
+        """A checksum-matching malformed projection fails through structure validation."""
+        malformed_seed = tmp_path / "kernel.v1.json"
+        content = json.dumps(
+            {
+                "meta": {
+                    "version": "1.0",
+                    "name": "KERNEL_SEED",
+                    "description": "malformed projection control",
+                },
+                "projections": [None],
+            }
+        ).encode("utf-8")
+        malformed_seed.write_bytes(content)
+        monkeypatch.setitem(
+            SEED_CHECKSUMS, "kernel.v1.json", compute_checksum(content)
+        )
+
+        with pytest.raises(ValueError, match="projection 0 must be a dict"):
+            load_verified_seed(malformed_seed, verify=True)
+
 
 # =============================================================================
 # Test: Verify All Seeds
