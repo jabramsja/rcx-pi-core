@@ -1,0 +1,24 @@
+{
+  "wave_id": "js-stage0-mucopy-bridge-nonblocker-closeout-2026-05-14",
+  "repeat_run_speedup_ratio": 0.940048,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.516293,
+  "repeat_run_raw_seconds": [
+    0.48534,
+    0.516293
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.48534
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 1.001633
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-14T03:26:30Z",
+  "collector_version": "2.2.0"
+}
