@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-rcx-load-projection-loader-production-test-surface-lock-2026-05-14",
+  "repeat_run_speedup_ratio": 1.037892,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.441257,
+  "repeat_run_raw_seconds": [
+    0.457977,
+    0.441257
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.457977
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.899234
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-14T16:55:52Z",
+  "collector_version": "2.2.0"
+}
