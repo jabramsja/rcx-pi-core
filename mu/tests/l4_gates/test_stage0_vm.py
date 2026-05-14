@@ -1579,26 +1579,37 @@ for (const [label, value] of cases) {
     });
   }
 }
-for (const [label, value] of cases) {
+const publicLaxCases = cases.concat([
+  ['plain_record', {a: 1}],
+  ['plain_array', [1]],
+  ['undefined_value', undefined],
+]);
+for (const [label, value] of publicLaxCases) {
   try {
     muCopy(value, false, 'direct muCopy boundary');
-    results.push({label: `${label}_lax`, laxCompleted: true});
+    results.push({label: `${label}_public_lax`, laxRejected: false});
   } catch (err) {
     results.push({
-      label: `${label}_lax`,
-      laxCompleted: false,
+      label: `${label}_public_lax`,
+      laxRejected: true,
       name: err && err.name,
       message: err && err.message,
+      hostTrapLeaked: String(err && err.message).includes('host '),
     });
   }
 }
 console.log(JSON.stringify({
-  ok: results.every(item =>
-    item.laxCompleted === true ||
-    (item.rejected === true &&
-     item.name === 'Stage0VMError' &&
-     item.message === 'direct muCopy boundary: non-Mu value cannot be captured' &&
-     item.hostTrapLeaked === false)),
+  ok: results.every(item => {
+    const strictRejected = item.rejected === true &&
+      item.name === 'Stage0VMError' &&
+      item.message === 'direct muCopy boundary: non-Mu value cannot be captured' &&
+      item.hostTrapLeaked === false;
+    const publicLaxRejected = item.laxRejected === true &&
+      item.name === 'Stage0VMError' &&
+      item.message === 'direct muCopy boundary: public muCopy requires rejectNonMu=true' &&
+      item.hostTrapLeaked === false;
+    return strictRejected || publicLaxRejected;
+  }),
   results
 }));
 """
