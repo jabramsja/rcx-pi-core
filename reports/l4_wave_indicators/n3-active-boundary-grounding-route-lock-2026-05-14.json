@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-active-boundary-grounding-route-lock-2026-05-14",
+  "repeat_run_speedup_ratio": 1.036122,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.443495,
+  "repeat_run_raw_seconds": [
+    0.459515,
+    0.443495
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.459515
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.90301
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-14T06:06:16Z",
+  "collector_version": "2.2.0"
+}
