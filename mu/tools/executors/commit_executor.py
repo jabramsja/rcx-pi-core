@@ -6507,6 +6507,10 @@ def _post_merge_request_for_queue_entry(entry: dict[str, Any]) -> str:
     packet = str(entry.get("packet") or "")
     source_packet = str(entry.get("source_packet") or "")
     category = str(entry.get("category") or "founder-ordered redteam")
+    category_lower = category.lower()
+    is_authorized_mu_structural = "structural" in category_lower and (
+        "/mu" in category_lower or "mu structural" in category_lower
+    )
     read_targets = [packet]
     if source_packet:
         read_targets.append(source_packet)
@@ -6517,11 +6521,15 @@ def _post_merge_request_for_queue_entry(entry: dict[str, Any]) -> str:
             f"candidate is {packet}; report that /mu structural work is queued "
             "and do not dispatch Phase A, Phase B, or commit implementation."
         )
+    stop_clause = (
+        "Stop if the packet requires work outside its bounded scope or founder input."
+        if is_authorized_mu_structural
+        else "Stop if the packet requires /mu structural work or founder input."
+    )
     return (
         f"Use the full dispatcher pipeline for this {category} remediation wave: "
         "post-merge supervisor -> Phase A -> Phase B -> commit executor. "
-        f"Read {target_text}. Do not edit Claude-related files. Stop if the "
-        "packet requires /mu structural work or founder input."
+        f"Read {target_text}. Do not edit Claude-related files. {stop_clause}"
     )
 
 

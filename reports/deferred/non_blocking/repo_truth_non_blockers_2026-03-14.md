@@ -42,6 +42,17 @@ archived at
 The active repo-truth retained advisory in this packet remains N3 broad
 host-surface boundary only.
 
+2026-05-13 successor routing note: PR #944 /
+`broad-host-surface-reduction-boundary-2026-05-13` and PR #945 /
+`broad-host-surface-next-boundary-slice-2026-05-13` closed bounded JS
+host-surface slices, and PR #946 closed only generated DOC_ACCURACY bridge
+residue. N3 remains active because those slices do not prove broad
+host-surface elimination. The next bounded successor route is
+`reports/control_plane/broad_host_surface_next_structural_slice_2026-05-13.md`,
+which must use dispatcher-first Phase A to select one exact source-grounded
+slice or leave N3 active with a precise next packet. Baseline-only cleanup is
+not N3 closure.
+
 2026-05-10 triage evidence refresh:
 
 - N1 was advisory in this 2026-05-10 snapshot because `_step_kernel_with_vm`
