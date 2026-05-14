@@ -416,6 +416,37 @@ class TestClassifyFailure:
             {"status": "error", "stderr": "Unable to create index.lock",
              "step": "stage_files"}) == FailureClass.STALE_GIT_INDEX_LOCK
 
+    def test_direct_git_commit_index_lock_wins_over_stale_active_chatter(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        payload = json.dumps({
+            "status": "error",
+            "step": "git_commit",
+            "errors": [
+                "git commit failed: fatal: Unable to create '/repo/.git/index.lock': "
+                "File exists. Another git process seems to be running in this "
+                "repository. remove the file manually to continue."
+            ],
+            "steps_completed": ["validate_inputs", "stage_files"],
+        })
+        result = {
+            "status": "failed",
+            "executor": "commit_executor",
+            "stdout": payload,
+            "stderr": (
+                "pre-push-fast failed: STALE: PR #927 is MERGED but NEXT item "
+                "not marked Landed\n"
+                "Run: bash tools/checks/check_stale_next_items.sh --fix"
+            ),
+        }
+
+        fc = rg_mod.classify_failure(result)
+        recovery = rg_mod.attempt_recovery(tmp_path, result, "wave-index-lock")
+
+        assert fc == FailureClass.STALE_GIT_INDEX_LOCK
+        assert rg_mod.tier_for(fc) == 2
+        assert recovery["failure_class"] == "stale_git_index_lock"
+        assert recovery["action"] == "transient_index_lock_released"
+
     def test_embedded_stage_files_git_add_error_wins_over_test_path_text(self):
         result = {
             "status": "failed",
@@ -437,7 +468,8 @@ class TestClassifyFailure:
             "step": "bridge_staging",
             "stderr": (
                 "git add failed with exit=128 | fatal: Unable to create "
-                "'/repo/.git/worktrees/w/index.lock': Operation not permitted"
+                "'/repo/.git/worktrees/w/index.lock': Operation not permitted\n"
+                "Run: bash tools/checks/check_stale_next_items.sh --fix"
             ),
             "errors": [
                 "Failed to stage files before bridge review",
@@ -3030,6 +3062,37 @@ class TestFixStaleActiveItems:
             text=True,
         ).stdout
         assert status == ""
+
+    def test_attempt_recovery_routes_real_prepush_stale_active_to_checker(self, tmp_path, monkeypatch):
+        wave_id = "wave-stale-2026-05-11"
+        commit_sha = self._init_repo_with_checker(tmp_path)
+        self._write_continuation(tmp_path, wave_id, commit_sha)
+        monkeypatch.delenv("RCX_SKIP_RECEIPT_CHECK", raising=False)
+        marker = self._install_receipt_skip_required_hook(tmp_path)
+        payload = json.dumps({
+            "status": "error",
+            "step": "run_pre_push_script",
+            "errors": [
+                "pre-push-fast failed: STALE: PR #927 is MERGED but NEXT item not marked Landed\n"
+                "1 stale active item(s) found - merged PRs/branches not marked Landed\n"
+                "Run: bash tools/checks/check_stale_next_items.sh --fix"
+            ],
+        })
+
+        result = rg_mod.attempt_recovery(
+            tmp_path,
+            {
+                "status": "failed",
+                "executor": "commit_executor",
+                "stdout": payload,
+            },
+            wave_id,
+        )
+
+        assert result["recovered"] is True, result
+        assert result["failure_class"] == "stale_active_items"
+        assert result["action"] == "commit_stale_active_items_repair"
+        assert marker.read_text(encoding="utf-8").strip() == "1"
 
     def test_refuses_to_commit_when_stale_fix_dirties_non_tasks_path(self, tmp_path):
         wave_id = "wave-stale-2026-05-11"

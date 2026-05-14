@@ -352,6 +352,10 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.PR_MERGE_CONFLICT
 
     l4_signal = f"{reason_lower} {combined_lower}"
+    if _looks_like_git_index_permission_failure(f"{combined_text}\n{reason_text}"):
+        return FailureClass.UNCLASSIFIED
+    if status_failed and _looks_like_direct_git_index_lock_failure(result):
+        return FailureClass.STALE_GIT_INDEX_LOCK
     if status_failed and _looks_like_stale_active_items_failure(l4_signal):
         return FailureClass.STALE_ACTIVE_ITEMS
     if status_failed and _looks_like_pre_push_pytest_failure(step_lower, l4_signal):
@@ -369,8 +373,6 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
         return FailureClass.L4_CONTRACT_VIOLATION
 
     # Tier 1: deterministic lock/state issues
-    if _looks_like_git_index_permission_failure(f"{combined_text}\n{reason_text}"):
-        return FailureClass.UNCLASSIFIED
     if "bridge config not found" in reason_lower or "bridge config not found" in combined_lower:
         return FailureClass.MISSING_BRIDGE_CONFIG
     if "bridge.lock" in reason_lower or "bridge.lock" in combined_lower:
@@ -490,6 +492,56 @@ def _looks_like_stale_active_items_failure(signal: str) -> bool:
             or "not marked landed" in text
         )
     )
+
+
+_DIRECT_GIT_INDEX_LOCK_STEPS = frozenset({
+    "stage_files",
+    "git_commit",
+    "ensure_feature_branch",
+    "bridge_staging",
+    "reentry_bridge_staging",
+    "staging",
+    "reentry_staging",
+})
+
+
+def _iter_text_values(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            parts.extend(_iter_text_values(item))
+        return parts
+    if isinstance(value, dict):
+        parts = []
+        for item in value.values():
+            parts.extend(_iter_text_values(item))
+        return parts
+    return []
+
+
+def _looks_like_direct_git_index_lock_failure(result: dict[str, Any]) -> bool:
+    for candidate in _extract_result_candidates(result):
+        step = str(candidate.get("step", "") or "").strip().lower()
+        if step not in _DIRECT_GIT_INDEX_LOCK_STEPS:
+            continue
+        text = "\n".join(_iter_text_values(candidate)).lower()
+        if "index.lock" not in text:
+            continue
+        if (
+            "unable to create" in text
+            or "could not create" in text
+            or "file exists" in text
+            or "another git process" in text
+            or "remove the file manually" in text
+            or "git add failed" in text
+            or "git commit failed" in text
+            or "git checkout" in text
+            or "git restore" in text
+        ):
+            return True
+    return False
 
 
 def _looks_like_mixed_staging(result: dict[str, Any]) -> bool:
