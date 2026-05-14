@@ -21,12 +21,15 @@ This wave may edit only:
 - `reports/control_plane/n3-autonomous-host-debt-reduction-plan-2026-05-14.md`
 - the same-wave `TASKS.md` tracker note if Phase A / Phase B stages this plan
 - the same-wave L4 indicator artifact if Phase A / Phase B stages this plan
-- the packet-owned routing record under `.agent_bus/meta/` via the canonical
-  routing-record builder
 
 Runtime, seed, scheduler, registry, parity, production `/mu`, host-oracle,
 Claude-related, hidden/local-memory, Codex binary/cache, and ratchet-baseline
 files are out of scope for this planning wave.
+
+Ignored local dispatcher state under `.agent_bus/`, including
+`.agent_bus/meta/post_merge_routing.json`, is not staged, tracked, or part of
+the committed wave scope. It may be regenerated only as local dispatcher
+handoff evidence through the canonical routing-record builder.
 
 - `reports/deferred/non_blocking/n3-autonomous-host-debt-reduction-plan-2026-05-14_bridge_nonblockers.md`
   - Same-wave Phase B/commit generated deferred non-blocking bridge findings packet only; no unrelated deferred report is authorized by this wave.
@@ -49,10 +52,11 @@ files are out of scope for this planning wave.
 - Direct dashboard probe returned HTTP `200`; direct pager endpoint probe
   returned HTTP `400` with body `Connection header did not include 'upgrade'`,
   matching a reachable websocket endpoint rather than a dead listener.
-- Current routing record is stale for new work: `.agent_bus/meta/post_merge_routing.json`
-  still names `commit-executor-index-lock-classifier-precedence-2026-05-14`,
-  which already merged as PR #961. This packet owns the next routing-record
-  rebuild before dispatcher launch.
+- Current ignored local dispatcher state is stale for new work:
+  `.agent_bus/meta/post_merge_routing.json` still names
+  `commit-executor-index-lock-classifier-precedence-2026-05-14`, which already
+  merged as PR #961. Any routing-record rebuild for this packet is local
+  handoff evidence only and cannot be used as committed staged-scope proof.
 
 Architectural source truth:
 
@@ -82,9 +86,10 @@ Architectural source truth:
 
 1. Lock this packet as the queue controller for follow-on N3 host-debt
    reduction waves.
-2. Rebuild `.agent_bus/meta/post_merge_routing.json` with the canonical
-   routing-record builder so dispatcher freshness is tied to current HEAD and
-   this packet.
+2. Rebuild the ignored local `.agent_bus/meta/post_merge_routing.json` only as
+   dispatcher handoff evidence with the canonical routing-record builder, so
+   local dispatcher freshness is tied to current HEAD and this packet without
+   adding the ignored file to staged scope.
 3. Route this packet through `executor_dispatch.py`, not a manual Phase A /
    Phase B shortcut.
 4. After this packet is locked, route the first actionable production-boundary
@@ -102,11 +107,12 @@ Architectural source truth:
 
 1. Phase A locks this queue-controller packet without runtime implementation
    edits.
-2. Phase B stages only this packet, the same-wave tracker note, the same-wave
-   L4 indicator artifact, and the packet-owned routing record.
-3. Phase B rebuilds `.agent_bus/meta/post_merge_routing.json` through the
-   canonical routing-record builder and proves dispatcher freshness against
-   current `HEAD` and current repo state.
+2. Phase B stages only this packet, the same-wave tracker note, and same-wave
+   committed evidence artifacts that are not ignored by Git.
+3. Phase B rebuilds ignored local dispatcher state through the canonical
+   routing-record builder only if dispatcher launch needs it, and treats
+   freshness against current `HEAD` and current repo state as local handoff
+   evidence rather than committed scope.
 4. Commit/pre-push execution remains executor-owned; this Phase B packet does
    not run commit or pre-push governance commands.
 5. After this queue-controller packet lands, route
@@ -248,8 +254,10 @@ candidate is not proof that the work remains unlanded.
 
 - This packet is reviewed and locked by Phase A before implementation waves
   start.
-- The routing record is rebuilt through the canonical builder and dispatcher
-  freshness passes.
+- Committed acceptance excludes ignored `.agent_bus/` routing records; if
+  dispatcher launch occurs from this packet, the routing record is rebuilt
+  through the canonical builder and dispatcher freshness passes as local
+  handoff evidence.
 - The first actionable wave after this plan is the `rcx_load` seed-image
   boundary adapter lock, not another broad queue-only packet.
 - Every implementation wave changes only its Phase-A-locked files and records
@@ -293,12 +301,13 @@ Phase B keeps this packet control-plane only. The implemented state is:
 
 - This packet is the N3 queue controller for follow-on host-debt reduction
   waves until the first production-boundary successor is routed.
-- The packet-owned routing record under `.agent_bus/meta/` must be rebuilt by
-  the canonical routing-record builder, bound to current `HEAD`, current repo
-  state, this wave id, `[NEXT-CODEX-POST-REDTEAM]`, and this packet path.
-- Dispatcher freshness is the local proof that the rebuilt record is usable by
-  `executor_dispatch.py`; this Phase B implementer does not launch commit or
-  pre-push governance surfaces.
+- Ignored local dispatcher state under `.agent_bus/meta/` may be rebuilt by the
+  canonical routing-record builder, bound to current `HEAD`, current repo state,
+  this wave id, `[NEXT-CODEX-POST-REDTEAM]`, and this packet path, but it is not
+  staged or tracked wave scope.
+- Dispatcher freshness is the local proof that a rebuilt ignored record is
+  usable by `executor_dispatch.py`; this Phase B implementer does not launch
+  commit or pre-push governance surfaces.
 - The first actionable successor after this queue-controller packet remains
   `n3-rcx-load-seed-image-boundary-adapter-lock-2026-05-14`.
 - Runtime, seed, scheduler, registry, parity, production `/mu`, host-oracle,
@@ -308,9 +317,9 @@ Phase B keeps this packet control-plane only. The implemented state is:
 Phase B-local validation surfaces:
 
 - `python3 tools/metrics/collect_l4_wave_indicators.py --wave-id n3-autonomous-host-debt-reduction-plan-2026-05-14 --output reports/l4_wave_indicators/n3-autonomous-host-debt-reduction-plan-2026-05-14.json`
-- canonical `build_and_write_routing_record(...)` invocation from
+- local-only canonical `build_and_write_routing_record(...)` invocation from
   `mu.tools.executors.executor_common`
-- dispatcher freshness check via
+- local-only dispatcher freshness check via
   `mu.tools.executors.executor_dispatch.validate_routing_record_freshness(...)`
 - `python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id n3-autonomous-host-debt-reduction-plan-2026-05-14`
 - `./tools/checks/check_docs_consistency.sh`
