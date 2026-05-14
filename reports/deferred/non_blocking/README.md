@@ -369,3 +369,23 @@ Archived source snapshots for extracted non-blocking residue live in:
   `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`; this
   closeout did not implement runtime, Stage0, seed, scheduler, registry, parity,
   production `/mu`, host-oracle, or Claude-related changes.
+
+2026-05-14 PR #949 bridge non-blocker closeout note:
+
+- Evidence command:
+  `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
+- Current deferred inventory is `reports/deferred/blocking/README.md`, this
+  README, and one partially active retained `/mu` structural advisory packet:
+  `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`.
+- The generated PR #949 bridge source-lock / DOC_ACCURACY residue
+  `js-stage0-mucopy-lax-export-confinement-2026-05-14_bridge_nonblockers.md`
+  moved to
+  `reports/archive/deferred/js-stage0-mucopy-lax-export-confinement-2026-05-14_bridge_nonblockers_closed-by-js-stage0-mucopy-bridge-nonblocker-closeout-2026-05-14.md`
+  after the predecessor packet distinguished historical Phase A planning text
+  from completed Phase B / PR #949 truth. The source-lock finding is closure
+  provenance from merged PR #949 remediation commit `05942b62`, not active
+  deferred work.
+- N3 broad host-surface boundary remains active and hard-stopped in
+  `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`; this
+  closeout did not implement runtime, Stage0, seed, scheduler, registry, parity,
+  production `/mu`, host-oracle, ratchet-baseline, or Claude-related changes.
