@@ -17,7 +17,7 @@ FOUNDER_OVERRIDE:n3-active-boundary-closeout-bridge-doc-accuracy-cleanup-2026-05
 In scope:
 
 - `reports/deferred/non_blocking/n3-active-boundary-bridge-nonblocker-closeout-2026-05-14_bridge_nonblockers.md`
-  - Active generated source packet to verify and archive only after all three findings are closed by current evidence.
+  - Pre-archive generated source packet path retained as historical closure evidence; current active source is absent after archive.
 - `reports/archive/deferred/n3-active-boundary-bridge-nonblocker-closeout-2026-05-14_bridge_nonblockers_closed-by-n3-active-boundary-closeout-bridge-doc-accuracy-cleanup-2026-05-14.md`
   - Required archive destination for the generated source packet.
 - `reports/control_plane/n3-active-boundary-bridge-nonblocker-closeout-2026-05-14_2026-05-14.md`
