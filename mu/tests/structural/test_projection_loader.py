@@ -10,10 +10,16 @@ Tests the projection loader factory to ensure:
 """
 
 import pytest
-from pathlib import Path
 
+from rcx_pi.selfhost import projection_loader as projection_loader_module
+from rcx_pi.selfhost import seed_integrity as seed_integrity_module
 from rcx_pi.selfhost.projection_loader import make_projection_loader
-from rcx_pi.selfhost.seed_integrity import get_seed_path
+from rcx_pi.selfhost.seed_integrity import (
+    EXPECTED_PROJECTION_IDS,
+    compute_checksum,
+    get_seed_path,
+    load_verified_seed,
+)
 
 
 class TestMakeProjectionLoader:
@@ -140,6 +146,62 @@ class TestSeedLoading:
         clear_fn()
         # get_seed_path() raises ValueError for unknown seed names
         with pytest.raises(ValueError, match="Unknown seed"):
+            load_fn()
+
+
+class TestProductionJsonBoundary:
+    """Bind projection_loader.py tests to the current production JSON loader path."""
+
+    @pytest.mark.parametrize(
+        "seed_file",
+        [
+            "kernel.v1.json",
+            "match.v2.json",
+            "subst.v2.json",
+            "bootstrap_structural.v1.json",
+            "rcx_engine.v1.json",
+        ],
+    )
+    def test_loader_matches_load_verified_seed_for_current_json_image(
+        self, seed_file: str
+    ):
+        """make_projection_loader returns the production verified JSON projections."""
+        expected_seed = load_verified_seed(get_seed_path(seed_file), verify=True)
+        load_fn, clear_fn = make_projection_loader(seed_file)
+
+        clear_fn()
+        projections = load_fn()
+
+        assert projections == expected_seed["projections"]
+        assert [p["id"] for p in projections] == EXPECTED_PROJECTION_IDS[seed_file]
+
+    def test_loader_rejects_malformed_registered_seed_after_checksum(
+        self, tmp_path, monkeypatch
+    ):
+        """Projection loader fails closed through load_verified_seed structure checks."""
+        malformed_seed = tmp_path / "kernel.v1.json"
+        content = (
+            '{"meta": {"version": "1.0", "name": "KERNEL_SEED", '
+            '"description": "malformed projection control"}, '
+            '"projections": [null]}'
+        ).encode("utf-8")
+        malformed_seed.write_bytes(content)
+        monkeypatch.setattr(
+            projection_loader_module,
+            "get_seed_path",
+            lambda _seed_file: malformed_seed,
+        )
+        monkeypatch.setitem(
+            seed_integrity_module.SEED_CHECKSUMS,
+            "kernel.v1.json",
+            compute_checksum(content),
+        )
+
+        load_fn, clear_fn = projection_loader_module.make_projection_loader(
+            "kernel.v1.json"
+        )
+        clear_fn()
+        with pytest.raises(ValueError, match="projection 0 must be a dict"):
             load_fn()
 
 
