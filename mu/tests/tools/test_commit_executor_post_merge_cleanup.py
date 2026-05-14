@@ -324,6 +324,52 @@ def test_post_merge_package_refresh_stops_before_mu_structural_queue(tmp_path):
     assert "hard stop" in package["tracker_state_summary"].lower()
 
 
+def test_post_merge_package_refresh_routes_authorized_mu_structural_non_hard_stop(tmp_path):
+    repo = _init_repo(tmp_path)
+    packet = (
+        "reports/control_plane/"
+        "broad_host_surface_next_structural_slice_2026-05-13.md"
+    )
+    source = "reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md"
+    _write_queue_packet(repo, packet, "Routed - Phase A required before implementation")
+    (repo / source).parent.mkdir(parents=True, exist_ok=True)
+    (repo / source).write_text("# source\n", encoding="utf-8")
+    (repo / "TASKS.md").write_text(
+        (
+            "## Ra\n"
+            "  6. **[FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-NEXT-SLICE] "
+            "QUEUED / PHASE A REQUIRED.** "
+            "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            "Wave ID: `broad-host-surface-next-structural-slice-2026-05-13`. "
+            "Class: `L4_ENABLER`. Category: /mu structural host-surface reduction. "
+            f"Packet: `{packet}`. "
+            f"Source audit packet: `{source}`.\n"
+        ),
+        encoding="utf-8",
+    )
+
+    package = commit_mod._refresh_post_merge_package_for_next_open_queue(  # ANTICHEAT_OK: testing private helper
+        repo_root=repo,
+        handoff={"task_id": "[NEXT-CODEX-POST-REDTEAM]"},
+        result={"pr_number": 946},
+        merge_sha="fresh-head",
+        log=_noop_log,
+    )
+
+    request = package["next_candidates"][0]["request_for_claude"]
+    assert package["wave_name"] == "broad-host-surface-next-structural-slice-2026-05-13"
+    assert package["next_candidates"][0]["tracked_packet"] == packet
+    assert "post-merge supervisor -> Phase A -> Phase B -> commit executor" in request
+    assert "requires /mu structural work" not in request
+    assert "outside its bounded scope" in request
+
+    non_mu_request = commit_mod._post_merge_request_for_queue_entry(  # ANTICHEAT_OK: testing private helper
+        {"packet": packet, "category": "tests"}
+    )
+    assert "requires /mu structural work" in non_mu_request
+    assert "outside its bounded scope" not in non_mu_request
+
+
 def test_post_merge_package_refresh_routes_open_tracker_packet_before_hard_stop(tmp_path):
     repo = _init_repo(tmp_path)
     routed_packet = (

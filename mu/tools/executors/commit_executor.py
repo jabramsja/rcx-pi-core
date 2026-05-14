@@ -6378,6 +6378,34 @@ def _tracker_note_wave_id(line: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+_MU_STRUCTURAL_PHASE_A_AUTHORIZATION_RE = re.compile(
+    r"(?i)\b(?:ROUTED\s*[-/]\s*)?PHASE\s+A\s+(?:REQUIRED|AUTHORIZED|LOCKED)\b"
+)
+
+
+def _queue_entry_category_is_mu_structural(category: Any) -> bool:
+    category_lower = str(category or "").lower()
+    return "structural" in category_lower and (
+        "/mu" in category_lower or "mu structural" in category_lower
+    )
+
+
+def _queue_entry_has_explicit_mu_structural_authorization(
+    *,
+    category: Any,
+    line: str,
+    state: Any,
+    status: Any,
+    wave_id: str,
+) -> bool:
+    if not _queue_entry_category_is_mu_structural(category):
+        return False
+    if _extract_same_wave_founder_override_token(line, wave_id):
+        return True
+    explicit_state = "\n".join(str(value or "") for value in (state, status))
+    return bool(_MU_STRUCTURAL_PHASE_A_AUTHORIZATION_RE.search(explicit_state))
+
+
 def _routed_tracker_queue_entries(
     repo_root: Path,
     *,
@@ -6404,21 +6432,32 @@ def _routed_tracker_queue_entries(
         if not status_upper.startswith("ROUTED - PHASE A"):
             continue
         category_match = re.search(r"Category:\s*([^.`]+)", line)
+        category = (
+            category_match.group(1).strip()
+            if category_match
+            else "routed remediation"
+        )
         line_upper = line.upper()
+        state = str(status or "Routed tracker note")
         entries.append(
             {
                 "label": wave_id.upper(),
-                "state": str(status or "Routed tracker note"),
+                "state": state,
                 "wave_id": wave_id,
-                "category": (
-                    category_match.group(1).strip()
-                    if category_match
-                    else "routed remediation"
-                ),
+                "category": category,
                 "packet": packet,
                 "source_packet": "",
                 "status": status,
                 "hard_stop": "HARD STOP" in line_upper or "HARD STOP" in status_upper,
+                "explicit_mu_structural_authorization": (
+                    _queue_entry_has_explicit_mu_structural_authorization(
+                        category=category,
+                        line=line,
+                        state=state,
+                        status=status,
+                        wave_id=wave_id,
+                    )
+                ),
             }
         )
         existing_wave_ids.add(wave_id)
@@ -6451,25 +6490,36 @@ def _founder_ordered_queue_entries(repo_root: Path) -> list[dict[str, Any]]:
             continue
         normalized_wave_id = normalize_wave_id(wave_id)
         category_match = re.search(r"Category:\s*([^.`]+)", line)
+        category = (
+            category_match.group(1).strip()
+            if category_match
+            else "founder-ordered redteam"
+        )
         source_packet = _queue_entry_backtick_value(line, "Source audit packet")
         status = read_control_plane_packet_status(repo_root, packet)
+        state = label_match.group("state").strip()
         line_upper = line.upper()
         status_upper = str(status or "").upper()
         seen_wave_ids.add(normalized_wave_id)
         entries.append(
             {
                 "label": label_match.group("label").strip(),
-                "state": label_match.group("state").strip(),
+                "state": state,
                 "wave_id": normalized_wave_id,
-                "category": (
-                    category_match.group(1).strip()
-                    if category_match
-                    else "founder-ordered redteam"
-                ),
+                "category": category,
                 "packet": packet,
                 "source_packet": source_packet,
                 "status": status,
                 "hard_stop": "HARD STOP" in line_upper or "HARD STOP" in status_upper,
+                "explicit_mu_structural_authorization": (
+                    _queue_entry_has_explicit_mu_structural_authorization(
+                        category=category,
+                        line=line,
+                        state=state,
+                        status=status,
+                        wave_id=normalized_wave_id,
+                    )
+                ),
             }
         )
     entries.extend(
@@ -6507,6 +6557,10 @@ def _post_merge_request_for_queue_entry(entry: dict[str, Any]) -> str:
     packet = str(entry.get("packet") or "")
     source_packet = str(entry.get("source_packet") or "")
     category = str(entry.get("category") or "founder-ordered redteam")
+    is_authorized_mu_structural = (
+        _queue_entry_category_is_mu_structural(category)
+        and bool(entry.get("explicit_mu_structural_authorization"))
+    )
     read_targets = [packet]
     if source_packet:
         read_targets.append(source_packet)
@@ -6517,11 +6571,15 @@ def _post_merge_request_for_queue_entry(entry: dict[str, Any]) -> str:
             f"candidate is {packet}; report that /mu structural work is queued "
             "and do not dispatch Phase A, Phase B, or commit implementation."
         )
+    stop_clause = (
+        "Stop if the packet requires work outside its bounded scope or founder input."
+        if is_authorized_mu_structural
+        else "Stop if the packet requires /mu structural work or founder input."
+    )
     return (
         f"Use the full dispatcher pipeline for this {category} remediation wave: "
         "post-merge supervisor -> Phase A -> Phase B -> commit executor. "
-        f"Read {target_text}. Do not edit Claude-related files. Stop if the "
-        "packet requires /mu structural work or founder input."
+        f"Read {target_text}. Do not edit Claude-related files. {stop_clause}"
     )
 
 
