@@ -11,9 +11,11 @@ Purpose: Create a planning-only control-plane wave map for reducing the N3 broad
 
 ## Scope
 
-Files/directories in scope for this rewrite:
+Files/directories in current staged package:
 
-- `reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md` only.
+- `TASKS.md`
+- `reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md`
+- `reports/l4_wave_indicators/n3-host-surface-reduction-wave-map-2026-05-14.json`
 
 Evidence surfaces in scope for this packet's Phase A plan:
 
@@ -21,28 +23,28 @@ Evidence surfaces in scope for this packet's Phase A plan:
 - This packet's stub content and the bridge reviewer evidence that the prior file had only title, Scope, and Request headings.
 - The governing surfaces named by the supervisor for future source-grounded waves: `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`, `reports/deferred/non_blocking/README.md`, `reports/control_plane/broad_host_surface_reduction_boundary_2026-05-13.md`, `reports/control_plane/broad_host_surface_next_structural_slice_2026-05-13.md`, `reports/control_plane/broad-host-surface-n3-source-boundary-slice-2026-05-14_2026-05-14.md`, `reports/control_plane/js-stage0-mucopy-lax-export-confinement-2026-05-14_2026-05-14.md`, `mu/docs/core/L4MicroAbi.v0.md`, `mu/docs/core/L4ExitChecklist.v0.md`, `mu/docs/core/Boot0Architecture.v0.md`, `mu/docs/core/L3SubstrateArchitecture.v0.md`, and current host-authority / host-semantics ratchet outputs.
 
-This wave's output is the control-plane map below. Future implementation waves must re-read their own source truth before locking write sets.
+This wave's output is the control-plane map below, backed by the same-wave `TASKS.md` tracker note and L4 indicator artifact named above. Future implementation waves must re-read their own source truth before locking write sets.
 
 ## Work items
 
 1. Replace the stub packet with a real Phase A control-plane plan.
    - Goal: satisfy the bridge request for concrete plan sections and bounded work items.
-   - Write set: this packet only.
+   - Planning content write set: this packet.
    - Proof class: L4_ENABLER / control-plane planning.
    - Validation: targeted `rg` / `wc` section proof against this packet.
    - Proof limit: this proves packet shape and authorization text only, not N3 runtime reduction.
 
-2. Bind this packet to a same-wave authorization surface without editing `TASKS.md`.
-   - Goal: unblock detector-visible authorization for this packet rewrite under the user's write-only-one-file constraint.
-   - Write set: this packet only.
-   - Proof class: POLICY_BOUND L4_ENABLER authorization repair.
-   - Authorization surface: packet-local tracker-sync note under Grounding / Authorization, carrying the same wave id and `FOUNDER_OVERRIDE` token.
+2. Bind this packet to same-wave tracker and indicator evidence.
+   - Goal: keep the packet, `TASKS.md` tracker note, and collected L4 indicator artifact aligned on the same staged wave scope.
+   - Write set: `TASKS.md`, this packet, and `reports/l4_wave_indicators/n3-host-surface-reduction-wave-map-2026-05-14.json`.
+   - Proof class: POLICY_BOUND L4_ENABLER authorization and indicator repair.
+   - Authorization surface: same-wave `TASKS.md` tracker-sync note carrying the wave id, indicator artifact, and `FOUNDER_OVERRIDE` token.
    - Validation: `rg -n "n3-host-surface-reduction-wave-map-2026-05-14|FOUNDER_OVERRIDE:n3-host-surface-reduction-wave-map-2026-05-14" TASKS.md reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md`.
-   - Proof limit: the command will show packet-local authority; it does not create a same-wave `TASKS.md` tracker because this rewrite is forbidden from editing `TASKS.md`.
+   - Proof limit: the command shows tracker and packet authority for this staged package; it does not prove N3 runtime reduction.
 
 3. Record the bounded future-wave queue for N3 host-surface reduction.
    - Goal: organize future dispatcher waves so each wave reduces or locks one narrow boundary instead of treating N3 as one broad implementation blob.
-   - Write set for this wave: this packet only.
+   - Planning content write set: this packet; same-wave tracker and indicator evidence remain part of the staged package.
    - Required fields for each future entry: goal, evidence surfaces, proposed write set, proof class, validations, stop conditions, and proof limits.
    - Proof limit: candidate entries are not claims that the items remain unlanded; future waves must remove or reclassify any item already proved closed by current code truth.
 
@@ -122,8 +124,8 @@ Future wave entries to evaluate against source/docs before implementation:
 
 ## Constraints
 
-- Do not edit any file except `reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md` in this rewrite.
-- Do not create new files, including indicator artifacts or `TASKS.md` tracker edits, in this turn.
+- Do not edit runtime, Stage0, seed, scheduler, registry, parity, production `/mu`, host-oracle, or Claude-related files in this wave.
+- Keep the wave-owned write set limited to `TASKS.md`, this packet, and the same-wave L4 indicator artifact.
 - Do not implement runtime, Stage0, seed, scheduler, registry, parity, production `/mu`, host-oracle, or Claude-related changes.
 - Do not add semantic host debt, host-only object-model behavior, or Python/JS semantic authority.
 - Do not move Mu semantic authority out of Mu programs/seeds/projections and into Python or JS host code.
@@ -134,7 +136,7 @@ Future wave entries to evaluate against source/docs before implementation:
 
 ## Stop conditions
 
-- Stop if satisfying a request requires writing outside this packet during this rewrite.
+- Stop if satisfying a request requires writing outside the current wave-owned package of `TASKS.md`, this packet, and the same-wave L4 indicator artifact.
 - Stop if a future candidate cannot be grounded in current file/doc/source truth when that candidate's own Phase A runs.
 - Stop if current code truth proves a candidate already landed; remove it from pending work and acceptance criteria instead of preserving stale wording.
 - Stop if a candidate requires runtime changes before Phase A locks exact write set, focused tests, parity obligations, ratchet expectations, and stop conditions.
@@ -147,8 +149,8 @@ Future wave entries to evaluate against source/docs before implementation:
 - Work items are bounded and distinguish this packet rewrite from future implementation waves.
 - Every future-wave entry above includes goal, evidence surfaces, proposed write set, proof class, validations, stop conditions, and proof limits.
 - The packet carries a wave-bound local override token for `n3-host-surface-reduction-wave-map-2026-05-14`.
-- The packet explicitly states that no same-wave `TASKS.md` tracker is created in this rewrite because the user constrained the write set to this packet only.
-- The packet contains a packet-local tracker-sync note for `n3-host-surface-reduction-wave-map-2026-05-14`, marked as packet-local authority and not as a `TASKS.md` tracker substitute for later commit/pre-push execution.
+- `TASKS.md` contains the same-wave tracker-sync note for `n3-host-surface-reduction-wave-map-2026-05-14`.
+- The packet records the same staged scope as `TASKS.md`: `TASKS.md`, this packet, and `reports/l4_wave_indicators/n3-host-surface-reduction-wave-map-2026-05-14.json`.
 - Targeted section proof passes:
   - `rg -n "^(#|##) |Work items|Constraints|Stop conditions|Acceptance criteria|Grounding|Authorization|FOUNDER_OVERRIDE" reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md && wc -l reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md`
 - Targeted authorization proof returns this packet's same-wave override:
@@ -170,17 +172,17 @@ Governing packet refs for future source-grounded work:
 - `reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md` is the governing packet for this planning wave.
 - Future implementation or source-lock waves must independently cite the relevant governing surfaces named in Scope before locking write sets.
 
-Bridge Round 1 disposition:
+Bridge / pre-commit disposition:
 
-- Bridge finding addressed in this packet only: the prior authorization text was too easy to misread as a normal `TASKS.md` tracker repair even though this Phase B rewrite is explicitly forbidden from editing `TASKS.md`.
-- This rewrite therefore records a packet-local tracker-sync note below, using the same wave id and override token, while preserving the write-only-one-file constraint.
-- No same-wave `TASKS.md` tracker is created in this rewrite. Commit/pre-push execution that requires strict `TASKS.md` tracker authority remains executor-owned and is outside this Phase B implementer's allowed write set.
+- Bridge Round 1 found that the prior authorization text did not clearly separate planning-packet authority from the normal strict `TASKS.md` tracker requirement.
+- The current staged package now includes the same-wave `TASKS.md` tracker note and the L4 indicator artifact, so this packet describes the tracker, indicator, and packet as one three-file staged scope.
+- Pre-commit supervisor receipt remains pending for this staged package; the packet does not claim N3 runtime reduction or final closeout.
 
-Packet-local tracker sync note:
+Same-wave tracker sync note:
 
-- Tracker sync note (2026-05-14, n3-host-surface-reduction-wave-map-2026-05-14): **NEXT-CODEX-POST-REDTEAM - N3 host-surface reduction wave-map control-plane packet.** Class: L4_ENABLER. Category: control-plane host-surface reduction map. target_gate_id: G8. Packet: `reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md`. evidence_command: `rg -n "^(#|##) |Work items|Constraints|Stop conditions|Acceptance criteria|Grounding|Authorization|FOUNDER_OVERRIDE" reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md && wc -l reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md && rg -n "FOUNDER_OVERRIDE:n3-host-surface-reduction-wave-map-2026-05-14" reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md`. evidence_delta: (1) The stub packet is replaced with a bounded Phase A control-plane plan containing Scope, Work items, Constraints, Stop conditions, Acceptance criteria, and Grounding / Authorization. (2) The future N3 queue is decomposed into source-grounded bounded candidates that each require their own future Phase A source read before any implementation. (3) The packet records a packet-local same-wave override because the user constrained this Phase B write set to this packet only and forbade `TASKS.md` edits. progress_proof_before: Bridge Round 1 found that the file's authorization text did not clearly separate packet-local authority from the normal strict `TASKS.md` tracker requirement. progress_proof_after: This packet carries an explicit packet-local tracker-sync note and override token for the same wave id, while stating that it does not create a `TASKS.md` tracker and does not claim strict commit/pre-push tracker authority. FOUNDER_OVERRIDE:n3-host-surface-reduction-wave-map-2026-05-14. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: not created in this Phase B rewrite because the user constrained the write set to this packet only. indicator_collection_command: not run in this Phase B rewrite; indicator creation is executor/closeout-owned. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
+- Tracker sync note (2026-05-14, n3-host-surface-reduction-wave-map-2026-05-14): **NEXT-CODEX-POST-REDTEAM - N3 host-surface reduction wave-map control-plane packet.** Class: L4_ENABLER. Category: control-plane host-surface reduction map. target_gate_id: G8. Packet: `reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md`. evidence_command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id n3-host-surface-reduction-wave-map-2026-05-14 --output reports/l4_wave_indicators/n3-host-surface-reduction-wave-map-2026-05-14.json`. evidence_delta: (1) Phase B converged on the locked plan at `reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md`. (2) Commit handoff carries 3 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface. progress_proof_before: Phase B had not yet emitted a commit-ready handoff with a canonical tracker note, so downstream governance could not bind the wave cleanly to its indicator artifact. progress_proof_after: Phase B refreshed the pre-commit supervisor package for `n3-host-surface-reduction-wave-map-2026-05-14` with 3 wave-owned file(s), bridge rounds=2, package-bound L4 authority pending pre-commit supervisor validation. FOUNDER_OVERRIDE:n3-host-surface-reduction-wave-map-2026-05-14. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: `reports/l4_wave_indicators/n3-host-surface-reduction-wave-map-2026-05-14.json`. indicator_collection_command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id n3-host-surface-reduction-wave-map-2026-05-14 --output reports/l4_wave_indicators/n3-host-surface-reduction-wave-map-2026-05-14.json`. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.
 
-Authorization: wave-bound packet-local L4_ENABLER override for this rewrite under the one-file write constraint.
+Authorization: wave-bound L4_ENABLER tracker authority for the current staged package.
 
 FOUNDER_OVERRIDE:n3-host-surface-reduction-wave-map-2026-05-14
 
@@ -193,6 +195,7 @@ FOUNDER_OVERRIDE:n3-host-surface-reduction-wave-map-2026-05-14
 - Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before pre-commit supervisor review so the tracker note, Gate 8 package, and governing packet describe one staged scope.
 - Scope binding: no indicator file other than the artifact above is in scope for this wave.
 - Current staged files:
+  - `TASKS.md`
   - `reports/control_plane/n3-host-surface-reduction-wave-map-2026-05-14_2026-05-14.md`
   - `reports/l4_wave_indicators/n3-host-surface-reduction-wave-map-2026-05-14.json`
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
