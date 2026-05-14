@@ -169,7 +169,7 @@ Source-lock authorization:
   converged Phase B package with package-bound L4 authority pending pre-commit
   supervisor validation. That is the immediate predecessor authority for this
   successor packet.
-- `TASKS.md:341` now records this same-wave production-boundary successor
+- `TASKS.md:342` now records this same-wave production-boundary successor
   no-go packet, binding the control-plane packet, indicator artifact, and
   `FOUNDER_OVERRIDE` to one detector-visible L4_ENABLER wave id without
   authorizing production loader edits.
