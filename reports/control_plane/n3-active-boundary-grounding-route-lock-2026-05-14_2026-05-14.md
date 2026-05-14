@@ -69,7 +69,7 @@ Out of scope for this bridge repair:
 ## Work items
 
 1. Re-ground N3 active status from current tracker and deferred-lane evidence.
-   `TASKS.md:564`, `TASKS.md:575`, and `TASKS.md:579` keep N3 broad
+   `TASKS.md:565`, `TASKS.md:576`, and `TASKS.md:580` keep N3 broad
    host-surface boundary active after Stage0 capture cleanup, Stage0 cleanup
    doc-accuracy closeout, and post-JS-pipeline cleanup. The active deferred
    source also states that the retained advisory is now N3 broad host-surface
@@ -78,10 +78,10 @@ Out of scope for this bridge repair:
    route before implementation (`:161` through `:175`).
 
 2. Remove closed candidates from pending work. Stage0 capture-path provenance
-   is not reopened because `TASKS.md:563` records the implementation and
-   `TASKS.md:564` records the deferred cleanup that archived the generated
+   is not reopened because `TASKS.md:564` records the implementation and
+   `TASKS.md:565` records the deferred cleanup that archived the generated
    predecessor residue. N5 JS pipeline governance is not reopened because
-   `TASKS.md:579` records that N5 live wording was removed from active deferred
+   `TASKS.md:580` records that N5 live wording was removed from active deferred
    docs and archived after PR #937 and the structural guard. PR #949 Stage0
    public copy source-lock residue is also not reopened because the active
    non-blocking README records the bridge finding as closure provenance from
@@ -150,7 +150,7 @@ Deferred:
   host iteration over `rcx_step`. This remains a later runtime/parity route.
 
 - **Engine pipeline thin-core/module extraction.** Prior N5 JS pipeline
-  governance cleanup is closed by `TASKS.md:579`. `L4MicroAbi.v0.md:141`
+  governance cleanup is closed by `TASKS.md:580`. `L4MicroAbi.v0.md:141`
   through `:153` excludes engine pipeline and hemisphere routing from the L4
   Micro-ABI by design. Any new engine-pipeline extraction route must be
   source-inspected in its own wave and must not be selected here as a proxy for
@@ -165,7 +165,7 @@ Deferred:
   bridge repair's allowed inspection set.
 
 - **Stage0 trusted/public export follow-ons.** Stage0 capture-path provenance
-  is implemented and cleaned up in `TASKS.md:563` and `TASKS.md:564`. The PR
+  is implemented and cleaned up in `TASKS.md:564` and `TASKS.md:565`. The PR
   #949 Stage0 public copy source-lock residue is closed as provenance, not
   active work, in `reports/deferred/non_blocking/README.md:373` through `:391`.
   Stage0 follow-ons are therefore not selected unless a later source-lock proves
@@ -317,13 +317,13 @@ source-lock is bounded to one successor source-lock write set.
 
 TASKS-grounded authorization:
 
-- `TASKS.md:563` records the Stage0 capture-path provenance implementation.
-- `TASKS.md:564` records the Stage0 capture provenance deferred cleanup,
+- `TASKS.md:564` records the Stage0 capture-path provenance implementation.
+- `TASKS.md:565` records the Stage0 capture provenance deferred cleanup,
   archives closed Stage0 capture residue, and preserves N3 broad host-surface
   boundary as live.
-- `TASKS.md:575` records the later Stage0 cleanup DOC_ACCURACY closeout and
+- `TASKS.md:576` records the later Stage0 cleanup DOC_ACCURACY closeout and
   still retains N3 broad host-surface boundary in the active deferred inventory.
-- `TASKS.md:579` records post-JS-pipeline governance cleanup, closes live N5
+- `TASKS.md:580` records post-JS-pipeline governance cleanup, closes live N5
   wording, and retains N3 broad host-surface boundary active without
   authorizing runtime, Stage0, seed, scheduler, registry, parity, production
   `/mu`, host-oracle, or Claude-related changes.

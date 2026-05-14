@@ -75,13 +75,14 @@ trigger.
 Command:
 
 ```bash
-rg -n "TASKS[.]md:(562|574|578)" reports/control_plane/n3-active-boundary-grounding-route-lock-2026-05-14_2026-05-14.md
+rg -n "TASKS[.]md:(562|563|574|575|578|579)" reports/control_plane/n3-active-boundary-grounding-route-lock-2026-05-14_2026-05-14.md
 ```
 
 Result: exit 1 with no output. For `rg`, exit 1 means no matches were found; in
 this wave that is the expected closed-proof result because the old stale
-`TASKS.md:562`, `TASKS.md:574`, and `TASKS.md:578` citations are absent from
-the current governing packet.
+`TASKS.md:562`, `TASKS.md:563`, `TASKS.md:574`, `TASKS.md:575`,
+`TASKS.md:578`, and `TASKS.md:579` citations are absent from the current
+governing packet.
 
 Command:
 
@@ -96,7 +97,7 @@ Result, exit 0:
     69  ## Work items
     70
     71  1. Re-ground N3 active status from current tracker and deferred-lane evidence.
-    72     `TASKS.md:564`, `TASKS.md:575`, and `TASKS.md:579` keep N3 broad
+    72     `TASKS.md:565`, `TASKS.md:576`, and `TASKS.md:580` keep N3 broad
     73     host-surface boundary active after Stage0 capture cleanup, Stage0 cleanup
     74     doc-accuracy closeout, and post-JS-pipeline cleanup. The active deferred
     75     source also states that the retained advisory is now N3 broad host-surface
@@ -105,10 +106,10 @@ Result, exit 0:
     78     route before implementation (`:161` through `:175`).
     79
     80  2. Remove closed candidates from pending work. Stage0 capture-path provenance
-    81     is not reopened because `TASKS.md:563` records the implementation and
-    82     `TASKS.md:564` records the deferred cleanup that archived the generated
+    81     is not reopened because `TASKS.md:564` records the implementation and
+    82     `TASKS.md:565` records the deferred cleanup that archived the generated
     83     predecessor residue. N5 JS pipeline governance is not reopened because
-    84     `TASKS.md:579` records that N5 live wording was removed from active deferred
+    84     `TASKS.md:580` records that N5 live wording was removed from active deferred
     85     docs and archived after PR #937 and the structural guard. PR #949 Stage0
     86     public copy source-lock residue is also not reopened because the active
     87     non-blocking README records the bridge finding as closure provenance from
@@ -118,7 +119,8 @@ Result, exit 0:
 ```
 
 The current text cites corrected TASKS lines and no longer carries the stale
-line-number citations named by the generated DOC_ACCURACY finding.
+line-number evidence citations named by the generated DOC_ACCURACY finding or
+the later PR review finding.
 
 ## Archive Result
 
@@ -140,20 +142,21 @@ Post-archive inventory, exit 0:
 ```text
 reports/deferred/blocking/README.md
 reports/deferred/non_blocking/README.md
+reports/deferred/non_blocking/n3-active-boundary-bridge-nonblocker-closeout-2026-05-14_bridge_nonblockers.md
 reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md
 ```
 
 `reports/deferred/non_blocking/README.md` was not edited. Its latest active
-inventory note already describes this post-archive lane as the blocking README,
-the non-blocking README, and the retained
-`reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md` packet.
+inventory note describes the stable retained lane, and the command output above
+records the additional same-wave generated closeout bridge packet present in the
+active lane at commit time.
 
 ## Validation Results
 
 | Command | Result |
 |---------|--------|
-| `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' -print \| sort` | exit 0 before and after archive; before contained the generated N3 bridge packet, after does not. |
-| `rg -n "TASKS[.]md:(562\|574\|578)" reports/control_plane/n3-active-boundary-grounding-route-lock-2026-05-14_2026-05-14.md` | exit 1, expected; stale TASKS references are absent. |
+| `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' -print \| sort` | exit 0 before and after archive; before contained the source generated N3 bridge packet, after contains the same-wave closeout bridge packet listed above instead. |
+| `rg -n "TASKS[.]md:(562\|563\|574\|575\|578\|579)" reports/control_plane/n3-active-boundary-grounding-route-lock-2026-05-14_2026-05-14.md` | exit 1, expected; stale TASKS references are absent. |
 | `nl -ba reports/control_plane/n3-active-boundary-grounding-route-lock-2026-05-14_2026-05-14.md \| sed -n '68,90p'` | exit 0; current corrected TASKS evidence is recorded above. |
 | `test ! -e reports/deferred/non_blocking/n3-active-boundary-grounding-route-lock-2026-05-14_bridge_nonblockers.md` | exit 0 after archive. |
 | `test -f reports/archive/deferred/n3-active-boundary-grounding-route-lock-2026-05-14_bridge_nonblockers_closed-by-n3-active-boundary-bridge-nonblocker-closeout-2026-05-14.md` | exit 0 after archive. |
@@ -170,7 +173,8 @@ the non-blocking README, and the retained
   `repo_truth_non_blockers_2026-03-14.md`.
 - Debt after: generated DOC_ACCURACY residue is archived as closed; retained N3
   broad host-surface advisory remains active in
-  `repo_truth_non_blockers_2026-03-14.md`.
+  `repo_truth_non_blockers_2026-03-14.md`; the same-wave generated closeout
+  bridge packet remains active as commit-time deferred follow-up.
 - Host semantics before/after: unchanged; this wave touches docs/control-plane
   and deferred archive surfaces only.
 - Runtime/substrate delta: none; no `/mu`, seed, scheduler, registry,
