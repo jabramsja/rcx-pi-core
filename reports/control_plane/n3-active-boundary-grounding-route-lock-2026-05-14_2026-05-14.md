@@ -63,8 +63,10 @@ Out of scope for this bridge repair:
   landed. This packet uses TASKS, governing packets, deferred-lane evidence,
   and doctrine only.
 
-- `reports/deferred/non_blocking/n3-active-boundary-grounding-route-lock-2026-05-14_bridge_nonblockers.md`
-  - Same-wave Phase B/commit generated deferred non-blocking bridge findings packet only; no unrelated deferred report is authorized by this wave.
+- Archived same-wave bridge finding source:
+  - `reports/archive/deferred/n3-active-boundary-grounding-route-lock-2026-05-14_bridge_nonblockers_closed-by-n3-active-boundary-bridge-nonblocker-closeout-2026-05-14.md`
+  - Historical closure provenance only; no active deferred report is authorized
+    by this predecessor route-lock packet after the closeout archive.
 
 ## Work items
 
@@ -387,24 +389,29 @@ Governing packet refs:
 - Indicator artifact: `reports/l4_wave_indicators/n3-active-boundary-grounding-route-lock-2026-05-14.json`
 - Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before pre-commit supervisor review so the tracker note, Gate 8 package, and governing packet describe one staged scope.
 - Scope binding: no indicator file other than the artifact above is in scope for this wave.
-- Current staged files:
+- Historical staged files at route-lock commit:
   - `TASKS.md`
   - `reports/control_plane/n3-active-boundary-grounding-route-lock-2026-05-14_2026-05-14.md`
-  - `reports/deferred/non_blocking/n3-active-boundary-grounding-route-lock-2026-05-14_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/n3-active-boundary-grounding-route-lock-2026-05-14.json`
+- Archived follow-up provenance:
+  - `reports/archive/deferred/n3-active-boundary-grounding-route-lock-2026-05-14_bridge_nonblockers_closed-by-n3-active-boundary-bridge-nonblocker-closeout-2026-05-14.md`
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
 
 Questions? Concerns? Thoughts? -- Think hard
 
 <!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->
-## Same-Wave Deferred Non-Blocking Authorization
+## Same-Wave Deferred Non-Blocking Archive Provenance
 
 - Refresh wave: `n3-active-boundary-grounding-route-lock-2026-05-14`
-- Purpose: Phase B and commit automation may stage the same-wave non-blocking bridge findings packet as deferred follow-up instead of blocking an otherwise commit-ready wave.
-- Authorized deferred packet(s):
-  - `reports/deferred/non_blocking/n3-active-boundary-grounding-route-lock-2026-05-14_bridge_nonblockers.md`
-- Scope binding: the packet(s) above are in scope only as generated same-wave non-blocking bridge findings packets.
-- Acceptance binding: the final touched-file set may include the packet(s) above when they are also present in `deferred_items` or current staged files.
+- Purpose: historical record that Phase B and commit automation were allowed to
+  stage the same-wave non-blocking bridge findings packet during the route-lock
+  wave.
+- Archived packet:
+  - `reports/archive/deferred/n3-active-boundary-grounding-route-lock-2026-05-14_bridge_nonblockers_closed-by-n3-active-boundary-bridge-nonblocker-closeout-2026-05-14.md`
+- Scope binding: the archive path above is closure provenance only and is not
+  current active-lane work.
+- Acceptance binding: successor closeout evidence proved the active deferred
+  source path is absent and the archive path exists.
 <!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->
 
 <!-- COMMIT_PATH_TRUTH_REFRESH:start -->
@@ -419,9 +426,10 @@ Questions? Concerns? Thoughts? -- Think hard
 - Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-active-boundary-grounding-route-lock-2026-05-14_2026-05-14.md. (2) Commit handoff carries 4 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/n3-active-boundary-grounding-route-lock-2026-05-14.json`
-- Current staged files:
+- Historical staged files at route-lock commit:
   - `TASKS.md`
   - `reports/control_plane/n3-active-boundary-grounding-route-lock-2026-05-14_2026-05-14.md`
-  - `reports/deferred/non_blocking/n3-active-boundary-grounding-route-lock-2026-05-14_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/n3-active-boundary-grounding-route-lock-2026-05-14.json`
+- Archived follow-up provenance:
+  - `reports/archive/deferred/n3-active-boundary-grounding-route-lock-2026-05-14_bridge_nonblockers_closed-by-n3-active-boundary-bridge-nonblocker-closeout-2026-05-14.md`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
