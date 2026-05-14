@@ -229,11 +229,11 @@ Proof limits:
   host-surface boundary active in deferred inventory while excluding unrelated
   runtime, Stage0, seed, scheduler, registry, parity, production `/mu`,
   host-oracle, and Claude-related changes.
-- Reviewer evidence for this rewrite is authoritative:
-  `rg -n "broad-host-surface-n3-source-boundary-slice-2026-05-14" TASKS.md`
-  had no matches for this new wave ID, so this packet supplies the wave-bound
-  packet authorization line instead of claiming TASKS already has same-wave
-  tracker authority.
+- Current tracker evidence for this rewrite is authoritative: `TASKS.md:332`
+  contains the same-wave tracker sync note for
+  `broad-host-surface-n3-source-boundary-slice-2026-05-14`, binding this
+  packet, indicator artifact, and pre-commit supervisor package refresh under
+  the shared wave ID.
 
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->
 ## Phase B Indicator Scope Reconciliation
