@@ -19,7 +19,7 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-14 PR #949 bridge non-blocker closeout):
+Current inventory refresh (2026-05-14 N3 source-lock DOC_ACCURACY closeout):
 
 - Evidence command:
   `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' -print | sort`.
@@ -54,6 +54,10 @@ reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md
 - The generated PR #949 bridge source-lock / DOC_ACCURACY residue for
   `js-stage0-mucopy-lax-export-confinement-2026-05-14` is closed and archived at
   `reports/archive/deferred/js-stage0-mucopy-lax-export-confinement-2026-05-14_bridge_nonblockers_closed-by-js-stage0-mucopy-bridge-nonblocker-closeout-2026-05-14.md`.
+- The generated PR #956 bridge DOC_ACCURACY residue for
+  `n3-rcx-load-projection-loader-image-boundary-source-lock-2026-05-14` is
+  closed and archived at
+  `reports/archive/deferred/n3-rcx-load-projection-loader-image-boundary-source-lock-2026-05-14_bridge_nonblockers_closed-by-n3-source-lock-doc-accuracy-closeout-2026-05-14.md`.
 - The retained `/mu` structural advisory still active in this lane is N3 broad
   host-surface boundary in
   `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`.

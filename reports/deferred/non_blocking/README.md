@@ -389,3 +389,21 @@ Archived source snapshots for extracted non-blocking residue live in:
   `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`; this
   closeout did not implement runtime, Stage0, seed, scheduler, registry, parity,
   production `/mu`, host-oracle, ratchet-baseline, or Claude-related changes.
+
+2026-05-14 N3 source-lock DOC_ACCURACY closeout note:
+
+- Evidence command:
+  `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
+- Current deferred inventory is `reports/deferred/blocking/README.md`, this
+  README, and one partially active retained `/mu` structural advisory packet:
+  `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`.
+- The generated PR #956 bridge DOC_ACCURACY residue
+  `n3-rcx-load-projection-loader-image-boundary-source-lock-2026-05-14_bridge_nonblockers.md`
+  moved to
+  `reports/archive/deferred/n3-rcx-load-projection-loader-image-boundary-source-lock-2026-05-14_bridge_nonblockers_closed-by-n3-source-lock-doc-accuracy-closeout-2026-05-14.md`
+  after the parent source-lock packet stopped presenting completed tracker,
+  indicator, commit-path, and sweep work as future work.
+- N3 broad host-surface boundary remains active and hard-stopped in
+  `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`; this
+  closeout did not implement runtime, Stage0, seed, scheduler, registry, parity,
+  production `/mu`, host-oracle, ratchet-baseline, or Claude-related changes.
