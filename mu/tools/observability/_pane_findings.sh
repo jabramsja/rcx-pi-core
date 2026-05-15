@@ -47,12 +47,16 @@ BOLD="\033[1m" DIM="\033[2m" GREEN="\033[32m" YELLOW="\033[33m"
 RED="\033[31m" CYAN="\033[36m" PURPLE="\033[35m" RESET="\033[0m"
 LAST_HASH=""
 TMPOUT="/tmp/rcx_pane_findings_$$.txt"
-NOTIFY_MARKER="/tmp/rcx_last_notified_round.txt"
+NOTIFY_MARKER="${RCX_PANE_NOTIFY_MARKER:-/tmp/rcx_last_notified_round.txt}"
 LAST_NOTIFIED_ROUND=$(cat "$NOTIFY_MARKER" 2>/dev/null || echo "")
 ONESHOT="${RCX_PANE_ONESHOT:-0}"
 
 notify() {
   local title="$1" msg="$2" round="$3"
+  # Oneshot renders are automation/test reads; keep them side-effect free.
+  if [ "$ONESHOT" = "1" ]; then
+    return 0
+  fi
   if command -v osascript >/dev/null 2>&1; then
     osascript - "$title" "$msg" >/dev/null 2>&1 <<'APPLESCRIPT' &
 on run argv

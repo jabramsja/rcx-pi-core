@@ -8155,6 +8155,58 @@ esac
         assert "REQUEST_CHANGES" in clean_stdout
         assert "Meaning: Needs fixes before continuing." in clean_stdout
 
+    def test_pane_findings_oneshot_suppresses_desktop_notify_side_effect(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._minimal_bus(repo_root)
+        self._install_observability_script(repo_root, "_pane_findings.sh")
+        raw_dir = repo_root / ".agent_bus" / "raw" / "phase-a-r1-oneshot-notify"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "phase-a-r1-oneshot-notify--r1-reviewer.txt").write_text(
+            "BEGIN_AGENT_ENVELOPE\n"
+            '{\n'
+            '  "decision": "REQUEST_CHANGES",\n'
+            '  "summary": "Oneshot render should stay side-effect free.",\n'
+            '  "findings": [\n'
+            '    {"disposition": "blocking", "severity": "high", "title": "Render finding"}\n'
+            '  ]\n'
+            '}\n'
+            "END_AGENT_ENVELOPE\n",
+            encoding="utf-8",
+        )
+        bin_dir = tmp_path / "notify-bin"
+        bin_dir.mkdir()
+        notify_called = tmp_path / "notify-called.txt"
+        self._write_executable(
+            bin_dir / "osascript",
+            "#!/usr/bin/env bash\n"
+            f"printf called > {shlex.quote(str(notify_called))}\n"
+            "sleep 20\n",
+        )
+        pane_notify_marker = tmp_path / "pane-notify-marker.txt"
+        env = os.environ | {
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RCX_PANE_NOTIFY_MARKER": str(pane_notify_marker),
+            "RCX_PANE_ONESHOT": "1",
+            "TERM": "xterm",
+        }
+
+        result = subprocess.run(
+            ["bash", str(repo_root / "mu" / "tools" / "observability" / "_pane_findings.sh")],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+
+        assert result.returncode == 0
+        clean_stdout = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout)
+        assert "REQUEST_CHANGES" in clean_stdout
+        assert "Render finding" in clean_stdout
+        assert not notify_called.exists()
+        assert not pane_notify_marker.exists()
+
     def test_pane_findings_honors_pinned_repo_root_env(self, tmp_path):
         quiet = tmp_path / "quiet"
         active = tmp_path / "active"
