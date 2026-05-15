@@ -403,6 +403,25 @@ def _replace_post_closure_non_blocking_block(packet_text: str, block: str) -> st
     return packet_text.rstrip() + "\n\n" + block.rstrip() + "\n"
 
 
+def _remove_post_closure_non_blocking_block(packet_text: str) -> tuple[str, bool]:
+    start_marker = "<!-- PHASE_B_POST_CLOSURE_NONBLOCKING:start -->"
+    end_marker = "<!-- PHASE_B_POST_CLOSURE_NONBLOCKING:end -->"
+    start = packet_text.find(start_marker)
+    end = packet_text.find(end_marker)
+    if start != -1 and end != -1 and end > start:
+        end += len(end_marker)
+        prefix = packet_text[:start].rstrip()
+        suffix = packet_text[end:].lstrip("\n")
+        if prefix and suffix:
+            return prefix + "\n\n" + suffix, True
+        if prefix:
+            return prefix + "\n", True
+        return suffix, True
+    if start != -1 or end != -1:
+        raise PhaseBExecutorError("post-closure deferred block markers are unbalanced")
+    return packet_text, False
+
+
 def _retain_non_blocking_findings_in_closed_archive(
     repo_root: Path,
     wave_id: str,
@@ -415,6 +434,14 @@ def _retain_non_blocking_findings_in_closed_archive(
         _replace_post_closure_non_blocking_block(packet_text, block),
         encoding="utf-8",
     )
+
+
+def _clear_non_blocking_findings_from_closed_archive(archive_path: Path) -> bool:
+    packet_text = archive_path.read_text(encoding="utf-8")
+    updated_text, changed = _remove_post_closure_non_blocking_block(packet_text)
+    if changed:
+        archive_path.write_text(updated_text, encoding="utf-8")
+    return changed
 
 
 def _clear_deferred_packet(repo_root: Path, wave_id: str) -> None:
@@ -488,18 +515,22 @@ def _sync_deferred_non_blocking_state(
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Refresh deferred packet state from the latest bridge findings."""
     closed_archive_path = _same_wave_closed_deferred_archive_path(repo_root, wave_id)
-    if new_findings and closed_archive_path is not None:
+    if closed_archive_path is not None:
         current_findings = list(new_findings)
-        _retain_non_blocking_findings_in_closed_archive(
-            repo_root,
-            wave_id,
-            closed_archive_path,
-            current_findings,
-        )
+        archive_rel_path = str(closed_archive_path.relative_to(repo_root))
+        if current_findings:
+            _retain_non_blocking_findings_in_closed_archive(
+                repo_root,
+                wave_id,
+                closed_archive_path,
+                current_findings,
+            )
+            executor_created.add(archive_rel_path)
+        elif _clear_non_blocking_findings_from_closed_archive(closed_archive_path):
+            executor_created.add(archive_rel_path)
         active_rel_path = _canonical_deferred_packet_relpath(wave_id)
         _clear_deferred_packet(repo_root, wave_id)
         executor_created.add(active_rel_path)
-        executor_created.add(str(closed_archive_path.relative_to(repo_root)))
         return current_findings, None
 
     current_findings, packet_path = _record_non_blocking_findings(
