@@ -2794,12 +2794,31 @@ def _auto_refresh_routing(
     # auto-refresh implicitly reuses the canonical on-disk package, so an
     # ancestor merge_sha can replay an obsolete bounded next candidate.
     if package_merge_sha != current_head:
-        if verbose:
-            print(
-                "[dispatch] Post-merge package is stale: "
-                f"merge_sha={package_merge_sha[:8]}, current HEAD={current_head[:8]}"
-            )
-        return False, None
+        repaired = _refresh_stale_post_merge_package_after_manual_merge(
+            repo_root,
+            package,
+            current_head=current_head,
+            verbose=verbose,
+            bus_dir=bus_dir,
+        )
+        if not repaired:
+            if verbose:
+                print(
+                    "[dispatch] Post-merge package is stale: "
+                    f"merge_sha={package_merge_sha[:8]}, current HEAD={current_head[:8]}"
+                )
+            return False, None
+        try:
+            package = json.loads(package_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            if verbose:
+                print(f"[dispatch] Cannot re-read refreshed post-merge package: {exc}")
+            return False, None
+        package_merge_sha = package.get("merge_sha")
+        if not isinstance(package_merge_sha, str) or package_merge_sha.strip() != current_head:
+            if verbose:
+                print("[dispatch] Repaired post-merge package did not bind current HEAD")
+            return False, None
 
     supervisor_script = _agents_dir_for_repo(script_repo_root) / "meta_bridge_supervisor.py"
     if not supervisor_script.exists():
@@ -2859,6 +2878,127 @@ def _auto_refresh_routing(
     if verbose:
         print(f"[dispatch] Auto-refresh succeeded: decision={refreshed.get('decision')}")
     return True, refreshed
+
+
+def _refresh_stale_post_merge_package_after_manual_merge(
+    repo_root: Path,
+    package: dict[str, Any],
+    *,
+    current_head: str,
+    verbose: bool = False,
+    bus_dir: str | Path | None = None,
+) -> bool:
+    """Repair the package refresh step missed by a bounded manual PR merge."""
+    stale_merge_sha = package.get("merge_sha")
+    if not isinstance(stale_merge_sha, str) or not stale_merge_sha.strip():
+        return False
+    stale_merge_sha = stale_merge_sha.strip()
+    if not _git_is_ancestor(repo_root, stale_merge_sha, current_head):
+        if verbose:
+            print(
+                "[dispatch] Refusing stale package repair: "
+                f"merge_sha={stale_merge_sha[:8]} is not an ancestor of HEAD"
+            )
+        return False
+    pr_number = _github_merge_commit_pr_number(repo_root, current_head)
+    if pr_number is None:
+        if verbose:
+            print(
+                "[dispatch] Refusing stale package repair: current HEAD is not "
+                "a GitHub pull-request merge commit"
+            )
+        return False
+    try:
+        commit_executor_mod = _load_commit_executor_module()
+    except Exception as exc:  # pragma: no cover - defensive import diagnostics
+        if verbose:
+            print(f"[dispatch] Cannot load commit executor package refresher: {exc}")
+        return False
+    refresh = getattr(commit_executor_mod, "_refresh_post_merge_package_for_next_open_queue", None)
+    if refresh is None:
+        if verbose:
+            print("[dispatch] Commit executor has no post-merge package refresher")
+        return False
+
+    active_bus_dir = getattr(commit_executor_mod, "_ACTIVE_BUS_DIR", None)
+    token = None
+    if active_bus_dir is not None and bus_dir is not None:
+        token = active_bus_dir.set(Path(bus_dir))
+
+    def log(message: str) -> None:
+        if verbose:
+            print(f"[dispatch] {message}")
+
+    try:
+        refresh(
+            repo_root=repo_root,
+            handoff={"task_id": package.get("task_id") or "[NEXT-CODEX-POST-REDTEAM]"},
+            result={"pr_number": str(pr_number)},
+            merge_sha=current_head,
+            log=log,
+        )
+    except Exception as exc:  # pragma: no cover - defensive runtime diagnostics
+        if verbose:
+            print(f"[dispatch] Failed stale package repair: {exc}")
+        return False
+    finally:
+        if token is not None:
+            active_bus_dir.reset(token)
+    return True
+
+
+def _git_is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
+    try:
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return True
+
+
+def _github_merge_commit_pr_number(repo_root: Path, commit_sha: str) -> int | None:
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%P%x00%s", commit_sha],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    parents, sep, subject = result.stdout.partition("\0")
+    if not sep or len(parents.split()) < 2:
+        return None
+    match = re.search(r"\bMerge pull request #(?P<pr>\d+)\b", subject)
+    if not match:
+        return None
+    return int(match.group("pr"))
+
+
+def _load_commit_executor_module() -> Any:
+    try:
+        import commit_executor as commit_executor_mod
+
+        return commit_executor_mod
+    except ImportError:
+        import importlib.util as _ilu
+
+        commit_path = SCRIPT_DIR / "commit_executor.py"
+        spec = _ilu.spec_from_file_location("commit_executor", str(commit_path))
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load commit executor from {commit_path}")
+        commit_executor_mod = _ilu.module_from_spec(spec)
+        sys.modules["commit_executor"] = commit_executor_mod
+        spec.loader.exec_module(commit_executor_mod)
+        return commit_executor_mod
 
 
 def _refresh_canonical_routing_record_state(

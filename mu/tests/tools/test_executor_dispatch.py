@@ -1142,6 +1142,7 @@ class TestDispatcherFreshnessRefresh:
             state_sha = "currentstate"
 
         monkeypatch.setattr(dispatch_mod, "_compute_repo_state", lambda _repo: RepoState())
+        monkeypatch.setattr(dispatch_mod, "_git_is_ancestor", lambda *_a, **_k: False)
 
         def fail_if_supervisor_runs(*_args, **_kwargs):
             pytest.fail("stale post-merge package must not invoke supervisor")
@@ -1152,6 +1153,103 @@ class TestDispatcherFreshnessRefresh:
 
         assert result["status"] == "stale"
         assert "Auto-refresh failed" in result["message"]
+
+    def test_stale_post_merge_package_repairs_after_manual_github_merge(
+        self, tmp_path,
+    ):
+        repo, env = _init_git_repo(tmp_path)
+        stale_merge = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/manual-package-repair"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+            env=env,
+        )
+        (repo / "repair.txt").write_text("repair\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "repair.txt"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+            env=env,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "repair package refresh"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+            env=env,
+        )
+        subprocess.run(
+            ["git", "checkout", "dev"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+            env=env,
+        )
+        subprocess.run(
+            [
+                "git",
+                "merge",
+                "--no-ff",
+                "jabramsja/manual-package-repair",
+                "-m",
+                (
+                    "Merge pull request #966 from "
+                    "jabramsja/jabramsja/manual-package-repair"
+                ),
+            ],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+            env=env,
+        )
+        current_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        package_dir = repo / ".agent_bus" / "meta"
+        package_dir.mkdir(parents=True)
+        stale_package = {
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "merged_pr": 965,
+            "merge_sha": stale_merge,
+            "wave_name": "old-wave",
+            "lane": "control-surface",
+            "deferred_items": [],
+            "tracker_state_summary": "stale",
+            "next_candidates": [
+                {"candidate": "old-wave", "bounded": True},
+            ],
+            "blocker_report_paths": [],
+        }
+        (package_dir / "post_merge_package.json").write_text(
+            json.dumps(stale_package),
+            encoding="utf-8",
+        )
+
+        repaired = dispatch_mod._refresh_stale_post_merge_package_after_manual_merge(  # ANTICHEAT_OK: testing dispatcher stale package repair helper
+            repo,
+            stale_package,
+            current_head=current_head,
+            verbose=True,
+        )
+
+        assert repaired
+        package = json.loads((package_dir / "post_merge_package.json").read_text())
+        assert package["merged_pr"] == 966
+        assert package["merge_sha"] == current_head
+        assert package["wave_name"] == "founder-ordered-post-merge-queue-empty"
 
 
 # ===========================================================================
