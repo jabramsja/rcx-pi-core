@@ -1099,6 +1099,88 @@ class TestDispatcherFreshnessRefresh:
         assert result["decision"] == "UPDATE_TRACKER_ONLY"
         assert auto_refresh_calls
 
+    def test_explicit_canonical_rebind_falls_back_to_post_merge_package_refresh(
+        self, tmp_path, monkeypatch,
+    ):
+        canonical_dir = tmp_path / ".agent_bus" / "meta"
+        canonical_dir.mkdir(parents=True)
+        record_path = canonical_dir / "post_merge_routing.json"
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "stale explicit canonical",
+            "wave_name": "old-wave",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "state_sha": "stale-state",
+            "next_candidates": [
+                {"candidate": "old-wave", "bounded": True},
+            ],
+        }
+        record_path.write_text(json.dumps(record), encoding="utf-8")
+        refreshed_record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "package refreshed canonical",
+            "wave_name": "new-wave",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "state_sha": "fresh-state",
+            "next_candidates": [
+                {"candidate": "new-wave", "bounded": True},
+            ],
+        }
+        monkeypatch.setattr(
+            dispatch_mod,
+            "validate_routing_record_freshness",
+            lambda rec, *_a, **_k: (
+                (True, "")
+                if rec.get("state_sha") == "fresh-state"
+                else (False, "stale for proof")
+            ),
+        )
+        canonical_calls = []
+        auto_refresh_calls = []
+
+        def fake_canonical_refresh(*args, **kwargs):
+            canonical_calls.append((args, kwargs))
+            return False, None
+
+        def fake_auto_refresh(*args, **kwargs):
+            auto_refresh_calls.append((args, kwargs))
+            return True, refreshed_record
+
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_refresh_canonical_routing_record_state",
+            fake_canonical_refresh,
+        )
+        monkeypatch.setattr(dispatch_mod, "_auto_refresh_routing", fake_auto_refresh)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_run_executor_in_group",
+            lambda args, cwd, timeout: subprocess.CompletedProcess(
+                args, 0, stdout='{"status":"success"}', stderr=""
+            ),
+        )
+        monkeypatch.setattr(
+            dispatch_mod,
+            "_continue_successful_executor_chain",
+            lambda *a, **k: {
+                "status": "success",
+                "decision": refreshed_record["decision"],
+                "executor": "phase_a_executor",
+            },
+        )
+
+        result = dispatch_mod.dispatch(
+            record,
+            repo_root=tmp_path,
+            routing_record_path=record_path,
+            verbose=True,
+        )
+
+        assert result["status"] == "success"
+        assert result["decision"] == "ROUTE_PHASE_A"
+        assert canonical_calls
+        assert auto_refresh_calls
+
     def test_auto_refresh_rejects_stale_post_merge_package_before_supervisor(
         self, tmp_path, monkeypatch,
     ):

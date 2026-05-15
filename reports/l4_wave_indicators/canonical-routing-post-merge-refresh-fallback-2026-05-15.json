@@ -1,0 +1,32 @@
+{
+  "wave_id": "canonical-routing-post-merge-refresh-fallback-2026-05-15",
+  "repeat_run_speedup_ratio": 0.968078,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.429427,
+  "repeat_run_raw_seconds": [
+    0.415719,
+    0.429427
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.415719
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.845146
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-15T09:10:26Z",
+  "collector_version": "2.2.0",
+  "manual_unblock_amendments": [
+    {
+      "kind": "pre_push_blocker_repair",
+      "evidence": "First push attempt failed in tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution::test_pane_findings_uses_active_worktree_when_current_root_is_quiet with subprocess.TimeoutExpired after _pane_findings.sh printed the expected REQUEST_CHANGES render.",
+      "mechanical_fix": "RCX_PANE_ONESHOT=1 findings renders suppress desktop notification dispatch and use a test-local notification marker.",
+      "validation": "PYTHONHASHSEED=0 python3 -m pytest -q tests/tools/test_recovery_gate.py::TestObservabilityWorktreeResolution --tb=short"
+    }
+  ]
+}

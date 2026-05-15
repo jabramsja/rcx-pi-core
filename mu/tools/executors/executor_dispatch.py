@@ -3208,6 +3208,17 @@ def dispatch(
                     verbose=verbose,
                     bus_dir=bus_dir,
                 )
+                if not refreshed or refresh_record is None:
+                    if verbose:
+                        print(
+                            "[dispatch] Canonical routing rebind failed; "
+                            "falling back to post-merge package refresh..."
+                        )
+                    refreshed, refresh_record = _auto_refresh_routing(
+                        repo,
+                        verbose=verbose,
+                        bus_dir=bus_dir,
+                    )
             else:
                 refreshed, refresh_record = _auto_refresh_routing(repo, verbose=verbose, bus_dir=bus_dir)
             if not refreshed or refresh_record is None:
