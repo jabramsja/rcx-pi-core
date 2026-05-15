@@ -339,6 +339,8 @@ def validate_split_allowances(data: object) -> list[str]:
         return errors
     seen_ids: set[str] = set()
     seen_pairs: set[tuple[SiteKey, SiteKey]] = set()
+    seen_old_targets: dict[SiteKey, SiteKey] = {}
+    seen_new_sources: dict[SiteKey, SiteKey] = {}
     for i, allowance in enumerate(allowances):
         context = f"split_allowances[{i}]"
         if not isinstance(allowance, dict):
@@ -389,7 +391,26 @@ def validate_split_allowances(data: object) -> list[str]:
                     f"{(old_key.substrate, old_key.file, old_key.name)} -> "
                     f"{(new_key.substrate, new_key.file, new_key.name)}"
                 )
-            seen_pairs.add(pair)
+            else:
+                previous_new_key = seen_old_targets.get(old_key)
+                if previous_new_key is not None:
+                    errors.append(
+                        f"{context} old site maps to multiple new sites: "
+                        f"{(old_key.substrate, old_key.file, old_key.name)} -> "
+                        f"{(previous_new_key.substrate, previous_new_key.file, previous_new_key.name)} "
+                        f"and {(new_key.substrate, new_key.file, new_key.name)}"
+                    )
+                previous_old_key = seen_new_sources.get(new_key)
+                if previous_old_key is not None:
+                    errors.append(
+                        f"{context} new site maps from multiple old sites: "
+                        f"{(new_key.substrate, new_key.file, new_key.name)} <- "
+                        f"{(previous_old_key.substrate, previous_old_key.file, previous_old_key.name)} "
+                        f"and {(old_key.substrate, old_key.file, old_key.name)}"
+                    )
+                seen_pairs.add(pair)
+                seen_old_targets.setdefault(old_key, new_key)
+                seen_new_sources.setdefault(new_key, old_key)
     return errors
 
 
