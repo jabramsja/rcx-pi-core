@@ -153,6 +153,272 @@ def test_build_commit_handoff_default_tracker_note_includes_tracked_packet(tmp_p
     assert f"Packet: `{packet_path}`" in handoff["tracker_note_text"]
 
 
+def test_post_commit_pre_push_dirty_isolation_stashes_and_restores(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    (repo / "dirty.py").write_text("dirty\n", encoding="utf-8")
+
+    messages: list[str] = []
+    isolation, error = commit_mod._stash_post_commit_pre_push_dirty_paths(  # ANTICHEAT_OK
+        repo,
+        wave_id="dirty-isolation-wave",
+        log=messages.append,
+    )
+
+    assert error is None
+    assert isolation is not None
+    assert "dirty.py" in isolation["paths"]
+    assert "commit_executor:post_commit_pre_push:dirty-isolation-wave:" in isolation["marker"]
+    status_after_stash = subprocess.run(
+        ["git", "status", "--short"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "dirty.py" not in status_after_stash
+
+    restore_error = commit_mod._restore_post_commit_pre_push_dirty_paths(  # ANTICHEAT_OK
+        repo,
+        isolation,
+        log=messages.append,
+    )
+
+    assert restore_error is None
+    status_after_restore = subprocess.run(
+        ["git", "status", "--short"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "dirty.py" in status_after_restore
+    assert (repo / "dirty.py").read_text(encoding="utf-8") == "dirty\n"
+
+
+def test_post_commit_pre_push_dirty_restore_rejects_oid_drift(tmp_path):
+    repo = _setup_repo(tmp_path)
+    (repo / "dirty.py").write_text("dirty\n", encoding="utf-8")
+
+    isolation, error = commit_mod._stash_post_commit_pre_push_dirty_paths(  # ANTICHEAT_OK
+        repo,
+        wave_id="dirty-isolation-wave",
+        log=lambda _msg: None,
+    )
+    assert error is None
+    assert isolation is not None
+
+    isolation["stash_oid"] = "not-the-created-stash"
+    restore_error = commit_mod._restore_post_commit_pre_push_dirty_paths(  # ANTICHEAT_OK
+        repo,
+        isolation,
+        log=lambda _msg: None,
+    )
+
+    assert restore_error is not None
+    assert "object id mismatch" in restore_error
+
+
+def test_post_commit_pre_push_dirty_isolation_resume_requires_verified_restore(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    (repo / "dirty.py").write_text("dirty\n", encoding="utf-8")
+
+    messages: list[str] = []
+    isolation, error = commit_mod._stash_post_commit_pre_push_dirty_paths(  # ANTICHEAT_OK
+        repo,
+        wave_id="dirty-isolation-wave",
+        log=messages.append,
+    )
+    assert error is None
+    assert isolation is not None
+
+    subprocess.run(
+        ["git", "stash", "pop", "--index", isolation["stash_ref"]],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    action, action_error = commit_mod._classify_pre_push_isolation_resume(  # ANTICHEAT_OK
+        repo,
+        isolation,
+    )
+    assert action is None
+    assert action_error is not None
+    assert "dirty before Step 11 can run safely" in action_error
+
+    restore_error = commit_mod._restore_post_commit_pre_push_dirty_paths(  # ANTICHEAT_OK
+        repo,
+        isolation,
+        log=messages.append,
+    )
+    assert restore_error is not None
+    assert "stash missing" in restore_error
+
+    commit_mod._mark_pre_push_isolation_verified(isolation)  # ANTICHEAT_OK
+    action, action_error = commit_mod._classify_pre_push_isolation_resume(  # ANTICHEAT_OK
+        repo,
+        isolation,
+    )
+    assert action == "already_restored"
+    assert action_error is None
+    restore_error = commit_mod._restore_post_commit_pre_push_dirty_paths(  # ANTICHEAT_OK
+        repo,
+        isolation,
+        log=messages.append,
+    )
+    assert restore_error is None
+    assert any("already restored" in message for message in messages)
+
+
+def test_post_commit_pre_push_dirty_isolation_checkpoint_is_durable(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True)
+    commit_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    continuation_path = commit_mod._continuation_record_path(  # ANTICHEAT_OK
+        repo,
+        "dirty-isolation-wave",
+    )
+    result = {
+        "commit_sha": commit_sha,
+        "receipt_decision": "COMMIT_GO",
+        "handoff_sha": "handoff-sha",
+        "steps_completed": ["ensure_feature_branch", "git_commit"],
+        "pre_push_isolation": {
+            "marker": "commit_executor:post_commit_pre_push:dirty-isolation-wave:abc",
+            "stash_ref": "stash@{0}",
+            "stash_oid": "stash-oid",
+            "paths": "dirty.py\n",
+        },
+    }
+
+    commit_mod._checkpoint_post_commit_progress(  # ANTICHEAT_OK
+        result,
+        continuation_path=continuation_path,
+        target_branch="dev",
+    )
+
+    payload = json.loads(continuation_path.read_text(encoding="utf-8"))
+    assert payload["pre_push_isolation"]["marker"].endswith("dirty-isolation-wave:abc")
+    loaded = commit_mod._load_post_commit_continuation(  # ANTICHEAT_OK
+        continuation_path,
+        repo_root=repo,
+        handoff_sha="handoff-sha",
+        target_branch="dev",
+    )
+    assert loaded is not None
+    assert loaded["pre_push_isolation"]["paths"] == "dirty.py\n"
+
+    result.pop("pre_push_isolation")
+    commit_mod._checkpoint_post_commit_progress(  # ANTICHEAT_OK
+        result,
+        continuation_path=continuation_path,
+        target_branch="dev",
+    )
+    payload = json.loads(continuation_path.read_text(encoding="utf-8"))
+    assert "pre_push_isolation" not in payload
+
+    (repo / "dirty.py").write_text("restored dirty work\n", encoding="utf-8")
+    result["pre_push_restored_paths"] = ["dirty.py"]
+    commit_mod._checkpoint_post_commit_progress(  # ANTICHEAT_OK
+        result,
+        continuation_path=continuation_path,
+        target_branch="dev",
+    )
+    loaded = commit_mod._load_post_commit_continuation(  # ANTICHEAT_OK
+        continuation_path,
+        repo_root=repo,
+        handoff_sha="handoff-sha",
+        target_branch="dev",
+    )
+    assert loaded is not None
+    assert loaded["pre_push_restored_paths"] == ["dirty.py"]
+
+
+def test_post_commit_pre_push_dirty_isolation_checkpoints_before_stash(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    hook = repo / "mu" / "tools" / "hooks" / "pre-push-fast"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True)
+    commit_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (repo / "dirty.py").write_text("operator dirty work\n", encoding="utf-8")
+
+    continuation_path = commit_mod._continuation_record_path(  # ANTICHEAT_OK
+        repo,
+        "dirty-isolation-wave",
+    )
+    result = {
+        "commit_sha": commit_sha,
+        "receipt_decision": "COMMIT_GO",
+        "handoff_sha": "handoff-sha",
+        "steps_completed": ["git_commit"],
+    }
+    observed: dict[str, dict] = {}
+    original_stash = commit_mod._stash_post_commit_pre_push_dirty_paths  # ANTICHEAT_OK
+
+    def observing_stash(repo_root, *args, **kwargs):
+        payload = json.loads(continuation_path.read_text(encoding="utf-8"))
+        observed["payload"] = payload
+        pending = payload["pre_push_isolation"]
+        assert pending["pre_push_state"] == commit_mod.PRE_PUSH_ISOLATION_STASH_PENDING_VALUE
+        assert "dirty.py" in pending["paths"]
+        assert "stash_ref" not in pending
+        assert pending["marker"] == kwargs["isolation"]["marker"]
+        return original_stash(repo_root, *args, **kwargs)
+
+    with patch.object(
+        commit_mod,
+        "_stash_post_commit_pre_push_dirty_paths",
+        side_effect=observing_stash,
+    ):
+        pipeline_result = commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK
+            handoff={"wave_id": "dirty-isolation-wave"},
+            repo_root=repo,
+            result=result,
+            target_branch="dev",
+            base_branch="dev",
+            continuation_path=continuation_path,
+            log=lambda _msg: None,
+        )
+
+    assert observed["payload"]["pre_push_isolation"]["marker"].startswith(
+        "commit_executor:post_commit_pre_push:dirty-isolation-wave:"
+    )
+    assert pipeline_result["status"] == "error"
+    assert pipeline_result["step"] == "run_pre_push_script"
+    status_after_restore = subprocess.run(
+        ["git", "status", "--short"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "dirty.py" in status_after_restore
+
+
 def test_bot_remediation_tracker_followup_appends_tasks_for_tracker_relevant_scope(tmp_path):
     repo = _setup_repo(tmp_path)
     wave_id = "bot-remediation-tracker-wave"
@@ -789,6 +1055,85 @@ class TestReceiptChainEndToEnd:
         assert "- Commit status: `pre_commit_supervisor_pending`" in packet_text
         assert f"  - `reports/l4_wave_indicators/{wave_id}.json`" in packet_text
         assert "  - `TASKS.md`" in packet_text
+
+    def test_commit_supervisor_package_fences_unstaged_out_of_scope_dirty_files(self, tmp_path):
+        from collections import namedtuple
+        import subprocess
+        import types
+
+        repo = _setup_repo(tmp_path)
+        (repo / "out_of_scope.py").write_text("# baseline\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "baseline"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+
+        wave_id = "commit-fenced-dirty-wave"
+        packet_path = "reports/control_plane/commit_fenced_dirty_wave.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Commit Fenced Dirty Wave\n\n"
+            "Status: Phase B ready\n"
+            f"Wave ID: {wave_id}\n"
+            "Wave class: L4_ENABLER\n"
+            "Target gate: G8\n",
+            encoding="utf-8",
+        )
+        (repo / "file.py").write_text("# changed code\n", encoding="utf-8")
+        (repo / "out_of_scope.py").write_text("# later wave dirty work\n", encoding="utf-8")
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(
+            json.dumps(
+                {
+                    "decision": "COMMIT_GO",
+                    "staged_sha": "fresh_sha_from_step6",
+                    "timestamp_utc": "2026-05-15T00:00:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        captured_package = {}
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+
+        def mock_supervisor(package_path, *a, **kw):
+            captured_package.update(json.loads(Path(package_path).read_text(encoding="utf-8")))
+            return SupervisorResult(
+                decision="COMMIT_GO",
+                summary="test",
+                receipt_path=sup_receipt_path,
+            )
+
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=["file.py", packet_path],
+            tracked_packet=packet_path,
+            scope_items=[packet_path],
+        )
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = mock_supervisor
+        mock_client.MetaBridgeClientError = Exception
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), patch.object(
+            commit_mod,
+            "_run_post_commit_pipeline",
+            side_effect=lambda **kwargs: {
+                "status": "success",
+                "steps_completed": kwargs["result"]["steps_completed"],
+            },
+        ):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "success", result
+        assert "out_of_scope.py" in captured_package["fenced_files"]
+        assert "out_of_scope.py" not in captured_package["changed_files"]
+        assert "file.py" in captured_package["changed_files"]
 
     def test_pre_commit_failure_demotes_completed_packet_and_task_for_dispatch_retry(self, tmp_path):
         import subprocess

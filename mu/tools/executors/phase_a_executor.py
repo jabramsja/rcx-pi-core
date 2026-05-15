@@ -104,6 +104,7 @@ BRIDGE_DECISION_RE = re.compile(
 BRIDGE_TURN_HEADING_RE = re.compile(r"^###\s+(?P<turn_id>\S+)\s+—\s+(?P<role>\S+)\s*$")
 BRIDGE_TURN_RAW_OUTPUT_RE = re.compile(r"^-\s*Raw output:\s*(?P<path>.+?)\s*$")
 BRIDGE_TURN_JOB_PREFIX_RE = re.compile(r"^(?P<job_id>.+)--r\d+-")
+BRIDGE_TURN_ROUND_RE = re.compile(r"--r(?P<round_no>\d+)-")
 AGENT_ENVELOPE_RE = re.compile(
     r"BEGIN_AGENT_ENVELOPE\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```\s*)?END_AGENT_ENVELOPE",
     re.DOTALL,
@@ -1299,7 +1300,11 @@ def _bridge_turn_raw_output_matches_turn(turn: dict[str, Any], raw_path: Path) -
     decision = str(turn.get("decision", "") or "").strip()
     if not turn_id or not role or not decision:
         return False
-    if str(envelope.get("turn_id", "") or "").strip() != turn_id:
+    envelope_turn_id = str(envelope.get("turn_id", "") or "").strip()
+    if envelope_turn_id != turn_id and not _bridge_turn_id_matches_round_alias(
+        turn_id,
+        envelope_turn_id,
+    ):
         return False
     if str(envelope.get("agent_role", "") or "").strip().lower() != role:
         return False
@@ -1319,6 +1324,16 @@ def _bridge_turn_job_prefix(turn_id: str) -> str:
     if not match:
         return ""
     return match.group("job_id")
+
+
+def _bridge_turn_id_matches_round_alias(turn_id: str, envelope_turn_id: str) -> bool:
+    """Accept bridge agent envelopes that report the round alias for the turn."""
+    if not turn_id or not envelope_turn_id:
+        return False
+    match = BRIDGE_TURN_ROUND_RE.search(turn_id)
+    if not match:
+        return False
+    return envelope_turn_id == f"round-{match.group('round_no')}"
 
 
 def _bridge_turn_heading_can_follow(turn: dict[str, Any], next_turn_id: str) -> bool:

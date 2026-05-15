@@ -5,7 +5,7 @@ Covers:
 2. cleanup_root not on base_branch → skipped with warning (no destruction).
 3. Wave branch missing → branch_deleted=False with warning, other steps still run.
 4. Worktree distinct path that doesn't exist → worktree step skipped cleanly.
-5. No stashes referencing wave_id → 0 dropped, unrelated stashes preserved.
+5. No executor-owned stashes for wave_id → 0 dropped, unrelated stashes preserved.
 6. Worktree removal unlocks branch so branch_deleted succeeds (order matters).
 """
 
@@ -70,10 +70,10 @@ def test_happy_path_removes_branch_worktree_and_matching_stashes(tmp_path):
     # Create wave branch + linked worktree
     wt_path = tmp_path / "wave_worktree"
     _git(["worktree", "add", "-b", target_branch, str(wt_path), "dev"], cwd=repo)
-    # Create two stashes: one referencing wave_id, one unrelated
+    # Create two stashes: one executor-owned Phase B marker, one unrelated.
     (repo / "scratch.txt").write_text("dirty")
     _git(["add", "scratch.txt"], cwd=repo)
-    _git(["stash", "push", "-m", f"On dev: {wave_id}-buffer"], cwd=repo)
+    _git(["stash", "push", "-m", f"phase_b:{target_branch}:abc123"], cwd=repo)
     (repo / "other.txt").write_text("unrelated")
     _git(["add", "other.txt"], cwd=repo)
     _git(["stash", "push", "-m", "On dev: unrelated-topic"], cwd=repo)
@@ -100,7 +100,40 @@ def test_happy_path_removes_branch_worktree_and_matching_stashes(tmp_path):
     # Unrelated stash preserved
     stash_list = _git(["stash", "list"], cwd=repo).stdout
     assert "unrelated-topic" in stash_list
-    assert wave_id not in stash_list
+    assert f"phase_b:{target_branch}:abc123" not in stash_list
+
+
+def test_post_merge_cleanup_preserves_manual_wave_named_stash(tmp_path):
+    repo = _init_repo(tmp_path)
+    wave_id = "test-wave-manual-stash-2026-05-14"
+    target_branch = f"jabramsja/{wave_id}"
+    _git(["branch", target_branch, "dev"], cwd=repo)
+
+    (repo / "manual.txt").write_text("manual")
+    _git(["add", "manual.txt"], cwd=repo)
+    _git(
+        [
+            "stash",
+            "push",
+            "-m",
+            f"rcx-temp-postcommit-push-isolation-{wave_id}",
+        ],
+        cwd=repo,
+    )
+
+    outcome = commit_mod._post_merge_cleanup(  # ANTICHEAT_OK: testing private helper
+        cleanup_root=repo,
+        repo_root=repo,
+        target_branch=target_branch,
+        base_branch="dev",
+        wave_id=wave_id,
+        log=_noop_log,
+    )
+
+    assert outcome["branch_deleted"] is True, outcome
+    assert outcome["stashes_dropped"] == 0, outcome
+    stash_list = _git(["stash", "list"], cwd=repo).stdout
+    assert f"rcx-temp-postcommit-push-isolation-{wave_id}" in stash_list
 
 
 def test_post_merge_package_refresh_selects_next_open_queue_packet(tmp_path):

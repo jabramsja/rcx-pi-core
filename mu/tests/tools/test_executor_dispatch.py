@@ -2751,6 +2751,50 @@ Phase-A-Lock: UNLOCKED
         rendered_path.write_text(render_content, encoding="utf-8")
         assert phase_a_mod._extract_bridge_decision(render_content, rendered_path=rendered_path) == "GO"  # ANTICHEAT_OK: testing stale-turn bridge decision parsing with artifact proof
 
+    def test_extract_bridge_decision_accepts_completed_round_alias_after_stale(self, tmp_path):
+        rendered_path = tmp_path / ".agent_bus" / "rendered" / "job.md"
+        rendered_path.parent.mkdir(parents=True)
+        raw_dir = tmp_path / ".agent_bus" / "raw" / "job"
+        raw_dir.mkdir(parents=True)
+        (raw_dir / "job--r1-reviewer-stale.txt").write_text(
+            self._raw_turn_envelope(
+                job_id="job",
+                turn_id="round-1",
+                role="reviewer",
+                decision="STALE",
+                summary="stale",
+            ),
+            encoding="utf-8",
+        )
+        (raw_dir / "job--r1-reviewer-completed.txt").write_text(
+            self._raw_turn_envelope(
+                job_id="job",
+                turn_id="round-1",
+                role="reviewer",
+                decision="REQUEST_CHANGES",
+                summary="completed",
+            ),
+            encoding="utf-8",
+        )
+        render_content = (
+            "# Bridge Job x\n\n"
+            "## Turns\n"
+            "### job--r1-reviewer-stale — reviewer\n"
+            "- Status: stale\n"
+            "- Decision: STALE\n"
+            "- Summary: stale\n"
+            "- Claimed files: (none)\n"
+            "- Raw output: .agent_bus/raw/job/job--r1-reviewer-stale.txt\n\n"
+            "### job--r1-reviewer-completed — reviewer\n"
+            "- Status: completed\n"
+            "- Decision: REQUEST_CHANGES\n"
+            "- Summary: done\n"
+            "- Claimed files: (none)\n"
+            "- Raw output: .agent_bus/raw/job/job--r1-reviewer-completed.txt\n"
+        )
+        rendered_path.write_text(render_content, encoding="utf-8")
+        assert phase_a_mod._extract_bridge_decision(render_content, rendered_path=rendered_path) == "REQUEST_CHANGES"  # ANTICHEAT_OK: testing real bridge round-alias envelopes after stale
+
     def test_extract_bridge_decision_requires_artifact_context_after_stale_turn(self):
         render_content = (
             "# Bridge Job x\n\n"
@@ -4405,6 +4449,27 @@ class TestEnsureFeatureBranch:
         result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
         assert "ensure_feature_branch" in result.get("steps_completed", [])
 
+    def test_9b_already_on_target_skips_collision_probe_timeout(self, tmp_path, monkeypatch):
+        """Already being on the target branch does not need remote collision checks."""
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env, check=True,
+        )
+        (repo / "file1.py").write_text("x = 1\n")
+
+        def timeout_probe(*_args, **_kwargs):
+            raise subprocess.TimeoutExpired(
+                cmd=["git", "ls-remote", "--heads", "origin", "jabramsja/test-wave-id"],
+                timeout=30,
+            )
+
+        monkeypatch.setattr(commit_mod, "_probe_feature_branch_existence", timeout_probe)
+
+        handoff = _make_new_handoff()
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+        assert "ensure_feature_branch" in result.get("steps_completed", [])
+
     def test_10_on_other_branch_rebinds_when_target_absent(self, tmp_path):
         """Test 10: On other branch with dev divergence → stash/rebind from dev."""
         repo, env = _init_git_repo(tmp_path)
@@ -5592,11 +5657,11 @@ class TestReceiptAndCommit:
         """Step 11 should surface stdout if pre-push-fast writes no stderr."""
         repo, env, mock_result = self._setup_repo_through_supervisor(tmp_path, "COMMIT_GO")
 
-        hooks_dir = repo / "mu" / "tools" / "hooks"
-        hooks_dir.mkdir(parents=True, exist_ok=True)
-        script = hooks_dir / "pre-push-fast"
-        script.write_text("#!/bin/bash\necho 'tracker note contract failed'\nexit 1\n")
-        script.chmod(0o755)
+        self._install_tracked_pre_push_fast(
+            repo,
+            env,
+            "#!/bin/bash\necho 'tracker note contract failed'\nexit 1\n",
+        )
 
         with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
             sys.modules["meta_bridge_client"].run_meta_bridge_package = MagicMock(return_value=mock_result)
@@ -5611,18 +5676,15 @@ class TestReceiptAndCommit:
         """Noisy Step 11 failures should report the failing tail, not the banner prefix."""
         repo, env, mock_result = self._setup_repo_through_supervisor(tmp_path, "COMMIT_GO")
 
-        hooks_dir = repo / "mu" / "tools" / "hooks"
-        hooks_dir.mkdir(parents=True, exist_ok=True)
-        script = hooks_dir / "pre-push-fast"
-        script.write_text(
+        self._install_tracked_pre_push_fast(
+            repo,
+            env,
             "#!/bin/bash\n"
             "for i in $(seq 1 120); do echo \"banner noise $i\"; done\n"
             "echo 'ERROR: Found private attr access in tests/'\n"
             "echo '  tests/tools/test_executor_dispatch.py:7211: ._continue_successful_executor_chain'\n"
             "exit 1\n",
-            encoding="utf-8",
         )
-        script.chmod(0o755)
 
         with patch.dict(sys.modules, {"meta_bridge_client": MagicMock()}):
             sys.modules["meta_bridge_client"].run_meta_bridge_package = MagicMock(return_value=mock_result)
@@ -5640,11 +5702,11 @@ class TestReceiptAndCommit:
         """Step 11 must give pre-push-fast enough time for the real fast audit path."""
         repo, env, mock_result = self._setup_repo_through_supervisor(tmp_path, "COMMIT_GO")
 
-        hooks_dir = repo / "mu" / "tools" / "hooks"
-        hooks_dir.mkdir(parents=True, exist_ok=True)
-        script = hooks_dir / "pre-push-fast"
-        script.write_text("#!/bin/bash\nexit 0\n")
-        script.chmod(0o755)
+        script = self._install_tracked_pre_push_fast(
+            repo,
+            env,
+            "#!/bin/bash\nexit 0\n",
+        )
 
         orig_run = commit_mod._run  # ANTICHEAT_OK: asserting Step 11 timeout contract
         seen_timeout = {"value": None}
@@ -5665,6 +5727,24 @@ class TestReceiptAndCommit:
         assert result["step"] == "run_pre_push_script"
         assert any("timed out" in e for e in result["errors"])
         assert seen_timeout["value"] == commit_mod.PRE_PUSH_FAST_TIMEOUT_S
+
+    def _install_tracked_pre_push_fast(self, repo, env, content):
+        """Install a tracked pre-push fixture so dirty isolation does not stash it."""
+        hooks_dir = repo / "mu" / "tools" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        script = hooks_dir / "pre-push-fast"
+        script.write_text(content, encoding="utf-8")
+        script.chmod(0o755)
+        rel = "mu/tools/hooks/pre-push-fast"
+        subprocess.run(["git", "add", "--", rel], cwd=repo, check=True, capture_output=True, env=env)
+        subprocess.run(
+            ["git", "commit", "-m", "add pre-push-fast fixture", "--only", "--", rel],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            env=env,
+        )
+        return script
 
     def _setup_repo_through_supervisor(self, tmp_path, receipt_decision="COMMIT_GO"):
         """Helper: create repo, pre-insert wave_id, create receipt, return (repo, env, mock)."""
