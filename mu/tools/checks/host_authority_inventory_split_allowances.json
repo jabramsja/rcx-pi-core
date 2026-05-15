@@ -1,0 +1,6 @@
+{
+  "description": "Checker-owned exact-pair split allowances for host-authority inventory accounting. This file is not a baseline; an empty list means no split is accepted.",
+  "kind": "host_authority_inventory_split_allowances",
+  "schema_version": 1,
+  "split_allowances": []
+}

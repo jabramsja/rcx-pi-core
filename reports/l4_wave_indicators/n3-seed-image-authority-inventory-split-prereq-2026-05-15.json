@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-seed-image-authority-inventory-split-prereq-2026-05-15",
+  "repeat_run_speedup_ratio": 1.036176,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.424844,
+  "repeat_run_raw_seconds": [
+    0.440213,
+    0.424844
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.440213
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.865057
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-15T08:08:17Z",
+  "collector_version": "2.2.0"
+}
