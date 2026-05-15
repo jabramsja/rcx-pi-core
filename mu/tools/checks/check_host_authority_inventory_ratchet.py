@@ -20,6 +20,7 @@ Usage:
     python3 tools/checks/check_host_authority_inventory_ratchet.py
     python3 tools/checks/check_host_authority_inventory_ratchet.py --json
     python3 tools/checks/check_host_authority_inventory_ratchet.py --baseline path/to/baseline.json
+    python3 tools/checks/check_host_authority_inventory_ratchet.py --split-allowances path/to/splits.json
     python3 tools/checks/check_host_authority_inventory_ratchet.py --update-baseline
 """
 from __future__ import annotations
@@ -47,6 +48,9 @@ def _find_repo_root() -> Path:
 
 REPO_ROOT = _find_repo_root()
 DEFAULT_BASELINE = REPO_ROOT / "tools" / "checks" / "host_authority_inventory_baseline.json"
+DEFAULT_SPLIT_ALLOWANCES = Path(__file__).resolve().with_name(
+    "host_authority_inventory_split_allowances.json"
+)
 
 PY_RUNTIME_DIR = REPO_ROOT / "rcx_pi" / "selfhost"
 JS_RUNTIME_DIR = REPO_ROOT / "mu" / "host" / "js"
@@ -126,6 +130,17 @@ VALID_SUBSTRATES = frozenset({"python", "javascript"})
 REQUIRED_INVENTORY_NAMES = ("total", "authority")
 REQUIRED_INVENTORY_FIELDS = frozenset({"site_counts", "entries"})
 REQUIRED_SITE_COUNT_FIELDS = frozenset({"python", "javascript", "total"})
+SPLIT_ALLOWANCE_KIND = "host_authority_inventory_split_allowances"
+REQUIRED_SPLIT_TOP_FIELDS = frozenset({"schema_version", "kind", "split_allowances"})
+ALLOWED_SPLIT_TOP_FIELDS = frozenset(
+    {"schema_version", "kind", "description", "generated_at", "split_allowances"}
+)
+REQUIRED_SPLIT_ALLOWANCE_FIELDS = frozenset({"id", "old", "new", "moved_signals"})
+ALLOWED_SPLIT_ALLOWANCE_FIELDS = frozenset(
+    {"id", "old", "new", "moved_signals", "reason"}
+)
+REQUIRED_SPLIT_SITE_REF_FIELDS = frozenset({"substrate", "file", "name"})
+ALLOWED_SPLIT_SITE_REF_FIELDS = REQUIRED_SPLIT_SITE_REF_FIELDS
 
 
 @dataclass(frozen=True)
@@ -133,6 +148,14 @@ class SiteKey:
     substrate: str
     file: str
     name: str
+
+
+def _empty_split_allowances() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "kind": SPLIT_ALLOWANCE_KIND,
+        "split_allowances": [],
+    }
 
 
 def validate_baseline(data: object) -> list[str]:
@@ -264,6 +287,127 @@ def load_baseline(path: Path) -> dict:
     errors = validate_baseline(data)
     if errors:
         print("ERROR: Baseline schema validation failed:", file=sys.stderr)
+        for err in errors:
+            print(f"  {err}", file=sys.stderr)
+        sys.exit(1)
+    return data
+
+
+def _validate_split_site_ref(ref: object, context: str) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(ref, dict):
+        return [f"{context} must be a dict, got {type(ref).__name__}"]
+    missing = REQUIRED_SPLIT_SITE_REF_FIELDS - set(ref.keys())
+    if missing:
+        errors.append(f"{context} missing fields: {sorted(missing)}")
+    unknown = set(ref.keys()) - ALLOWED_SPLIT_SITE_REF_FIELDS
+    if unknown:
+        errors.append(f"{context} has unsupported fields: {sorted(unknown)}")
+    substrate = ref.get("substrate")
+    if substrate not in VALID_SUBSTRATES:
+        errors.append(f"{context}.substrate must be one of {sorted(VALID_SUBSTRATES)}, got {substrate!r}")
+    for field in ("file", "name"):
+        value = ref.get(field)
+        if not isinstance(value, str) or not value:
+            errors.append(f"{context}.{field} must be a non-empty string, got {value!r}")
+    file_path = ref.get("file", "")
+    if isinstance(file_path, str) and ".." in Path(file_path).parts:
+        errors.append(f"{context}.file has path traversal: {file_path!r}")
+    return errors
+
+
+def validate_split_allowances(data: object) -> list[str]:
+    """Validate checker-owned split policy schema. Returns list of errors."""
+    errors: list[str] = []
+    if not isinstance(data, dict):
+        return [f"split allowances must be a dict, got {type(data).__name__}"]
+    missing_top = REQUIRED_SPLIT_TOP_FIELDS - set(data.keys())
+    if missing_top:
+        errors.append(f"split allowances missing fields: {sorted(missing_top)}")
+    unknown_top = set(data.keys()) - ALLOWED_SPLIT_TOP_FIELDS
+    if unknown_top:
+        errors.append(f"split allowances has unsupported fields: {sorted(unknown_top)}")
+    if data.get("schema_version") != 1:
+        errors.append(f"split allowances schema_version must be 1, got {data.get('schema_version')}")
+    if data.get("kind") != SPLIT_ALLOWANCE_KIND:
+        errors.append(f"split allowances kind must be {SPLIT_ALLOWANCE_KIND!r}, got {data.get('kind')!r}")
+    allowances = data.get("split_allowances")
+    if not isinstance(allowances, list):
+        errors.append(
+            f"split_allowances must be a list, got {type(allowances).__name__}"
+        )
+        return errors
+    seen_ids: set[str] = set()
+    seen_pairs: set[tuple[SiteKey, SiteKey]] = set()
+    for i, allowance in enumerate(allowances):
+        context = f"split_allowances[{i}]"
+        if not isinstance(allowance, dict):
+            errors.append(f"{context} must be a dict, got {type(allowance).__name__}")
+            continue
+        missing = REQUIRED_SPLIT_ALLOWANCE_FIELDS - set(allowance.keys())
+        if missing:
+            errors.append(f"{context} missing fields: {sorted(missing)}")
+        unknown = set(allowance.keys()) - ALLOWED_SPLIT_ALLOWANCE_FIELDS
+        if unknown:
+            errors.append(f"{context} has unsupported fields: {sorted(unknown)}")
+        allowance_id = allowance.get("id")
+        if not isinstance(allowance_id, str) or not allowance_id:
+            errors.append(f"{context}.id must be a non-empty string, got {allowance_id!r}")
+        elif allowance_id in seen_ids:
+            errors.append(f"{context}.id duplicate: {allowance_id!r}")
+        else:
+            seen_ids.add(allowance_id)
+        old_ref = allowance.get("old")
+        new_ref = allowance.get("new")
+        errors.extend(_validate_split_site_ref(old_ref, f"{context}.old"))
+        errors.extend(_validate_split_site_ref(new_ref, f"{context}.new"))
+        moved_signals = allowance.get("moved_signals")
+        if (
+            not isinstance(moved_signals, list)
+            or not moved_signals
+            or not all(isinstance(signal, str) and signal for signal in moved_signals)
+        ):
+            errors.append(f"{context}.moved_signals must be a non-empty list[str], got {moved_signals!r}")
+        elif len(set(moved_signals)) != len(moved_signals):
+            errors.append(f"{context}.moved_signals must not contain duplicates")
+        elif any(signal.startswith("parse_error:") for signal in moved_signals):
+            errors.append(f"{context}.moved_signals must not allow parse_error signals")
+        if isinstance(old_ref, dict) and isinstance(new_ref, dict):
+            old_key = _split_ref_key(old_ref)
+            new_key = _split_ref_key(new_ref)
+            if old_key.substrate != new_key.substrate:
+                errors.append(
+                    f"{context} old/new substrates must match, got "
+                    f"{old_key.substrate!r} and {new_key.substrate!r}"
+                )
+            if old_key == new_key:
+                errors.append(f"{context} old and new site references must differ")
+            pair = (old_key, new_key)
+            if pair in seen_pairs:
+                errors.append(
+                    f"{context} duplicate old/new pair: "
+                    f"{(old_key.substrate, old_key.file, old_key.name)} -> "
+                    f"{(new_key.substrate, new_key.file, new_key.name)}"
+                )
+            seen_pairs.add(pair)
+    return errors
+
+
+def load_split_allowances(path: Path, *, required: bool = False) -> dict[str, object]:
+    """Load split allowances, returning an empty policy when the default file is absent."""
+    if not path.is_file():
+        if required:
+            print(f"ERROR: Split allowance file not found: {path}", file=sys.stderr)
+            sys.exit(1)
+        return _empty_split_allowances()
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        print(f"ERROR: Split allowance JSON parse failed: {path}: {exc}", file=sys.stderr)
+        sys.exit(1)
+    errors = validate_split_allowances(data)
+    if errors:
+        print("ERROR: Split allowance schema validation failed:", file=sys.stderr)
         for err in errors:
             print(f"  {err}", file=sys.stderr)
         sys.exit(1)
@@ -608,6 +752,22 @@ def _site_key(site: dict[str, object]) -> SiteKey:
     )
 
 
+def _split_ref_key(ref: dict[object, object]) -> SiteKey:
+    return SiteKey(
+        substrate=str(ref.get("substrate")),
+        file=str(ref.get("file")),
+        name=str(ref.get("name")),
+    )
+
+
+def _change_key(change: dict[str, object]) -> SiteKey:
+    return SiteKey(
+        substrate=str(change["substrate"]),
+        file=str(change["file"]),
+        name=str(change["name"]),
+    )
+
+
 def _compare_entry_sets(
     current_sites: list[dict[str, object]],
     baseline_entries: list[dict[str, object]],
@@ -656,7 +816,171 @@ def _compare_entry_sets(
     }
 
 
-def compare_inventories(current_inventories: dict[str, list[dict[str, object]]], baseline: dict) -> dict[str, object]:
+def _apply_split_allowances(
+    current_inventories: dict[str, list[dict[str, object]]],
+    baseline: dict,
+    split_allowances: dict[str, object],
+    total_result: dict[str, object],
+    authority_result: dict[str, object],
+) -> tuple[list[dict[str, object]], list[str], set[SiteKey], set[SiteKey], set[SiteKey]]:
+    errors = validate_split_allowances(split_allowances)
+    if errors:
+        return [], errors, set(), set(), set()
+
+    allowances = split_allowances.get("split_allowances", [])
+    if not allowances:
+        return [], [], set(), set(), set()
+
+    baseline_inventories = baseline.get("inventories", {})
+    baseline_total_map = {
+        _site_key(entry): entry
+        for entry in baseline_inventories.get("total", {}).get("entries", [])
+    }
+    baseline_authority_map = {
+        _site_key(entry): entry
+        for entry in baseline_inventories.get("authority", {}).get("entries", [])
+    }
+    current_total_map = {
+        _site_key(entry): entry
+        for entry in current_inventories["total_sites"]
+    }
+    current_authority_map = {
+        _site_key(entry): entry
+        for entry in current_inventories["authority_sites"]
+    }
+    new_total_keys = {_site_key(site) for site in total_result["new_sites"]}
+    new_authority_keys = {_site_key(site) for site in authority_result["new_sites"]}
+    removed_authority_keys = {_site_key(site) for site in authority_result["removed_sites"]}
+
+    accepted: list[dict[str, object]] = []
+    accepted_new_total_keys: set[SiteKey] = set()
+    accepted_new_authority_keys: set[SiteKey] = set()
+    accepted_old_authority_removed_keys: set[SiteKey] = set()
+    accepted_substrates: set[str] = set()
+
+    for i, allowance in enumerate(allowances):
+        assert isinstance(allowance, dict)
+        allowance_id = str(allowance["id"])
+        context = f"split_allowances[{i}] {allowance_id!r}"
+        old_key = _split_ref_key(allowance["old"])
+        new_key = _split_ref_key(allowance["new"])
+        moved_signals = set(str(signal) for signal in allowance["moved_signals"])
+        pair_errors: list[str] = []
+
+        old_baseline_total = baseline_total_map.get(old_key)
+        old_baseline_authority = baseline_authority_map.get(old_key)
+        old_current_total = current_total_map.get(old_key)
+        new_current_total = current_total_map.get(new_key)
+        new_current_authority = current_authority_map.get(new_key)
+        old_current_authority = current_authority_map.get(old_key)
+
+        if old_baseline_total is None:
+            pair_errors.append(f"{context}: old site is not present in baseline total inventory")
+        if old_baseline_authority is None:
+            pair_errors.append(f"{context}: old site is not present in baseline authority subset")
+        if old_current_total is None:
+            pair_errors.append(f"{context}: paired old wrapper is missing from current total inventory")
+        if new_current_total is None:
+            pair_errors.append(f"{context}: new site is missing from current total inventory")
+        if new_current_authority is None:
+            pair_errors.append(f"{context}: new site is missing from current authority subset")
+        if new_key in baseline_total_map or new_key in baseline_authority_map:
+            pair_errors.append(f"{context}: new site is already in baseline inventory")
+        if new_key not in new_total_keys:
+            pair_errors.append(f"{context}: new site is not a current new total-inventory site")
+        if new_key not in new_authority_keys:
+            pair_errors.append(f"{context}: new site is not a current new authority-subset site")
+
+        if old_baseline_authority is not None:
+            old_baseline_signals = set(str(signal) for signal in old_baseline_authority.get("signals", []))
+            if not moved_signals <= old_baseline_signals:
+                pair_errors.append(
+                    f"{context}: moved_signals must be a subset of old baseline signals "
+                    f"{sorted(old_baseline_signals)}"
+                )
+        else:
+            old_baseline_signals = set()
+
+        old_current_signals = (
+            set(str(signal) for signal in old_current_total.get("signals", []))
+            if old_current_total is not None
+            else set()
+        )
+        new_current_signals = (
+            set(str(signal) for signal in new_current_authority.get("signals", []))
+            if new_current_authority is not None
+            else set()
+        )
+
+        if old_current_signals - old_baseline_signals:
+            pair_errors.append(
+                f"{context}: paired old wrapper gained authority signals "
+                f"{sorted(old_current_signals - old_baseline_signals)}"
+            )
+        if old_current_signals & moved_signals:
+            pair_errors.append(
+                f"{context}: paired old wrapper still carries moved signals "
+                f"{sorted(old_current_signals & moved_signals)}"
+            )
+        if not new_current_signals:
+            pair_errors.append(f"{context}: new site has no authority signals to account for")
+        if not new_current_signals <= moved_signals:
+            pair_errors.append(
+                f"{context}: new site authority signals {sorted(new_current_signals)} "
+                f"are not bounded by moved_signals {sorted(moved_signals)}"
+            )
+
+        if pair_errors:
+            errors.extend(pair_errors)
+            continue
+
+        accepted.append(
+            {
+                "id": allowance_id,
+                "old": {
+                    "substrate": old_key.substrate,
+                    "file": old_key.file,
+                    "name": old_key.name,
+                    "line": int(old_baseline_total["line"]),
+                },
+                "new": {
+                    "substrate": new_key.substrate,
+                    "file": new_key.file,
+                    "name": new_key.name,
+                    "line": int(new_current_total["line"]),
+                },
+                "moved_signals": sorted(moved_signals),
+                "old_baseline_signals": sorted(old_baseline_signals),
+                "old_current_signals": sorted(old_current_signals),
+                "new_current_signals": sorted(new_current_signals),
+            }
+        )
+        accepted_new_total_keys.add(new_key)
+        accepted_new_authority_keys.add(new_key)
+        if old_key in removed_authority_keys or old_current_authority is None:
+            accepted_old_authority_removed_keys.add(old_key)
+        accepted_substrates.add(old_key.substrate)
+
+    if accepted and accepted_substrates != VALID_SUBSTRATES:
+        errors.append(
+            "split allowances must include accepted split pairs for both substrates; "
+            f"got {sorted(accepted_substrates)}"
+        )
+
+    return (
+        accepted,
+        errors,
+        accepted_new_total_keys,
+        accepted_new_authority_keys,
+        accepted_old_authority_removed_keys,
+    )
+
+
+def compare_inventories(
+    current_inventories: dict[str, list[dict[str, object]]],
+    baseline: dict,
+    split_allowances: dict[str, object] | None = None,
+) -> dict[str, object]:
     """Compare total inventory plus authority subset vs baseline."""
     inventories = baseline.get("inventories", {})
     total_result = _compare_entry_sets(
@@ -667,6 +991,46 @@ def compare_inventories(current_inventories: dict[str, list[dict[str, object]]],
         current_inventories["authority_sites"],
         inventories.get("authority", {}).get("entries", []),
     )
+    split_policy = split_allowances if split_allowances is not None else _empty_split_allowances()
+    (
+        accepted_split_pairs,
+        split_policy_errors,
+        accepted_new_total_keys,
+        accepted_new_authority_keys,
+        accepted_old_authority_removed_keys,
+    ) = _apply_split_allowances(
+        current_inventories,
+        baseline,
+        split_policy,
+        total_result,
+        authority_result,
+    )
+    accepted_old_keys = {
+        _split_ref_key(pair["old"])
+        for pair in accepted_split_pairs
+        if isinstance(pair.get("old"), dict)
+    }
+    new_total_sites = [
+        site for site in total_result["new_sites"] if _site_key(site) not in accepted_new_total_keys
+    ]
+    new_authority_sites = [
+        site
+        for site in authority_result["new_sites"]
+        if _site_key(site) not in accepted_new_authority_keys
+    ]
+    removed_authority_sites = [
+        site
+        for site in authority_result["removed_sites"]
+        if _site_key(site) not in accepted_old_authority_removed_keys
+    ]
+    total_signal_changes = [
+        change for change in total_result["signal_changes"] if _change_key(change) not in accepted_old_keys
+    ]
+    authority_signal_changes = [
+        change
+        for change in authority_result["signal_changes"]
+        if _change_key(change) not in accepted_old_keys
+    ]
     return {
         "current_total_counts": total_result["current_counts"],
         "baseline_total_counts": total_result["baseline_counts"],
@@ -674,13 +1038,17 @@ def compare_inventories(current_inventories: dict[str, list[dict[str, object]]],
         "baseline_authority_counts": authority_result["baseline_counts"],
         "current_total_sites": total_result["current_sites"],
         "current_authority_sites": authority_result["current_sites"],
-        "new_total_sites": total_result["new_sites"],
-        "new_authority_sites": authority_result["new_sites"],
+        "new_total_sites": new_total_sites,
+        "new_authority_sites": new_authority_sites,
         "removed_total_sites": total_result["removed_sites"],
-        "removed_authority_sites": authority_result["removed_sites"],
-        "total_signal_changes": total_result["signal_changes"],
-        "authority_signal_changes": authority_result["signal_changes"],
-        "passed": len(total_result["new_sites"]) == 0 and len(authority_result["new_sites"]) == 0,
+        "removed_authority_sites": removed_authority_sites,
+        "total_signal_changes": total_signal_changes,
+        "authority_signal_changes": authority_signal_changes,
+        "accepted_split_pairs": accepted_split_pairs,
+        "split_policy_errors": split_policy_errors,
+        "passed": len(new_total_sites) == 0
+        and len(new_authority_sites) == 0
+        and not split_policy_errors,
     }
 
 
@@ -713,9 +1081,34 @@ def format_human(result: dict[str, object], py_files: int, js_files: int) -> str
             f"({baseline_authority_counts['python']} Python + {baseline_authority_counts['javascript']} JS)"
         ),
     ]
+    if result["accepted_split_pairs"]:
+        lines.append(
+            f"ACCEPTED SPLITS: {len(result['accepted_split_pairs'])} exact host-authority split pair(s):"
+        )
+        for pair in result["accepted_split_pairs"]:
+            old = pair["old"]
+            new = pair["new"]
+            lines.append(
+                f"  SPLIT {old['substrate']} {old['file']}::{old['name']} "
+                f"-> {new['file']}::{new['name']} "
+                f"(moved={','.join(pair['moved_signals'])}; "
+                f"old_now={','.join(pair['old_current_signals']) or 'none'}; "
+                f"new_now={','.join(pair['new_current_signals'])})"
+            )
     if result["passed"]:
-        lines.append("PASS: No new total-inventory or authority-subset sites detected.")
+        if result["accepted_split_pairs"]:
+            lines.append("PASS: No unaccepted new total-inventory or authority-subset sites detected.")
+        else:
+            lines.append("PASS: No new total-inventory or authority-subset sites detected.")
     else:
+        if result["split_policy_errors"]:
+            lines.append(
+                f"FAIL: {len(result['split_policy_errors'])} split allowance policy error(s):"
+            )
+            for err in result["split_policy_errors"][:20]:
+                lines.append(f"  SPLIT_POLICY {err}")
+            if len(result["split_policy_errors"]) > 20:
+                lines.append(f"  ... and {len(result['split_policy_errors']) - 20} more")
         if result["new_total_sites"]:
             lines.append(
                 f"FAIL: {len(result['new_total_sites'])} new total-inventory site(s) not in baseline:"
@@ -782,6 +1175,12 @@ def write_baseline(path: Path, current_inventories: dict[str, list[dict[str, obj
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Host-authority inventory ratchet")
     parser.add_argument("--baseline", type=str, default=None, help="Custom baseline path")
+    parser.add_argument(
+        "--split-allowances",
+        type=str,
+        default=None,
+        help="Custom exact-pair split allowance path",
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON output")
     parser.add_argument("--update-baseline", action="store_true", help="Write current inventory as baseline")
     args = parser.parse_args(argv)
@@ -814,10 +1213,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     baseline_path = Path(args.baseline) if args.baseline else DEFAULT_BASELINE
+    split_allowance_path = (
+        Path(args.split_allowances) if args.split_allowances else DEFAULT_SPLIT_ALLOWANCES
+    )
+    _loaded_split_allowances = load_split_allowances(
+        split_allowance_path,
+        required=bool(args.split_allowances),
+    )
     if args.update_baseline:
         if baseline_path.exists():
             baseline = load_baseline(baseline_path)
-            result = compare_inventories(current_inventories, baseline)
+            result = compare_inventories(current_inventories, baseline, _empty_split_allowances())
             if result["new_total_sites"] or result["new_authority_sites"]:
                 print(
                     "ERROR: Cannot update baseline while new total-inventory or authority-subset "
@@ -830,7 +1236,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     baseline = load_baseline(baseline_path)
-    result = compare_inventories(current_inventories, baseline)
+    result = compare_inventories(current_inventories, baseline, _loaded_split_allowances)
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
