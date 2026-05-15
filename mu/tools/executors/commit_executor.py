@@ -547,6 +547,8 @@ def _canonicalize_stage_paths(repo_root: Path, paths: list[str]) -> list[str]:
 
 
 def _path_deleted_in_branch_history(repo_root: Path, relpath: str) -> bool:
+    branch_refs: list[str] = []
+
     upstream = _run(
         ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
         cwd=repo_root,
@@ -554,29 +556,44 @@ def _path_deleted_in_branch_history(repo_root: Path, relpath: str) -> bool:
         timeout=30,
     )
     upstream_ref = upstream.stdout.strip()
-    if upstream.returncode != 0 or not upstream_ref:
-        return False
+    if upstream.returncode == 0 and upstream_ref:
+        branch_refs.append(upstream_ref)
 
-    merge_base = _run(
-        ["git", "merge-base", upstream_ref, "HEAD"],
-        cwd=repo_root,
-        check=False,
-        timeout=30,
-    )
-    base_sha = merge_base.stdout.strip()
-    if merge_base.returncode != 0 or not base_sha:
-        return False
+    for candidate in ("origin/dev", "dev"):
+        if candidate in branch_refs:
+            continue
+        exists = _run(
+            ["git", "rev-parse", "--verify", "--quiet", candidate],
+            cwd=repo_root,
+            check=False,
+            timeout=30,
+        )
+        if exists.returncode == 0:
+            branch_refs.append(candidate)
 
-    committed_delete = _run(
-        [
-            "git", "diff", "--name-only", "--diff-filter=D",
-            f"{base_sha}..HEAD", "--", relpath,
-        ],
-        cwd=repo_root,
-        check=False,
-        timeout=30,
-    )
-    return committed_delete.returncode == 0 and bool(committed_delete.stdout.strip())
+    for branch_ref in branch_refs:
+        merge_base = _run(
+            ["git", "merge-base", branch_ref, "HEAD"],
+            cwd=repo_root,
+            check=False,
+            timeout=30,
+        )
+        base_sha = merge_base.stdout.strip()
+        if merge_base.returncode != 0 or not base_sha:
+            continue
+
+        committed_delete = _run(
+            [
+                "git", "diff", "--name-only", "--diff-filter=D",
+                f"{base_sha}..HEAD", "--", relpath,
+            ],
+            cwd=repo_root,
+            check=False,
+            timeout=30,
+        )
+        if committed_delete.returncode == 0 and bool(committed_delete.stdout.strip()):
+            return True
+    return False
 
 
 def _stage_handoff_paths(

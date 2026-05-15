@@ -3590,6 +3590,60 @@ class TestWaveIdBounds:
         )
         assert third.stdout.strip() == ""
 
+    def test_stage_handoff_paths_skips_older_branch_history_deletion_after_push(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        target_rel = "reports/deferred/non_blocking/wave_bridge_nonblockers.md"
+        target = repo / target_rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("# Deferred\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", target_rel], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "add deferred packet"], cwd=repo, check=True, capture_output=True)
+        base_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        subprocess.run(["git", "update-ref", "refs/remotes/origin/dev", base_sha], cwd=repo, check=True)
+        subprocess.run(["git", "checkout", "-b", "feature"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "rm", "--", target_rel], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "delete deferred packet"], cwd=repo, check=True, capture_output=True)
+        (repo / "file.py").write_text("# follow-up\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "file.py"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "follow-up"], cwd=repo, check=True, capture_output=True)
+        feature_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        subprocess.run(["git", "update-ref", "refs/remotes/origin/feature", feature_sha], cwd=repo, check=True)
+        subprocess.run(["git", "config", "branch.feature.remote", "origin"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "config", "branch.feature.merge", "refs/heads/feature"],
+            cwd=repo,
+            check=True,
+        )
+
+        commit_mod._stage_handoff_paths(  # ANTICHEAT_OK: direct stage helper regression for pushed stale handoff paths
+            repo,
+            files_to_stage=[target_rel],
+            force_files=[],
+        )
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-status", "--", target_rel],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        assert staged.stdout.strip() == ""
+
     def test_stage_handoff_paths_does_not_stage_scope_only_deletion(self, tmp_path):
         import subprocess
 

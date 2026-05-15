@@ -622,7 +622,8 @@ Result: passed with `2 passed in 0.93s`.
 PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py --tb=short
 ```
 
-Result: passed with `131 passed in 32.31s`.
+Result: passed with `132 passed in 37.52s` after the staging-continuation
+regression was added.
 
 ```bash
 python3 -m py_compile mu/tools/executors/commit_executor.py
@@ -635,6 +636,43 @@ python3 tools/checks/check_host_authority_inventory_ratchet.py
 Result: passed. Host-semantics ratchet reported no increases; host-authority
 inventory remained `311 total` / `217 authority`, with no new total-inventory or
 authority-subset sites detected.
+
+## Commit Executor Staging Continuation Root Fix (2026-05-15)
+
+Root-cause evidence from the post-commit continuation rerun:
+
+- `python3 mu/tools/executors/commit_executor.py --handoff .agent_bus/executors/phase_b_handoff.json --json`
+  returned `step: stage_files` with
+  `fatal: pathspec 'reports/deferred/non_blocking/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14_bridge_nonblockers.md' did not match any files`.
+- `git merge-base origin/dev HEAD` returned `1c380027bcdb62661518dcd956c9a156058a33b0`,
+  and `git diff --name-status --diff-filter=D <base>..HEAD -- <active-packet>`
+  returned `D` for the active generated packet.
+- `@{upstream}` resolves to
+  `origin/jabramsja/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14`,
+  and its merge-base with `HEAD` is the current pushed head, so the old
+  upstream-only branch-history check cannot see deletions that happened earlier
+  in the same already-pushed feature branch.
+
+Mechanical repair:
+
+- `mu/tools/executors/commit_executor.py` now checks branch-history deletions
+  against `@{upstream}` when useful and then falls back to `origin/dev` / `dev`
+  before treating a missing handoff path as stageable.
+- `mu/tests/tools/test_commit_executor_receipt.py::TestWaveIdBounds::test_stage_handoff_paths_skips_older_branch_history_deletion_after_push`
+  reproduces the pushed-feature-upstream shape: feature upstream points at the
+  current feature head, the deleted path is older than `HEAD^..HEAD`, and
+  `origin/dev` is the only ref that proves the branch deletion.
+
+Focused staging-continuation evidence:
+
+```bash
+PYTHONHASHSEED=0 python3 -m pytest -q \
+  mu/tests/tools/test_commit_executor_receipt.py::TestWaveIdBounds::test_stage_handoff_paths_is_idempotent_for_staged_deletion \
+  mu/tests/tools/test_commit_executor_receipt.py::TestWaveIdBounds::test_stage_handoff_paths_skips_older_branch_history_deletion_after_push \
+  --tb=short
+```
+
+Result: passed with `2 passed in 1.54s`.
 
 Current staged L4 evidence after the retry-root fix:
 
@@ -681,10 +719,10 @@ Questions? Concerns? Thoughts? -- Think hard
 - Refresh wave: `n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14`
 - Active packet: `reports/control_plane/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `9dfb21ba9105f9cc6d811cdd0596893719de8daa4299b33623aeddf7235b2140`
+- Tracker note sha256: `52a0d2adaa8ec9522efeb1ffc41b8ff27dab6238b0f362eddf66966e1c6035d7`
 - Indicator artifact: `reports/l4_wave_indicators/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.json`
 - Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py`.
-- Evidence delta: (1) Routed commit handoff scopes 5 wave-owned file(s). (2) Evidence gate exercises 1 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.json..
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.json`
 - Current staged files:
