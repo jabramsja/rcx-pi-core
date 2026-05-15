@@ -3376,6 +3376,44 @@ _HYBRID_VALIDATION_KEYS: frozenset[str] = frozenset({
     "validator",
     "targets",
 })
+_ANTI_THEATER_PYTEST_ID_RE = re.compile(
+    r"\b(?:mu/)?tests/[A-Za-z0-9_./-]+\.py::"
+    r"(?:[A-Za-z_][A-Za-z0-9_]*|<module>)::"
+    r"[A-Za-z_][A-Za-z0-9_]*\b"
+)
+_ANTI_THEATER_ALLOWLIST_AUTHORIZATION_TOKENS: tuple[str, ...] = (
+    "founder_authorizes_anti_theater_allowlist_expansion",
+    "founder-authorizes-anti-theater-allowlist-expansion",
+    "user_authorizes_anti_theater_allowlist_expansion",
+    "user-authorizes-anti-theater-allowlist-expansion",
+    "explicit founder directive authorizes anti-theater allowlist expansion",
+    "explicit user directive authorizes anti-theater allowlist expansion",
+)
+_ANTI_THEATER_ALLOWLIST_AUTHORIZATION_FIELDS: tuple[str, ...] = (
+    "anti_theater_allowlist_authorized",
+    "anti_theater_allowlist_authorization",
+    "founder_authorizes_anti_theater_allowlist_expansion",
+    "user_authorizes_anti_theater_allowlist_expansion",
+)
+_ANTI_THEATER_ALLOWLIST_AUTHORIZATION_CONTAINERS: tuple[str, ...] = (
+    "recovery",
+    "metadata",
+)
+_ANTI_THEATER_ALLOWLIST_PATH_FRAGMENTS: tuple[str, ...] = (
+    "tools/checks/theater_allowlist.json",
+    "theater_allowlist.json",
+    "--update-allowlist",
+)
+_ANTI_THEATER_ALLOWLIST_ACTION_RE = re.compile(
+    r"\b(?:add|append|edit|expand|modify|normalize|update|write)\b.{0,80}\ballowlist\b"
+    r"|\ballowlist\b.{0,80}\b(?:add|append|edit|expand|modify|normalize|update|write)\b",
+    re.IGNORECASE,
+)
+_ANTI_THEATER_ALLOWLIST_NEGATION_RE = re.compile(
+    r"\b(?:avoid|block|blocked|do\s+not|don't|must\s+not|reject|rejected|without)\b"
+    r".{0,80}(?:\ballowlist\b|theater_allowlist\.json|--update-allowlist)",
+    re.IGNORECASE,
+)
 
 
 def _is_hybrid_test_tool_path(rel_path: str) -> bool:
@@ -3428,6 +3466,234 @@ def _hybrid_scope_matches(rel_path: str, files_in_scope: list[str]) -> bool:
 
 def _is_hybrid_validator_target(rel_path: str) -> bool:
     return _is_hybrid_test_tool_path(rel_path)
+
+
+def _join_bounded_head(texts: list[str], budget: int) -> str:
+    parts: list[str] = []
+    remaining = budget
+    for text in texts:
+        if remaining <= 0:
+            break
+        if parts:
+            parts.append("\n")
+            remaining -= 1
+            if remaining <= 0:
+                break
+        if len(text) > remaining:
+            parts.append(text[:remaining])
+            break
+        parts.append(text)
+        remaining -= len(text)
+    return "".join(parts)
+
+
+def _join_bounded_tail(texts: list[str], budget: int) -> str:
+    parts: list[str] = []
+    remaining = budget
+    for text in reversed(texts):
+        if remaining <= 0:
+            break
+        if parts:
+            parts.append("\n")
+            remaining -= 1
+            if remaining <= 0:
+                break
+        if len(text) > remaining:
+            parts.append(text[-remaining:])
+            break
+        parts.append(text)
+        remaining -= len(text)
+    return "".join(reversed(parts))
+
+
+def _bounded_result_text(result: dict[str, Any], *, max_chars: int = 200_000) -> str:
+    texts = [str(text) for text in _iter_text_values(result) if text]
+    if not texts:
+        return ""
+    total_len = sum(len(text) for text in texts) + max(0, len(texts) - 1)
+    if total_len <= max_chars:
+        return "\n".join(texts)
+    marker = "\n[bounded result middle omitted]\n"
+    budget = max_chars - len(marker)
+    if budget <= 0:
+        return marker[:max_chars]
+    head_budget = budget // 2
+    tail_budget = budget - head_budget
+    head = _join_bounded_head(texts, head_budget)
+    tail = _join_bounded_tail(texts, tail_budget)
+    return f"{head.rstrip()}{marker}{tail.lstrip()}"
+
+
+def _extract_anti_theater_pytest_ids(text: str) -> list[str]:
+    seen: set[str] = set()
+    ids: list[str] = []
+    for match in _ANTI_THEATER_PYTEST_ID_RE.finditer(text):
+        pytest_id = match.group(0).lstrip("./")
+        if pytest_id not in seen:
+            seen.add(pytest_id)
+            ids.append(pytest_id)
+        if len(ids) >= 5:
+            break
+    return ids
+
+
+def _trusted_anti_theater_allowlist_authorization_values(
+    result: dict[str, Any],
+) -> list[Any]:
+    values: list[Any] = []
+    for key in _ANTI_THEATER_ALLOWLIST_AUTHORIZATION_FIELDS:
+        if key in result:
+            values.append(result[key])
+    for container_key in _ANTI_THEATER_ALLOWLIST_AUTHORIZATION_CONTAINERS:
+        container = result.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        for key in _ANTI_THEATER_ALLOWLIST_AUTHORIZATION_FIELDS:
+            if key in container:
+                values.append(container[key])
+    return values
+
+
+def _anti_theater_allowlist_authorization_value(value: Any) -> bool:
+    if value is True:
+        return True
+    if isinstance(value, str):
+        signal = value.lower()
+        return any(token in signal for token in _ANTI_THEATER_ALLOWLIST_AUTHORIZATION_TOKENS)
+    if isinstance(value, dict):
+        return any(_anti_theater_allowlist_authorization_value(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_anti_theater_allowlist_authorization_value(item) for item in value)
+    return False
+
+
+def _anti_theater_allowlist_authorized(result: dict[str, Any]) -> bool:
+    # stdout/stderr are command-controlled. Authorization must come only from
+    # executor-populated fields, never from arbitrary bounded failure text.
+    return any(
+        _anti_theater_allowlist_authorization_value(value)
+        for value in _trusted_anti_theater_allowlist_authorization_values(result)
+    )
+
+
+def _anti_theater_ratchet_context(
+    result: dict[str, Any],
+) -> dict[str, Any] | None:
+    signal = _bounded_result_text(result)
+    lowered = signal.lower()
+    detected = (
+        "anti-theater ratchet" in lowered
+        or (
+            "unallowlisted" in lowered
+            and "pytest" in lowered
+            and "ratchet" in lowered
+        )
+        or (
+            "tools/checks/theater_allowlist.json" in lowered
+            and "unallowlisted" in lowered
+        )
+    )
+    if not detected:
+        return None
+    return {
+        "pytest_ids": _extract_anti_theater_pytest_ids(signal),
+        "allowlist_authorized": _anti_theater_allowlist_authorized(result),
+    }
+
+
+def _build_anti_theater_ratchet_prompt_context(
+    result: dict[str, Any],
+) -> str:
+    context = _anti_theater_ratchet_context(result)
+    if context is None:
+        return ""
+    pytest_ids = context["pytest_ids"] or ["(pytest method not extracted from bounded failure evidence)"]
+    pytest_lines = "\n".join(f"  - {pytest_id}" for pytest_id in pytest_ids)
+    return f"""
+Anti-Theater Ratchet Diagnostic Context:
+- Detected gate shape: Anti-Theater Ratchet Check / new unallowlisted pytest method.
+- Failing pytest method(s):
+{pytest_lines}
+- Recovery policy: this must not be repaired by allowlist expansion unless trusted result metadata contains an explicit founder/user directive authorizing anti-theater allowlist expansion.
+- Default direction: perform proof-quality behavioral test repair, or escalate clearly if the needed repair is outside bounded recovery scope.
+- Delegate scope rule: if delegate_implementer is used, files_in_scope must name existing bounded recovery tooling/tests/control-plane files; do not invent reports/deferred/<wave>.md or use broad deferred globs for this failure shape.
+""".strip()
+
+
+def _text_proposes_anti_theater_allowlist_expansion(text: str) -> bool:
+    lowered = text.lower()
+    if not lowered:
+        return False
+    segments = re.split(r"[\n\r;]+|(?<=[.!?])\s+", text)
+    for segment in segments:
+        lowered_segment = segment.lower()
+        if not lowered_segment:
+            continue
+        if _ANTI_THEATER_ALLOWLIST_NEGATION_RE.search(segment):
+            continue
+        if any(fragment in lowered_segment for fragment in _ANTI_THEATER_ALLOWLIST_PATH_FRAGMENTS):
+            return True
+        if _ANTI_THEATER_ALLOWLIST_ACTION_RE.search(segment):
+            return True
+    return False
+
+
+def _recovery_response_targets_anti_theater_allowlist(response: dict[str, Any]) -> bool:
+    action = response.get("action")
+    commands = response.get("commands", [])
+    texts: list[str] = []
+    if action == "shell":
+        texts.extend(cmd for cmd in commands if isinstance(cmd, str))
+    elif action == "edit":
+        for edit in commands:
+            if not isinstance(edit, dict):
+                continue
+            texts.extend(
+                str(edit.get(key, "") or "")
+                for key in ("file_path", "old_text", "new_text")
+            )
+    elif action == "delegate_implementer":
+        texts.append(json.dumps(response, sort_keys=True))
+    else:
+        return False
+    texts.append(str(response.get("explanation", "") or ""))
+    return any(_text_proposes_anti_theater_allowlist_expansion(text) for text in texts)
+
+
+def _anti_theater_response_policy_rejection(
+    result: dict[str, Any],
+    response: dict[str, Any],
+) -> str:
+    context = _anti_theater_ratchet_context(result)
+    if context is None or context.get("allowlist_authorized"):
+        return ""
+    if not _recovery_response_targets_anti_theater_allowlist(response):
+        return ""
+    return (
+        "anti-theater ratchet recovery policy blocks allowlist-first repair; "
+        "repair the behavioral test/proof quality or escalate for founder review"
+    )
+
+
+def _anti_theater_delegate_scope_rejection(
+    repo_root: Path,
+    result: dict[str, Any],
+    delegate_payload: dict[str, Any],
+) -> str:
+    context = _anti_theater_ratchet_context(result)
+    if context is None:
+        return ""
+    for rel_path in delegate_payload["files_in_scope"]:
+        if _has_hybrid_glob_meta(rel_path):
+            return (
+                "anti-theater ratchet delegate scope must name existing concrete "
+                f"files, not patterns: {rel_path}"
+            )
+        if rel_path.startswith("reports/deferred/") and not (repo_root / rel_path).is_file():
+            return f"anti-theater ratchet delegate scope references missing deferred path: {rel_path}"
+        if not (repo_root / rel_path).is_file():
+            return f"anti-theater ratchet delegate scope references missing path: {rel_path}"
+    return ""
 
 
 def _strip_shell_quotes(text: str) -> str:
@@ -4096,6 +4362,12 @@ def _build_diagnosis_prompt(
         git_status = git_proc.stdout[:500] if git_proc.returncode == 0 else "(unavailable)"
     except (subprocess.TimeoutExpired, OSError):
         git_status = "(unavailable)"
+    anti_theater_context = _build_anti_theater_ratchet_prompt_context(result)
+    anti_theater_section = (
+        f"\n\n{anti_theater_context}\n"
+        if anti_theater_context
+        else "\n"
+    )
 
     prompt = f"""You are a pipeline recovery agent. A pipeline step has failed and you must diagnose and fix it.
 
@@ -4113,7 +4385,7 @@ STDOUT (last 50 lines):
 
 Git status:
 {git_status}
-
+{anti_theater_section}
 Do not run tools or shell commands yourself during this diagnosis turn.
 Use only the evidence above, decide the smallest honest next action, and
 return the JSON plan immediately.
@@ -5187,6 +5459,9 @@ def _run_delegate_implementer_action(
     ok, delegate_payload, detail = _validate_delegate_implementer_payload(response)
     if not ok or delegate_payload is None:
         return {"ok": False, "detail": detail, "result_update": None}
+    detail = _anti_theater_delegate_scope_rejection(repo_root, result, delegate_payload)
+    if detail:
+        return {"ok": False, "detail": detail, "result_update": None}
     blocked, blocked_detail = _hybrid_bootstrap_fault_detected(result, delegate_payload["files_in_scope"])
     if blocked:
         return {"ok": False, "detail": blocked_detail, "result_update": None}
@@ -5648,6 +5923,37 @@ def run_recovery_loop(
         action = response.get("action", "skip")
         commands = response.get("commands", [])
         explanation = response.get("explanation", "")
+        policy_rejection = _anti_theater_response_policy_rejection(result, response)
+        if policy_rejection:
+            dur = round(time.monotonic() - iteration_t0, 3)
+            loop_log.append({
+                "iteration": i + 1,
+                "action": "policy_blocked",
+                "detail": policy_rejection,
+                "requested_action": action,
+                "explanation": explanation,
+                "duration_s": dur,
+            })
+            _log_tier3_attempt(
+                repo_root, wave_id, step, fc, i + 1,
+                "policy_blocked", "blocked", dur, policy_rejection,
+                invocation_id=invocation_id,
+            )
+            _finish_recovery_status(
+                repo_root,
+                recovered=False,
+                exhausted=True,
+                outcome="policy_blocked",
+                action="policy_blocked",
+                detail=policy_rejection,
+                state="tier3_policy_blocked",
+            )
+            return {
+                "recovered": False,
+                "exhausted": True,
+                "iterations": i + 1,
+                "log": loop_log,
+            }
         _update_recovery_status(
             repo_root,
             child_pid=0,
