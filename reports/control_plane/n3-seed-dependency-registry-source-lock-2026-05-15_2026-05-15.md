@@ -96,7 +96,6 @@ Read-only source scope:
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/n3-seed-dependency-registry-source-lock-2026-05-15.json`
 - Current staged files:
-  - `TASKS.md`
   - `mu/tests/l4_gates/test_wave_j_arch_gaps_gate.py`
   - `mu/tests/parity/test_seed_loading_parity.py`
   - `reports/control_plane/n3-seed-dependency-registry-source-lock-2026-05-15_2026-05-15.md`

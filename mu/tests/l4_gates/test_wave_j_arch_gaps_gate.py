@@ -294,6 +294,9 @@ class TestSeedDependencyParity:
         """JS SEED_DEPENDENCIES export must exactly mirror Python."""
         from mu.tests.parity.test_seed_loading_parity import (
             assert_seed_dependency_maps_match_exactly,
+            seed_dependency_map_snapshots,
         )
 
+        py_dependencies, js_dependencies = seed_dependency_map_snapshots()
+        assert js_dependencies == py_dependencies
         assert_seed_dependency_maps_match_exactly()

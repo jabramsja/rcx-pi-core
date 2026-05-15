@@ -170,6 +170,11 @@ def _python_seed_dependencies() -> dict[str, list[str]]:
     return SEED_DEPENDENCIES
 
 
+def seed_dependency_map_snapshots() -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Return Python and JS SEED_DEPENDENCIES maps after shape validation."""
+    return _python_seed_dependencies(), _js_seed_dependencies()
+
+
 def _dependency_list_mismatch(seed_name: str, py_list: list[str], js_list: list[str]) -> str:
     py_counter = Counter(py_list)
     js_counter = Counter(js_list)
@@ -191,8 +196,7 @@ def _dependency_list_mismatch(seed_name: str, py_list: list[str], js_list: list[
 
 def assert_seed_dependency_maps_match_exactly() -> None:
     """Assert Python and JS exported SEED_DEPENDENCIES maps are identical."""
-    py_dependencies = _python_seed_dependencies()
-    js_dependencies = _js_seed_dependencies()
+    py_dependencies, js_dependencies = seed_dependency_map_snapshots()
 
     missing_js_keys = sorted(set(py_dependencies) - set(js_dependencies))
     extra_js_keys = sorted(set(js_dependencies) - set(py_dependencies))
