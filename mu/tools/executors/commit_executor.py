@@ -4610,11 +4610,11 @@ def _resolve_tasks_md_tracker_note_conflict(path: Path) -> bool:
 
 
 def _is_tracker_note_only(buf: list[str]) -> bool:
-    """Every non-blank line in *buf* must be a tracker-sync-note line.
+    """Every non-blank line in *buf* must be a tracker-sync line.
 
-    Tracker-sync-note lines start with ``- Tracker sync note (`` or
-    ``- ~~Tracker sync note (`` (strike-through closed notes). Leading
-    whitespace is allowed (indented continuation lines inside a note).
+    Tracker-sync lines include canonical notes and same-wave follow-ups,
+    including strike-through closed notes. Leading whitespace is allowed
+    (indented continuation lines inside a note).
     """
     for raw in buf:
         stripped = raw.rstrip("\n").strip()
@@ -4622,7 +4622,9 @@ def _is_tracker_note_only(buf: list[str]) -> bool:
             continue
         if not (
             stripped.startswith("- Tracker sync note (")
+            or stripped.startswith("- Tracker sync follow-up (")
             or stripped.startswith("- ~~Tracker sync note (")
+            or stripped.startswith("- ~~Tracker sync follow-up (")
         ):
             return False
     return True

@@ -79,6 +79,7 @@ Allowed implementation write set:
 - `mu/tests/tools/test_phase_b_executor.py` focused pipeline root-fix regression only
 - `mu/tools/executors/commit_executor.py` same-wave commit-handoff root fix only
 - `mu/tests/tools/test_commit_executor_receipt.py` focused commit-handoff root-fix regression only
+- `mu/tests/tools/test_commit_executor_step14_autoresolve.py` focused commit auto-resolve regression only
 - `TASKS.md` same-wave tracker note
 - `reports/control_plane/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.md`
 - `reports/archive/deferred/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14_bridge_nonblockers_closed-by-n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.md`
@@ -674,7 +675,32 @@ PYTHONHASHSEED=0 python3 -m pytest -q \
 
 Result: passed with `2 passed in 1.54s`.
 
-Current staged L4 evidence after the retry-root fix:
+## Commit Executor TASKS Follow-Up Auto-Resolve Root Fix (2026-05-15)
+
+Root-cause evidence from PR #970 merge failure:
+
+- Commit executor reached Step 15 after CI passed and then failed with
+  `merge_pr.sh failed: X Pull request ... is not mergeable: the merge commit cannot be cleanly created`.
+- The live log shows the built-in conflict handler attempted the merge and then
+  aborted: `Step 14 auto-resolve: PR #970 mergeable=CONFLICTING; attempting merge`
+  followed by `Step 14 auto-resolve: merge aborted`.
+- `git merge-tree $(git merge-base HEAD origin/dev) HEAD origin/dev` showed the
+  conflict block was the TASKS tracker area. The conflicted block contained
+  same-wave `Tracker sync follow-up` lines as well as canonical tracker notes.
+- `_is_tracker_note_only(...)` accepted `Tracker sync note` lines but rejected
+  `Tracker sync follow-up`, so the auto-resolver treated a safe tracker-only
+  conflict as non-tracker content and aborted.
+
+Mechanical repair:
+
+- `mu/tools/executors/commit_executor.py` now treats canonical
+  `Tracker sync follow-up` lines, including struck-through forms, as
+  tracker-sync lines for the TASKS conflict auto-resolver.
+- `mu/tests/tools/test_commit_executor_step14_autoresolve.py` adds direct
+  validator and conflict-resolution regressions for follow-up lines in the same
+  TASKS conflict block.
+
+Current staged L4 evidence after the continuation root fixes:
 
 ```bash
 python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14
@@ -683,10 +709,10 @@ python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id n3-rcx-
 Result: passed as `L4_ENABLER` compliant with 5 changed files, 0 runtime files,
 and only control-plane/tooling evidence paths in scope.
 
-Retry-root staged files:
+Current staged files:
 
 - `TASKS.md`
-- `mu/tests/tools/test_commit_executor_receipt.py`
+- `mu/tests/tools/test_commit_executor_step14_autoresolve.py`
 - `mu/tools/executors/commit_executor.py`
 - `reports/control_plane/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.md`
 - `reports/l4_wave_indicators/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.json`
@@ -719,15 +745,15 @@ Questions? Concerns? Thoughts? -- Think hard
 - Refresh wave: `n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14`
 - Active packet: `reports/control_plane/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `52a0d2adaa8ec9522efeb1ffc41b8ff27dab6238b0f362eddf66966e1c6035d7`
+- Tracker note sha256: `dc054bfca1369043bcf06ec6dca3224052dcb6f60a87abca9e09dff96bef4292`
 - Indicator artifact: `reports/l4_wave_indicators/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py`.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_step14_autoresolve.py`.
 - Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/tools/test_commit_executor_receipt.py`
+  - `mu/tests/tools/test_commit_executor_step14_autoresolve.py`
   - `mu/tools/executors/commit_executor.py`
   - `reports/control_plane/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.md`
   - `reports/l4_wave_indicators/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.json`

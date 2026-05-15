@@ -40,6 +40,13 @@ class TestIsTrackerNoteOnly:
         ]
         assert commit_mod._is_tracker_note_only(buf)  # ANTICHEAT_OK: validator verify
 
+    def test_accepts_tracker_followups(self):
+        buf = [
+            "\t- Tracker sync follow-up (2026-05-15T16:03:40Z, wave-a): same-wave root fix.\n",
+            "- ~~Tracker sync follow-up (2026-05-14T00:00:00Z, wave-b): closed.~~\n",
+        ]
+        assert commit_mod._is_tracker_note_only(buf)  # ANTICHEAT_OK: validator verify
+
     def test_accepts_strikethrough_notes(self):
         buf = [
             "- ~~Tracker sync note (2026-04-20, wave-a): closed.~~\n",
@@ -104,6 +111,26 @@ class TestResolveTasksMdTrackerNoteConflict:
         assert other_idx < my_idx, (
             "origin block (merged-first wave) must come before HEAD block"
         )
+
+    def test_chronological_resolution_accepts_tracker_followups(self, tmp_path):
+        path = tmp_path / "TASKS.md"
+        conflict = (
+            "# TASKS\n\n## NEXT\n\n"
+            "<<<<<<< HEAD\n"
+            "- Tracker sync note (2026-05-15, my_wave): **feat:** in-flight.\n"
+            "\t- Tracker sync follow-up (2026-05-15T16:03:40Z, my_wave): root fix.\n"
+            "=======\n"
+            "- Tracker sync follow-up (2026-05-15, other_wave): merged-first root fix.\n"
+            "- Tracker sync note (2026-05-15, other_wave): **feat:** merged-first.\n"
+            ">>>>>>> origin/dev\n"
+        )
+        path.write_text(conflict, encoding="utf-8")
+        assert commit_mod._resolve_tasks_md_tracker_note_conflict(path) is True  # ANTICHEAT_OK: helper verify
+        resolved = path.read_text(encoding="utf-8")
+        assert "<<<<<<<" not in resolved
+        assert ">>>>>>>" not in resolved
+        assert resolved.index("other_wave") < resolved.index("my_wave")
+        assert "Tracker sync follow-up" in resolved
 
     def test_rejects_non_tracker_note_in_conflict(self, tmp_path):
         path = tmp_path / "TASKS.md"
