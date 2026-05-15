@@ -584,12 +584,16 @@ def _stage_handoff_paths(
     *,
     files_to_stage: list[str],
     force_files: list[str],
+    scope_files: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     canonical_files = _canonicalize_stage_paths(repo_root, files_to_stage)
     canonical_force = _canonicalize_stage_paths(repo_root, force_files)
+    # scope_files bounds branch-rebind context only. Commit staging authority
+    # stays with files_to_stage and force_files.
+    stage_files = canonical_files
     existing_files: list[str] = []
     missing_files: list[str] = []
-    for relpath in canonical_files:
+    for relpath in stage_files:
         path = repo_root / relpath
         if path.exists() or path.is_symlink():
             existing_files.append(relpath)
@@ -1279,6 +1283,40 @@ def _same_wave_deferred_non_blocking_paths(wave_id: str, paths: list[str]) -> li
         return []
     expected = f"reports/deferred/non_blocking/{normalized_wave}_bridge_nonblockers.md"
     return [expected] if expected in set(_dedupe_repo_paths(paths)) else []
+
+
+def _is_staged_deletion(repo_root: Path, rel_path: str) -> bool:
+    """Return whether rel_path is already staged as a deletion."""
+    normalized = _normalize_repo_relpath(str(rel_path or ""))
+    if not normalized or _is_absolute_untrusted_path(normalized) or _has_path_traversal(normalized):
+        return False
+    try:
+        staged_delete = _run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=D", "--", normalized],
+            cwd=repo_root,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+        return False
+    return staged_delete.returncode == 0 and normalized in set(
+        _dedupe_repo_paths(staged_delete.stdout.splitlines())
+    )
+
+
+def _same_wave_active_deferred_non_blocking_paths(
+    wave_id: str,
+    paths: list[str],
+    *,
+    repo_root: Path | None = None,
+) -> list[str]:
+    active_paths = _same_wave_deferred_non_blocking_paths(wave_id, paths)
+    if repo_root is None:
+        return active_paths
+    return [
+        path for path in active_paths
+        if not _is_staged_deletion(repo_root, path)
+    ]
 
 
 def _same_wave_closed_deferred_archive_paths(wave_id: str, paths: list[str]) -> list[str]:
@@ -2661,6 +2699,7 @@ def _collect_branch_rebind_dirty_scope(
         path for path in [
             *handoff.get("files_to_stage", []),
             *handoff.get("force_add_files", []),
+            *handoff.get("scope_items", []),
         ]
         if isinstance(path, str) and path.strip()
     ]
@@ -2958,15 +2997,16 @@ def _restore_post_commit_pre_push_dirty_paths(
 def _capture_scope_snapshot(
     repo_root: Path,
     pathspecs: list[str],
- ) -> dict[str, bytes | None]:
-    """Capture exact worktree bytes for dirty wave-owned files."""
-    snapshot: dict[str, bytes | None] = {}
+) -> dict[str, Any]:
+    """Capture exact worktree bytes and staged deletion state for wave-owned files."""
+    snapshot: dict[str, Any] = {}
     for path in pathspecs:
         full_path = repo_root / path
-        if full_path.exists():
-            snapshot[path] = full_path.read_bytes()
-        else:
-            snapshot[path] = None
+        payload = full_path.read_bytes() if full_path.exists() else None
+        snapshot[path] = {
+            "payload": payload,
+            "staged_delete": _is_staged_deletion(repo_root, path),
+        }
     return snapshot
 
 
@@ -2989,22 +3029,33 @@ def _clear_scope_for_branch_rebind(
             full_path.unlink()
 
 
-def _restore_scope_snapshot(repo_root: Path, snapshot: dict[str, bytes | None]) -> None:
+def _restore_scope_snapshot(repo_root: Path, snapshot: dict[str, Any]) -> None:
     """Restore the captured bounded scope onto the rebound branch."""
-    for path, payload in snapshot.items():
+    for path, entry in snapshot.items():
+        if isinstance(entry, dict) and "payload" in entry:
+            payload = entry.get("payload")
+            staged_delete = bool(entry.get("staged_delete"))
+        else:
+            payload = entry
+            staged_delete = False
         full_path = repo_root / path
         if payload is None:
             if full_path.exists():
                 full_path.unlink()
-            continue
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_bytes(payload)
+        else:
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_bytes(payload)
+        if staged_delete:
+            if full_path.exists():
+                _run(["git", "rm", "--cached", "--", path], cwd=repo_root, check=False, timeout=30)
+            else:
+                _run(["git", "add", "-u", "--", path], cwd=repo_root, check=False, timeout=30)
 
 
 def _restore_scope_snapshot_on_branch_failure(
     repo_root: Path,
     *,
-    snapshot: dict[str, bytes | None],
+    snapshot: dict[str, Any],
     expected_branch: str,
 ) -> None:
     """Restore a captured bounded scope when checkout failed before branch switch."""
@@ -5826,7 +5877,7 @@ def prepare_handoff_from_routing_record(
     embedded_handoff = record.get("handoff")
     if isinstance(embedded_handoff, dict):
         embedded_copy = copy.deepcopy(embedded_handoff)
-        valid, handoff_errors = validate_handoff(embedded_copy)
+        valid, handoff_errors = validate_handoff(embedded_copy, repo_root=repo_root)
         if valid and not standalone:
             return embedded_copy, []
         if not valid:
@@ -6255,14 +6306,18 @@ def build_commit_handoff(
         handoff["target_branch"] = target_branch.strip()
 
     # Validate against schema
-    valid, validation_errors = validate_handoff(handoff)
+    valid, validation_errors = validate_handoff(handoff, repo_root=repo_root)
     if not valid:
         return handoff, validation_errors
 
     return handoff, []
 
 
-def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
+def validate_handoff(
+    handoff: dict[str, Any],
+    *,
+    repo_root: Path | None = None,
+) -> tuple[bool, list[str]]:
     """Step 1: Validate all handoff fields."""
     if not isinstance(handoff, dict):
         return False, ["Handoff must be a JSON object"]
@@ -6382,9 +6437,10 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
                     errors.append(f"Path traversal in deferred_items: {item}")
 
     deferred_stage_paths = deferred_items if isinstance(deferred_items, list) else []
-    same_wave_active = _same_wave_deferred_non_blocking_paths(
+    same_wave_active = _same_wave_active_deferred_non_blocking_paths(
         wave_id,
         [*fts, *faf, *deferred_stage_paths],
+        repo_root=repo_root,
     ) if isinstance(fts, list) and isinstance(faf, list) else []
     same_wave_archive = _same_wave_closed_deferred_archive_paths(
         wave_id,
@@ -7663,7 +7719,7 @@ def _run_commit_pipeline_impl(
             pass
 
     # ── Step 1: validate_inputs ──────────────────────────────────────
-    valid, errors = validate_handoff(handoff)
+    valid, errors = validate_handoff(handoff, repo_root=repo_root)
     if not valid:
         return {"status": "error", "step": "validate_inputs", "errors": errors}
     result["steps_completed"].append("validate_inputs")
@@ -7690,7 +7746,7 @@ def _run_commit_pipeline_impl(
         )
         if tracker_note_text != handoff.get("tracker_note_text", ""):
             handoff = {**handoff, "tracker_note_text": tracker_note_text}
-            valid, errors = validate_handoff(handoff)
+            valid, errors = validate_handoff(handoff, repo_root=repo_root)
             if not valid:
                 return {"status": "error", "step": "validate_inputs", "errors": errors}
             log(
@@ -7791,7 +7847,7 @@ def _run_commit_pipeline_impl(
                                 ],
                                 "steps_completed": result["steps_completed"]}
                     scoped_dirty = sorted((tracked_dirty | untracked_dirty) - set(outside_scope))
-                    snapshot: dict[str, bytes | None] = {}
+                    snapshot: dict[str, Any] = {}
                     if scoped_dirty:
                         snapshot = _capture_scope_snapshot(repo_root, scoped_dirty)
                         _clear_scope_for_branch_rebind(
@@ -7844,7 +7900,7 @@ def _run_commit_pipeline_impl(
                         ],
                         "steps_completed": result["steps_completed"]}
             scoped_dirty = sorted((tracked_dirty | untracked_dirty) - set(outside_scope))
-            snapshot: dict[str, bytes | None] = {}
+            snapshot: dict[str, Any] = {}
             try:
                 # When dev has diverged on wave-owned files, a raw checkout can fail
                 # closed with "would be overwritten by checkout". Snapshot only the
@@ -8056,10 +8112,12 @@ def _run_commit_pipeline_impl(
     # ── Step 4: stage_files ──────────────────────────────────────────
     files_to_stage = _canonicalize_stage_paths(repo_root, list(handoff["files_to_stage"]))
     force_files = _canonicalize_stage_paths(repo_root, list(handoff.get("force_add_files", [])))
+    scope_files = _canonicalize_stage_paths(repo_root, list(handoff.get("scope_items", [])))
     handoff = {
         **handoff,
         "files_to_stage": files_to_stage,
         "force_add_files": force_files,
+        "scope_items": scope_files,
     }
 
     # Auto-add TASKS.md if modified in step 3
@@ -8087,6 +8145,7 @@ def _run_commit_pipeline_impl(
             repo_root,
             files_to_stage=files_to_stage,
             force_files=force_files,
+            scope_files=scope_files,
         )
         handoff = {
             **handoff,
@@ -8207,6 +8266,7 @@ def _run_commit_pipeline_impl(
                 repo_root,
                 files_to_stage=list(handoff["files_to_stage"]),
                 force_files=list(handoff.get("force_add_files", [])),
+                scope_files=list(handoff.get("scope_items", [])),
             )
             handoff = {
                 **handoff,
@@ -8424,7 +8484,7 @@ def _run_commit_pipeline_impl(
                 **handoff,
                 "evidence_handles": handoff_evidence,
             }
-            valid_handoff, validation_errors = validate_handoff(handoff)
+            valid_handoff, validation_errors = validate_handoff(handoff, repo_root=repo_root)
             if not valid_handoff:
                 return {"status": "error", "step": "build_and_run_supervisor",
                         "errors": [
@@ -8966,7 +9026,7 @@ def _invalidate_durable_handoff_pre_commit_receipt_for_commit_retry(
             tracker_note_text
         )
 
-    valid_handoff, validation_errors = validate_handoff(payload)
+    valid_handoff, validation_errors = validate_handoff(payload, repo_root=repo_root)
     if not valid_handoff:
         return (
             False,

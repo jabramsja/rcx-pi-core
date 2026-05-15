@@ -2164,6 +2164,52 @@ class TestReceiptChainEndToEnd:
         assert ok is False
         assert any("both active deferred and archived closed" in error for error in errors)
 
+    def test_build_handoff_accepts_same_wave_staged_deletion_with_closed_archive(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "deferred-auth-wave"
+        deferred_path = "reports/deferred/non_blocking/deferred-auth-wave_bridge_nonblockers.md"
+        archive_path = (
+            "reports/archive/deferred/"
+            "deferred-auth-wave_bridge_nonblockers_closed-by-deferred-auth-wave.md"
+        )
+        deferred_file = repo / deferred_path
+        deferred_file.parent.mkdir(parents=True, exist_ok=True)
+        deferred_file.write_text("# Deferred\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", deferred_path], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "add deferred packet"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "rm", "--", deferred_path], cwd=repo, check=True, capture_output=True)
+        archive_file = repo / archive_path
+        archive_file.parent.mkdir(parents=True, exist_ok=True)
+        archive_file.write_text("# Closed deferred packet\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", archive_path], cwd=repo, check=True)
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=[deferred_path, archive_path],
+            deferred_items=[],
+        )
+
+        ok_without_repo, errors_without_repo = commit_mod.validate_handoff(handoff)
+        ok, errors = commit_mod.validate_handoff(handoff, repo_root=repo)
+        rebuilt, build_errors = commit_mod.build_commit_handoff(
+            wave_id=wave_id,
+            task_id="[TEST]",
+            files_to_stage=[deferred_path, archive_path],
+            commit_message="test: staged deletion handoff\n\nCo-Authored-By: test",
+            fixes_implemented=["test"],
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            repo_root=repo,
+        )
+
+        assert ok_without_repo is False
+        assert any("both active deferred and archived closed" in error for error in errors_without_repo)
+        assert ok is True
+        assert errors == []
+        assert build_errors == []
+        assert rebuilt["files_to_stage"] == [deferred_path, archive_path]
+
     def test_commit_packet_truth_refresh_authorizes_staged_same_wave_deferred_packet(self, tmp_path):
         import subprocess
 
@@ -3508,6 +3554,126 @@ class TestWaveIdBounds:
             text=True,
         )
         assert third.stdout.strip() == ""
+
+    def test_stage_handoff_paths_does_not_stage_scope_only_deletion(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        changed = repo / "changed.txt"
+        context = repo / "context.md"
+        changed.write_text("original\n", encoding="utf-8")
+        context.write_text("context\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "changed.txt", "context.md"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True)
+        changed.write_text("changed\n", encoding="utf-8")
+        context.unlink()
+
+        staged_files, force_files = commit_mod._stage_handoff_paths(  # ANTICHEAT_OK: direct stage helper regression for scope-only context paths
+            repo,
+            files_to_stage=["changed.txt"],
+            force_files=[],
+            scope_files=["context.md"],
+        )
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-status"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        unstaged = subprocess.run(
+            ["git", "diff", "--name-status"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        assert staged_files == ["changed.txt"]
+        assert force_files == []
+        assert set(staged.stdout.splitlines()) == {"M\tchanged.txt"}
+        assert "D\tcontext.md" in set(unstaged.stdout.splitlines())
+
+    def test_stage_handoff_paths_restages_scoped_deletion_after_rebind_restore(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        subprocess.run(
+            [
+                "git", "add", "--",
+                "TASKS.md",
+                "file.py",
+                "mu/tools/metrics/collect_l4_wave_indicators.py",
+            ],
+            cwd=repo,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "baseline test repo"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        active_rel = "reports/deferred/non_blocking/wave_bridge_nonblockers.md"
+        archive_rel = "reports/archive/deferred/wave_bridge_nonblockers_closed-by-wave.md"
+        active = repo / active_rel
+        archive = repo / archive_rel
+        active.parent.mkdir(parents=True, exist_ok=True)
+        active.write_text("# Deferred\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", active_rel], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "add deferred packet"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "rm", "--", active_rel], cwd=repo, check=True, capture_output=True)
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        archive.write_text("# Closed deferred packet\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", archive_rel], cwd=repo, check=True)
+        handoff = _make_new_schema_handoff(
+            wave_id="wave",
+            files_to_stage=[archive_rel],
+            force_add_files=[],
+            scope_items=[active_rel],
+        )
+
+        tracked_dirty, untracked_dirty, outside_scope = commit_mod._collect_branch_rebind_dirty_scope(  # ANTICHEAT_OK: direct branch-rebind regression for scoped staged deletion
+            repo,
+            handoff=handoff,
+        )
+        snapshot = commit_mod._capture_scope_snapshot(  # ANTICHEAT_OK: direct branch-rebind regression for scoped staged deletion
+            repo,
+            sorted((tracked_dirty | untracked_dirty) - set(outside_scope)),
+        )
+        commit_mod._clear_scope_for_branch_rebind(  # ANTICHEAT_OK: direct branch-rebind regression for scoped staged deletion
+            repo,
+            tracked_paths=sorted(tracked_dirty),
+            untracked_paths=sorted(untracked_dirty),
+        )
+        commit_mod._restore_scope_snapshot(repo, snapshot)  # ANTICHEAT_OK: direct branch-rebind regression for scoped staged deletion
+        staged_files, force_files = commit_mod._stage_handoff_paths(  # ANTICHEAT_OK: direct branch-rebind regression for scoped staged deletion
+            repo,
+            files_to_stage=list(handoff["files_to_stage"]),
+            force_files=list(handoff["force_add_files"]),
+            scope_files=list(handoff["scope_items"]),
+        )
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-status"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        staged_lines = set(staged.stdout.splitlines())
+
+        assert outside_scope == []
+        assert active_rel in tracked_dirty
+        assert archive_rel in tracked_dirty
+        assert staged_files == [archive_rel]
+        assert force_files == []
+        assert f"D\t{active_rel}" in staged_lines
+        assert f"A\t{archive_rel}" in staged_lines
 
     def test_stage_handoff_paths_is_idempotent_for_branch_history_deletion(self, tmp_path):
         import subprocess
