@@ -4032,6 +4032,27 @@ class TestHybridDelegatePayload:
             "reports/control_plane/hybrid_recovery_inert_structural_gaps_2026-04-17.md",
         ]
 
+    def test_valid_payload_accepts_documented_bounded_scope_patterns(self):
+        ok, payload, detail = rg_mod._validate_delegate_implementer_payload(  # ANTICHEAT_OK: validates closed hybrid payload schema
+            make_delegate_response(
+                files_in_scope=[
+                    "mu/tools/executors/**/*.py",
+                    "mu/tests/tools/test_*.py",
+                    "reports/deferred/**/*.md",
+                    "reports/control_plane/**/*.md",
+                ],
+            )
+        )
+
+        assert ok is True
+        assert detail == ""
+        assert payload["files_in_scope"] == [
+            "mu/tools/executors/**/*.py",
+            "mu/tests/tools/test_*.py",
+            "reports/deferred/**/*.md",
+            "reports/control_plane/**/*.md",
+        ]
+
     @pytest.mark.parametrize(
         "files_in_scope",
         [
@@ -4044,6 +4065,8 @@ class TestHybridDelegatePayload:
             [".agent_bus/state.json"],
             [".claude/rules/test.md"],
             ["archive/old.md"],
+            ["mu/tools/executors/*.json"],
+            ["mu/tools/executors/**/phase_b_implementer.py"],
             ["../escape.py"],
         ],
     )
@@ -4194,6 +4217,87 @@ class TestHybridDelegateRuntime:
         assert out["log"][0]["action"] == "delegate_implementer"
         assert out["log"][0]["pre_validation_drift"] == ["mu/tools/executors/recovery_gate.py"]
         assert out["log"][0]["final_drift"] == ["mu/tools/executors/recovery_gate.py"]
+
+    def test_delegate_implementer_scope_pattern_allows_matching_concrete_file(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        config_dir = tmp_path / "mu" / "tools" / "executors"
+        (config_dir / "executor_config.json").write_text(
+            json.dumps({"hybrid_recovery_enabled": True}),
+            encoding="utf-8",
+        )
+        fake_module = FakeHybridImplementerModule(mutate_path="mu/tools/executors/recovery_gate.py")
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        monkeypatch.setattr(
+            rg_mod,
+            "_run_hybrid_validation_spec",
+            lambda *args, **kwargs: {
+                "validator": "pytest_targeted",
+                "command": [sys.executable, "-m", "pytest"],
+                "targets": ["mu/tests/tools/test_recovery_gate.py"],
+                "stdout": "",
+                "stderr": "",
+                "exit_code": 0,
+                "passed": True,
+            },
+        )
+
+        with patch.object(rg_mod, "_load_phase_b_implementer_module", return_value=fake_module):
+            result = rg_mod._run_delegate_implementer_action(  # ANTICHEAT_OK: folded pattern scope contract
+                tmp_path,
+                result={"status": "failed", "step": "final_pytest_gate", "stderr": "FAILED test_x", "stdout": ""},
+                wave_id="wave-pattern-scope",
+                step="final_pytest_gate",
+                response=make_delegate_response(files_in_scope=["mu/tools/executors/**/*.py"]),
+                explanation="pattern scope repair",
+                recovery_prompt_path=".scratch/recovery_agent_wave-pattern-scope-final-pytest-gate-1.txt",
+            )
+
+        assert result["ok"] is True, result
+        assert result["pre_validation_audit"]["observed_drift"] == [
+            "mu/tools/executors/recovery_gate.py"
+        ]
+        assert result["final_audit"]["observed_drift"] == [
+            "mu/tools/executors/recovery_gate.py"
+        ]
+
+    def test_delegate_implementer_scope_pattern_still_blocks_bootstrap_surface(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        config_dir = tmp_path / "mu" / "tools" / "executors"
+        (config_dir / "executor_config.json").write_text(
+            json.dumps({"hybrid_recovery_enabled": True}),
+            encoding="utf-8",
+        )
+        fake_module = FakeHybridImplementerModule(
+            mutate_path="mu/tools/executors/phase_b_implementer.py"
+        )
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        monkeypatch.setattr(
+            rg_mod,
+            "_run_hybrid_validation_spec",
+            lambda *args, **kwargs: {
+                "validator": "pytest_targeted",
+                "command": [sys.executable, "-m", "pytest"],
+                "targets": ["mu/tests/tools/test_recovery_gate.py"],
+                "stdout": "",
+                "stderr": "",
+                "exit_code": 0,
+                "passed": True,
+            },
+        )
+
+        with patch.object(rg_mod, "_load_phase_b_implementer_module", return_value=fake_module):
+            result = rg_mod._run_delegate_implementer_action(  # ANTICHEAT_OK: folded bootstrap exclusion contract
+                tmp_path,
+                result={"status": "failed", "step": "final_pytest_gate", "stderr": "FAILED test_x", "stdout": ""},
+                wave_id="wave-pattern-bootstrap",
+                step="final_pytest_gate",
+                response=make_delegate_response(files_in_scope=["mu/tools/executors/**/*.py"]),
+                explanation="pattern scope repair",
+                recovery_prompt_path=".scratch/recovery_agent_wave-pattern-bootstrap-final-pytest-gate-1.txt",
+            )
+
+        assert result["ok"] is False
+        assert "phase_b_implementer.py" in result["detail"]
 
     def test_delegate_implementer_timeout_result_is_structured_not_raised(self, tmp_path, monkeypatch):
         init_hybrid_delegate_tree(tmp_path)
@@ -4545,6 +4649,55 @@ class TestHybridScopeAudit:
             "unexpected .scratch descendant outside exact exception set: "
             ".scratch/adversary_3c/attack_02_new_child.py"
         ) == audit["detail"]
+
+    def test_preexisting_scratch_symlink_to_scratch_dir_is_baselined(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        scratch = tmp_path / ".scratch" / "phase-b-r1" / "tmp" / "pytest-of-user" / "pytest-0"
+        target = scratch / "test_case_1"
+        target.mkdir(parents=True)
+        link = scratch / "test_case_current"
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: baseline existing pytest current symlink
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+        assert baseline["inventory"][".scratch/phase-b-r1/tmp/pytest-of-user/pytest-0/test_case_current"]["type"] == "symlink"
+
+        ok, audit = rg_mod._audit_hybrid_checkpoint(  # ANTICHEAT_OK: unchanged baseline symlink must not block delegate recovery
+            tmp_path,
+            baseline=baseline,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is True
+        assert audit["observed_drift"] == []
+
+    def test_preexisting_scratch_symlink_escape_fails_closed(self, tmp_path, monkeypatch):
+        init_hybrid_delegate_tree(tmp_path)
+        monkeypatch.setattr(rg_mod, "_capture_hybrid_git_control_tuple", lambda _root: {"stable": True})
+        scratch = tmp_path / ".scratch" / "phase-b-r1"
+        scratch.mkdir(parents=True)
+        outside = tmp_path / "outside-target"
+        outside.mkdir()
+        try:
+            (scratch / "current").symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"symlink unavailable: {exc}")
+
+        ok, baseline = rg_mod._capture_hybrid_checkpoint(  # ANTICHEAT_OK: reject preexisting scratch symlink escape
+            tmp_path,
+            files_in_scope=["mu/tools/executors/recovery_gate.py"],
+            exception_paths=rg_mod._hybrid_exception_paths(),  # ANTICHEAT_OK: test-only helper for exact hybrid exception allowlist
+        )
+        assert ok is False
+        assert "baselined .scratch symlink escaped its stable realpath" in baseline["detail"]
 
     def test_scratch_pycache_exemption_rejects_symlinked_cache_dir(self, tmp_path, monkeypatch):
         init_hybrid_delegate_tree(tmp_path)

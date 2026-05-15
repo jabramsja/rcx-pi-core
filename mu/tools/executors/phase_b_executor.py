@@ -3069,7 +3069,34 @@ def _collect_staged_files(repo_root: Path) -> list[str]:
     return sorted(set(f for f in staged if f))
 
 
-def _collect_commit_bound_files(repo_root: Path, changed_files: list[str]) -> list[str]:
+def _reconcile_bridge_fix_scope(
+    repo_root: Path,
+    implementer_changed_files: set[str],
+    current_fix_changed_files: set[str],
+) -> set[str]:
+    """Honor a bridge-fix agent's intentional staging boundary.
+
+    Bridge fixes sometimes resolve package-composition findings by unstaging
+    pre-existing files from a broader implementation scope. Accumulated
+    ``implementer_changed`` state must not blindly re-stage those files for the
+    next review round, but files newly changed by this fix round still need to
+    remain tracked even when the agent did not stage them itself.
+    """
+    staged_after_fix = set(_collect_staged_files(repo_root))
+    if not staged_after_fix:
+        return set(implementer_changed_files)
+
+    current_fix_changed = set(current_fix_changed_files)
+    preexisting_tracked = set(implementer_changed_files) - current_fix_changed
+    return (preexisting_tracked & staged_after_fix) | current_fix_changed
+
+
+def _collect_commit_bound_files(
+    repo_root: Path,
+    changed_files: list[str],
+    *,
+    allowed_files: set[str] | None = None,
+) -> list[str]:
     """Return the supervisor/commit package truth for files bound to this commit.
 
     Phase B stages wave-owned files before the pre-commit supervisor so the
@@ -3077,7 +3104,10 @@ def _collect_commit_bound_files(repo_root: Path, changed_files: list[str]) -> li
     commit-bound git truth; packaging it as fenced dirty work creates a false
     package contradiction.
     """
-    return sorted(set(changed_files) | set(_collect_staged_files(repo_root)))
+    commit_bound = set(changed_files) | set(_collect_staged_files(repo_root))
+    if allowed_files is not None:
+        commit_bound &= set(allowed_files)
+    return sorted(commit_bound)
 
 
 def _collect_fenced_dirty_files(repo_root: Path, commit_bound_files: list[str]) -> list[str]:
@@ -3166,6 +3196,41 @@ def _parse_plan_declared_files(plan_content: str) -> list[str]:
     return parsed
 
 
+def _parse_exact_stage_scope_files(plan_content: str) -> list[str]:
+    """Extract a packet section that explicitly declares the exact staged scope."""
+    lines = plan_content.splitlines()
+    marker_index: int | None = None
+    for index, line in enumerate(lines):
+        lower = line.lower()
+        if "may stage exactly" in lower and "file" in lower:
+            marker_index = index
+            break
+    if marker_index is None:
+        return []
+
+    seen: set[str] = set()
+    parsed: list[str] = []
+    started = False
+    for line in lines[marker_index + 1:]:
+        stripped = line.strip()
+        if not stripped:
+            if started:
+                break
+            continue
+        if stripped.startswith("#"):
+            break
+        if not stripped.startswith("- "):
+            if started:
+                break
+            continue
+        normalized = _normalize_declared_path_token(stripped[2:].strip().split()[0])
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            parsed.append(normalized)
+            started = True
+    return parsed
+
+
 def _parse_fenced_out_files(plan_content: str) -> list[str]:
     """Extract repo-relative files explicitly marked as fenced out in the packet."""
     seen: set[str] = set()
@@ -3251,6 +3316,16 @@ def _collect_baseline_wave_files(repo_root: Path, plan_path: str) -> list[str]:
         elif plan_prefix and f.startswith(plan_prefix):
             baseline.append(f)
     return sorted(set(baseline))
+
+
+def _restrict_baseline_to_exact_scope(
+    baseline_wave_files: set[str],
+    exact_stage_scope_files: set[str] | None,
+) -> set[str]:
+    """Prevent dirty-worktree baseline capture from widening an exact package."""
+    if not exact_stage_scope_files:
+        return baseline_wave_files
+    return set(baseline_wave_files) & set(exact_stage_scope_files)
 
 
 def _collect_wave_owned_files(
@@ -3411,6 +3486,35 @@ def _stage_files_for_pipeline(repo_root: Path, files: list[str]) -> tuple[bool, 
     if not ok and not detail:
         detail = "git add failed without diagnostic detail"
     return ok, detail
+
+
+def _unstage_out_of_exact_scope(
+    repo_root: Path,
+    allowed_files: set[str],
+) -> tuple[bool, str]:
+    """Keep an exact-scope package from inheriting stale staged wave files."""
+    stale_staged = sorted(
+        path for path in _collect_staged_files(repo_root)
+        if path not in allowed_files
+    )
+    if not stale_staged:
+        return True, ""
+    try:
+        subprocess.run(
+            ["git", "restore", "--staged", "--", *stale_staged],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return True, ""
+    except subprocess.CalledProcessError as exc:
+        detail_parts = [
+            f"git restore --staged failed with exit={exc.returncode}",
+            (exc.stderr or "").strip(),
+            (exc.stdout or "").strip(),
+        ]
+        return False, " | ".join(part for part in detail_parts if part)
 
 
 def _agent_review_scope_fingerprint(repo_root: Path, files: list[str], *, depth: str) -> str:
@@ -4229,6 +4333,7 @@ def _finalize_phase_b_pre_supervisor_tracker_note(
     founder_override: str = "",
     unblocks_wave_id: str = "",
     unblocks_runtime_blocker: str = "",
+    allowed_files: set[str] | None = None,
 ) -> tuple[str, str, str, bool, list[str], str | None]:
     """Render/stage the final pre-supervisor tracker note after scope refresh."""
     final_scope = _phase_b_pre_supervisor_note_scope(changed_files)
@@ -4281,7 +4386,11 @@ def _finalize_phase_b_pre_supervisor_tracker_note(
                 )
 
         refreshed_scope = _phase_b_pre_supervisor_note_scope(
-            _collect_commit_bound_files(repo_root, final_scope)
+            _collect_commit_bound_files(
+                repo_root,
+                final_scope,
+                allowed_files=allowed_files,
+            )
         )
         if refreshed_scope == final_scope:
             verify_error = _verify_phase_b_pre_supervisor_tracker_note(
@@ -4665,15 +4774,21 @@ def run_phase_b(
 
     # Parse plan-declared files from markdown/body content.
     fenced_out_files = set(_parse_fenced_out_files(plan_content))
+    exact_stage_scope_files = set(_parse_exact_stage_scope_files(plan_content))
     plan_declared_files: list[str] | None = None
-    _parsed = [
-        path for path in _parse_plan_declared_files(plan_content)
-        if path not in fenced_out_files
-    ]
+    if exact_stage_scope_files:
+        _parsed = sorted(path for path in exact_stage_scope_files if path not in fenced_out_files)
+    else:
+        _parsed = [
+            path for path in _parse_plan_declared_files(plan_content)
+            if path not in fenced_out_files
+        ]
     # Only activate strict tracking when the plan actually declares files.
     # An empty parse means "plan has no file list" → use prefix fallback.
     if _parsed:
         plan_declared_files = _parsed
+    if exact_stage_scope_files:
+        log(f"Exact staged scope declares {len(exact_stage_scope_files)} file(s)")
     if fenced_out_files:
         log(
             f"Checkout-state fence excludes {len(fenced_out_files)} file(s) "
@@ -4716,6 +4831,13 @@ def run_phase_b(
     # late follow-up fixes made after a saved checkpoint are not silently dropped
     # from supervisor packaging on resume.
     baseline_wave_files |= (set(_collect_baseline_wave_files(repo_root, plan_path)) - fenced_out_files)
+    baseline_wave_files = _restrict_baseline_to_exact_scope(
+        baseline_wave_files,
+        exact_stage_scope_files or None,
+    )
+    if exact_stage_scope_files:
+        implementer_changed &= exact_stage_scope_files
+        executor_created &= exact_stage_scope_files
 
     def _build_bridge_fix_prompt(round_num: int, bridge_decision: str, findings_for_impl: str) -> str:
         """Build the implementer prompt for a bridge-fix round."""
@@ -4757,6 +4879,20 @@ def run_phase_b(
         post_fix_files = set(_collect_changed_files(repo_root))
         current_fix_changed = sorted(post_fix_files - pre_fix_files)
         implementer_changed |= set(current_fix_changed)
+        if exact_stage_scope_files:
+            current_fix_changed = sorted(set(current_fix_changed) & exact_stage_scope_files)
+            implementer_changed &= exact_stage_scope_files
+        reconciled_implementer_changed = _reconcile_bridge_fix_scope(
+            repo_root,
+            implementer_changed,
+            set(current_fix_changed),
+        )
+        if reconciled_implementer_changed != implementer_changed:
+            log(
+                "Bridge fix reconciled implementer scope from "
+                f"{len(implementer_changed)} to {len(reconciled_implementer_changed)} file(s)"
+            )
+            implementer_changed = reconciled_implementer_changed
         changed_files = _collect_wave_owned_files(
             repo_root,
             plan_path,
@@ -4861,6 +4997,8 @@ def run_phase_b(
                     )
                 post_pytest_fix_files = set(_collect_changed_files(repo_root))
                 implementer_changed |= (post_pytest_fix_files - pre_pytest_fix_files)
+                if exact_stage_scope_files:
+                    implementer_changed &= exact_stage_scope_files
                 changed_files = _collect_wave_owned_files(
                     repo_root,
                     plan_path,
@@ -4963,6 +5101,8 @@ def run_phase_b(
 
         post_reentry_files = set(_collect_changed_files(repo_root))
         implementer_changed |= (post_reentry_files - pre_reentry_files)
+        if exact_stage_scope_files:
+            implementer_changed &= exact_stage_scope_files
         changed_files = _collect_wave_owned_files(
             repo_root,
             plan_path,
@@ -5031,6 +5171,29 @@ def run_phase_b(
             "private_attr_gate_test_files": result.get("private_attr_gate_test_files", []),
         })
         return scoped_files
+
+    def _reconcile_exact_stage_scope_for_review(
+        *,
+        step: str,
+        context: str,
+    ) -> dict[str, Any] | None:
+        if not exact_stage_scope_files:
+            return None
+        reconciled_ok, reconciled_detail = _unstage_out_of_exact_scope(
+            repo_root,
+            exact_stage_scope_files,
+        )
+        if reconciled_ok:
+            return None
+        return {
+            "status": "error",
+            "step": step,
+            "stderr": reconciled_detail,
+            "errors": [
+                f"Failed to reconcile exact staged scope before {context}",
+                reconciled_detail,
+            ],
+        }
 
     def _run_private_attr_gate_with_remediation(
         candidate_files: list[str],
@@ -5110,6 +5273,8 @@ def run_phase_b(
 
             post_gate_fix_files = set(_collect_changed_files(repo_root))
             implementer_changed |= (post_gate_fix_files - pre_gate_fix_files) - fenced_out_files
+            if exact_stage_scope_files:
+                implementer_changed &= exact_stage_scope_files
             current_files = _collect_wave_owned_files(
                 repo_root,
                 plan_path,
@@ -5165,6 +5330,12 @@ def run_phase_b(
                 + "private-attr remediation: staging "
                 f"{len(current_files)} wave-owned files before fresh bridge review..."
             )
+            reconcile_error = _reconcile_exact_stage_scope_for_review(
+                step=f"{step_name}_scope_reconcile",
+                context="private-attr remediation bridge review",
+            )
+            if reconcile_error is not None:
+                return current_files, reconcile_error
             staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, current_files)
             if not staged_ok:
                 return current_files, {
@@ -5603,6 +5774,8 @@ def run_phase_b(
         # Collect changed files after implementer ran — track what implementer actually changed
         post_impl_files = set(_collect_changed_files(repo_root))
         implementer_changed = (post_impl_files - pre_impl_files) - fenced_out_files
+        if exact_stage_scope_files:
+            implementer_changed &= exact_stage_scope_files
         changed_files = _collect_wave_owned_files(
             repo_root,
             plan_path,
@@ -5844,6 +6017,21 @@ def run_phase_b(
         )
         changed_files = _bridge_review_scope_files(changed_files)
         if changed_files:
+            if exact_stage_scope_files:
+                reconciled_ok, reconciled_detail = _unstage_out_of_exact_scope(
+                    repo_root,
+                    exact_stage_scope_files,
+                )
+                if not reconciled_ok:
+                    result["status"] = "error"
+                    result["step"] = "bridge_staging_scope_reconcile"
+                    result["stderr"] = reconciled_detail
+                    result["errors"] = [
+                        "Failed to reconcile exact staged scope before bridge review",
+                        reconciled_detail,
+                    ]
+                    _clear_state(repo_root)
+                    return result
             log(f"Staging {len(changed_files)} wave-owned files before bridge review...")
             staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, changed_files)
             if not staged_ok:
@@ -6441,6 +6629,21 @@ def run_phase_b(
         # This ensures the receipt staged_sha matches what commit_executor will use.
         # Scope to wave-owned files only — do not sweep unrelated dirty worktree files.
         if changed_files:
+            if exact_stage_scope_files:
+                reconciled_ok, reconciled_detail = _unstage_out_of_exact_scope(
+                    repo_root,
+                    exact_stage_scope_files,
+                )
+                if not reconciled_ok:
+                    return {
+                        "status": "error",
+                        "step": "pre_supervisor_staging_scope_reconcile",
+                        "stderr": reconciled_detail,
+                        "errors": [
+                            "Failed to reconcile exact staged scope before supervisor",
+                            reconciled_detail,
+                        ],
+                    }
             log(f"Staging {len(changed_files)} wave-owned files before supervisor...")
             staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, changed_files)
             if not staged_ok:
@@ -6509,7 +6712,11 @@ def run_phase_b(
                 if packet_scope_modified and plan_path not in changed_files:
                     changed_files.append(plan_path)
                     changed_files = sorted(set(changed_files))
-        package_changed_files = _collect_commit_bound_files(repo_root, changed_files)
+        package_changed_files = _collect_commit_bound_files(
+            repo_root,
+            changed_files,
+            allowed_files=exact_stage_scope_files or None,
+        )
         if package_changed_files != changed_files:
             log(
                 "Supervisor package scope expanded to include "
@@ -6568,6 +6775,7 @@ def run_phase_b(
             founder_override=pre_supervisor_raw_founder_override_token,
             unblocks_wave_id=plan.get("unblocks_wave_id", ""),
             unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
+            allowed_files=exact_stage_scope_files or None,
         )
         if tracker_sync_error is not None:
             _clear_state(repo_root)
@@ -6807,6 +7015,13 @@ def run_phase_b(
             if changed_files:
                 changed_files = _bridge_review_scope_files(changed_files)
                 log(f"Re-entry: staging {len(changed_files)} wave-owned files before bridge review...")
+                reconcile_error = _reconcile_exact_stage_scope_for_review(
+                    step="reentry_bridge_staging_scope_reconcile",
+                    context="re-entry bridge review",
+                )
+                if reconcile_error is not None:
+                    _clear_state(repo_root)
+                    return reconcile_error
                 staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, changed_files)
                 if not staged_ok:
                     _clear_state(repo_root)
@@ -7308,6 +7523,22 @@ def run_phase_b(
         # FAIL CLOSED if restaging fails — do not run supervisor on stale state
         # Scope to wave-owned files only — do not sweep unrelated dirty worktree files.
         if changed_files:
+            if exact_stage_scope_files:
+                reconciled_ok, reconciled_detail = _unstage_out_of_exact_scope(
+                    repo_root,
+                    exact_stage_scope_files,
+                )
+                if not reconciled_ok:
+                    _clear_state(repo_root)
+                    return {
+                        "status": "error",
+                        "step": "reentry_staging_scope_reconcile",
+                        "stderr": reconciled_detail,
+                        "errors": [
+                            "Failed to reconcile exact staged scope before re-entry supervisor",
+                            reconciled_detail,
+                        ],
+                    }
             staged_ok, stage_detail = _stage_files_for_pipeline(repo_root, changed_files)
             if not staged_ok:
                 _clear_state(repo_root)
@@ -7376,7 +7607,11 @@ def run_phase_b(
                 if packet_scope_modified and plan_path not in changed_files:
                     changed_files.append(plan_path)
                     changed_files = sorted(set(changed_files))
-        reentry_package_changed_files = _collect_commit_bound_files(repo_root, changed_files)
+        reentry_package_changed_files = _collect_commit_bound_files(
+            repo_root,
+            changed_files,
+            allowed_files=exact_stage_scope_files or None,
+        )
         if reentry_package_changed_files != changed_files:
             log(
                 "Re-entry supervisor package scope expanded to include "
@@ -7435,6 +7670,7 @@ def run_phase_b(
             founder_override=reentry_pre_supervisor_raw_founder_override_token,
             unblocks_wave_id=plan.get("unblocks_wave_id", ""),
             unblocks_runtime_blocker=plan.get("unblocks_runtime_blocker", ""),
+            allowed_files=exact_stage_scope_files or None,
         )
         if reentry_tracker_sync_error is not None:
             _clear_state(repo_root)
@@ -7544,7 +7780,11 @@ def run_phase_b(
                 executor_created or None,
                 baseline_wave_files or None,
             )
-            changed_files = _collect_commit_bound_files(repo_root, changed_files)
+            changed_files = _collect_commit_bound_files(
+                repo_root,
+                changed_files,
+                allowed_files=exact_stage_scope_files or None,
+            )
             changed_files = _bridge_review_scope_files(changed_files)
             result["status"] = "needs_phase_b"
             result["step"] = "post_reentry_supervisor"
@@ -7656,6 +7896,21 @@ def run_phase_b(
         }
 
     # Scope to wave-owned files only — do not sweep all dirty files
+    if exact_stage_scope_files:
+        reconciled_ok, reconciled_detail = _unstage_out_of_exact_scope(
+            repo_root,
+            exact_stage_scope_files,
+        )
+        if not reconciled_ok:
+            return {
+                "status": "error",
+                "step": "commit_handoff_stage_scope_reconcile",
+                "stderr": reconciled_detail,
+                "errors": [
+                    "Failed to reconcile exact staged scope before commit handoff",
+                    reconciled_detail,
+                ],
+            }
     wave_owned_files = _collect_wave_owned_files(
         repo_root,
         plan_path,
@@ -7664,7 +7919,11 @@ def run_phase_b(
         executor_created or None,
         baseline_wave_files or None,
     )
-    wave_owned_files = _collect_commit_bound_files(repo_root, wave_owned_files)
+    wave_owned_files = _collect_commit_bound_files(
+        repo_root,
+        wave_owned_files,
+        allowed_files=exact_stage_scope_files or None,
+    )
     if not wave_owned_files:
         return {
             "status": "error",

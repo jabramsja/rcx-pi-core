@@ -1491,7 +1491,7 @@ class TestMaintenanceTrackerMetadataPropagation:
              patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json") as mock_handoff:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
-        assert result["status"] == "commit_ready", result
+        assert result["status"] == "commit_ready"
         assert "Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT" in plan.read_text(
             encoding="utf-8",
         )
@@ -1591,7 +1591,7 @@ class TestMaintenanceTrackerMetadataPropagation:
              ) as mock_handoff:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
-        assert result["status"] == "commit_ready", result
+        assert result["status"] == "commit_ready"
         assert mock_handoff.call_args.kwargs["task_id"] == "[PIPELINE-RECOVERY]"
         assert mock_handoff.call_args.kwargs["wave_id"] == "phase-b-validate-inputs-task-id-leniency-2026-04-20"
 
@@ -1718,7 +1718,7 @@ class TestMaintenanceTrackerMetadataPropagation:
              patch.object(pb_mod, "load_routing_record", return_value=routing), \
              patch.object(pb_mod, "_collect_changed_files", return_value=[]), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=list(changed)), \
-             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files: list(files)), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kwargs: list(files)), \
              patch.object(pb_mod, "_run_pytest_on_files", return_value={
                  "exit_code": 0,
                  "passed": True,
@@ -1830,7 +1830,7 @@ class TestMaintenanceTrackerMetadataPropagation:
              patch.object(pb_mod, "load_routing_record", return_value=routing), \
              patch.object(pb_mod, "_collect_changed_files", return_value=list(changed)), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=list(changed)), \
-             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files: list(files)), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kwargs: list(files)), \
              patch.object(pb_mod, "_run_pytest_on_files", return_value={
                  "exit_code": 0,
                  "passed": True,
@@ -1948,7 +1948,7 @@ class TestMaintenanceTrackerMetadataPropagation:
              patch.object(pb_mod, "load_routing_record", return_value=routing), \
              patch.object(pb_mod, "_collect_changed_files", return_value=list(changed)), \
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=list(changed)), \
-             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files: list(files)), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kwargs: list(files)), \
              patch.object(pb_mod, "_run_pytest_on_files", return_value={
                  "exit_code": 0,
                  "passed": True,
@@ -2230,7 +2230,7 @@ class TestMaintenanceTrackerMetadataPropagation:
         )
 
         with patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
-             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files: sorted(set(files))):
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kwargs: sorted(set(files))):
             (
                 note,
                 raw_override,
@@ -2284,7 +2284,7 @@ class TestMaintenanceTrackerMetadataPropagation:
         )
 
         with patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
-             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files: sorted(set(files))):
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kwargs: sorted(set(files))):
             (
                 note,
                 raw_override,
@@ -2707,7 +2707,7 @@ class TestMaintenanceTrackerMetadataPropagation:
              ) as mock_handoff:
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
-        assert result["status"] == "commit_ready"
+        assert result["status"] == "commit_ready", result
         assert mock_handoff.call_args.kwargs["bridge_status"] == {
             "rounds": 1,
             "total_rounds": 1,
@@ -2821,7 +2821,7 @@ class TestMaintenanceTrackerMetadataPropagation:
             result = pb_mod.run_phase_b(repo, plan_path, max_bridge_rounds=5)
 
         expected_status = {"rounds": 3, "total_rounds": 3}
-        assert result["status"] == "commit_ready"
+        assert result["status"] == "commit_ready", result
         assert captured_package["wave_class"] == "L4_ENABLER"
         assert captured_package["bridge_status"] == expected_status
         assert mock_handoff.call_args.kwargs["bridge_status"] == expected_status
@@ -7100,6 +7100,288 @@ class TestSdkReviewScopeSelection:
             "mu/tools/runners/run_review.py",
         ]
 
+    def test_exact_stage_scope_ignores_read_only_and_refresh_blocks(self):
+        plan = (
+            "## Scope\n\n"
+            "This lock package may stage exactly these same-wave files:\n\n"
+            "- `TASKS.md`\n"
+            "- `reports/control_plane/plan.md`\n"
+            "- `reports/deferred/non_blocking/plan_bridge_nonblockers.md`\n"
+            "- `reports/l4_wave_indicators/plan.json`\n\n"
+            "Read-only grounding for this packet:\n\n"
+            "- `mu/host/python/rcx_pi/selfhost/seed_integrity.py`\n"
+            "- `mu/tools/executors/phase_b_executor.py`\n\n"
+            "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:start -->\n"
+            "- Current staged files:\n"
+            "  - `mu/host/python/rcx_pi/selfhost/seed_integrity.py`\n"
+            "  - `reports/control_plane/plan.md`\n"
+            "<!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->\n"
+        )
+
+        assert pb_mod._parse_exact_stage_scope_files(plan) == [  # ANTICHEAT_OK: testing internal executor functions
+            "TASKS.md",
+            "reports/control_plane/plan.md",
+            "reports/deferred/non_blocking/plan_bridge_nonblockers.md",
+            "reports/l4_wave_indicators/plan.json",
+        ]
+
+    def test_exact_stage_scope_unstages_stale_wave_owned_files(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / "README.md").write_text("init\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+
+        for rel_path in [
+            "TASKS.md",
+            "reports/control_plane/plan.md",
+            "reports/l4_wave_indicators/plan.json",
+            "mu/host/python/rcx_pi/selfhost/seed_integrity.py",
+        ]:
+            full = repo / rel_path
+            full.parent.mkdir(parents=True, exist_ok=True)
+            full.write_text(f"{rel_path}\n", encoding="utf-8")
+        subprocess.run(
+            [
+                "git", "add", "--",
+                "TASKS.md",
+                "reports/control_plane/plan.md",
+                "reports/l4_wave_indicators/plan.json",
+                "mu/host/python/rcx_pi/selfhost/seed_integrity.py",
+            ],
+            cwd=repo,
+            check=True,
+        )
+
+        allowed = {
+            "TASKS.md",
+            "reports/control_plane/plan.md",
+            "reports/l4_wave_indicators/plan.json",
+        }
+        ok, detail = pb_mod._unstage_out_of_exact_scope(repo, allowed)  # ANTICHEAT_OK: testing internal executor functions
+
+        assert ok, detail
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+        assert staged == [
+            "TASKS.md",
+            "reports/control_plane/plan.md",
+            "reports/l4_wave_indicators/plan.json",
+        ]
+        assert (repo / "mu/host/python/rcx_pi/selfhost/seed_integrity.py").exists()
+
+    def test_exact_stage_scope_filters_commit_bound_expansion_from_staged_runtime(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        (repo / "README.md").write_text("init\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+
+        for rel_path in [
+            "TASKS.md",
+            "reports/control_plane/plan.md",
+            "mu/host/js/core/seed_loader.js",
+        ]:
+            full = repo / rel_path
+            full.parent.mkdir(parents=True, exist_ok=True)
+            full.write_text(f"{rel_path}\n", encoding="utf-8")
+        subprocess.run(
+            [
+                "git", "add", "--",
+                "TASKS.md",
+                "reports/control_plane/plan.md",
+                "mu/host/js/core/seed_loader.js",
+            ],
+            cwd=repo,
+            check=True,
+        )
+
+        commit_bound = pb_mod._collect_commit_bound_files(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            ["TASKS.md"],
+            allowed_files={"TASKS.md", "reports/control_plane/plan.md"},
+        )
+
+        assert commit_bound == ["TASKS.md", "reports/control_plane/plan.md"]
+
+    def test_exact_stage_scope_reconciles_before_private_attr_bridge_review(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text(
+            "# Plan\n\n"
+            "Phase-A-Lock: LOCKED\n\n"
+            "## Scope\n\n"
+            "This lock package may stage exactly these same-wave files:\n\n"
+            "- `reports/control_plane/plan.md`\n"
+            "- `mu/tests/tools/test_foo.py`\n",
+            encoding="utf-8",
+        )
+
+        changed_files = ["mu/tests/tools/test_foo.py"]
+        mock_impl = _make_mock_impl()
+        events: list[tuple[str, object]] = []
+        gate_fail = {
+            "passed": False,
+            "skipped": False,
+            "exit_code": 1,
+            "stdout": "ERROR: Found private attr access in tests/:",
+            "stderr": "",
+            "test_files": changed_files,
+        }
+        gate_pass = {
+            "passed": True,
+            "skipped": False,
+            "exit_code": 0,
+            "stdout": "",
+            "stderr": "",
+            "test_files": changed_files,
+        }
+
+        def unstage_side(repo_root, allowed):
+            events.append(("unstage", sorted(allowed)))
+            return True, ""
+
+        def stage_side(repo_root, files):
+            events.append(("stage", list(files)))
+            return True
+
+        def bridge_side(repo_root, summary, **kwargs):
+            events.append(("bridge", summary))
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": kwargs.get("job_id", "j"),
+            }
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", return_value={
+                 "enabled": True, "event_id": "evt", "attempted": [], "budget_exhausted": False,
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "run_private_attr_gate", side_effect=[gate_fail, gate_pass]), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
+             }), \
+             patch.object(pb_mod, "_unstage_out_of_exact_scope", side_effect=unstage_side), \
+             patch.object(pb_mod, "_stage_files", side_effect=stage_side), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+                 "exit_code": 0,
+                 "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                 "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+             }), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=2)
+
+        assert result["status"] == "commit_ready", result
+        private_bridge_index = next(
+            index for index, event in enumerate(events)
+            if event[0] == "bridge" and "private-attr remediation review" in str(event[1])
+        )
+        assert events[private_bridge_index - 2][0] == "unstage"
+        assert events[private_bridge_index - 1][0] == "stage"
+
+    def test_exact_stage_scope_reconciles_before_needs_phase_b_reentry_bridge_review(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text(
+            "# Plan\n\n"
+            "Phase-A-Lock: LOCKED\n\n"
+            "## Scope\n\n"
+            "This lock package may stage exactly these same-wave files:\n\n"
+            "- `reports/control_plane/plan.md`\n"
+            "- `mu/tools/executors/foo.py`\n",
+            encoding="utf-8",
+        )
+
+        changed_files = ["mu/tools/executors/foo.py"]
+        mock_impl = _make_mock_impl()
+        events: list[tuple[str, object]] = []
+
+        def unstage_side(repo_root, allowed):
+            events.append(("unstage", sorted(allowed)))
+            return True, ""
+
+        def stage_side(repo_root, files):
+            events.append(("stage", list(files)))
+            return True
+
+        def bridge_side(repo_root, summary, **kwargs):
+            events.append(("bridge", summary))
+            return {
+                "exit_code": 0,
+                "stdout": "GO\n",
+                "stderr": "",
+                "decision": "GO",
+                "job_id": kwargs.get("job_id", "j"),
+            }
+
+        supervisor_results = iter([
+            {
+                "exit_code": 0,
+                "parsed": {
+                    "decision": "NEEDS_PHASE_B",
+                    "summary": "fix stale staged scope",
+                    "status": "success",
+                    "findings": [],
+                },
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r1.json",
+            },
+            {
+                "exit_code": 0,
+                "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+                "receipt_path": ".agent_bus/meta/pre_commit_receipts/r2.json",
+            },
+        ])
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "emit_pipeline_agent_event", return_value={
+                 "enabled": True, "event_id": "evt", "attempted": [], "budget_exhausted": False,
+             }), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
+             patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=bridge_side), \
+             patch.object(pb_mod, "run_private_attr_gate", return_value={
+                 "passed": True,
+                 "skipped": True,
+                 "exit_code": 0,
+                 "stdout": "",
+                 "stderr": "",
+                 "test_files": [],
+             }), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={
+                 "exit_code": 0, "stdout": "1 passed", "stderr": "", "passed": True,
+             }), \
+             patch.object(pb_mod, "_unstage_out_of_exact_scope", side_effect=unstage_side), \
+             patch.object(pb_mod, "_stage_files", side_effect=stage_side), \
+             patch.object(pb_mod, "load_routing_record", return_value=_VALID_ROUTING_RECORD.copy()), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=lambda *args, **kwargs: next(supervisor_results)), \
+             patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus" / "handoff.json"):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=2)
+
+        assert result["status"] == "commit_ready", result
+        reentry_bridge_index = next(
+            index for index, event in enumerate(events)
+            if event[0] == "bridge" and "Phase B re-entry R" in str(event[1])
+        )
+        assert events[reentry_bridge_index - 2][0] == "unstage"
+        assert events[reentry_bridge_index - 1][0] == "stage"
+
     def test_report_only_changed_files_skip_sdk_gate(self, tmp_path):
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -8472,6 +8754,54 @@ class TestWaveOwnedFilesNoPrefixGlob:
             assert "reports/control_plane/other.md" in files
             # mu/tools/ is in _WAVE_OWNED_PREFIXES
             assert "mu/tools/executors/foo.py" in files
+
+
+class TestBridgeFixScopeReconciliation:
+    def test_preexisting_unstaged_files_drop_from_implementer_scope(self, tmp_path):
+        with patch.object(
+            pb_mod,
+            "_collect_staged_files",
+            return_value=["TASKS.md", "reports/control_plane/lock.md"],
+        ):
+            reconciled = pb_mod._reconcile_bridge_fix_scope(  # ANTICHEAT_OK: testing internal executor function
+                tmp_path,
+                {
+                    "TASKS.md",
+                    "mu/host/js/core/seed_loader.js",
+                    "reports/control_plane/lock.md",
+                },
+                set(),
+            )
+
+        assert reconciled == {"TASKS.md", "reports/control_plane/lock.md"}
+
+    def test_new_fix_files_remain_tracked_even_when_unstaged(self, tmp_path):
+        with patch.object(pb_mod, "_collect_staged_files", return_value=["TASKS.md"]):
+            reconciled = pb_mod._reconcile_bridge_fix_scope(  # ANTICHEAT_OK: testing internal executor function
+                tmp_path,
+                {
+                    "TASKS.md",
+                    "mu/host/js/core/seed_loader.js",
+                    "reports/deferred/non_blocking/lock_bridge_nonblockers.md",
+                },
+                {"reports/deferred/non_blocking/lock_bridge_nonblockers.md"},
+            )
+
+        assert reconciled == {
+            "TASKS.md",
+            "reports/deferred/non_blocking/lock_bridge_nonblockers.md",
+        }
+
+    def test_empty_staged_set_preserves_scope(self, tmp_path):
+        implementer_changed = {"TASKS.md", "mu/host/js/core/seed_loader.js"}
+        with patch.object(pb_mod, "_collect_staged_files", return_value=[]):
+            reconciled = pb_mod._reconcile_bridge_fix_scope(  # ANTICHEAT_OK: testing internal executor function
+                tmp_path,
+                implementer_changed,
+                set(),
+            )
+
+        assert reconciled == implementer_changed
 
 
 class TestRoutingValidationNotBypassed:

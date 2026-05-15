@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import atexit
 import fcntl
+import fnmatch
 import hashlib
 import json
 import os
@@ -3394,6 +3395,37 @@ def _is_hybrid_allowed_scope_path(rel_path: str) -> bool:
     )
 
 
+def _has_hybrid_glob_meta(rel_path: str) -> bool:
+    return any(ch in rel_path for ch in "*?[")
+
+
+def _is_hybrid_allowed_scope_pattern(rel_path: str) -> bool:
+    return rel_path in _HYBRID_SCOPE_PATTERNS
+
+
+def _hybrid_scope_pattern_matches(rel_path: str, pattern: str) -> bool:
+    if fnmatch.fnmatchcase(rel_path, pattern):
+        return True
+    if "/**/" in pattern:
+        return fnmatch.fnmatchcase(rel_path, pattern.replace("/**/", "/"))
+    return False
+
+
+def _hybrid_scope_matches(rel_path: str, files_in_scope: list[str]) -> bool:
+    if rel_path in files_in_scope:
+        return True
+    if (
+        any(rel_path.startswith(prefix) for prefix in _HYBRID_HARD_DENY_PREFIXES)
+        or rel_path in _HYBRID_BOOTSTRAP_SURFACES
+    ):
+        return False
+    return any(
+        _is_hybrid_allowed_scope_pattern(scope)
+        and _hybrid_scope_pattern_matches(rel_path, scope)
+        for scope in files_in_scope
+    )
+
+
 def _is_hybrid_validator_target(rel_path: str) -> bool:
     return _is_hybrid_test_tool_path(rel_path)
 
@@ -4618,7 +4650,16 @@ def _validate_baselined_hybrid_scratch_path(
     expected_realpath = str(path.resolve(strict=False))
     if not snapshot["exists"]:
         return True, ""
-    if snapshot["type"] not in {"directory", "file"}:
+    if snapshot["type"] == "symlink":
+        target = Path(str(snapshot["realpath"]))
+        scratch_root = (repo_root / ".scratch").resolve(strict=False)
+        try:
+            target.relative_to(scratch_root)
+        except ValueError:
+            return False, f"baselined .scratch symlink escaped its stable realpath: {rel_path}"
+        if not (target.is_file() or target.is_dir()):
+            return False, f"baselined .scratch symlink target must remain a regular file or directory: {rel_path}"
+    elif snapshot["type"] not in {"directory", "file"}:
         return False, f"baselined .scratch path must remain a regular file or directory: {rel_path}"
     if snapshot["realpath"] != expected_realpath:
         return False, f"baselined .scratch path escaped its stable realpath: {rel_path}"
@@ -4792,6 +4833,8 @@ def _capture_hybrid_checkpoint(
     baseline_inventory: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     for rel_path in files_in_scope:
+        if _is_hybrid_allowed_scope_pattern(rel_path):
+            continue
         ok, detail = _validate_hybrid_scope_file(repo_root, rel_path)
         if not ok:
             return False, {"detail": detail}
@@ -4850,7 +4893,10 @@ def _audit_hybrid_checkpoint(
         exception_paths=exception_paths,
     )
     observed_drift = sorted(set(manifest_reasons) | set(inventory_reasons))
-    out_of_scope = sorted(path for path in observed_drift if path not in files_in_scope)
+    out_of_scope = sorted(
+        path for path in observed_drift
+        if not _hybrid_scope_matches(path, files_in_scope)
+    )
     if out_of_scope:
         return False, {
             "detail": f"hybrid observed drift escaped declared scope: {out_of_scope[0]}",
@@ -4980,6 +5026,11 @@ def _validate_delegate_implementer_payload(
             return False, None, f"hybrid files_in_scope targets denied prefix: {normalized}"
         if normalized in _HYBRID_BOOTSTRAP_SURFACES:
             return False, None, f"hybrid files_in_scope targets bootstrap surface: {normalized}"
+        if _has_hybrid_glob_meta(normalized):
+            if not _is_hybrid_allowed_scope_pattern(normalized):
+                return False, None, f"hybrid files_in_scope pattern is outside the bounded control-surface allowlist: {normalized}"
+            files_in_scope.append(normalized)
+            continue
         if not _is_hybrid_allowed_scope_path(normalized):
             return False, None, f"hybrid files_in_scope is outside the bounded control-surface allowlist: {normalized}"
         files_in_scope.append(normalized)

@@ -499,6 +499,30 @@ def _current_staged_diff_paths(repo_root: Path) -> list[str]:
     return _dedupe_repo_paths(proc.stdout.splitlines())
 
 
+def _collect_commit_fenced_dirty_files(
+    repo_root: Path,
+    commit_bound_files: list[str],
+) -> list[str]:
+    """Collect dirty paths that belong outside the current commit package."""
+    commit_bound = set(_dedupe_repo_paths(commit_bound_files))
+    try:
+        proc = _run(["git", "status", "--porcelain"], cwd=repo_root, timeout=30)
+    except subprocess.CalledProcessError:
+        return []
+
+    fenced: list[str] = []
+    for raw_line in proc.stdout.splitlines():
+        parsed = _parse_porcelain_status_line(raw_line)
+        if parsed is None:
+            continue
+        _, raw_path = parsed
+        path = _normalize_repo_relpath(raw_path)
+        if not path or path in commit_bound or _is_transient_status_path(path):
+            continue
+        fenced.append(path)
+    return sorted(set(fenced))
+
+
 def _canonicalize_stage_path(repo_root: Path, raw_path: str) -> str:
     """Resolve repo-local symlink aliases before passing paths to git add."""
     normalized = _normalize_repo_relpath(raw_path)
@@ -2722,6 +2746,215 @@ def _dirty_worktree_paths(repo_root: Path) -> set[str]:
     }
 
 
+def _find_stash_ref_by_marker(
+    repo_root: Path,
+    marker: str,
+) -> tuple[str, str] | None:
+    """Return (stash_ref, stash_oid) for an exact stash marker."""
+    proc = _run(
+        ["git", "stash", "list", "--format=%gd%x00%H%x00%s"],
+        cwd=repo_root,
+        check=False,
+        timeout=30,
+    )
+    if proc.returncode != 0:
+        return None
+    for raw_line in proc.stdout.splitlines():
+        parts = raw_line.split("\x00", 2)
+        if len(parts) != 3:
+            continue
+        ref, oid, subject = parts
+        if subject.strip().endswith(marker):
+            return ref, oid
+    return None
+
+
+PRE_PUSH_ISOLATION_VERIFIED_VALUE = "pre_push_passed"
+PRE_PUSH_ISOLATION_STASH_PENDING_VALUE = "stash_pending"
+
+
+def _prepare_post_commit_pre_push_dirty_isolation(
+    repo_root: Path,
+    *,
+    wave_id: str,
+) -> dict[str, Any] | None:
+    """Build a durable pre-stash record for unrelated dirty work."""
+    dirty_paths = sorted(_dirty_worktree_paths(repo_root))
+    if not dirty_paths:
+        return None
+    return {
+        "marker": f"commit_executor:post_commit_pre_push:{wave_id}:{uuid.uuid4().hex}",
+        "paths": "\n".join(dirty_paths),
+        "pre_push_state": PRE_PUSH_ISOLATION_STASH_PENDING_VALUE,
+    }
+
+
+def _stash_post_commit_pre_push_dirty_paths(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    log: Any,
+    isolation: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Temporarily isolate unrelated dirty work before running pre-push-fast."""
+    dirty_paths = sorted(_pre_push_isolation_paths(isolation))
+    if not dirty_paths:
+        dirty_paths = sorted(_dirty_worktree_paths(repo_root))
+    if not dirty_paths:
+        return None, None
+
+    marker = str((isolation or {}).get("marker") or "").strip()
+    if not marker:
+        marker = f"commit_executor:post_commit_pre_push:{wave_id}:{uuid.uuid4().hex}"
+    stash_ref = _find_stash_ref_by_marker(repo_root, marker)
+    if stash_ref is None:
+        current_dirty_paths = _dirty_worktree_paths(repo_root)
+        missing_paths = sorted(set(dirty_paths) - current_dirty_paths)
+        if missing_paths:
+            return None, (
+                "pre-push dirty isolation paths changed before stash creation: "
+                + ", ".join(missing_paths)
+            )
+        result = _run(
+            ["git", "stash", "push", "--include-untracked", "-m", marker, "--", *dirty_paths],
+            cwd=repo_root,
+            check=False,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            return None, f"git stash push failed before pre-push isolation: {detail or result.returncode}"
+        stash_ref = _find_stash_ref_by_marker(repo_root, marker)
+        if stash_ref is None:
+            return None, (
+                "git stash push reported saved changes before pre-push isolation, "
+                "but the created stash ref could not be found"
+            )
+
+    ref, oid = stash_ref
+    isolated = dict(isolation or {})
+    isolated.update({
+        "marker": marker,
+        "stash_ref": ref,
+        "stash_oid": oid,
+        "paths": "\n".join(dirty_paths),
+    })
+    if isolated.get("pre_push_state") == PRE_PUSH_ISOLATION_STASH_PENDING_VALUE:
+        isolated.pop("pre_push_state", None)
+    log(
+        "Step 11: isolated "
+        f"{len(dirty_paths)} dirty out-of-scope path(s) in {ref} before pre-push"
+    )
+    return isolated, None
+
+
+def _pre_push_isolation_paths(isolation: dict[str, Any] | None) -> set[str]:
+    if not isolation:
+        return set()
+    return {
+        path.strip()
+        for path in str(isolation.get("paths") or "").splitlines()
+        if path.strip()
+    }
+
+
+def _pre_push_isolation_verified(isolation: dict[str, Any] | None) -> bool:
+    if not isolation:
+        return False
+    return isolation.get("pre_push_state") == PRE_PUSH_ISOLATION_VERIFIED_VALUE
+
+
+def _mark_pre_push_isolation_verified(isolation: dict[str, Any]) -> None:
+    isolation["pre_push_state"] = PRE_PUSH_ISOLATION_VERIFIED_VALUE
+
+
+def _pre_push_isolation_already_restored(
+    repo_root: Path,
+    isolation: dict[str, Any] | None,
+) -> bool:
+    expected_paths = _pre_push_isolation_paths(isolation)
+    if not expected_paths:
+        return False
+    return expected_paths <= _dirty_worktree_paths(repo_root)
+
+
+def _classify_pre_push_isolation_resume(
+    repo_root: Path,
+    isolation: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    """Classify durable pre-push isolation state before Step 11 resumes."""
+    marker = str(isolation.get("marker") or "")
+    expected_paths = _pre_push_isolation_paths(isolation)
+    resolved = _find_stash_ref_by_marker(repo_root, marker)
+    dirty_isolated_paths = expected_paths & _dirty_worktree_paths(repo_root)
+    verified = _pre_push_isolation_verified(isolation)
+    if dirty_isolated_paths:
+        if verified and resolved is None and _pre_push_isolation_already_restored(
+            repo_root,
+            isolation,
+        ):
+            return "already_restored", None
+        dirty_list = ", ".join(sorted(dirty_isolated_paths))
+        return None, (
+            "pre-push isolation paths are dirty before Step 11 can run safely: "
+            f"{dirty_list}"
+        )
+    if resolved is None:
+        return None, f"pre-push isolation stash missing for marker {marker}"
+    _stash_ref, stash_oid = resolved
+    expected_oid = str(isolation.get("stash_oid") or "")
+    if expected_oid and stash_oid != expected_oid:
+        return None, (
+            "pre-push isolation stash object id mismatch: "
+            f"expected {expected_oid}, found {stash_oid}"
+        )
+    if verified:
+        return "restore_only", None
+    return "run_pre_push", None
+
+
+def _restore_post_commit_pre_push_dirty_paths(
+    repo_root: Path,
+    isolation: dict[str, Any] | None,
+    *,
+    log: Any,
+) -> str | None:
+    """Restore a pre-push isolation stash and fail closed on ref drift."""
+    if not isolation:
+        return None
+    marker = isolation.get("marker", "")
+    expected_oid = isolation.get("stash_oid", "")
+    resolved = _find_stash_ref_by_marker(repo_root, marker)
+    if resolved is None:
+        if _pre_push_isolation_verified(isolation) and _pre_push_isolation_already_restored(
+            repo_root,
+            isolation,
+        ):
+            log(
+                "Step 11: pre-push isolation stash already restored for "
+                f"marker {marker}"
+            )
+            return None
+        return f"pre-push isolation stash missing for marker {marker}"
+    stash_ref, stash_oid = resolved
+    if expected_oid and stash_oid != expected_oid:
+        return (
+            "pre-push isolation stash object id mismatch: "
+            f"expected {expected_oid}, found {stash_oid}"
+        )
+    pop = _run(
+        ["git", "stash", "pop", "--index", stash_ref],
+        cwd=repo_root,
+        check=False,
+        timeout=120,
+    )
+    if pop.returncode != 0:
+        detail = (pop.stderr or pop.stdout or "").strip()
+        return f"git stash pop --index {stash_ref} failed after pre-push isolation: {detail}"
+    log(f"Step 11: restored pre-push isolation stash {stash_ref}")
+    return None
+
+
 def _capture_scope_snapshot(
     repo_root: Path,
     pathspecs: list[str],
@@ -3092,6 +3325,8 @@ def _write_continuation_record(
     steps_completed: list[str],
     pr_number: str | None = None,
     bot_review_request_sha: str | None = None,
+    pre_push_isolation: dict[str, Any] | None = None,
+    pre_push_restored_paths: list[str] | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     existing_payload = _read_continuation_record(path) or {}
@@ -3107,6 +3342,10 @@ def _write_continuation_record(
     }
     if pr_number:
         payload["pr_number"] = pr_number
+    if pre_push_isolation:
+        payload["pre_push_isolation"] = dict(pre_push_isolation)
+    if pre_push_restored_paths:
+        payload["pre_push_restored_paths"] = sorted(set(pre_push_restored_paths))
     preserved_bot_review_request_sha = existing_payload.get("bot_review_request_sha")
     preserved_commit_sha = existing_payload.get("commit_sha")
     if bot_review_request_sha:
@@ -3196,18 +3435,39 @@ def _load_post_commit_continuation(
                 return None
             payload["steps_completed"] = reset_steps
             payload.pop("bot_review_request_sha", None)
+            payload.pop("pre_push_isolation", None)
+            payload.pop("pre_push_restored_paths", None)
         except subprocess.CalledProcessError:
             return None
     non_transient_status = []
+    non_transient_paths: list[str] = []
     for line in status_output:
         path_text = line[3:] if len(line) > 3 else line
         if " -> " in path_text:
             path_text = path_text.split(" -> ", 1)[1]
         if _is_transient_status_path(path_text):
             continue
+        normalized_path = _normalize_repo_relpath(path_text)
+        if normalized_path:
+            non_transient_paths.append(normalized_path)
         non_transient_status.append(line)
     if non_transient_status:
-        return None
+        active_isolation = (
+            payload.get("pre_push_isolation")
+            if isinstance(payload.get("pre_push_isolation"), dict)
+            else None
+        )
+        restored_paths_raw = payload.get("pre_push_restored_paths")
+        restored_paths: set[str] = set()
+        if isinstance(restored_paths_raw, list):
+            restored_paths = {
+                normalized
+                for path in restored_paths_raw
+                if (normalized := _normalize_repo_relpath(str(path)))
+            }
+        allowed_dirty_paths = restored_paths | _pre_push_isolation_paths(active_isolation)
+        if not non_transient_paths or not set(non_transient_paths) <= allowed_dirty_paths:
+            return None
 
     return payload
 
@@ -3234,6 +3494,19 @@ def _checkpoint_post_commit_progress(
     pr_number_val = result.get("pr_number")
     pr_number = str(pr_number_val) if pr_number_val else None
     bot_review_request_sha = result.get("bot_review_request_sha")
+    pre_push_isolation = result.get("pre_push_isolation")
+    if not isinstance(pre_push_isolation, dict):
+        pre_push_isolation = None
+    pre_push_restored_paths_raw = result.get("pre_push_restored_paths")
+    pre_push_restored_paths = (
+        [
+            _normalize_repo_relpath(str(path))
+            for path in pre_push_restored_paths_raw
+            if _normalize_repo_relpath(str(path))
+        ]
+        if isinstance(pre_push_restored_paths_raw, list)
+        else None
+    )
     _write_continuation_record(
         continuation_path,
         handoff_sha=handoff_sha,
@@ -3243,6 +3516,8 @@ def _checkpoint_post_commit_progress(
         steps_completed=steps_completed,
         pr_number=pr_number,
         bot_review_request_sha=bot_review_request_sha if isinstance(bot_review_request_sha, str) else None,
+        pre_push_isolation=pre_push_isolation,
+        pre_push_restored_paths=pre_push_restored_paths,
     )
 
 
@@ -6231,6 +6506,20 @@ def validate_handoff(handoff: dict[str, Any]) -> tuple[bool, list[str]]:
 _STASH_REF_RE = re.compile(r"^stash@\{(\d+)\}")
 
 
+def _is_pipeline_owned_cleanup_stash(
+    stash_line: str,
+    *,
+    wave_id: str,
+    target_branch: str,
+) -> bool:
+    """Return true only for executor-owned stash markers for this wave."""
+    markers = [
+        f"phase_b:{target_branch}:",
+        f"phase_b:{wave_id}:",
+    ]
+    return any(marker in stash_line for marker in markers if marker)
+
+
 def _post_merge_cleanup(
     *,
     cleanup_root: Path,
@@ -6244,7 +6533,7 @@ def _post_merge_cleanup(
 
     Runs from *cleanup_root* (main repo after ff-only to origin/base_branch).
     Deletes the merged local branch, removes the wave worktree if distinct,
-    and drops any stashes whose description references *wave_id*.
+    and drops executor-owned Phase B branch-switch stashes for *wave_id*.
 
     All failures are logged and swallowed; the merge has already succeeded
     and cleanup must never regress the pipeline.
@@ -6324,7 +6613,8 @@ def _post_merge_cleanup(
         outcome["warnings"].append("branch delete timed out")
         log("Step 16a branch delete timed out")
 
-    # 16c: drop any stashes whose description references the wave_id.
+    # 16c: drop executor-owned stashes for this wave. Do not drop arbitrary
+    # user/operator stashes just because their description mentions the wave_id.
     # Drop highest-index first so remaining refs stay stable during loop.
     if wave_id:
         try:
@@ -6333,7 +6623,11 @@ def _post_merge_cleanup(
             ).stdout
             refs_to_drop: list[tuple[int, str]] = []
             for line in stash_out.splitlines():
-                if wave_id not in line:
+                if not _is_pipeline_owned_cleanup_stash(
+                    line,
+                    wave_id=wave_id,
+                    target_branch=target_branch,
+                ):
                     continue
                 ref = line.split(":", 1)[0]
                 m = _STASH_REF_RE.match(ref)
@@ -6355,7 +6649,7 @@ def _post_merge_cleanup(
             if outcome["stashes_dropped"]:
                 log(
                     f"Step 16c: dropped {outcome['stashes_dropped']} stash(es) "
-                    f"referencing {wave_id}"
+                    f"owned by pipeline markers for {wave_id}"
                 )
         except subprocess.CalledProcessError as exc:
             detail = (exc.stderr or exc.stdout or str(exc)).strip()
@@ -6703,31 +6997,163 @@ def _run_post_commit_pipeline(
     # ── Step 11: run_pre_push_script ──────────────────────────────────
     if "run_pre_push_script" not in result["steps_completed"]:
         pre_push_script = repo_root / "mu" / "tools" / "hooks" / "pre-push-fast"
-        if pre_push_script.exists():
-            try:
-                _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=PRE_PUSH_FAST_TIMEOUT_S)
-            except subprocess.CalledProcessError as exc:
-                detail = _tail_failure_excerpt(
-                    exc.stderr or exc.stdout or "",
-                    limit=4000,
-                    max_lines=80,
-                )
-                if not detail:
-                    detail = f"exit {exc.returncode}"
-                return {"status": "error", "step": "run_pre_push_script",
-                        "errors": [f"pre-push-fast failed: {detail}"],
-                        "steps_completed": result["steps_completed"]}
-            except subprocess.TimeoutExpired:
-                return {"status": "error", "step": "run_pre_push_script",
-                        "errors": ["pre-push-fast timed out"],
-                        "steps_completed": result["steps_completed"]}
-        result["steps_completed"].append("run_pre_push_script")
-        _checkpoint_post_commit_progress(
-            result,
-            continuation_path=continuation_path,
-            target_branch=target_branch,
+        existing_isolation = result.get("pre_push_isolation")
+        isolation: dict[str, Any] | None = (
+            dict(existing_isolation) if isinstance(existing_isolation, dict) else None
         )
-        log("Step 11: pre-push script passed")
+        isolation_error: str | None = None
+        if pre_push_script.exists():
+            if isolation:
+                if isolation.get("pre_push_state") == PRE_PUSH_ISOLATION_STASH_PENDING_VALUE:
+                    log(
+                        "Step 11: resuming pending pre-push dirty isolation "
+                        f"{isolation.get('marker')}"
+                    )
+                    isolation, isolation_error = _stash_post_commit_pre_push_dirty_paths(
+                        repo_root,
+                        wave_id=str(handoff.get("wave_id") or ""),
+                        log=log,
+                        isolation=isolation,
+                    )
+                    if isolation_error:
+                        return {"status": "error", "step": "pre_push_dirty_isolation",
+                                "errors": [isolation_error],
+                                "steps_completed": result["steps_completed"]}
+                    if isolation:
+                        result["pre_push_isolation"] = isolation
+                        result.pop("pre_push_restored_paths", None)
+                        _checkpoint_post_commit_progress(
+                            result,
+                            continuation_path=continuation_path,
+                            target_branch=target_branch,
+                        )
+                    resume_action = "run_pre_push"
+                else:
+                    resume_action, isolation_error = _classify_pre_push_isolation_resume(
+                        repo_root,
+                        isolation,
+                    )
+                    if isolation_error:
+                        return {"status": "error", "step": "pre_push_dirty_isolation",
+                                "errors": [isolation_error],
+                                "steps_completed": result["steps_completed"]}
+                    log(
+                        "Step 11: resuming with durable pre-push dirty isolation "
+                        f"{isolation.get('stash_ref') or isolation.get('marker')}"
+                    )
+                    if resume_action == "already_restored":
+                        restored_paths = sorted(_pre_push_isolation_paths(isolation))
+                        result.pop("pre_push_isolation", None)
+                        if restored_paths:
+                            result["pre_push_restored_paths"] = restored_paths
+                        result["steps_completed"].append("run_pre_push_script")
+                        _checkpoint_post_commit_progress(
+                            result,
+                            continuation_path=continuation_path,
+                            target_branch=target_branch,
+                        )
+                        log(
+                            "Step 11: pre-push already passed before dirty isolation "
+                            "restore checkpoint; checkpoint refreshed"
+                        )
+                        log("Step 11: pre-push script passed")
+                        resume_action = "complete"
+            else:
+                resume_action = "run_pre_push"
+                isolation = _prepare_post_commit_pre_push_dirty_isolation(
+                    repo_root,
+                    wave_id=str(handoff.get("wave_id") or ""),
+                )
+                if isolation:
+                    result["pre_push_isolation"] = isolation
+                    result.pop("pre_push_restored_paths", None)
+                    _checkpoint_post_commit_progress(
+                        result,
+                        continuation_path=continuation_path,
+                        target_branch=target_branch,
+                    )
+                    isolation, isolation_error = _stash_post_commit_pre_push_dirty_paths(
+                        repo_root,
+                        wave_id=str(handoff.get("wave_id") or ""),
+                        log=log,
+                        isolation=isolation,
+                    )
+                    if isolation_error:
+                        return {"status": "error", "step": "pre_push_dirty_isolation",
+                                "errors": [isolation_error],
+                                "steps_completed": result["steps_completed"]}
+                    if isolation:
+                        result["pre_push_isolation"] = isolation
+                        _checkpoint_post_commit_progress(
+                            result,
+                            continuation_path=continuation_path,
+                            target_branch=target_branch,
+                        )
+            if "run_pre_push_script" not in result["steps_completed"]:
+                pre_push_error: dict[str, Any] | None = None
+                if resume_action == "restore_only":
+                    log(
+                        "Step 11: pre-push already passed before prior restore "
+                        "attempt; restoring isolated dirty work"
+                    )
+                else:
+                    try:
+                        _run(["bash", str(pre_push_script)], cwd=repo_root, timeout=PRE_PUSH_FAST_TIMEOUT_S)
+                    except subprocess.CalledProcessError as exc:
+                        detail = _tail_failure_excerpt(
+                            exc.stderr or exc.stdout or "",
+                            limit=4000,
+                            max_lines=80,
+                        )
+                        if not detail:
+                            detail = f"exit {exc.returncode}"
+                        pre_push_error = {"status": "error", "step": "run_pre_push_script",
+                                          "errors": [f"pre-push-fast failed: {detail}"],
+                                          "steps_completed": result["steps_completed"]}
+                    except subprocess.TimeoutExpired:
+                        pre_push_error = {"status": "error", "step": "run_pre_push_script",
+                                          "errors": ["pre-push-fast timed out"],
+                                          "steps_completed": result["steps_completed"]}
+                    if pre_push_error is None and isolation:
+                        _mark_pre_push_isolation_verified(isolation)
+                        result["pre_push_isolation"] = isolation
+                        _checkpoint_post_commit_progress(
+                            result,
+                            continuation_path=continuation_path,
+                            target_branch=target_branch,
+                        )
+                restore_error = _restore_post_commit_pre_push_dirty_paths(
+                    repo_root,
+                    isolation,
+                    log=log,
+                )
+                if restore_error:
+                    errors = [restore_error]
+                    if pre_push_error:
+                        errors.extend(pre_push_error.get("errors", []))
+                    return {"status": "error", "step": "restore_pre_push_dirty_isolation",
+                            "errors": errors,
+                            "steps_completed": result["steps_completed"]}
+                if isolation:
+                    restored_paths = sorted(_pre_push_isolation_paths(isolation))
+                    result.pop("pre_push_isolation", None)
+                    if restored_paths:
+                        result["pre_push_restored_paths"] = restored_paths
+                    _checkpoint_post_commit_progress(
+                        result,
+                        continuation_path=continuation_path,
+                        target_branch=target_branch,
+                    )
+                if pre_push_error:
+                    return pre_push_error
+        if "run_pre_push_script" not in result["steps_completed"]:
+            result["steps_completed"].append("run_pre_push_script")
+            _checkpoint_post_commit_progress(
+                result,
+                continuation_path=continuation_path,
+                target_branch=target_branch,
+            )
+            log("Step 11: pre-push script passed")
     else:
         log("Step 11: pre-push script already passed, skipping")
 
@@ -7293,6 +7719,10 @@ def _run_commit_pipeline_impl(
         result["steps_completed"] = list(continuation.get("steps_completed", []))
         result["commit_sha"] = continuation["commit_sha"]
         result["pr_number"] = continuation.get("pr_number")
+        if isinstance(continuation.get("pre_push_isolation"), dict):
+            result["pre_push_isolation"] = dict(continuation["pre_push_isolation"])
+        if isinstance(continuation.get("pre_push_restored_paths"), list):
+            result["pre_push_restored_paths"] = list(continuation["pre_push_restored_paths"])
         log(
             "Resuming post-commit pipeline from local commit "
             f"{continuation['commit_sha'][:8]}"
@@ -7320,47 +7750,111 @@ def _run_commit_pipeline_impl(
                 "errors": ["Cannot determine current branch"],
                 "steps_completed": result["steps_completed"]}
 
-    try:
-        local_target_exists, remote_target_exists = _probe_feature_branch_existence(
-            repo_root,
-            target_branch,
-        )
-    except subprocess.TimeoutExpired:
-        return {"status": "error", "step": "ensure_feature_branch",
-                "errors": ["Timeout checking target branch collisions"],
-                "steps_completed": result["steps_completed"]}
-    branch_start_ref = _preferred_branch_creation_base(repo_root, base_branch)
-    start_from_remote_base = branch_start_ref != base_branch
-
-    if current == base_branch:
-        if local_target_exists:
-            return {"status": "error", "step": "ensure_feature_branch",
-                    "errors": [f"Local branch {target_branch} already exists"],
-                    "steps_completed": result["steps_completed"]}
-        if remote_target_exists:
-            return {"status": "error", "step": "ensure_feature_branch",
-                    "errors": [f"Remote branch {target_branch} already exists"],
-                    "steps_completed": result["steps_completed"]}
+    if current == target_branch:
+        log(f"Step 2: already on {target_branch}")
+    else:
         try:
-            if start_from_remote_base:
-                tracked_dirty, untracked_dirty, outside_scope = _collect_branch_rebind_dirty_scope(
+            local_target_exists, remote_target_exists = _probe_feature_branch_existence(
+                repo_root,
+                target_branch,
+            )
+        except subprocess.TimeoutExpired:
+            return {"status": "error", "step": "ensure_feature_branch",
+                    "errors": ["Timeout checking target branch collisions"],
+                    "steps_completed": result["steps_completed"]}
+        branch_start_ref = _preferred_branch_creation_base(repo_root, base_branch)
+        start_from_remote_base = branch_start_ref != base_branch
+
+        if current == base_branch:
+            if local_target_exists:
+                return {"status": "error", "step": "ensure_feature_branch",
+                        "errors": [f"Local branch {target_branch} already exists"],
+                        "steps_completed": result["steps_completed"]}
+            if remote_target_exists:
+                return {"status": "error", "step": "ensure_feature_branch",
+                        "errors": [f"Remote branch {target_branch} already exists"],
+                        "steps_completed": result["steps_completed"]}
+            try:
+                if start_from_remote_base:
+                    tracked_dirty, untracked_dirty, outside_scope = _collect_branch_rebind_dirty_scope(
+                        repo_root,
+                        handoff=handoff,
+                    )
+                    if outside_scope:
+                        preview = ", ".join(outside_scope[:10])
+                        if len(outside_scope) > 10:
+                            preview += ", ..."
+                        return {"status": "error", "step": "ensure_feature_branch",
+                                "errors": [
+                                    "Refusing branch creation from fetched base because dirty paths outside "
+                                    f"the wave scope are present: {preview}"
+                                ],
+                                "steps_completed": result["steps_completed"]}
+                    scoped_dirty = sorted((tracked_dirty | untracked_dirty) - set(outside_scope))
+                    snapshot: dict[str, bytes | None] = {}
+                    if scoped_dirty:
+                        snapshot = _capture_scope_snapshot(repo_root, scoped_dirty)
+                        _clear_scope_for_branch_rebind(
+                            repo_root,
+                            tracked_paths=sorted(tracked_dirty),
+                            untracked_paths=sorted(untracked_dirty),
+                        )
+                    _run(["git", "checkout", "-b", target_branch, branch_start_ref], cwd=repo_root)
+                    if snapshot:
+                        _restore_scope_snapshot(repo_root, snapshot)
+                    log(f"Step 2: created branch {target_branch} from {branch_start_ref}")
+                else:
+                    _run(["git", "checkout", "-b", target_branch], cwd=repo_root)
+                    log(f"Step 2: created branch {target_branch}")
+            except subprocess.CalledProcessError as exc:
+                _restore_scope_snapshot_on_branch_failure(
                     repo_root,
-                    handoff=handoff,
+                    snapshot=locals().get("snapshot", {}),
+                    expected_branch=current,
                 )
-                if outside_scope:
-                    preview = ", ".join(outside_scope[:10])
-                    if len(outside_scope) > 10:
-                        preview += ", ..."
-                    return {"status": "error", "step": "ensure_feature_branch",
-                            "errors": [
-                                "Refusing branch creation from fetched base because dirty paths outside "
-                                f"the wave scope are present: {preview}"
-                            ],
-                            "steps_completed": result["steps_completed"]}
-                scoped_dirty = sorted((tracked_dirty | untracked_dirty) - set(outside_scope))
-                snapshot: dict[str, bytes | None] = {}
+                return {"status": "error", "step": "ensure_feature_branch",
+                        "errors": [f"git checkout -b failed: {exc.stderr.strip()}"],
+                        "steps_completed": result["steps_completed"]}
+        else:
+            if local_target_exists or remote_target_exists:
+                collisions: list[str] = []
+                if local_target_exists:
+                    collisions.append(f"local branch {target_branch}")
+                if remote_target_exists:
+                    collisions.append(f"remote branch origin/{target_branch}")
+                collision_text = " and ".join(collisions)
+                return {"status": "error", "step": "ensure_feature_branch",
+                        "errors": [
+                            f"On branch {current}, expected {base_branch} or {target_branch}. "
+                            f"Refusing auto-rebind because {collision_text} already exists"
+                        ],
+                        "steps_completed": result["steps_completed"]}
+            tracked_dirty, untracked_dirty, outside_scope = _collect_branch_rebind_dirty_scope(
+                repo_root,
+                handoff=handoff,
+            )
+            if outside_scope:
+                preview = ", ".join(outside_scope[:10])
+                if len(outside_scope) > 10:
+                    preview += ", ..."
+                return {"status": "error", "step": "ensure_feature_branch",
+                        "errors": [
+                            "Refusing auto-rebind because dirty paths outside the wave scope are present: "
+                            f"{preview}"
+                        ],
+                        "steps_completed": result["steps_completed"]}
+            scoped_dirty = sorted((tracked_dirty | untracked_dirty) - set(outside_scope))
+            snapshot: dict[str, bytes | None] = {}
+            try:
+                # When dev has diverged on wave-owned files, a raw checkout can fail
+                # closed with "would be overwritten by checkout". Snapshot only the
+                # bounded dirty scope, clear it, rebind to the fresh target branch
+                # from dev, then restore the exact bytes onto the canonical branch.
                 if scoped_dirty:
-                    snapshot = _capture_scope_snapshot(repo_root, scoped_dirty)
+                    snapshot = _capture_scope_snapshot(
+                        repo_root,
+                        scoped_dirty,
+                    )
                     _clear_scope_for_branch_rebind(
                         repo_root,
                         tracked_paths=sorted(tracked_dirty),
@@ -7369,85 +7863,22 @@ def _run_commit_pipeline_impl(
                 _run(["git", "checkout", "-b", target_branch, branch_start_ref], cwd=repo_root)
                 if snapshot:
                     _restore_scope_snapshot(repo_root, snapshot)
-                log(f"Step 2: created branch {target_branch} from {branch_start_ref}")
-            else:
-                _run(["git", "checkout", "-b", target_branch], cwd=repo_root)
-                log(f"Step 2: created branch {target_branch}")
-        except subprocess.CalledProcessError as exc:
-            _restore_scope_snapshot_on_branch_failure(
-                repo_root,
-                snapshot=locals().get("snapshot", {}),
-                expected_branch=current,
-            )
-            return {"status": "error", "step": "ensure_feature_branch",
-                    "errors": [f"git checkout -b failed: {exc.stderr.strip()}"],
-                    "steps_completed": result["steps_completed"]}
-    elif current == target_branch:
-        log(f"Step 2: already on {target_branch}")
-    else:
-        if local_target_exists or remote_target_exists:
-            collisions: list[str] = []
-            if local_target_exists:
-                collisions.append(f"local branch {target_branch}")
-            if remote_target_exists:
-                collisions.append(f"remote branch origin/{target_branch}")
-            collision_text = " and ".join(collisions)
-            return {"status": "error", "step": "ensure_feature_branch",
-                    "errors": [
-                        f"On branch {current}, expected {base_branch} or {target_branch}. "
-                        f"Refusing auto-rebind because {collision_text} already exists"
-                    ],
-                    "steps_completed": result["steps_completed"]}
-        tracked_dirty, untracked_dirty, outside_scope = _collect_branch_rebind_dirty_scope(
-            repo_root,
-            handoff=handoff,
-        )
-        if outside_scope:
-            preview = ", ".join(outside_scope[:10])
-            if len(outside_scope) > 10:
-                preview += ", ..."
-            return {"status": "error", "step": "ensure_feature_branch",
-                    "errors": [
-                        "Refusing auto-rebind because dirty paths outside the wave scope are present: "
-                        f"{preview}"
-                    ],
-                    "steps_completed": result["steps_completed"]}
-        scoped_dirty = sorted((tracked_dirty | untracked_dirty) - set(outside_scope))
-        snapshot: dict[str, bytes | None] = {}
-        try:
-            # When dev has diverged on wave-owned files, a raw checkout can fail
-            # closed with "would be overwritten by checkout". Snapshot only the
-            # bounded dirty scope, clear it, rebind to the fresh target branch
-            # from dev, then restore the exact bytes onto the canonical branch.
-            if scoped_dirty:
-                snapshot = _capture_scope_snapshot(
-                    repo_root,
-                    scoped_dirty,
+                log(
+                    "Step 2: rebound worktree from "
+                    f"{current} to {target_branch} using {branch_start_ref} as base"
                 )
-                _clear_scope_for_branch_rebind(
+            except subprocess.CalledProcessError as exc:
+                _restore_scope_snapshot_on_branch_failure(
                     repo_root,
-                    tracked_paths=sorted(tracked_dirty),
-                    untracked_paths=sorted(untracked_dirty),
+                    snapshot=snapshot,
+                    expected_branch=current,
                 )
-            _run(["git", "checkout", "-b", target_branch, branch_start_ref], cwd=repo_root)
-            if snapshot:
-                _restore_scope_snapshot(repo_root, snapshot)
-            log(
-                "Step 2: rebound worktree from "
-                f"{current} to {target_branch} using {branch_start_ref} as base"
-            )
-        except subprocess.CalledProcessError as exc:
-            _restore_scope_snapshot_on_branch_failure(
-                repo_root,
-                snapshot=snapshot,
-                expected_branch=current,
-            )
-            failed_cmd = exc.cmd if isinstance(exc.cmd, list) else []
-            detail = (exc.stderr or exc.stdout or "").strip()
-            cmd_text = " ".join(str(part) for part in failed_cmd) or "step-2 rebind helper"
-            return {"status": "error", "step": "ensure_feature_branch",
-                    "errors": [f"Step 2 rebind failed while running `{cmd_text}`: {detail}"],
-                    "steps_completed": result["steps_completed"]}
+                failed_cmd = exc.cmd if isinstance(exc.cmd, list) else []
+                detail = (exc.stderr or exc.stdout or "").strip()
+                cmd_text = " ".join(str(part) for part in failed_cmd) or "step-2 rebind helper"
+                return {"status": "error", "step": "ensure_feature_branch",
+                        "errors": [f"Step 2 rebind failed while running `{cmd_text}`: {detail}"],
+                        "steps_completed": result["steps_completed"]}
 
     if "ensure_feature_branch" not in result["steps_completed"]:
         result["steps_completed"].append("ensure_feature_branch")
@@ -7917,6 +8348,7 @@ def _run_commit_pipeline_impl(
             "wave_name": wave_id,
             "lane": handoff.get("supervisor_lane", handoff["caller"]),
             "changed_files": changed_files,
+            "fenced_files": _collect_commit_fenced_dirty_files(repo_root, changed_files),
             "scope_items": supervisor_scope_items,
             "fixes_implemented": handoff["fixes_implemented"],
             "deferred_items": handoff.get("deferred_items", []),
