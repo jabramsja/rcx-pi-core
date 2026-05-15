@@ -3389,6 +3389,16 @@ _ANTI_THEATER_ALLOWLIST_AUTHORIZATION_TOKENS: tuple[str, ...] = (
     "explicit founder directive authorizes anti-theater allowlist expansion",
     "explicit user directive authorizes anti-theater allowlist expansion",
 )
+_ANTI_THEATER_ALLOWLIST_AUTHORIZATION_FIELDS: tuple[str, ...] = (
+    "anti_theater_allowlist_authorized",
+    "anti_theater_allowlist_authorization",
+    "founder_authorizes_anti_theater_allowlist_expansion",
+    "user_authorizes_anti_theater_allowlist_expansion",
+)
+_ANTI_THEATER_ALLOWLIST_AUTHORIZATION_CONTAINERS: tuple[str, ...] = (
+    "recovery",
+    "metadata",
+)
 _ANTI_THEATER_ALLOWLIST_PATH_FRAGMENTS: tuple[str, ...] = (
     "tools/checks/theater_allowlist.json",
     "theater_allowlist.json",
@@ -3527,11 +3537,43 @@ def _extract_anti_theater_pytest_ids(text: str) -> list[str]:
     return ids
 
 
-def _anti_theater_allowlist_authorized(result: dict[str, Any]) -> bool:
-    if result.get("anti_theater_allowlist_authorized") is True:
+def _trusted_anti_theater_allowlist_authorization_values(
+    result: dict[str, Any],
+) -> list[Any]:
+    values: list[Any] = []
+    for key in _ANTI_THEATER_ALLOWLIST_AUTHORIZATION_FIELDS:
+        if key in result:
+            values.append(result[key])
+    for container_key in _ANTI_THEATER_ALLOWLIST_AUTHORIZATION_CONTAINERS:
+        container = result.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        for key in _ANTI_THEATER_ALLOWLIST_AUTHORIZATION_FIELDS:
+            if key in container:
+                values.append(container[key])
+    return values
+
+
+def _anti_theater_allowlist_authorization_value(value: Any) -> bool:
+    if value is True:
         return True
-    signal = _bounded_result_text(result).lower()
-    return any(token in signal for token in _ANTI_THEATER_ALLOWLIST_AUTHORIZATION_TOKENS)
+    if isinstance(value, str):
+        signal = value.lower()
+        return any(token in signal for token in _ANTI_THEATER_ALLOWLIST_AUTHORIZATION_TOKENS)
+    if isinstance(value, dict):
+        return any(_anti_theater_allowlist_authorization_value(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_anti_theater_allowlist_authorization_value(item) for item in value)
+    return False
+
+
+def _anti_theater_allowlist_authorized(result: dict[str, Any]) -> bool:
+    # stdout/stderr are command-controlled. Authorization must come only from
+    # executor-populated fields, never from arbitrary bounded failure text.
+    return any(
+        _anti_theater_allowlist_authorization_value(value)
+        for value in _trusted_anti_theater_allowlist_authorization_values(result)
+    )
 
 
 def _anti_theater_ratchet_context(
@@ -3572,7 +3614,7 @@ Anti-Theater Ratchet Diagnostic Context:
 - Detected gate shape: Anti-Theater Ratchet Check / new unallowlisted pytest method.
 - Failing pytest method(s):
 {pytest_lines}
-- Recovery policy: this must not be repaired by allowlist expansion unless the failure evidence contains an explicit founder/user directive authorizing anti-theater allowlist expansion.
+- Recovery policy: this must not be repaired by allowlist expansion unless trusted result metadata contains an explicit founder/user directive authorizing anti-theater allowlist expansion.
 - Default direction: perform proof-quality behavioral test repair, or escalate clearly if the needed repair is outside bounded recovery scope.
 - Delegate scope rule: if delegate_implementer is used, files_in_scope must name existing bounded recovery tooling/tests/control-plane files; do not invent reports/deferred/<wave>.md or use broad deferred globs for this failure shape.
 """.strip()
@@ -3612,6 +3654,8 @@ def _recovery_response_targets_anti_theater_allowlist(response: dict[str, Any]) 
             )
     elif action == "delegate_implementer":
         texts.append(json.dumps(response, sort_keys=True))
+    else:
+        return False
     texts.append(str(response.get("explanation", "") or ""))
     return any(_text_proposes_anti_theater_allowlist_expansion(text) for text in texts)
 
