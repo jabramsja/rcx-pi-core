@@ -2830,6 +2830,26 @@ class TestWaveIdBounds:
         assert "no_op_proof:" in handoff["tracker_note_text"]
         assert "defer_reason_code:" in handoff["tracker_note_text"]
 
+    def test_prepare_handoff_update_tracker_only_code_scope_uses_phase_b_lane(self, tmp_path):
+        record = {
+            "wave_name": "control-surface-repair-wave",
+            "summary": "repair control surface code",
+            "decision": "UPDATE_TRACKER_ONLY",
+            "files_to_stage": [
+                "TASKS.md",
+                "mu/tools/executors/phase_b_implementer.py",
+                "mu/tests/tools/test_phase_b_executor.py",
+            ],
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(record, tmp_path)
+
+        assert errors == []
+        assert handoff is not None
+        assert handoff["caller"] == "phase_b"
+        valid, validation_errors = commit_mod.validate_handoff(handoff)
+        assert valid, validation_errors
+
     @pytest.mark.parametrize(
         "extra_scope",
         [

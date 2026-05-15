@@ -303,6 +303,27 @@ class TestBuildImplementationPrompt:
         assert "commit/push governance commands" in prompt
         assert "Phase B-local validation" in prompt
 
+    def test_prompt_renders_outer_pipeline_commands_inert(self, tmp_path):
+        prompt = impl_mod.build_implementation_prompt(
+            "## Pipeline Requirement\n\n"
+            "```bash\n"
+            "python3 mu/tools/executors/executor_dispatch.py "
+            "--routing-record .agent_bus/meta/post_merge_routing.json "
+            "--loop --max-waves 1 --json\n"
+            "```\n\n"
+            "```bash\n"
+            "codex-rcx-preflight parity\n"
+            "```\n",
+            repo_root=tmp_path,
+            wave_id="w",
+        )
+
+        assert "python3 mu/tools/executors/executor_dispatch.py" not in prompt
+        assert "codex-rcx-preflight parity" not in prompt
+        assert "outer-pipeline command omitted" in prompt
+        assert "Do NOT run dispatcher" in prompt
+        assert "executor launch commands" in prompt
+
     def test_prompt_includes_learning_context_when_provided(self, tmp_path):
         learning = "## Learning Context\n\nKnown pipeline patterns:\n- [test_failure] error → fix"
         prompt = impl_mod.build_implementation_prompt(
