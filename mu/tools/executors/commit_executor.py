@@ -6010,7 +6010,11 @@ def prepare_handoff_from_routing_record(
         fixes_implemented=record.get("fixes_implemented", [summary]),
         wave_class=wave_class,
         target_gate_id=target_gate_id,
-        caller="update_tracker_only" if decision == "UPDATE_TRACKER_ONLY" else "phase_b",
+        caller=_caller_for_synthesized_routing_handoff(
+            decision,
+            files_to_stage,
+            force_add_files,
+        ),
         base_branch="dev",
         branch_prefix="jabramsja",
         force_add_files=force_add_files,
@@ -6028,6 +6032,37 @@ def prepare_handoff_from_routing_record(
     if build_errors:
         return None, build_errors
     return handoff, []
+
+
+_TRACKER_ONLY_EXACT_PATHS = frozenset({"TASKS.md", "STATUS.md", "CHANGELOG.md"})
+_TRACKER_ONLY_PREFIXES = (
+    "reports/control_plane/",
+    "reports/l4_wave_indicators/",
+    "reports/deferred/",
+    "reports/archive/",
+)
+
+
+def _is_tracker_only_handoff_path(path: Any) -> bool:
+    normalized = _normalize_repo_relpath(str(path or ""))
+    if not normalized:
+        return True
+    if normalized in _TRACKER_ONLY_EXACT_PATHS:
+        return True
+    return normalized.startswith(_TRACKER_ONLY_PREFIXES)
+
+
+def _caller_for_synthesized_routing_handoff(
+    decision: str,
+    files_to_stage: list[str],
+    force_add_files: list[str],
+) -> str:
+    if decision != "UPDATE_TRACKER_ONLY":
+        return "phase_b"
+    scoped_paths = [*files_to_stage, *force_add_files]
+    if scoped_paths and all(_is_tracker_only_handoff_path(path) for path in scoped_paths):
+        return "update_tracker_only"
+    return "phase_b"
 
 
 def build_commit_handoff(

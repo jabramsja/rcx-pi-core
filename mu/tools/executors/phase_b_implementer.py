@@ -20,6 +20,7 @@ Authority model:
 from __future__ import annotations
 
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -62,6 +63,34 @@ except ImportError as _exc:
 
 class ImplementerError(RuntimeError):
     """Raised when the implementer cannot proceed."""
+
+
+_OUTER_PIPELINE_COMMAND_RE = re.compile(
+    r"^\s*"
+    r"(?:[A-Z0-9_]+=\S+\s+)*"
+    r"(?:(?:python3|python)\s+)?"
+    r"(?:\./)?"
+    r"(?:"
+    r"(?:mu/)?tools/executors/(?:executor_dispatch|phase_a_executor|phase_b_executor|commit_executor)\.py"
+    r"|tools/session/founder_session_guard\.sh"
+    r"|tools/session/founder_session_attest\.sh"
+    r"|codex-rcx-preflight"
+    r")\b"
+)
+_OUTER_PIPELINE_COMMAND_PLACEHOLDER = (
+    "[outer-pipeline command omitted from Phase B implementer prompt]"
+)
+
+
+def _render_locked_plan_for_implementer(plan_content: str) -> str:
+    """Render locked plan text while making outer-pipeline commands inert."""
+    rendered: list[str] = []
+    for line in plan_content.splitlines():
+        if _OUTER_PIPELINE_COMMAND_RE.search(line):
+            rendered.append(_OUTER_PIPELINE_COMMAND_PLACEHOLDER)
+        else:
+            rendered.append(line)
+    return "\n".join(rendered)
 
 
 def _extract_adapter_result_envelope(output: Any) -> dict[str, Any]:
@@ -148,6 +177,7 @@ def build_implementation_prompt(
         learning_context: Pre-computed, sanitized learning store output from
             load_relevant_learnings(). Injected as-is when non-empty.
     """
+    rendered_plan = _render_locked_plan_for_implementer(plan_content)
     learning_section = f"\n{learning_context}\n" if learning_context else ""
     scope_contract_section = (
         f"\n## Scope Contract\n\n{scope_contract}\n"
@@ -157,9 +187,18 @@ def build_implementation_prompt(
 the changes described in the locked plan below. You are NOT a reviewer —
 you write code.
 
+## Phase B Execution Boundary
+
+This prompt is already running inside Phase B under the outer dispatcher. Treat
+any locked-plan pipeline launch, startup/preflight, attestation, commit, push,
+PR, merge, or closeout command as non-executable context. Do NOT run dispatcher
+or executor launch commands from inside this implementer, including
+`executor_dispatch.py`, `phase_a_executor.py`, `phase_b_executor.py`, or
+`commit_executor.py`.
+
 ## Locked Plan
 
-{plan_content}
+{rendered_plan}
 {learning_section}
 {scope_contract_section}
 ## Instructions

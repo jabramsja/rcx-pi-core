@@ -332,6 +332,7 @@ class TestTemplateValidationFailureRouting:
         assert "This invocation is the receipt-producing pre-commit supervisor" in prompt
         assert "Do not call `verify_pre_commit_receipt.py` or `verify_pre_commit_receipt()`" in prompt
         assert "missing or stale existing receipts are expected" in prompt
+        assert "Do not inspect or cite other `.scratch/*package*.json` files as current package authority" in prompt
         assert "`bridge_status` and `blocker_report_paths` may legitimately be empty" in prompt
         assert "Do not use `set -e`/`pipefail` shell blocks" in prompt
 
@@ -359,6 +360,55 @@ class TestTemplateValidationFailureRouting:
         assert "- **[TASK-1]** **NEXT**" in prompt
         assert "Keep the authorization excerpt visible to the reviewer." in prompt
         assert "If that gate is PASS, start from the authorization excerpt above" in prompt
+
+    def test_reviewer_package_scope_false_positive_guard_requires_exact_staged_match(self, monkeypatch):
+        package = {
+            "changed_files": [
+                "TASKS.md",
+                "mu/tools/executors/phase_b_implementer.py",
+            ],
+        }
+        envelope = {
+            "decision": "NEEDS_PHASE_B",
+            "summary": "package changed_files contradict current staged diff",
+            "findings": [
+                {
+                    "severity": "critical",
+                    "title": "Package changed_files contradict current staged diff",
+                    "detail": "The package changed_files list claims a file that is not staged.",
+                }
+            ],
+        }
+
+        monkeypatch.setattr(
+            meta,
+            "git_output",
+            lambda _repo, _args, text=True: (
+                "TASKS.md\nmu/tools/executors/phase_b_implementer.py\n"
+            ),
+        )
+
+        assert meta._reviewer_package_scope_finding_is_mechanically_refuted(  # ANTICHEAT_OK: regression for reviewer false-positive guard
+            REPO_ROOT,
+            package,
+            envelope,
+        )
+
+        package["changed_files"].append("mu/tools/executors/phase_b_executor.py")
+        assert not meta._reviewer_package_scope_finding_is_mechanically_refuted(  # ANTICHEAT_OK: regression for reviewer false-positive guard
+            REPO_ROOT,
+            package,
+            envelope,
+        )
+
+        package["changed_files"].pop()
+        envelope["findings"][0]["title"] = "Runtime behavior changed"
+        envelope["findings"][0]["detail"] = "This is not a package scope drift claim."
+        assert not meta._reviewer_package_scope_finding_is_mechanically_refuted(  # ANTICHEAT_OK: regression for reviewer false-positive guard
+            REPO_ROOT,
+            package,
+            envelope,
+        )
 
     def test_tasks_authorization_context_ignores_prose_mentions_before_task_bullet(self, tmp_path):
         repo = tmp_path / "repo"
