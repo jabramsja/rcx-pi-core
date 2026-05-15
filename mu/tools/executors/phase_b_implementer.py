@@ -65,8 +65,7 @@ class ImplementerError(RuntimeError):
     """Raised when the implementer cannot proceed."""
 
 
-_OUTER_PIPELINE_COMMAND_RE = re.compile(
-    r"^\s*"
+_OUTER_PIPELINE_COMMAND_TARGET_RE = (
     r"(?:[A-Z0-9_]+=\S+\s+)*"
     r"(?:(?:python3|python)\s+)?"
     r"(?:\./)?"
@@ -77,16 +76,37 @@ _OUTER_PIPELINE_COMMAND_RE = re.compile(
     r"|codex-rcx-preflight"
     r")\b"
 )
+_OUTER_PIPELINE_COMMAND_LINE_RE = re.compile(
+    r"^\s*"
+    r"(?:(?:>\s*)|(?:[-*+]\s+(?:\[[ xX]\]\s+)?)|(?:\d+[.)]\s+))*"
+    r"`*"
+    r"\s*"
+    r"(?:[$#]\s+)?"
+    + _OUTER_PIPELINE_COMMAND_TARGET_RE
+)
+_OUTER_PIPELINE_COMMAND_CODE_SPAN_RE = re.compile(
+    r"`+\s*"
+    r"(?:[$#]\s+)?"
+    + _OUTER_PIPELINE_COMMAND_TARGET_RE
+)
 _OUTER_PIPELINE_COMMAND_PLACEHOLDER = (
     "[outer-pipeline command omitted from Phase B implementer prompt]"
 )
+
+
+def _contains_outer_pipeline_command(line: str) -> bool:
+    """Return True for runnable outer-pipeline commands in locked-plan text."""
+    return bool(
+        _OUTER_PIPELINE_COMMAND_LINE_RE.search(line)
+        or _OUTER_PIPELINE_COMMAND_CODE_SPAN_RE.search(line)
+    )
 
 
 def _render_locked_plan_for_implementer(plan_content: str) -> str:
     """Render locked plan text while making outer-pipeline commands inert."""
     rendered: list[str] = []
     for line in plan_content.splitlines():
-        if _OUTER_PIPELINE_COMMAND_RE.search(line):
+        if _contains_outer_pipeline_command(line):
             rendered.append(_OUTER_PIPELINE_COMMAND_PLACEHOLDER)
         else:
             rendered.append(line)
