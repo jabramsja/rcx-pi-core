@@ -6025,6 +6025,198 @@ class TestDeferredPacketFiling:
         )
         assert deferred_items == []
 
+    def test_collect_supervisor_deferred_items_ignores_staged_deleted_packet(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        deferred_rel = "reports/deferred/non_blocking/wave_bridge_nonblockers.md"
+        (repo / "reports" / "deferred" / "non_blocking").mkdir(parents=True)
+        (repo / deferred_rel).write_text("# Deferred\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", deferred_rel], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "rm", "--", deferred_rel], cwd=repo, check=True, capture_output=True)
+
+        status = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert f"D  {deferred_rel}" in status
+
+        deferred_items = pb_mod._collect_supervisor_deferred_items(  # ANTICHEAT_OK: testing internal executor functions
+            [deferred_rel],
+            deferred_rel,
+            repo_root=repo,
+        )
+
+        assert deferred_items == []
+
+    def test_commit_handoff_stage_files_omit_closed_active_staged_deletion(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        wave_id = "wave"
+        active_rel = "reports/deferred/non_blocking/wave_bridge_nonblockers.md"
+        archive_rel = "reports/archive/deferred/wave_bridge_nonblockers_closed-by-wave.md"
+        (repo / "reports" / "deferred" / "non_blocking").mkdir(parents=True)
+        (repo / active_rel).write_text("# Deferred\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", active_rel], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "rm", "--", active_rel], cwd=repo, check=True, capture_output=True)
+        (repo / archive_rel).parent.mkdir(parents=True)
+        (repo / archive_rel).write_text("# Deferred archive\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", archive_rel], cwd=repo, check=True)
+
+        files_to_stage, staged_deletions = pb_mod._split_commit_handoff_stage_files(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            wave_id,
+            [active_rel, archive_rel],
+        )
+
+        assert files_to_stage == [archive_rel]
+        assert staged_deletions == [active_rel]
+        handoff, errors = commit_mod.build_commit_handoff(
+            wave_id=wave_id,
+            task_id="[PIPELINE-RECOVERY]",
+            files_to_stage=files_to_stage,
+            commit_message="test: handoff\n\nCo-Authored-By: test",
+            fixes_implemented=["test"],
+            wave_class="MAINTENANCE",
+            target_gate_id="G8",
+            repo_root=repo,
+        )
+
+        assert errors == []
+        assert handoff["files_to_stage"] == [archive_rel]
+
+    def test_commit_handoff_stage_files_scope_staged_deletion_for_branch_rebind(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        wave_id = "wave"
+        active_rel = "reports/deferred/non_blocking/wave_bridge_nonblockers.md"
+        archive_rel = "reports/archive/deferred/wave_bridge_nonblockers_closed-by-wave.md"
+        (repo / "reports" / "deferred" / "non_blocking").mkdir(parents=True)
+        (repo / active_rel).write_text("# Deferred\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", active_rel], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "rm", "--", active_rel], cwd=repo, check=True, capture_output=True)
+        (repo / archive_rel).parent.mkdir(parents=True)
+        (repo / archive_rel).write_text("# Deferred archive\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", archive_rel], cwd=repo, check=True)
+
+        files_to_stage, staged_deletions = pb_mod._split_commit_handoff_stage_files(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            wave_id,
+            [active_rel, archive_rel],
+        )
+        handoff, errors = commit_mod.build_commit_handoff(
+            wave_id=wave_id,
+            task_id="[PIPELINE-RECOVERY]",
+            files_to_stage=files_to_stage,
+            commit_message="test: handoff\n\nCo-Authored-By: test",
+            fixes_implemented=["test"],
+            wave_class="MAINTENANCE",
+            target_gate_id="G8",
+            scope_items=staged_deletions,
+            repo_root=repo,
+        )
+
+        assert errors == []
+        assert handoff["scope_items"] == [active_rel]
+        tracked_dirty, untracked_dirty, outside_scope = commit_mod._collect_branch_rebind_dirty_scope(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            handoff=handoff,
+        )
+        assert active_rel in tracked_dirty
+        assert archive_rel in tracked_dirty
+        assert untracked_dirty == set()
+        assert outside_scope == []
+
+    def test_sync_deferred_notes_into_closed_archive_without_reopening_active_lane(self, tmp_path):
+        repo = tmp_path / "repo"
+        active = repo / "reports" / "deferred" / "non_blocking" / "wave_bridge_nonblockers.md"
+        archive = (
+            repo
+            / "reports"
+            / "archive"
+            / "deferred"
+            / "wave_bridge_nonblockers_closed-by-wave.md"
+        )
+        active.parent.mkdir(parents=True)
+        archive.parent.mkdir(parents=True)
+        active.write_text("# Deferred\n\nStatus: DEFERRED_NON_BLOCKING\n", encoding="utf-8")
+        archive.write_text(
+            "# Deferred\n\nStatus: CLOSED_BY_REENTRY_RECONCILIATION\n",
+            encoding="utf-8",
+        )
+        executor_created: set[str] = set()
+
+        findings, packet_path = pb_mod._sync_deferred_non_blocking_state(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            "wave",
+            [],
+            [
+                {
+                    "title": "Packet validation wording is stale",
+                    "class": "DOC_ACCURACY",
+                    "severity": "low",
+                    "file": "reports/control_plane/wave.md",
+                    "evidence_cmd": "git show :reports/control_plane/wave.md",
+                }
+            ],
+            previous_packet_path="reports/deferred/non_blocking/wave_bridge_nonblockers.md",
+            executor_created=executor_created,
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+        )
+
+        assert packet_path is None
+        assert findings[0]["title"] == "Packet validation wording is stale"
+        assert not active.exists()
+        archive_text = archive.read_text(encoding="utf-8")
+        assert "PHASE_B_POST_CLOSURE_NONBLOCKING:start" in archive_text
+        assert "RETAINED_OUTSIDE_ACTIVE_DEFERRED_LANE" in archive_text
+        assert "Packet validation wording is stale" in archive_text
+        assert "reports/deferred/non_blocking/wave_bridge_nonblockers.md" in executor_created
+        assert "reports/archive/deferred/wave_bridge_nonblockers_closed-by-wave.md" in executor_created
+
+    def test_sync_deferred_replaces_post_closure_archive_notes_idempotently(self, tmp_path):
+        repo = tmp_path / "repo"
+        archive = (
+            repo
+            / "reports"
+            / "archive"
+            / "deferred"
+            / "wave_bridge_nonblockers_closed-by-wave.md"
+        )
+        archive.parent.mkdir(parents=True)
+        archive.write_text(
+            "# Deferred\n\n"
+            "<!-- PHASE_B_POST_CLOSURE_NONBLOCKING:start -->\n"
+            "old note\n"
+            "<!-- PHASE_B_POST_CLOSURE_NONBLOCKING:end -->\n",
+            encoding="utf-8",
+        )
+
+        pb_mod._sync_deferred_non_blocking_state(  # ANTICHEAT_OK: testing internal executor functions
+            repo,
+            "wave",
+            [],
+            [{"title": "New note", "class": "DOC_ACCURACY", "severity": "low", "file": "x.md"}],
+            previous_packet_path=None,
+            executor_created=set(),
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+        )
+
+        archive_text = archive.read_text(encoding="utf-8")
+        assert "New note" in archive_text
+        assert "old note" not in archive_text
+        assert archive_text.count("PHASE_B_POST_CLOSURE_NONBLOCKING:start") == 1
+
     def test_record_non_blocking_findings_replaces_prior_packet_contents(self, tmp_path):
         existing = [
             {"title": "Old nit", "class": "DOC_ACCURACY", "severity": "low", "file": "old.py", "disposition": "non_blocking"},
