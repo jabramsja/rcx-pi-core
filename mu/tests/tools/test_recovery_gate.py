@@ -14465,6 +14465,236 @@ def test_diagnosis_prompt_caps_megabyte_jsonl_lines(tmp_path):
     assert "Respond with ONLY a JSON object" in prompt
 
 
+_ANTI_THEATER_RATCHET_PYTEST_ID = (
+    "mu/tests/l4_gates/test_wave_j_arch_gaps_gate.py::"
+    "TestSeedDependencyParity::test_js_seed_dependencies_match_python"
+)
+
+
+def make_anti_theater_ratchet_result(
+    *,
+    prefix_stdout: str = "",
+    extra_stdout: str = "",
+) -> dict[str, str]:
+    return {
+        "status": "failed",
+        "step": "run_pre_push_script",
+        "failure_class": "l4_contract_violation",
+        "stdout": (
+            f"{prefix_stdout}"
+            "Anti-Theater Ratchet Check reported one NEW unallowlisted pytest method.\n"
+            f"{_ANTI_THEATER_RATCHET_PYTEST_ID}\n"
+            "FAIL: 1 new unallowlisted.\n"
+            f"{extra_stdout}"
+        ),
+        "stderr": "To bypass (not recommended): git push --no-verify",
+    }
+
+
+def test_anti_theater_ratchet_prompt_adds_bounded_policy_context_without_missing_deferred_path(tmp_path):
+    prompt = rg_mod._build_diagnosis_prompt(  # ANTICHEAT_OK: bounded anti-theater prompt context
+        make_anti_theater_ratchet_result(extra_stdout="x" * 1_100_000),
+        "n3-seed-dependency-registry-source-lock-2026-05-15",
+        0,
+        tmp_path,
+    )
+
+    assert len(prompt) <= rg_mod._RECOVERY_AGENT_PROMPT_MAX_CHARS  # ANTICHEAT_OK
+    assert "Anti-Theater Ratchet Diagnostic Context" in prompt
+    assert _ANTI_THEATER_RATCHET_PYTEST_ID in prompt
+    assert "must not be repaired by allowlist expansion" in prompt
+    assert "proof-quality behavioral test repair" in prompt
+    assert "reports/deferred/<wave>.md" in prompt
+    assert (
+        "reports/deferred/n3-seed-dependency-registry-source-lock-2026-05-15.md"
+        not in prompt
+    )
+
+
+def test_anti_theater_ratchet_tail_signal_after_large_prefix_blocks_allowlist_repair(tmp_path):
+    result = make_anti_theater_ratchet_result(prefix_stdout="x" * 250_000)
+
+    context = rg_mod._anti_theater_ratchet_context(result)  # ANTICHEAT_OK: bounded tail signal detection
+    assert context is not None
+    assert context["pytest_ids"] == [_ANTI_THEATER_RATCHET_PYTEST_ID]
+
+    prompt = rg_mod._build_diagnosis_prompt(  # ANTICHEAT_OK: bounded anti-theater prompt context
+        result,
+        "n3-seed-dependency-registry-source-lock-2026-05-15",
+        0,
+        tmp_path,
+    )
+    assert len(prompt) <= rg_mod._RECOVERY_AGENT_PROMPT_MAX_CHARS  # ANTICHEAT_OK
+    assert "Anti-Theater Ratchet Diagnostic Context" in prompt
+    assert _ANTI_THEATER_RATCHET_PYTEST_ID in prompt
+
+    rejection = rg_mod._anti_theater_response_policy_rejection(  # ANTICHEAT_OK: policy guard regression
+        result,
+        {
+            "action": "shell",
+            "commands": ["printf x >> tools/checks/theater_allowlist.json"],
+            "explanation": "update the ratchet allowlist for the new method",
+        },
+    )
+    assert "allowlist-first repair" in rejection
+
+
+def test_anti_theater_ratchet_extracts_module_level_pytest_id():
+    pytest_id = "mu/tests/l4_gates/test_example.py::<module>::test_vacuous"
+    result = {
+        "status": "failed",
+        "step": "run_pre_push_script",
+        "failure_class": "l4_contract_violation",
+        "stdout": (
+            "=== Anti-Theater Ratchet Check ===\n"
+            "NEW (unallowlisted) - 1 method(s):\n"
+            f"  {pytest_id}\n"
+            "FAIL: 1 new unallowlisted.\n"
+        ),
+        "stderr": "",
+    }
+
+    context = rg_mod._anti_theater_ratchet_context(result)  # ANTICHEAT_OK: module-level ratchet extraction
+    assert context is not None
+    assert context["pytest_ids"] == [pytest_id]
+
+    prompt_context = rg_mod._build_anti_theater_ratchet_prompt_context(result)  # ANTICHEAT_OK
+    assert pytest_id in prompt_context
+    assert "(pytest method not extracted from bounded failure evidence)" not in prompt_context
+
+
+def test_anti_theater_ratchet_policy_allows_negated_allowlist_path_mentions():
+    response = {
+        "action": "shell",
+        "commands": [
+            f"python3 -m pytest -q {_ANTI_THEATER_RATCHET_PYTEST_ID} --tb=short"
+        ],
+        "explanation": (
+            "avoid tools/checks/theater_allowlist.json; "
+            "repair the behavioral test instead"
+        ),
+    }
+
+    assert (
+        rg_mod._text_proposes_anti_theater_allowlist_expansion(  # ANTICHEAT_OK: negated path mention
+            response["explanation"]
+        )
+        is False
+    )
+    assert (
+        rg_mod._anti_theater_response_policy_rejection(  # ANTICHEAT_OK: targeted pytest remains available
+            make_anti_theater_ratchet_result(),
+            response,
+        )
+        == ""
+    )
+
+
+def test_anti_theater_ratchet_blocks_allowlist_first_shell_before_execution(tmp_path):
+    response = json.dumps({
+        "action": "shell",
+        "commands": ["printf x >> tools/checks/theater_allowlist.json"],
+        "explanation": "update the ratchet allowlist for the new unallowlisted method",
+    })
+    fake = FakePopen(stdout=response, pid=6010)
+
+    def fake_run(args, **kwargs):
+        if args == ["git", "status", "--short"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        raise AssertionError(f"allowlist-first shell command must not execute: {args!r}")
+
+    with patch.object(rg_mod.subprocess, "run", side_effect=fake_run), \
+         patch.object(rg_mod.subprocess, "Popen", return_value=fake):
+        out = rg_mod.run_recovery_loop(
+            tmp_path,
+            make_anti_theater_ratchet_result(),
+            "n3-seed-dependency-registry-source-lock-2026-05-15",
+            max_iterations=1,
+        )
+
+    assert out["recovered"] is False
+    assert out["exhausted"] is True
+    assert out["log"][0]["action"] == "policy_blocked"
+    assert "allowlist-first repair" in out["log"][0]["detail"]
+    assert not (tmp_path / "tools" / "checks" / "theater_allowlist.json").exists()
+    status = rg_mod._load_recovery_status(tmp_path)  # ANTICHEAT_OK
+    assert status["state"] == "tier3_policy_blocked"
+    assert status["outcome"] == "policy_blocked"
+
+
+def test_anti_theater_ratchet_delegate_scope_rejects_missing_deferred_path(tmp_path, monkeypatch):
+    init_hybrid_delegate_tree(tmp_path)
+    config_dir = tmp_path / "mu" / "tools" / "executors"
+    (config_dir / "executor_config.json").write_text(
+        json.dumps({"hybrid_recovery_enabled": True}),
+        encoding="utf-8",
+    )
+    response = make_delegate_response(
+        files_in_scope=[
+            "mu/tools/executors/recovery_gate.py",
+            "reports/deferred/n3-seed-dependency-registry-source-lock-2026-05-15.md",
+        ],
+    )
+    monkeypatch.setattr(
+        rg_mod,
+        "_load_phase_b_implementer_module",
+        lambda _root: (_ for _ in ()).throw(AssertionError("delegate must not launch")),
+    )
+
+    result = rg_mod._run_delegate_implementer_action(  # ANTICHEAT_OK: anti-theater delegate scope guard
+        tmp_path,
+        result=make_anti_theater_ratchet_result(),
+        wave_id="n3-seed-dependency-registry-source-lock-2026-05-15",
+        step="run_pre_push_script",
+        response=response,
+        explanation="repair without deferred invention",
+        recovery_prompt_path=".scratch/recovery_agent_anti-theater-run-pre-push-script-1.txt",
+    )
+
+    assert result["ok"] is False
+    assert (
+        "anti-theater ratchet delegate scope references missing deferred path"
+        in result["detail"]
+    )
+    assert "reports/deferred/n3-seed-dependency-registry-source-lock-2026-05-15.md" in result["detail"]
+
+
+def test_anti_theater_ratchet_policy_preserves_dangerous_command_restrictions(tmp_path):
+    safe_pytest = "python3 -m pytest mu/tests/tools/test_recovery_gate.py"
+    response = json.dumps({
+        "action": "shell",
+        "commands": ["git reset --hard", "git push origin HEAD", safe_pytest],
+        "explanation": "run bounded recovery commands",
+    })
+    fake = FakePopen(stdout=response, pid=6011)
+    executed_commands = []
+
+    def fake_run(args, **kwargs):
+        if args == ["git", "status", "--short"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if args in {"git reset --hard", "git push origin HEAD"}:
+            raise AssertionError(f"dangerous command must not execute: {args!r}")
+        executed_commands.append(args)
+        return subprocess.CompletedProcess(args, 0, "ok", "")
+
+    with patch.object(rg_mod.subprocess, "run", side_effect=fake_run), \
+         patch.object(rg_mod.subprocess, "Popen", return_value=fake):
+        out = rg_mod.run_recovery_loop(
+            tmp_path,
+            make_anti_theater_ratchet_result(),
+            "n3-seed-dependency-registry-source-lock-2026-05-15",
+            max_iterations=1,
+        )
+
+    assert out["recovered"] is False
+    assert out["exhausted"] is True
+    assert out["log"][0]["action"] == "shell"
+    assert out["log"][0]["blocked"] is True
+    assert "BLOCKED: git reset --hard" in out["log"][0]["results"]
+    assert "BLOCKED: git push origin HEAD" in out["log"][0]["results"]
+    assert executed_commands == [safe_pytest]
+
+
 # ---------------------------------------------------------------------------
 # Regression tests for FailureClass.PR_CONFLICTING + fix_pr_conflicting
 # (Work Item E in the Phase A plan for recovery-gate-pr-conflicting-2026-04-20)
