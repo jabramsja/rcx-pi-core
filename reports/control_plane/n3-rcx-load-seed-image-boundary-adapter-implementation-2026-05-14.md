@@ -575,14 +575,83 @@ PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receip
 Result: passed with `3 passed in 0.44s`, `2 passed in 0.67s`, and `2 passed in
 1.13s`.
 
-Current staged L4 evidence after re-entry/root-fix reconciliation:
+## Commit Executor Retry Root Fix (2026-05-15)
+
+Root-cause evidence after PR #970 reached the commit/push/CI path:
+
+- `.agent_bus/executors/phase_b_handoff.json` still listed the old active
+  generated packet in `files_to_stage` and `scope_items`, while also listing the
+  closed archive in `files_to_stage` and `force_add_files`.
+- `git log --name-status -2 -- <active-packet> <closed-archive>` shows commit
+  `09579ac4` deleted the active packet and added the archive.
+- `git ls-files --stage -- <active-packet> <closed-archive>` now returns only
+  the closed archive index entry. The active generated packet is absent from the
+  worktree and index.
+- The retry validator only excluded active paths while they were currently
+  staged deletions. After the deletion commit, the same stale handoff path was no
+  longer a staged deletion, so validation reconstructed a false active/archive
+  collision from handoff text instead of repo truth.
+
+Mechanical repair:
+
+- `mu/tools/executors/commit_executor.py` now treats a same-wave active deferred
+  packet as closed for the active/archive collision check when the path is absent
+  from both the worktree and Git index.
+- The existing staged-deletion allowance remains intact, so uncommitted closeout
+  still passes only when the active packet deletion is staged.
+- The validator still rejects handoffs that list an active packet and closed
+  archive when no repo root is provided or when the active packet remains live in
+  repo truth.
+- `mu/tests/tools/test_commit_executor_receipt.py` adds a committed-deletion
+  regression that reproduces the retry state: stale handoff text lists both
+  active and archive paths, while the repo has already committed deletion of the
+  active packet and retained only the archive.
+
+Focused retry-root evidence:
+
+```bash
+PYTHONHASHSEED=0 python3 -m pytest -q \
+  mu/tests/tools/test_commit_executor_receipt.py::TestReceiptChainEndToEnd::test_build_handoff_accepts_same_wave_staged_deletion_with_closed_archive \
+  mu/tests/tools/test_commit_executor_receipt.py::TestReceiptChainEndToEnd::test_validate_handoff_accepts_same_wave_committed_deletion_with_closed_archive \
+  --tb=short
+```
+
+Result: passed with `2 passed in 0.93s`.
+
+```bash
+PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py --tb=short
+```
+
+Result: passed with `131 passed in 32.31s`.
+
+```bash
+python3 -m py_compile mu/tools/executors/commit_executor.py
+git diff --check
+./tools/checks/check_docs_consistency.sh
+python3 mu/tools/checks/check_host_semantics_ratchet.py --json
+python3 tools/checks/check_host_authority_inventory_ratchet.py
+```
+
+Result: passed. Host-semantics ratchet reported no increases; host-authority
+inventory remained `311 total` / `217 authority`, with no new total-inventory or
+authority-subset sites detected.
+
+Current staged L4 evidence after the retry-root fix:
 
 ```bash
 python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14
 ```
 
-Result: passed as `L4_ENABLER` compliant with 9 changed files, 0 runtime files,
+Result: passed as `L4_ENABLER` compliant with 5 changed files, 0 runtime files,
 and only control-plane/tooling evidence paths in scope.
+
+Retry-root staged files:
+
+- `TASKS.md`
+- `mu/tests/tools/test_commit_executor_receipt.py`
+- `mu/tools/executors/commit_executor.py`
+- `reports/control_plane/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.md`
+- `reports/l4_wave_indicators/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.json`
 
 Questions? Concerns? Thoughts? -- Think hard
 
@@ -612,20 +681,16 @@ Questions? Concerns? Thoughts? -- Think hard
 - Refresh wave: `n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14`
 - Active packet: `reports/control_plane/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `5c2204fb8286b3fbe7e4e446e1df279026f91a12f3887f782fd903f29e84779f`
+- Tracker note sha256: `9dfb21ba9105f9cc6d811cdd0596893719de8daa4299b33623aeddf7235b2140`
 - Indicator artifact: `reports/l4_wave_indicators/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_phase_b_executor.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.md. (2) Final pytest gate covered 2 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py`.
+- Evidence delta: (1) Routed commit handoff scopes 5 wave-owned file(s). (2) Evidence gate exercises 1 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.json..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.json`
 - Current staged files:
   - `TASKS.md`
   - `mu/tests/tools/test_commit_executor_receipt.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
   - `mu/tools/executors/commit_executor.py`
-  - `mu/tools/executors/phase_b_executor.py`
-  - `reports/archive/deferred/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14_bridge_nonblockers_closed-by-n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.md`
   - `reports/control_plane/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.md`
-  - `reports/deferred/non_blocking/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/n3-rcx-load-seed-image-boundary-adapter-implementation-2026-05-14.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

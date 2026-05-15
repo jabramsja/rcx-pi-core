@@ -2210,6 +2210,41 @@ class TestReceiptChainEndToEnd:
         assert build_errors == []
         assert rebuilt["files_to_stage"] == [deferred_path, archive_path]
 
+    def test_validate_handoff_accepts_same_wave_committed_deletion_with_closed_archive(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "deferred-auth-wave"
+        deferred_path = "reports/deferred/non_blocking/deferred-auth-wave_bridge_nonblockers.md"
+        archive_path = (
+            "reports/archive/deferred/"
+            "deferred-auth-wave_bridge_nonblockers_closed-by-deferred-auth-wave.md"
+        )
+        deferred_file = repo / deferred_path
+        deferred_file.parent.mkdir(parents=True, exist_ok=True)
+        deferred_file.write_text("# Deferred\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", deferred_path], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "add deferred packet"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "rm", "--", deferred_path], cwd=repo, check=True, capture_output=True)
+        archive_file = repo / archive_path
+        archive_file.parent.mkdir(parents=True, exist_ok=True)
+        archive_file.write_text("# Closed deferred packet\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", archive_path], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "close deferred packet"], cwd=repo, check=True, capture_output=True)
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            files_to_stage=[deferred_path, archive_path],
+            deferred_items=[],
+        )
+
+        ok_without_repo, errors_without_repo = commit_mod.validate_handoff(handoff)
+        ok, errors = commit_mod.validate_handoff(handoff, repo_root=repo)
+
+        assert ok_without_repo is False
+        assert any("both active deferred and archived closed" in error for error in errors_without_repo)
+        assert ok is True
+        assert errors == []
+
     def test_commit_packet_truth_refresh_authorizes_staged_same_wave_deferred_packet(self, tmp_path):
         import subprocess
 

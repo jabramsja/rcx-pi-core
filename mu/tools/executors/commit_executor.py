@@ -1304,6 +1304,17 @@ def _is_staged_deletion(repo_root: Path, rel_path: str) -> bool:
     )
 
 
+def _is_absent_from_worktree_and_index(repo_root: Path, rel_path: str) -> bool:
+    """Return true when repo truth has no live worktree or index entry."""
+    normalized = _normalize_repo_relpath(str(rel_path or ""))
+    if not normalized or _is_absolute_untrusted_path(normalized) or _has_path_traversal(normalized):
+        return False
+    path = repo_root / normalized
+    if path.exists() or path.is_symlink():
+        return False
+    return not _git_index_contains_repo_path(repo_root, normalized)
+
+
 def _same_wave_active_deferred_non_blocking_paths(
     wave_id: str,
     paths: list[str],
@@ -1315,7 +1326,10 @@ def _same_wave_active_deferred_non_blocking_paths(
         return active_paths
     return [
         path for path in active_paths
-        if not _is_staged_deletion(repo_root, path)
+        if not (
+            _is_staged_deletion(repo_root, path)
+            or _is_absent_from_worktree_and_index(repo_root, path)
+        )
     ]
 
 
