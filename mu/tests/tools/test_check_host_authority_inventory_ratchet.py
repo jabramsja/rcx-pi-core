@@ -423,6 +423,60 @@ class TestHostAuthorityInventorySplitAllowances:
         )
         assert any("old/new substrates must match" in error for error in errors)
 
+    def test_one_old_site_to_multiple_new_sites_fails_schema_validation(self):
+        errors = validate_split_allowances(
+            _split_allowances(
+                [
+                    _split_entry(
+                        "py-split-a",
+                        "python",
+                        self.PY_FILE,
+                        self.PY_OLD,
+                        self.PY_FILE,
+                        self.PY_NEW,
+                        ["builtin:len"],
+                    ),
+                    _split_entry(
+                        "py-split-b",
+                        "python",
+                        self.PY_FILE,
+                        self.PY_OLD,
+                        self.PY_FILE,
+                        "load_verified_seed_image_alt",
+                        ["builtin:len"],
+                    ),
+                ]
+            )
+        )
+        assert any("old site maps to multiple new sites" in error for error in errors)
+
+    def test_multiple_old_sites_to_one_new_site_fails_schema_validation(self):
+        errors = validate_split_allowances(
+            _split_allowances(
+                [
+                    _split_entry(
+                        "py-split-a",
+                        "python",
+                        self.PY_FILE,
+                        self.PY_OLD,
+                        self.PY_FILE,
+                        self.PY_NEW,
+                        ["builtin:len"],
+                    ),
+                    _split_entry(
+                        "py-split-b",
+                        "python",
+                        self.PY_FILE,
+                        "load_verified_seed_alt",
+                        self.PY_FILE,
+                        self.PY_NEW,
+                        ["builtin:len"],
+                    ),
+                ]
+            )
+        )
+        assert any("new site maps from multiple old sites" in error for error in errors)
+
     def test_wrong_signal_shape_fails_closed(self):
         baseline, policy = self._baseline_and_policy()
         current = self._accepted_current()
