@@ -4884,6 +4884,35 @@ class TestHybridScopeAudit:
         assert blocked is True
         assert "bootstrap/adapter fault" in detail
 
+    def test_bootstrap_adapter_fault_ignores_diagnostic_stdout_mentions(self):
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: bootstrap fault guard
+            {
+                "status": "failed",
+                "step": "build_and_run_supervisor",
+                "stderr": "",
+                "stdout": (
+                    "Supervisor read mu/tools/executors/phase_b_implementer.py "
+                    "while diagnosing a staged package regression."
+                ),
+            },
+            ["mu/tools/executors/recovery_gate.py"],
+        )
+        assert blocked is False
+        assert detail == ""
+
+    def test_bootstrap_adapter_fault_detects_stdout_config_errors(self):
+        blocked, detail = rg_mod._hybrid_bootstrap_fault_detected(  # ANTICHEAT_OK: bootstrap fault guard
+            {
+                "status": "failed",
+                "step": "build_and_run_supervisor",
+                "stderr": "",
+                "stdout": "Bridge adapter config error: missing backend",
+            },
+            ["mu/tools/executors/recovery_gate.py"],
+        )
+        assert blocked is True
+        assert "bootstrap/adapter fault" in detail
+
 
 class TestDangerousCommandDetection:
     @pytest.mark.parametrize("cmd", [

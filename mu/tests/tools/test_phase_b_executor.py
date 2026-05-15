@@ -138,6 +138,66 @@ class TestPhaseBWaveClassResolution:
 
         assert "Class: L4_ENABLER" in note
 
+    def test_no_go_structural_packet_without_runtime_packages_as_enabler(self):
+        plan = (
+            "Class: L4_STRUCTURAL\n"
+            "\n"
+            "Status: NO-GO before commit readiness.\n"
+            "The package remains NO-GO: it has no accepted executable runtime delta.\n"
+        )
+
+        note = pb_mod.build_phase_b_tracker_note(
+            wave_id="no-go-structural-wave",
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/no_go.md",
+            plan_content=plan,
+            changed_files=[
+                "TASKS.md",
+                "reports/control_plane/no_go.md",
+                "reports/deferred/non_blocking/no_go_bridge_nonblockers.md",
+                "reports/l4_wave_indicators/no-go-structural-wave.json",
+            ],
+            test_files=[],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=2,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        assert "Class: L4_ENABLER" in note
+        assert "host_semantics_delta_before" not in note
+        assert "structural_artifact_ref" not in note
+
+    def test_smaller_prerequisite_alone_does_not_downgrade_structural_packet(self):
+        plan = (
+            "Class: L4_STRUCTURAL\n"
+            "\n"
+            "The package needs a smaller prerequisite before implementation.\n"
+        )
+
+        note = pb_mod.build_phase_b_tracker_note(
+            wave_id="ambiguous-structural-wave",
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/ambiguous.md",
+            plan_content=plan,
+            changed_files=[
+                "TASKS.md",
+                "reports/control_plane/ambiguous.md",
+                "reports/l4_wave_indicators/ambiguous-structural-wave.json",
+            ],
+            test_files=[],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=1,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        assert "Class: L4_STRUCTURAL" in note
+
     def test_runtime_structural_packet_stays_structural(self):
         note = pb_mod.build_phase_b_tracker_note(
             wave_id="runtime-structural-wave",

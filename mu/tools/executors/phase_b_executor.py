@@ -1048,6 +1048,10 @@ def _plan_declares_routing_boundary(plan_content: str) -> bool:
         "not an implementation packet" in text
         or "phase a routing boundary" in text
         or "locked later phase b plan" in text
+        or "no-go package" in text
+        or "no-go before commit readiness" in text
+        or "stopped before commit readiness" in text
+        or "no accepted executable runtime delta" in text
     )
 
 

@@ -4943,12 +4943,11 @@ def _hybrid_bootstrap_fault_detected(
     for rel_path in files_in_scope:
         if rel_path in _HYBRID_BOOTSTRAP_SURFACES:
             return True, f"hybrid delegation may not target bootstrap surface: {rel_path}"
-    haystack = " ".join(
+    diagnostic_haystack = " ".join(
         str(result.get(key, "") or "")
         for key in ("step", "stderr", "stdout", "executor")
     ).lower()
     blocked_fragments = (
-        "mu/tools/executors/phase_b_implementer.py",
         ".agent_bus/bridge_config.json",
         "bridge adapter config error",
         "cannot import bridge_adapters",
@@ -4956,7 +4955,7 @@ def _hybrid_bootstrap_fault_detected(
         "adapter selection",
     )
     for fragment in blocked_fragments:
-        if fragment in haystack:
+        if fragment in diagnostic_haystack:
             return True, f"hybrid delegation blocked for bootstrap/adapter fault: {fragment}"
     return False, ""
 
