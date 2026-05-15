@@ -291,20 +291,9 @@ class TestSeedDependencyParity:
     """Python and JS seed dependency registries must match."""
 
     def test_js_seed_dependencies_match_python(self):
-        """JS SEED_DEPENDENCIES must mirror Python SEED_DEPENDENCIES."""
-        from pathlib import Path
-        from rcx_pi.selfhost.seed_integrity import SEED_DEPENDENCIES, get_mu_dir
+        """JS SEED_DEPENDENCIES export must exactly mirror Python."""
+        from mu.tests.parity.test_seed_loading_parity import (
+            assert_seed_dependency_maps_match_exactly,
+        )
 
-        # Read JS seed_loader.js using canonical mu_dir (avoids symlink issues)
-        js_path = get_mu_dir() / "host" / "js" / "core" / "seed_loader.js"
-        js_content = js_path.read_text()
-
-        # For each Python dependency, verify the JS file mentions it
-        for seed_name, deps in SEED_DEPENDENCIES.items():
-            assert seed_name in js_content, (
-                f"JS seed_loader.js missing dependency entry for {seed_name}"
-            )
-            for dep in deps:
-                assert dep in js_content, (
-                    f"JS seed_loader.js missing dependency {dep} for {seed_name}"
-                )
+        assert_seed_dependency_maps_match_exactly()

@@ -20,6 +20,7 @@ What this checker does NOT prove:
 
 from __future__ import annotations
 
+from collections import Counter
 import functools
 import json
 import os
@@ -30,6 +31,7 @@ from pathlib import Path
 import pytest
 from rcx_pi.selfhost.seed_integrity import (
     SEED_CHECKSUMS,
+    SEED_DEPENDENCIES,
     EXPECTED_PROJECTION_IDS,
     MU_SEED_LOCATIONS,
     get_seed_path,
@@ -120,6 +122,102 @@ def _js_load_verified_seed_result(seed_name: str, subdir: str) -> dict[str, obje
     return json.loads(proc.stdout)
 
 
+def _js_seed_dependencies() -> dict[str, list[str]]:
+    js_script = """
+    const { SEED_DEPENDENCIES } = require('./mu/host/js/core/seed_loader');
+    const nonArrayValues = {};
+    for (const [seedName, deps] of Object.entries(SEED_DEPENDENCIES)) {
+      if (!Array.isArray(deps)) {
+        nonArrayValues[seedName] = Object.prototype.toString.call(deps);
+      }
+    }
+    console.log(JSON.stringify({
+      dependencies: SEED_DEPENDENCIES,
+      nonArrayValues,
+    }));
+    """
+    proc = subprocess.run(
+        ["node", "-e", js_script],
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO),
+        timeout=10,
+    )
+    assert proc.returncode == 0, f"JS seed dependency probe failed: {proc.stderr}"
+    payload = json.loads(proc.stdout)
+    non_array_values = payload["nonArrayValues"]
+    assert non_array_values == {}, (
+        "JS SEED_DEPENDENCIES has non-array values: "
+        f"{non_array_values}"
+    )
+    dependencies = payload["dependencies"]
+    assert isinstance(dependencies, dict), (
+        "JS SEED_DEPENDENCIES export must serialize to an object"
+    )
+    return dependencies
+
+
+def _python_seed_dependencies() -> dict[str, list[str]]:
+    non_list_values = {
+        seed_name: type(deps).__name__
+        for seed_name, deps in SEED_DEPENDENCIES.items()
+        if not isinstance(deps, list)
+    }
+    assert non_list_values == {}, (
+        "Python SEED_DEPENDENCIES has non-list values: "
+        f"{non_list_values}"
+    )
+    return SEED_DEPENDENCIES
+
+
+def _dependency_list_mismatch(seed_name: str, py_list: list[str], js_list: list[str]) -> str:
+    py_counter = Counter(py_list)
+    js_counter = Counter(js_list)
+    missing_targets = sorted((py_counter - js_counter).elements())
+    extra_targets = sorted((js_counter - py_counter).elements())
+    details = [
+        f"{seed_name}:",
+        f"  py={py_list}",
+        f"  js={js_list}",
+    ]
+    if missing_targets:
+        details.append(f"  missing_js_targets={missing_targets}")
+    if extra_targets:
+        details.append(f"  extra_js_targets={extra_targets}")
+    if py_counter == js_counter and py_list != js_list:
+        details.append("  order_drift=true")
+    return "\n".join(details)
+
+
+def assert_seed_dependency_maps_match_exactly() -> None:
+    """Assert Python and JS exported SEED_DEPENDENCIES maps are identical."""
+    py_dependencies = _python_seed_dependencies()
+    js_dependencies = _js_seed_dependencies()
+
+    missing_js_keys = sorted(set(py_dependencies) - set(js_dependencies))
+    extra_js_keys = sorted(set(js_dependencies) - set(py_dependencies))
+    mismatches = []
+
+    for seed_name in sorted(set(py_dependencies) & set(js_dependencies)):
+        py_list = py_dependencies[seed_name]
+        js_list = js_dependencies[seed_name]
+        if py_list != js_list:
+            mismatches.append(_dependency_list_mismatch(seed_name, py_list, js_list))
+
+    errors = []
+    if missing_js_keys:
+        errors.append(f"missing_js_keys={missing_js_keys}")
+    if extra_js_keys:
+        errors.append(f"extra_js_keys={extra_js_keys}")
+    if mismatches:
+        errors.append("dependency_list_mismatches:\n" + "\n".join(mismatches))
+
+    assert not errors, (
+        "Python/JS SEED_DEPENDENCIES exported maps differ:\n"
+        + "\n".join(errors)
+    )
+
+
 def _subdir_relative_to_mu(seed_dir: Path) -> str:
     return os.path.relpath(seed_dir, _REPO / "mu")
 
@@ -200,6 +298,16 @@ class TestProjectionIdParity:
             assert len(py_list) == len(js_list), (
                 f"{seed}: Python has {len(py_list)} projections, JS has {len(js_list)}"
             )
+
+
+# ── Seed dependency parity ──────────────────────────────────────────────
+
+
+class TestSeedDependencyParity:
+    """SEED_DEPENDENCIES maps must match exactly between Python and JS."""
+
+    def test_seed_dependency_maps_match_exactly(self):
+        assert_seed_dependency_maps_match_exactly()
 
 
 # ── Seed location coverage ──────────────────────────────────────────────
