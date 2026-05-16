@@ -731,34 +731,60 @@ class TestJsSeedLoaderMalformedProjection:
         )
         assert out == "OK", f"seed_loader scalar projection: {out}"
 
-    def test_main_validate_seed_structure_type_guard_source_lock(self):
-        """main.js validateSeedStructure contains type guard before 'id' in proj check.
-
-        Source-lock: validateSeedStructure is not exported, so we verify the
-        guard predicate exists in the source and precedes the 'id' in proj check.
-        If the guard is removed or reordered, this test fails.
-        """
+    def test_main_load_verified_seed_delegates_to_seed_image_boundary_source_lock(self):
+        """CLI seed path wrapper delegates parse/validation to the byte boundary."""
         main_js = (REPO_ROOT / "mu" / "host" / "js" / "cli" / "main.js").read_text()
-        guard = "proj === null || typeof proj !== 'object' || Array.isArray(proj)"
-        id_check = "'id' in proj"
-        assert guard in main_js, (
-            "main.js missing type guard predicate in validateSeedStructure"
+        assert "loadVerifiedSeedImage" in main_js, (
+            "main.js must import/use the shared seed image boundary"
         )
-        assert id_check in main_js, (
-            "main.js missing 'id' in proj check in validateSeedStructure"
+        fn_match = re.search(
+            r"function loadVerifiedSeed\(seedPath, seedName\) \{(.*?)^}",
+            main_js,
+            re.DOTALL | re.MULTILINE,
         )
-        guard_pos = main_js.index(guard)
-        id_pos = main_js.index(id_check)
-        assert guard_pos < id_pos, (
-            f"Type guard (pos {guard_pos}) must appear before "
-            f"'id' in proj check (pos {id_pos})"
+        assert fn_match, "main.js loadVerifiedSeed wrapper not found"
+        body = fn_match.group(1)
+        assert "fs.readFileSync(seedPath)" in body, (
+            "main.js path wrapper must retain filesystem read at the outer edge"
+        )
+        assert "loadVerifiedSeedImage(" in body, (
+            "main.js path wrapper must delegate to loadVerifiedSeedImage"
+        )
+        assert "JSON.parse" not in body, (
+            "main.js path wrapper must not parse seed JSON directly"
+        )
+        assert "verifySeedChecksum" not in body, (
+            "main.js path wrapper must not duplicate checksum verification"
         )
 
     def test_core_seed_loader_type_guard_precedes_unknown_and_id_map(self):
-        """seed_loader.js rejects malformed projection entries before registry/id access."""
+        """seed image boundary rejects malformed projections before registry/id access."""
         source = (
             REPO_ROOT / "mu" / "host" / "js" / "core" / "seed_loader.js"
         ).read_text()
+        assert "function loadVerifiedSeedImage(" in source, (
+            "seed_loader.js missing explicit seed image byte boundary"
+        )
+        assert "require('util')" not in source and 'require("util")' not in source, (
+            "seed_loader.js must not widen the Node stdlib import surface for seed bytes"
+        )
+        wrapper_match = re.search(
+            r"function loadVerifiedSeed\(seedName, subdir\) \{(.*?)^}",
+            source,
+            re.DOTALL | re.MULTILINE,
+        )
+        assert wrapper_match, "seed_loader.js loadVerifiedSeed wrapper not found"
+        wrapper_body = wrapper_match.group(1)
+        assert "fs.readFileSync(seedPath)" in wrapper_body, (
+            "seed_loader.js path wrapper must keep file I/O at the outer edge"
+        )
+        assert "loadVerifiedSeedImage(" in wrapper_body, (
+            "seed_loader.js path wrapper must delegate to loadVerifiedSeedImage"
+        )
+        assert "JSON.parse" not in wrapper_body, (
+            "seed_loader.js path wrapper must not parse seed JSON directly"
+        )
+
         guard = "p === null || typeof p !== 'object' || Array.isArray(p)"
         unknown_seed_check = "if (!expected)"
         id_map = "seed.projections.map(p => p.id)"

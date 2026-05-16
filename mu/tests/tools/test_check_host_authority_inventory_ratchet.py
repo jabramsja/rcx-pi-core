@@ -93,13 +93,17 @@ def _split_entry(
     new_file: str,
     new_name: str,
     moved_signals: list[str],
+    split_kind: str | None = None,
 ) -> dict:
-    return {
+    entry = {
         "id": allowance_id,
         "old": {"substrate": substrate, "file": old_file, "name": old_name},
         "new": {"substrate": substrate, "file": new_file, "name": new_name},
         "moved_signals": moved_signals,
     }
+    if split_kind is not None:
+        entry["split_kind"] = split_kind
+    return entry
 
 
 class TestHostAuthorityInventoryRatchet:
@@ -350,10 +354,141 @@ class TestHostAuthorityInventorySplitAllowances:
         assert len(result["accepted_split_pairs"]) == 2
         human = format_human(result, py_files=1, js_files=1)
         as_json = json.dumps(result, sort_keys=True)
-        assert "ACCEPTED SPLITS: 2 exact host-authority split pair(s)" in human
+        assert "ACCEPTED SPLITS: 2 exact host-inventory split pair(s)" in human
         assert "load_verified_seed -> rcx_pi/selfhost/seed_integrity.py::load_verified_seed_image" in human
         assert '"accepted_split_pairs"' in as_json
         assert "py-seed-image-boundary" in as_json
+
+    def test_accepts_mixed_total_and_authority_split_pairs(self):
+        py_old = _site("python", self.PY_FILE, self.PY_OLD, [], 10)
+        js_old = _site("javascript", self.JS_FILE, self.JS_OLD, ["builtin:JSON.parse"], 20)
+        baseline = _make_baseline([py_old, js_old], [js_old])
+        py_old_current = _site("python", self.PY_FILE, self.PY_OLD, [], 10)
+        py_new_current = _site("python", self.PY_FILE, self.PY_NEW, [], 40)
+        js_old_current = _site("javascript", self.JS_FILE, self.JS_OLD, [], 20)
+        js_new_current = _site("javascript", self.JS_FILE, self.JS_NEW, ["builtin:JSON.parse"], 50)
+        policy = _split_allowances(
+            [
+                _split_entry(
+                    "py-total-seed-image-boundary",
+                    "python",
+                    self.PY_FILE,
+                    self.PY_OLD,
+                    self.PY_FILE,
+                    self.PY_NEW,
+                    [],
+                    "total",
+                ),
+                _split_entry(
+                    "js-authority-seed-image-boundary",
+                    "javascript",
+                    self.JS_FILE,
+                    self.JS_OLD,
+                    self.JS_FILE,
+                    self.JS_NEW,
+                    ["builtin:JSON.parse"],
+                    "authority",
+                ),
+            ]
+        )
+        result = compare_inventories(
+            {
+                "total_sites": [py_old_current, py_new_current, js_old_current, js_new_current],
+                "authority_sites": [js_new_current],
+            },
+            baseline,
+            policy,
+        )
+        assert result["passed"] is True
+        assert result["new_total_sites"] == []
+        assert result["new_authority_sites"] == []
+        assert {pair["split_kind"] for pair in result["accepted_split_pairs"]} == {
+            "authority",
+            "total",
+        }
+
+    def test_total_split_rejects_new_authority_signals(self):
+        old = _site("python", self.PY_FILE, self.PY_OLD, [], 10)
+        new = _site("python", self.PY_FILE, self.PY_NEW, ["builtin:len"], 40)
+        policy = _split_allowances(
+            [
+                _split_entry(
+                    "py-total-seed-image-boundary",
+                    "python",
+                    self.PY_FILE,
+                    self.PY_OLD,
+                    self.PY_FILE,
+                    self.PY_NEW,
+                    [],
+                    "total",
+                )
+            ]
+        )
+        result = compare_inventories(
+            {"total_sites": [old, new], "authority_sites": [new]},
+            _make_baseline([old], []),
+            policy,
+        )
+        assert result["passed"] is False
+        assert any(
+            "total split new site appears in current authority subset" in error
+            for error in result["split_policy_errors"]
+        )
+
+    def test_total_split_rejects_old_authority_site(self):
+        old = _site("python", self.PY_FILE, self.PY_OLD, ["builtin:len"], 10)
+        new = _site("python", self.PY_FILE, self.PY_NEW, [], 40)
+        policy = _split_allowances(
+            [
+                _split_entry(
+                    "py-total-seed-image-boundary",
+                    "python",
+                    self.PY_FILE,
+                    self.PY_OLD,
+                    self.PY_FILE,
+                    self.PY_NEW,
+                    [],
+                    "total",
+                )
+            ]
+        )
+        result = compare_inventories(
+            {"total_sites": [old, new], "authority_sites": [old]},
+            _make_baseline([old], [old]),
+            policy,
+        )
+        assert result["passed"] is False
+        assert any(
+            "total split old site is present in baseline authority subset" in error
+            for error in result["split_policy_errors"]
+        )
+
+    def test_total_split_stale_policy_fails_closed(self):
+        old = _site("python", self.PY_FILE, self.PY_OLD, [], 10)
+        policy = _split_allowances(
+            [
+                _split_entry(
+                    "py-total-stale",
+                    "python",
+                    self.PY_FILE,
+                    self.PY_OLD,
+                    self.PY_FILE,
+                    self.PY_NEW,
+                    [],
+                    "total",
+                )
+            ]
+        )
+        result = compare_inventories(
+            {"total_sites": [old], "authority_sites": []},
+            _make_baseline([old], []),
+            policy,
+        )
+        assert result["passed"] is False
+        assert any(
+            "new site is missing from current total inventory" in error
+            for error in result["split_policy_errors"]
+        )
 
     def test_malformed_split_policy_fails_closed(self):
         baseline, _policy = self._baseline_and_policy()
@@ -422,6 +557,25 @@ class TestHostAuthorityInventorySplitAllowances:
             )
         )
         assert any("old/new substrates must match" in error for error in errors)
+
+    def test_total_split_requires_empty_moved_signals(self):
+        errors = validate_split_allowances(
+            _split_allowances(
+                [
+                    _split_entry(
+                        "py-total-with-signals",
+                        "python",
+                        self.PY_FILE,
+                        self.PY_OLD,
+                        self.PY_FILE,
+                        self.PY_NEW,
+                        ["builtin:len"],
+                        "total",
+                    )
+                ]
+            )
+        )
+        assert any("must be empty for total-inventory splits" in error for error in errors)
 
     def test_one_old_site_to_multiple_new_sites_fails_schema_validation(self):
         errors = validate_split_allowances(
@@ -634,5 +788,5 @@ class TestHostAuthorityInventoryInvocationPaths:
         mu_payload = json.loads(mu_result.stdout)
         assert tools_payload["passed"] is True
         assert mu_payload["passed"] is True
-        assert tools_payload["accepted_split_pairs"] == mu_payload["accepted_split_pairs"] == []
+        assert tools_payload["accepted_split_pairs"] == mu_payload["accepted_split_pairs"]
         assert tools_payload["split_policy_errors"] == mu_payload["split_policy_errors"] == []

@@ -14,12 +14,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 
 // Core modules
 const { validateNoKernelReservedFields } = require('../core/security');
 const muContainers = require('../core/container_factory');
 const stage0Vm = require('../core/stage0_vm');
+const { loadVerifiedSeedImage } = require('../core/seed_loader');
 
 // Seed integrity verification — parity with Python's seed_integrity.py
 const SEED_CHECKSUMS = {
@@ -159,15 +159,6 @@ const EXPECTED_PROJECTION_IDS = {
   ],
 };
 
-function verifySeedChecksum(seedName, rawContent) {
-  const expected = SEED_CHECKSUMS[seedName];
-  if (!expected) throw new Error(`Unknown seed: ${seedName} — not in SEED_CHECKSUMS (fail-closed)`);
-  const actual = crypto.createHash('sha256').update(rawContent).digest('hex');
-  if (actual !== expected) {
-    throw new Error(`Seed ${seedName} checksum mismatch: expected ${expected}, got ${actual}`);
-  }
-}
-
 function validateSeedStructure(seedName, seed) {
   if (!('meta' in seed) || seed.meta === null || typeof seed.meta !== 'object') {
     throw new Error(`Seed ${seedName}: missing or invalid 'meta' field`);
@@ -182,20 +173,6 @@ function validateSeedStructure(seedName, seed) {
     }
     if (!('id' in proj) || !('pattern' in proj) || !('body' in proj)) {
       throw new Error(`Seed ${seedName}: projection ${i} missing required field (id/pattern/body)`);
-    }
-  }
-}
-
-function validateProjectionIds(seedName, seed) {
-  const expected = EXPECTED_PROJECTION_IDS[seedName];
-  if (!expected) throw new Error(`Unknown seed: ${seedName} — not in EXPECTED_PROJECTION_IDS (fail-closed)`);
-  const actualIds = seed.projections.map(p => p.id);
-  if (actualIds.length !== expected.length) {
-    throw new Error(`Seed ${seedName}: expected ${expected.length} projections, got ${actualIds.length}`);
-  }
-  for (let i = 0; i < expected.length; i++) {
-    if (actualIds[i] !== expected[i]) {
-      throw new Error(`Seed ${seedName}: projection order mismatch at index ${i}: expected '${expected[i]}', got '${actualIds[i]}'`);
     }
   }
 }
@@ -243,12 +220,15 @@ function validateCombinedBridgeOrdering(projections) {
 }
 
 function loadVerifiedSeed(seedPath, seedName) {
-  const raw = fs.readFileSync(seedPath, 'utf8');
-  verifySeedChecksum(seedName, raw);
-  const seed = stage0Vm.muCopy(JSON.parse(raw), true, 'Verified seed parse tree');
-  validateSeedStructure(seedName, seed);
-  validateProjectionIds(seedName, seed);
-  return seed;
+  const raw = fs.readFileSync(seedPath);
+  return loadVerifiedSeedImage(
+    seedName,
+    raw,
+    SEED_CHECKSUMS,
+    EXPECTED_PROJECTION_IDS,
+    'SEED_CHECKSUMS',
+    'EXPECTED_PROJECTION_IDS'
+  );
 }
 
 // mu/ root is 3 levels up from cli/

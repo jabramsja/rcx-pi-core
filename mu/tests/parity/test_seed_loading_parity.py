@@ -34,8 +34,10 @@ from rcx_pi.selfhost.seed_integrity import (
     SEED_DEPENDENCIES,
     EXPECTED_PROJECTION_IDS,
     MU_SEED_LOCATIONS,
+    compute_checksum,
     get_seed_path,
     load_verified_seed,
+    load_verified_seed_image,
 )
 
 # ── Locate JS source ────────────────────────────────────────────────────
@@ -119,6 +121,116 @@ def _js_load_verified_seed_result(seed_name: str, subdir: str) -> dict[str, obje
         timeout=10,
     )
     assert proc.returncode == 0, f"JS seed loader probe failed: {proc.stderr}"
+    return json.loads(proc.stdout)
+
+
+def _python_load_verified_seed_image_result(
+    seed_name: str, seed_bytes: bytes, *, verify: bool
+) -> dict[str, object]:
+    try:
+        seed = load_verified_seed_image(seed_name, seed_bytes, verify=verify)
+    except Exception as exc:  # tests compare fail-closed behavior across substrates
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "ids": [proj["id"] for proj in seed["projections"]]}
+
+
+def _js_load_verified_seed_image_result(
+    seed_name: str,
+    raw_json: str,
+    expected_ids: list[str] | None = None,
+    *,
+    register_checksum: bool,
+) -> dict[str, object]:
+    js_script = f"""
+    const crypto = require('crypto');
+    const {{ loadVerifiedSeedImage }} = require('./mu/host/js/core/seed_loader');
+    const raw = Buffer.from({json.dumps(raw_json)}, 'utf8');
+    const checksums = Object.create(null);
+    const projectionIds = Object.create(null);
+    if ({json.dumps(register_checksum)}) {{
+      checksums[{json.dumps(seed_name)}] = crypto.createHash('sha256').update(raw).digest('hex');
+    }}
+    if ({json.dumps(expected_ids)} !== null) {{
+      projectionIds[{json.dumps(seed_name)}] = {json.dumps(expected_ids)};
+    }}
+    try {{
+      const seed = loadVerifiedSeedImage(
+        {json.dumps(seed_name)},
+        raw,
+        checksums,
+        projectionIds,
+        'TEST_CHECKSUMS',
+        'TEST_PROJECTION_IDS'
+      );
+      console.log(JSON.stringify({{
+        ok: true,
+        ids: seed.projections.map(p => p.id),
+      }}));
+    }} catch (e) {{
+      console.log(JSON.stringify({{
+        ok: false,
+        error: e.message,
+      }}));
+    }}
+    """
+    proc = subprocess.run(
+        ["node", "-e", js_script],
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO),
+        timeout=10,
+    )
+    assert proc.returncode == 0, f"JS seed image loader probe failed: {proc.stderr}"
+    return json.loads(proc.stdout)
+
+
+def _js_load_verified_seed_image_bytes_result(
+    seed_name: str,
+    seed_bytes: bytes,
+    expected_ids: list[str] | None = None,
+    *,
+    register_checksum: bool,
+) -> dict[str, object]:
+    js_script = f"""
+    const crypto = require('crypto');
+    const {{ loadVerifiedSeedImage }} = require('./mu/host/js/core/seed_loader');
+    const raw = Buffer.from({list(seed_bytes)});
+    const checksums = Object.create(null);
+    const projectionIds = Object.create(null);
+    if ({json.dumps(register_checksum)}) {{
+      checksums[{json.dumps(seed_name)}] = crypto.createHash('sha256').update(raw).digest('hex');
+    }}
+    if ({json.dumps(expected_ids)} !== null) {{
+      projectionIds[{json.dumps(seed_name)}] = {json.dumps(expected_ids)};
+    }}
+    try {{
+      const seed = loadVerifiedSeedImage(
+        {json.dumps(seed_name)},
+        raw,
+        checksums,
+        projectionIds,
+        'TEST_CHECKSUMS',
+        'TEST_PROJECTION_IDS'
+      );
+      console.log(JSON.stringify({{
+        ok: true,
+        ids: seed.projections.map(p => p.id),
+      }}));
+    }} catch (e) {{
+      console.log(JSON.stringify({{
+        ok: false,
+        error: e.message,
+      }}));
+    }}
+    """
+    proc = subprocess.run(
+        ["node", "-e", js_script],
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO),
+        timeout=10,
+    )
+    assert proc.returncode == 0, f"JS seed image bytes probe failed: {proc.stderr}"
     return json.loads(proc.stdout)
 
 
@@ -388,6 +500,148 @@ class TestProductionLoaderBoundaryParity:
         assert "Unknown seed" in str(py_result["error"])
         assert js_result["ok"] is False
         assert "projection[0]" in str(js_result["error"])
+
+    def test_non_finite_seed_image_fails_closed_in_both_byte_boundaries(self):
+        """Both seed image boundaries reject non-finite numeric JSON."""
+        raw_json = (
+            '{"meta": {"version": "1.0", "name": "NAN", "description": "x"}, '
+            '"projections": [{"id": "x", "pattern": NaN, "body": {}}]}'
+        )
+
+        py_result = _python_load_verified_seed_image_result(
+            "nonfinite_control.v1.json", raw_json.encode("utf-8"), verify=False
+        )
+        js_result = _js_load_verified_seed_image_result(
+            "nonfinite_control.v1.json",
+            raw_json,
+            register_checksum=False,
+        )
+
+        assert py_result["ok"] is False
+        assert "NaN" in str(py_result["error"])
+        assert js_result["ok"] is False
+        assert (
+            "Unexpected token" in str(js_result["error"])
+            or "not valid JSON" in str(js_result["error"])
+        )
+
+    def test_js_seed_image_boundary_validates_projection_order(self):
+        """JS byte boundary enforces caller-provided projection ID order."""
+        raw_json = json.dumps(
+            {
+                "meta": {
+                    "version": "1.0",
+                    "name": "ORDER",
+                    "description": "projection order control",
+                },
+                "projections": [
+                    {"id": "order.second", "pattern": {}, "body": {}},
+                    {"id": "order.first", "pattern": {}, "body": {}},
+                ],
+            }
+        )
+        js_result = _js_load_verified_seed_image_result(
+            "order_control.v1.json",
+            raw_json,
+            expected_ids=["order.first", "order.second"],
+            register_checksum=True,
+        )
+
+        assert js_result["ok"] is False
+        assert "projection IDs mismatch" in str(js_result["error"])
+
+    def test_registered_seed_image_missing_meta_fails_closed_in_both_boundaries(
+        self, monkeypatch
+    ):
+        """Registered malformed seed images still pass checksum before structure rejection."""
+        seed_name = "missing_meta_control.v1.json"
+        seed_bytes = json.dumps(
+            {
+                "projections": [
+                    {"id": "missing.meta", "pattern": {}, "body": {}},
+                ],
+            }
+        ).encode("utf-8")
+        monkeypatch.setitem(SEED_CHECKSUMS, seed_name, compute_checksum(seed_bytes))
+        monkeypatch.setitem(EXPECTED_PROJECTION_IDS, seed_name, ["missing.meta"])
+
+        py_result = _python_load_verified_seed_image_result(
+            seed_name, seed_bytes, verify=True
+        )
+        js_result = _js_load_verified_seed_image_bytes_result(
+            seed_name,
+            seed_bytes,
+            expected_ids=["missing.meta"],
+            register_checksum=True,
+        )
+
+        assert py_result["ok"] is False
+        assert "missing 'meta'" in str(py_result["error"])
+        assert js_result["ok"] is False
+        assert "missing 'meta'" in str(js_result["error"])
+
+    def test_registered_seed_image_missing_projection_body_fails_closed_in_both_boundaries(
+        self, monkeypatch
+    ):
+        """Registered projection entries must retain id/pattern/body structure."""
+        seed_name = "missing_projection_body_control.v1.json"
+        seed_bytes = json.dumps(
+            {
+                "meta": {
+                    "version": "1.0",
+                    "name": "MISSING_BODY",
+                    "description": "projection body control",
+                },
+                "projections": [
+                    {"id": "missing.body", "pattern": {}},
+                ],
+            }
+        ).encode("utf-8")
+        monkeypatch.setitem(SEED_CHECKSUMS, seed_name, compute_checksum(seed_bytes))
+        monkeypatch.setitem(EXPECTED_PROJECTION_IDS, seed_name, ["missing.body"])
+
+        py_result = _python_load_verified_seed_image_result(
+            seed_name, seed_bytes, verify=True
+        )
+        js_result = _js_load_verified_seed_image_bytes_result(
+            seed_name,
+            seed_bytes,
+            expected_ids=["missing.body"],
+            register_checksum=True,
+        )
+
+        assert py_result["ok"] is False
+        assert "missing keys" in str(py_result["error"])
+        assert js_result["ok"] is False
+        assert "missing key 'body'" in str(js_result["error"])
+
+    def test_registered_invalid_utf8_seed_image_fails_closed_in_both_boundaries(
+        self, monkeypatch
+    ):
+        """JS must not replace invalid UTF-8 that Python rejects during decoding."""
+        seed_name = "invalid_utf8_control.v1.json"
+        seed_bytes = (
+            b'{"meta": {"version": "1.0", "name": "'
+            + bytes([0xFF])
+            + b'", "description": "x"}, "projections": []}'
+        )
+        monkeypatch.setitem(SEED_CHECKSUMS, seed_name, compute_checksum(seed_bytes))
+        monkeypatch.setitem(EXPECTED_PROJECTION_IDS, seed_name, [])
+
+        py_result = _python_load_verified_seed_image_result(
+            seed_name, seed_bytes, verify=True
+        )
+        js_result = _js_load_verified_seed_image_bytes_result(
+            seed_name,
+            seed_bytes,
+            expected_ids=[],
+            register_checksum=True,
+        )
+
+        assert py_result["ok"] is False
+        assert "utf-8" in str(py_result["error"]).lower()
+        assert js_result["ok"] is False
+        assert "utf-8" in str(js_result["error"]).lower()
 
 
 # ---------------------------------------------------------------------------

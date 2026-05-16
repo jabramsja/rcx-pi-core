@@ -178,23 +178,33 @@ function isFullyLockedSeed(seedName) {
 }
 
 /**
- * Load and verify a seed file.
+ * Verify, parse, and validate a seed JSON image without performing file I/O.
  * @param {string} seedName - Seed filename (e.g., 'terminal_classify.v1.json')
- * @param {string} subdir - Subdirectory under mu/ (e.g., 'utilities')
+ * @param {Buffer|string} seedBytes - Raw seed JSON bytes
+ * @param {object} checksumRegistry - Seed checksum registry
+ * @param {object} projectionIdRegistry - Seed projection ID registry
+ * @param {string} checksumRegistryName - Human-readable checksum registry name
+ * @param {string} projectionIdRegistryName - Human-readable projection registry name
  * @returns {object} Parsed seed object
  */
-function loadVerifiedSeed(seedName, subdir) {
-  const seedPath = path.join(__dirname, '..', '..', '..', subdir, seedName);
-  const raw = fs.readFileSync(seedPath, 'utf8');
+function loadVerifiedSeedImage(
+  seedName,
+  seedBytes,
+  checksumRegistry,
+  projectionIdRegistry,
+  checksumRegistryName,
+  projectionIdRegistryName
+) {
+  const imageBytes = Buffer.isBuffer(seedBytes) ? seedBytes : Buffer.from(seedBytes);
 
   // Compute hash of raw bytes before any parsing.
-  const hash = crypto.createHash('sha256').update(raw).digest('hex');
+  const hash = crypto.createHash('sha256').update(imageBytes).digest('hex');
 
   // SECURITY: For known seeds, verify checksum BEFORE JSON.parse.
   // A tampered seed must never reach the parser — checksum is the first gate.
   // For unknown seeds (not in registry), we fall through to parse-then-reject
   // so that projection type guards can still fire for diagnostic clarity.
-  const expected = CORE_SEED_CHECKSUMS[seedName];
+  const expected = checksumRegistry[seedName];
   if (expected) {
     // Known seed — verify checksum before parsing (fail-closed)
     if (hash !== expected) {
@@ -202,33 +212,74 @@ function loadVerifiedSeed(seedName, subdir) {
     }
   }
 
+  const raw = new TextDecoder('utf-8', { fatal: true }).decode(imageBytes);
   const seed = muCopy(JSON.parse(raw), true, 'Verified seed parse tree');
 
-  // Projection entry type guard (fail-closed — reject null/array/scalar before .id access)
-  if (Array.isArray(seed.projections)) {
-    for (let i = 0; i < seed.projections.length; i++) {
-      const p = seed.projections[i];
-      if (p === null || typeof p !== 'object' || Array.isArray(p)) {
-        throw new Error(
-          `Seed ${seedName}: projection[${i}] must be a plain object, ` +
-          `got ${p === null ? 'null' : Array.isArray(p) ? 'array' : typeof p}`
-        );
-      }
+  if (seed === null || typeof seed !== 'object' || Array.isArray(seed)) {
+    throw new Error(
+      `Seed ${seedName} must be a plain object, ` +
+      `got ${seed === null ? 'null' : Array.isArray(seed) ? 'array' : typeof seed}`
+    );
+  }
+  if (!('meta' in seed)) {
+    throw new Error(`Seed ${seedName} missing 'meta' key`);
+  }
+  if (!('projections' in seed)) {
+    throw new Error(`Seed ${seedName} missing 'projections' key`);
+  }
+
+  const meta = seed.meta;
+  const projections = seed.projections;
+  if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) {
+    throw new Error(
+      `Seed ${seedName} 'meta' must be a plain object, ` +
+      `got ${meta === null ? 'null' : Array.isArray(meta) ? 'array' : typeof meta}`
+    );
+  }
+  if (!Array.isArray(projections)) {
+    throw new Error(
+      `Seed ${seedName} 'projections' must be an array, got ${typeof projections}`
+    );
+  }
+
+  for (const field of ['version', 'name', 'description']) {
+    if (!(field in meta)) {
+      throw new Error(`Seed ${seedName} meta missing key '${field}'`);
+    }
+  }
+
+  for (let i = 0; i < projections.length; i++) {
+    const p = projections[i];
+    if (p === null || typeof p !== 'object' || Array.isArray(p)) {
+      throw new Error(
+        `Seed ${seedName}: projection[${i}] must be a plain object, ` +
+        `got ${p === null ? 'null' : Array.isArray(p) ? 'array' : typeof p}`
+      );
+    }
+    const proj = p;
+    if (!('id' in proj)) {
+      throw new Error(`Seed ${seedName} projection ${i} missing key 'id'`);
+    }
+    if (!('pattern' in proj)) {
+      throw new Error(`Seed ${seedName} projection ${i} missing key 'pattern'`);
+    }
+    if (!('body' in proj)) {
+      throw new Error(`Seed ${seedName} projection ${i} missing key 'body'`);
     }
   }
 
   // Fail-closed on unknown seeds (parity with Python seed_integrity.py)
   if (!expected) {
     throw new Error(
-      `Unknown seed: ${seedName} (no checksum registered in CORE_SEED_CHECKSUMS)`
+      `Unknown seed: ${seedName} (no checksum registered in ${checksumRegistryName})`
     );
   }
 
   // Projection ID verification (fail-closed: registry asymmetry = error)
-  const expectedIds = CORE_SEED_PROJECTION_IDS[seedName];
+  const expectedIds = projectionIdRegistry[seedName];
   if (!expectedIds) {
     throw new Error(
-      `Seed ${seedName} has checksum but no projection IDs in CORE_SEED_PROJECTION_IDS (registry asymmetry)`
+      `Seed ${seedName} has checksum but no projection IDs in ${projectionIdRegistryName} (registry asymmetry)`
     );
   }
   const actualIds = seed.projections.map(p => p.id);
@@ -242,8 +293,27 @@ function loadVerifiedSeed(seedName, subdir) {
   return seed;
 }
 
+/**
+ * Load and verify a seed file.
+ * @param {string} seedName - Seed filename (e.g., 'terminal_classify.v1.json')
+ * @param {string} subdir - Subdirectory under mu/ (e.g., 'utilities')
+ * @returns {object} Parsed seed object
+ */
+function loadVerifiedSeed(seedName, subdir) {
+  const seedPath = path.join(__dirname, '..', '..', '..', subdir, seedName);
+  const raw = fs.readFileSync(seedPath);
+  return loadVerifiedSeedImage(
+    seedName,
+    raw,
+    CORE_SEED_CHECKSUMS,
+    CORE_SEED_PROJECTION_IDS,
+    'CORE_SEED_CHECKSUMS',
+    'CORE_SEED_PROJECTION_IDS'
+  );
+}
+
 function getSeedChecksum(seedName) {
   return CORE_SEED_CHECKSUMS[seedName] ?? null;
 }
 
-module.exports = { loadVerifiedSeed, getSeedSubdir, isFullyLockedSeed, getSeedChecksum, validateSeedDependencies, SEED_SUBDIRS, SEED_DEPENDENCIES };
+module.exports = { loadVerifiedSeed, loadVerifiedSeedImage, getSeedSubdir, isFullyLockedSeed, getSeedChecksum, validateSeedDependencies, SEED_SUBDIRS, SEED_DEPENDENCIES };

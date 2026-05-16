@@ -1,6 +1,45 @@
 {
-  "description": "Checker-owned exact-pair split allowances for host-authority inventory accounting. This file is not a baseline; an empty list means no split is accepted.",
+  "description": "Checker-owned exact-pair split allowances for host-authority and total-inventory accounting. This file is not a baseline; an empty list means no split is accepted.",
   "kind": "host_authority_inventory_split_allowances",
   "schema_version": 1,
-  "split_allowances": []
+  "split_allowances": [
+    {
+      "id": "n3-rcx-load-seed-image-boundary-python-total",
+      "moved_signals": [],
+      "new": {
+        "file": "rcx_pi/selfhost/seed_integrity.py",
+        "name": "load_verified_seed_image",
+        "substrate": "python"
+      },
+      "old": {
+        "file": "rcx_pi/selfhost/seed_integrity.py",
+        "name": "load_verified_seed",
+        "substrate": "python"
+      },
+      "reason": "Same-wave filesystem wrapper to seed-image byte boundary split. Python side has no authority signals; this accounts for total inventory only.",
+      "split_kind": "total"
+    },
+    {
+      "id": "n3-rcx-load-seed-image-boundary-javascript-authority",
+      "moved_signals": [
+        "builtin:Array.isArray",
+        "builtin:JSON.parse",
+        "builtin:JSON.stringify",
+        "loop",
+        "mutation:.update("
+      ],
+      "new": {
+        "file": "mu/host/js/core/seed_loader.js",
+        "name": "loadVerifiedSeedImage",
+        "substrate": "javascript"
+      },
+      "old": {
+        "file": "mu/host/js/core/seed_loader.js",
+        "name": "loadVerifiedSeed",
+        "substrate": "javascript"
+      },
+      "reason": "Same-wave filesystem wrapper to seed-image byte boundary split. JS parser/projection checks moved from path wrapper to byte-boundary loader.",
+      "split_kind": "authority"
+    }
+  ]
 }
