@@ -260,15 +260,21 @@ includes the JS governance checks required by `TASKS.md` for scoped `/mu` edits.
   packet text, preserves only contract-complete existing tracker notes, and
   renders structural fallback tracker metadata with gate evidence plus a
   non-gate post-sweep.
+- The first commit-executor pre-push attempt then failed the bootstrap purity
+  ratchet on a new JavaScript stdlib import: `util`. Same-wave repair removed
+  the `util` module import from the seed byte boundary while retaining fatal
+  UTF-8 decode parity, and added an L4 gate assertion against reintroducing
+  `require("util")`/`require('util')` in the core seed loader.
 - Final local evidence:
   `mu/tests/tools/test_check_host_authority_inventory_ratchet.py` passed
   `32 passed`; focused seed/projection/parity/L4 plus commit-executor root-fix
   evidence passed `298 passed`; commit-executor receipt regressions passed
-  `135 passed`; broad Python/JS parity passed `333 passed`; `node
-  mu/host/js/eval_step.js`, JS debt, contraband, AST police, test theater, seed
-  police, host-semantics ratchet, both host-authority inventory ratchet
-  entrypoints, docs consistency, L4 indicator collection, and staged L4
-  execution contract all passed.
+  `135 passed`; post-pre-push utility-import repair evidence passed bootstrap
+  purity plus seed-loading parity/L4 gate slice `25 passed`; broad Python/JS
+  parity passed `333 passed`; `node mu/host/js/eval_step.js`, JS debt,
+  contraband, AST police, test theater, seed police, host-semantics ratchet,
+  both host-authority inventory ratchet entrypoints, docs consistency, L4
+  indicator collection, and staged L4 execution contract all passed.
 - Proof limit: this is JSON seed-image boundary narrowing toward
   `rcx_load(image_bytes)`. It does not eliminate the bootstrap, close N3,
   productionize binary/TLV seed images, or make D010/full L4 readiness claims.

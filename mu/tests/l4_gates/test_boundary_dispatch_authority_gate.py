@@ -765,6 +765,9 @@ class TestJsSeedLoaderMalformedProjection:
         assert "function loadVerifiedSeedImage(" in source, (
             "seed_loader.js missing explicit seed image byte boundary"
         )
+        assert "require('util')" not in source and 'require("util")' not in source, (
+            "seed_loader.js must not widen the Node stdlib import surface for seed bytes"
+        )
         wrapper_match = re.search(
             r"function loadVerifiedSeed\(seedName, subdir\) \{(.*?)^}",
             source,

@@ -1,24 +1,24 @@
 {
   "wave_id": "n3-rcx-load-seed-image-boundary-adapter-runtime-retry-2026-05-15",
-  "repeat_run_speedup_ratio": 1.201704,
+  "repeat_run_speedup_ratio": 1.062701,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.399918,
+  "step_growth_slope": 0.415222,
   "repeat_run_raw_seconds": [
-    0.480583,
-    0.399918
+    0.441257,
+    0.415222
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.480583
+      "elapsed_seconds": 0.441257
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.880501
+      "elapsed_seconds": 0.856479
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-16T01:39:32Z",
+  "collection_timestamp_utc": "2026-05-16T01:51:06Z",
   "collector_version": "2.2.0"
 }

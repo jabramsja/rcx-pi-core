@@ -12,7 +12,6 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { TextDecoder } = require('util');
 const { muCopy } = require('./stage0_vm');
 
 // Fail-closed: checksum + projection ID registries for seeds loaded by core modules.
