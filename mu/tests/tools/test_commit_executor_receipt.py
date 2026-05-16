@@ -3219,6 +3219,144 @@ class TestWaveIdBounds:
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
+    def test_prepare_handoff_from_routing_record_standalone_derives_structural_class_from_packet(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "n3-runtime-retry"
+        packet_path = "reports/control_plane/n3-runtime-retry.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Packet\n"
+            f"Wave ID: {wave_id}\n"
+            "Class: L4_STRUCTURAL\n"
+            "Target gate: G8\n",
+            encoding="utf-8",
+        )
+        runtime_path = repo / "mu" / "host" / "js" / "core" / "seed_loader.js"
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_path.write_text("// staged runtime split\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "--", packet_path, "mu/host/js/core/seed_loader.js"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+
+        record = {
+            "wave_name": wave_id,
+            "summary": "structural staged retry",
+            "decision": "ROUTE_PHASE_A",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "next_candidates": [
+                {
+                    "candidate": wave_id,
+                    "tracked_packet": packet_path,
+                }
+            ],
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert errors == []
+        assert handoff is not None
+        assert handoff["wave_class"] == "L4_STRUCTURAL"
+        assert "Class: L4_STRUCTURAL" in handoff["tracker_note_text"]
+        assert "workload_target: host_debt_reduction" in handoff["tracker_note_text"]
+        assert "host_semantics_delta_before:" in handoff["tracker_note_text"]
+        assert "host_semantics_delta_after:" in handoff["tracker_note_text"]
+        assert "structural_artifact_ref:" in handoff["tracker_note_text"]
+        assert "post_gate_contract_sweep:" in handoff["tracker_note_text"]
+        assert "mu/tests/l4_gates/" in handoff["tracker_note_text"]
+        assert "no_op_proof:" not in handoff["tracker_note_text"]
+
+    def test_prepare_handoff_from_routing_record_standalone_preserves_existing_structural_tracker_note(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "n3-runtime-retry"
+        packet_path = "reports/control_plane/n3-runtime-retry.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Packet\n"
+            f"Wave ID: {wave_id}\n"
+            "Class: L4_STRUCTURAL\n"
+            "Target gate: G8\n",
+            encoding="utf-8",
+        )
+        existing_note = (
+            f"- Tracker sync note (2026-05-16, {wave_id}): "
+            "**custom structural closeout.** Class: L4_STRUCTURAL. target_gate_id: G8. "
+            f"Packet: `{packet_path}`. evidence_command: `custom`. "
+            "workload_target: host_debt_reduction. "
+            "host_semantics_delta_before: standalone handoff was not bound to structural class. "
+            "host_semantics_delta_after: standalone handoff preserves structural class. "
+            "structural_artifact_ref: mu/host/python/rcx_pi/selfhost/seed_integrity.py. "
+            "evidence_delta: structural runtime retry evidence. "
+            "progress_proof_before: standalone recovery defaulted class incorrectly. "
+            "progress_proof_after: standalone recovery preserves structural class. "
+            "post_gate_contract_sweep: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/parity/`. "
+            "primary_blocker_class: INTEGRATION. "
+            "primary_invariant_id: INV_CROSS_SUBSTRATE_PARITY. "
+            f"indicator_artifact_ref: reports/l4_wave_indicators/{wave_id}.json. "
+            f"indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} --output reports/l4_wave_indicators/{wave_id}.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        )
+        (repo / "TASKS.md").write_text(
+            "# RCX Task List (Canonical)\n\n"
+            "## Ra (Resolved / Merged)\n"
+            "Items here are implemented.\n"
+            f"{existing_note}\n",
+            encoding="utf-8",
+        )
+        runtime_path = repo / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "seed_integrity.py"
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_path.write_text("# staged runtime split\n", encoding="utf-8")
+        subprocess.run(
+            [
+                "git",
+                "add",
+                "--",
+                "TASKS.md",
+                packet_path,
+                "mu/host/python/rcx_pi/selfhost/seed_integrity.py",
+            ],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+
+        record = {
+            "wave_name": wave_id,
+            "summary": "structural staged retry",
+            "decision": "ROUTE_PHASE_A",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "next_candidates": [
+                {
+                    "candidate": wave_id,
+                    "tracked_packet": packet_path,
+                }
+            ],
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert errors == []
+        assert handoff is not None
+        assert handoff["wave_class"] == "L4_STRUCTURAL"
+        assert handoff["tracker_note_text"] == existing_note
+
     def test_prepare_handoff_from_routing_record_standalone_regenerates_embedded_handoff(self, tmp_path):
         import subprocess
 

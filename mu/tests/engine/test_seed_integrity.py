@@ -12,12 +12,14 @@ import json
 import pytest
 from pathlib import Path
 
+import rcx_pi.selfhost.seed_integrity as seed_integrity_module
 from rcx_pi.selfhost.seed_integrity import (
     compute_checksum,
     verify_checksum,
     validate_seed_structure,
     validate_projection_ids,
     load_verified_seed,
+    load_verified_seed_image,
     verify_all_seeds,
     get_seed_path,
     SEED_CHECKSUMS,
@@ -297,6 +299,33 @@ class TestVerifiedLoad:
         seed = load_verified_seed(seed_file, verify=False)
         assert seed["meta"]["name"] == "TEST"
 
+    def test_load_verified_seed_delegates_path_bytes_to_image_boundary(
+        self, tmp_path, monkeypatch
+    ):
+        """Path loader reads bytes once, then delegates verification to image boundary."""
+        seed_file = tmp_path / "delegated.v1.json"
+        seed_bytes = (
+            b'{"meta": {"version": "1.0", "name": "DELEGATED", '
+            b'"description": "test"}, "projections": []}'
+        )
+        seed_file.write_bytes(seed_bytes)
+        calls = []
+
+        def fake_seed_image_loader(seed_name, image_bytes, verify=True):
+            calls.append((seed_name, image_bytes, verify))
+            return {"delegated": True}
+
+        monkeypatch.setattr(
+            seed_integrity_module,
+            "load_verified_seed_image",
+            fake_seed_image_loader,
+        )
+
+        assert seed_integrity_module.load_verified_seed(
+            seed_file, verify=False
+        ) == {"delegated": True}
+        assert calls == [("delegated.v1.json", seed_bytes, False)]
+
     def test_load_nonexistent_raises(self):
         """Loading nonexistent file raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
@@ -341,6 +370,13 @@ class TestVerifiedLoad:
         with pytest.raises(ValueError, match="integrity check failed"):
             load_verified_seed(tampered_seed, verify=True)
 
+    def test_load_verified_seed_image_rejects_tampered_known_seed_before_json_parse(
+        self,
+    ):
+        """Byte boundary fails checksum before malformed JSON parsing."""
+        with pytest.raises(ValueError, match="integrity check failed"):
+            load_verified_seed_image("kernel.v1.json", b'{"meta": ', verify=True)
+
     def test_load_verified_seed_rejects_malformed_projection_after_checksum(
         self, tmp_path, monkeypatch
     ):
@@ -363,6 +399,30 @@ class TestVerifiedLoad:
 
         with pytest.raises(ValueError, match="projection 0 must be a dict"):
             load_verified_seed(malformed_seed, verify=True)
+
+    def test_load_verified_seed_image_validates_projection_order(
+        self, monkeypatch
+    ):
+        """Byte boundary enforces registered projection IDs and order."""
+        expected = EXPECTED_PROJECTION_IDS["kernel.v1.json"]
+        wrong_order = list(reversed(expected))
+        content = json.dumps(
+            {
+                "meta": {
+                    "version": "1.0",
+                    "name": "KERNEL_SEED",
+                    "description": "projection order control",
+                },
+                "projections": [
+                    {"id": projection_id, "pattern": {}, "body": {}}
+                    for projection_id in wrong_order
+                ],
+            }
+        ).encode("utf-8")
+        monkeypatch.setitem(SEED_CHECKSUMS, "kernel.v1.json", compute_checksum(content))
+
+        with pytest.raises(ValueError, match="projection order mismatch"):
+            load_verified_seed_image("kernel.v1.json", content, verify=True)
 
 
 # =============================================================================
@@ -490,6 +550,12 @@ class TestNonFiniteNumericRejection:
         seed_file.write_text('{"meta": {"name": "T"}, "projections": [{"id": "x", "pattern": NaN, "body": {}}]}')
         with pytest.raises(ValueError, match="NaN"):
             load_verified_seed(seed_file, verify=False)
+
+    def test_nan_rejected_by_seed_image_boundary(self):
+        """The seed image boundary rejects non-finite numeric literals directly."""
+        content = b'{"meta": {"name": "T"}, "projections": [{"id": "x", "pattern": NaN, "body": {}}]}'
+        with pytest.raises(ValueError, match="NaN"):
+            load_verified_seed_image("nan_test.json", content, verify=False)
 
     def test_infinity_rejected(self, tmp_path):
         """JSON containing Infinity is rejected deterministically."""

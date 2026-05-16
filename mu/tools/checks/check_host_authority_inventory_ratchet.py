@@ -137,10 +137,11 @@ ALLOWED_SPLIT_TOP_FIELDS = frozenset(
 )
 REQUIRED_SPLIT_ALLOWANCE_FIELDS = frozenset({"id", "old", "new", "moved_signals"})
 ALLOWED_SPLIT_ALLOWANCE_FIELDS = frozenset(
-    {"id", "old", "new", "moved_signals", "reason"}
+    {"id", "old", "new", "moved_signals", "reason", "split_kind"}
 )
 REQUIRED_SPLIT_SITE_REF_FIELDS = frozenset({"substrate", "file", "name"})
 ALLOWED_SPLIT_SITE_REF_FIELDS = REQUIRED_SPLIT_SITE_REF_FIELDS
+VALID_SPLIT_KINDS = frozenset({"authority", "total"})
 
 
 @dataclass(frozen=True)
@@ -359,17 +360,24 @@ def validate_split_allowances(data: object) -> list[str]:
             errors.append(f"{context}.id duplicate: {allowance_id!r}")
         else:
             seen_ids.add(allowance_id)
+        split_kind = allowance.get("split_kind", "authority")
+        if split_kind not in VALID_SPLIT_KINDS:
+            errors.append(
+                f"{context}.split_kind must be one of {sorted(VALID_SPLIT_KINDS)}, got {split_kind!r}"
+            )
         old_ref = allowance.get("old")
         new_ref = allowance.get("new")
         errors.extend(_validate_split_site_ref(old_ref, f"{context}.old"))
         errors.extend(_validate_split_site_ref(new_ref, f"{context}.new"))
         moved_signals = allowance.get("moved_signals")
-        if (
-            not isinstance(moved_signals, list)
-            or not moved_signals
-            or not all(isinstance(signal, str) and signal for signal in moved_signals)
+        if not isinstance(moved_signals, list) or not all(
+            isinstance(signal, str) and signal for signal in moved_signals
         ):
-            errors.append(f"{context}.moved_signals must be a non-empty list[str], got {moved_signals!r}")
+            errors.append(f"{context}.moved_signals must be list[str], got {moved_signals!r}")
+        elif split_kind == "authority" and not moved_signals:
+            errors.append(f"{context}.moved_signals must be non-empty for authority splits")
+        elif split_kind == "total" and moved_signals:
+            errors.append(f"{context}.moved_signals must be empty for total-inventory splits")
         elif len(set(moved_signals)) != len(moved_signals):
             errors.append(f"{context}.moved_signals must not contain duplicates")
         elif any(signal.startswith("parse_error:") for signal in moved_signals):
@@ -882,6 +890,7 @@ def _apply_split_allowances(
     for i, allowance in enumerate(allowances):
         assert isinstance(allowance, dict)
         allowance_id = str(allowance["id"])
+        split_kind = str(allowance.get("split_kind", "authority"))
         context = f"split_allowances[{i}] {allowance_id!r}"
         old_key = _split_ref_key(allowance["old"])
         new_key = _split_ref_key(allowance["new"])
@@ -897,20 +906,26 @@ def _apply_split_allowances(
 
         if old_baseline_total is None:
             pair_errors.append(f"{context}: old site is not present in baseline total inventory")
-        if old_baseline_authority is None:
+        if split_kind == "authority" and old_baseline_authority is None:
             pair_errors.append(f"{context}: old site is not present in baseline authority subset")
+        if split_kind == "total" and old_baseline_authority is not None:
+            pair_errors.append(f"{context}: total split old site is present in baseline authority subset")
         if old_current_total is None:
             pair_errors.append(f"{context}: paired old wrapper is missing from current total inventory")
         if new_current_total is None:
             pair_errors.append(f"{context}: new site is missing from current total inventory")
-        if new_current_authority is None:
+        if split_kind == "authority" and new_current_authority is None:
             pair_errors.append(f"{context}: new site is missing from current authority subset")
+        if split_kind == "total" and new_current_authority is not None:
+            pair_errors.append(f"{context}: total split new site appears in current authority subset")
         if new_key in baseline_total_map or new_key in baseline_authority_map:
             pair_errors.append(f"{context}: new site is already in baseline inventory")
         if new_key not in new_total_keys:
             pair_errors.append(f"{context}: new site is not a current new total-inventory site")
-        if new_key not in new_authority_keys:
+        if split_kind == "authority" and new_key not in new_authority_keys:
             pair_errors.append(f"{context}: new site is not a current new authority-subset site")
+        if split_kind == "total" and new_key in new_authority_keys:
+            pair_errors.append(f"{context}: total split new site must not be a current new authority-subset site")
 
         if old_baseline_authority is not None:
             old_baseline_signals = set(str(signal) for signal in old_baseline_authority.get("signals", []))
@@ -927,29 +942,42 @@ def _apply_split_allowances(
             if old_current_total is not None
             else set()
         )
+        signal_source = new_current_authority if split_kind == "authority" else new_current_total
         new_current_signals = (
-            set(str(signal) for signal in new_current_authority.get("signals", []))
-            if new_current_authority is not None
+            set(str(signal) for signal in signal_source.get("signals", []))
+            if signal_source is not None
             else set()
         )
 
-        if old_current_signals - old_baseline_signals:
-            pair_errors.append(
-                f"{context}: paired old wrapper gained authority signals "
-                f"{sorted(old_current_signals - old_baseline_signals)}"
-            )
-        if old_current_signals & moved_signals:
-            pair_errors.append(
-                f"{context}: paired old wrapper still carries moved signals "
-                f"{sorted(old_current_signals & moved_signals)}"
-            )
-        if not new_current_signals:
-            pair_errors.append(f"{context}: new site has no authority signals to account for")
-        if not new_current_signals <= moved_signals:
-            pair_errors.append(
-                f"{context}: new site authority signals {sorted(new_current_signals)} "
-                f"are not bounded by moved_signals {sorted(moved_signals)}"
-            )
+        if split_kind == "authority":
+            if old_current_signals - old_baseline_signals:
+                pair_errors.append(
+                    f"{context}: paired old wrapper gained authority signals "
+                    f"{sorted(old_current_signals - old_baseline_signals)}"
+                )
+            if old_current_signals & moved_signals:
+                pair_errors.append(
+                    f"{context}: paired old wrapper still carries moved signals "
+                    f"{sorted(old_current_signals & moved_signals)}"
+                )
+            if not new_current_signals:
+                pair_errors.append(f"{context}: new site has no authority signals to account for")
+            if not new_current_signals <= moved_signals:
+                pair_errors.append(
+                    f"{context}: new site authority signals {sorted(new_current_signals)} "
+                    f"are not bounded by moved_signals {sorted(moved_signals)}"
+                )
+        else:
+            if old_current_signals:
+                pair_errors.append(
+                    f"{context}: total split old wrapper carries authority signals "
+                    f"{sorted(old_current_signals)}"
+                )
+            if new_current_signals:
+                pair_errors.append(
+                    f"{context}: total split new site carries authority signals "
+                    f"{sorted(new_current_signals)}"
+                )
 
         if pair_errors:
             errors.extend(pair_errors)
@@ -971,15 +999,17 @@ def _apply_split_allowances(
                     "line": int(new_current_total["line"]),
                 },
                 "moved_signals": sorted(moved_signals),
+                "split_kind": split_kind,
                 "old_baseline_signals": sorted(old_baseline_signals),
                 "old_current_signals": sorted(old_current_signals),
                 "new_current_signals": sorted(new_current_signals),
             }
         )
         accepted_new_total_keys.add(new_key)
-        accepted_new_authority_keys.add(new_key)
-        if old_key in removed_authority_keys or old_current_authority is None:
-            accepted_old_authority_removed_keys.add(old_key)
+        if split_kind == "authority":
+            accepted_new_authority_keys.add(new_key)
+            if old_key in removed_authority_keys or old_current_authority is None:
+                accepted_old_authority_removed_keys.add(old_key)
         accepted_substrates.add(old_key.substrate)
 
     if accepted and accepted_substrates != VALID_SUBSTRATES:
@@ -1104,7 +1134,7 @@ def format_human(result: dict[str, object], py_files: int, js_files: int) -> str
     ]
     if result["accepted_split_pairs"]:
         lines.append(
-            f"ACCEPTED SPLITS: {len(result['accepted_split_pairs'])} exact host-authority split pair(s):"
+            f"ACCEPTED SPLITS: {len(result['accepted_split_pairs'])} exact host-inventory split pair(s):"
         )
         for pair in result["accepted_split_pairs"]:
             old = pair["old"]
@@ -1112,9 +1142,10 @@ def format_human(result: dict[str, object], py_files: int, js_files: int) -> str
             lines.append(
                 f"  SPLIT {old['substrate']} {old['file']}::{old['name']} "
                 f"-> {new['file']}::{new['name']} "
-                f"(moved={','.join(pair['moved_signals'])}; "
+                f"(kind={pair.get('split_kind', 'authority')}; "
+                f"moved={','.join(pair['moved_signals']) or 'none'}; "
                 f"old_now={','.join(pair['old_current_signals']) or 'none'}; "
-                f"new_now={','.join(pair['new_current_signals'])})"
+                f"new_now={','.join(pair['new_current_signals']) or 'none'})"
             )
     if result["passed"]:
         if result["accepted_split_pairs"]:

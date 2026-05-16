@@ -585,6 +585,40 @@ def validate_projection_ids(seed_name: str, seed: dict[str, Any]) -> None:
 # =============================================================================
 
 
+def load_verified_seed_image(
+    seed_name: str,
+    seed_bytes: bytes,
+    verify: bool = True,
+) -> dict[str, Any]:
+    """
+    Deterministically verify, parse, and validate a JSON seed image.
+
+    Args:
+        seed_name: Registered seed filename.
+        seed_bytes: Raw seed JSON bytes.
+        verify: If True, verify checksum and structure. Default True.
+
+    Returns:
+        Parsed seed dict.
+
+    Raises:
+        ValueError: If integrity check fails.
+    """
+    # Verify checksum
+    if verify:
+        verify_checksum(seed_name, seed_bytes)
+
+    # Reject JSON's non-standard NaN/Infinity tokens without a host-local parser.
+    seed = json.loads(seed_bytes.decode("utf-8"), parse_constant=int)
+
+    # Validate structure and projection IDs
+    if verify:
+        validate_seed_structure(seed_name, seed)
+        validate_projection_ids(seed_name, seed)
+
+    return seed
+
+
 # BOOTSTRAP_PRIMITIVE: projection_loader
 # This is the irreducible seed bootstrap primitive.
 # Cannot be structural because projections must come from somewhere (JSON files).
@@ -611,29 +645,8 @@ def load_verified_seed(seed_path: Path, verify: bool = True) -> dict[str, Any]:
 
     See: mu/docs/core/BootstrapPrimitives.v0.md
     """
-    seed_name = seed_path.name
-
-    # Read raw content for checksum
     content = seed_path.read_bytes()
-
-    # Verify checksum
-    if verify:
-        verify_checksum(seed_name, content)
-
-    # Parse JSON (reject non-finite numeric literals for cross-substrate parity)
-    def _reject_non_finite(token: str) -> None:
-        raise ValueError(
-            f"Seed {seed_name}: non-finite numeric literal rejected: {token}"
-        )
-
-    seed = json.loads(content.decode("utf-8"), parse_constant=_reject_non_finite)
-
-    # Validate structure and projection IDs
-    if verify:
-        validate_seed_structure(seed_name, seed)
-        validate_projection_ids(seed_name, seed)
-
-    return seed
+    return load_verified_seed_image(seed_path.name, content, verify=verify)
 
 
 def get_mu_dir() -> Path:

@@ -124,6 +124,11 @@ PACKET_TARGET_GATE_RE = re.compile(
     r"(?:\*\*)?\s*:\s*`?([A-Za-z0-9][A-Za-z0-9._-]*)`?",
     re.IGNORECASE,
 )
+VALID_WAVE_CLASSES = frozenset({"L4_STRUCTURAL", "L4_ENABLER", "MAINTENANCE"})
+PACKET_WAVE_CLASS_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?(?:\*\*)?Class(?:\*\*)?\s*:\s*`?([A-Za-z0-9_ -]+)`?",
+    re.IGNORECASE,
+)
 
 FORCE_ADD_DENYLIST = tuple(d.lower() for d in (".git/", ".env", ".agent_bus/"))
 
@@ -748,6 +753,39 @@ def _extract_target_gate_id_from_text(text: str) -> str:
     return ""
 
 
+def _normalize_wave_class(value: Any) -> str:
+    clean = str(value or "").strip().strip("`.,;")
+    normalized = re.sub(r"[\s-]+", "_", clean).upper()
+    return normalized if normalized in VALID_WAVE_CLASSES else ""
+
+
+def _extract_wave_class_from_text(text: str) -> str:
+    for line in str(text or "").splitlines():
+        match = PACKET_WAVE_CLASS_RE.match(line)
+        if match:
+            wave_class = _normalize_wave_class(match.group(1))
+            if wave_class:
+                return wave_class
+    return ""
+
+
+def _resolve_wave_class(
+    record: dict[str, Any],
+    repo_root: Path,
+    *,
+    embedded_handoff: dict[str, Any] | None = None,
+) -> str:
+    for value in (
+        (embedded_handoff or {}).get("wave_class"),
+        record.get("wave_class"),
+    ):
+        wave_class = _normalize_wave_class(value)
+        if wave_class:
+            return wave_class
+    wave_class = _extract_wave_class_from_text(_tracked_packet_text_from_record(record, repo_root))
+    return wave_class or "MAINTENANCE"
+
+
 def _resolve_target_gate_id(
     record: dict[str, Any],
     repo_root: Path,
@@ -809,6 +847,46 @@ def _extract_same_wave_founder_override_from_tasks(repo_root: Path, wave_id: str
             if token and normalize_wave_id(token) == normalized_wave_id:
                 return token
     return ""
+
+
+def _extract_existing_canonical_tracker_note_from_tasks(
+    repo_root: Path,
+    wave_id: str,
+    *,
+    wave_class: str = "",
+    target_gate_id: str = "",
+) -> str:
+    tasks_path = repo_root / "TASKS.md"
+    if not tasks_path.is_file():
+        return ""
+    lines = tasks_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    ra_idx, ra_end_idx = _find_ra_section_range(lines)
+    if ra_idx is None or ra_end_idx is None:
+        return ""
+    indices = _matching_tracker_note_indices_in_range(
+        lines,
+        wave_id,
+        start_idx=ra_idx,
+        end_idx=ra_end_idx,
+    )
+    canonical = [
+        idx
+        for idx in indices
+        if _is_canonical_tracker_note_line(lines[idx].rstrip("\n"), wave_id)
+    ]
+    if len(canonical) != 1:
+        return ""
+    note = lines[canonical[0]].rstrip("\n")
+    if wave_class and target_gate_id:
+        validation_errors = _validate_tracker_note_text(
+            tracker_note_text=note,
+            wave_id=wave_id,
+            wave_class=wave_class,
+            target_gate_id=target_gate_id,
+        )
+        if validation_errors:
+            return ""
+    return note
 
 
 def _packet_declares_same_wave_id(packet_text: str, normalized_wave_id: str) -> bool:
@@ -3129,6 +3207,66 @@ def _collect_wave_test_files(paths: list[str]) -> list[str]:
     return test_files
 
 
+_STRUCTURAL_ARTIFACT_PREFIXES = (
+    "mu/host/",
+    "mu/programs/",
+    "mu/substrate/",
+    "mu/closures/",
+    "mu/tests/l4_gates/",
+    "tests/l4_gates/",
+)
+
+_NON_GATE_TEST_DOMAINS = (
+    "tests/engine/",
+    "tests/parity/",
+    "tests/structural/",
+    "tests/tools/",
+    "tests/docs/",
+    "mu/tests/engine/",
+    "mu/tests/parity/",
+    "mu/tests/structural/",
+    "mu/tests/tools/",
+    "mu/tests/docs/",
+)
+
+
+def _select_l4_gate_test_files(paths: list[str]) -> list[str]:
+    return [
+        path
+        for path in paths
+        if path.startswith(("tests/l4_gates/", "mu/tests/l4_gates/"))
+    ]
+
+
+def _select_non_gate_test_files(paths: list[str]) -> list[str]:
+    return [
+        path
+        for path in paths
+        if path.startswith(_NON_GATE_TEST_DOMAINS)
+    ]
+
+
+def _summarize_structural_artifacts(changed_files: list[str], *, limit: int = 8) -> str:
+    artifacts = [
+        path for path in changed_files
+        if path.startswith(_STRUCTURAL_ARTIFACT_PREFIXES)
+    ]
+    if not artifacts:
+        artifacts = list(changed_files)
+    visible = artifacts[:limit]
+    suffix = ""
+    if len(artifacts) > limit:
+        suffix = f"; +{len(artifacts) - limit} more structural artifact(s)"
+    return "; ".join(visible) + suffix
+
+
+def _build_structural_post_gate_sweep(test_files: list[str], changed_files: list[str]) -> str:
+    non_gate_tests = _select_non_gate_test_files(test_files) or _select_non_gate_test_files(changed_files)
+    if non_gate_tests:
+        return "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short " + " ".join(non_gate_tests)
+    return "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/engine/ mu/tests/parity/ mu/tests/structural/"
+
+
 def _normalize_repo_relpath(path: str) -> str:
     return str(path or "").replace("\\", "/").strip()
 
@@ -3285,7 +3423,44 @@ def _build_default_tracker_note_text(
         )
         return _append_founder_override_to_tracker_note(note, founder_override_token)
 
-    if test_files:
+    structural_kwargs: dict[str, str] = {}
+    if wave_class == "L4_STRUCTURAL":
+        gate_tests = _select_l4_gate_test_files(test_files)
+        evidence_targets = gate_tests or ["mu/tests/l4_gates/"]
+        evidence_command = (
+            "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+            + " ".join(evidence_targets)
+        )
+        evidence_delta = (
+            f"(1) Routed standalone commit handoff scopes {len(wave_files)} wave-owned file(s). "
+            "(2) Evidence gate targets the L4 gate domain for structural runtime/substrate scope. "
+            f"(3) Indicator artifact binds the wave to {indicator_path}."
+        )
+        progress_before = (
+            "Standalone commit handoff regeneration had not yet bound the staged structural diff "
+            "to a complete L4 tracker note, so pre-commit governance could misclassify it."
+        )
+        progress_after = (
+            f"Standalone commit handoff for {wave_id} preserves L4_STRUCTURAL class, "
+            f"{len(wave_files)} wave-owned file(s), and contract-complete structural metadata."
+        )
+        structural_kwargs = {
+            "workload_target": "host_debt_reduction",
+            "host_semantics_delta_before": (
+                "staged runtime/substrate split requires governance as host-debt reduction, "
+                "not a maintenance no-op"
+            ),
+            "host_semantics_delta_after": (
+                "standalone regeneration preserves structural classification and leaves "
+                "semantic authority checks to the L4 ratchets and post-gate sweep"
+            ),
+            "structural_artifact_ref": _summarize_structural_artifacts(wave_files),
+            "post_gate_contract_sweep": _build_structural_post_gate_sweep(
+                test_files,
+                wave_files,
+            ),
+        }
+    elif test_files:
         evidence_command = (
             "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short " + " ".join(test_files)
         )
@@ -3326,18 +3501,34 @@ def _build_default_tracker_note_text(
             primary_invariant_id="INV_STRUCTURAL_FORWARD_MOTION",
             indicator_artifact_ref=indicator_path,
             indicator_collection_command=indicator_cmd,
+            **structural_kwargs,
         )
         return _append_founder_override_to_tracker_note(
             _tracker_sync_note.render_tracker_sync_note(fields),
             founder_override_token,
         )
 
+    structural_text = ""
+    if structural_kwargs:
+        structural_text = (
+            f"workload_target: {structural_kwargs['workload_target']}. "
+            f"host_semantics_delta_before: {structural_kwargs['host_semantics_delta_before']}. "
+            f"host_semantics_delta_after: {structural_kwargs['host_semantics_delta_after']}. "
+            f"structural_artifact_ref: {structural_kwargs['structural_artifact_ref']}. "
+        )
+    sweep_text = ""
+    if structural_kwargs:
+        sweep_text = (
+            f"post_gate_contract_sweep: `{structural_kwargs['post_gate_contract_sweep']}`. "
+        )
     return _append_founder_override_to_tracker_note(
         f"- Tracker sync note ({datetime.now(timezone.utc).strftime('%Y-%m-%d')}, {wave_id}): "
         f"**{summary}.**. Class: {wave_class}. target_gate_id: {target_gate_id}. "
         f"{packet_text}"
+        f"{structural_text}"
         f"evidence_command: `{evidence_command}`. evidence_delta: {evidence_delta}. "
         f"progress_proof_before: {progress_before}. progress_proof_after: {progress_after}. "
+        f"{sweep_text}"
         "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
         f"indicator_artifact_ref: {indicator_path}. indicator_collection_command: {indicator_cmd}. "
         "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
@@ -5981,7 +6172,11 @@ def prepare_handoff_from_routing_record(
 
     # Normalize wave_id for branch naming
     wave_id = normalize_wave_id(wave_name)
-    wave_class = record.get("wave_class", "MAINTENANCE")
+    wave_class = _resolve_wave_class(
+        record,
+        repo_root,
+        embedded_handoff=embedded_copy,
+    )
     target_gate_id = _resolve_target_gate_id(
         record,
         repo_root,
@@ -6018,7 +6213,11 @@ def prepare_handoff_from_routing_record(
                 or wave_name
             )
         )
-        standalone_wave_class = str((embedded_copy or {}).get("wave_class") or wave_class)
+        standalone_wave_class = _resolve_wave_class(
+            record,
+            repo_root,
+            embedded_handoff=embedded_copy,
+        )
         founder_override_token, override_error = _resolve_standalone_founder_override_token(
             record,
             repo_root,
@@ -6029,6 +6228,16 @@ def prepare_handoff_from_routing_record(
         if override_error:
             return None, [override_error]
         commit_message = _build_standalone_commit_message(wave_id)
+        standalone_tracker_note = (
+            str(record.get("tracker_note_text") or "").strip()
+            or str((embedded_copy or {}).get("tracker_note_text") or "").strip()
+            or _extract_existing_canonical_tracker_note_from_tasks(
+                repo_root,
+                wave_id,
+                wave_class=standalone_wave_class,
+                target_gate_id=target_gate_id,
+            )
+        )
         handoff, build_errors = build_commit_handoff(
             wave_id=wave_id,
             task_id=str((embedded_copy or {}).get("task_id") or record.get("task_id", f"[{wave_name}]")),
@@ -6042,7 +6251,7 @@ def prepare_handoff_from_routing_record(
             branch_prefix=str((embedded_copy or {}).get("branch_prefix") or "jabramsja"),
             pr_title=commit_message[:70],
             pr_body=None,
-            tracker_note_text=None,
+            tracker_note_text=standalone_tracker_note or None,
             tracked_packet=_tracked_packet_path_from_record(record) or None,
             supervisor_lane=(embedded_copy or {}).get("supervisor_lane"),
             deferred_items=(embedded_copy or {}).get("deferred_items"),
