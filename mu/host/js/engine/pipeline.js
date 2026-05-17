@@ -240,14 +240,24 @@ function boundaryOpRunTrace(kernelProjections, seedProjectionMap, request, reqIn
         `run_trace projection[${i}] must have 'pattern' and 'body' keys`);
     }
   }
-  // max_steps parity policy: normalize-fallback.
-  // Numeric finite → floor to int. Non-numeric/boolean/NaN/±Infinity → fallback to 100.
-  // Matches Python parity exactly.
-  let traceMaxSteps = reqInput.max_steps ?? 100;
-  if (typeof traceMaxSteps !== 'number' || traceMaxSteps !== traceMaxSteps || !isFinite(traceMaxSteps)) traceMaxSteps = 100;
-  traceMaxSteps = Math.floor(traceMaxSteps);
-  if (traceMaxSteps < 0) traceMaxSteps = 100;
-  if (traceMaxSteps > MAX_BOUNDARY_TRACE_STEPS) traceMaxSteps = MAX_BOUNDARY_TRACE_STEPS;
+  // max_steps boundary contract: absent key defaults to the bootstrap clock.
+  // Explicit values are structural integer budget data and fail closed if dirty.
+  let traceMaxSteps = 100;
+  if (Object.hasOwn(reqInput, 'max_steps')) {
+    traceMaxSteps = reqInput.max_steps;
+    if (typeof traceMaxSteps !== 'number' || !Number.isFinite(traceMaxSteps) || !Number.isInteger(traceMaxSteps)) {
+      throw new RcxError('api.bad_request',
+        `run_trace input 'max_steps' must be an integer, got ${typeof traceMaxSteps}`);
+    }
+    if (traceMaxSteps < 0) {
+      throw new RcxError('api.bad_request',
+        `run_trace input 'max_steps' must be >= 0, got ${traceMaxSteps}`);
+    }
+  }
+  if (traceMaxSteps > MAX_BOUNDARY_TRACE_STEPS) {
+    throw new RcxError('api.bad_request',
+      `run_trace input 'max_steps' exceeds boundary cap of ${MAX_BOUNDARY_TRACE_STEPS}`);
+  }
   const raw = runStructural(kernelProjections, projs, reqInput.value, traceMaxSteps, vmConfig || null);
   return muContainers.record([
     ['result', raw.result],

@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-max-steps-structural-fuel-production-lock-2026-05-14",
+  "repeat_run_speedup_ratio": 1.022931,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.487369,
+  "repeat_run_raw_seconds": [
+    0.498545,
+    0.487369
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.498545
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.985914
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-17T07:45:24Z",
+  "collector_version": "2.2.0"
+}
