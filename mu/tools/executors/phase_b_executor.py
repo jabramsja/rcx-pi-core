@@ -1251,15 +1251,15 @@ def _effective_phase_b_tracker_wave_class(
     plan_content: str,
     changed_files: list[str],
 ) -> str:
-    """Classify planning-only structural packets as enablers for final packaging.
+    """Classify final package scope from the actual diff before packet prose.
 
     L4_STRUCTURAL is reserved for executable runtime/substrate deltas plus L4 gate
     evidence. A control-plane packet that only selects a later structural route is
     an enabler, even when the selected future route is structural.
     """
-    if wave_class != "L4_STRUCTURAL":
-        return wave_class
     if _phase_b_scope_has_runtime_substrate_file(changed_files):
+        return "L4_STRUCTURAL"
+    if wave_class != "L4_STRUCTURAL":
         return wave_class
     if _plan_declares_routing_boundary(plan_content):
         return "L4_ENABLER"
@@ -4537,7 +4537,7 @@ def _finalize_phase_b_pre_supervisor_tracker_note(
     package_founder_override = ""
 
     for _attempt in range(2):
-        tracker_note = _build_phase_b_tracker_note(
+        tracker_note = build_phase_b_tracker_note(
             wave_id=wave_id,
             task_id=task_id,
             wave_class=wave_class,
@@ -8160,7 +8160,7 @@ def run_phase_b(
         reentry=bool("reentry_converged" in locals() and locals()["reentry_converged"]),
     )
     handoff_test_files = locals().get("reentry_test_files") or locals().get("final_test_files") or []
-    tracker_note_text = _build_phase_b_tracker_note(
+    tracker_note_text = build_phase_b_tracker_note(
         wave_id=wave_id,
         task_id=routing_record.get("task_id", "[EXECUTOR-SURFACES]"),
         wave_class=wave_class,

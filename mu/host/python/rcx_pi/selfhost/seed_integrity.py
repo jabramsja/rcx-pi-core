@@ -19,413 +19,126 @@ from typing import Any
 
 
 # =============================================================================
-# Known Good Checksums
+# Canonical Seed Registry Manifest
 # =============================================================================
 
-# SHA256 checksums of canonical seed files.
-# Update these when seeds are intentionally modified.
-SEED_CHECKSUMS: dict[str, str] = {
-    # Updated v1.1.0: added match.typed.descend for type-tagged head/tail structures
-    # Updated: Added execution_layer: META_CIRCULAR, fixed match.equal description
-    # Updated: Fixed meta.doc path (docs/SelfHosting.v0.md -> mu/docs/core/SelfHosting.v0.md)
-    "match.v1.json": "33c7bc60d2c4468f224d85c7d0e6c385a898f61585001370b6511c30307f2c9c",
-    # Updated v1.2.0: added subst.typed.* projections for type-tagged structures (Phase 6c)
-    # Updated: Added execution_layer: META_CIRCULAR
-    # Updated: Fixed meta.doc path (docs/SelfHosting.v0.md -> mu/docs/core/SelfHosting.v0.md)
-    "subst.v1.json": "929db9a6d60b28d53c5e184da7db8c7c668d2f9a65068e8cb0e2629083ffd51f",
-    # Phase 6b: classification as Mu projections (v1.0.0 + nested_not_kv fix)
-    # Updated: Added execution_layer: META_CIRCULAR
-    # Updated: Fixed meta.doc path (docs/SelfHosting.v0.md -> mu/docs/core/SelfHosting.v0.md)
-    "classify.v1.json": "8ecd4fccca243c49129c0d65c8fef5797f19a36499e17038625fca3051108b79",
-    # Phase 7a: meta-circular kernel projections (v1.0.1 - entry format output)
-    # Updated: Added execution_layer: META_CIRCULAR
-    "kernel.v1.json": "8a4471648c8d77d4d5beedf3491c04b8154e282bbfbf52a958f8c5bcc5d94c4f",
-    # Phase 7b: match with kernel context passthrough + match.fail (fixed var names)
-    # Updated: Added execution_layer: META_CIRCULAR, fixed match.equal description
-    # Updated: Fixed invariant honesty (match.equal non-linear acknowledgment)
-    "match.v2.json": "11c79466bb3c4761513cd09f0d4bfda234802a8f8f130a62282e46f2c078fbb6",
-    # Phase 7b: subst with kernel context passthrough
-    # Updated: Added execution_layer: META_CIRCULAR
-    # Updated: Added subst.lookup.exhausted (structural unbound-variable error)
-    "subst.v2.json": "aa6a9581ef2befe3783e5190d5149c4dd71d7e67e70b92e90f93e7c193822d24",
-    # mu/ folder reorganization: renamed from enginenews.v1/exhaust.v1 to recurrence.v1/exhaustion.v1
-    # Legacy names (enginenews.v1, exhaust.v1) removed - mu/ is now canonical
-    # Updated v1.2.0: META_CIRCULAR execution_layer (Gate 4 cutover complete)
-    # Gate 3 (2026-02-06): Rewritten with normalized linked-list patterns for structural execution
-    # Gate 4 (2026-02-07): runtime cutover to step_kernel_mu bridge path
-    # v1.2.0 + PROOF_OF_CONCEPT marker (superseded by recurrence.v2.json)
-    "recurrence.v1.json": "ad9944b340e22df187fe567875d2c75483d4201b1b5c0147e1e8ec63e0bbacd0",
-    # exhaustion.v1.json = exhaust.v1.json with exhaustion.* projection IDs
-    # Updated v1.2.0: META_CIRCULAR execution_layer (Gate 4 cutover complete)
-    # Gate 3 (2026-02-06): Rewritten with normalized linked-list patterns for structural execution
-    # Gate 4 (2026-02-07): runtime cutover to step_kernel_mu bridge path
-    # v1.3.0: sentinel-skip projections (scan_skip_sentinel_maxsteps/stall) — structural tolerance
-    "exhaustion.v1.json": "8489398b8264dd547b231f67c98543bba1d6d45a24bb5504039395a24eb068d3",
-    # RCX Engine: structural specification for pipeline orchestration (7 projections)
-    # Status: structural_specification — host loop services boundary stalls (hash_trace, sub-algorithms)
-    "rcx_engine.v1.json": "1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f",
-    # RCX Engine State: structural state schema for G=(V,E), maps, rank, and NextID
-    "rcx_engine_state.v1.json": "7e4d05fcdca90e5c374ce45e094ad73b2a1bec9599254bd457db194c00fc29d0",
-    # RCX Engine Scheduler: structural operator-pool scheduler seed
-    "rcx_engine_scheduler.v1.json": "2e10c737f8d1a8b2fcd1a2a22b5f51e855c51372d691fce2a05e435744d78f65",
-    # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
-    "bootstrap_structural.v1.json": "dfaa1ea9de000e344fee1e61be9666e2876091fa64aff524857265929a261964",
-    # Utilities: eval.v1.json - deep evaluation projections (BOOTSTRAP execution layer)
-    # Updated: Fixed meta.doc path (docs/DeepStep.v0.md -> mu/docs/core/EVAL_SEED.v0.md)
-    "eval.v1.json": "4c88e312002601f56fa5c3604f7938bc3651cf2718f1e672274a454b14e8bd78",
-    # Hemispheres v1: native structural routing (APPLICATION execution layer)
-    "hemispheres.v1.json": "fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8",
-    # Paxos demo: livelock simulation + healer (APPLICATION execution layer)
-    "paxos_demo.v1.json": "56f534439b0b93df1802b3fb2e41fb0d0919b934c6667d9ab413678f6971ef6d",
-    # Recurrence v2: hash-accelerated closure detection (META_CIRCULAR)
-    "recurrence.v2.json": "f8bc7fc7f43f5423b0ecf0e78fd4b2d99699456ecff1e113d4c8e7167b213fa9",
-    # Fix v1: structural fix routine for GAP-04-FIX (Rule 0.6, APPLICATION)
-    "fix.v1.json": "d961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34",
-    # Metabolization v1: hemisphere sink re-expression cycle (APPLICATION)
-    "metabolization.v1.json": "a1f60ff55dc3e9f7c0c12e247a337d5d942cbfb74beffd001336d3a77de9a1e7",
-    # Terminal classify v1: structural terminal classification and exit-reason derivation (STRUCTURAL)
-    "terminal_classify.v1.json": "413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7",
-    # Metabolize cycle v1: structural walker for hemisphere metabolization (APPLICATION)
-    "metabolize_cycle.v1.json": "1e84573c241dba55a81adf6c60568c25127b836ef5570909bab81fa9303fcf01",
-    # Evidence walker v1: structural trace walker for ontology evidence collection (APPLICATION)
-    "evidence_walker.v1.json": "e4ea438a8a9533c9b32aeadb852475f9270d27e9bf6175abfa57145b34dc5f29",
-}
+SEED_REGISTRY_MANIFEST_NAME = "seed_registry_manifest.v1.json"
+SEED_REGISTRY_MANIFEST_SCHEMA = "rcx.seed_registry_manifest.v1"
+SEED_REGISTRY_MANIFEST_SHA256 = (
+    "175ba95a371914f3d38bbe960ccd9300b44ea907d020164deb25947292bb7d29"
+)
 
-# Sidecar metadata: lifecycle status for each seed.
-# Does NOT affect checksum validation — pure metadata for tooling and audit.
-# Values: "production" (default), "legacy-poc" (proof-of-concept, superseded by v2+)
-SEED_STATUS: dict[str, str] = {
-    "kernel.v1.json": "production",
-    "recurrence.v1.json": "legacy-poc",  # superseded by recurrence.v2.json
-    "exhaustion.v1.json": "legacy-poc",  # proof-of-concept sentinel-skip patterns
-    "match.v1.json": "legacy-poc",  # superseded by match.v2.json
-    "subst.v1.json": "legacy-poc",  # superseded by subst.v2.json
-}
+_MU_DIR = Path(__file__).resolve().parents[4]
+_MANIFEST_PATH = _MU_DIR / SEED_REGISTRY_MANIFEST_NAME
+_MANIFEST_BYTES = _MANIFEST_PATH.read_bytes()
+_MANIFEST_ACTUAL_SHA256 = hashlib.sha256(_MANIFEST_BYTES).hexdigest()
+if _MANIFEST_ACTUAL_SHA256 != SEED_REGISTRY_MANIFEST_SHA256:
+    raise ValueError(
+        f"Seed registry manifest integrity check failed for {_MANIFEST_PATH}:\n"
+        f"  Expected: {SEED_REGISTRY_MANIFEST_SHA256}\n"
+        f"  Got:      {_MANIFEST_ACTUAL_SHA256}"
+    )
 
-# Expected projection IDs for each seed.
-# These must be present for the seed to be valid.
-EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {
-    "match.v1.json": [
-        "match.done",
-        "match.sibling",
-        "match.equal",
-        "match.var",
-        "match.typed.descend",  # Type-tagged head/tail (Phase 6c)
-        "match.dict.descend",
-        "match.wrap",  # Must be last (catch-all)
-    ],
-    "subst.v1.json": [
-        "subst.done",
-        "subst.ascend",
-        "subst.sibling",
-        "subst.var",
-        "subst.lookup.found",   # Phase 6a: structural lookup
-        "subst.lookup.next",    # Phase 6a: structural lookup
-        "subst.typed.descend",  # Phase 6c: type-tagged structures
-        "subst.typed.sibling",  # Phase 6c: type-tagged structures
-        "subst.typed.ascend",   # Phase 6c: type-tagged structures
-        "subst.descend",
-        "subst.primitive",
-        "subst.wrap",  # Must be last (catch-all)
-    ],
-    "classify.v1.json": [
-        "classify.done",
-        "classify.nested_not_kv",  # Reject head/tail in key position
-        "classify.kv_continue",
-        "classify.not_kv",
-        "classify.empty",
-        "classify.wrap",  # Must be last (catch-all)
-    ],
-    "kernel.v1.json": [
-        "kernel.wrap",      # Entry point (must be first for entry matching)
-        "kernel.stall",     # Empty remaining list -> stall
-        "kernel.try",       # Start matching first projection
-        "kernel.match_success",  # Match succeeded -> start substitution
-        "kernel.match_fail",     # Match failed -> try next projection
-        "kernel.subst_success",  # Substitution complete -> return result
-        "kernel.unwrap",    # Extract final result (must be last)
-    ],
-    # Phase 7b: match with context passthrough + match.fail catch-all
-    "match.v2.json": [
-        "match.done",
-        "match.sibling",
-        "match.equal",
-        "match.var",
-        "match.typed.descend",
-        "match.dict.descend",
-        "match.fail",       # Catch-all failure (must be before wrap)
-        "match.wrap",       # Must be last (entry point)
-    ],
-    # Phase 7b: subst with context passthrough
-    "subst.v2.json": [
-        "subst.done",
-        "subst.ascend",
-        "subst.sibling",
-        "subst.var",
-        "subst.lookup.found",
-        "subst.lookup.next",
-        "subst.lookup.exhausted",
-        "subst.typed.descend",
-        "subst.typed.sibling",
-        "subst.typed.ascend",
-        "subst.descend",
-        "subst.primitive",
-        "subst.wrap",       # Must be last (entry point)
-    ],
-    # mu/ folder: recurrence.v1 (renamed from enginenews.v1)
-    "recurrence.v1.json": [
-        "recurrence.init",               # Entry: _detect_closure -> internal state
-        "recurrence.end_of_trace",       # End of trace (null) -> no closure
-        "recurrence.check_state_stall",  # Extract state from stall entry
-        "recurrence.check_state_maxsteps",  # Extract state from max_steps entry
-        "recurrence.check_state",        # Extract state from trace entry
-        "recurrence.found_in_seen",      # State in seen-set -> closure!
-        "recurrence.not_in_head",        # State not in head -> check tail
-        "recurrence.not_found",          # State not in seen -> add and advance
-        "recurrence.unwrap",             # Exit: extract final result
-    ],
-    # recurrence.v2.json = hash-accelerated closure detection
-    "recurrence.v2.json": [
-        "recurrence.init",               # Entry: _detect_closure -> internal state
-        "recurrence.end_of_trace",       # End of trace (null) -> no closure
-        "recurrence.check_state_stall",  # Extract state+hash from stall entry
-        "recurrence.check_state_maxsteps",  # Extract state+hash from max_steps entry
-        "recurrence.check_state",        # Extract state+hash from trace entry
-        "recurrence.hash_match",         # Hash in seen-set (non-linear) -> closure!
-        "recurrence.hash_no_match",      # Hash not in head -> check tail
-        "recurrence.not_found",          # Hash not in seen -> add {hash,state} and advance
-        "recurrence.unwrap",             # Exit: extract final result
-    ],
-    # exhaustion.v1.json = exhaust.v1.json with exhaustion.* projection IDs
-    "exhaustion.v1.json": [
-        "exhaustion.init_null",        # Entry: no tau_step -> continue
-        "exhaustion.init",             # Entry: tau_step set -> find tau entry
-        "exhaustion.find_match",       # Found step == tau_step (non-linear)
-        "exhaustion.find_continue",    # Not at tau_step yet, advance
-        "exhaustion.find_not_found",   # End of trace without finding tau
-        "exhaustion.scan_same",        # Same operator (non-linear), continue
-        "exhaustion.scan_skip_sentinel_maxsteps",  # Skip terminal sentinel (max_steps)
-        "exhaustion.scan_skip_sentinel_stall",     # Skip terminal sentinel (stall)
-        "exhaustion.scan_different",   # Different operator -> not exhausted
-        "exhaustion.scan_end",         # End of trace, all same -> check frozen
-        "exhaustion.frozen_found",     # Operator in frozen list (non-linear)
-        "exhaustion.frozen_check_tail",  # Check next in frozen list
-        "exhaustion.do_freeze",        # Not frozen -> freeze it
-    ],
-    # RCX Engine: main program orchestrating recurrence + exhaustion
-    "rcx_engine.v1.json": [
-        "engine.init",                      # Entry: default config
-        "engine.init_config",               # Entry: custom config (+ trampoline re-entry)
-        "engine.trace_done",                # Trace complete -> request boundary hash
-        "engine.hash_done_fix",             # Stall detected -> dispatch fix.v1.json (Rule 0.6)
-        "engine.hash_done",                 # Non-stall -> start recurrence
-        "engine.fix_done_applied",          # Fix applied -> recurrence with fixed result
-        "engine.fix_done_none",             # Fix not applicable -> recurrence with original
-        "engine.recurrence_done",           # Recurrence done -> exhaustion
-        "engine.exhaustion_done_freeze",    # action=freeze -> trampoline re-entry (TRANSITIONAL)
-        "engine.exhaustion_done_terminal",  # Non-freeze -> final result
-        "engine.unwrap",                    # Extract final result
-    ],
-    # RCX Engine State: formal state artifact for graph/bookkeeping/rank/NextID
-    "rcx_engine_state.v1.json": [
-        "engine_state.shape_valid",
-        "engine_state.identity_stable",
-        "engine_state.next_id_monotone",
-        "engine_state.shape_invalid_missing_graph",
-        "engine_state.shape_invalid_missing_omega",
-        "engine_state.shape_invalid_missing_l_map",
-        "engine_state.shape_invalid_missing_xi",
-        "engine_state.shape_invalid_missing_rho",
-        "engine_state.shape_invalid_missing_next_id",
-    ],
-    # RCX Engine Scheduler: formal scheduler/operator-pool artifact
-    "rcx_engine_scheduler.v1.json": [
-        "scheduler.invalid_missing_godel_unary_map",
-        "scheduler.invalid_non_godel_head",
-        "scheduler.invalid_godel_missing_code",
-        "scheduler.invalid_godel_missing_domain",
-        "scheduler.invalid_godel_missing_codomain",
-        "scheduler.invalid_godel_missing_identity_map",
-        "scheduler.reject_identity_map",
-        "scheduler.reject_tail_identity_map",
-        "scheduler.reject_third_identity_map",
-        "scheduler.reject_unhandled_three_operator_pool",
-        "scheduler.order_error_0010_before_0001",
-        "scheduler.order_error_0100_before_0011",
-        "scheduler.skip_frozen_head",
-        "scheduler.skip_frozen_tail_member",
-        "scheduler.skip_frozen_tail2_member",
-        "scheduler.scan_frozen_tail",
-        "scheduler.select_single_operator",
-        "scheduler.select_0001_before_0010",
-        "scheduler.select_0011_before_0100",
-        "scheduler.reject_unhandled_two_operator_pool",
-        "scheduler.pool_exhausted",
-        "scheduler.reject_unhandled_operator_pool_shape",
-    ],
-    # Step 7: Bootstrap-Structural Bridge (non-linear pattern support)
-    "bootstrap_structural.v1.json": [
-        "bridge.var.check_existing",    # Entry: start lookup for variable
-        "bridge.lookup.found_same",     # Found binding with same value (non-linear OK)
-        "bridge.lookup.found_different",  # Found binding with different value -> NO_MATCH
-        "bridge.lookup.not_found_yet",  # Name not at head, continue searching
-        "bridge.lookup.not_found",      # Name not in bindings, add new
-    ],
-    # Utilities: eval.v1.json (legacy naming, BOOTSTRAP execution layer)
-    "eval.v1.json": [
-        "restart",              # ROOT_CHECK with changes -> restart traversal
-        "unwrap",               # ROOT_CHECK without changes -> done
-        "descend.dict",         # DESCEND into dict with head/tail structure
-        "sibling.to_tail",      # SIBLING after head done -> move to tail
-        "ascend.to_context",    # ASCEND -> pop context frame
-        "ascend.to_root",       # ASCEND when context empty -> root_check
-        "wrap",                 # Entry point - wrap raw value into state
-    ],
-    # Paxos demo: consensus demonstration
-    "paxos_demo.v1.json": [
-        "paxos.init",
-        "paxos.vote_a",
-        "paxos.reject_b",
-        "paxos.reject_a",
-        "healer.detect_deadlock",
-        "healer.detect_deadlock_engine",
-    ],
-    # Hemispheres v1: native structural routing (APPLICATION execution layer)
-    "hemispheres.v1.json": [
-        "hemisphere.init",                  # Entry: decompose engine_result
-        "hemisphere.classify.exhaustion",   # Exhaustion detected -> sink
-        "hemisphere.classify.null",         # Value is null -> r_null
-        "hemisphere.classify.closure",      # Closure detected -> r_a
-        "hemisphere.classify.stall",        # Stall detected -> r_inf
-        "hemisphere.classify.default",      # Default -> lobes
-        "hemisphere.add.r_null",            # Prepend entry to r_null
-        "hemisphere.add.r_inf",             # Prepend entry to r_inf
-        "hemisphere.add.r_a",               # Prepend entry to r_a
-        "hemisphere.add.lobes",             # Prepend entry to lobes
-        "hemisphere.add.sink",              # Prepend entry to sink
-        "hemisphere.unwrap",                # Extract final result
-    ],
-    # Fix v1: structural fix routine for GAP-04-FIX (Rule 0.6)
-    "fix.v1.json": [
-        "fix.init",              # Entry: decompose apply_fix request
-        "fix.edge_add_guard",    # I3 idempotence: already has fix edge
-        "fix.edge_add",          # Add one edge to graph with edges
-        "fix.vertex_add_guard",  # I3 idempotence: already has fix vertex
-        "fix.vertex_add",        # Add one vertex to graph with vertices
-        "fix.pass_through",      # Fallback: no perturbation possible
-    ],
-    # Metabolization v1: hemisphere sink re-expression cycle (APPLICATION)
-    "metabolization.v1.json": [
-        "hemisphere.metabolize.sink_to_r_null",  # Sink entry -> r_null (void) — must precede r_inf
-        "hemisphere.metabolize.sink_to_r_inf",   # Sink entry -> r_inf (unbounded)
-        "hemisphere.recover.stall_to_lobes",     # Stalled -> lobes (preferred)
-        "hemisphere.recover.stall_to_sink",      # Stalled -> sink (fallback)
-        "hemisphere.promote.lobes_to_r_a",       # Lobes -> r_a (closure evidence)
-        "hemisphere.recycle.residual_to_sink",   # Unresolvable -> sink (recycle)
-    ],
-    # Terminal classify v1: structural terminal classification + exit-reason derivation (STRUCTURAL)
-    "terminal_classify.v1.json": [
-        "tc.recurrence",       # Recurrence terminal (3-key shape)
-        "tc.exhaustion",       # Exhaustion terminal (4-key shape)
-        "tc.engine",           # Engine terminal (8-key shape)
-        "tc.exit.closure",     # Exit reason: closure (highest priority)
-        "tc.exit.exhaustion",  # Exit reason: exhaustion
-        "tc.exit.stall",       # Exit reason: stall
-        "tc.exit.completed",   # Exit reason: completed (lowest priority)
-    ],
-    # Metabolize cycle v1: structural walker for hemisphere metabolization (APPLICATION)
-    "metabolize_cycle.v1.json": [
-        "metabolize.cycle.init",               # Entry: sink has entries -> extract first
-        "metabolize.cycle.init_skip_sink",      # Entry: sink empty -> lobes phase
-        "metabolize.cycle.sink_to_r_null",      # Sink entry null state -> r_null (must precede r_inf)
-        "metabolize.cycle.sink_to_r_inf",       # Sink entry non-null state -> r_inf
-        "metabolize.cycle.sink_next",           # Remaining sink entries -> continue
-        "metabolize.cycle.sink_done",           # No remaining sink -> lobes phase
-        "metabolize.cycle.lobes_start",         # Lobes has entries -> start scanning
-        "metabolize.cycle.lobes_start_empty",   # Lobes null -> done
-        "metabolize.cycle.lobes_promote",       # Lobes closure_flag=true -> r_a
-        "metabolize.cycle.lobes_keep",          # Lobes closure_flag=false -> kept
-        "metabolize.cycle.lobes_next",          # Remaining lobes -> continue
-        "metabolize.cycle.lobes_done",          # No remaining lobes -> start reverse
-        "metabolize.cycle.lobes_reverse_step",  # Reverse: move head to target
-        "metabolize.cycle.lobes_reverse_done",  # Reverse complete -> set lobes, done
-        "metabolize.cycle.unwrap",              # Exit: extract final hemispheres
-    ],
-    # Evidence walker v1: structural trace walker for ontology evidence collection (APPLICATION)
-    "evidence_walker.v1.json": [
-        "evidence.walk.init",              # Entry: trace has entries -> start collecting
-        "evidence.walk.init_empty",        # Entry: null trace -> done immediately
-        "evidence.walk.collect_and_next",  # Collect entry, advance to next
-        "evidence.walk.collect_and_done",  # Collect last entry -> done
-    ],
-}
+SEED_REGISTRY_MANIFEST = json.loads(
+    _MANIFEST_BYTES.decode("utf-8"),
+    parse_constant=int,
+)
+if not isinstance(SEED_REGISTRY_MANIFEST, dict):
+    raise ValueError("Seed registry manifest must be a dict")
+if SEED_REGISTRY_MANIFEST.get("schema") != SEED_REGISTRY_MANIFEST_SCHEMA:
+    raise ValueError(
+        "Seed registry manifest schema mismatch: "
+        f"{SEED_REGISTRY_MANIFEST.get('schema')!r}"
+    )
+_MANIFEST_SEEDS = SEED_REGISTRY_MANIFEST.get("seeds")
+if not isinstance(_MANIFEST_SEEDS, dict) or not _MANIFEST_SEEDS:
+    raise ValueError("Seed registry manifest must contain non-empty seeds dict")
 
+_VALID_MANIFEST_SUBDIRS = ("substrate", "closures", "bridge", "programs", "utilities")
+_VALID_MANIFEST_STATUSES = ("production", "legacy-poc")
+_REQUIRED_MANIFEST_RECORD_KEYS = (
+    "subdir",
+    "sha256",
+    "projection_ids",
+    "status",
+    "dependencies",
+    "js_cli_registered",
+    "js_core_locked",
+)
+for _seed_name, _record in _MANIFEST_SEEDS.items():
+    if not isinstance(_seed_name, str) or not _seed_name.endswith(".json"):
+        raise ValueError(f"Seed registry manifest has invalid seed name: {_seed_name!r}")
+    if not isinstance(_record, dict):
+        raise ValueError(f"Seed registry manifest record for {_seed_name} must be a dict")
+    _missing: list[str] = []
+    for _required_key in _REQUIRED_MANIFEST_RECORD_KEYS:
+        if _required_key not in _record:
+            _missing.append(_required_key)
+    if _missing:
+        raise ValueError(
+            f"Seed registry manifest record for {_seed_name} missing keys: {_missing}"
+        )
 
-# Map seed names to mu/ subfolders — the ONLY source of truth for seed locations.
-# Module-level so it's created once (not per call).
-MU_SEED_LOCATIONS: dict[str, str] = {
-    # Substrate seeds (the VM)
-    "kernel.v1.json": "substrate",
-    "match.v1.json": "substrate",
-    "match.v2.json": "substrate",
-    "subst.v1.json": "substrate",
-    "subst.v2.json": "substrate",
-    # Bridge seeds
-    "bootstrap_structural.v1.json": "bridge",
-    # Closure detection seeds
-    "recurrence.v1.json": "closures",
-    "recurrence.v2.json": "closures",
-    "exhaustion.v1.json": "closures",
-    "fix.v1.json": "closures",
-    # Utilities
-    "classify.v1.json": "utilities",
-    "eval.v1.json": "utilities",
-    "terminal_classify.v1.json": "utilities",
-    # Programs
-    "rcx_engine.v1.json": "programs",
-    "rcx_engine_state.v1.json": "programs",
-    "rcx_engine_scheduler.v1.json": "programs",
-    "hemispheres.v1.json": "programs",
-    "paxos_demo.v1.json": "programs",
-    "metabolization.v1.json": "programs",
-    "metabolize_cycle.v1.json": "programs",
-    "evidence_walker.v1.json": "utilities",
-}
+    _subdir = _record["subdir"]
+    if _subdir not in _VALID_MANIFEST_SUBDIRS:
+        raise ValueError(
+            f"Seed registry manifest record for {_seed_name} has invalid subdir: {_subdir!r}"
+        )
+    _checksum = _record["sha256"]
+    if (
+        not isinstance(_checksum, str)
+        or len(_checksum) != 64
+        or any(_char not in "0123456789abcdef" for _char in _checksum)
+    ):
+        raise ValueError(f"Seed registry manifest record for {_seed_name} has invalid sha256")
+    _projection_ids = _record["projection_ids"]
+    if not isinstance(_projection_ids, list) or not all(
+        isinstance(_projection_id, str) for _projection_id in _projection_ids
+    ):
+        raise ValueError(
+            f"Seed registry manifest record for {_seed_name} has invalid projection_ids"
+        )
+    _status = _record["status"]
+    if _status not in _VALID_MANIFEST_STATUSES:
+        raise ValueError(
+            f"Seed registry manifest record for {_seed_name} has invalid status: {_status!r}"
+        )
+    _dependencies = _record["dependencies"]
+    if not isinstance(_dependencies, list) or not all(
+        isinstance(_dep, str) for _dep in _dependencies
+    ):
+        raise ValueError(
+            f"Seed registry manifest record for {_seed_name} has invalid dependencies"
+        )
+    for _flag_name in ("js_cli_registered", "js_core_locked"):
+        if not isinstance(_record[_flag_name], bool):
+            raise ValueError(
+                f"Seed registry manifest record for {_seed_name} has non-bool {_flag_name}"
+            )
 
+_REGISTERED_MANIFEST_SEEDS = set(_MANIFEST_SEEDS)
+for _seed_name, _record in _MANIFEST_SEEDS.items():
+    for _dep in _record["dependencies"]:
+        if _dep not in _REGISTERED_MANIFEST_SEEDS:
+            raise ValueError(
+                f"Seed registry manifest record for {_seed_name} depends on unknown seed {_dep}"
+            )
 
-# =============================================================================
-# Seed Dependencies (Execution-Time Prerequisites)
-# =============================================================================
-# Maps seed names to the seeds they require to be loaded for correct execution.
-# Dependencies are EXECUTION-level: the dependent seed's projections produce output
-# that expects to be consumed by projections from the required seed.
-# This is NOT about load order (seeds load independently) but about ensuring
-# all required projection families are present when running a program.
-SEED_DEPENDENCIES: dict[str, list[str]] = {
-    # Kernel dispatches to match.v2 and subst.v2 for structural execution
-    "kernel.v1.json": ["match.v2.json", "subst.v2.json"],
-    # match.v2 uses bootstrap_structural bridge for non-linear binding support
-    "match.v2.json": ["bootstrap_structural.v1.json"],
-    # Engine orchestrates recurrence, exhaustion, and fix sub-algorithms
-    "rcx_engine.v1.json": [
-        "recurrence.v2.json",
-        "exhaustion.v1.json",
-        "fix.v1.json",
-    ],
-    # Hemispheres routing expects engine result shape (from rcx_engine)
-    "hemispheres.v1.json": ["rcx_engine.v1.json"],
-    # Metabolize cycle walks hemisphere structure (from hemispheres)
-    "metabolize_cycle.v1.json": [
-        "hemispheres.v1.json",
-        "metabolization.v1.json",
-    ],
-    # Seeds with NO external dependencies (leaf nodes):
-    # match.v1.json, subst.v1.json, subst.v2.json, classify.v1.json,
-    # recurrence.v1.json, recurrence.v2.json, exhaustion.v1.json,
-    # bootstrap_structural.v1.json, eval.v1.json, paxos_demo.v1.json,
-    # fix.v1.json, metabolization.v1.json, terminal_classify.v1.json,
-    # evidence_walker.v1.json
-}
+_SEED_REGISTRY_RECORDS: dict[str, dict[str, Any]] = SEED_REGISTRY_MANIFEST["seeds"]
+
+# Compatibility views: static seed truth is manifest data, not host literals.
+SEED_CHECKSUMS: dict[str, str] = {}
+EXPECTED_PROJECTION_IDS: dict[str, list[str]] = {}
+MU_SEED_LOCATIONS: dict[str, str] = {}
+SEED_STATUS: dict[str, str] = {}
+SEED_DEPENDENCIES: dict[str, list[str]] = {}
+for _seed_name, _record in _SEED_REGISTRY_RECORDS.items():
+    SEED_CHECKSUMS[_seed_name] = _record["sha256"]
+    EXPECTED_PROJECTION_IDS[_seed_name] = list(_record["projection_ids"])
+    MU_SEED_LOCATIONS[_seed_name] = _record["subdir"]
+    SEED_STATUS[_seed_name] = _record["status"]
+    if _record["dependencies"]:
+        SEED_DEPENDENCIES[_seed_name] = list(_record["dependencies"])
 
 
 def validate_seed_dependencies(loaded_seeds: set[str]) -> list[str]:
@@ -651,7 +364,7 @@ def load_verified_seed(seed_path: Path, verify: bool = True) -> dict[str, Any]:
 
 def get_mu_dir() -> Path:
     """Get the mu directory path (new organized structure)."""
-    return Path(__file__).parent.parent.parent / "mu"
+    return _MU_DIR
 
 
 def get_seed_path(seed_name: str) -> Path:

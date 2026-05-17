@@ -26,7 +26,13 @@ from __future__ import annotations
 
 from .eval_seed import step as eval_step, _step_trusted
 from .mu_type import Mu, assert_mu, is_mu, mu_hash, mu_hash_control, mu_hash_control_cached
-from .seed_integrity import get_seed_path, load_verified_seed, SEED_CHECKSUMS, EXPECTED_PROJECTION_IDS
+from .seed_integrity import (
+    get_seed_path,
+    load_verified_seed,
+    SEED_CHECKSUMS,
+    EXPECTED_PROJECTION_IDS,
+    SEED_REGISTRY_MANIFEST,
+)
 from .projection_loader import make_projection_loader
 
 # Boot1 imports — engine_pipeline (Boot2) depends on kernel orchestration (Boot1).
@@ -157,17 +163,13 @@ def _validate_reentry_payload(payload: object, context: str) -> None:
 # JS CORE Seed Registries (Ontology Promotion)
 # =============================================================================
 
-# JS CORE seed registry — mirrors CORE_SEED_CHECKSUMS / CORE_SEED_PROJECTION_IDS
-# keys in seed_loader.js. When JS expands its CORE registries, update here and the
-# parity test (test_python_locked_set_matches_js_locked_set) will verify consistency.
-# Expert finding: collapsed to single frozenset (both sets were identical).
-_JS_CORE_SEED_REGISTRY_KEYS = frozenset({  # AST_OK: infra — JS CORE registry mirror
-    "terminal_classify.v1.json",
-    "hemispheres.v1.json",
-    "rcx_engine.v1.json",
-    "rcx_engine_state.v1.json",
-    "rcx_engine_scheduler.v1.json",
-})
+# JS CORE seed registry keys are derived from the verified canonical manifest,
+# matching seed_loader.js CORE_* derivation from record.js_core_locked.
+_JS_CORE_SEED_REGISTRY_KEYS = frozenset(  # AST_OK: infra — manifest-derived JS CORE registry view
+    seed_name
+    for seed_name, record in SEED_REGISTRY_MANIFEST["seeds"].items()
+    if record["js_core_locked"]
+)
 
 
 def _derive_opromo_fully_locked_seeds() -> frozenset:  # AST_OK: infra — A13 lock derivation

@@ -28,6 +28,35 @@ class TestSeedDependencyRegistry:
         assert isinstance(SEED_DEPENDENCIES, dict)
         assert len(SEED_DEPENDENCIES) > 0
 
+    def test_registry_views_are_manifest_derived(self):
+        """Static seed registry authority must come from the verified manifest."""
+        from rcx_pi.selfhost.seed_integrity import (
+            EXPECTED_PROJECTION_IDS,
+            MU_SEED_LOCATIONS,
+            SEED_CHECKSUMS,
+            SEED_DEPENDENCIES,
+            SEED_REGISTRY_MANIFEST,
+        )
+
+        records = SEED_REGISTRY_MANIFEST["seeds"]
+        assert SEED_CHECKSUMS == {
+            seed_name: record["sha256"]
+            for seed_name, record in records.items()
+        }
+        assert EXPECTED_PROJECTION_IDS == {
+            seed_name: record["projection_ids"]
+            for seed_name, record in records.items()
+        }
+        assert MU_SEED_LOCATIONS == {
+            seed_name: record["subdir"]
+            for seed_name, record in records.items()
+        }
+        assert SEED_DEPENDENCIES == {
+            seed_name: record["dependencies"]
+            for seed_name, record in records.items()
+            if record["dependencies"]
+        }
+
     def test_all_dependency_targets_are_registered_seeds(self):
         """Every seed listed as a dependency must itself be a registered seed."""
         from rcx_pi.selfhost.seed_integrity import (

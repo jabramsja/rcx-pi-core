@@ -4053,6 +4053,21 @@ class TestHybridDelegatePayload:
             "reports/control_plane/**/*.md",
         ]
 
+    def test_valid_payload_accepts_narrow_report_only_control_plane_glob(self):
+        ok, payload, detail = rg_mod._validate_delegate_implementer_payload(  # ANTICHEAT_OK: validates closed hybrid payload schema
+            make_delegate_response(
+                files_in_scope=[
+                    "reports/control_plane/n3_seed_registry_man*.md",
+                ],
+            )
+        )
+
+        assert ok is True
+        assert detail == ""
+        assert payload["files_in_scope"] == [
+            "reports/control_plane/n3_seed_registry_man*.md",
+        ]
+
     @pytest.mark.parametrize(
         "files_in_scope",
         [

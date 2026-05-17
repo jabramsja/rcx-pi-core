@@ -19,163 +19,12 @@ const path = require('path');
 const { validateNoKernelReservedFields } = require('../core/security');
 const muContainers = require('../core/container_factory');
 const stage0Vm = require('../core/stage0_vm');
-const { loadVerifiedSeedImage } = require('../core/seed_loader');
-
-// Seed integrity verification — parity with Python's seed_integrity.py
-const SEED_CHECKSUMS = {
-  'kernel.v1.json': '8a4471648c8d77d4d5beedf3491c04b8154e282bbfbf52a958f8c5bcc5d94c4f',
-  'match.v2.json': '11c79466bb3c4761513cd09f0d4bfda234802a8f8f130a62282e46f2c078fbb6',
-  'subst.v2.json': 'aa6a9581ef2befe3783e5190d5149c4dd71d7e67e70b92e90f93e7c193822d24',
-  'recurrence.v1.json': 'ad9944b340e22df187fe567875d2c75483d4201b1b5c0147e1e8ec63e0bbacd0',
-  'recurrence.v2.json': 'f8bc7fc7f43f5423b0ecf0e78fd4b2d99699456ecff1e113d4c8e7167b213fa9',
-  'exhaustion.v1.json': '8489398b8264dd547b231f67c98543bba1d6d45a24bb5504039395a24eb068d3',
-  'bootstrap_structural.v1.json': 'dfaa1ea9de000e344fee1e61be9666e2876091fa64aff524857265929a261964',
-  'hemispheres.v1.json': 'fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8',
-  'rcx_engine.v1.json': '1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f',
-  'rcx_engine_state.v1.json': '7e4d05fcdca90e5c374ce45e094ad73b2a1bec9599254bd457db194c00fc29d0',
-  'rcx_engine_scheduler.v1.json': '2e10c737f8d1a8b2fcd1a2a22b5f51e855c51372d691fce2a05e435744d78f65',
-  'fix.v1.json': 'd961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34',
-  'metabolization.v1.json': 'a1f60ff55dc3e9f7c0c12e247a337d5d942cbfb74beffd001336d3a77de9a1e7',
-  'terminal_classify.v1.json': '413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7',
-  'metabolize_cycle.v1.json': '1e84573c241dba55a81adf6c60568c25127b836ef5570909bab81fa9303fcf01',
-  'evidence_walker.v1.json': 'e4ea438a8a9533c9b32aeadb852475f9270d27e9bf6175abfa57145b34dc5f29', // registered but not loaded at runtime — JS engine pipeline not yet implemented (Python loads in engine_pipeline.py:561)
-};
-
-// Expected projection IDs in security-critical order (first-match-wins)
-const EXPECTED_PROJECTION_IDS = {
-  'kernel.v1.json': [
-    'kernel.wrap', 'kernel.stall', 'kernel.try', 'kernel.match_success',
-    'kernel.match_fail', 'kernel.subst_success', 'kernel.unwrap',
-  ],
-  'match.v2.json': [
-    'match.done', 'match.sibling', 'match.equal', 'match.var',
-    'match.typed.descend', 'match.dict.descend', 'match.fail', 'match.wrap',
-  ],
-  'subst.v2.json': [
-    'subst.done', 'subst.ascend', 'subst.sibling', 'subst.var',
-    'subst.lookup.found', 'subst.lookup.next', 'subst.lookup.exhausted',
-    'subst.typed.descend',
-    'subst.typed.sibling', 'subst.typed.ascend', 'subst.descend',
-    'subst.primitive', 'subst.wrap',
-  ],
-  'recurrence.v1.json': [
-    'recurrence.init', 'recurrence.end_of_trace', 'recurrence.check_state_stall',
-    'recurrence.check_state_maxsteps', 'recurrence.check_state',
-    'recurrence.found_in_seen', 'recurrence.not_in_head', 'recurrence.not_found',
-    'recurrence.unwrap',
-  ],
-  'recurrence.v2.json': [
-    'recurrence.init', 'recurrence.end_of_trace', 'recurrence.check_state_stall',
-    'recurrence.check_state_maxsteps', 'recurrence.check_state',
-    'recurrence.hash_match', 'recurrence.hash_no_match', 'recurrence.not_found',
-    'recurrence.unwrap',
-  ],
-  'exhaustion.v1.json': [
-    'exhaustion.init_null', 'exhaustion.init', 'exhaustion.find_match',
-    'exhaustion.find_continue', 'exhaustion.find_not_found', 'exhaustion.scan_same',
-    'exhaustion.scan_skip_sentinel_maxsteps', 'exhaustion.scan_skip_sentinel_stall',
-    'exhaustion.scan_different', 'exhaustion.scan_end', 'exhaustion.frozen_found',
-    'exhaustion.frozen_check_tail', 'exhaustion.do_freeze',
-  ],
-  'bootstrap_structural.v1.json': [
-    'bridge.var.check_existing', 'bridge.lookup.found_same',
-    'bridge.lookup.found_different', 'bridge.lookup.not_found_yet',
-    'bridge.lookup.not_found',
-  ],
-  'hemispheres.v1.json': [
-    'hemisphere.init', 'hemisphere.classify.exhaustion', 'hemisphere.classify.null',
-    'hemisphere.classify.closure', 'hemisphere.classify.stall',
-    'hemisphere.classify.default', 'hemisphere.add.r_null', 'hemisphere.add.r_inf',
-    'hemisphere.add.r_a', 'hemisphere.add.lobes', 'hemisphere.add.sink',
-    'hemisphere.unwrap',
-  ],
-  'rcx_engine.v1.json': [
-    'engine.init', 'engine.init_config', 'engine.trace_done',
-    'engine.hash_done_fix', 'engine.hash_done',
-    'engine.fix_done_applied', 'engine.fix_done_none',
-    'engine.recurrence_done', 'engine.exhaustion_done_freeze',
-    'engine.exhaustion_done_terminal', 'engine.unwrap',
-  ],
-  'rcx_engine_state.v1.json': [
-    'engine_state.shape_valid',
-    'engine_state.identity_stable',
-    'engine_state.next_id_monotone',
-    'engine_state.shape_invalid_missing_graph',
-    'engine_state.shape_invalid_missing_omega',
-    'engine_state.shape_invalid_missing_l_map',
-    'engine_state.shape_invalid_missing_xi',
-    'engine_state.shape_invalid_missing_rho',
-    'engine_state.shape_invalid_missing_next_id',
-  ],
-  'rcx_engine_scheduler.v1.json': [
-    'scheduler.invalid_missing_godel_unary_map',
-    'scheduler.invalid_non_godel_head',
-    'scheduler.invalid_godel_missing_code',
-    'scheduler.invalid_godel_missing_domain',
-    'scheduler.invalid_godel_missing_codomain',
-    'scheduler.invalid_godel_missing_identity_map',
-    'scheduler.reject_identity_map',
-    'scheduler.reject_tail_identity_map',
-    'scheduler.reject_third_identity_map',
-    'scheduler.reject_unhandled_three_operator_pool',
-    'scheduler.order_error_0010_before_0001',
-    'scheduler.order_error_0100_before_0011',
-    'scheduler.skip_frozen_head',
-    'scheduler.skip_frozen_tail_member',
-    'scheduler.skip_frozen_tail2_member',
-    'scheduler.scan_frozen_tail',
-    'scheduler.select_single_operator',
-    'scheduler.select_0001_before_0010',
-    'scheduler.select_0011_before_0100',
-    'scheduler.reject_unhandled_two_operator_pool',
-    'scheduler.pool_exhausted',
-    'scheduler.reject_unhandled_operator_pool_shape',
-  ],
-  'fix.v1.json': [
-    'fix.init', 'fix.edge_add_guard', 'fix.edge_add', 'fix.vertex_add_guard', 'fix.vertex_add', 'fix.pass_through',
-  ],
-  'metabolization.v1.json': [
-    'hemisphere.metabolize.sink_to_r_null', 'hemisphere.metabolize.sink_to_r_inf',
-    'hemisphere.recover.stall_to_lobes', 'hemisphere.recover.stall_to_sink',
-    'hemisphere.promote.lobes_to_r_a', 'hemisphere.recycle.residual_to_sink',
-  ],
-  'terminal_classify.v1.json': [
-    'tc.recurrence', 'tc.exhaustion', 'tc.engine',
-    'tc.exit.closure', 'tc.exit.exhaustion', 'tc.exit.stall', 'tc.exit.completed',
-  ],
-  'metabolize_cycle.v1.json': [
-    'metabolize.cycle.init', 'metabolize.cycle.init_skip_sink',
-    'metabolize.cycle.sink_to_r_null', 'metabolize.cycle.sink_to_r_inf',
-    'metabolize.cycle.sink_next', 'metabolize.cycle.sink_done',
-    'metabolize.cycle.lobes_start', 'metabolize.cycle.lobes_start_empty',
-    'metabolize.cycle.lobes_promote', 'metabolize.cycle.lobes_keep',
-    'metabolize.cycle.lobes_next', 'metabolize.cycle.lobes_done',
-    'metabolize.cycle.lobes_reverse_step', 'metabolize.cycle.lobes_reverse_done',
-    'metabolize.cycle.unwrap',
-  ],
-  'evidence_walker.v1.json': [ // registered but not loaded at runtime — see SEED_CHECKSUMS note
-    'evidence.walk.init', 'evidence.walk.init_empty',
-    'evidence.walk.collect_and_next', 'evidence.walk.collect_and_done',
-  ],
-};
-
-function validateSeedStructure(seedName, seed) {
-  if (!('meta' in seed) || seed.meta === null || typeof seed.meta !== 'object') {
-    throw new Error(`Seed ${seedName}: missing or invalid 'meta' field`);
-  }
-  if (!('projections' in seed) || !Array.isArray(seed.projections)) {
-    throw new Error(`Seed ${seedName}: missing or invalid 'projections' field`);
-  }
-  for (let i = 0; i < seed.projections.length; i++) {
-    const proj = seed.projections[i];
-    if (proj === null || typeof proj !== 'object' || Array.isArray(proj)) {
-      throw new Error(`Seed ${seedName}: projection[${i}] must be a plain object, got ${proj === null ? 'null' : Array.isArray(proj) ? 'array' : typeof proj}`);
-    }
-    if (!('id' in proj) || !('pattern' in proj) || !('body' in proj)) {
-      throw new Error(`Seed ${seedName}: projection ${i} missing required field (id/pattern/body)`);
-    }
-  }
-}
+const {
+  getSeedSubdir,
+  loadVerifiedSeedImage,
+  SEED_CHECKSUMS,
+  EXPECTED_PROJECTION_IDS,
+} = require('../core/seed_loader');
 
 function validateCombinedBridgeOrdering(projections) {
   const ids = [];
@@ -219,7 +68,8 @@ function validateCombinedBridgeOrdering(projections) {
   }
 }
 
-function loadVerifiedSeed(seedPath, seedName) {
+function loadVerifiedSeed(seedName) {
+  const seedPath = path.join(muRoot, getSeedSubdir(seedName), seedName);
   const raw = fs.readFileSync(seedPath);
   return loadVerifiedSeedImage(
     seedName,
@@ -233,23 +83,19 @@ function loadVerifiedSeed(seedPath, seedName) {
 
 // mu/ root is 3 levels up from cli/
 const muRoot = path.join(__dirname, '..', '..', '..');
-const substrateDir = path.join(muRoot, 'substrate');
-const closuresDir = path.join(muRoot, 'closures');
-const bridgeDir = path.join(muRoot, 'bridge');
-const programsDir = path.join(muRoot, 'programs');
 
-const kernel = loadVerifiedSeed(path.join(substrateDir, 'kernel.v1.json'), 'kernel.v1.json');
-const matchSeed = loadVerifiedSeed(path.join(substrateDir, 'match.v2.json'), 'match.v2.json');
-const substSeed = loadVerifiedSeed(path.join(substrateDir, 'subst.v2.json'), 'subst.v2.json');
-const recurrenceSeed = loadVerifiedSeed(path.join(closuresDir, 'recurrence.v1.json'), 'recurrence.v1.json');
-const recurrenceV2Seed = loadVerifiedSeed(path.join(closuresDir, 'recurrence.v2.json'), 'recurrence.v2.json');
-const exhaustionSeed = loadVerifiedSeed(path.join(closuresDir, 'exhaustion.v1.json'), 'exhaustion.v1.json');
-const fixSeed = loadVerifiedSeed(path.join(closuresDir, 'fix.v1.json'), 'fix.v1.json');
-const bridgeSeed = loadVerifiedSeed(path.join(bridgeDir, 'bootstrap_structural.v1.json'), 'bootstrap_structural.v1.json');
-const hemisphereSeed = loadVerifiedSeed(path.join(programsDir, 'hemispheres.v1.json'), 'hemispheres.v1.json');
-const engineSeed = loadVerifiedSeed(path.join(programsDir, 'rcx_engine.v1.json'), 'rcx_engine.v1.json');
-const metabolizationSeed = loadVerifiedSeed(path.join(programsDir, 'metabolization.v1.json'), 'metabolization.v1.json');
-const metabolizeCycleSeed = loadVerifiedSeed(path.join(programsDir, 'metabolize_cycle.v1.json'), 'metabolize_cycle.v1.json');
+const kernel = loadVerifiedSeed('kernel.v1.json');
+const matchSeed = loadVerifiedSeed('match.v2.json');
+const substSeed = loadVerifiedSeed('subst.v2.json');
+const recurrenceSeed = loadVerifiedSeed('recurrence.v1.json');
+const recurrenceV2Seed = loadVerifiedSeed('recurrence.v2.json');
+const exhaustionSeed = loadVerifiedSeed('exhaustion.v1.json');
+const fixSeed = loadVerifiedSeed('fix.v1.json');
+const bridgeSeed = loadVerifiedSeed('bootstrap_structural.v1.json');
+const hemisphereSeed = loadVerifiedSeed('hemispheres.v1.json');
+const engineSeed = loadVerifiedSeed('rcx_engine.v1.json');
+const metabolizationSeed = loadVerifiedSeed('metabolization.v1.json');
+const metabolizeCycleSeed = loadVerifiedSeed('metabolize_cycle.v1.json');
 
 // S1-C: Load ALL compiled Stage0 bundles for VM execution path
 const compiledDir = path.join(muRoot, 'stage0', 'compiled');

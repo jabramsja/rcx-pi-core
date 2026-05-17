@@ -3438,7 +3438,14 @@ def _has_hybrid_glob_meta(rel_path: str) -> bool:
 
 
 def _is_hybrid_allowed_scope_pattern(rel_path: str) -> bool:
-    return rel_path in _HYBRID_SCOPE_PATTERNS
+    if rel_path in _HYBRID_SCOPE_PATTERNS:
+        return True
+    if not _has_hybrid_glob_meta(rel_path):
+        return False
+    return (
+        (rel_path.startswith("reports/control_plane/") and rel_path.endswith(".md"))
+        or (rel_path.startswith("reports/deferred/") and rel_path.endswith(".md"))
+    )
 
 
 def _hybrid_scope_pattern_matches(rel_path: str, pattern: str) -> bool:

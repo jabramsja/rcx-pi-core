@@ -1346,6 +1346,16 @@ class TestLoadPlanPacketPathTraversal:
             content,
         ) == "L4_STRUCTURAL"
 
+    def test_effective_phase_b_tracker_wave_class_upgrades_runtime_scope_from_enabler(self):
+        assert pb_mod._effective_phase_b_tracker_wave_class(  # ANTICHEAT_OK: tests final-scope class derivation
+            "L4_ENABLER",
+            plan_content="# Plan\nWave Class: L4_ENABLER\n",
+            changed_files=[
+                "mu/host/js/core/seed_loader.js",
+                "reports/l4_wave_indicators/runtime-scope-wave.json",
+            ],
+        ) == "L4_STRUCTURAL"
+
     def test_header_metadata_wins_over_later_narrative_bullets(self, tmp_path):
         """Canonical header metadata must not be overwritten by later bullets."""
         repo = tmp_path / "repo"
@@ -2401,6 +2411,54 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert f"FOUNDER_OVERRIDE:{wave_id}" not in tasks_text
         assert raw_override == ""
         assert package_override == ""
+
+    def test_pre_supervisor_tracker_note_uses_structural_class_for_runtime_scope(
+        self,
+        tmp_path,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+        wave_id = "runtime-scope-pre-supervisor-wave-2026-05-16"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+
+        with patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kwargs: sorted(set(files))):
+            (
+                note,
+                raw_override,
+                package_override,
+                modified,
+                final_scope,
+                error,
+            ) = pb_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: locks final-scope class derivation
+                repo,
+                wave_id=wave_id,
+                task_id="[NEXT-CODEX-POST-REDTEAM]",
+                wave_class="L4_ENABLER",
+                target_gate_id="G8",
+                plan_path="reports/control_plane/runtime_scope.md",
+                plan_content="# Plan\nWave Class: L4_ENABLER\n",
+                changed_files=[
+                    "mu/host/js/core/seed_loader.js",
+                    "mu/tests/l4_gates/test_wave_j_arch_gaps_gate.py",
+                    "reports/control_plane/runtime_scope.md",
+                    indicator_path,
+                ],
+                test_files=["mu/tests/l4_gates/test_wave_j_arch_gaps_gate.py"],
+                receipt_path=".scratch/phase_b_supervisor_package.json",
+                bridge_status={"rounds": 1},
+                reentry=False,
+                founder_override=wave_id,
+            )
+
+        assert error is None
+        assert modified is True
+        assert "TASKS.md" in final_scope
+        assert "Class: L4_STRUCTURAL" in note
+        assert "workload_target:" in note
+        assert raw_override == f"FOUNDER_OVERRIDE:{wave_id}"
+        assert package_override == f"FOUNDER_OVERRIDE:{wave_id}"
 
     def test_pre_supervisor_tracker_note_verification_rejects_stale_top_note(self, tmp_path):
         repo = tmp_path / "repo"
