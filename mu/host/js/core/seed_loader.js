@@ -232,6 +232,64 @@ function loadVerifiedSeedImage(
   }
 
   const raw = new TextDecoder('utf-8', { fatal: true }).decode(imageBytes);
+
+  // Canonical production seed images are integer-only. Scan number syntax before
+  // JSON.parse so JS cannot silently collapse 1.0/1e0 into the same Number as 1.
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch !== '-' && (ch < '0' || ch > '9')) {
+      continue;
+    }
+
+    const start = i;
+    if (ch === '-') {
+      i++;
+    }
+    while (i < raw.length && raw[i] >= '0' && raw[i] <= '9') {
+      i++;
+    }
+    let decimalOrExponent = false;
+    if (raw[i] === '.') {
+      decimalOrExponent = true;
+      i++;
+      while (i < raw.length && raw[i] >= '0' && raw[i] <= '9') {
+        i++;
+      }
+    }
+    if (raw[i] === 'e' || raw[i] === 'E') {
+      decimalOrExponent = true;
+      i++;
+      if (raw[i] === '+' || raw[i] === '-') {
+        i++;
+      }
+      while (i < raw.length && raw[i] >= '0' && raw[i] <= '9') {
+        i++;
+      }
+    }
+    if (decimalOrExponent) {
+      throw new Error(
+        `Seed ${seedName} contains non-integer JSON numeric literal ${raw.slice(start, i)}`
+      );
+    }
+    i--;
+  }
+
   const seed = muCopy(JSON.parse(raw), true, 'Verified seed parse tree');
 
   if (seed === null || typeof seed !== 'object' || Array.isArray(seed)) {

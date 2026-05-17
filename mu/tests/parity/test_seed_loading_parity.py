@@ -571,6 +571,34 @@ class TestProductionLoaderBoundaryParity:
         assert py_result == {"ok": True, "ids": expected_ids}
         assert js_result == {"ok": True, "ids": expected_ids}
 
+    def test_canonical_seed_corpus_loads_integer_images_in_both_boundaries(self):
+        """All canonical production corpus seed images remain accepted as integer-only."""
+        canonical_subdirs = {"substrate", "closures", "bridge", "programs"}
+        seed_names = sorted(
+            seed_name
+            for seed_name, subdir in MU_SEED_LOCATIONS.items()
+            if subdir in canonical_subdirs
+        )
+        assert seed_names
+
+        for seed_name in seed_names:
+            seed_path = get_seed_path(seed_name)
+            seed_bytes = seed_path.read_bytes()
+            expected_ids = EXPECTED_PROJECTION_IDS[seed_name]
+
+            py_result = _python_load_verified_seed_image_result(
+                seed_name, seed_bytes, verify=True
+            )
+            js_result = _js_load_verified_seed_image_bytes_result(
+                seed_name,
+                seed_bytes,
+                expected_ids=expected_ids,
+                register_checksum=True,
+            )
+
+            assert py_result == {"ok": True, "ids": expected_ids}
+            assert js_result == {"ok": True, "ids": expected_ids}
+
     def test_tampered_known_seed_fails_closed_in_both_byte_boundaries(self):
         """The same tampered known seed image is rejected before parse on both substrates."""
         seed_name = "rcx_engine.v1.json"
@@ -633,6 +661,27 @@ class TestProductionLoaderBoundaryParity:
             "Unexpected token" in str(js_result["error"])
             or "not valid JSON" in str(js_result["error"])
         )
+
+    def test_finite_non_integer_seed_image_fails_closed_in_both_byte_boundaries(self):
+        """Both seed image boundaries reject finite non-integer JSON numerics."""
+        raw_json = (
+            '{"meta": {"version": "1.0", "name": "DECIMAL", "description": "x"}, '
+            '"projections": [{"id": "x", "pattern": 2.5, "body": {}}]}'
+        )
+
+        py_result = _python_load_verified_seed_image_result(
+            "decimal_control.v1.json", raw_json.encode("utf-8"), verify=False
+        )
+        js_result = _js_load_verified_seed_image_result(
+            "decimal_control.v1.json",
+            raw_json,
+            register_checksum=False,
+        )
+
+        assert py_result["ok"] is False
+        assert "2.5" in str(py_result["error"])
+        assert js_result["ok"] is False
+        assert "non-integer JSON numeric literal 2.5" in str(js_result["error"])
 
     def test_js_seed_image_boundary_validates_projection_order(self):
         """JS byte boundary enforces caller-provided projection ID order."""
