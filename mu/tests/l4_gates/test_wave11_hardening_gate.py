@@ -15,6 +15,8 @@ import textwrap
 
 import pytest
 
+from tests.repo_root import REPO_ROOT
+
 JS_TRUST_MU_PRELUDE = """
 const muContainers = require('./mu/host/js/core/container_factory');
 function trustMu(value) {
@@ -263,9 +265,6 @@ class TestSeedRegistryCrossValidation:
         static source literals.
         """
         import json
-        from pathlib import Path
-
-        repo = Path(__file__).resolve().parents[3]
         result = subprocess.run(
             [
                 "node",
@@ -283,7 +282,7 @@ class TestSeedRegistryCrossValidation:
             capture_output=True,
             text=True,
             timeout=10,
-            cwd=repo,
+            cwd=REPO_ROOT,
         )
         assert result.returncode == 0, result.stderr
         snapshot = json.loads(result.stdout)

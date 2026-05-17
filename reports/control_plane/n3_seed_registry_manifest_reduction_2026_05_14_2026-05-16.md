@@ -117,13 +117,21 @@ Questions? Concerns? Thoughts? -- Think hard
   - `mu/host/python/rcx_pi/selfhost/seed_integrity.py`
   - `mu/seed_registry_manifest.v1.json`
   - `mu/tests/engine/test_seed_integrity.py`
+  - `mu/tests/l4_gates/test_boundary_dispatch_authority_gate.py`
   - `mu/tests/l4_gates/test_evidence_walker_gate.py`
   - `mu/tests/l4_gates/test_wave11_hardening_gate.py`
   - `mu/tests/l4_gates/test_wave_j_arch_gaps_gate.py`
   - `mu/tests/parity/test_seed_loading_parity.py`
   - `mu/tests/structural/test_engine_pipeline_discipline.py`
+  - `mu/tests/tools/test_commit_executor_receipt.py`
+  - `mu/tests/tools/test_l4_execution_contract_enforcement.py`
+  - `mu/tests/tools/test_meta_bridge_supervisor.py`
   - `mu/tests/tools/test_phase_b_executor.py`
   - `mu/tests/tools/test_recovery_gate.py`
+  - `mu/tools/agents/meta_bridge_supervisor.py`
+  - `mu/tools/agents/templates/meta_bridge_task.txt`
+  - `mu/tools/checks/enforce_l4_execution_contract.py`
+  - `mu/tools/executors/commit_executor.py`
   - `mu/tools/executors/phase_b_executor.py`
   - `mu/tools/executors/recovery_gate.py`
   - `reports/control_plane/n3_seed_registry_manifest_reduction_2026_05_14_2026-05-16.md`

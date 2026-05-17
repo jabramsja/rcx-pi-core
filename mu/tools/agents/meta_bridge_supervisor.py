@@ -827,17 +827,30 @@ def validate_package_schema(package: Any) -> tuple[bool, list[str]]:
     return len(errors) == 0, errors
 
 
-def _run_external_override_validator(repo_root: Path, wave_name: str) -> tuple[int, str]:
-    """Invoke tools/checks/enforce_l4_execution_contract.py --staged --wave-id <wave_name>.
+def _run_external_override_validator(
+    repo_root: Path,
+    wave_name: str,
+    wave_class: str,
+) -> tuple[int, str]:
+    """Invoke the L4 contract checker for the package's staged class and wave.
 
     The supervisor consumes the external validator's exit code — it does NOT
     re-derive replay protection, wave-binding, or runtime-diff constraints.
     Any invocation failure is reported as a non-zero exit so Gate 8 falls
     through to the strict-match body (fail-closed safety net).
     """
+    cmd = [
+        "python3",
+        "tools/checks/enforce_l4_execution_contract.py",
+        "--staged",
+        "--wave-id",
+        wave_name,
+    ]
+    if wave_class:
+        cmd.extend(["--wave-class", wave_class])
     try:
         proc = subprocess.run(
-            ["python3", "tools/checks/enforce_l4_execution_contract.py", "--staged", "--wave-id", wave_name],
+            cmd,
             cwd=repo_root,
             capture_output=True,
             text=True,
@@ -924,7 +937,11 @@ def check_tasks_authorization(
             founder_override_token=founder_override_token,
         )
     ):
-        exit_code, _validator_output = _run_external_override_validator(repo_root, wave_name)
+        exit_code, _validator_output = _run_external_override_validator(
+            repo_root,
+            wave_name,
+            wave_class,
+        )
         if exit_code == 0:
             print(
                 "[meta-bridge] Gate 8 passed via staged-token-bound externally-validated "

@@ -1875,7 +1875,14 @@ def enforce(
                 errors.append("L4_ENABLER missing evidence_command in tracker note")
             if current["evidence_delta"] is None:
                 errors.append("L4_ENABLER missing evidence_delta in tracker note")
-            if current.get("host_semantics_delta_before") is not None or current.get("host_semantics_delta_after") is not None:
+            note_wave_class = current.get("wave_class")
+            if (
+                note_wave_class == "L4_ENABLER"
+                and (
+                    current.get("host_semantics_delta_before") is not None
+                    or current.get("host_semantics_delta_after") is not None
+                )
+            ):
                 errors.append(
                     "L4_ENABLER cannot claim host_semantics_delta without runtime file changes."
                 )

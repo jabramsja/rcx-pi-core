@@ -246,6 +246,45 @@ class TestL4EnablerEnforcement:
         assert not passed
         assert any("L4_ENABLER" in e for e in errors)
 
+    def test_enabler_followup_can_bind_parent_structural_note_without_host_delta_claim(self) -> None:
+        notes = [{
+            "wave_id": "same-wave-structural-parent",
+            "wave_class": "L4_STRUCTURAL",
+            "raw_class": "L4_STRUCTURAL",
+            "gate": "G8",
+            "no_op_proof": None,
+            "evidence_command": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/l4_gates/test_gate.py",
+            "evidence_delta": "parent structural wave already landed runtime reduction",
+            "host_semantics_delta_before": "parent structural baseline before runtime reduction",
+            "host_semantics_delta_after": "parent structural baseline after runtime reduction",
+            "structural_artifact_ref": "mu/host/js/core/seed_loader.js",
+            "defer_reason_code": None,
+            "founder_override": "same-wave-structural-parent",
+            "primary_blocker_class": "INTEGRATION",
+            "post_gate_contract_sweep": "PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/engine/test_seed_integrity.py",
+            "primary_invariant_id": "INV_STRUCTURAL_FORWARD_MOTION",
+            "progress_proof_before": "staged follow-up had no separate package class",
+            "progress_proof_after": "staged follow-up is bounded to tests and packet truth",
+            "indicator_artifact_ref": "reports/l4_wave_indicators/same-wave-structural-parent.json",
+            "indicator_collection_command": "python3 tools/metrics/collect_l4_wave_indicators.py --wave-id same-wave-structural-parent",
+            "bootstrap_endgame_policy": "SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP",
+            "boot0_track_id": "V1",
+            "boot0_progress_state": "HOLD",
+            "unblocks_wave_id": None,
+            "unblocks_runtime_blocker": None,
+            "workload_target": "host_debt_reduction",
+            "date": "2026-05-17",
+            "raw": "test structural parent note",
+        }]
+        files = [
+            "mu/tests/l4_gates/test_boundary_dispatch_authority_gate.py",
+            "reports/control_plane/same_wave_structural_parent.md",
+        ]
+
+        passed, errors = enforce("L4_ENABLER", files, notes=notes)
+
+        assert passed, errors
+
 
 # =============================================================================
 # MAINTENANCE enforcement
