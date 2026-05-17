@@ -188,6 +188,8 @@ def _js_load_verified_seed_image_result(
 def _js_load_verified_seed_image_bytes_result(
     seed_name: str,
     seed_bytes: bytes,
+    *,
+    forced_sha256: str | None = None,
 ) -> dict[str, object]:
     js_script = """
     const fs = require('fs');
@@ -195,28 +197,52 @@ def _js_load_verified_seed_image_bytes_result(
       loadVerifiedSeedImage,
       SEED_IMAGE_VERIFICATION_MODES,
     } = require('./mu/host/js/core/seed_loader');
+    const crypto = require('crypto');
     const input = JSON.parse(fs.readFileSync(0, 'utf8'));
     const raw = Buffer.from(input.seedBytesBase64, 'base64');
+    const originalCreateHash = crypto.createHash;
+    if (input.forcedSha256 !== null) {
+      crypto.createHash = function(...args) {
+        const hash = originalCreateHash.apply(this, args);
+        return {
+          update(...updateArgs) {
+            hash.update(...updateArgs);
+            return this;
+          },
+          digest(encoding) {
+            if (encoding === 'hex') {
+              return input.forcedSha256;
+            }
+            return hash.digest(encoding);
+          },
+        };
+      };
+    }
+    let result;
     try {
       const seed = loadVerifiedSeedImage(
         input.seedName,
         raw,
         SEED_IMAGE_VERIFICATION_MODES.CLI
       );
-      console.log(JSON.stringify({
+      result = {
         ok: true,
         ids: seed.projections.map(p => p.id),
-      }));
+      };
     } catch (e) {
-      console.log(JSON.stringify({
+      result = {
         ok: false,
         error: e.message,
-      }));
+      };
+    } finally {
+      crypto.createHash = originalCreateHash;
     }
+    console.log(JSON.stringify(result));
     """
     payload = {
         "seedName": seed_name,
         "seedBytesBase64": base64.b64encode(seed_bytes).decode("ascii"),
+        "forcedSha256": forced_sha256,
     }
     proc = subprocess.run(
         ["node", "-e", js_script],
@@ -730,17 +756,30 @@ class TestProductionLoaderBoundaryParity:
         assert js_result["ok"] is False
         assert "non-integer JSON numeric literal 2.5" in str(js_result["error"])
 
-    def test_js_seed_image_boundary_retains_projection_order_source_lock(self):
-        """Production JS byte boundary still checks manifest projection ID order."""
-        source = (_REPO / "mu" / "host" / "js" / "core" / "seed_loader.js").read_text()
+    def test_js_seed_image_boundary_rejects_projection_order_mismatch(self):
+        """Production JS byte boundary rejects checksum-valid projection order drift."""
+        seed_name = "rcx_engine.v1.json"
+        seed = json.loads(get_seed_path(seed_name).read_text())
+        expected_ids = EXPECTED_PROJECTION_IDS[seed_name]
+        assert len(seed["projections"]) > 1
 
-        assert "const expectedIds = projectionIdRegistry[seedName]" in source
-        assert "const actualIds = seed.projections.map(p => p.id)" in source
-        assert (
-            "JSON.stringify(actualIds) !== JSON.stringify(expectedIds)"
-            in source
+        first, second, *rest = seed["projections"]
+        seed["projections"] = [second, first, *rest]
+        actual_ids = [projection["id"] for projection in seed["projections"]]
+        assert actual_ids != expected_ids
+        assert Counter(actual_ids) == Counter(expected_ids)
+
+        seed_bytes = json.dumps(seed, separators=(",", ":")).encode("utf-8")
+        js_result = _js_load_verified_seed_image_bytes_result(
+            seed_name,
+            seed_bytes,
+            forced_sha256=_js_seed_checksums()[seed_name],
         )
-        assert "Seed projection IDs mismatch" in source
+
+        assert js_result["ok"] is False
+        assert "Seed projection IDs mismatch" in str(js_result["error"])
+        assert actual_ids[0] in str(js_result["error"])
+        assert expected_ids[0] in str(js_result["error"])
 
     def test_control_seed_image_missing_meta_fails_closed_in_both_boundaries(
         self, monkeypatch
