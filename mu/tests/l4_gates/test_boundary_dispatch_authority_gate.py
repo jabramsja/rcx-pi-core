@@ -33,7 +33,14 @@ from rcx_pi.selfhost.engine_pipeline import (
     _BOUNDARY_DISPATCH,  # ANTICHEAT_OK: gate verifies dispatch map keys
     _ALGORITHM_SEED_ALLOWLIST,  # ANTICHEAT_OK: gate verifies algorithm seed authority (F-22)
 )
-from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+from rcx_pi.selfhost.seed_integrity import (
+    EXPECTED_PROJECTION_IDS,
+    SEED_CHECKSUMS,
+    compute_checksum,
+    get_seed_path,
+    load_verified_seed,
+    load_verified_seed_image,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +62,50 @@ def _stub_emit(event_name, iteration, state, error_code=None, **extra):
 
 def setup_function():
     _events.clear()
+
+
+def _load_js_seed_image_with_test_registry(
+    seed_name: str,
+    seed_bytes: bytes,
+    expected_ids: list[str],
+) -> dict[str, object]:
+    """Call the production JS seed-image loader with a checksum-bound test registry."""
+    js_code = f"""
+    const crypto = require('crypto');
+    const {{ loadVerifiedSeedImage }} = require('./mu/host/js/core/seed_loader');
+    const raw = Buffer.from({list(seed_bytes)});
+    const checksums = Object.create(null);
+    const projectionIds = Object.create(null);
+    checksums[{json.dumps(seed_name)}] = crypto.createHash('sha256').update(raw).digest('hex');
+    projectionIds[{json.dumps(seed_name)}] = {json.dumps(expected_ids)};
+    try {{
+        const seed = loadVerifiedSeedImage(
+            {json.dumps(seed_name)},
+            raw,
+            checksums,
+            projectionIds,
+            'TEST_CHECKSUMS',
+            'TEST_PROJECTION_IDS'
+        );
+        console.log(JSON.stringify({{
+            ok: true,
+            ids: seed.projections.map(p => p.id),
+        }}));
+    }} catch (e) {{
+        console.log(JSON.stringify({{
+            ok: false,
+            error: e.message,
+        }}));
+    }}
+    """
+    result = subprocess.run(
+        ["node", "-e", js_code],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+    assert result.returncode == 0, f"JS seed image loader failed: {result.stderr}"
+    return json.loads(result.stdout)
 
 
 # ===========================================================================
@@ -151,6 +202,103 @@ class TestBoundaryOpsDerivation:
         )
         assert result.returncode == 0, f"JS seed load failed: {result.stderr}"
         assert result.stdout.strip() == "11", f"Expected 11 projections, got {result.stdout.strip()}"
+
+
+# ===========================================================================
+# Test 1b: Seed-image numeric-domain boundary
+# ===========================================================================
+
+
+class TestSeedImageNumericDomainBoundary:
+    """Production seed-image loaders keep canonical seed numerics integer-only."""
+
+    EXPECTED_IDS = ["numeric.ok"]
+
+    @staticmethod
+    def _seed_bytes(numeric_literal: str) -> bytes:
+        return (
+            b'{"meta": {"version": "1.0", "name": "NUMERIC", "description": "x"}, '
+            b'"projections": [{"id": "numeric.ok", "pattern": {"n": '
+            + numeric_literal.encode("ascii")
+            + b'}, "body": {"m": 2}}]}'
+        )
+
+    def _load_python_seed_image(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        seed_name: str,
+        seed_bytes: bytes,
+    ) -> dict[str, object]:
+        monkeypatch.setitem(SEED_CHECKSUMS, seed_name, compute_checksum(seed_bytes))
+        monkeypatch.setitem(EXPECTED_PROJECTION_IDS, seed_name, self.EXPECTED_IDS)
+        try:
+            seed = load_verified_seed_image(seed_name, seed_bytes, verify=True)
+        except Exception as exc:  # gate compares fail-closed substrate behavior
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "ids": [proj["id"] for proj in seed["projections"]]}
+
+    def test_integer_seed_image_numeric_loads_through_python_and_js(self, monkeypatch):
+        """Checksum-bound integer seed images still load through both byte boundaries."""
+        seed_name = "integer_numeric_domain_control.v1.json"
+        seed_bytes = self._seed_bytes("1")
+
+        py_result = self._load_python_seed_image(monkeypatch, seed_name, seed_bytes)
+        js_result = _load_js_seed_image_with_test_registry(
+            seed_name,
+            seed_bytes,
+            self.EXPECTED_IDS,
+        )
+
+        assert py_result == {"ok": True, "ids": self.EXPECTED_IDS}
+        assert js_result == {"ok": True, "ids": self.EXPECTED_IDS}
+
+    @pytest.mark.parametrize("numeric_literal", ["1.0", "2.5", "1e0"])
+    def test_non_integer_seed_image_numeric_rejected_through_python_and_js(
+        self,
+        monkeypatch,
+        numeric_literal,
+    ):
+        """Decimal/exponent JSON numerics reject before either loader accepts a seed."""
+        seed_name = f"non_integer_{numeric_literal.replace('.', '_')}.v1.json"
+        seed_bytes = self._seed_bytes(numeric_literal)
+
+        py_result = self._load_python_seed_image(monkeypatch, seed_name, seed_bytes)
+        js_result = _load_js_seed_image_with_test_registry(
+            seed_name,
+            seed_bytes,
+            self.EXPECTED_IDS,
+        )
+
+        assert py_result["ok"] is False
+        assert numeric_literal in str(py_result["error"])
+        assert js_result["ok"] is False
+        assert f"non-integer JSON numeric literal {numeric_literal}" in str(
+            js_result["error"]
+        )
+
+    @pytest.mark.parametrize("numeric_literal", ["NaN", "Infinity", "-Infinity"])
+    def test_non_finite_seed_image_numeric_rejected_through_python_and_js(
+        self,
+        monkeypatch,
+        numeric_literal,
+    ):
+        """NaN/Infinity remain rejected at the same production byte boundaries."""
+        seed_name = f"non_finite_{numeric_literal.replace('-', 'neg_')}.v1.json"
+        seed_bytes = self._seed_bytes(numeric_literal)
+
+        py_result = self._load_python_seed_image(monkeypatch, seed_name, seed_bytes)
+        js_result = _load_js_seed_image_with_test_registry(
+            seed_name,
+            seed_bytes,
+            self.EXPECTED_IDS,
+        )
+
+        assert py_result["ok"] is False
+        assert "Infinity" in str(py_result["error"]) or "NaN" in str(py_result["error"])
+        assert js_result["ok"] is False
+        assert "JSON" in str(js_result["error"]) or "Unexpected token" in str(
+            js_result["error"]
+        )
 
 
 # ===========================================================================

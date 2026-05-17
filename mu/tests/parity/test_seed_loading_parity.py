@@ -20,6 +20,7 @@ What this checker does NOT prove:
 
 from __future__ import annotations
 
+import base64
 from collections import Counter
 import functools
 import json
@@ -203,40 +204,49 @@ def _js_load_verified_seed_image_bytes_result(
     *,
     register_checksum: bool,
 ) -> dict[str, object]:
-    js_script = f"""
+    js_script = """
     const crypto = require('crypto');
-    const {{ loadVerifiedSeedImage }} = require('./mu/host/js/core/seed_loader');
-    const raw = Buffer.from({list(seed_bytes)});
+    const fs = require('fs');
+    const { loadVerifiedSeedImage } = require('./mu/host/js/core/seed_loader');
+    const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+    const raw = Buffer.from(input.seedBytesBase64, 'base64');
     const checksums = Object.create(null);
     const projectionIds = Object.create(null);
-    if ({json.dumps(register_checksum)}) {{
-      checksums[{json.dumps(seed_name)}] = crypto.createHash('sha256').update(raw).digest('hex');
-    }}
-    if ({json.dumps(expected_ids)} !== null) {{
-      projectionIds[{json.dumps(seed_name)}] = {json.dumps(expected_ids)};
-    }}
-    try {{
+    if (input.registerChecksum) {
+      checksums[input.seedName] = crypto.createHash('sha256').update(raw).digest('hex');
+    }
+    if (input.expectedIds !== null) {
+      projectionIds[input.seedName] = input.expectedIds;
+    }
+    try {
       const seed = loadVerifiedSeedImage(
-        {json.dumps(seed_name)},
+        input.seedName,
         raw,
         checksums,
         projectionIds,
         'TEST_CHECKSUMS',
         'TEST_PROJECTION_IDS'
       );
-      console.log(JSON.stringify({{
+      console.log(JSON.stringify({
         ok: true,
         ids: seed.projections.map(p => p.id),
-      }}));
-    }} catch (e) {{
-      console.log(JSON.stringify({{
+      }));
+    } catch (e) {
+      console.log(JSON.stringify({
         ok: false,
         error: e.message,
-      }}));
-    }}
+      }));
+    }
     """
+    payload = {
+        "seedName": seed_name,
+        "seedBytesBase64": base64.b64encode(seed_bytes).decode("ascii"),
+        "expectedIds": expected_ids,
+        "registerChecksum": register_checksum,
+    }
     proc = subprocess.run(
         ["node", "-e", js_script],
+        input=json.dumps(payload),
         capture_output=True,
         text=True,
         cwd=str(_REPO),
@@ -250,35 +260,42 @@ def _js_load_registered_seed_image_bytes_result(
     seed_name: str,
     seed_bytes: bytes,
 ) -> dict[str, object]:
-    js_script = f"""
-    const {{
+    js_script = """
+    const fs = require('fs');
+    const {
       loadVerifiedSeedImage,
       SEED_CHECKSUMS,
       EXPECTED_PROJECTION_IDS,
-    }} = require('./mu/host/js/core/seed_loader');
-    const raw = Buffer.from({list(seed_bytes)});
-    try {{
+    } = require('./mu/host/js/core/seed_loader');
+    const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+    const raw = Buffer.from(input.seedBytesBase64, 'base64');
+    try {
       const seed = loadVerifiedSeedImage(
-        {json.dumps(seed_name)},
+        input.seedName,
         raw,
         SEED_CHECKSUMS,
         EXPECTED_PROJECTION_IDS,
         'SEED_CHECKSUMS',
         'EXPECTED_PROJECTION_IDS'
       );
-      console.log(JSON.stringify({{
+      console.log(JSON.stringify({
         ok: true,
         ids: seed.projections.map(p => p.id),
-      }}));
-    }} catch (e) {{
-      console.log(JSON.stringify({{
+      }));
+    } catch (e) {
+      console.log(JSON.stringify({
         ok: false,
         error: e.message,
-      }}));
-    }}
+      }));
+    }
     """
+    payload = {
+        "seedName": seed_name,
+        "seedBytesBase64": base64.b64encode(seed_bytes).decode("ascii"),
+    }
     proc = subprocess.run(
         ["node", "-e", js_script],
+        input=json.dumps(payload),
         capture_output=True,
         text=True,
         cwd=str(_REPO),
@@ -571,6 +588,34 @@ class TestProductionLoaderBoundaryParity:
         assert py_result == {"ok": True, "ids": expected_ids}
         assert js_result == {"ok": True, "ids": expected_ids}
 
+    def test_canonical_seed_corpus_loads_integer_images_in_both_boundaries(self):
+        """All canonical production corpus seed images remain accepted as integer-only."""
+        canonical_subdirs = {"substrate", "closures", "bridge", "programs"}
+        seed_names = sorted(
+            seed_name
+            for seed_name, subdir in MU_SEED_LOCATIONS.items()
+            if subdir in canonical_subdirs
+        )
+        assert seed_names
+
+        for seed_name in seed_names:
+            seed_path = get_seed_path(seed_name)
+            seed_bytes = seed_path.read_bytes()
+            expected_ids = EXPECTED_PROJECTION_IDS[seed_name]
+
+            py_result = _python_load_verified_seed_image_result(
+                seed_name, seed_bytes, verify=True
+            )
+            js_result = _js_load_verified_seed_image_bytes_result(
+                seed_name,
+                seed_bytes,
+                expected_ids=expected_ids,
+                register_checksum=True,
+            )
+
+            assert py_result == {"ok": True, "ids": expected_ids}
+            assert js_result == {"ok": True, "ids": expected_ids}
+
     def test_tampered_known_seed_fails_closed_in_both_byte_boundaries(self):
         """The same tampered known seed image is rejected before parse on both substrates."""
         seed_name = "rcx_engine.v1.json"
@@ -633,6 +678,27 @@ class TestProductionLoaderBoundaryParity:
             "Unexpected token" in str(js_result["error"])
             or "not valid JSON" in str(js_result["error"])
         )
+
+    def test_finite_non_integer_seed_image_fails_closed_in_both_byte_boundaries(self):
+        """Both seed image boundaries reject finite non-integer JSON numerics."""
+        raw_json = (
+            '{"meta": {"version": "1.0", "name": "DECIMAL", "description": "x"}, '
+            '"projections": [{"id": "x", "pattern": 2.5, "body": {}}]}'
+        )
+
+        py_result = _python_load_verified_seed_image_result(
+            "decimal_control.v1.json", raw_json.encode("utf-8"), verify=False
+        )
+        js_result = _js_load_verified_seed_image_result(
+            "decimal_control.v1.json",
+            raw_json,
+            register_checksum=False,
+        )
+
+        assert py_result["ok"] is False
+        assert "2.5" in str(py_result["error"])
+        assert js_result["ok"] is False
+        assert "non-integer JSON numeric literal 2.5" in str(js_result["error"])
 
     def test_js_seed_image_boundary_validates_projection_order(self):
         """JS byte boundary enforces caller-provided projection ID order."""

@@ -627,6 +627,18 @@ class TestNonFiniteNumericRejection:
         with pytest.raises(ValueError, match="NaN"):
             load_verified_seed_image("nan_test.json", content, verify=False)
 
+    def test_non_integer_number_rejected_by_seed_image_boundary(self):
+        """The seed image boundary rejects finite decimal numeric literals."""
+        content = b'{"meta": {"name": "T"}, "projections": [{"id": "x", "pattern": 2.5, "body": {}}]}'
+        with pytest.raises(ValueError, match="2.5"):
+            load_verified_seed_image("decimal_test.json", content, verify=False)
+
+    def test_integer_number_still_loads_by_seed_image_boundary(self):
+        """Integer-only seed image numerics remain valid at the byte boundary."""
+        content = b'{"meta": {"name": "T"}, "projections": [{"id": "x", "pattern": {"a": 1}, "body": {"b": 2}}]}'
+        seed = load_verified_seed_image("integer_test.json", content, verify=False)
+        assert seed["projections"][0]["pattern"] == {"a": 1}
+
     def test_infinity_rejected(self, tmp_path):
         """JSON containing Infinity is rejected deterministically."""
         seed_file = tmp_path / "inf_test.json"
@@ -644,7 +656,7 @@ class TestNonFiniteNumericRejection:
     def test_normal_json_still_loads(self, tmp_path):
         """Normal JSON with standard types loads without error."""
         seed_file = tmp_path / "normal_test.json"
-        seed_file.write_text('{"meta": {"name": "T"}, "projections": [{"id": "x", "pattern": {"a": 1}, "body": {"b": 2.5}}]}')
+        seed_file.write_text('{"meta": {"name": "T"}, "projections": [{"id": "x", "pattern": {"a": 1}, "body": {"b": 2}}]}')
         seed = load_verified_seed(seed_file, verify=False)
         assert seed["projections"][0]["pattern"] == {"a": 1}
 

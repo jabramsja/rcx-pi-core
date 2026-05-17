@@ -3665,6 +3665,91 @@ class TestWaveIdBounds:
         valid, validation_errors = commit_mod.validate_handoff(handoff)
         assert valid, validation_errors
 
+    def test_validate_handoff_accepts_authorized_standalone_same_pr_repair_target_branch(
+        self, tmp_path
+    ):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "seed-parity-argv-ci-repair-2026-05-17"
+        packet_path = f"reports/control_plane/{wave_id}.md"
+        packet = repo / packet_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Seed Parity Argv CI Repair\n"
+            f"Wave ID: {wave_id}\n"
+            "Class: L4_ENABLER\n"
+            "Lane: control-surface\n"
+            "Authorization: authorized control-surface L4_ENABLER; "
+            "standing pipeline-bug-fix authorization.\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "add", "--", packet_path],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+        note = _with_founder_override(
+            _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"],
+            wave_id,
+        )
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            caller="standalone",
+            pre_commit_receipt_path="",
+            tracked_packet=packet_path,
+            files_to_stage=["file.py", packet_path],
+            target_branch="jabramsja/original-structural-wave-2026-05-17",
+            tracker_note_text=note,
+        )
+
+        valid, validation_errors = commit_mod.validate_handoff(handoff, repo_root=repo)
+
+        assert valid, validation_errors
+
+    def test_validate_handoff_rejects_unauthorized_standalone_same_pr_repair_target_branch(
+        self, tmp_path
+    ):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "seed-parity-argv-ci-repair-2026-05-17"
+        packet_path = f"reports/control_plane/{wave_id}.md"
+        packet = repo / packet_path
+        packet.parent.mkdir(parents=True, exist_ok=True)
+        packet.write_text(
+            "# Seed Parity Argv CI Repair\n"
+            f"Wave ID: {wave_id}\n"
+            "Class: L4_ENABLER\n"
+            "Lane: control-surface\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "add", "--", packet_path],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+        note = _with_founder_override(
+            _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"],
+            wave_id,
+        )
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            caller="standalone",
+            pre_commit_receipt_path="",
+            tracked_packet=packet_path,
+            files_to_stage=["file.py", packet_path],
+            target_branch="jabramsja/original-structural-wave-2026-05-17",
+            tracker_note_text=note,
+        )
+
+        valid, validation_errors = commit_mod.validate_handoff(handoff, repo_root=repo)
+
+        assert not valid
+        assert any("authorized standalone control-surface" in err for err in validation_errors)
+
     def test_has_path_traversal_decodes_percent_escapes(self):
         assert commit_mod._has_path_traversal("..%2F..%2Fetc%2Fpasswd") is True  # ANTICHEAT_OK: testing path traversal detection
         assert commit_mod._has_path_traversal("%2e%2e/foo") is True  # ANTICHEAT_OK: testing path traversal detection

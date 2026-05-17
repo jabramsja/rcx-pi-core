@@ -321,8 +321,13 @@ def load_verified_seed_image(
     if verify:
         verify_checksum(seed_name, seed_bytes)
 
-    # Reject JSON's non-standard NaN/Infinity tokens without a host-local parser.
-    seed = json.loads(seed_bytes.decode("utf-8"), parse_constant=int)
+    # Reject JSON's non-standard NaN/Infinity tokens and decimal/exponent number
+    # literals without adding a semantic numeric layer to the loader.
+    seed = json.loads(
+        seed_bytes.decode("utf-8"),
+        parse_float=int,
+        parse_constant=int,
+    )
 
     # Validate structure and projection IDs
     if verify:
