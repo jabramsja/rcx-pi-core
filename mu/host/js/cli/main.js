@@ -22,6 +22,7 @@ const stage0Vm = require('../core/stage0_vm');
 const {
   getSeedSubdir,
   loadVerifiedSeedImage,
+  SEED_IMAGE_VERIFICATION_MODES,
   SEED_CHECKSUMS,
   EXPECTED_PROJECTION_IDS,
 } = require('../core/seed_loader');
@@ -71,14 +72,7 @@ function validateCombinedBridgeOrdering(projections) {
 function loadVerifiedSeed(seedName) {
   const seedPath = path.join(muRoot, getSeedSubdir(seedName), seedName);
   const raw = fs.readFileSync(seedPath);
-  return loadVerifiedSeedImage(
-    seedName,
-    raw,
-    SEED_CHECKSUMS,
-    EXPECTED_PROJECTION_IDS,
-    'SEED_CHECKSUMS',
-    'EXPECTED_PROJECTION_IDS'
-  );
+  return loadVerifiedSeedImage(seedName, raw, SEED_IMAGE_VERIFICATION_MODES.CLI);
 }
 
 // mu/ root is 3 levels up from cli/

@@ -156,7 +156,10 @@ def _js_load_verified_seed_image_result(
 ) -> dict[str, object]:
     js_script = f"""
     const crypto = require('crypto');
-    const {{ loadVerifiedSeedImage }} = require('./mu/host/js/core/seed_loader');
+    const {{
+      loadVerifiedSeedImage,
+      SEED_IMAGE_VERIFICATION_MODES,
+    }} = require('./mu/host/js/core/seed_loader');
     const raw = Buffer.from({json.dumps(raw_json)}, 'utf8');
     const checksums = Object.create(null);
     const projectionIds = Object.create(null);
@@ -170,10 +173,13 @@ def _js_load_verified_seed_image_result(
       const seed = loadVerifiedSeedImage(
         {json.dumps(seed_name)},
         raw,
-        checksums,
-        projectionIds,
-        'TEST_CHECKSUMS',
-        'TEST_PROJECTION_IDS'
+        SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL,
+        {{
+          checksumRegistry: checksums,
+          projectionIdRegistry: projectionIds,
+          checksumRegistryName: 'TEST_CHECKSUMS',
+          projectionIdRegistryName: 'TEST_PROJECTION_IDS',
+        }}
       );
       console.log(JSON.stringify({{
         ok: true,
@@ -207,7 +213,10 @@ def _js_load_verified_seed_image_bytes_result(
     js_script = """
     const crypto = require('crypto');
     const fs = require('fs');
-    const { loadVerifiedSeedImage } = require('./mu/host/js/core/seed_loader');
+    const {
+      loadVerifiedSeedImage,
+      SEED_IMAGE_VERIFICATION_MODES,
+    } = require('./mu/host/js/core/seed_loader');
     const input = JSON.parse(fs.readFileSync(0, 'utf8'));
     const raw = Buffer.from(input.seedBytesBase64, 'base64');
     const checksums = Object.create(null);
@@ -222,10 +231,13 @@ def _js_load_verified_seed_image_bytes_result(
       const seed = loadVerifiedSeedImage(
         input.seedName,
         raw,
-        checksums,
-        projectionIds,
-        'TEST_CHECKSUMS',
-        'TEST_PROJECTION_IDS'
+        SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL,
+        {
+          checksumRegistry: checksums,
+          projectionIdRegistry: projectionIds,
+          checksumRegistryName: 'TEST_CHECKSUMS',
+          projectionIdRegistryName: 'TEST_PROJECTION_IDS',
+        }
       );
       console.log(JSON.stringify({
         ok: true,
@@ -264,8 +276,7 @@ def _js_load_registered_seed_image_bytes_result(
     const fs = require('fs');
     const {
       loadVerifiedSeedImage,
-      SEED_CHECKSUMS,
-      EXPECTED_PROJECTION_IDS,
+      SEED_IMAGE_VERIFICATION_MODES,
     } = require('./mu/host/js/core/seed_loader');
     const input = JSON.parse(fs.readFileSync(0, 'utf8'));
     const raw = Buffer.from(input.seedBytesBase64, 'base64');
@@ -273,10 +284,7 @@ def _js_load_registered_seed_image_bytes_result(
       const seed = loadVerifiedSeedImage(
         input.seedName,
         raw,
-        SEED_CHECKSUMS,
-        EXPECTED_PROJECTION_IDS,
-        'SEED_CHECKSUMS',
-        'EXPECTED_PROJECTION_IDS'
+        SEED_IMAGE_VERIFICATION_MODES.CLI
       );
       console.log(JSON.stringify({
         ok: true,
@@ -441,6 +449,33 @@ class TestSeedChecksumParity:
             if record["js_core_locked"]
         }
 
+    def test_js_seed_image_production_api_uses_closed_manifest_views(self):
+        """Production JS seed-image calls must choose closed manifest modes."""
+        source = (_REPO / "mu" / "host" / "js" / "core" / "seed_loader.js").read_text()
+        main_source = (_REPO / "mu" / "host" / "js" / "cli" / "main.js").read_text()
+
+        public_sig = (
+            "function loadVerifiedSeedImage(seedName, seedBytes, "
+            "verificationMode, negativeControlView)"
+        )
+        assert public_sig in source
+        assert "loadCliVerifiedSeedImage" not in source
+        assert "loadVerifiedSeedImageForNegativeControl" not in source
+        assert "SEED_IMAGE_VERIFICATION_MODES.CORE" in source
+        assert "SEED_IMAGE_VERIFICATION_MODES.CLI" in source
+        assert "SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL" in source
+
+        assert (
+            "loadVerifiedSeedImage(seedName, raw, SEED_IMAGE_VERIFICATION_MODES.CLI)"
+            in main_source
+        )
+        main_wrapper = main_source[
+            main_source.index("function loadVerifiedSeed(seedName)"):
+            main_source.index("// mu/ root is 3 levels up from cli/")
+        ]
+        assert "SEED_CHECKSUMS," not in main_wrapper
+        assert "EXPECTED_PROJECTION_IDS," not in main_wrapper
+
     def test_js_seeds_are_subset_of_python(self):
         """Every JS seed must exist in Python's SEED_CHECKSUMS."""
         js_checksums = _js_seed_checksums()
@@ -589,12 +624,13 @@ class TestProductionLoaderBoundaryParity:
         assert js_result == {"ok": True, "ids": expected_ids}
 
     def test_canonical_seed_corpus_loads_integer_images_in_both_boundaries(self):
-        """All canonical production corpus seed images remain accepted as integer-only."""
+        """All JS-registered canonical corpus seed images load through production views."""
         canonical_subdirs = {"substrate", "closures", "bridge", "programs"}
+        js_registered = set(_js_seed_checksums())
         seed_names = sorted(
             seed_name
             for seed_name, subdir in MU_SEED_LOCATIONS.items()
-            if subdir in canonical_subdirs
+            if subdir in canonical_subdirs and seed_name in js_registered
         )
         assert seed_names
 
@@ -606,12 +642,7 @@ class TestProductionLoaderBoundaryParity:
             py_result = _python_load_verified_seed_image_result(
                 seed_name, seed_bytes, verify=True
             )
-            js_result = _js_load_verified_seed_image_bytes_result(
-                seed_name,
-                seed_bytes,
-                expected_ids=expected_ids,
-                register_checksum=True,
-            )
+            js_result = _js_load_registered_seed_image_bytes_result(seed_name, seed_bytes)
 
             assert py_result == {"ok": True, "ids": expected_ids}
             assert js_result == {"ok": True, "ids": expected_ids}
@@ -701,7 +732,7 @@ class TestProductionLoaderBoundaryParity:
         assert "non-integer JSON numeric literal 2.5" in str(js_result["error"])
 
     def test_js_seed_image_boundary_validates_projection_order(self):
-        """JS byte boundary enforces caller-provided projection ID order."""
+        """JS negative-control byte boundary enforces projection ID order."""
         raw_json = json.dumps(
             {
                 "meta": {

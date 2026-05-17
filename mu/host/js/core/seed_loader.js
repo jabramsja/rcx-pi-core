@@ -196,25 +196,44 @@ function isFullyLockedSeed(seedName) {
   return seedName in CORE_SEED_CHECKSUMS && seedName in CORE_SEED_PROJECTION_IDS;
 }
 
+const SEED_IMAGE_VERIFICATION_MODES = Object.freeze({
+  CORE: 'manifest-core',
+  CLI: 'manifest-cli',
+  TEST_ONLY_NEGATIVE_CONTROL: 'test-only-negative-control',
+});
+
 /**
  * Verify, parse, and validate a seed JSON image without performing file I/O.
  * @param {string} seedName - Seed filename (e.g., 'terminal_classify.v1.json')
  * @param {Buffer|string} seedBytes - Raw seed JSON bytes
- * @param {object} checksumRegistry - Seed checksum registry
- * @param {object} projectionIdRegistry - Seed projection ID registry
- * @param {string} checksumRegistryName - Human-readable checksum registry name
- * @param {string} projectionIdRegistryName - Human-readable projection registry name
+ * @param {string} verificationMode - Closed manifest view selector
+ * @param {object} negativeControlView - TEST-ONLY synthetic registry view
  * @returns {object} Parsed seed object
  */
-function loadVerifiedSeedImage(
-  seedName,
-  seedBytes,
-  checksumRegistry,
-  projectionIdRegistry,
-  checksumRegistryName,
-  projectionIdRegistryName
-) {
+function loadVerifiedSeedImage(seedName, seedBytes, verificationMode, negativeControlView) {
   const imageBytes = Buffer.isBuffer(seedBytes) ? seedBytes : Buffer.from(seedBytes);
+  let checksumRegistry;
+  let projectionIdRegistry;
+  let checksumRegistryName;
+  let projectionIdRegistryName;
+  if (verificationMode === SEED_IMAGE_VERIFICATION_MODES.CORE) {
+    checksumRegistry = CORE_SEED_CHECKSUMS;
+    projectionIdRegistry = CORE_SEED_PROJECTION_IDS;
+    checksumRegistryName = 'CORE_SEED_CHECKSUMS';
+    projectionIdRegistryName = 'CORE_SEED_PROJECTION_IDS';
+  } else if (verificationMode === SEED_IMAGE_VERIFICATION_MODES.CLI) {
+    checksumRegistry = SEED_CHECKSUMS;
+    projectionIdRegistry = EXPECTED_PROJECTION_IDS;
+    checksumRegistryName = 'SEED_CHECKSUMS';
+    projectionIdRegistryName = 'EXPECTED_PROJECTION_IDS';
+  } else if (verificationMode === SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL) {
+    checksumRegistry = negativeControlView.checksumRegistry;
+    projectionIdRegistry = negativeControlView.projectionIdRegistry;
+    checksumRegistryName = negativeControlView.checksumRegistryName;
+    projectionIdRegistryName = negativeControlView.projectionIdRegistryName;
+  } else {
+    throw new Error(`Unknown seed image verification mode: ${verificationMode}`);
+  }
 
   // Compute hash of raw bytes before any parsing.
   const hash = crypto.createHash('sha256').update(imageBytes).digest('hex');
@@ -388,10 +407,7 @@ function loadVerifiedSeed(seedName, subdir) {
   return loadVerifiedSeedImage(
     seedName,
     raw,
-    CORE_SEED_CHECKSUMS,
-    CORE_SEED_PROJECTION_IDS,
-    'CORE_SEED_CHECKSUMS',
-    'CORE_SEED_PROJECTION_IDS'
+    SEED_IMAGE_VERIFICATION_MODES.CORE
   );
 }
 
@@ -406,6 +422,7 @@ module.exports = {
   isFullyLockedSeed,
   getSeedChecksum,
   validateSeedDependencies,
+  SEED_IMAGE_VERIFICATION_MODES,
   SEED_REGISTRY_MANIFEST,
   SEED_CHECKSUMS,
   EXPECTED_PROJECTION_IDS,

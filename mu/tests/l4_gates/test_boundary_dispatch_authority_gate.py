@@ -64,15 +64,18 @@ def setup_function():
     _events.clear()
 
 
-def _load_js_seed_image_with_test_registry(
+def _load_js_seed_image_with_negative_control_registry(
     seed_name: str,
     seed_bytes: bytes,
     expected_ids: list[str],
 ) -> dict[str, object]:
-    """Call the production JS seed-image loader with a checksum-bound test registry."""
+    """Call the explicit JS negative-control mode with checksum-bound registries."""
     js_code = f"""
     const crypto = require('crypto');
-    const {{ loadVerifiedSeedImage }} = require('./mu/host/js/core/seed_loader');
+    const {{
+        loadVerifiedSeedImage,
+        SEED_IMAGE_VERIFICATION_MODES,
+    }} = require('./mu/host/js/core/seed_loader');
     const raw = Buffer.from({list(seed_bytes)});
     const checksums = Object.create(null);
     const projectionIds = Object.create(null);
@@ -82,10 +85,13 @@ def _load_js_seed_image_with_test_registry(
         const seed = loadVerifiedSeedImage(
             {json.dumps(seed_name)},
             raw,
-            checksums,
-            projectionIds,
-            'TEST_CHECKSUMS',
-            'TEST_PROJECTION_IDS'
+            SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL,
+            {{
+                checksumRegistry: checksums,
+                projectionIdRegistry: projectionIds,
+                checksumRegistryName: 'TEST_CHECKSUMS',
+                projectionIdRegistryName: 'TEST_PROJECTION_IDS',
+            }}
         );
         console.log(JSON.stringify({{
             ok: true,
@@ -243,7 +249,7 @@ class TestSeedImageNumericDomainBoundary:
         seed_bytes = self._seed_bytes("1")
 
         py_result = self._load_python_seed_image(monkeypatch, seed_name, seed_bytes)
-        js_result = _load_js_seed_image_with_test_registry(
+        js_result = _load_js_seed_image_with_negative_control_registry(
             seed_name,
             seed_bytes,
             self.EXPECTED_IDS,
@@ -263,7 +269,7 @@ class TestSeedImageNumericDomainBoundary:
         seed_bytes = self._seed_bytes(numeric_literal)
 
         py_result = self._load_python_seed_image(monkeypatch, seed_name, seed_bytes)
-        js_result = _load_js_seed_image_with_test_registry(
+        js_result = _load_js_seed_image_with_negative_control_registry(
             seed_name,
             seed_bytes,
             self.EXPECTED_IDS,
@@ -287,7 +293,7 @@ class TestSeedImageNumericDomainBoundary:
         seed_bytes = self._seed_bytes(numeric_literal)
 
         py_result = self._load_python_seed_image(monkeypatch, seed_name, seed_bytes)
-        js_result = _load_js_seed_image_with_test_registry(
+        js_result = _load_js_seed_image_with_negative_control_registry(
             seed_name,
             seed_bytes,
             self.EXPECTED_IDS,
@@ -813,9 +819,12 @@ class TestJsSeedLoaderMalformedProjection:
 
     @staticmethod
     def _run_seed_loader_test(projections_json, expect_index, expect_type):
-        """Call production loadVerifiedSeedImage with malformed projection bytes."""
+        """Call the explicit negative-control mode with malformed projection bytes."""
         js_code = f"""
-        const {{ loadVerifiedSeedImage }} = require('./mu/host/js/core/seed_loader');
+        const {{
+            loadVerifiedSeedImage,
+            SEED_IMAGE_VERIFICATION_MODES,
+        }} = require('./mu/host/js/core/seed_loader');
         const seedBytes = Buffer.from(JSON.stringify({{
             meta: {{name: "TEST", version: "1.0", description: "test"}},
             projections: {projections_json}
@@ -824,10 +833,13 @@ class TestJsSeedLoaderMalformedProjection:
             loadVerifiedSeedImage(
                 '_test_malformed_seed.json',
                 seedBytes,
-                Object.create(null),
-                Object.create(null),
-                'TEST_CHECKSUMS',
-                'TEST_PROJECTION_IDS'
+                SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL,
+                {{
+                    checksumRegistry: Object.create(null),
+                    projectionIdRegistry: Object.create(null),
+                    checksumRegistryName: 'TEST_CHECKSUMS',
+                    projectionIdRegistryName: 'TEST_PROJECTION_IDS',
+                }}
             );
             console.log('ERROR: no throw');
         }} catch(e) {{
@@ -873,7 +885,7 @@ class TestJsSeedLoaderMalformedProjection:
     def test_main_load_verified_seed_delegates_to_seed_image_boundary_source_lock(self):
         """CLI seed path wrapper delegates parse/validation to the byte boundary."""
         main_js = (REPO_ROOT / "mu" / "host" / "js" / "cli" / "main.js").read_text()
-        assert "loadVerifiedSeedImage" in main_js, (
+        assert "SEED_IMAGE_VERIFICATION_MODES.CLI" in main_js, (
             "main.js must import/use the shared seed image boundary"
         )
         fn_match = re.search(
@@ -892,6 +904,15 @@ class TestJsSeedLoaderMalformedProjection:
         assert "loadVerifiedSeedImage(" in body, (
             "main.js path wrapper must delegate to loadVerifiedSeedImage"
         )
+        assert "SEED_IMAGE_VERIFICATION_MODES.CLI" in body, (
+            "main.js path wrapper must use the manifest-derived CLI view"
+        )
+        assert "SEED_CHECKSUMS," not in body, (
+            "main.js path wrapper must not pass caller checksum registry authority"
+        )
+        assert "EXPECTED_PROJECTION_IDS," not in body, (
+            "main.js path wrapper must not pass caller projection registry authority"
+        )
         assert "JSON.parse" not in body, (
             "main.js path wrapper must not parse seed JSON directly"
         )
@@ -906,6 +927,9 @@ class TestJsSeedLoaderMalformedProjection:
         ).read_text()
         assert "function loadVerifiedSeedImage(" in source, (
             "seed_loader.js missing explicit seed image byte boundary"
+        )
+        assert "SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL" in source, (
+            "seed_loader.js missing explicit test-only negative-control mode"
         )
         assert "require('util')" not in source and 'require("util")' not in source, (
             "seed_loader.js must not widen the Node stdlib import surface for seed bytes"
@@ -922,6 +946,15 @@ class TestJsSeedLoaderMalformedProjection:
         )
         assert "loadVerifiedSeedImage(" in wrapper_body, (
             "seed_loader.js path wrapper must delegate to loadVerifiedSeedImage"
+        )
+        assert "SEED_IMAGE_VERIFICATION_MODES.CORE" in wrapper_body, (
+            "seed_loader.js path wrapper must use the manifest-derived core view"
+        )
+        assert "CORE_SEED_CHECKSUMS," not in wrapper_body, (
+            "seed_loader.js path wrapper must not pass caller checksum registry authority"
+        )
+        assert "CORE_SEED_PROJECTION_IDS," not in wrapper_body, (
+            "seed_loader.js path wrapper must not pass caller projection registry authority"
         )
         assert "JSON.parse" not in wrapper_body, (
             "seed_loader.js path wrapper must not parse seed JSON directly"
