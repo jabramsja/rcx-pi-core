@@ -172,6 +172,18 @@ for (const [seedName, record] of Object.entries(SEED_REGISTRY_RECORDS)) {
   SEED_SUBDIRS[seedName] = record.subdir;
 }
 
+for (const registry of [EXPECTED_PROJECTION_IDS, CORE_SEED_PROJECTION_IDS, SEED_DEPENDENCIES]) {
+  for (const value of Object.values(registry)) {
+    Object.freeze(value);
+  }
+}
+Object.freeze(SEED_CHECKSUMS);
+Object.freeze(EXPECTED_PROJECTION_IDS);
+Object.freeze(CORE_SEED_CHECKSUMS);
+Object.freeze(CORE_SEED_PROJECTION_IDS);
+Object.freeze(SEED_DEPENDENCIES);
+Object.freeze(SEED_SUBDIRS);
+
 /**
  * Get the subdirectory for a seed file.
  * @param {string} seedName - Seed filename
@@ -199,7 +211,21 @@ function isFullyLockedSeed(seedName) {
 const SEED_IMAGE_VERIFICATION_MODES = Object.freeze({
   CORE: 'manifest-core',
   CLI: 'manifest-cli',
-  TEST_ONLY_NEGATIVE_CONTROL: 'test-only-negative-control',
+});
+
+const SEED_IMAGE_VERIFICATION_VIEWS = Object.freeze({
+  [SEED_IMAGE_VERIFICATION_MODES.CORE]: Object.freeze({
+    checksumRegistry: CORE_SEED_CHECKSUMS,
+    projectionIdRegistry: CORE_SEED_PROJECTION_IDS,
+    checksumRegistryName: 'CORE_SEED_CHECKSUMS',
+    projectionIdRegistryName: 'CORE_SEED_PROJECTION_IDS',
+  }),
+  [SEED_IMAGE_VERIFICATION_MODES.CLI]: Object.freeze({
+    checksumRegistry: SEED_CHECKSUMS,
+    projectionIdRegistry: EXPECTED_PROJECTION_IDS,
+    checksumRegistryName: 'SEED_CHECKSUMS',
+    projectionIdRegistryName: 'EXPECTED_PROJECTION_IDS',
+  }),
 });
 
 /**
@@ -207,33 +233,20 @@ const SEED_IMAGE_VERIFICATION_MODES = Object.freeze({
  * @param {string} seedName - Seed filename (e.g., 'terminal_classify.v1.json')
  * @param {Buffer|string} seedBytes - Raw seed JSON bytes
  * @param {string} verificationMode - Closed manifest view selector
- * @param {object} negativeControlView - TEST-ONLY synthetic registry view
  * @returns {object} Parsed seed object
  */
-function loadVerifiedSeedImage(seedName, seedBytes, verificationMode, negativeControlView) {
+function loadVerifiedSeedImage(seedName, seedBytes, verificationMode) {
   const imageBytes = Buffer.isBuffer(seedBytes) ? seedBytes : Buffer.from(seedBytes);
-  let checksumRegistry;
-  let projectionIdRegistry;
-  let checksumRegistryName;
-  let projectionIdRegistryName;
-  if (verificationMode === SEED_IMAGE_VERIFICATION_MODES.CORE) {
-    checksumRegistry = CORE_SEED_CHECKSUMS;
-    projectionIdRegistry = CORE_SEED_PROJECTION_IDS;
-    checksumRegistryName = 'CORE_SEED_CHECKSUMS';
-    projectionIdRegistryName = 'CORE_SEED_PROJECTION_IDS';
-  } else if (verificationMode === SEED_IMAGE_VERIFICATION_MODES.CLI) {
-    checksumRegistry = SEED_CHECKSUMS;
-    projectionIdRegistry = EXPECTED_PROJECTION_IDS;
-    checksumRegistryName = 'SEED_CHECKSUMS';
-    projectionIdRegistryName = 'EXPECTED_PROJECTION_IDS';
-  } else if (verificationMode === SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL) {
-    checksumRegistry = negativeControlView.checksumRegistry;
-    projectionIdRegistry = negativeControlView.projectionIdRegistry;
-    checksumRegistryName = negativeControlView.checksumRegistryName;
-    projectionIdRegistryName = negativeControlView.projectionIdRegistryName;
-  } else {
+  const verificationView = SEED_IMAGE_VERIFICATION_VIEWS[verificationMode];
+  if (!verificationView) {
     throw new Error(`Unknown seed image verification mode: ${verificationMode}`);
   }
+  const {
+    checksumRegistry,
+    projectionIdRegistry,
+    checksumRegistryName,
+    projectionIdRegistryName,
+  } = verificationView;
 
   // Compute hash of raw bytes before any parsing.
   const hash = crypto.createHash('sha256').update(imageBytes).digest('hex');
