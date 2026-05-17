@@ -64,34 +64,23 @@ def setup_function():
     _events.clear()
 
 
-def _load_js_seed_image_with_negative_control_registry(
+def _load_js_seed_image_with_manifest_mode(
     seed_name: str,
     seed_bytes: bytes,
-    expected_ids: list[str],
+    verification_mode: str = "CLI",
 ) -> dict[str, object]:
-    """Call the explicit JS negative-control mode with checksum-bound registries."""
+    """Call the JS seed-image boundary through a closed manifest-derived mode."""
     js_code = f"""
-    const crypto = require('crypto');
     const {{
         loadVerifiedSeedImage,
         SEED_IMAGE_VERIFICATION_MODES,
     }} = require('./mu/host/js/core/seed_loader');
     const raw = Buffer.from({list(seed_bytes)});
-    const checksums = Object.create(null);
-    const projectionIds = Object.create(null);
-    checksums[{json.dumps(seed_name)}] = crypto.createHash('sha256').update(raw).digest('hex');
-    projectionIds[{json.dumps(seed_name)}] = {json.dumps(expected_ids)};
     try {{
         const seed = loadVerifiedSeedImage(
             {json.dumps(seed_name)},
             raw,
-            SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL,
-            {{
-                checksumRegistry: checksums,
-                projectionIdRegistry: projectionIds,
-                checksumRegistryName: 'TEST_CHECKSUMS',
-                projectionIdRegistryName: 'TEST_PROJECTION_IDS',
-            }}
+            SEED_IMAGE_VERIFICATION_MODES[{json.dumps(verification_mode)}]
         );
         console.log(JSON.stringify({{
             ok: true,
@@ -243,20 +232,18 @@ class TestSeedImageNumericDomainBoundary:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "ids": [proj["id"] for proj in seed["projections"]]}
 
-    def test_integer_seed_image_numeric_loads_through_python_and_js(self, monkeypatch):
-        """Checksum-bound integer seed images still load through both byte boundaries."""
-        seed_name = "integer_numeric_domain_control.v1.json"
-        seed_bytes = self._seed_bytes("1")
+    def test_integer_seed_image_numeric_loads_through_python_and_js(self):
+        """Canonical integer seed images still load through both production byte boundaries."""
+        seed_name = "rcx_engine.v1.json"
+        seed_bytes = get_seed_path(seed_name).read_bytes()
+        expected_ids = EXPECTED_PROJECTION_IDS[seed_name]
 
-        py_result = self._load_python_seed_image(monkeypatch, seed_name, seed_bytes)
-        js_result = _load_js_seed_image_with_negative_control_registry(
-            seed_name,
-            seed_bytes,
-            self.EXPECTED_IDS,
-        )
+        seed = load_verified_seed_image(seed_name, seed_bytes, verify=True)
+        py_result = {"ok": True, "ids": [proj["id"] for proj in seed["projections"]]}
+        js_result = _load_js_seed_image_with_manifest_mode(seed_name, seed_bytes)
 
-        assert py_result == {"ok": True, "ids": self.EXPECTED_IDS}
-        assert js_result == {"ok": True, "ids": self.EXPECTED_IDS}
+        assert py_result == {"ok": True, "ids": expected_ids}
+        assert js_result == {"ok": True, "ids": expected_ids}
 
     @pytest.mark.parametrize("numeric_literal", ["1.0", "2.5", "1e0"])
     def test_non_integer_seed_image_numeric_rejected_through_python_and_js(
@@ -269,11 +256,7 @@ class TestSeedImageNumericDomainBoundary:
         seed_bytes = self._seed_bytes(numeric_literal)
 
         py_result = self._load_python_seed_image(monkeypatch, seed_name, seed_bytes)
-        js_result = _load_js_seed_image_with_negative_control_registry(
-            seed_name,
-            seed_bytes,
-            self.EXPECTED_IDS,
-        )
+        js_result = _load_js_seed_image_with_manifest_mode(seed_name, seed_bytes)
 
         assert py_result["ok"] is False
         assert numeric_literal in str(py_result["error"])
@@ -293,11 +276,7 @@ class TestSeedImageNumericDomainBoundary:
         seed_bytes = self._seed_bytes(numeric_literal)
 
         py_result = self._load_python_seed_image(monkeypatch, seed_name, seed_bytes)
-        js_result = _load_js_seed_image_with_negative_control_registry(
-            seed_name,
-            seed_bytes,
-            self.EXPECTED_IDS,
-        )
+        js_result = _load_js_seed_image_with_manifest_mode(seed_name, seed_bytes)
 
         assert py_result["ok"] is False
         assert "Infinity" in str(py_result["error"]) or "NaN" in str(py_result["error"])
@@ -819,7 +798,7 @@ class TestJsSeedLoaderMalformedProjection:
 
     @staticmethod
     def _run_seed_loader_test(projections_json, expect_index, expect_type):
-        """Call the explicit negative-control mode with malformed projection bytes."""
+        """Call the production CLI mode with malformed projection bytes."""
         js_code = f"""
         const {{
             loadVerifiedSeedImage,
@@ -833,13 +812,7 @@ class TestJsSeedLoaderMalformedProjection:
             loadVerifiedSeedImage(
                 '_test_malformed_seed.json',
                 seedBytes,
-                SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL,
-                {{
-                    checksumRegistry: Object.create(null),
-                    projectionIdRegistry: Object.create(null),
-                    checksumRegistryName: 'TEST_CHECKSUMS',
-                    projectionIdRegistryName: 'TEST_PROJECTION_IDS',
-                }}
+                SEED_IMAGE_VERIFICATION_MODES.CLI
             );
             console.log('ERROR: no throw');
         }} catch(e) {{
@@ -928,8 +901,11 @@ class TestJsSeedLoaderMalformedProjection:
         assert "function loadVerifiedSeedImage(" in source, (
             "seed_loader.js missing explicit seed image byte boundary"
         )
-        assert "SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL" in source, (
-            "seed_loader.js missing explicit test-only negative-control mode"
+        assert "TEST_ONLY_NEGATIVE_CONTROL" not in source, (
+            "seed_loader.js must not export a production negative-control mode"
+        )
+        assert "negativeControlView" not in source, (
+            "seed_loader.js must not accept caller-supplied negative-control views"
         )
         assert "require('util')" not in source and 'require("util")' not in source, (
             "seed_loader.js must not widen the Node stdlib import surface for seed bytes"

@@ -150,36 +150,18 @@ def _python_load_verified_seed_image_result(
 def _js_load_verified_seed_image_result(
     seed_name: str,
     raw_json: str,
-    expected_ids: list[str] | None = None,
-    *,
-    register_checksum: bool,
 ) -> dict[str, object]:
     js_script = f"""
-    const crypto = require('crypto');
     const {{
       loadVerifiedSeedImage,
       SEED_IMAGE_VERIFICATION_MODES,
     }} = require('./mu/host/js/core/seed_loader');
     const raw = Buffer.from({json.dumps(raw_json)}, 'utf8');
-    const checksums = Object.create(null);
-    const projectionIds = Object.create(null);
-    if ({json.dumps(register_checksum)}) {{
-      checksums[{json.dumps(seed_name)}] = crypto.createHash('sha256').update(raw).digest('hex');
-    }}
-    if ({json.dumps(expected_ids)} !== null) {{
-      projectionIds[{json.dumps(seed_name)}] = {json.dumps(expected_ids)};
-    }}
     try {{
       const seed = loadVerifiedSeedImage(
         {json.dumps(seed_name)},
         raw,
-        SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL,
-        {{
-          checksumRegistry: checksums,
-          projectionIdRegistry: projectionIds,
-          checksumRegistryName: 'TEST_CHECKSUMS',
-          projectionIdRegistryName: 'TEST_PROJECTION_IDS',
-        }}
+        SEED_IMAGE_VERIFICATION_MODES.CLI
       );
       console.log(JSON.stringify({{
         ok: true,
@@ -206,12 +188,8 @@ def _js_load_verified_seed_image_result(
 def _js_load_verified_seed_image_bytes_result(
     seed_name: str,
     seed_bytes: bytes,
-    expected_ids: list[str] | None = None,
-    *,
-    register_checksum: bool,
 ) -> dict[str, object]:
     js_script = """
-    const crypto = require('crypto');
     const fs = require('fs');
     const {
       loadVerifiedSeedImage,
@@ -219,25 +197,11 @@ def _js_load_verified_seed_image_bytes_result(
     } = require('./mu/host/js/core/seed_loader');
     const input = JSON.parse(fs.readFileSync(0, 'utf8'));
     const raw = Buffer.from(input.seedBytesBase64, 'base64');
-    const checksums = Object.create(null);
-    const projectionIds = Object.create(null);
-    if (input.registerChecksum) {
-      checksums[input.seedName] = crypto.createHash('sha256').update(raw).digest('hex');
-    }
-    if (input.expectedIds !== null) {
-      projectionIds[input.seedName] = input.expectedIds;
-    }
     try {
       const seed = loadVerifiedSeedImage(
         input.seedName,
         raw,
-        SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL,
-        {
-          checksumRegistry: checksums,
-          projectionIdRegistry: projectionIds,
-          checksumRegistryName: 'TEST_CHECKSUMS',
-          projectionIdRegistryName: 'TEST_PROJECTION_IDS',
-        }
+        SEED_IMAGE_VERIFICATION_MODES.CLI
       );
       console.log(JSON.stringify({
         ok: true,
@@ -253,8 +217,6 @@ def _js_load_verified_seed_image_bytes_result(
     payload = {
         "seedName": seed_name,
         "seedBytesBase64": base64.b64encode(seed_bytes).decode("ascii"),
-        "expectedIds": expected_ids,
-        "registerChecksum": register_checksum,
     }
     proc = subprocess.run(
         ["node", "-e", js_script],
@@ -455,15 +417,54 @@ class TestSeedChecksumParity:
         main_source = (_REPO / "mu" / "host" / "js" / "cli" / "main.js").read_text()
 
         public_sig = (
-            "function loadVerifiedSeedImage(seedName, seedBytes, "
-            "verificationMode, negativeControlView)"
+            "function loadVerifiedSeedImage(seedName, seedBytes, verificationMode)"
         )
         assert public_sig in source
         assert "loadCliVerifiedSeedImage" not in source
         assert "loadVerifiedSeedImageForNegativeControl" not in source
         assert "SEED_IMAGE_VERIFICATION_MODES.CORE" in source
         assert "SEED_IMAGE_VERIFICATION_MODES.CLI" in source
-        assert "SEED_IMAGE_VERIFICATION_MODES.TEST_ONLY_NEGATIVE_CONTROL" in source
+        assert "TEST_ONLY_NEGATIVE_CONTROL" not in source
+        assert "negativeControlView" not in source
+        assert "SEED_IMAGE_VERIFICATION_VIEWS" in source
+
+        mutation_probe = """
+        'use strict';
+        const sl = require('./mu/host/js/core/seed_loader');
+        let mutationError = null;
+        try {
+          sl.SEED_CHECKSUMS['synthetic_control.v1.json'] = '0'.repeat(64);
+          sl.EXPECTED_PROJECTION_IDS['synthetic_control.v1.json'] = [];
+        } catch (e) {
+          mutationError = e.name;
+        }
+        console.log(JSON.stringify({
+          frozenChecksums: Object.isFrozen(sl.SEED_CHECKSUMS),
+          frozenProjectionIds: Object.isFrozen(sl.EXPECTED_PROJECTION_IDS),
+          hasSyntheticChecksum: Object.prototype.hasOwnProperty.call(
+            sl.SEED_CHECKSUMS,
+            'synthetic_control.v1.json'
+          ),
+          hasSyntheticProjectionIds: Object.prototype.hasOwnProperty.call(
+            sl.EXPECTED_PROJECTION_IDS,
+            'synthetic_control.v1.json'
+          ),
+          mutationError,
+        }));
+        """
+        proc = subprocess.run(
+            ["node", "-e", mutation_probe],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert proc.returncode == 0, proc.stderr
+        probe = json.loads(proc.stdout)
+        assert probe["frozenChecksums"] is True
+        assert probe["frozenProjectionIds"] is True
+        assert probe["hasSyntheticChecksum"] is False
+        assert probe["hasSyntheticProjectionIds"] is False
 
         assert (
             "loadVerifiedSeedImage(seedName, raw, SEED_IMAGE_VERIFICATION_MODES.CLI)"
@@ -699,7 +700,6 @@ class TestProductionLoaderBoundaryParity:
         js_result = _js_load_verified_seed_image_result(
             "nonfinite_control.v1.json",
             raw_json,
-            register_checksum=False,
         )
 
         assert py_result["ok"] is False
@@ -723,7 +723,6 @@ class TestProductionLoaderBoundaryParity:
         js_result = _js_load_verified_seed_image_result(
             "decimal_control.v1.json",
             raw_json,
-            register_checksum=False,
         )
 
         assert py_result["ok"] is False
@@ -731,35 +730,22 @@ class TestProductionLoaderBoundaryParity:
         assert js_result["ok"] is False
         assert "non-integer JSON numeric literal 2.5" in str(js_result["error"])
 
-    def test_js_seed_image_boundary_validates_projection_order(self):
-        """JS negative-control byte boundary enforces projection ID order."""
-        raw_json = json.dumps(
-            {
-                "meta": {
-                    "version": "1.0",
-                    "name": "ORDER",
-                    "description": "projection order control",
-                },
-                "projections": [
-                    {"id": "order.second", "pattern": {}, "body": {}},
-                    {"id": "order.first", "pattern": {}, "body": {}},
-                ],
-            }
-        )
-        js_result = _js_load_verified_seed_image_result(
-            "order_control.v1.json",
-            raw_json,
-            expected_ids=["order.first", "order.second"],
-            register_checksum=True,
-        )
+    def test_js_seed_image_boundary_retains_projection_order_source_lock(self):
+        """Production JS byte boundary still checks manifest projection ID order."""
+        source = (_REPO / "mu" / "host" / "js" / "core" / "seed_loader.js").read_text()
 
-        assert js_result["ok"] is False
-        assert "projection IDs mismatch" in str(js_result["error"])
+        assert "const expectedIds = projectionIdRegistry[seedName]" in source
+        assert "const actualIds = seed.projections.map(p => p.id)" in source
+        assert (
+            "JSON.stringify(actualIds) !== JSON.stringify(expectedIds)"
+            in source
+        )
+        assert "Seed projection IDs mismatch" in source
 
-    def test_registered_seed_image_missing_meta_fails_closed_in_both_boundaries(
+    def test_control_seed_image_missing_meta_fails_closed_in_both_boundaries(
         self, monkeypatch
     ):
-        """Registered malformed seed images still pass checksum before structure rejection."""
+        """Malformed seed image controls reject missing top-level metadata."""
         seed_name = "missing_meta_control.v1.json"
         seed_bytes = json.dumps(
             {
@@ -777,8 +763,6 @@ class TestProductionLoaderBoundaryParity:
         js_result = _js_load_verified_seed_image_bytes_result(
             seed_name,
             seed_bytes,
-            expected_ids=["missing.meta"],
-            register_checksum=True,
         )
 
         assert py_result["ok"] is False
@@ -786,10 +770,10 @@ class TestProductionLoaderBoundaryParity:
         assert js_result["ok"] is False
         assert "missing 'meta'" in str(js_result["error"])
 
-    def test_registered_seed_image_missing_projection_body_fails_closed_in_both_boundaries(
+    def test_control_seed_image_missing_projection_body_fails_closed_in_both_boundaries(
         self, monkeypatch
     ):
-        """Registered projection entries must retain id/pattern/body structure."""
+        """Malformed projection controls must retain id/pattern/body structure."""
         seed_name = "missing_projection_body_control.v1.json"
         seed_bytes = json.dumps(
             {
@@ -812,8 +796,6 @@ class TestProductionLoaderBoundaryParity:
         js_result = _js_load_verified_seed_image_bytes_result(
             seed_name,
             seed_bytes,
-            expected_ids=["missing.body"],
-            register_checksum=True,
         )
 
         assert py_result["ok"] is False
@@ -821,7 +803,7 @@ class TestProductionLoaderBoundaryParity:
         assert js_result["ok"] is False
         assert "missing key 'body'" in str(js_result["error"])
 
-    def test_registered_invalid_utf8_seed_image_fails_closed_in_both_boundaries(
+    def test_control_invalid_utf8_seed_image_fails_closed_in_both_boundaries(
         self, monkeypatch
     ):
         """JS must not replace invalid UTF-8 that Python rejects during decoding."""
@@ -840,8 +822,6 @@ class TestProductionLoaderBoundaryParity:
         js_result = _js_load_verified_seed_image_bytes_result(
             seed_name,
             seed_bytes,
-            expected_ids=[],
-            register_checksum=True,
         )
 
         assert py_result["ok"] is False
