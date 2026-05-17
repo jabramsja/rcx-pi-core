@@ -702,23 +702,36 @@ def _boundary_op_run_trace(request, req_input, max_algorithm_iterations):
         if "pattern" not in p or "body" not in p:
             raise RcxEngineError("api.bad_request",
                 f"run_trace projection[{i}] must have 'pattern' and 'body' keys")
-    # max_steps parity policy: normalize-fallback.
-    # Numeric finite → floor to int. Non-numeric/bool/NaN/±Inf → fallback to 100.
-    # Matches JS behavior (typeof !== 'number' || isNaN → 100, Math.floor) exactly.
-    max_steps = req_input.get("max_steps", 100)
-    if isinstance(max_steps, bool) or not isinstance(max_steps, (int, float)):
-        max_steps = 100
-    elif max_steps != max_steps or abs(max_steps) == float('inf'):
-        max_steps = 100
+    # max_steps boundary contract: absent key defaults to the bootstrap clock.
+    # Explicit values are structural integer budget data and fail closed if dirty.
+    if "max_steps" in req_input:
+        max_steps = req_input["max_steps"]
+        if isinstance(max_steps, bool):
+            raise RcxEngineError("api.bad_request",
+                "run_trace input 'max_steps' must be an integer, got bool")
+        if isinstance(max_steps, int):
+            trace_max_steps = max_steps
+        elif (
+            isinstance(max_steps, float)
+            and max_steps == max_steps
+            and abs(max_steps) != float("inf")
+            and max_steps.is_integer()
+        ):
+            trace_max_steps = int(max_steps)
+        else:
+            raise RcxEngineError("api.bad_request",
+                f"run_trace input 'max_steps' must be an integer, got {type(max_steps).__name__}")
+        if trace_max_steps < 0:
+            raise RcxEngineError("api.bad_request",
+                f"run_trace input 'max_steps' must be >= 0, got {trace_max_steps}")
     else:
-        max_steps = int(max_steps)
-    if max_steps < 0:
-        max_steps = 100
-    # HF2 parity: clamp max_steps to prevent unbounded trace (matches JS MAX_BOUNDARY_TRACE_STEPS).
+        trace_max_steps = 100
+    # HF2 parity: hard resource cap to prevent unbounded trace (matches JS MAX_BOUNDARY_TRACE_STEPS).
     _MAX_BOUNDARY_TRACE_STEPS = 10000
-    if max_steps > _MAX_BOUNDARY_TRACE_STEPS:
-        max_steps = _MAX_BOUNDARY_TRACE_STEPS
-    raw = run_mu_structural(projs, req_input["value"], max_steps=max_steps)
+    if trace_max_steps > _MAX_BOUNDARY_TRACE_STEPS:
+        raise RcxEngineError("api.bad_request",
+            f"run_trace input 'max_steps' exceeds boundary cap of {_MAX_BOUNDARY_TRACE_STEPS}")
+    raw = run_mu_structural(projs, req_input["value"], max_steps=trace_max_steps)
     return {"result": raw["result"], "trace": raw["trace"], "stall": raw["stall"]}
 
 

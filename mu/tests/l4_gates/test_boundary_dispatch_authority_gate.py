@@ -64,6 +64,106 @@ def setup_function():
     _events.clear()
 
 
+_MAX_STEPS_MISSING = object()
+
+
+def _linked_trace_to_list(trace):
+    entries = []
+    current = trace
+    while isinstance(current, dict) and "head" in current:
+        entries.append(current["head"])
+        current = current["tail"]
+    return entries
+
+
+def _toggle_trace_request(max_steps=_MAX_STEPS_MISSING):
+    request_input = {
+        "projections": [
+            {"pattern": "A", "body": "B"},
+            {"pattern": "B", "body": "A"},
+        ],
+        "value": "A",
+    }
+    if max_steps is not _MAX_STEPS_MISSING:
+        request_input["max_steps"] = max_steps
+    return {
+        "operation": "run_trace",
+        "input": request_input,
+        "context": {},
+        "inject_key": "result",
+    }
+
+
+def _run_js_trace(max_steps_expr=None):
+    max_steps_field = "" if max_steps_expr is None else f", max_steps: {max_steps_expr}"
+    js_code = f"""
+    const fs = require('fs');
+    const path = require('path');
+    const pipeline = require('./mu/host/js/engine/pipeline');
+    const muContainers = require('./mu/host/js/core/container_factory');
+    const {{
+      loadVerifiedSeedImage,
+      getSeedSubdir,
+      SEED_IMAGE_VERIFICATION_MODES,
+    }} = require('./mu/host/js/core/seed_loader');
+    function seed(name) {{
+      const seedPath = path.join(process.cwd(), 'mu', getSeedSubdir(name), name);
+      const raw = fs.readFileSync(seedPath);
+      return loadVerifiedSeedImage(name, raw, SEED_IMAGE_VERIFICATION_MODES.CLI).projections;
+    }}
+    const kernelProjections = muContainers.list([
+      ...seed('kernel.v1.json'),
+      ...seed('bootstrap_structural.v1.json'),
+      ...seed('match.v2.json'),
+      ...seed('subst.v2.json'),
+    ]);
+    function linkedTraceToArray(trace) {{
+      const entries = [];
+      let current = trace;
+      while (current && typeof current === 'object' && 'head' in current) {{
+        entries.push(current.head);
+        current = current.tail;
+      }}
+      return entries;
+    }}
+    try {{
+      const result = pipeline.serviceBoundaryEffect(
+        kernelProjections, {{}},
+        {{
+          operation:'run_trace',
+          input:{{
+            projections:[{{pattern:'A',body:'B'}},{{pattern:'B',body:'A'}}],
+            value:'A'{max_steps_field}
+          }},
+          context:{{}},
+          inject_key:'r'
+        }},
+        10, function(){{}}, 0, {{}}
+      );
+      const trace = linkedTraceToArray(result.r.trace);
+      console.log(JSON.stringify({{
+        ok: true,
+        result: result.r.result,
+        stall: result.r.stall,
+        last: trace[trace.length - 1]
+      }}));
+    }} catch(e) {{
+      console.log(JSON.stringify({{
+        ok: false,
+        error_code: e.error_code || null,
+        name: e.constructor.name,
+        message: e.message
+      }}));
+    }}
+    """
+    result = subprocess.run(
+        ["node", "-e", js_code],
+        capture_output=True, text=True, cwd=str(REPO_ROOT),
+    )
+    assert result.returncode == 0, f"JS failed: {result.stderr}"
+    return json.loads(result.stdout)
+
+
 def _load_js_seed_image_with_manifest_mode(
     seed_name: str,
     seed_bytes: bytes,
@@ -518,43 +618,88 @@ class TestRequestValidation:
                 emit_fn=_stub_emit, step=0, state={},
             )
 
-    def test_run_trace_max_steps_normalize_string(self):
-        """run_trace with max_steps='abc' normalizes to 100 (no TypeError).
-
-        Parity policy: both substrates normalize non-numeric max_steps to 100.
-        """
-        # max_steps='abc' → fallback 100; empty projections → stall, not max_steps error
-        request = {
-            "operation": "run_trace",
-            "input": {"projections": [], "value": 1, "max_steps": "abc"},
-            "context": {},
-            "inject_key": "result",
-        }
-        # Should NOT raise TypeError — normalized max_steps, empty projs → stall result
+    def test_run_trace_max_steps_absent_defaults_to_bootstrap_clock(self):
+        """Missing max_steps uses the boundary default clock, not a dirty fallback."""
         ctx = _service_boundary_effect(
-            request, max_algorithm_iterations=10,
+            _toggle_trace_request(), max_algorithm_iterations=10,
             emit_fn=_stub_emit, step=0, state={},
         )
-        assert "result" in ctx
-
-    def test_run_trace_max_steps_float_normalizes(self):
-        """run_trace with max_steps=1.5 normalizes to int(1) (no TypeError).
-
-        Parity policy: both substrates floor numeric max_steps to int.
-        """
-        simple_projs = [{"pattern": {"x": {"var": "v"}}, "body": {"var": "v"}}]
-        request = {
-            "operation": "run_trace",
-            "input": {"projections": simple_projs, "value": {"x": 42}, "max_steps": 1.5},
-            "context": {},
-            "inject_key": "result",
+        result = ctx["result"]
+        trace = _linked_trace_to_list(result["trace"])
+        assert result["stall"] is False
+        assert result["result"] == "A"
+        assert trace[-1] == {
+            "step": 100,
+            "state": "A",
+            "projection": None,
+            "max_steps": True,
         }
-        # Should NOT raise TypeError — float coerced to int(1)
+
+    def test_run_trace_max_steps_explicit_integer_budget(self):
+        """Explicit integer max_steps is accepted as structural budget data."""
         ctx = _service_boundary_effect(
-            request, max_algorithm_iterations=10,
+            _toggle_trace_request(1), max_algorithm_iterations=10,
             emit_fn=_stub_emit, step=0, state={},
         )
-        assert "result" in ctx
+        result = ctx["result"]
+        trace = _linked_trace_to_list(result["trace"])
+        assert result["stall"] is False
+        assert result["result"] == "B"
+        assert trace[-1] == {
+            "step": 1,
+            "state": "B",
+            "projection": None,
+            "max_steps": True,
+        }
+
+    @pytest.mark.parametrize(
+        "bad_value",
+        [
+            pytest.param("abc", id="string"),
+            pytest.param({}, id="object"),
+            pytest.param(True, id="bool"),
+            pytest.param(None, id="null"),
+            pytest.param(-1, id="negative"),
+            pytest.param(1.5, id="non_integer_float"),
+            pytest.param(float("inf"), id="inf"),
+            pytest.param(float("nan"), id="nan"),
+        ],
+    )
+    def test_run_trace_max_steps_explicit_bad_values_fail_closed(self, bad_value):
+        """Explicit dirty max_steps values raise typed boundary errors."""
+        with pytest.raises(RcxEngineError) as exc:
+            _service_boundary_effect(
+                _toggle_trace_request(bad_value), max_algorithm_iterations=10,
+                emit_fn=_stub_emit, step=0, state={},
+            )
+        assert exc.value.error_code == "api.bad_request"
+
+    def test_run_trace_max_steps_over_cap_fails_closed(self):
+        """The hard cap is a fail-closed resource guard, not a silent clamp."""
+        with pytest.raises(RcxEngineError) as exc:
+            _service_boundary_effect(
+                _toggle_trace_request(10001), max_algorithm_iterations=10,
+                emit_fn=_stub_emit, step=0, state={},
+            )
+        assert exc.value.error_code == "api.bad_request"
+        assert "10000" in str(exc.value)
+
+    def test_run_trace_zero_budget_reports_exhaustion_boundary(self):
+        """A zero explicit budget produces the trace exhaustion marker at step 0."""
+        ctx = _service_boundary_effect(
+            _toggle_trace_request(0), max_algorithm_iterations=10,
+            emit_fn=_stub_emit, step=0, state={},
+        )
+        result = ctx["result"]
+        trace = _linked_trace_to_list(result["trace"])
+        assert result["stall"] is False
+        assert result["result"] == "A"
+        assert trace == [{
+            "step": 0,
+            "state": "A",
+            "projection": None,
+            "max_steps": True,
+        }]
 
     def test_js_run_trace_non_array_projections(self):
         """JS run_trace with non-array projections raises RcxError, not TypeError."""
@@ -606,92 +751,70 @@ class TestRequestValidation:
         assert result.returncode == 0, f"JS failed: {result.stderr}"
         assert result.stdout.strip() == "OK", f"JS non-dict projection: {result.stdout.strip()}"
 
-    def test_js_run_trace_max_steps_string_normalizes(self):
-        """JS run_trace with max_steps='abc' normalizes to 100 (no raw TypeError).
-
-        Parity policy: both substrates normalize non-numeric max_steps to 100.
-        """
-        js_code = """
-        const pipeline = require('./mu/host/js/engine/pipeline');
-        try {
-            pipeline.serviceBoundaryEffect(
-                [], {}, {operation:'run_trace',input:{projections:[],value:1,max_steps:'abc'},context:{},inject_key:'r'},
-                10, function(){}, 0, {}
-            );
-            console.log('OK');
-        } catch(e) {
-            if (e instanceof TypeError && e.message.includes('max_steps')) {
-                console.log('WRONG: raw TypeError about max_steps');
-            } else {
-                console.log('OK');
-            }
+    def test_js_run_trace_max_steps_absent_defaults_to_bootstrap_clock(self):
+        """JS missing max_steps matches the boundary default clock."""
+        result = _run_js_trace()
+        assert result["ok"] is True
+        assert result["stall"] is False
+        assert result["result"] == "A"
+        assert result["last"] == {
+            "step": 100,
+            "state": "A",
+            "projection": None,
+            "max_steps": True,
         }
-        """
-        result = subprocess.run(
-            ["node", "-e", js_code],
-            capture_output=True, text=True, cwd=str(REPO_ROOT),
-        )
-        assert result.returncode == 0, f"JS failed: {result.stderr}"
-        assert result.stdout.strip() == "OK", f"JS max_steps normalize: {result.stdout.strip()}"
 
-    def test_js_run_trace_max_steps_float_normalizes(self):
-        """JS run_trace with max_steps=1.5 normalizes to 1 (no raw TypeError).
-
-        Parity policy: both substrates floor numeric max_steps to int.
-        """
-        js_code = """
-        const pipeline = require('./mu/host/js/engine/pipeline');
-        try {
-            const p = [{pattern:{x:{var:'v'}},body:{var:'v'}}];
-            pipeline.serviceBoundaryEffect(
-                [], {}, {operation:'run_trace',input:{projections:p,value:{x:42},max_steps:1.5},context:{},inject_key:'r'},
-                10, function(){}, 0, {}
-            );
-            console.log('OK');
-        } catch(e) {
-            if (e instanceof TypeError) {
-                console.log('WRONG: raw TypeError: ' + e.message);
-            } else {
-                console.log('OK');
-            }
+    def test_js_run_trace_max_steps_explicit_integer_budget(self):
+        """JS explicit integer max_steps is accepted as structural budget data."""
+        result = _run_js_trace("1")
+        assert result["ok"] is True
+        assert result["stall"] is False
+        assert result["result"] == "B"
+        assert result["last"] == {
+            "step": 1,
+            "state": "B",
+            "projection": None,
+            "max_steps": True,
         }
-        """
-        result = subprocess.run(
-            ["node", "-e", js_code],
-            capture_output=True, text=True, cwd=str(REPO_ROOT),
-        )
-        assert result.returncode == 0, f"JS failed: {result.stderr}"
-        assert result.stdout.strip() == "OK", f"JS float max_steps: {result.stdout.strip()}"
 
-    def test_run_trace_max_steps_inf_normalizes(self):
-        """run_trace with max_steps=inf normalizes to 100 (no raw OverflowError)."""
-        import math
-        request = {
-            "operation": "run_trace",
-            "input": {"projections": [], "value": 1, "max_steps": math.inf},
-            "context": {},
-            "inject_key": "result",
-        }
-        ctx = _service_boundary_effect(
-            request, max_algorithm_iterations=10,
-            emit_fn=_stub_emit, step=0, state={},
-        )
-        assert "result" in ctx
+    @pytest.mark.parametrize(
+        "bad_expr",
+        [
+            pytest.param("'abc'", id="string"),
+            pytest.param("{}", id="object"),
+            pytest.param("true", id="bool"),
+            pytest.param("null", id="null"),
+            pytest.param("-1", id="negative"),
+            pytest.param("1.5", id="non_integer_number"),
+            pytest.param("Infinity", id="inf"),
+            pytest.param("NaN", id="nan"),
+        ],
+    )
+    def test_js_run_trace_max_steps_explicit_bad_values_fail_closed(self, bad_expr):
+        """JS explicit dirty max_steps values raise typed boundary errors."""
+        result = _run_js_trace(bad_expr)
+        assert result["ok"] is False
+        assert result["error_code"] == "api.bad_request"
 
-    def test_run_trace_max_steps_nan_normalizes(self):
-        """run_trace with max_steps=nan normalizes to 100 (no raw ValueError)."""
-        import math
-        request = {
-            "operation": "run_trace",
-            "input": {"projections": [], "value": 1, "max_steps": math.nan},
-            "context": {},
-            "inject_key": "result",
+    def test_js_run_trace_max_steps_over_cap_fails_closed(self):
+        """JS hard cap is a fail-closed resource guard, not a silent clamp."""
+        result = _run_js_trace("10001")
+        assert result["ok"] is False
+        assert result["error_code"] == "api.bad_request"
+        assert "10000" in result["message"]
+
+    def test_js_run_trace_zero_budget_reports_exhaustion_boundary(self):
+        """JS zero explicit budget produces the trace exhaustion marker at step 0."""
+        result = _run_js_trace("0")
+        assert result["ok"] is True
+        assert result["stall"] is False
+        assert result["result"] == "A"
+        assert result["last"] == {
+            "step": 0,
+            "state": "A",
+            "projection": None,
+            "max_steps": True,
         }
-        ctx = _service_boundary_effect(
-            request, max_algorithm_iterations=10,
-            emit_fn=_stub_emit, step=0, state={},
-        )
-        assert "result" in ctx
 
     def test_run_trace_empty_dict_projection(self):
         """run_trace with projections=[{}] raises typed error (missing pattern/body)."""
@@ -706,56 +829,6 @@ class TestRequestValidation:
                 bad_request, max_algorithm_iterations=10,
                 emit_fn=_stub_emit, step=0, state={},
             )
-
-    def test_js_run_trace_max_steps_inf_normalizes(self):
-        """JS run_trace with max_steps=Infinity normalizes to 100 (no raw error)."""
-        js_code = """
-        const pipeline = require('./mu/host/js/engine/pipeline');
-        try {
-            pipeline.serviceBoundaryEffect(
-                [], {}, {operation:'run_trace',input:{projections:[],value:1,max_steps:Infinity},context:{},inject_key:'r'},
-                10, function(){}, 0, {}
-            );
-            console.log('OK');
-        } catch(e) {
-            if (e instanceof RangeError || e instanceof TypeError) {
-                console.log('WRONG: ' + e.constructor.name + ': ' + e.message);
-            } else {
-                console.log('OK');
-            }
-        }
-        """
-        result = subprocess.run(
-            ["node", "-e", js_code],
-            capture_output=True, text=True, cwd=str(REPO_ROOT),
-        )
-        assert result.returncode == 0, f"JS failed: {result.stderr}"
-        assert result.stdout.strip() == "OK", f"JS inf max_steps: {result.stdout.strip()}"
-
-    def test_js_run_trace_max_steps_nan_normalizes(self):
-        """JS run_trace with max_steps=NaN normalizes to 100 (no raw error)."""
-        js_code = """
-        const pipeline = require('./mu/host/js/engine/pipeline');
-        try {
-            pipeline.serviceBoundaryEffect(
-                [], {}, {operation:'run_trace',input:{projections:[],value:1,max_steps:NaN},context:{},inject_key:'r'},
-                10, function(){}, 0, {}
-            );
-            console.log('OK');
-        } catch(e) {
-            if (e instanceof RangeError || e instanceof TypeError) {
-                console.log('WRONG: ' + e.constructor.name + ': ' + e.message);
-            } else {
-                console.log('OK');
-            }
-        }
-        """
-        result = subprocess.run(
-            ["node", "-e", js_code],
-            capture_output=True, text=True, cwd=str(REPO_ROOT),
-        )
-        assert result.returncode == 0, f"JS failed: {result.stderr}"
-        assert result.stdout.strip() == "OK", f"JS nan max_steps: {result.stdout.strip()}"
 
     def test_js_run_trace_empty_dict_projection(self):
         """JS run_trace with projections=[{}] raises typed error (missing pattern/body)."""
