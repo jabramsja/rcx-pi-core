@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-stack-guard-depth-budget-production-lock-2026-05-14",
+  "repeat_run_speedup_ratio": 1.047179,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.290891,
+  "repeat_run_raw_seconds": [
+    0.304615,
+    0.290891
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.304615
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.595506
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-17T19:56:37Z",
+  "collector_version": "2.2.0"
+}
