@@ -1,24 +1,24 @@
 {
   "wave_id": "n3-seed-registry-manifest-reduction-2026-05-14",
-  "repeat_run_speedup_ratio": 1.006104,
+  "repeat_run_speedup_ratio": 0.977707,
   "parity_diff_count": 6,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.412371,
+  "step_growth_slope": 0.432293,
   "repeat_run_raw_seconds": [
-    0.414888,
-    0.412371
+    0.422656,
+    0.432293
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.414888
+      "elapsed_seconds": 0.422656
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.827259
+      "elapsed_seconds": 0.854949
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-17T01:44:45Z",
+  "collection_timestamp_utc": "2026-05-17T02:06:22Z",
   "collector_version": "2.2.0"
 }

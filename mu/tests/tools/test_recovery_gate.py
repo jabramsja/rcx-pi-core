@@ -2920,6 +2920,143 @@ class TestTier2FixesMap:
         assert set(rg_mod._TIER2_FIXES.keys()) == expected  # ANTICHEAT_OK
 
 
+class TestCheckStaleNextItemsRetry:
+    checker = _REPO_ROOT / "mu" / "tools" / "checks" / "check_stale_next_items.sh"
+
+    def init_repo(self, tmp_path: Path) -> Path:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+        (repo / "TASKS.md").write_text(
+            "## NOW\n\n"
+            "- Active local work\n\n"
+            "## NEXT\n\n"
+            "- Follow-up from PR #751 still in flight\n\n"
+            "## VECTOR\n\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "TASKS.md"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=RCX Test",
+                "-c",
+                "user.email=rcx@example.invalid",
+                "commit",
+                "-m",
+                "seed tasks",
+            ],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        return repo
+
+    def write_fake_gh(self, bin_dir: Path, *, persistent_failure: bool) -> Path:
+        count_path = bin_dir / "gh-count"
+        gh = bin_dir / "gh"
+        failure_clause = "if [ \"$count\" -eq 1 ]; then" if not persistent_failure else "if true; then"
+        gh.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            f"count_file={str(count_path)!r}\n"
+            "count=0\n"
+            "if [ -f \"$count_file\" ]; then count=$(cat \"$count_file\"); fi\n"
+            "count=$((count + 1))\n"
+            "printf '%s\\n' \"$count\" > \"$count_file\"\n"
+            "if [ \"$1\" = pr ] && [ \"$2\" = view ] && [ \"$3\" = 751 ]; then\n"
+            f"  {failure_clause}\n"
+            "    echo 'Post \"https://api.github.com/graphql\": dial tcp 140.82.114.5:443: i/o timeout' >&2\n"
+            "    exit 1\n"
+            "  fi\n"
+            "  printf 'OPEN\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "echo \"unexpected gh args: $*\" >&2\n"
+            "exit 64\n",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+        return count_path
+
+    def run_checker(
+        self,
+        repo: Path,
+        bin_dir: Path,
+        *,
+        attempts: str = "2",
+        sleep_seconds: str = "0",
+    ) -> subprocess.CompletedProcess[str]:
+        env = {
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "RCX_GH_RETRY_ATTEMPTS": attempts,
+            "RCX_GH_RETRY_SLEEP_SECONDS": sleep_seconds,
+        }
+        return subprocess.run(
+            ["bash", str(self.checker)],
+            cwd=repo,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+    def test_stale_next_checker_retries_transient_pr_view_failure(self, tmp_path):
+        repo = self.init_repo(tmp_path)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        count_path = self.write_fake_gh(bin_dir, persistent_failure=False)
+
+        result = self.run_checker(repo, bin_dir)
+
+        assert result.returncode == 0, result.stderr + result.stdout
+        assert count_path.read_text(encoding="utf-8").strip() == "2"
+        assert "WARNING: gh pr view 751 --json state --jq .state failed on attempt 1/2" in result.stderr
+        assert "All active items with merged PRs/branches are properly marked" in result.stdout
+
+    def test_stale_next_checker_fails_closed_after_retry_exhausted(self, tmp_path):
+        repo = self.init_repo(tmp_path)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        count_path = self.write_fake_gh(bin_dir, persistent_failure=True)
+
+        result = self.run_checker(repo, bin_dir)
+
+        assert result.returncode == 2
+        assert count_path.read_text(encoding="utf-8").strip() == "2"
+        assert "ERROR: Failed to check PR #751 state:" in result.stderr
+        assert "api.github.com/graphql" in result.stderr
+
+    def test_stale_next_checker_rejects_zero_retry_attempts(self, tmp_path):
+        repo = self.init_repo(tmp_path)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        count_path = self.write_fake_gh(bin_dir, persistent_failure=False)
+
+        result = self.run_checker(repo, bin_dir, attempts="0")
+
+        assert result.returncode == 2
+        assert "RCX_GH_RETRY_ATTEMPTS must be a positive integer" in result.stderr
+        assert not count_path.exists()
+
+    def test_stale_next_checker_rejects_non_integer_retry_config(self, tmp_path):
+        repo = self.init_repo(tmp_path)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        count_path = self.write_fake_gh(bin_dir, persistent_failure=False)
+
+        attempts_result = self.run_checker(repo, bin_dir, attempts="abc")
+        sleep_result = self.run_checker(repo, bin_dir, sleep_seconds="-1")
+
+        assert attempts_result.returncode == 2
+        assert "RCX_GH_RETRY_ATTEMPTS must be a positive integer" in attempts_result.stderr
+        assert sleep_result.returncode == 2
+        assert "RCX_GH_RETRY_SLEEP_SECONDS must be a non-negative integer" in sleep_result.stderr
+        assert not count_path.exists()
+
+
 class TestFixStaleActiveItems:
     def _init_repo_with_checker(self, repo_root: Path, *, dirty_extra_path: str = "") -> str:
         subprocess.run(["git", "init"], cwd=repo_root, check=True, capture_output=True, text=True)

@@ -138,3 +138,14 @@ Questions? Concerns? Thoughts? -- Think hard
   - `reports/deferred/non_blocking/n3-seed-registry-manifest-reduction-2026-05-14_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/n3-seed-registry-manifest-reduction-2026-05-14.json`
 <!-- PHASE_B_INDICATOR_SCOPE_REFRESH:end -->
+
+<!-- COMMIT_EXECUTOR_PREPUSH_RECOVERY:start -->
+## Commit Executor Pre-Push Recovery
+
+- Recovery timestamp: 2026-05-17.
+- Failure evidence: commit executor reached local commit `b71c0e8dfdea6973da18949c4d0a58a86e67ee24`, then Step 11 failed in `pre-push-fast` with `ERROR: Failed to check PR #751 state: Post "https://api.github.com/graphql": dial tcp 140.82.114.5:443: i/o timeout`.
+- Root cause: `mu/tools/checks/check_stale_next_items.sh` invoked `gh pr view ...` once for each active PR reference and failed closed immediately on a transient GitHub CLI/API timeout.
+- Mechanical fix: `run_gh_with_retry` now retries bounded `gh` calls used by stale-NEXT PR and branch checks, validates retry environment values before any `gh` call, and preserves fail-closed exit code 2 after retry exhaustion or invalid retry configuration.
+- Regression proof: `mu/tests/tools/test_recovery_gate.py::TestCheckStaleNextItemsRetry` runs the real checker with a fake `gh`, proving transient PR-state failure retries to success, persistent PR-state failure still fails closed, and zero/non-integer retry settings fail closed before `gh` is invoked.
+- Pre-commit governance repair: the first retry package added `mu/tests/tools/test_check_stale_next_items.py`, and `tests/docs/test_growth_caps.py::TestGrowthCaps::test_test_file_count_within_cap` rejected the staged package with `Test file count (313) exceeds baseline (190) + cap (122) = 312`. The retry regression coverage is now consolidated into existing `mu/tests/tools/test_recovery_gate.py` instead of increasing the test-file cap.
+<!-- COMMIT_EXECUTOR_PREPUSH_RECOVERY:end -->
