@@ -9,7 +9,10 @@ These tests verify that:
 """
 
 import json
+import os
 import pytest
+import subprocess
+import sys
 from pathlib import Path
 
 import rcx_pi.selfhost.seed_integrity as seed_integrity_module
@@ -22,8 +25,11 @@ from rcx_pi.selfhost.seed_integrity import (
     load_verified_seed_image,
     verify_all_seeds,
     get_seed_path,
+    SEED_REGISTRY_MANIFEST,
     SEED_CHECKSUMS,
     EXPECTED_PROJECTION_IDS,
+    MU_SEED_LOCATIONS,
+    SEED_DEPENDENCIES,
 )
 
 
@@ -100,6 +106,70 @@ class TestChecksumVerification:
         """Unknown seed name raises error."""
         with pytest.raises(ValueError, match="Unknown seed"):
             verify_checksum("unknown.json", b"test")
+
+
+# =============================================================================
+# Test: Manifest Registry Root
+# =============================================================================
+
+
+class TestSeedRegistryManifest:
+    """Seed registry compatibility maps are derived from verified manifest data."""
+
+    def test_manifest_data_derives_python_registry_views(self):
+        """Python registry views must be projections of the canonical manifest."""
+        records = SEED_REGISTRY_MANIFEST["seeds"]
+
+        assert SEED_CHECKSUMS == {
+            seed_name: record["sha256"]
+            for seed_name, record in records.items()
+        }
+        assert EXPECTED_PROJECTION_IDS == {
+            seed_name: record["projection_ids"]
+            for seed_name, record in records.items()
+        }
+        assert MU_SEED_LOCATIONS == {
+            seed_name: record["subdir"]
+            for seed_name, record in records.items()
+        }
+        assert SEED_DEPENDENCIES == {
+            seed_name: record["dependencies"]
+            for seed_name, record in records.items()
+            if record["dependencies"]
+        }
+
+    def test_manifest_checksum_precedes_manifest_parse(self):
+        """Malformed manifest bytes fail at checksum before JSON parsing."""
+        repo = Path(__file__).resolve().parents[3]
+        script = """
+from pathlib import Path
+
+_original_read_bytes = Path.read_bytes
+
+def fake_read_bytes(self):
+    if self.name == "seed_registry_manifest.v1.json":
+        return b'{"schema": '
+    return _original_read_bytes(self)
+
+Path.read_bytes = fake_read_bytes
+import rcx_pi.selfhost.seed_integrity
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+            env={
+                **os.environ,
+                "PYTHONPATH": str(repo / "mu" / "host" / "python"),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            },
+            timeout=10,
+        )
+
+        assert proc.returncode != 0
+        assert "manifest integrity check failed" in proc.stderr
+        assert "JSONDecodeError" not in proc.stderr
 
 
 # =============================================================================

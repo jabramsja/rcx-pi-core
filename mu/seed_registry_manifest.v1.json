@@ -1,0 +1,423 @@
+{
+  "schema": "rcx.seed_registry_manifest.v1",
+  "seeds": {
+    "match.v1.json": {
+      "subdir": "substrate",
+      "sha256": "33c7bc60d2c4468f224d85c7d0e6c385a898f61585001370b6511c30307f2c9c",
+      "projection_ids": [
+        "match.done",
+        "match.sibling",
+        "match.equal",
+        "match.var",
+        "match.typed.descend",
+        "match.dict.descend",
+        "match.wrap"
+      ],
+      "status": "legacy-poc",
+      "dependencies": [],
+      "js_cli_registered": false,
+      "js_core_locked": false
+    },
+    "subst.v1.json": {
+      "subdir": "substrate",
+      "sha256": "929db9a6d60b28d53c5e184da7db8c7c668d2f9a65068e8cb0e2629083ffd51f",
+      "projection_ids": [
+        "subst.done",
+        "subst.ascend",
+        "subst.sibling",
+        "subst.var",
+        "subst.lookup.found",
+        "subst.lookup.next",
+        "subst.typed.descend",
+        "subst.typed.sibling",
+        "subst.typed.ascend",
+        "subst.descend",
+        "subst.primitive",
+        "subst.wrap"
+      ],
+      "status": "legacy-poc",
+      "dependencies": [],
+      "js_cli_registered": false,
+      "js_core_locked": false
+    },
+    "classify.v1.json": {
+      "subdir": "utilities",
+      "sha256": "8ecd4fccca243c49129c0d65c8fef5797f19a36499e17038625fca3051108b79",
+      "projection_ids": [
+        "classify.done",
+        "classify.nested_not_kv",
+        "classify.kv_continue",
+        "classify.not_kv",
+        "classify.empty",
+        "classify.wrap"
+      ],
+      "status": "production",
+      "dependencies": [],
+      "js_cli_registered": false,
+      "js_core_locked": false
+    },
+    "kernel.v1.json": {
+      "subdir": "substrate",
+      "sha256": "8a4471648c8d77d4d5beedf3491c04b8154e282bbfbf52a958f8c5bcc5d94c4f",
+      "projection_ids": [
+        "kernel.wrap",
+        "kernel.stall",
+        "kernel.try",
+        "kernel.match_success",
+        "kernel.match_fail",
+        "kernel.subst_success",
+        "kernel.unwrap"
+      ],
+      "status": "production",
+      "dependencies": [
+        "match.v2.json",
+        "subst.v2.json"
+      ],
+      "js_cli_registered": true,
+      "js_core_locked": false
+    },
+    "match.v2.json": {
+      "subdir": "substrate",
+      "sha256": "11c79466bb3c4761513cd09f0d4bfda234802a8f8f130a62282e46f2c078fbb6",
+      "projection_ids": [
+        "match.done",
+        "match.sibling",
+        "match.equal",
+        "match.var",
+        "match.typed.descend",
+        "match.dict.descend",
+        "match.fail",
+        "match.wrap"
+      ],
+      "status": "production",
+      "dependencies": [
+        "bootstrap_structural.v1.json"
+      ],
+      "js_cli_registered": true,
+      "js_core_locked": false
+    },
+    "subst.v2.json": {
+      "subdir": "substrate",
+      "sha256": "aa6a9581ef2befe3783e5190d5149c4dd71d7e67e70b92e90f93e7c193822d24",
+      "projection_ids": [
+        "subst.done",
+        "subst.ascend",
+        "subst.sibling",
+        "subst.var",
+        "subst.lookup.found",
+        "subst.lookup.next",
+        "subst.lookup.exhausted",
+        "subst.typed.descend",
+        "subst.typed.sibling",
+        "subst.typed.ascend",
+        "subst.descend",
+        "subst.primitive",
+        "subst.wrap"
+      ],
+      "status": "production",
+      "dependencies": [],
+      "js_cli_registered": true,
+      "js_core_locked": false
+    },
+    "recurrence.v1.json": {
+      "subdir": "closures",
+      "sha256": "ad9944b340e22df187fe567875d2c75483d4201b1b5c0147e1e8ec63e0bbacd0",
+      "projection_ids": [
+        "recurrence.init",
+        "recurrence.end_of_trace",
+        "recurrence.check_state_stall",
+        "recurrence.check_state_maxsteps",
+        "recurrence.check_state",
+        "recurrence.found_in_seen",
+        "recurrence.not_in_head",
+        "recurrence.not_found",
+        "recurrence.unwrap"
+      ],
+      "status": "legacy-poc",
+      "dependencies": [],
+      "js_cli_registered": true,
+      "js_core_locked": false
+    },
+    "exhaustion.v1.json": {
+      "subdir": "closures",
+      "sha256": "8489398b8264dd547b231f67c98543bba1d6d45a24bb5504039395a24eb068d3",
+      "projection_ids": [
+        "exhaustion.init_null",
+        "exhaustion.init",
+        "exhaustion.find_match",
+        "exhaustion.find_continue",
+        "exhaustion.find_not_found",
+        "exhaustion.scan_same",
+        "exhaustion.scan_skip_sentinel_maxsteps",
+        "exhaustion.scan_skip_sentinel_stall",
+        "exhaustion.scan_different",
+        "exhaustion.scan_end",
+        "exhaustion.frozen_found",
+        "exhaustion.frozen_check_tail",
+        "exhaustion.do_freeze"
+      ],
+      "status": "legacy-poc",
+      "dependencies": [],
+      "js_cli_registered": true,
+      "js_core_locked": false
+    },
+    "rcx_engine.v1.json": {
+      "subdir": "programs",
+      "sha256": "1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f",
+      "projection_ids": [
+        "engine.init",
+        "engine.init_config",
+        "engine.trace_done",
+        "engine.hash_done_fix",
+        "engine.hash_done",
+        "engine.fix_done_applied",
+        "engine.fix_done_none",
+        "engine.recurrence_done",
+        "engine.exhaustion_done_freeze",
+        "engine.exhaustion_done_terminal",
+        "engine.unwrap"
+      ],
+      "status": "production",
+      "dependencies": [
+        "recurrence.v2.json",
+        "exhaustion.v1.json",
+        "fix.v1.json"
+      ],
+      "js_cli_registered": true,
+      "js_core_locked": true
+    },
+    "rcx_engine_state.v1.json": {
+      "subdir": "programs",
+      "sha256": "7e4d05fcdca90e5c374ce45e094ad73b2a1bec9599254bd457db194c00fc29d0",
+      "projection_ids": [
+        "engine_state.shape_valid",
+        "engine_state.identity_stable",
+        "engine_state.next_id_monotone",
+        "engine_state.shape_invalid_missing_graph",
+        "engine_state.shape_invalid_missing_omega",
+        "engine_state.shape_invalid_missing_l_map",
+        "engine_state.shape_invalid_missing_xi",
+        "engine_state.shape_invalid_missing_rho",
+        "engine_state.shape_invalid_missing_next_id"
+      ],
+      "status": "production",
+      "dependencies": [],
+      "js_cli_registered": true,
+      "js_core_locked": true
+    },
+    "rcx_engine_scheduler.v1.json": {
+      "subdir": "programs",
+      "sha256": "2e10c737f8d1a8b2fcd1a2a22b5f51e855c51372d691fce2a05e435744d78f65",
+      "projection_ids": [
+        "scheduler.invalid_missing_godel_unary_map",
+        "scheduler.invalid_non_godel_head",
+        "scheduler.invalid_godel_missing_code",
+        "scheduler.invalid_godel_missing_domain",
+        "scheduler.invalid_godel_missing_codomain",
+        "scheduler.invalid_godel_missing_identity_map",
+        "scheduler.reject_identity_map",
+        "scheduler.reject_tail_identity_map",
+        "scheduler.reject_third_identity_map",
+        "scheduler.reject_unhandled_three_operator_pool",
+        "scheduler.order_error_0010_before_0001",
+        "scheduler.order_error_0100_before_0011",
+        "scheduler.skip_frozen_head",
+        "scheduler.skip_frozen_tail_member",
+        "scheduler.skip_frozen_tail2_member",
+        "scheduler.scan_frozen_tail",
+        "scheduler.select_single_operator",
+        "scheduler.select_0001_before_0010",
+        "scheduler.select_0011_before_0100",
+        "scheduler.reject_unhandled_two_operator_pool",
+        "scheduler.pool_exhausted",
+        "scheduler.reject_unhandled_operator_pool_shape"
+      ],
+      "status": "production",
+      "dependencies": [],
+      "js_cli_registered": true,
+      "js_core_locked": true
+    },
+    "bootstrap_structural.v1.json": {
+      "subdir": "bridge",
+      "sha256": "dfaa1ea9de000e344fee1e61be9666e2876091fa64aff524857265929a261964",
+      "projection_ids": [
+        "bridge.var.check_existing",
+        "bridge.lookup.found_same",
+        "bridge.lookup.found_different",
+        "bridge.lookup.not_found_yet",
+        "bridge.lookup.not_found"
+      ],
+      "status": "production",
+      "dependencies": [],
+      "js_cli_registered": true,
+      "js_core_locked": false
+    },
+    "eval.v1.json": {
+      "subdir": "utilities",
+      "sha256": "4c88e312002601f56fa5c3604f7938bc3651cf2718f1e672274a454b14e8bd78",
+      "projection_ids": [
+        "restart",
+        "unwrap",
+        "descend.dict",
+        "sibling.to_tail",
+        "ascend.to_context",
+        "ascend.to_root",
+        "wrap"
+      ],
+      "status": "production",
+      "dependencies": [],
+      "js_cli_registered": false,
+      "js_core_locked": false
+    },
+    "hemispheres.v1.json": {
+      "subdir": "programs",
+      "sha256": "fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8",
+      "projection_ids": [
+        "hemisphere.init",
+        "hemisphere.classify.exhaustion",
+        "hemisphere.classify.null",
+        "hemisphere.classify.closure",
+        "hemisphere.classify.stall",
+        "hemisphere.classify.default",
+        "hemisphere.add.r_null",
+        "hemisphere.add.r_inf",
+        "hemisphere.add.r_a",
+        "hemisphere.add.lobes",
+        "hemisphere.add.sink",
+        "hemisphere.unwrap"
+      ],
+      "status": "production",
+      "dependencies": [
+        "rcx_engine.v1.json"
+      ],
+      "js_cli_registered": true,
+      "js_core_locked": true
+    },
+    "paxos_demo.v1.json": {
+      "subdir": "programs",
+      "sha256": "56f534439b0b93df1802b3fb2e41fb0d0919b934c6667d9ab413678f6971ef6d",
+      "projection_ids": [
+        "paxos.init",
+        "paxos.vote_a",
+        "paxos.reject_b",
+        "paxos.reject_a",
+        "healer.detect_deadlock",
+        "healer.detect_deadlock_engine"
+      ],
+      "status": "production",
+      "dependencies": [],
+      "js_cli_registered": false,
+      "js_core_locked": false
+    },
+    "recurrence.v2.json": {
+      "subdir": "closures",
+      "sha256": "f8bc7fc7f43f5423b0ecf0e78fd4b2d99699456ecff1e113d4c8e7167b213fa9",
+      "projection_ids": [
+        "recurrence.init",
+        "recurrence.end_of_trace",
+        "recurrence.check_state_stall",
+        "recurrence.check_state_maxsteps",
+        "recurrence.check_state",
+        "recurrence.hash_match",
+        "recurrence.hash_no_match",
+        "recurrence.not_found",
+        "recurrence.unwrap"
+      ],
+      "status": "production",
+      "dependencies": [],
+      "js_cli_registered": true,
+      "js_core_locked": false
+    },
+    "fix.v1.json": {
+      "subdir": "closures",
+      "sha256": "d961abcf1b9ba39c2eebcf049ae3351b51082a09c41deb0d71efef9eedadca34",
+      "projection_ids": [
+        "fix.init",
+        "fix.edge_add_guard",
+        "fix.edge_add",
+        "fix.vertex_add_guard",
+        "fix.vertex_add",
+        "fix.pass_through"
+      ],
+      "status": "production",
+      "dependencies": [],
+      "js_cli_registered": true,
+      "js_core_locked": false
+    },
+    "metabolization.v1.json": {
+      "subdir": "programs",
+      "sha256": "a1f60ff55dc3e9f7c0c12e247a337d5d942cbfb74beffd001336d3a77de9a1e7",
+      "projection_ids": [
+        "hemisphere.metabolize.sink_to_r_null",
+        "hemisphere.metabolize.sink_to_r_inf",
+        "hemisphere.recover.stall_to_lobes",
+        "hemisphere.recover.stall_to_sink",
+        "hemisphere.promote.lobes_to_r_a",
+        "hemisphere.recycle.residual_to_sink"
+      ],
+      "status": "production",
+      "dependencies": [],
+      "js_cli_registered": true,
+      "js_core_locked": false
+    },
+    "terminal_classify.v1.json": {
+      "subdir": "utilities",
+      "sha256": "413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7",
+      "projection_ids": [
+        "tc.recurrence",
+        "tc.exhaustion",
+        "tc.engine",
+        "tc.exit.closure",
+        "tc.exit.exhaustion",
+        "tc.exit.stall",
+        "tc.exit.completed"
+      ],
+      "status": "production",
+      "dependencies": [],
+      "js_cli_registered": true,
+      "js_core_locked": true
+    },
+    "metabolize_cycle.v1.json": {
+      "subdir": "programs",
+      "sha256": "1e84573c241dba55a81adf6c60568c25127b836ef5570909bab81fa9303fcf01",
+      "projection_ids": [
+        "metabolize.cycle.init",
+        "metabolize.cycle.init_skip_sink",
+        "metabolize.cycle.sink_to_r_null",
+        "metabolize.cycle.sink_to_r_inf",
+        "metabolize.cycle.sink_next",
+        "metabolize.cycle.sink_done",
+        "metabolize.cycle.lobes_start",
+        "metabolize.cycle.lobes_start_empty",
+        "metabolize.cycle.lobes_promote",
+        "metabolize.cycle.lobes_keep",
+        "metabolize.cycle.lobes_next",
+        "metabolize.cycle.lobes_done",
+        "metabolize.cycle.lobes_reverse_step",
+        "metabolize.cycle.lobes_reverse_done",
+        "metabolize.cycle.unwrap"
+      ],
+      "status": "production",
+      "dependencies": [
+        "hemispheres.v1.json",
+        "metabolization.v1.json"
+      ],
+      "js_cli_registered": true,
+      "js_core_locked": false
+    },
+    "evidence_walker.v1.json": {
+      "subdir": "utilities",
+      "sha256": "e4ea438a8a9533c9b32aeadb852475f9270d27e9bf6175abfa57145b34dc5f29",
+      "projection_ids": [
+        "evidence.walk.init",
+        "evidence.walk.init_empty",
+        "evidence.walk.collect_and_next",
+        "evidence.walk.collect_and_done"
+      ],
+      "status": "production",
+      "dependencies": [],
+      "js_cli_registered": true,
+      "js_core_locked": false
+    }
+  }
+}

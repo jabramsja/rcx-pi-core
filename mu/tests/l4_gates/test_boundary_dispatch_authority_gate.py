@@ -658,36 +658,29 @@ class TestRequestValidation:
 class TestJsSeedLoaderMalformedProjection:
     """JS seed loader must reject null/array/scalar projection entries.
 
-    Tests call production loadVerifiedSeed from seed_loader.js directly via
-    temp seed files written to os.tmpdir() (NOT mu/utilities/, to avoid race
-    conditions with test_seed_counts.py during parallel execution). Unknown
-    seed names hit the projection-entry type guard before checksum/projection-ID
-    checks, so malformed projections are caught regardless of registry status.
+    Tests call the production seed image byte boundary directly. The path wrapper
+    now resolves filenames through the manifest first; unknown filenames should
+    fail there, while malformed image contents are validated by loadVerifiedSeedImage.
     """
 
     @staticmethod
     def _run_seed_loader_test(projections_json, expect_index, expect_type):
-        """Write a temp seed with malformed projections, call production loadVerifiedSeed.
-
-        Temp files are written to os.tmpdir() (not mu/utilities/) to avoid
-        race conditions with test_seed_counts.py during parallel execution.
-        """
+        """Call production loadVerifiedSeedImage with malformed projection bytes."""
         js_code = f"""
-        const fs = require('fs');
-        const path = require('path');
-        const os = require('os');
-        const {{ loadVerifiedSeed }} = require('./mu/host/js/core/seed_loader');
-        const tmpDir = os.tmpdir();
-        const tmpName = '_test_malformed_' + process.pid + '.json';
-        const seedPath = path.join(tmpDir, tmpName);
-        const muRoot = path.resolve('mu');
-        const relSubdir = path.relative(muRoot, tmpDir);
-        fs.writeFileSync(seedPath, JSON.stringify({{
+        const {{ loadVerifiedSeedImage }} = require('./mu/host/js/core/seed_loader');
+        const seedBytes = Buffer.from(JSON.stringify({{
             meta: {{name: "TEST", version: "1.0", description: "test"}},
             projections: {projections_json}
         }}));
         try {{
-            loadVerifiedSeed(tmpName, relSubdir);
+            loadVerifiedSeedImage(
+                '_test_malformed_seed.json',
+                seedBytes,
+                Object.create(null),
+                Object.create(null),
+                'TEST_CHECKSUMS',
+                'TEST_PROJECTION_IDS'
+            );
             console.log('ERROR: no throw');
         }} catch(e) {{
             if (e.message.includes('projection[{expect_index}]') &&
@@ -696,8 +689,6 @@ class TestJsSeedLoaderMalformedProjection:
             }} else {{
                 console.log('WRONG: ' + e.message);
             }}
-        }} finally {{
-            try {{ fs.unlinkSync(seedPath); }} catch(_) {{}}
         }}
         """
         result = subprocess.run(
@@ -738,12 +729,15 @@ class TestJsSeedLoaderMalformedProjection:
             "main.js must import/use the shared seed image boundary"
         )
         fn_match = re.search(
-            r"function loadVerifiedSeed\(seedPath, seedName\) \{(.*?)^}",
+            r"function loadVerifiedSeed\(seedName\) \{(.*?)^}",
             main_js,
             re.DOTALL | re.MULTILINE,
         )
         assert fn_match, "main.js loadVerifiedSeed wrapper not found"
         body = fn_match.group(1)
+        assert "getSeedSubdir(seedName)" in body, (
+            "main.js path wrapper must derive seed subdir from the manifest"
+        )
         assert "fs.readFileSync(seedPath)" in body, (
             "main.js path wrapper must retain filesystem read at the outer edge"
         )

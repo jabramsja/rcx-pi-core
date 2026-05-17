@@ -24,7 +24,6 @@ from collections import Counter
 import functools
 import json
 import os
-import re
 import subprocess
 from pathlib import Path
 
@@ -43,50 +42,39 @@ from rcx_pi.selfhost.seed_integrity import (
 # ── Locate JS source ────────────────────────────────────────────────────
 
 _REPO = Path(__file__).resolve().parents[3]
-_JS_DIR = _REPO / "mu" / "host" / "js"
 
 
 @functools.lru_cache(maxsize=1)
-def _js_source() -> str:
-    """Read all JS module files concatenated (monolith was split into modules)."""
-    parts = []
-    for f in sorted(_JS_DIR.rglob("*.js")):
-        parts.append(f.read_text())
-    return "\n".join(parts)
+def _js_registry_snapshot() -> dict[str, dict[str, object]]:
+    """Read JS registry views after manifest verification and derivation."""
+    js_script = """
+    const sl = require('./mu/host/js/core/seed_loader');
+    console.log(JSON.stringify({
+      SEED_REGISTRY_MANIFEST: sl.SEED_REGISTRY_MANIFEST,
+      SEED_CHECKSUMS: sl.SEED_CHECKSUMS,
+      EXPECTED_PROJECTION_IDS: sl.EXPECTED_PROJECTION_IDS,
+      CORE_SEED_CHECKSUMS: sl.CORE_SEED_CHECKSUMS,
+      CORE_SEED_PROJECTION_IDS: sl.CORE_SEED_PROJECTION_IDS,
+      SEED_SUBDIRS: sl.SEED_SUBDIRS,
+    }));
+    """
+    proc = subprocess.run(
+        ["node", "-e", js_script],
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO),
+        timeout=10,
+    )
+    assert proc.returncode == 0, f"JS registry probe failed: {proc.stderr}"
+    return json.loads(proc.stdout)
 
 
-def _extract_js_dict(source: str, const_name: str) -> dict[str, str]:
-    """Extract a JS const object of 'key': 'value' pairs from source."""
-    pattern = rf"const\s+{const_name}\s*=\s*\{{(.*?)\}};"
-    m = re.search(pattern, source, re.DOTALL)
-    if not m:
-        pytest.fail(f"Could not find {const_name} in JS source")
-    block = m.group(1)
-    return dict(re.findall(r"'([^']+)':\s*'([^']+)'", block))
+def _js_seed_checksums() -> dict[str, str]:
+    return _js_registry_snapshot()["SEED_CHECKSUMS"]
 
 
-def _extract_js_list_dict(source: str, const_name: str) -> dict[str, list[str]]:
-    """Extract a JS const object of 'key': [...] entries from source."""
-    pattern = rf"const\s+{const_name}\s*=\s*\{{(.*?)\}};"
-    m = re.search(pattern, source, re.DOTALL)
-    if not m:
-        pytest.fail(f"Could not find {const_name} in JS source")
-    block = m.group(1)
-    result = {}
-    for seed_match in re.finditer(r"'([^']+\.json)':\s*\[(.*?)\]", block, re.DOTALL):
-        seed_name = seed_match.group(1)
-        ids_block = seed_match.group(2)
-        ids = re.findall(r"'([^']+)'", ids_block)
-        result[seed_name] = ids
-    return result
-
-
-def _extract_js_seed_checksums(source: str) -> dict[str, str]:
-    return _extract_js_dict(source, "SEED_CHECKSUMS")
-
-
-def _extract_js_projection_ids(source: str) -> dict[str, list[str]]:
-    return _extract_js_list_dict(source, "EXPECTED_PROJECTION_IDS")
+def _js_projection_ids() -> dict[str, list[str]]:
+    return _js_registry_snapshot()["EXPECTED_PROJECTION_IDS"]
 
 
 def _python_load_verified_seed_result(seed_path: Path) -> dict[str, object]:
@@ -121,6 +109,30 @@ def _js_load_verified_seed_result(seed_name: str, subdir: str) -> dict[str, obje
         timeout=10,
     )
     assert proc.returncode == 0, f"JS seed loader probe failed: {proc.stderr}"
+    return json.loads(proc.stdout)
+
+
+def _js_load_verified_seed_subdir_error(seed_name: str, subdir: str) -> dict[str, object]:
+    js_script = f"""
+    const {{ loadVerifiedSeed }} = require('./mu/host/js/core/seed_loader');
+    try {{
+      loadVerifiedSeed({json.dumps(seed_name)}, {json.dumps(subdir)});
+      console.log(JSON.stringify({{ok: true}}));
+    }} catch (e) {{
+      console.log(JSON.stringify({{
+        ok: false,
+        error: e.message,
+      }}));
+    }}
+    """
+    proc = subprocess.run(
+        ["node", "-e", js_script],
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO),
+        timeout=10,
+    )
+    assert proc.returncode == 0, f"JS seed loader subdir probe failed: {proc.stderr}"
     return json.loads(proc.stdout)
 
 
@@ -234,6 +246,48 @@ def _js_load_verified_seed_image_bytes_result(
     return json.loads(proc.stdout)
 
 
+def _js_load_registered_seed_image_bytes_result(
+    seed_name: str,
+    seed_bytes: bytes,
+) -> dict[str, object]:
+    js_script = f"""
+    const {{
+      loadVerifiedSeedImage,
+      SEED_CHECKSUMS,
+      EXPECTED_PROJECTION_IDS,
+    }} = require('./mu/host/js/core/seed_loader');
+    const raw = Buffer.from({list(seed_bytes)});
+    try {{
+      const seed = loadVerifiedSeedImage(
+        {json.dumps(seed_name)},
+        raw,
+        SEED_CHECKSUMS,
+        EXPECTED_PROJECTION_IDS,
+        'SEED_CHECKSUMS',
+        'EXPECTED_PROJECTION_IDS'
+      );
+      console.log(JSON.stringify({{
+        ok: true,
+        ids: seed.projections.map(p => p.id),
+      }}));
+    }} catch (e) {{
+      console.log(JSON.stringify({{
+        ok: false,
+        error: e.message,
+      }}));
+    }}
+    """
+    proc = subprocess.run(
+        ["node", "-e", js_script],
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO),
+        timeout=10,
+    )
+    assert proc.returncode == 0, f"JS registered seed image probe failed: {proc.stderr}"
+    return json.loads(proc.stdout)
+
+
 def _js_seed_dependencies() -> dict[str, list[str]]:
     js_script = """
     const { SEED_DEPENDENCIES } = require('./mu/host/js/core/seed_loader');
@@ -344,15 +398,41 @@ def _subdir_relative_to_mu(seed_dir: Path) -> str:
 class TestSeedChecksumParity:
     """Python and JS must agree on seed checksums."""
 
+    def test_js_registry_views_are_manifest_derived(self):
+        """JS registry exports must be derived from manifest registration flags."""
+        snapshot = _js_registry_snapshot()
+        records = snapshot["SEED_REGISTRY_MANIFEST"]["seeds"]
+
+        assert snapshot["SEED_CHECKSUMS"] == {
+            seed_name: record["sha256"]
+            for seed_name, record in records.items()
+            if record["js_cli_registered"]
+        }
+        assert snapshot["EXPECTED_PROJECTION_IDS"] == {
+            seed_name: record["projection_ids"]
+            for seed_name, record in records.items()
+            if record["js_cli_registered"]
+        }
+        assert snapshot["CORE_SEED_CHECKSUMS"] == {
+            seed_name: record["sha256"]
+            for seed_name, record in records.items()
+            if record["js_core_locked"]
+        }
+        assert snapshot["CORE_SEED_PROJECTION_IDS"] == {
+            seed_name: record["projection_ids"]
+            for seed_name, record in records.items()
+            if record["js_core_locked"]
+        }
+
     def test_js_seeds_are_subset_of_python(self):
         """Every JS seed must exist in Python's SEED_CHECKSUMS."""
-        js_checksums = _extract_js_seed_checksums(_js_source())
+        js_checksums = _js_seed_checksums()
         js_only = set(js_checksums) - set(SEED_CHECKSUMS)
         assert not js_only, f"JS has seeds not in Python: {js_only}"
 
     def test_shared_checksums_match(self):
         """For every seed in both substrates, checksums must be identical."""
-        js_checksums = _extract_js_seed_checksums(_js_source())
+        js_checksums = _js_seed_checksums()
         mismatches = []
         for seed, js_hash in js_checksums.items():
             py_hash = SEED_CHECKSUMS.get(seed)
@@ -362,7 +442,7 @@ class TestSeedChecksumParity:
 
     def test_js_loads_expected_seed_count(self):
         """JS must register exactly 16 seeds including lazy/runtime structural seeds."""
-        js_checksums = _extract_js_seed_checksums(_js_source())
+        js_checksums = _js_seed_checksums()
         assert len(js_checksums) == 16, (
             f"JS seed count changed from 16 to {len(js_checksums)}. "
             f"Seeds: {sorted(js_checksums.keys())}"
@@ -370,7 +450,7 @@ class TestSeedChecksumParity:
 
     def test_python_is_superset(self):
         """Python tracks more seeds than JS (v1 versions, utilities, demos)."""
-        js_checksums = _extract_js_seed_checksums(_js_source())
+        js_checksums = _js_seed_checksums()
         assert len(SEED_CHECKSUMS) > len(js_checksums), (
             "Python should track MORE seeds than JS (includes v1 versions, utilities)"
         )
@@ -384,13 +464,13 @@ class TestProjectionIdParity:
 
     def test_js_projection_seeds_subset_of_python(self):
         """Every seed with JS projection IDs must also have Python projection IDs."""
-        js_ids = _extract_js_projection_ids(_js_source())
+        js_ids = _js_projection_ids()
         js_only = set(js_ids) - set(EXPECTED_PROJECTION_IDS)
         assert not js_only, f"JS has projection IDs for seeds not in Python: {js_only}"
 
     def test_projection_ids_match_exactly(self):
         """For shared seeds, projection ID lists must match (order-sensitive)."""
-        js_ids = _extract_js_projection_ids(_js_source())
+        js_ids = _js_projection_ids()
         mismatches = []
         for seed, js_list in js_ids.items():
             py_list = EXPECTED_PROJECTION_IDS.get(seed)
@@ -408,7 +488,7 @@ class TestProjectionIdParity:
 
     def test_projection_id_count_per_seed(self):
         """Projection count per seed must match between substrates."""
-        js_ids = _extract_js_projection_ids(_js_source())
+        js_ids = _js_projection_ids()
         for seed, js_list in js_ids.items():
             py_list = EXPECTED_PROJECTION_IDS.get(seed, [])
             assert len(py_list) == len(js_list), (
@@ -448,6 +528,36 @@ class TestSeedLocationCoverage:
         for seed, loc in MU_SEED_LOCATIONS.items():
             assert loc in valid_dirs, f"{seed} has invalid location '{loc}'"
 
+    def test_js_seed_subdirs_are_manifest_derived(self):
+        """JS path-loader subdir view must be derived from the verified manifest."""
+        snapshot = _js_registry_snapshot()
+        records = snapshot["SEED_REGISTRY_MANIFEST"]["seeds"]
+
+        assert snapshot["SEED_SUBDIRS"] == {
+            seed_name: record["subdir"]
+            for seed_name, record in records.items()
+        }
+
+    def test_js_path_loader_rejects_caller_subdir_drift(self):
+        """JS path loader must not trust caller-supplied subdir authority."""
+        result = _js_load_verified_seed_subdir_error(
+            "rcx_engine.v1.json", "utilities"
+        )
+
+        assert result["ok"] is False
+        assert "subdir mismatch" in str(result["error"])
+
+    def test_js_cli_seed_reads_resolve_subdir_from_manifest(self):
+        """JS CLI seed path loading must not duplicate per-seed subdir maps."""
+        source = (_REPO / "mu" / "host" / "js" / "cli" / "main.js").read_text()
+
+        assert "getSeedSubdir(seedName)" in source
+        assert "substrateDir" not in source
+        assert "closuresDir" not in source
+        assert "bridgeDir" not in source
+        assert "programsDir" not in source
+        assert "loadVerifiedSeed(path.join" not in source
+
 
 class TestProductionLoaderBoundaryParity:
     """Python and JS production loaders must agree on accept/reject boundaries."""
@@ -461,19 +571,18 @@ class TestProductionLoaderBoundaryParity:
         assert py_result == {"ok": True, "ids": expected_ids}
         assert js_result == {"ok": True, "ids": expected_ids}
 
-    def test_tampered_known_seed_fails_closed_in_both_loaders(self, tmp_path):
-        """The same tampered known seed image is rejected on both substrates."""
+    def test_tampered_known_seed_fails_closed_in_both_byte_boundaries(self):
+        """The same tampered known seed image is rejected before parse on both substrates."""
         seed_name = "rcx_engine.v1.json"
-        seed_path = tmp_path / seed_name
-        seed_path.write_text(
-            '{"meta": {"version": "1.0", "name": "RCX_ENGINE", '
-            '"description": "tampered"}, "projections": [null]}'
+        seed_bytes = (
+            b'{"meta": {"version": "1.0", "name": "RCX_ENGINE", '
+            b'"description": "tampered"}, "projections": [null]}'
         )
 
-        py_result = _python_load_verified_seed_result(seed_path)
-        js_result = _js_load_verified_seed_result(
-            seed_name, _subdir_relative_to_mu(tmp_path)
+        py_result = _python_load_verified_seed_image_result(
+            seed_name, seed_bytes, verify=True
         )
+        js_result = _js_load_registered_seed_image_bytes_result(seed_name, seed_bytes)
 
         assert py_result["ok"] is False
         assert "integrity check failed" in str(py_result["error"])
@@ -499,7 +608,7 @@ class TestProductionLoaderBoundaryParity:
         assert py_result["ok"] is False
         assert "Unknown seed" in str(py_result["error"])
         assert js_result["ok"] is False
-        assert "projection[0]" in str(js_result["error"])
+        assert "Unknown seed" in str(js_result["error"])
 
     def test_non_finite_seed_image_fails_closed_in_both_byte_boundaries(self):
         """Both seed image boundaries reject non-finite numeric JSON."""
@@ -687,24 +796,12 @@ class TestSeedChecksumFailClosed:
 # N4: JS seed_loader.js CORE registries subset of cli/main.js registries
 # ---------------------------------------------------------------------------
 
-def _seed_loader_source() -> str:
-    """Read seed_loader.js specifically (not concatenated rglob) to avoid comment shadowing."""
-    path = _REPO / "mu" / "host" / "js" / "core" / "seed_loader.js"
-    return path.read_text()
-
-
-def _main_js_source() -> str:
-    """Read cli/main.js specifically to avoid comment shadowing."""
-    path = _REPO / "mu" / "host" / "js" / "cli" / "main.js"
-    return path.read_text()
-
-
 def _extract_js_core_seed_checksums() -> dict[str, str]:
-    return _extract_js_dict(_seed_loader_source(), "CORE_SEED_CHECKSUMS")
+    return _js_registry_snapshot()["CORE_SEED_CHECKSUMS"]
 
 
 def _extract_js_core_projection_ids() -> dict[str, list[str]]:
-    return _extract_js_list_dict(_seed_loader_source(), "CORE_SEED_PROJECTION_IDS")
+    return _js_registry_snapshot()["CORE_SEED_PROJECTION_IDS"]
 
 
 class TestJsSeedLoaderSubsetGate:
@@ -713,7 +810,7 @@ class TestJsSeedLoaderSubsetGate:
     def test_core_checksums_subset_of_main(self):
         """Every CORE_SEED_CHECKSUMS entry must exist in SEED_CHECKSUMS with same hash."""
         core = _extract_js_core_seed_checksums()
-        main = _extract_js_dict(_main_js_source(), "SEED_CHECKSUMS")
+        main = _js_seed_checksums()
         for seed, core_hash in core.items():
             assert seed in main, (
                 f"seed_loader.js CORE_SEED_CHECKSUMS has '{seed}' not in cli/main.js SEED_CHECKSUMS"
@@ -725,7 +822,7 @@ class TestJsSeedLoaderSubsetGate:
     def test_core_projection_ids_subset_of_main(self):
         """Every CORE_SEED_PROJECTION_IDS entry must match cli/main.js exactly."""
         core = _extract_js_core_projection_ids()
-        main = _extract_js_list_dict(_main_js_source(), "EXPECTED_PROJECTION_IDS")
+        main = _js_projection_ids()
         for seed, core_ids in core.items():
             assert seed in main, (
                 f"seed_loader.js CORE_SEED_PROJECTION_IDS has '{seed}' not in cli/main.js"

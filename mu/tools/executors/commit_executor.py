@@ -3216,6 +3216,16 @@ _STRUCTURAL_ARTIFACT_PREFIXES = (
     "tests/l4_gates/",
 )
 
+_RUNTIME_SUBSTRATE_PREFIXES = (
+    "mu/host/",
+    "mu/substrate/",
+    "mu/closures/",
+    "mu/bridge/",
+    "mu/programs/",
+    "rcx_pi/selfhost/",
+    "mu/tools/compilers/",
+)
+
 _NON_GATE_TEST_DOMAINS = (
     "tests/engine/",
     "tests/parity/",
@@ -3265,6 +3275,55 @@ def _build_structural_post_gate_sweep(test_files: list[str], changed_files: list
     if non_gate_tests:
         return "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short " + " ".join(non_gate_tests)
     return "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/engine/ mu/tests/parity/ mu/tests/structural/"
+
+
+def _contains_runtime_or_substrate_path(paths: list[str]) -> bool:
+    for raw_path in paths:
+        if not isinstance(raw_path, str):
+            continue
+        normalized = raw_path.replace("\\", "/")
+        if normalized.startswith(_RUNTIME_SUBSTRATE_PREFIXES):
+            return True
+    return False
+
+
+def _range_diff_paths_for_base(repo_root: Path, base_branch: str) -> list[str]:
+    candidates: list[str] = []
+    if base_branch:
+        candidates.append(f"origin/{base_branch}")
+        candidates.append(base_branch)
+    candidates.append("origin/dev")
+    candidates.append("dev")
+
+    seen: set[str] = set()
+    for ref in candidates:
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        try:
+            _run(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"], cwd=repo_root, timeout=10)
+            proc = _run(["git", "diff", "--name-only", f"{ref}...HEAD"], cwd=repo_root, timeout=30)
+        except subprocess.CalledProcessError:
+            continue
+        return _dedupe_repo_paths(proc.stdout.splitlines())
+    return []
+
+
+def _supervisor_wave_class_for_staged_scope(
+    wave_class: str,
+    *,
+    staged_changed_files: list[str],
+    branch_range_files: list[str],
+) -> str:
+    """Retarget post-structural staged repairs without faking runtime deltas."""
+    normalized = str(wave_class or "").strip()
+    if (
+        normalized == "L4_STRUCTURAL"
+        and not _contains_runtime_or_substrate_path(staged_changed_files)
+        and _contains_runtime_or_substrate_path(branch_range_files)
+    ):
+        return "L4_ENABLER"
+    return normalized
 
 
 def _normalize_repo_relpath(path: str) -> str:
@@ -3318,6 +3377,37 @@ def _tracker_relevant_paths_for_handoff(
     return tracker_paths
 
 
+def _dirty_tracker_relevant_paths_for_handoff(
+    repo_root: Path,
+    files_to_stage: list[str],
+    force_add_files: list[str] | None = None,
+) -> list[str]:
+    candidate_paths = _dedupe_repo_paths([*(files_to_stage or []), *((force_add_files or []))])
+    if not candidate_paths:
+        return []
+    try:
+        proc = _run(
+            ["git", "status", "--porcelain", "--", *candidate_paths],
+            cwd=repo_root,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError:
+        return _tracker_relevant_paths_for_handoff(files_to_stage, force_add_files)
+
+    dirty_paths: set[str] = set()
+    for line in proc.stdout.splitlines():
+        parsed = _parse_porcelain_status_line(line)
+        if parsed is None:
+            continue
+        _, raw_path = parsed
+        path = _normalize_repo_relpath(raw_path)
+        if path:
+            dirty_paths.add(path)
+
+    dirty_ordered = [path for path in candidate_paths if path in dirty_paths]
+    return _tracker_relevant_paths_for_handoff(dirty_ordered, [])
+
+
 def _build_tracker_followup_note(*, wave_id: str, tracker_paths: list[str]) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     preview = ", ".join(tracker_paths[:3])
@@ -3328,6 +3418,51 @@ def _build_tracker_followup_note(*, wave_id: str, tracker_paths: list[str]) -> s
         f"- Tracker sync follow-up ({stamp}, {wave_id}): same-wave follow-up commit touched "
         f"tracker-relevant file(s) without phase/task-state change: {preview}.\n"
     )
+
+
+def _sync_tracker_followup_line(
+    lines: list[str],
+    *,
+    wave_id: str,
+    canonical_idx: int,
+    tracker_followup_indices: list[int],
+    tracker_paths: list[str],
+    tracker_file_staged: bool,
+) -> tuple[bool, str | None, str | None]:
+    if len(tracker_followup_indices) > 1:
+        return (
+            False,
+            f"wave_id '{wave_id}' has {len(tracker_followup_indices)} tracker follow-up notes in TASKS.md (duplicate)",
+            None,
+        )
+
+    should_emit_followup = bool(tracker_paths) and not tracker_file_staged
+    followup_idx = tracker_followup_indices[0] if tracker_followup_indices else None
+    if not should_emit_followup:
+        if followup_idx is None:
+            return False, None, None
+        del lines[followup_idx]
+        return True, None, "removed"
+
+    followup_line = _build_tracker_followup_note(
+        wave_id=wave_id,
+        tracker_paths=tracker_paths,
+    )
+    if followup_idx is None:
+        lines.insert(canonical_idx + 1, followup_line)
+        return True, None, "inserted"
+
+    if followup_idx == canonical_idx + 1:
+        if lines[followup_idx] == followup_line:
+            return False, None, None
+        lines[followup_idx] = followup_line
+        return True, None, "refreshed"
+
+    del lines[followup_idx]
+    if followup_idx < canonical_idx:
+        canonical_idx -= 1
+    lines.insert(canonical_idx + 1, followup_line)
+    return True, None, "refreshed"
 
 
 def _append_founder_override_to_tracker_note(
@@ -8278,9 +8413,15 @@ def _run_commit_pipeline_impl(
         start_idx=ra_idx,
         end_idx=ra_end_idx,
     )
-    tracker_relevant_paths = _tracker_relevant_paths_for_handoff(
+    tracker_relevant_paths = _dirty_tracker_relevant_paths_for_handoff(
+        repo_root,
         list(handoff["files_to_stage"]),
         list(handoff.get("force_add_files", [])),
+    )
+    tracker_file_staged = any(
+        path in {"TASKS.md", "STATUS.md"}
+        for path in [*handoff["files_to_stage"], *handoff.get("force_add_files", [])]
+        if isinstance(path, str)
     )
     note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
 
@@ -8298,42 +8439,31 @@ def _run_commit_pipeline_impl(
         canonical_idx = canonical_tracker_indices[0]
         if lines[canonical_idx] != note_line:
             lines[canonical_idx] = note_line
-            tasks_path.write_text("".join(lines), encoding="utf-8")
             tasks_modified = True
             log(f"Step 3: tracker note updated for {wave_id}")
         else:
             log(f"Step 3: tracker note for {wave_id} already present, skipping")
-            tracker_file_staged = any(
-                path in {"TASKS.md", "STATUS.md"}
-                for path in [*handoff["files_to_stage"], *handoff.get("force_add_files", [])]
-                if isinstance(path, str)
-            )
-            if tracker_relevant_paths and not tracker_file_staged:
-                followup_line = _build_tracker_followup_note(
-                    wave_id=wave_id,
-                    tracker_paths=tracker_relevant_paths,
-                )
-                if len(tracker_followup_indices) > 1:
-                    return {
-                        "status": "error",
-                        "step": "ensure_tracker_note",
-                        "errors": [
-                            f"wave_id '{wave_id}' has {len(tracker_followup_indices)} tracker follow-up notes in TASKS.md (duplicate)"
-                        ],
-                        "steps_completed": result["steps_completed"],
-                    }
-                if tracker_followup_indices:
-                    followup_idx = tracker_followup_indices[0]
-                    if lines[followup_idx] != followup_line:
-                        lines[followup_idx] = followup_line
-                        tasks_modified = True
-                        log(f"Step 3: tracker follow-up refreshed for {wave_id}")
-                else:
-                    lines.insert(canonical_idx + 1, followup_line)
-                    tasks_modified = True
-                    log(f"Step 3: tracker follow-up inserted for {wave_id}")
-                if tasks_modified:
-                    tasks_path.write_text("".join(lines), encoding="utf-8")
+        followup_modified, followup_error, followup_action = _sync_tracker_followup_line(
+            lines,
+            wave_id=wave_id,
+            canonical_idx=canonical_idx,
+            tracker_followup_indices=tracker_followup_indices,
+            tracker_paths=tracker_relevant_paths,
+            tracker_file_staged=tracker_file_staged,
+        )
+        if followup_error:
+            return {
+                "status": "error",
+                "step": "ensure_tracker_note",
+                "errors": [followup_error],
+                "steps_completed": result["steps_completed"],
+            }
+        if followup_modified:
+            tasks_modified = True
+            if followup_action:
+                log(f"Step 3: tracker follow-up {followup_action} for {wave_id}")
+        if tasks_modified:
+            tasks_path.write_text("".join(lines), encoding="utf-8")
     elif matching_tracker_indices:
         # Insert after the last tracker note in Ra, or repair a single malformed
         # tracker-note-shaped line for this wave in place.
@@ -8672,7 +8802,19 @@ def _run_commit_pipeline_impl(
             evidence_handles.update(handoff_evidence_handles)
         if "collect_and_stage_indicator" in result["steps_completed"]:
             evidence_handles.setdefault("indicator", indicator_path)
-        supervisor_wave_class = str(handoff.get("wave_class", "") or "").strip()
+        handoff_wave_class = str(handoff.get("wave_class", "") or "").strip()
+        branch_range_files = _range_diff_paths_for_base(repo_root, base_branch)
+        supervisor_wave_class = _supervisor_wave_class_for_staged_scope(
+            handoff_wave_class,
+            staged_changed_files=changed_files,
+            branch_range_files=branch_range_files,
+        )
+        if supervisor_wave_class != handoff_wave_class:
+            log(
+                "Step 6: retargeted staged follow-up supervisor class "
+                f"{handoff_wave_class}->{supervisor_wave_class} because the staged "
+                "repair has no runtime/substrate delta while the branch range does"
+            )
         supervisor_founder_override_token = ""
         if _wave_class_allows_founder_override(supervisor_wave_class):
             if tok := _extract_founder_override_from_tracker_note(

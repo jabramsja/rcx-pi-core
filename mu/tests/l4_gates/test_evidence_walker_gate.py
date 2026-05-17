@@ -2,14 +2,18 @@
 L4 Gate: evidence_walker.v1.json proof-class verification.
 
 Python proves structural trace walking for ontology evidence collection.
-JavaScript source-locks the same seed registry entries but intentionally does
-not load evidence_walker.v1 into the JS runtime path.
+JavaScript source-locks the same manifest-derived seed registry entries but
+intentionally does not load evidence_walker.v1 into the JS runtime path.
 
 Usage:
     PYTHONHASHSEED=0 pytest tests/l4_gates/test_evidence_walker_gate.py -v
 """
 
 from __future__ import annotations
+
+import functools
+import json
+import subprocess
 
 import pytest
 
@@ -23,6 +27,27 @@ from rcx_pi.selfhost.seed_integrity import (
     SEED_CHECKSUMS,
 )
 from tests.repo_root import REPO_ROOT
+
+
+@functools.lru_cache(maxsize=1)
+def _js_registry_snapshot() -> dict[str, dict[str, object]]:
+    js_script = """
+    const sl = require('./mu/host/js/core/seed_loader');
+    console.log(JSON.stringify({
+      SEED_REGISTRY_MANIFEST: sl.SEED_REGISTRY_MANIFEST,
+      SEED_CHECKSUMS: sl.SEED_CHECKSUMS,
+      EXPECTED_PROJECTION_IDS: sl.EXPECTED_PROJECTION_IDS,
+    }));
+    """
+    proc = subprocess.run(
+        ["node", "-e", js_script],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+        timeout=10,
+    )
+    assert proc.returncode == 0, f"JS registry probe failed: {proc.stderr}"
+    return json.loads(proc.stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -48,28 +73,24 @@ class TestEvidenceWalkerJsRegistryGate:
     """Gate: JS registry source-lock for evidence_walker.v1, not runtime parity."""
 
     def test_js_seed_checksums_contains_evidence_walker(self):
-        """JS SEED_CHECKSUMS must include evidence_walker.v1.json."""
-        import re
-        js_main = REPO_ROOT / "mu" / "host" / "js" / "cli" / "main.js"
-        source = js_main.read_text()
-        match = re.search(r"evidence_walker\.v1\.json.*?:\s*'([a-f0-9]+)'", source)
-        assert match, "evidence_walker.v1.json not found in JS SEED_CHECKSUMS"
+        """JS SEED_CHECKSUMS must include manifest-registered evidence_walker.v1.json."""
+        snapshot = _js_registry_snapshot()
+        record = snapshot["SEED_REGISTRY_MANIFEST"]["seeds"]["evidence_walker.v1.json"]
+        assert record["js_cli_registered"] is True
+        assert "evidence_walker.v1.json" in snapshot["SEED_CHECKSUMS"]
         py_checksum = SEED_CHECKSUMS["evidence_walker.v1.json"]
-        assert match.group(1) == py_checksum, (
-            f"JS/Python checksum mismatch: JS={match.group(1)} Python={py_checksum}"
+        js_checksum = snapshot["SEED_CHECKSUMS"]["evidence_walker.v1.json"]
+        assert js_checksum == py_checksum, (
+            f"JS/Python checksum mismatch: JS={js_checksum} Python={py_checksum}"
         )
 
     def test_js_projection_ids_contains_evidence_walker(self):
-        """JS EXPECTED_PROJECTION_IDS must include evidence_walker.v1.json."""
-        import re
-        js_main = REPO_ROOT / "mu" / "host" / "js" / "cli" / "main.js"
-        source = js_main.read_text()
-        assert "'evidence_walker.v1.json'" in source or '"evidence_walker.v1.json"' in source, (
-            "evidence_walker.v1.json not found in JS EXPECTED_PROJECTION_IDS"
-        )
+        """JS EXPECTED_PROJECTION_IDS must include manifest-registered evidence_walker.v1.json."""
+        snapshot = _js_registry_snapshot()
+        assert "evidence_walker.v1.json" in snapshot["EXPECTED_PROJECTION_IDS"]
         py_ids = EXPECTED_PROJECTION_IDS["evidence_walker.v1.json"]
-        for pid in py_ids:
-            assert pid in source, f"JS missing projection ID: {pid}"
+        js_ids = snapshot["EXPECTED_PROJECTION_IDS"]["evidence_walker.v1.json"]
+        assert js_ids == py_ids
 
     def test_js_runtime_seed_projection_map_does_not_load_evidence_walker(self):
         """JS must not imply runtime parity by loading evidence_walker.v1."""

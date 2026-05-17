@@ -14,100 +14,139 @@ const path = require('path');
 const crypto = require('crypto');
 const { muCopy } = require('./stage0_vm');
 
-// Fail-closed: checksum + projection ID registries for seeds loaded by core modules.
-// Must mirror entries in cli/main.js and Python seed_integrity.py.
-const CORE_SEED_CHECKSUMS = {
-  'terminal_classify.v1.json': '413acebcdcda2de65a87530924b27eca597e9cf3ec5e4f153a6cd5b4e3bcf7d7',
-  'hemispheres.v1.json': 'fb212be1d4bedcdf4b805ff4394d47bee8cb1b7eda19b449e16536a22c683de8',
-  'rcx_engine.v1.json': '1e32fcb989d18015be45ee7dd6d7b85a9ecfa8509d44562f04b7029c23ec684f',
-  'rcx_engine_state.v1.json': '7e4d05fcdca90e5c374ce45e094ad73b2a1bec9599254bd457db194c00fc29d0',
-  'rcx_engine_scheduler.v1.json': '2e10c737f8d1a8b2fcd1a2a22b5f51e855c51372d691fce2a05e435744d78f65',
-};
+const SEED_REGISTRY_MANIFEST_NAME = 'seed_registry_manifest.v1.json';
+const SEED_REGISTRY_MANIFEST_SCHEMA = 'rcx.seed_registry_manifest.v1';
+const SEED_REGISTRY_MANIFEST_SHA256 =
+  '175ba95a371914f3d38bbe960ccd9300b44ea907d020164deb25947292bb7d29';
 
-const CORE_SEED_PROJECTION_IDS = {
-  'terminal_classify.v1.json': [
-    'tc.recurrence',
-    'tc.exhaustion',
-    'tc.engine',
-    'tc.exit.closure',
-    'tc.exit.exhaustion',
-    'tc.exit.stall',
-    'tc.exit.completed',
-  ],
-  'hemispheres.v1.json': [
-    'hemisphere.init',
-    'hemisphere.classify.exhaustion',
-    'hemisphere.classify.null',
-    'hemisphere.classify.closure',
-    'hemisphere.classify.stall',
-    'hemisphere.classify.default',
-    'hemisphere.add.r_null',
-    'hemisphere.add.r_inf',
-    'hemisphere.add.r_a',
-    'hemisphere.add.lobes',
-    'hemisphere.add.sink',
-    'hemisphere.unwrap',
-  ],
-  'rcx_engine.v1.json': [
-    'engine.init',
-    'engine.init_config',
-    'engine.trace_done',
-    'engine.hash_done_fix',
-    'engine.hash_done',
-    'engine.fix_done_applied',
-    'engine.fix_done_none',
-    'engine.recurrence_done',
-    'engine.exhaustion_done_freeze',
-    'engine.exhaustion_done_terminal',
-    'engine.unwrap',
-  ],
-  'rcx_engine_state.v1.json': [
-    'engine_state.shape_valid',
-    'engine_state.identity_stable',
-    'engine_state.next_id_monotone',
-    'engine_state.shape_invalid_missing_graph',
-    'engine_state.shape_invalid_missing_omega',
-    'engine_state.shape_invalid_missing_l_map',
-    'engine_state.shape_invalid_missing_xi',
-    'engine_state.shape_invalid_missing_rho',
-    'engine_state.shape_invalid_missing_next_id',
-  ],
-  'rcx_engine_scheduler.v1.json': [
-    'scheduler.invalid_missing_godel_unary_map',
-    'scheduler.invalid_non_godel_head',
-    'scheduler.invalid_godel_missing_code',
-    'scheduler.invalid_godel_missing_domain',
-    'scheduler.invalid_godel_missing_codomain',
-    'scheduler.invalid_godel_missing_identity_map',
-    'scheduler.reject_identity_map',
-    'scheduler.reject_tail_identity_map',
-    'scheduler.reject_third_identity_map',
-    'scheduler.reject_unhandled_three_operator_pool',
-    'scheduler.order_error_0010_before_0001',
-    'scheduler.order_error_0100_before_0011',
-    'scheduler.skip_frozen_head',
-    'scheduler.skip_frozen_tail_member',
-    'scheduler.skip_frozen_tail2_member',
-    'scheduler.scan_frozen_tail',
-    'scheduler.select_single_operator',
-    'scheduler.select_0001_before_0010',
-    'scheduler.select_0011_before_0100',
-    'scheduler.reject_unhandled_two_operator_pool',
-    'scheduler.pool_exhausted',
-    'scheduler.reject_unhandled_operator_pool_shape',
-  ],
-};
+const manifestPath = path.join(__dirname, '..', '..', '..', SEED_REGISTRY_MANIFEST_NAME);
+const manifestBytes = fs.readFileSync(manifestPath);
+const manifestActualSha256 = crypto.createHash('sha256').update(manifestBytes).digest('hex');
+if (manifestActualSha256 !== SEED_REGISTRY_MANIFEST_SHA256) {
+  throw new Error(
+    `Seed registry manifest checksum mismatch: ${SEED_REGISTRY_MANIFEST_NAME} ` +
+    `(expected ${SEED_REGISTRY_MANIFEST_SHA256}, got ${manifestActualSha256})`
+  );
+}
 
-// Seed dependencies — mirrors SEED_DEPENDENCIES in Python seed_integrity.py.
-// Maps seed names to execution-time prerequisites (seeds whose projections must
-// be present for the dependent seed's projections to produce correct output).
-const SEED_DEPENDENCIES = {
-  'kernel.v1.json': ['match.v2.json', 'subst.v2.json'],
-  'match.v2.json': ['bootstrap_structural.v1.json'],
-  'rcx_engine.v1.json': ['recurrence.v2.json', 'exhaustion.v1.json', 'fix.v1.json'],
-  'hemispheres.v1.json': ['rcx_engine.v1.json'],
-  'metabolize_cycle.v1.json': ['hemispheres.v1.json', 'metabolization.v1.json'],
-};
+const manifestRaw = new TextDecoder('utf-8', { fatal: true }).decode(manifestBytes);
+const SEED_REGISTRY_MANIFEST = muCopy(
+  JSON.parse(manifestRaw),
+  true,
+  'Seed registry manifest parse tree'
+);
+if (
+  SEED_REGISTRY_MANIFEST === null ||
+  typeof SEED_REGISTRY_MANIFEST !== 'object' ||
+  Array.isArray(SEED_REGISTRY_MANIFEST)
+) {
+  throw new Error('Seed registry manifest must be a plain object');
+}
+if (SEED_REGISTRY_MANIFEST.schema !== SEED_REGISTRY_MANIFEST_SCHEMA) {
+  throw new Error(`Seed registry manifest schema mismatch: ${SEED_REGISTRY_MANIFEST.schema}`);
+}
+const manifestSeeds = SEED_REGISTRY_MANIFEST.seeds;
+if (
+  manifestSeeds === null ||
+  typeof manifestSeeds !== 'object' ||
+  Array.isArray(manifestSeeds) ||
+  Object.keys(manifestSeeds).length === 0
+) {
+  throw new Error('Seed registry manifest must contain non-empty seeds object');
+}
+
+const validManifestSubdirs = new Set(['substrate', 'closures', 'bridge', 'programs', 'utilities']);
+const validManifestStatuses = new Set(['production', 'legacy-poc']);
+const requiredManifestKeys = [
+  'subdir',
+  'sha256',
+  'projection_ids',
+  'status',
+  'dependencies',
+  'js_cli_registered',
+  'js_core_locked',
+];
+for (const [seedName, record] of Object.entries(manifestSeeds)) {
+  if (typeof seedName !== 'string' || !seedName.endsWith('.json')) {
+    throw new Error(`Seed registry manifest has invalid seed name: ${seedName}`);
+  }
+  if (record === null || typeof record !== 'object' || Array.isArray(record)) {
+    throw new Error(`Seed registry manifest record for ${seedName} must be a plain object`);
+  }
+  for (const key of requiredManifestKeys) {
+    if (!(key in record)) {
+      throw new Error(`Seed registry manifest record for ${seedName} missing key '${key}'`);
+    }
+  }
+  if (!validManifestSubdirs.has(record.subdir)) {
+    throw new Error(`Seed registry manifest record for ${seedName} has invalid subdir`);
+  }
+  if (typeof record.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(record.sha256)) {
+    throw new Error(`Seed registry manifest record for ${seedName} has invalid sha256`);
+  }
+  let projectionIdsValid = Array.isArray(record.projection_ids);
+  if (projectionIdsValid) {
+    for (const projectionId of record.projection_ids) {
+      if (typeof projectionId !== 'string') {
+        projectionIdsValid = false;
+        break;
+      }
+    }
+  }
+  if (!projectionIdsValid) {
+    throw new Error(`Seed registry manifest record for ${seedName} has invalid projection_ids`);
+  }
+  if (!validManifestStatuses.has(record.status)) {
+    throw new Error(`Seed registry manifest record for ${seedName} has invalid status`);
+  }
+  let dependenciesValid = Array.isArray(record.dependencies);
+  if (dependenciesValid) {
+    for (const dep of record.dependencies) {
+      if (typeof dep !== 'string') {
+        dependenciesValid = false;
+        break;
+      }
+    }
+  }
+  if (!dependenciesValid) {
+    throw new Error(`Seed registry manifest record for ${seedName} has invalid dependencies`);
+  }
+  if (typeof record.js_cli_registered !== 'boolean' || typeof record.js_core_locked !== 'boolean') {
+    throw new Error(`Seed registry manifest record for ${seedName} has invalid JS flags`);
+  }
+}
+
+const registeredManifestSeeds = new Set(Object.keys(manifestSeeds));
+for (const [seedName, record] of Object.entries(manifestSeeds)) {
+  for (const dep of record.dependencies) {
+    if (!registeredManifestSeeds.has(dep)) {
+      throw new Error(`Seed registry manifest record for ${seedName} depends on unknown seed ${dep}`);
+    }
+  }
+}
+
+const SEED_REGISTRY_RECORDS = SEED_REGISTRY_MANIFEST.seeds;
+const SEED_CHECKSUMS = Object.create(null);
+const EXPECTED_PROJECTION_IDS = Object.create(null);
+const CORE_SEED_CHECKSUMS = Object.create(null);
+const CORE_SEED_PROJECTION_IDS = Object.create(null);
+for (const [seedName, record] of Object.entries(SEED_REGISTRY_RECORDS)) {
+  if (record.js_cli_registered) {
+    SEED_CHECKSUMS[seedName] = record.sha256;
+    EXPECTED_PROJECTION_IDS[seedName] = record.projection_ids.slice();
+  }
+  if (record.js_core_locked) {
+    CORE_SEED_CHECKSUMS[seedName] = record.sha256;
+    CORE_SEED_PROJECTION_IDS[seedName] = record.projection_ids.slice();
+  }
+}
+
+const SEED_DEPENDENCIES = Object.create(null);
+for (const [seedName, record] of Object.entries(SEED_REGISTRY_RECORDS)) {
+  if (record.dependencies.length > 0) {
+    SEED_DEPENDENCIES[seedName] = record.dependencies.slice();
+  }
+}
 
 /**
  * Validate that all execution-time dependencies are satisfied.
@@ -128,30 +167,10 @@ function validateSeedDependencies(loadedSeeds) {
   return errors;
 }
 
-// Map seed names to mu/ subfolders — mirrors MU_SEED_LOCATIONS in Python seed_integrity.py.
-const SEED_SUBDIRS = {
-  'kernel.v1.json': 'substrate',
-  'match.v1.json': 'substrate',
-  'match.v2.json': 'substrate',
-  'subst.v1.json': 'substrate',
-  'subst.v2.json': 'substrate',
-  'bootstrap_structural.v1.json': 'bridge',
-  'recurrence.v1.json': 'closures',
-  'recurrence.v2.json': 'closures',
-  'exhaustion.v1.json': 'closures',
-  'fix.v1.json': 'closures',
-  'classify.v1.json': 'utilities',
-  'eval.v1.json': 'utilities',
-  'terminal_classify.v1.json': 'utilities',
-  'rcx_engine.v1.json': 'programs',
-  'rcx_engine_state.v1.json': 'programs',
-  'rcx_engine_scheduler.v1.json': 'programs',
-  'hemispheres.v1.json': 'programs',
-  'paxos_demo.v1.json': 'programs',
-  'metabolization.v1.json': 'programs',
-  'metabolize_cycle.v1.json': 'programs',
-  'evidence_walker.v1.json': 'utilities',
-};
+const SEED_SUBDIRS = Object.create(null);
+for (const [seedName, record] of Object.entries(SEED_REGISTRY_RECORDS)) {
+  SEED_SUBDIRS[seedName] = record.subdir;
+}
 
 /**
  * Get the subdirectory for a seed file.
@@ -296,11 +315,17 @@ function loadVerifiedSeedImage(
 /**
  * Load and verify a seed file.
  * @param {string} seedName - Seed filename (e.g., 'terminal_classify.v1.json')
- * @param {string} subdir - Subdirectory under mu/ (e.g., 'utilities')
+ * @param {string} subdir - Caller-visible subdir, checked against manifest data
  * @returns {object} Parsed seed object
  */
 function loadVerifiedSeed(seedName, subdir) {
-  const seedPath = path.join(__dirname, '..', '..', '..', subdir, seedName);
+  const manifestSubdir = getSeedSubdir(seedName);
+  if (subdir !== manifestSubdir) {
+    throw new Error(
+      `Seed ${seedName} subdir mismatch: manifest has ${manifestSubdir}, caller supplied ${subdir}`
+    );
+  }
+  const seedPath = path.join(__dirname, '..', '..', '..', manifestSubdir, seedName);
   const raw = fs.readFileSync(seedPath);
   return loadVerifiedSeedImage(
     seedName,
@@ -316,4 +341,18 @@ function getSeedChecksum(seedName) {
   return CORE_SEED_CHECKSUMS[seedName] ?? null;
 }
 
-module.exports = { loadVerifiedSeed, loadVerifiedSeedImage, getSeedSubdir, isFullyLockedSeed, getSeedChecksum, validateSeedDependencies, SEED_SUBDIRS, SEED_DEPENDENCIES };
+module.exports = {
+  loadVerifiedSeed,
+  loadVerifiedSeedImage,
+  getSeedSubdir,
+  isFullyLockedSeed,
+  getSeedChecksum,
+  validateSeedDependencies,
+  SEED_REGISTRY_MANIFEST,
+  SEED_CHECKSUMS,
+  EXPECTED_PROJECTION_IDS,
+  CORE_SEED_CHECKSUMS,
+  CORE_SEED_PROJECTION_IDS,
+  SEED_SUBDIRS,
+  SEED_DEPENDENCIES,
+};

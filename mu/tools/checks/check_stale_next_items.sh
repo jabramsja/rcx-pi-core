@@ -18,6 +18,17 @@ cd "$REPO_ROOT"
 
 TASKS_FILE="TASKS.md"
 FIX_MODE=false
+GH_RETRY_ATTEMPTS="${RCX_GH_RETRY_ATTEMPTS:-3}"
+GH_RETRY_SLEEP_SECONDS="${RCX_GH_RETRY_SLEEP_SECONDS:-2}"
+
+if [[ ! "$GH_RETRY_ATTEMPTS" =~ ^[0-9]+$ ]] || [ "$GH_RETRY_ATTEMPTS" -lt 1 ]; then
+    echo "ERROR: RCX_GH_RETRY_ATTEMPTS must be a positive integer" >&2
+    exit 2
+fi
+if [[ ! "$GH_RETRY_SLEEP_SECONDS" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: RCX_GH_RETRY_SLEEP_SECONDS must be a non-negative integer" >&2
+    exit 2
+fi
 
 if [ "${1:-}" = "--fix" ]; then
     FIX_MODE=true
@@ -50,12 +61,34 @@ STALE_PR_NUMBERS=""
 STALE_WAVE_IDS=""
 MARKER_RE='~~|Landed|COMPLETE|CLOSED|Resolved|CLEARED|IMPLEMENTED'
 
+run_gh_with_retry() {
+    local attempt
+    local output=""
+    local status=0
+
+    for ((attempt = 1; attempt <= GH_RETRY_ATTEMPTS; attempt++)); do
+        if output=$(gh "$@" 2>&1); then
+            printf '%s\n' "$output"
+            return 0
+        else
+            status=$?
+        fi
+        if [ "$attempt" -lt "$GH_RETRY_ATTEMPTS" ]; then
+            echo "WARNING: gh $* failed on attempt ${attempt}/${GH_RETRY_ATTEMPTS}: $output" >&2
+            sleep "$GH_RETRY_SLEEP_SECONDS"
+        fi
+    done
+
+    printf '%s\n' "$output"
+    return "$status"
+}
+
 merged_pr_for_wave_branch() {
     local wave_id="$1"
     local merged_pr
     local branch_filter
 
-    if ! merged_pr=$(gh pr list --state merged --head "$wave_id" --json number --jq '.[0].number // empty' --limit 1 2>&1); then
+    if ! merged_pr=$(run_gh_with_retry pr list --state merged --head "$wave_id" --json number --jq '.[0].number // empty' --limit 1); then
         printf '%s\n' "$merged_pr"
         return 2
     fi
@@ -67,13 +100,12 @@ merged_pr_for_wave_branch() {
     # Accept both plain wave branches and contributor-prefixed wave branches.
     branch_filter="map(select(.headRefName == \"${wave_id}\" or (.headRefName | endswith(\"/${wave_id}\")))) | .[0].number // empty"
     if ! merged_pr=$(
-        gh pr list \
+        run_gh_with_retry pr list \
             --state merged \
             --search "$wave_id" \
             --json number,headRefName \
             --jq "$branch_filter" \
-            --limit 50 \
-            2>&1
+            --limit 50
     ); then
         printf '%s\n' "$merged_pr"
         return 2
@@ -85,12 +117,11 @@ merged_pr_for_wave_branch() {
     fi
 
     if ! merged_pr=$(
-        gh pr list \
+        run_gh_with_retry pr list \
             --state merged \
             --json number,headRefName \
             --jq "$branch_filter" \
-            --limit 500 \
-            2>&1
+            --limit 500
     ); then
         printf '%s\n' "$merged_pr"
         return 2
@@ -105,8 +136,9 @@ if [ -n "$PR_NUMBERS" ]; then
         CHECKED=$((CHECKED + 1))
 
         # Check if PR is merged
-        # Fail closed: if gh fails (auth, network), exit with error rather than silently skipping
-        if ! PR_STATE=$(gh pr view "$pr_num" --json state --jq '.state' 2>&1); then
+        # Fail closed after bounded retry: if gh fails (auth, network), exit
+        # with error rather than silently skipping stale merged PRs.
+        if ! PR_STATE=$(run_gh_with_retry pr view "$pr_num" --json state --jq '.state'); then
             echo "ERROR: Failed to check PR #${pr_num} state: $PR_STATE" >&2
             echo "   Ensure gh CLI is authenticated and network is available."
             exit 2

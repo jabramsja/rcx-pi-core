@@ -470,6 +470,138 @@ def test_bot_remediation_tracker_followup_skips_when_tracker_file_scoped(tmp_pat
     assert "Tracker sync follow-up" not in (repo / "TASKS.md").read_text(encoding="utf-8")
 
 
+def test_structural_staged_followup_retargets_supervisor_class_when_branch_range_has_runtime():
+    staged_files = [
+        "TASKS.md",
+        "mu/tests/l4_gates/test_boundary_dispatch_authority_gate.py",
+        "reports/control_plane/wave.md",
+    ]
+    branch_range_files = [
+        "mu/host/js/core/seed_loader.js",
+        "mu/tests/l4_gates/test_boundary_dispatch_authority_gate.py",
+    ]
+
+    wave_class = commit_mod._supervisor_wave_class_for_staged_scope(  # ANTICHEAT_OK
+        "L4_STRUCTURAL",
+        staged_changed_files=staged_files,
+        branch_range_files=branch_range_files,
+    )
+
+    assert wave_class == "L4_ENABLER"
+
+
+def test_structural_initial_scope_keeps_supervisor_class_when_staged_runtime_present():
+    staged_files = [
+        "mu/host/js/core/seed_loader.js",
+        "mu/tests/l4_gates/test_boundary_dispatch_authority_gate.py",
+    ]
+
+    wave_class = commit_mod._supervisor_wave_class_for_staged_scope(  # ANTICHEAT_OK
+        "L4_STRUCTURAL",
+        staged_changed_files=staged_files,
+        branch_range_files=staged_files,
+    )
+
+    assert wave_class == "L4_STRUCTURAL"
+
+
+def test_dirty_tracker_followup_paths_ignore_clean_handoff_runtime_paths(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    runtime_path = repo / "mu" / "host" / "js" / "core" / "seed_loader.js"
+    control_path = repo / "mu" / "tools" / "executors" / "commit_executor.py"
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    control_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_path.write_text("// already committed runtime\n", encoding="utf-8")
+    control_path.write_text("# committed control\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "--", "mu/host/js/core/seed_loader.js", "mu/tools/executors/commit_executor.py"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "baseline files"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    control_path.write_text("# dirty control\n", encoding="utf-8")
+
+    tracker_paths = commit_mod._dirty_tracker_relevant_paths_for_handoff(  # ANTICHEAT_OK
+        repo,
+        [
+            "mu/host/js/core/seed_loader.js",
+            "mu/tools/executors/commit_executor.py",
+        ],
+        [],
+    )
+
+    assert tracker_paths == ["mu/tools/executors/commit_executor.py"]
+
+
+def test_tracker_followup_refreshes_when_canonical_note_updates(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    wave_id = "tracker-followup-canonical-update-wave"
+    runtime_rel = "mu/host/js/core/seed_loader.js"
+    control_rel = "mu/tools/executors/commit_executor.py"
+    runtime_path = repo / runtime_rel
+    control_path = repo / control_rel
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    control_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_path.write_text("// already committed runtime\n", encoding="utf-8")
+    control_path.write_text("# committed control\n", encoding="utf-8")
+    old_tracker_note = _make_new_schema_handoff(
+        wave_id=wave_id,
+        target_gate_id="G7",
+    )["tracker_note_text"]
+    stale_followup = (
+        f"- Tracker sync follow-up (2026-05-17T00:00:00Z, {wave_id}): "
+        "same-wave follow-up commit touched tracker-relevant file(s) without "
+        f"phase/task-state change: {runtime_rel}.\n"
+    )
+    (repo / "TASKS.md").write_text(
+        f"## Ra\n\n{old_tracker_note}\n{stale_followup}\n---\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "baseline tracker state"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    control_path.write_text("# dirty control follow-up\n", encoding="utf-8")
+
+    handoff = _make_new_schema_handoff(
+        wave_id=wave_id,
+        target_gate_id="G8",
+        files_to_stage=[runtime_rel, control_rel],
+        scope_items=[runtime_rel, control_rel],
+        fixes_implemented=["refresh stale tracker follow-up from dirty staged paths"],
+    )
+    with patch.object(
+        commit_mod,
+        "_load_repo_meta_bridge_client",
+        side_effect=ImportError("stop after tracker sync"),
+    ):
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+    assert result["step"] == "build_and_run_supervisor"
+    tasks_content = (repo / "TASKS.md").read_text(encoding="utf-8")
+    assert "target_gate_id: G8" in tasks_content
+    followup_lines = [
+        line for line in tasks_content.splitlines()
+        if line.startswith("- Tracker sync follow-up") and wave_id in line
+    ]
+    assert len(followup_lines) == 1
+    assert control_rel in followup_lines[0]
+    assert runtime_rel not in followup_lines[0]
+
+
 def _setup_repo(tmp_path):
     """Create a minimal git repo for pipeline tests."""
     import subprocess

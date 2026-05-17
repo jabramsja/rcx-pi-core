@@ -47,6 +47,25 @@ def _read_all_js_source() -> str:
         parts.append(f.read_text())
     return "\n".join(parts)
 
+
+def _extract_js_function_body(source: str, function_name: str) -> str:
+    """Extract a top-level JS function body for source-contract guards."""
+    signature = f"function {function_name}"
+    start = source.find(signature)
+    assert start != -1, f"Could not find {function_name} function"
+    opening_brace = source.find("{", start)
+    assert opening_brace != -1, f"Could not find {function_name} opening brace"
+    depth = 0
+    for index in range(opening_brace, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening_brace + 1:index]
+    raise AssertionError(f"Could not find {function_name} closing brace")
+
 # ── Known callsite inventory ─────────────────────────────────────────────
 
 # All functions that call run_engine_pipeline() directly.
@@ -969,25 +988,22 @@ class TestJsBoundaryContractLock:
         )
 
     def test_js_validate_seed_uses_key_presence(self):
-        """validateSeedStructure must use 'key' in obj, not falsy checks."""
-        source = _read_all_js_source()
-        assert "'id' in proj" in source, "validateSeedStructure must use key-presence for 'id'"
-        assert "'pattern' in proj" in source, "validateSeedStructure must use key-presence for 'pattern'"
-        assert "'body' in proj" in source, "validateSeedStructure must use key-presence for 'body'"
-        assert "'meta' in seed" in source, "validateSeedStructure must use key-presence for 'meta'"
+        """Seed image validation must use 'key' in obj, not falsy checks."""
+        source = (_REPO / "mu" / "host" / "js" / "core" / "seed_loader.js").read_text()
+        func_body = _extract_js_function_body(source, "loadVerifiedSeedImage")
+        assert "'id' in proj" in func_body, "loadVerifiedSeedImage must use key-presence for 'id'"
+        assert "'pattern' in proj" in func_body, "loadVerifiedSeedImage must use key-presence for 'pattern'"
+        assert "'body' in proj" in func_body, "loadVerifiedSeedImage must use key-presence for 'body'"
+        assert "'meta' in seed" in func_body, "loadVerifiedSeedImage must use key-presence for 'meta'"
 
     def test_js_validate_seed_no_falsy_pattern(self):
-        """Old falsy patterns must not exist in validateSeedStructure."""
-        source = _read_all_js_source()
-        # Extract just the validateSeedStructure function body
-        import re
-        match = re.search(r"function validateSeedStructure\(.*?\{(.*?)\n\}", source, re.DOTALL)
-        assert match, "Could not find validateSeedStructure function"
-        func_body = match.group(1)
-        assert "!proj.id" not in func_body, "validateSeedStructure still uses falsy !proj.id"
-        assert "!proj.pattern" not in func_body, "validateSeedStructure still uses falsy !proj.pattern"
-        assert "!proj.body" not in func_body, "validateSeedStructure still uses falsy !proj.body"
-        assert "!seed.meta" not in func_body, "validateSeedStructure still uses falsy !seed.meta"
+        """Old falsy patterns must not exist in seed image validation."""
+        source = (_REPO / "mu" / "host" / "js" / "core" / "seed_loader.js").read_text()
+        func_body = _extract_js_function_body(source, "loadVerifiedSeedImage")
+        assert "!proj.id" not in func_body, "loadVerifiedSeedImage still uses falsy !proj.id"
+        assert "!proj.pattern" not in func_body, "loadVerifiedSeedImage still uses falsy !proj.pattern"
+        assert "!proj.body" not in func_body, "loadVerifiedSeedImage still uses falsy !proj.body"
+        assert "!seed.meta" not in func_body, "loadVerifiedSeedImage still uses falsy !seed.meta"
 
 
 # ── JS engine pipeline shape governance ─────────────────────────────────

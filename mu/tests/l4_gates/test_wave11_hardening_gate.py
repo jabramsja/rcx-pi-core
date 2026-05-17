@@ -15,6 +15,8 @@ import textwrap
 
 import pytest
 
+from tests.repo_root import REPO_ROOT
+
 JS_TRUST_MU_PRELUDE = """
 const muContainers = require('./mu/host/js/core/container_factory');
 function trustMu(value) {
@@ -258,34 +260,34 @@ class TestSeedRegistryCrossValidation:
     def test_js_checksums_vs_projection_ids(self):
         """JS CORE_SEED_CHECKSUMS and CORE_SEED_PROJECTION_IDS must have same keys.
 
-        These are not exported, so we parse the source file directly.
+        These views are derived from the verified seed registry manifest at
+        module load, so inspect the exported runtime views instead of requiring
+        static source literals.
         """
-        import re
-        from pathlib import Path
-
-        source = Path("mu/host/js/core/seed_loader.js").read_text()
-
-        # Extract keys from CORE_SEED_CHECKSUMS block
-        cs_match = re.search(
-            r"const CORE_SEED_CHECKSUMS\s*=\s*\{(.*?)\};",
-            source, re.DOTALL,
+        import json
+        result = subprocess.run(
+            [
+                "node",
+                "-e",
+                textwrap.dedent(
+                    """
+                    const sl = require('./mu/host/js/core/seed_loader');
+                    console.log(JSON.stringify({
+                      checksums: sl.CORE_SEED_CHECKSUMS,
+                      projectionIds: sl.CORE_SEED_PROJECTION_IDS,
+                    }));
+                    """
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=REPO_ROOT,
         )
-        assert cs_match, "Could not find CORE_SEED_CHECKSUMS in seed_loader.js"
-        cs_keys = set(re.findall(r"'([^']+\.json)'", cs_match.group(1)))
-
-        # Extract keys from CORE_SEED_PROJECTION_IDS block
-        pi_match = re.search(
-            r"const CORE_SEED_PROJECTION_IDS\s*=\s*\{(.*?)\n\};",
-            source, re.DOTALL,
-        )
-        assert pi_match, "Could not find CORE_SEED_PROJECTION_IDS in seed_loader.js"
-        # Only get top-level keys (seed names), not projection ID values
-        pi_block = pi_match.group(1)
-        pi_keys = set()
-        for line in pi_block.splitlines():
-            m = re.match(r"\s+'([^']+\.json)':", line)
-            if m:
-                pi_keys.add(m.group(1))
+        assert result.returncode == 0, result.stderr
+        snapshot = json.loads(result.stdout)
+        cs_keys = set(snapshot["checksums"].keys())
+        pi_keys = set(snapshot["projectionIds"].keys())
 
         cs_only = cs_keys - pi_keys
         pi_only = pi_keys - cs_keys
