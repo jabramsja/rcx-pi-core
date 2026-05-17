@@ -20,6 +20,7 @@ What this checker does NOT prove:
 
 from __future__ import annotations
 
+import base64
 from collections import Counter
 import functools
 import json
@@ -203,40 +204,49 @@ def _js_load_verified_seed_image_bytes_result(
     *,
     register_checksum: bool,
 ) -> dict[str, object]:
-    js_script = f"""
+    js_script = """
     const crypto = require('crypto');
-    const {{ loadVerifiedSeedImage }} = require('./mu/host/js/core/seed_loader');
-    const raw = Buffer.from({list(seed_bytes)});
+    const fs = require('fs');
+    const { loadVerifiedSeedImage } = require('./mu/host/js/core/seed_loader');
+    const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+    const raw = Buffer.from(input.seedBytesBase64, 'base64');
     const checksums = Object.create(null);
     const projectionIds = Object.create(null);
-    if ({json.dumps(register_checksum)}) {{
-      checksums[{json.dumps(seed_name)}] = crypto.createHash('sha256').update(raw).digest('hex');
-    }}
-    if ({json.dumps(expected_ids)} !== null) {{
-      projectionIds[{json.dumps(seed_name)}] = {json.dumps(expected_ids)};
-    }}
-    try {{
+    if (input.registerChecksum) {
+      checksums[input.seedName] = crypto.createHash('sha256').update(raw).digest('hex');
+    }
+    if (input.expectedIds !== null) {
+      projectionIds[input.seedName] = input.expectedIds;
+    }
+    try {
       const seed = loadVerifiedSeedImage(
-        {json.dumps(seed_name)},
+        input.seedName,
         raw,
         checksums,
         projectionIds,
         'TEST_CHECKSUMS',
         'TEST_PROJECTION_IDS'
       );
-      console.log(JSON.stringify({{
+      console.log(JSON.stringify({
         ok: true,
         ids: seed.projections.map(p => p.id),
-      }}));
-    }} catch (e) {{
-      console.log(JSON.stringify({{
+      }));
+    } catch (e) {
+      console.log(JSON.stringify({
         ok: false,
         error: e.message,
-      }}));
-    }}
+      }));
+    }
     """
+    payload = {
+        "seedName": seed_name,
+        "seedBytesBase64": base64.b64encode(seed_bytes).decode("ascii"),
+        "expectedIds": expected_ids,
+        "registerChecksum": register_checksum,
+    }
     proc = subprocess.run(
         ["node", "-e", js_script],
+        input=json.dumps(payload),
         capture_output=True,
         text=True,
         cwd=str(_REPO),
@@ -250,35 +260,42 @@ def _js_load_registered_seed_image_bytes_result(
     seed_name: str,
     seed_bytes: bytes,
 ) -> dict[str, object]:
-    js_script = f"""
-    const {{
+    js_script = """
+    const fs = require('fs');
+    const {
       loadVerifiedSeedImage,
       SEED_CHECKSUMS,
       EXPECTED_PROJECTION_IDS,
-    }} = require('./mu/host/js/core/seed_loader');
-    const raw = Buffer.from({list(seed_bytes)});
-    try {{
+    } = require('./mu/host/js/core/seed_loader');
+    const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+    const raw = Buffer.from(input.seedBytesBase64, 'base64');
+    try {
       const seed = loadVerifiedSeedImage(
-        {json.dumps(seed_name)},
+        input.seedName,
         raw,
         SEED_CHECKSUMS,
         EXPECTED_PROJECTION_IDS,
         'SEED_CHECKSUMS',
         'EXPECTED_PROJECTION_IDS'
       );
-      console.log(JSON.stringify({{
+      console.log(JSON.stringify({
         ok: true,
         ids: seed.projections.map(p => p.id),
-      }}));
-    }} catch (e) {{
-      console.log(JSON.stringify({{
+      }));
+    } catch (e) {
+      console.log(JSON.stringify({
         ok: false,
         error: e.message,
-      }}));
-    }}
+      }));
+    }
     """
+    payload = {
+        "seedName": seed_name,
+        "seedBytesBase64": base64.b64encode(seed_bytes).decode("ascii"),
+    }
     proc = subprocess.run(
         ["node", "-e", js_script],
+        input=json.dumps(payload),
         capture_output=True,
         text=True,
         cwd=str(_REPO),

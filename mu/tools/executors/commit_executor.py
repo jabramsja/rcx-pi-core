@@ -1162,6 +1162,47 @@ def _is_wave_bound_target_branch(
     )
 
 
+def _is_authorized_control_surface_repair_target_branch(
+    handoff: dict[str, Any],
+    repo_root: Path | None,
+    target_branch: str,
+    *,
+    branch_prefix: str,
+    wave_id: str,
+) -> bool:
+    """Allow standalone repair waves to land on an existing PR branch.
+
+    This is intentionally narrower than generic target-branch override support:
+    only standalone L4_ENABLER handoffs with an indexed same-wave control-plane
+    packet that declares control-surface authorization may target a non-wave
+    branch under the caller's branch prefix.
+    """
+    if handoff.get("caller") != "standalone":
+        return False
+    if str(handoff.get("wave_class") or "").strip() != "L4_ENABLER":
+        return False
+    if repo_root is None:
+        return False
+    if not target_branch or not branch_prefix or not wave_id:
+        return False
+    prefix = f"{branch_prefix}/"
+    if not target_branch.startswith(prefix):
+        return False
+    suffix = target_branch[len(prefix):]
+    if not TARGET_BRANCH_SUFFIX_RE.fullmatch(suffix):
+        return False
+    return _control_surface_packet_authorized(
+        {
+            "wave_id": wave_id,
+            "wave_name": wave_id,
+            "tracked_packet": handoff.get("tracked_packet", ""),
+            "tracker_note_text": handoff.get("tracker_note_text", ""),
+        },
+        repo_root,
+        wave_id=wave_id,
+    )
+
+
 def _handoff_plan_path(handoff: dict[str, Any]) -> str | None:
     tracked_packet = handoff.get("tracked_packet")
     if isinstance(tracked_packet, str) and tracked_packet.strip():
@@ -6957,10 +6998,19 @@ def validate_handoff(
                 normalized_target_branch,
                 branch_prefix=str(branch_prefix or ""),
                 wave_id=str(wave_id or ""),
+            ) and not _is_authorized_control_surface_repair_target_branch(
+                handoff,
+                repo_root,
+                normalized_target_branch,
+                branch_prefix=str(branch_prefix or ""),
+                wave_id=str(wave_id or ""),
             ):
                 errors.append(
                     "target_branch must equal the canonical wave branch or a "
-                    f"restart branch derived from wave_id '{wave_id}': {normalized_target_branch}"
+                    "restart branch derived from wave_id, unless this is an "
+                    "authorized standalone control-surface L4_ENABLER repair "
+                    f"under the branch prefix for wave_id '{wave_id}': "
+                    f"{normalized_target_branch}"
                 )
 
     # Caller validation
