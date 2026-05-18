@@ -31,10 +31,10 @@ line:
   reduction.
 
 The exact wave id
-`n3-seed-image-authority-inventory-split-prereq-2026-05-15` is not yet present
-in `TASKS.md`; adding the same-wave tracker note remains a required Phase B
-work item before commit handoff. The wave-bound automation override for this
-control-surface L4 enabler is:
+`n3-seed-image-authority-inventory-split-prereq-2026-05-15` is now present in
+`TASKS.md:350`, with the same-wave tracker follow-up recorded at
+`TASKS.md:352`. The wave-bound automation override for this control-surface L4
+enabler is:
 
 `FOUNDER_OVERRIDE:n3-seed-image-authority-inventory-split-prereq-2026-05-15`
 
