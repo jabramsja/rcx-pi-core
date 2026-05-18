@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-projection-loader-js-binary-decoder-parity-2026-05-14",
+  "repeat_run_speedup_ratio": 1.067227,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.259076,
+  "repeat_run_raw_seconds": [
+    0.276493,
+    0.259076
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.276493
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.535569
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-18T08:07:41Z",
+  "collector_version": "2.2.0"
+}
