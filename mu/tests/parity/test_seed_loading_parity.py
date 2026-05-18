@@ -764,6 +764,18 @@ class TestProjectionLoaderBinaryDecoderParity:
         assert js_result["name"] == "MuBinaryDecodeError"
         assert "cannot be represented exactly" in str(js_result["error"])
 
+    def test_js_mu_binary_decoder_rejects_malformed_utf8_string_with_mu_taxonomy(
+        self,
+    ):
+        """Malformed binary string payloads must not leak host TypeError."""
+        malformed_string = bytes([0x05, 0x00, 0x00, 0x00, 0x01, 0xFF])
+
+        js_result = _js_decode_mu_binary_value_result(malformed_string)
+
+        assert js_result["ok"] is False
+        assert js_result["name"] == "MuBinaryDecodeError"
+        assert "Malformed UTF-8 string at offset 0" in str(js_result["error"])
+
     def test_js_seed_binary_projection_decoder_preserves_proto_string_keys(self):
         """Mu dict keys named __proto__ are data, not JavaScript prototype edits."""
         projections = [

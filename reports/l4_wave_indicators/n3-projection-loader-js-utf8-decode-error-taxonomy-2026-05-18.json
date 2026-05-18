@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-projection-loader-js-utf8-decode-error-taxonomy-2026-05-18",
+  "repeat_run_speedup_ratio": 1.041662,
+  "parity_diff_count": 6,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.266549,
+  "repeat_run_raw_seconds": [
+    0.277654,
+    0.266549
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.277654
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.544203
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-18T17:50:53Z",
+  "collector_version": "2.2.0"
+}
