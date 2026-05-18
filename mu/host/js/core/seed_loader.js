@@ -228,6 +228,248 @@ const SEED_IMAGE_VERIFICATION_VIEWS = Object.freeze({
   }),
 });
 
+const MU_BINARY_TAGS = Object.freeze({
+  NULL: 0x00,
+  TRUE: 0x01,
+  FALSE: 0x02,
+  INT64: 0x03,
+  FLOAT64: 0x04,
+  STRING: 0x05,
+  LIST: 0x06,
+  DICT: 0x07,
+});
+
+class MuBinaryDecodeError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'MuBinaryDecodeError';
+  }
+}
+
+const MU_BINARY_CODEC = Object.freeze({
+  toBuffer(binaryBytes) {
+    if (Buffer.isBuffer(binaryBytes)) {
+      return binaryBytes;
+    }
+    if (binaryBytes instanceof ArrayBuffer) {
+      return Buffer.from(binaryBytes);
+    }
+    if (ArrayBuffer.isView(binaryBytes)) {
+      return Buffer.from(
+        binaryBytes.buffer,
+        binaryBytes.byteOffset,
+        binaryBytes.byteLength
+      );
+    }
+    if (Array.isArray(binaryBytes)) {
+      for (let i = 0; i < binaryBytes.length; i++) {
+        const byte = binaryBytes[i];
+        if (!Number.isInteger(byte) || byte < 0 || byte > 255) {
+          throw new TypeError(
+            `MuBinary byte array entry at index ${i} must be an integer in 0..255`
+          );
+        }
+      }
+      return Buffer.from(binaryBytes);
+    }
+    throw new TypeError(
+      `MuBinary input must be bytes, got ${binaryBytes === null ? 'null' : typeof binaryBytes}`
+    );
+  },
+
+  requireAvailable(data, offset, length, label, tagOffset) {
+    if (offset + length <= data.length) {
+      return;
+    }
+    const have = Math.max(data.length - offset, 0);
+    throw new MuBinaryDecodeError(
+      `Truncated ${label} at offset ${tagOffset} (need ${length} bytes, have ${have})`
+    );
+  },
+
+  readUInt32(data, offset, label, tagOffset) {
+    this.requireAvailable(data, offset, 4, label, tagOffset);
+    return data.readUInt32BE(offset);
+  },
+
+  decodeAt(data, offset) {
+    if (offset >= data.length) {
+      throw new MuBinaryDecodeError(
+        `Unexpected end of data at offset ${offset} (data length ${data.length})`
+      );
+    }
+
+    const tagOffset = offset;
+    const tag = data[offset];
+    offset += 1;
+
+    if (tag === MU_BINARY_TAGS.NULL) {
+      return [null, offset, false];
+    }
+    if (tag === MU_BINARY_TAGS.TRUE) {
+      return [true, offset, false];
+    }
+    if (tag === MU_BINARY_TAGS.FALSE) {
+      return [false, offset, false];
+    }
+    if (tag === MU_BINARY_TAGS.INT64) {
+      this.requireAvailable(data, offset, 8, 'int64', tagOffset);
+      const value = data.readBigInt64BE(offset);
+      const numberValue = Number(value);
+      if (!Number.isFinite(numberValue) || BigInt(numberValue) !== value) {
+        throw new MuBinaryDecodeError(
+          `int64 at offset ${tagOffset} cannot be represented exactly as a JavaScript Number`
+        );
+      }
+      return [numberValue, offset + 8, false];
+    }
+    if (tag === MU_BINARY_TAGS.FLOAT64) {
+      this.requireAvailable(data, offset, 8, 'float64', tagOffset);
+      return [data.readDoubleBE(offset), offset + 8, true];
+    }
+    if (tag === MU_BINARY_TAGS.STRING) {
+      const length = this.readUInt32(data, offset, 'string length', tagOffset);
+      offset += 4;
+      this.requireAvailable(data, offset, length, 'string data', tagOffset);
+      const value = new TextDecoder('utf-8', { fatal: true }).decode(
+        data.subarray(offset, offset + length)
+      );
+      return [value, offset + length, false];
+    }
+    if (tag === MU_BINARY_TAGS.LIST) {
+      const count = this.readUInt32(data, offset, 'list count', tagOffset);
+      offset += 4;
+      const items = [];
+      let sawFloat64 = false;
+      for (let i = 0; i < count; i++) {
+        const decoded = this.decodeAt(data, offset);
+        items.push(decoded[0]);
+        offset = decoded[1];
+        sawFloat64 = sawFloat64 || decoded[2];
+      }
+      return [items, offset, sawFloat64];
+    }
+    if (tag === MU_BINARY_TAGS.DICT) {
+      const count = this.readUInt32(data, offset, 'dict count', tagOffset);
+      offset += 4;
+      const result = Object.create(null);
+      let sawFloat64 = false;
+      for (let i = 0; i < count; i++) {
+        const keyDecoded = this.decodeAt(data, offset);
+        const key = keyDecoded[0];
+        offset = keyDecoded[1];
+        if (typeof key !== 'string') {
+          throw new MuBinaryDecodeError(
+            `Dict key must decode to string, got ${typeof key} at offset ${offset}`
+          );
+        }
+        const valueDecoded = this.decodeAt(data, offset);
+        result[key] = valueDecoded[0];
+        offset = valueDecoded[1];
+        sawFloat64 = sawFloat64 || keyDecoded[2] || valueDecoded[2];
+      }
+      return [result, offset, sawFloat64];
+    }
+    throw new MuBinaryDecodeError(
+      `Unknown tag 0x${tag.toString(16).padStart(2, '0')} at offset ${tagOffset}`
+    );
+  },
+
+  decodeValue(binaryBytes) {
+    const data = this.toBuffer(binaryBytes);
+    const decoded = this.decodeAt(data, 0);
+    if (decoded[1] !== data.length) {
+      throw new MuBinaryDecodeError(
+        `Trailing data: decoded ${decoded[1]} bytes but data is ${data.length} bytes`
+      );
+    }
+    return decoded[0];
+  },
+
+  decodeValueWithMetadata(binaryBytes) {
+    const data = this.toBuffer(binaryBytes);
+    const decoded = this.decodeAt(data, 0);
+    if (decoded[1] !== data.length) {
+      throw new MuBinaryDecodeError(
+        `Trailing data: decoded ${decoded[1]} bytes but data is ${data.length} bytes`
+      );
+    }
+    return {
+      value: decoded[0],
+      sawFloat64: decoded[2],
+    };
+  },
+
+  rejectNonIntegerSeedNumerics(value, pathLabel) {
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) {
+        throw new MuBinaryDecodeError(
+          `Seed binary projection contains non-finite numeric value at ${pathLabel}`
+        );
+      }
+      if (!Number.isInteger(value)) {
+        throw new MuBinaryDecodeError(
+          `Seed binary projection contains non-integer numeric value ${value} at ${pathLabel}`
+        );
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) {
+        this.rejectNonIntegerSeedNumerics(value[i], `${pathLabel}[${i}]`);
+      }
+      return;
+    }
+    if (value !== null && typeof value === 'object') {
+      for (const [key, nested] of Object.entries(value)) {
+        this.rejectNonIntegerSeedNumerics(nested, `${pathLabel}.${key}`);
+      }
+    }
+  },
+
+  decodeSeedProjections(binaryBytes) {
+    const decoded = this.decodeValueWithMetadata(binaryBytes);
+    const projections = decoded.value;
+    if (!Array.isArray(projections)) {
+      throw new MuBinaryDecodeError(
+        `Seed binary image must decode to projections array, got ${
+          projections === null ? 'null' : typeof projections
+        }`
+      );
+    }
+    if (decoded.sawFloat64) {
+      throw new MuBinaryDecodeError(
+        'Seed binary projection contains FLOAT64 numeric data; current seed images are integer-only'
+      );
+    }
+    for (let i = 0; i < projections.length; i++) {
+      const proj = projections[i];
+      if (proj === null || typeof proj !== 'object' || Array.isArray(proj)) {
+        throw new MuBinaryDecodeError(
+          `Seed binary projection[${i}] must be a plain object, ` +
+          `got ${proj === null ? 'null' : Array.isArray(proj) ? 'array' : typeof proj}`
+        );
+      }
+      for (const key of ['id', 'pattern', 'body']) {
+        if (!(key in proj)) {
+          throw new MuBinaryDecodeError(`Seed binary projection ${i} missing key '${key}'`);
+        }
+      }
+      if (typeof proj.id !== 'string') {
+        throw new MuBinaryDecodeError(
+          `Seed binary projection ${i} id must be a string, got ${typeof proj.id}`
+        );
+      }
+      this.rejectNonIntegerSeedNumerics(proj.pattern, `projection[${i}].pattern`);
+      this.rejectNonIntegerSeedNumerics(proj.body, `projection[${i}].body`);
+    }
+    return muCopy(projections, true, 'Decoded binary seed projections');
+  },
+});
+
+const decodeMuBinaryValue = MU_BINARY_CODEC.decodeValue.bind(MU_BINARY_CODEC);
+const decodeSeedBinaryProjections = MU_BINARY_CODEC.decodeSeedProjections.bind(MU_BINARY_CODEC);
+
 /**
  * Verify, parse, and validate a seed JSON image without performing file I/O.
  * @param {string} seedName - Seed filename (e.g., 'terminal_classify.v1.json')
@@ -435,6 +677,9 @@ module.exports = {
   isFullyLockedSeed,
   getSeedChecksum,
   validateSeedDependencies,
+  decodeMuBinaryValue,
+  decodeSeedBinaryProjections,
+  MuBinaryDecodeError,
   SEED_IMAGE_VERIFICATION_MODES,
   SEED_REGISTRY_MANIFEST,
   SEED_CHECKSUMS,

@@ -1025,10 +1025,55 @@ class TestJsSeedLoaderMalformedProjection:
             "seed_loader.js projection type guard must run before projection id access"
         )
 
+# ===========================================================================
+# Test 3c: JS binary decoder sidecar lock
+# ===========================================================================
+
+
+class TestJsSeedLoaderBinaryDecoderSidecarLock:
+    """Binary decoder sidecar must not become the production seed loading path."""
+
+    def test_binary_decoder_sidecar_not_production_loader(self):
+        """Binary decoder parity must not become the production seed loading path."""
+        source = (
+            REPO_ROOT / "mu" / "host" / "js" / "core" / "seed_loader.js"
+        ).read_text()
+
+        assert "decodeMuBinaryValue" in source, (
+            "seed_loader.js must export the mechanical MuBinary decoder sidecar"
+        )
+        assert "decodeSeedBinaryProjections" in source, (
+            "seed_loader.js must export the seed-projection binary decoder sidecar"
+        )
+
+        json_boundary = source[
+            source.index("function loadVerifiedSeedImage"):
+            source.index("/**\n * Load and verify a seed file.")
+        ]
+        path_wrapper = source[
+            source.index("function loadVerifiedSeed(seedName, subdir)"):
+            source.index("function getSeedChecksum")
+        ]
+
+        assert "decodeSeedBinaryProjections(" not in json_boundary, (
+            "JSON seed image boundary must remain the production parse/verify path"
+        )
+        assert "decodeMuBinaryValue(" not in json_boundary, (
+            "JSON seed image boundary must not dispatch to the binary sidecar"
+        )
+        assert "decodeSeedBinaryProjections(" not in path_wrapper, (
+            "path loader must not flip from JSON seed images to binary projections"
+        )
+        assert "loadVerifiedSeedImage(" in path_wrapper, (
+            "path loader must continue delegating to the JSON seed image boundary"
+        )
+        assert "SEED_IMAGE_VERIFICATION_MODES.CORE" in path_wrapper, (
+            "core path loader must continue using manifest-derived CORE authority"
+        )
 
 
 # ===========================================================================
-# Test 3c: F2 production-binding lock (anti-theater)
+# Test 3d: F2 production-binding lock (anti-theater)
 # ===========================================================================
 
 

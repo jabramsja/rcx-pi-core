@@ -39,6 +39,10 @@ from rcx_pi.selfhost.seed_integrity import (
     load_verified_seed,
     load_verified_seed_image,
 )
+from mu.tests.research.test_d010_h5_projection_loader_binary import (
+    mu_decode_value,
+    mu_encode,
+)
 
 # ── Locate JS source ────────────────────────────────────────────────────
 
@@ -298,6 +302,76 @@ def _js_load_registered_seed_image_bytes_result(
         timeout=10,
     )
     assert proc.returncode == 0, f"JS registered seed image probe failed: {proc.stderr}"
+    return json.loads(proc.stdout)
+
+
+def _js_decode_mu_binary_value_result(binary_bytes: bytes) -> dict[str, object]:
+    js_script = """
+    const fs = require('fs');
+    const { decodeMuBinaryValue } = require('./mu/host/js/core/seed_loader');
+    const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+    const raw = Buffer.from(input.binaryBytesBase64, 'base64');
+    try {
+      console.log(JSON.stringify({
+        ok: true,
+        value: decodeMuBinaryValue(raw),
+      }));
+    } catch (e) {
+      console.log(JSON.stringify({
+        ok: false,
+        error: e.message,
+        name: e.name,
+      }));
+    }
+    """
+    payload = {
+        "binaryBytesBase64": base64.b64encode(binary_bytes).decode("ascii"),
+    }
+    proc = subprocess.run(
+        ["node", "-e", js_script],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO),
+        timeout=10,
+    )
+    assert proc.returncode == 0, f"JS MuBinary decoder probe failed: {proc.stderr}"
+    return json.loads(proc.stdout)
+
+
+def _js_decode_seed_binary_projections_result(binary_bytes: bytes) -> dict[str, object]:
+    js_script = """
+    const fs = require('fs');
+    const {
+      decodeSeedBinaryProjections,
+    } = require('./mu/host/js/core/seed_loader');
+    const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+    const raw = Buffer.from(input.binaryBytesBase64, 'base64');
+    try {
+      console.log(JSON.stringify({
+        ok: true,
+        projections: decodeSeedBinaryProjections(raw),
+      }));
+    } catch (e) {
+      console.log(JSON.stringify({
+        ok: false,
+        error: e.message,
+        name: e.name,
+      }));
+    }
+    """
+    payload = {
+        "binaryBytesBase64": base64.b64encode(binary_bytes).decode("ascii"),
+    }
+    proc = subprocess.run(
+        ["node", "-e", js_script],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO),
+        timeout=10,
+    )
+    assert proc.returncode == 0, f"JS seed binary decoder probe failed: {proc.stderr}"
     return json.loads(proc.stdout)
 
 
@@ -583,6 +657,175 @@ class TestSeedDependencyParity:
 
     def test_seed_dependency_maps_match_exactly(self):
         assert_seed_dependency_maps_match_exactly()
+
+
+class TestProjectionLoaderBinaryDecoderParity:
+    """JS sidecar TLV decoder must mechanically match the D010 research codec."""
+
+    def test_js_binary_decoder_exports_sidecar_without_production_default_flip(self):
+        """Binary decoding remains a sidecar and the JSON production paths stay default."""
+        source = (_REPO / "mu" / "host" / "js" / "core" / "seed_loader.js").read_text()
+
+        assert "decodeMuBinaryValue" in source
+        assert "decodeSeedBinaryProjections" in source
+        assert "function loadVerifiedSeedImage(seedName, seedBytes, verificationMode)" in source
+
+        json_boundary = source[
+            source.index("function loadVerifiedSeedImage"):
+            source.index("/**\n * Load and verify a seed file.")
+        ]
+        path_wrapper = source[
+            source.index("function loadVerifiedSeed(seedName, subdir)"):
+            source.index("function getSeedChecksum")
+        ]
+
+        assert "decodeSeedBinaryProjections(" not in json_boundary
+        assert "decodeMuBinaryValue(" not in json_boundary
+        assert "decodeSeedBinaryProjections(" not in path_wrapper
+        assert "loadVerifiedSeedImage(" in path_wrapper
+        assert "SEED_IMAGE_VERIFICATION_MODES.CORE" in path_wrapper
+
+    @pytest.mark.parametrize(
+        ("binary_bytes", "expected"),
+        [
+            (bytes([0x00]), None),
+            (bytes([0x01]), True),
+            (bytes([0x02]), False),
+            (bytes([0x03]) + (42).to_bytes(8, "big", signed=True), 42),
+            (bytes([0x03]) + (-1).to_bytes(8, "big", signed=True), -1),
+            (bytes([0x03]) + (2**53).to_bytes(8, "big", signed=True), 2**53),
+            (bytes([0x03]) + (-(2**53)).to_bytes(8, "big", signed=True), -(2**53)),
+            (bytes([0x05, 0x00, 0x00, 0x00, 0x05]) + b"hello", "hello"),
+            (bytes([0x06, 0x00, 0x00, 0x00, 0x00]), []),
+            (bytes([0x07, 0x00, 0x00, 0x00, 0x00]), {}),
+        ],
+    )
+    def test_js_mu_binary_golden_values_match_python_research_decoder(
+        self,
+        binary_bytes,
+        expected,
+    ):
+        """Hand-built TLV values decode identically in Python research and JS."""
+        assert mu_decode_value(binary_bytes) == expected
+
+        js_result = _js_decode_mu_binary_value_result(binary_bytes)
+
+        assert js_result == {"ok": True, "value": expected}
+
+    def test_js_seed_binary_projection_decoder_matches_python_research_codec(self):
+        """A D010-style projection image decodes to the current JSON projection data."""
+        seed_name = "rcx_engine.v1.json"
+        seed = load_verified_seed_image(
+            seed_name,
+            get_seed_path(seed_name).read_bytes(),
+            verify=True,
+        )
+        minimal_projections = [
+            {
+                "id": projection["id"],
+                "pattern": projection["pattern"],
+                "body": projection["body"],
+            }
+            for projection in seed["projections"]
+        ]
+        binary_image = mu_encode(minimal_projections)
+
+        assert mu_decode_value(binary_image) == minimal_projections
+        js_result = _js_decode_seed_binary_projections_result(binary_image)
+
+        assert js_result == {"ok": True, "projections": minimal_projections}
+
+    def test_js_seed_binary_projection_decoder_accepts_d010_large_int_fixture(self):
+        """The JS sidecar accepts D010's exact ±2**53 INT64 research fixture."""
+        large_int = 2**53
+        projections = [
+            {
+                "id": "large.int.control",
+                "pattern": {"n": large_int},
+                "body": {"neg": -large_int},
+            },
+        ]
+        binary_image = mu_encode(projections)
+
+        assert mu_decode_value(binary_image) == projections
+        js_result = _js_decode_seed_binary_projections_result(binary_image)
+
+        assert js_result == {"ok": True, "projections": projections}
+
+    def test_js_mu_binary_decoder_rejects_int64_values_that_would_round_in_js(self):
+        """Non-exact INT64 materialization remains outside this sidecar proof."""
+        non_exact = 2**53 + 1
+        binary_value = bytes([0x03]) + non_exact.to_bytes(8, "big", signed=True)
+
+        assert mu_decode_value(binary_value) == non_exact
+        js_result = _js_decode_mu_binary_value_result(binary_value)
+
+        assert js_result["ok"] is False
+        assert js_result["name"] == "MuBinaryDecodeError"
+        assert "cannot be represented exactly" in str(js_result["error"])
+
+    def test_js_seed_binary_projection_decoder_preserves_proto_string_keys(self):
+        """Mu dict keys named __proto__ are data, not JavaScript prototype edits."""
+        projections = [
+            {
+                "id": "proto.null.control",
+                "pattern": {"__proto__": None, "safe": 1},
+                "body": {},
+            },
+        ]
+        binary_image = mu_encode(projections)
+
+        assert mu_decode_value(binary_image) == projections
+        js_result = _js_decode_seed_binary_projections_result(binary_image)
+
+        assert js_result == {"ok": True, "projections": projections}
+
+    def test_js_seed_binary_projection_decoder_rejects_non_projection_image(self):
+        """Binary seed projection sidecar must fail closed on wrong top-level shape."""
+        js_result = _js_decode_seed_binary_projections_result(bytes([0x00]))
+
+        assert js_result["ok"] is False
+        assert js_result["name"] == "MuBinaryDecodeError"
+        assert "projections array" in str(js_result["error"])
+
+    @pytest.mark.parametrize("float_value", [2.5, 2.0])
+    def test_js_seed_binary_projection_decoder_rejects_float64_seed_numerics(
+        self,
+        float_value,
+    ):
+        """The sidecar rejects FLOAT64 seed numerics even when JS sees an integer."""
+        binary_image = mu_encode(
+            [
+                {
+                    "id": "float.policy.control",
+                    "pattern": {"n": float_value},
+                    "body": {"ok": True},
+                },
+            ]
+        )
+
+        assert mu_decode_value(binary_image)[0]["pattern"] == {"n": float_value}
+        js_result = _js_decode_seed_binary_projections_result(binary_image)
+
+        assert js_result["ok"] is False
+        assert js_result["name"] == "MuBinaryDecodeError"
+        assert "FLOAT64 numeric data" in str(js_result["error"])
+
+    def test_js_mu_binary_decoder_rejects_trailing_data_and_non_string_dict_key(self):
+        """Negative controls lock parser failure modes without exercising Mu semantics."""
+        trailing = _js_decode_mu_binary_value_result(bytes([0x00, 0x00]))
+        non_string_key = _js_decode_mu_binary_value_result(
+            bytes([0x07, 0x00, 0x00, 0x00, 0x01])
+            + bytes([0x03]) + (42).to_bytes(8, "big", signed=True)
+            + bytes([0x05, 0x00, 0x00, 0x00, 0x03]) + b"val"
+        )
+
+        assert trailing["ok"] is False
+        assert trailing["name"] == "MuBinaryDecodeError"
+        assert "Trailing data" in str(trailing["error"])
+        assert non_string_key["ok"] is False
+        assert non_string_key["name"] == "MuBinaryDecodeError"
+        assert "Dict key must decode to string" in str(non_string_key["error"])
 
 
 # ── Seed location coverage ──────────────────────────────────────────────
