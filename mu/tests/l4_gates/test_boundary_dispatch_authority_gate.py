@@ -1071,6 +1071,25 @@ class TestJsSeedLoaderBinaryDecoderSidecarLock:
             "core path loader must continue using manifest-derived CORE authority"
         )
 
+        js_code = """
+        const { decodeMuBinaryValue } = require('./mu/host/js/core/seed_loader');
+        try {
+            decodeMuBinaryValue(Buffer.from([0x05, 0x00, 0x00, 0x00, 0x01, 0xff]));
+            console.log(JSON.stringify({ok: true}));
+        } catch(e) {
+            console.log(JSON.stringify({ok: false, name: e.name, error: e.message}));
+        }
+        """
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True, cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, f"JS failed: {result.stderr}"
+        malformed_utf8 = json.loads(result.stdout)
+        assert malformed_utf8["ok"] is False
+        assert malformed_utf8["name"] == "MuBinaryDecodeError"
+        assert "Malformed UTF-8 string at offset 0" in malformed_utf8["error"]
+
 
 # ===========================================================================
 # Test 3d: F2 production-binding lock (anti-theater)

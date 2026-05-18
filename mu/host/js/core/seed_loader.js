@@ -331,9 +331,16 @@ const MU_BINARY_CODEC = Object.freeze({
       const length = this.readUInt32(data, offset, 'string length', tagOffset);
       offset += 4;
       this.requireAvailable(data, offset, length, 'string data', tagOffset);
-      const value = new TextDecoder('utf-8', { fatal: true }).decode(
-        data.subarray(offset, offset + length)
-      );
+      let value;
+      try {
+        value = new TextDecoder('utf-8', { fatal: true }).decode(
+          data.subarray(offset, offset + length)
+        );
+      } catch (error) {
+        throw new MuBinaryDecodeError(
+          `Malformed UTF-8 string at offset ${tagOffset}: ${error.message}`
+        );
+      }
       return [value, offset + length, false];
     }
     if (tag === MU_BINARY_TAGS.LIST) {
