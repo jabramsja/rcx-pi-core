@@ -311,6 +311,14 @@ class CheckResult:
         return self.status == "FAIL"
 
 
+def _excerpt(text: object, limit: int = 500) -> str:
+    raw = "" if text is None else str(text)
+    compact = " ".join(raw.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: max(0, limit - 3)].rstrip() + "..."
+
+
 def _repo_root() -> Path:
     try:
         root = subprocess.check_output(
