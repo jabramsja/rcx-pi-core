@@ -26,18 +26,30 @@ import functools
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from rcx_pi.selfhost.seed_integrity import (
     SEED_CHECKSUMS,
     SEED_DEPENDENCIES,
+    SEED_REGISTRY_MANIFEST,
+    SEED_BINARY_CHECKSUM_POLICY_ID,
+    SEED_BINARY_MIGRATION_POLICY_ID,
     EXPECTED_PROJECTION_IDS,
     MU_SEED_LOCATIONS,
     compute_checksum,
     get_seed_path,
     load_verified_seed,
     load_verified_seed_image,
+)
+import mu.tools.seed_binary_migration as seed_binary_migration_tool
+from mu.tools.seed_binary_migration import (
+    SeedBinaryMigrationError,
+    decode_seed_binary_projections,
+    encode_seed_binary_projections,
+    generate_seed_binary_migration_artifact,
+    verify_seed_binary_migration_artifact,
 )
 from mu.tests.research.test_d010_h5_projection_loader_binary import (
     mu_decode_value,
@@ -372,6 +384,64 @@ def _js_decode_seed_binary_projections_result(binary_bytes: bytes) -> dict[str, 
         timeout=10,
     )
     assert proc.returncode == 0, f"JS seed binary decoder probe failed: {proc.stderr}"
+    return json.loads(proc.stdout)
+
+
+def _js_seed_binary_migration_proof_result(
+    seed_name: str,
+    seed_bytes: bytes,
+    binary_bytes: bytes,
+    expected_proof: dict[str, object] | None = None,
+) -> dict[str, object]:
+    js_script = """
+    const fs = require('fs');
+    const {
+      buildSeedBinaryMigrationProof,
+      verifySeedBinaryMigrationArtifact,
+      SEED_IMAGE_VERIFICATION_MODES,
+    } = require('./mu/host/js/core/seed_loader');
+    const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+    const seedBytes = Buffer.from(input.seedBytesBase64, 'base64');
+    const binaryBytes = Buffer.from(input.binaryBytesBase64, 'base64');
+    try {
+      const proof = input.expectedProof === null
+        ? buildSeedBinaryMigrationProof(
+            input.seedName,
+            seedBytes,
+            binaryBytes,
+            SEED_IMAGE_VERIFICATION_MODES.CLI
+          )
+        : verifySeedBinaryMigrationArtifact(
+            input.seedName,
+            seedBytes,
+            binaryBytes,
+            input.expectedProof,
+            SEED_IMAGE_VERIFICATION_MODES.CLI
+          );
+      console.log(JSON.stringify({ok: true, proof}));
+    } catch (e) {
+      console.log(JSON.stringify({
+        ok: false,
+        error: e.message,
+        name: e.name,
+      }));
+    }
+    """
+    payload = {
+        "seedName": seed_name,
+        "seedBytesBase64": base64.b64encode(seed_bytes).decode("ascii"),
+        "binaryBytesBase64": base64.b64encode(binary_bytes).decode("ascii"),
+        "expectedProof": expected_proof,
+    }
+    proc = subprocess.run(
+        ["node", "-e", js_script],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO),
+        timeout=10,
+    )
+    assert proc.returncode == 0, f"JS seed binary proof probe failed: {proc.stderr}"
     return json.loads(proc.stdout)
 
 
@@ -838,6 +908,635 @@ class TestProjectionLoaderBinaryDecoderParity:
         assert non_string_key["ok"] is False
         assert non_string_key["name"] == "MuBinaryDecodeError"
         assert "Dict key must decode to string" in str(non_string_key["error"])
+
+
+class TestProjectionLoaderSeedMigrationIntegrityChain:
+    """Generated seed binary artifacts must bind back to JSON source truth."""
+
+    @staticmethod
+    def _minimal_projections(seed: dict[str, object]) -> list[dict[str, object]]:
+        return [
+            {
+                "id": projection["id"],
+                "pattern": projection["pattern"],
+                "body": projection["body"],
+            }
+            for projection in seed["projections"]
+        ]
+
+    @staticmethod
+    def encode_projection_with_duplicate_body(
+        projection: dict[str, object],
+        duplicate_count: int,
+    ) -> bytes:
+        pairs = [
+            ("id", projection["id"]),
+            ("pattern", projection["pattern"]),
+            ("body", projection["body"]),
+        ]
+        pairs.extend(("body", projection["body"]) for _ in range(duplicate_count))
+        parts = [bytes([0x07]) + len(pairs).to_bytes(4, "big")]
+        for key, value in pairs:
+            parts.append(mu_encode(key))
+            parts.append(mu_encode(value))
+        return b"".join(parts)
+
+    @classmethod
+    def _duplicate_key_sidecar(
+        cls,
+        projections: list[dict[str, object]],
+    ) -> bytes:
+        parts = [bytes([0x06]) + len(projections).to_bytes(4, "big")]
+        for index, projection in enumerate(projections):
+            if index == 0:
+                parts.append(
+                    cls.encode_projection_with_duplicate_body(
+                        projection,
+                        1,
+                    )
+                )
+            else:
+                parts.append(mu_encode(projection))
+        return b"".join(parts)
+
+    @staticmethod
+    def _reordered_projection_key_sidecar(
+        projections: list[dict[str, object]],
+    ) -> bytes:
+        return encode_seed_binary_projections(
+            [
+                {
+                    "body": projection["body"],
+                    "pattern": projection["pattern"],
+                    "id": projection["id"],
+                }
+                for projection in projections
+            ]
+        )
+
+    def test_generated_artifact_is_smaller_stable_and_cross_substrate_verified(self):
+        """Python generation and JS sidecar verification produce the same proof chain."""
+        seed_name = "rcx_engine.v1.json"
+        seed_bytes = get_seed_path(seed_name).read_bytes()
+        seed = load_verified_seed_image(seed_name, seed_bytes, verify=True)
+        minimal_projections = self._minimal_projections(seed)
+
+        binary_one, proof_one = generate_seed_binary_migration_artifact(
+            seed_name,
+            seed_bytes,
+        )
+        binary_two, proof_two = generate_seed_binary_migration_artifact(
+            seed_name,
+            seed_bytes,
+        )
+
+        assert binary_one == binary_two
+        assert proof_one == proof_two
+        assert len(binary_one) < len(seed_bytes)
+        assert proof_one["binary_is_smaller"] is True
+        assert proof_one["migration_policy_id"] == SEED_BINARY_MIGRATION_POLICY_ID
+        assert proof_one["checksum_policy_id"] == SEED_BINARY_CHECKSUM_POLICY_ID
+        assert proof_one["json_sha256"] == compute_checksum(seed_bytes)
+        assert proof_one["binary_sha256"] == compute_checksum(binary_one)
+        assert proof_one["projection_ids"] == EXPECTED_PROJECTION_IDS[seed_name]
+        assert proof_one["projection_count"] == len(minimal_projections)
+        assert len(proof_one["proof_chain_sha256"]) == 64
+
+        assert decode_seed_binary_projections(binary_one) == minimal_projections
+        js_decode = _js_decode_seed_binary_projections_result(binary_one)
+        assert js_decode == {"ok": True, "projections": minimal_projections}
+
+        js_build = _js_seed_binary_migration_proof_result(
+            seed_name,
+            seed_bytes,
+            binary_one,
+        )
+        js_verify = _js_seed_binary_migration_proof_result(
+            seed_name,
+            seed_bytes,
+            binary_one,
+            proof_one,
+        )
+        assert js_build == {"ok": True, "proof": proof_one}
+        assert js_verify == {"ok": True, "proof": proof_one}
+
+    def test_integrity_chain_rejects_duplicate_key_sidecar(self, tmp_path):
+        """Validation must reject non-generated duplicate-key sidecars."""
+        seed_name = "rcx_engine.v1.json"
+        seed_path = get_seed_path(seed_name)
+        seed_bytes = seed_path.read_bytes()
+        seed = load_verified_seed_image(seed_name, seed_bytes, verify=True)
+        minimal_projections = self._minimal_projections(seed)
+        generated_binary, proof = generate_seed_binary_migration_artifact(
+            seed_name,
+            seed_bytes,
+        )
+        duplicate_binary = self._duplicate_key_sidecar(minimal_projections)
+
+        assert generated_binary != duplicate_binary
+        assert len(duplicate_binary) < len(seed_bytes)
+        with pytest.raises(SeedBinaryMigrationError, match="Duplicate dict key"):
+            decode_seed_binary_projections(duplicate_binary)
+
+        with pytest.raises(SeedBinaryMigrationError, match="Duplicate dict key"):
+            verify_seed_binary_migration_artifact(
+                seed_name,
+                seed_bytes,
+                duplicate_binary,
+                proof,
+            )
+
+        js_build = _js_seed_binary_migration_proof_result(
+            seed_name,
+            seed_bytes,
+            duplicate_binary,
+        )
+        assert js_build["ok"] is False
+        assert js_build["name"] == "MuBinaryDecodeError"
+        assert "Duplicate dict key" in str(js_build["error"])
+
+        binary_path = tmp_path / "duplicate-key.mub"
+        proof_path = tmp_path / "proof.json"
+        binary_path.write_bytes(duplicate_binary)
+        proof_path.write_text(json.dumps(proof), encoding="utf-8")
+        validate = subprocess.run(
+            [
+                sys.executable,
+                str(_REPO / "mu" / "tools" / "seed_binary_migration.py"),
+                "validate",
+                "--seed-name",
+                seed_name,
+                "--json-seed",
+                str(seed_path),
+                "--binary",
+                str(binary_path),
+                "--proof",
+                str(proof_path),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert validate.returncode == 1
+        assert "Duplicate dict key" in validate.stderr
+
+    def test_integrity_chain_rejects_noncanonical_projection_key_order(self):
+        """Python and JS proof paths must reject non-generated projection ordering."""
+        seed_name = "rcx_engine.v1.json"
+        seed_bytes = get_seed_path(seed_name).read_bytes()
+        seed = load_verified_seed_image(seed_name, seed_bytes, verify=True)
+        minimal_projections = self._minimal_projections(seed)
+        _, proof = generate_seed_binary_migration_artifact(
+            seed_name,
+            seed_bytes,
+        )
+        reordered_binary = self._reordered_projection_key_sidecar(minimal_projections)
+
+        assert reordered_binary != encode_seed_binary_projections(minimal_projections)
+        with pytest.raises(SeedBinaryMigrationError, match="non-canonical key order"):
+            verify_seed_binary_migration_artifact(
+                seed_name,
+                seed_bytes,
+                reordered_binary,
+                proof,
+            )
+
+        js_build = _js_seed_binary_migration_proof_result(
+            seed_name,
+            seed_bytes,
+            reordered_binary,
+        )
+        assert js_build["ok"] is False
+        assert js_build["name"] == "MuBinaryDecodeError"
+        assert "non-canonical key order" in str(js_build["error"])
+
+    def test_integrity_chain_rejects_checksum_trailing_id_and_source_mismatch(self):
+        """Stored proof validation fails closed for each migration identity break."""
+        seed_name = "rcx_engine.v1.json"
+        seed_bytes = get_seed_path(seed_name).read_bytes()
+        seed = load_verified_seed_image(seed_name, seed_bytes, verify=True)
+        minimal_projections = self._minimal_projections(seed)
+        binary_image, proof = generate_seed_binary_migration_artifact(
+            seed_name,
+            seed_bytes,
+        )
+
+        with pytest.raises(ValueError, match="integrity check failed"):
+            verify_seed_binary_migration_artifact(
+                seed_name,
+                seed_bytes + b" ",
+                binary_image,
+                proof,
+            )
+
+        with pytest.raises(SeedBinaryMigrationError, match="Trailing data"):
+            verify_seed_binary_migration_artifact(
+                seed_name,
+                seed_bytes,
+                binary_image + b"\x00",
+                proof,
+            )
+
+        with pytest.raises(SeedBinaryMigrationError, match="Unknown tag"):
+            verify_seed_binary_migration_artifact(
+                seed_name,
+                seed_bytes,
+                b"\xff",
+                proof,
+            )
+
+        id_mismatch = json.loads(json.dumps(minimal_projections))
+        id_mismatch[0]["id"] = "migration.id.mismatch"
+        with pytest.raises(SeedBinaryMigrationError, match="projection ID mismatch"):
+            verify_seed_binary_migration_artifact(
+                seed_name,
+                seed_bytes,
+                mu_encode(id_mismatch),
+                proof,
+            )
+
+        source_mismatch = json.loads(json.dumps(minimal_projections))
+        source_mismatch[0]["body"] = {"migration": "mismatch"}
+        with pytest.raises(SeedBinaryMigrationError, match="source/binary mismatch"):
+            verify_seed_binary_migration_artifact(
+                seed_name,
+                seed_bytes,
+                mu_encode(source_mismatch),
+                proof,
+            )
+
+        wrong_proof = dict(proof)
+        wrong_proof["binary_sha256"] = "0" * 64
+        with pytest.raises(SeedBinaryMigrationError, match="binary_sha256"):
+            verify_seed_binary_migration_artifact(
+                seed_name,
+                seed_bytes,
+                binary_image,
+                wrong_proof,
+            )
+
+        for key, bad_value in {
+            "binary_is_smaller": False,
+            "binary_size": 999999,
+            "json_size": 1,
+            "projection_count": 999,
+        }.items():
+            tampered_proof = dict(proof)
+            tampered_proof[key] = bad_value
+            with pytest.raises(SeedBinaryMigrationError, match=key):
+                verify_seed_binary_migration_artifact(
+                    seed_name,
+                    seed_bytes,
+                    binary_image,
+                    tampered_proof,
+                )
+
+            js_verify = _js_seed_binary_migration_proof_result(
+                seed_name,
+                seed_bytes,
+                binary_image,
+                tampered_proof,
+            )
+            assert js_verify["ok"] is False
+            assert key in str(js_verify["error"])
+
+        bool_as_number_proof = dict(proof)
+        bool_as_number_proof["binary_is_smaller"] = 1
+        with pytest.raises(SeedBinaryMigrationError, match="binary_is_smaller"):
+            verify_seed_binary_migration_artifact(
+                seed_name,
+                seed_bytes,
+                binary_image,
+                bool_as_number_proof,
+            )
+        js_verify = _js_seed_binary_migration_proof_result(
+            seed_name,
+            seed_bytes,
+            binary_image,
+            bool_as_number_proof,
+        )
+        assert js_verify["ok"] is False
+        assert "binary_is_smaller" in str(js_verify["error"])
+
+    def test_non_exact_integer_policy_remains_fail_closed(self, monkeypatch):
+        """Migration does not expand the current exact-number seed policy."""
+        seed_name = "nonexact_int_control.v1.json"
+        seed_bytes = (
+            b'{"meta":{"version":"1.0","name":"NONEXACT","description":"x"},'
+            b'"projections":[{"id":"nonexact","pattern":{"n":9007199254740993},'
+            b'"body":{}}]}'
+        )
+        monkeypatch.setitem(SEED_CHECKSUMS, seed_name, compute_checksum(seed_bytes))
+        monkeypatch.setitem(EXPECTED_PROJECTION_IDS, seed_name, ["nonexact"])
+        monkeypatch.setitem(
+            SEED_REGISTRY_MANIFEST["seeds"],
+            seed_name,
+            {
+                "subdir": "utilities",
+                "sha256": compute_checksum(seed_bytes),
+                "projection_ids": ["nonexact"],
+                "status": "production",
+                "dependencies": [],
+                "js_cli_registered": True,
+                "js_core_locked": False,
+            },
+        )
+
+        with pytest.raises(SeedBinaryMigrationError, match="outside exact JS integer"):
+            generate_seed_binary_migration_artifact(seed_name, seed_bytes)
+
+    def test_seed_binary_migration_rejects_seed_outside_js_registry(self, tmp_path):
+        """The migration artifact boundary must be verifiable by the JS CLI view."""
+        seed_name = "classify.v1.json"
+        seed_path = get_seed_path(seed_name)
+        binary_path = tmp_path / "classify.v1.mub"
+        proof_path = tmp_path / "classify.v1.mub.proof.json"
+        tool = _REPO / "mu" / "tools" / "seed_binary_migration.py"
+
+        assert seed_name in SEED_CHECKSUMS
+        assert seed_name not in _js_seed_checksums()
+
+        with pytest.raises(SeedBinaryMigrationError, match="JS CLI verification registry"):
+            generate_seed_binary_migration_artifact(seed_name, seed_path.read_bytes())
+
+        generate = subprocess.run(
+            [
+                sys.executable,
+                str(tool),
+                "generate",
+                "--seed-name",
+                seed_name,
+                "--json-seed",
+                str(seed_path),
+                "--binary-out",
+                str(binary_path),
+                "--proof-out",
+                str(proof_path),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert generate.returncode == 1
+        assert "JS CLI verification registry" in generate.stderr
+        assert not binary_path.exists()
+        assert not proof_path.exists()
+
+        binary_path.write_bytes(b"\x00")
+        proof_path.write_text("{}", encoding="utf-8")
+        validate = subprocess.run(
+            [
+                sys.executable,
+                str(tool),
+                "validate",
+                "--seed-name",
+                seed_name,
+                "--json-seed",
+                str(seed_path),
+                "--binary",
+                str(binary_path),
+                "--proof",
+                str(proof_path),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert validate.returncode == 1
+        assert "JS CLI verification registry" in validate.stderr
+
+    def test_seed_binary_migration_tool_generate_validate_round_trip(self, tmp_path):
+        """The bounded mu/tools CLI delegates generation and validation to policy code."""
+        seed_name = "rcx_engine.v1.json"
+        seed_path = get_seed_path(seed_name)
+        binary_path = tmp_path / "rcx_engine.v1.mub"
+        proof_path = tmp_path / "rcx_engine.v1.mub.proof.json"
+        tool = _REPO / "mu" / "tools" / "seed_binary_migration.py"
+
+        generate = subprocess.run(
+            [
+                sys.executable,
+                str(tool),
+                "generate",
+                "--seed-name",
+                seed_name,
+                "--json-seed",
+                str(seed_path),
+                "--binary-out",
+                str(binary_path),
+                "--proof-out",
+                str(proof_path),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert generate.returncode == 0, generate.stderr
+        generated_proof = json.loads(generate.stdout)
+        assert binary_path.is_file()
+        assert proof_path.is_file()
+        assert json.loads(proof_path.read_text()) == generated_proof
+
+        validate = subprocess.run(
+            [
+                sys.executable,
+                str(tool),
+                "validate",
+                "--seed-name",
+                seed_name,
+                "--json-seed",
+                str(seed_path),
+                "--binary",
+                str(binary_path),
+                "--proof",
+                str(proof_path),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert validate.returncode == 0, validate.stderr
+        assert json.loads(validate.stdout) == generated_proof
+
+        tampered_proof = dict(generated_proof)
+        tampered_proof["binary_size"] = 999999
+        proof_path.write_text(json.dumps(tampered_proof), encoding="utf-8")
+        validate_tampered = subprocess.run(
+            [
+                sys.executable,
+                str(tool),
+                "validate",
+                "--seed-name",
+                seed_name,
+                "--json-seed",
+                str(seed_path),
+                "--binary",
+                str(binary_path),
+                "--proof",
+                str(proof_path),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert validate_tampered.returncode == 1
+        assert "binary_size" in validate_tampered.stderr
+
+        bool_as_number_proof = dict(generated_proof)
+        bool_as_number_proof["binary_is_smaller"] = 1
+        proof_path.write_text(json.dumps(bool_as_number_proof), encoding="utf-8")
+        validate_bool_as_number = subprocess.run(
+            [
+                sys.executable,
+                str(tool),
+                "validate",
+                "--seed-name",
+                seed_name,
+                "--json-seed",
+                str(seed_path),
+                "--binary",
+                str(binary_path),
+                "--proof",
+                str(proof_path),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert validate_bool_as_number.returncode == 1
+        assert "binary_is_smaller" in validate_bool_as_number.stderr
+
+    def test_seed_binary_migration_tool_generate_rejects_path_overlap_and_partial_outputs(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """Generate must not overwrite inputs or leave sidecar halves on output failure."""
+        seed_name = "rcx_engine.v1.json"
+        seed_source = get_seed_path(seed_name)
+        seed_copy = tmp_path / seed_name
+        seed_copy.write_bytes(seed_source.read_bytes())
+        seed_copy_sha = compute_checksum(seed_copy.read_bytes())
+        tool = _REPO / "mu" / "tools" / "seed_binary_migration.py"
+
+        input_overlap_proof = tmp_path / "input-overlap.proof.json"
+        input_overlap = subprocess.run(
+            [
+                sys.executable,
+                str(tool),
+                "generate",
+                "--seed-name",
+                seed_name,
+                "--json-seed",
+                str(seed_copy),
+                "--binary-out",
+                str(seed_copy),
+                "--proof-out",
+                str(input_overlap_proof),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert input_overlap.returncode == 1
+        assert "must be distinct" in input_overlap.stderr
+        assert compute_checksum(seed_copy.read_bytes()) == seed_copy_sha
+        assert not input_overlap_proof.exists()
+
+        same_output = tmp_path / "same-output"
+        output_overlap = subprocess.run(
+            [
+                sys.executable,
+                str(tool),
+                "generate",
+                "--seed-name",
+                seed_name,
+                "--json-seed",
+                str(seed_copy),
+                "--binary-out",
+                str(same_output),
+                "--proof-out",
+                str(same_output),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert output_overlap.returncode == 1
+        assert "must be distinct" in output_overlap.stderr
+        assert not same_output.exists()
+
+        binary_path = tmp_path / "partial.mub"
+        proof_dir = tmp_path / "proof-dir"
+        proof_dir.mkdir()
+        proof_write_failure = subprocess.run(
+            [
+                sys.executable,
+                str(tool),
+                "generate",
+                "--seed-name",
+                seed_name,
+                "--json-seed",
+                str(seed_copy),
+                "--binary-out",
+                str(binary_path),
+                "--proof-out",
+                str(proof_dir),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO),
+            timeout=10,
+        )
+        assert proof_write_failure.returncode == 1
+        assert "proof-out must be a file path" in proof_write_failure.stderr
+        assert not binary_path.exists()
+
+        rollback_binary = tmp_path / "rollback.mub"
+        rollback_proof = tmp_path / "rollback.proof.json"
+        old_binary = b"OLD_BINARY"
+        old_proof = '{"old": true}\n'
+        rollback_binary.write_bytes(old_binary)
+        rollback_proof.write_text(old_proof, encoding="utf-8")
+        replace_targets: list[Path] = []
+        original_replace = Path.replace
+
+        def fail_second_replace(self: Path, target: object) -> Path:
+            target_path = Path(target)
+            replace_targets.append(target_path)
+            if len(replace_targets) == 2:
+                raise RuntimeError("forced second replace failure")
+            return original_replace(self, target)
+
+        monkeypatch.setattr(Path, "replace", fail_second_replace)
+        late_publish_failure = seed_binary_migration_tool.main(
+            [
+                "generate",
+                "--seed-name",
+                seed_name,
+                "--json-seed",
+                str(seed_copy),
+                "--binary-out",
+                str(rollback_binary),
+                "--proof-out",
+                str(rollback_proof),
+            ]
+        )
+        assert late_publish_failure == 1
+        assert replace_targets[:2] == [rollback_binary, rollback_proof]
+        assert rollback_binary.read_bytes() == old_binary
+        assert rollback_proof.read_text(encoding="utf-8") == old_proof
+        assert not list(tmp_path.glob(".rollback.mub.*.tmp"))
+        assert not list(tmp_path.glob(".rollback.proof.json.*.tmp"))
 
 
 # ── Seed location coverage ──────────────────────────────────────────────

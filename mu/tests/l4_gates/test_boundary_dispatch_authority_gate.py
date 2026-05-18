@@ -41,6 +41,10 @@ from rcx_pi.selfhost.seed_integrity import (
     load_verified_seed,
     load_verified_seed_image,
 )
+from mu.tools.seed_binary_migration import (
+    decode_seed_binary_projections,
+    generate_seed_binary_migration_artifact,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1089,6 +1093,101 @@ class TestJsSeedLoaderBinaryDecoderSidecarLock:
         assert malformed_utf8["ok"] is False
         assert malformed_utf8["name"] == "MuBinaryDecodeError"
         assert "Malformed UTF-8 string at offset 0" in malformed_utf8["error"]
+
+
+class TestProjectionLoaderSeedMigrationIntegrityChainBoundary:
+    """Seed binary migration proof must remain sidecar-only."""
+
+    def test_binary_migration_integrity_chain_not_production_loader(self, monkeypatch):
+        """Production JSON loaders must not call binary migration or proof helpers."""
+        seed_name = "rcx_engine.v1.json"
+        seed_bytes = get_seed_path(seed_name).read_bytes()
+        binary_image, proof = generate_seed_binary_migration_artifact(
+            seed_name,
+            seed_bytes,
+        )
+        assert proof["binary_is_smaller"] is True
+        assert decode_seed_binary_projections(binary_image)
+
+        import mu.tools.seed_binary_migration as migration_tool_mod
+
+        def _sidecar_called(_binary_image):
+            raise AssertionError("binary sidecar called from JSON loader")
+
+        monkeypatch.setattr(
+            migration_tool_mod,
+            "decode_seed_binary_projections",
+            _sidecar_called,
+        )
+        seed = load_verified_seed_image(seed_name, seed_bytes, verify=True)
+        assert [proj["id"] for proj in seed["projections"]] == EXPECTED_PROJECTION_IDS[
+            seed_name
+        ]
+
+        py_source = (
+            REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "seed_integrity.py"
+        ).read_text()
+        py_json_boundary = py_source[
+            py_source.index("def load_verified_seed_image("):
+            py_source.index("# BOOTSTRAP_PRIMITIVE: projection_loader")
+        ]
+        py_path_wrapper = py_source[
+            py_source.index("def load_verified_seed(seed_path: Path"):
+            py_source.index("def get_mu_dir")
+        ]
+        for forbidden in (
+            "generate_seed_binary_migration_artifact",
+            "verify_seed_binary_migration_artifact",
+            "decode_seed_binary_projections",
+            "encode_seed_binary_projections",
+        ):
+            assert forbidden not in py_json_boundary
+            assert forbidden not in py_path_wrapper
+
+        js_source = (
+            REPO_ROOT / "mu" / "host" / "js" / "core" / "seed_loader.js"
+        ).read_text()
+        assert "buildSeedBinaryMigrationProof" in js_source
+        assert "verifySeedBinaryMigrationArtifact" in js_source
+        json_boundary = js_source[
+            js_source.index("function loadVerifiedSeedImage"):
+            js_source.index("/**\n * Load and verify a seed file.")
+        ]
+        path_wrapper = js_source[
+            js_source.index("function loadVerifiedSeed(seedName, subdir)"):
+            js_source.index("function getSeedChecksum")
+        ]
+        for forbidden in (
+            "buildSeedBinaryMigrationProof(",
+            "verifySeedBinaryMigrationArtifact(",
+            "decodeSeedBinaryProjections(",
+            "decodeMuBinaryValue(",
+        ):
+            assert forbidden not in json_boundary
+            assert forbidden not in path_wrapper
+
+        js_code = """
+        const sl = require('./mu/host/js/core/seed_loader');
+        sl.decodeSeedBinaryProjections = function() {
+          throw new Error('binary sidecar called from JSON loader');
+        };
+        const seed = sl.loadVerifiedSeed('rcx_engine.v1.json', 'programs');
+        console.log(JSON.stringify({
+          ok: true,
+          ids: seed.projections.map(p => p.id),
+        }));
+        """
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {
+            "ok": True,
+            "ids": EXPECTED_PROJECTION_IDS[seed_name],
+        }
 
 
 # ===========================================================================
