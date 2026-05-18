@@ -19,7 +19,7 @@ Archive rule:
 - if archive movement is outside the authorized wave scope, the retained active
   copy must be clearly marked historical or closed-parent advisory
 
-Current inventory refresh (2026-05-14 N3 source-lock DOC_ACCURACY closeout):
+Current inventory refresh (2026-05-18 N3 deferred bridge residue closeout):
 
 - Evidence command:
   `find reports/deferred/blocking reports/deferred/non_blocking -maxdepth 1 -type f -name '*.md' -print | sort`.
@@ -28,47 +28,31 @@ Current inventory refresh (2026-05-14 N3 source-lock DOC_ACCURACY closeout):
 ```text
 reports/deferred/blocking/README.md
 reports/deferred/non_blocking/README.md
+reports/deferred/non_blocking/n3-autonomous-host-debt-reduction-plan-2026-05-14_bridge_nonblockers.md
+reports/deferred/non_blocking/n3-deferred-bridge-residue-closeout-2026-05-18_bridge_nonblockers.md
+reports/deferred/non_blocking/n3-js-seed-image-boundary-manifest-authority-narrowing-2026-05-17_bridge_nonblockers.md
+reports/deferred/non_blocking/n3-js-seed-image-negative-control-production-surface-removal-2026-05-17_bridge_nonblockers.md
+reports/deferred/non_blocking/n3-seed-registry-manifest-reduction-2026-05-14_bridge_nonblockers.md
+reports/deferred/non_blocking/phase-b-no-go-package-classification-repair-2026-05-15_bridge_nonblockers.md
+reports/deferred/non_blocking/recovery-gate-anti-theater-ratchet-routing-root-fix-2026-05-15_bridge_nonblockers.md
 reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md
 ```
 
 - `reports/deferred/blocking/` currently contains `README.md` only; no active
   blocking deferred packets remain.
-- `reports/deferred/non_blocking/` currently contains `README.md` plus one
-  partially active retained `/mu` structural advisory packet.
-- The generated same-wave DOC_ACCURACY bridge residue for
-  `stage0-capture-provenance-deferred-cleanup-2026-05-12` is closed and archived
-  at
-  `reports/archive/deferred/stage0-capture-provenance-deferred-cleanup-2026-05-12_bridge_nonblockers_closed-by-stage0-cleanup-bridge-doc-accuracy-closeout-2026-05-12.md`.
-- Transparent JS Proxy provenance is closed by
-  `transparent-js-live-container-provenance-implementation-2026-05-13` and
-  archived at
-  `reports/archive/deferred/founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_bridge_nonblockers_closed-by-transparent-js-live-container-provenance-implementation-2026-05-13.md`.
-- The generated PR #945 bridge DOC_ACCURACY residue for
-  `broad-host-surface-next-boundary-slice-2026-05-13` is closed and archived at
-  `reports/archive/deferred/broad-host-surface-next-boundary-slice-2026-05-13_bridge_nonblockers_closed-by-broad-host-surface-next-bridge-doc-accuracy-closeout-2026-05-13.md`.
-- The same-wave generated indicator reproducibility and staged-file scope bridge
-  residue for
-  `broad-host-surface-next-bridge-doc-accuracy-closeout-2026-05-13` is resolved
-  as historical residue and archived at
-  `reports/archive/deferred/broad-host-surface-next-bridge-doc-accuracy-closeout-2026-05-13_bridge_nonblockers_closed-by-broad-host-surface-next-bridge-doc-accuracy-closeout-2026-05-13.md`.
-- The generated PR #949 bridge source-lock / DOC_ACCURACY residue for
-  `js-stage0-mucopy-lax-export-confinement-2026-05-14` is closed and archived at
-  `reports/archive/deferred/js-stage0-mucopy-lax-export-confinement-2026-05-14_bridge_nonblockers_closed-by-js-stage0-mucopy-bridge-nonblocker-closeout-2026-05-14.md`.
-- The generated PR #956 bridge DOC_ACCURACY residue for
-  `n3-rcx-load-projection-loader-image-boundary-source-lock-2026-05-14` is
-  closed and archived at
-  `reports/archive/deferred/n3-rcx-load-projection-loader-image-boundary-source-lock-2026-05-14_bridge_nonblockers_closed-by-n3-source-lock-doc-accuracy-closeout-2026-05-14.md`.
-- The retained `/mu` structural advisory still active in this lane is N3 broad
-  host-surface boundary in
+- `reports/deferred/non_blocking/` currently contains this README plus eight
+  active or partially active advisory/generated bridge packets.
+- The packet-named generated N3 bridge residue for
+  `n3-rcx-load-seed-image-boundary-adapter-lock-2026-05-14`,
+  `n3-seed-image-authority-inventory-split-prereq-2026-05-15`, and
+  `n3-stack-guard-depth-budget-production-lock-2026-05-14` is closed and archived
+  with same-wave provenance at:
+  - `reports/archive/deferred/n3-rcx-load-seed-image-boundary-adapter-lock-2026-05-14_bridge_nonblockers_closed-by-n3-deferred-bridge-residue-closeout-2026-05-18.md`
+  - `reports/archive/deferred/n3-seed-image-authority-inventory-split-prereq-2026-05-15_bridge_nonblockers_closed-by-n3-deferred-bridge-residue-closeout-2026-05-18.md`
+  - `reports/archive/deferred/n3-stack-guard-depth-budget-production-lock-2026-05-14_bridge_nonblockers_closed-by-n3-deferred-bridge-residue-closeout-2026-05-18.md`
+- The retained `/mu` structural advisory still active in this lane includes N3
+  broad host-surface boundary in
   `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`.
-- N1 VM coverage bookkeeping is closed by PR #940 /
-  `vm-cutover-coverage-trace-implementation-2026-05-12` and is no longer active
-  deferred work. Its historical repo-truth text is archived at
-  `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N1_vm_coverage_bookkeeping_closed-by-vm-cutover-coverage-trace-implementation-2026-05-12.md`.
-- Closed N5 JS pipeline governance residue is preserved as historical evidence
-  at
-  `reports/archive/deferred/repo_truth_non_blockers_2026-03-14_N5_js_pipeline_governance_closed-by-post-js-pipeline-governance-deferred-cleanup-2026-05-12.md`
-  after PR #937 and the tracked structural guard landed.
 
 Closed-parent exclusions for this index:
 

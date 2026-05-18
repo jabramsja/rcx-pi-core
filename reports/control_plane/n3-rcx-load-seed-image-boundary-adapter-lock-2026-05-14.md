@@ -35,7 +35,7 @@ This lock package may stage exactly these same-wave files:
 
 Read-only grounding for this packet:
 
-- `TASKS.md:345`
+- `TASKS.md:348`
 - `.agent_bus/raw/phase-a-r3-4d9970bb/phase-a-r3-4d9970bb--r1-reviewer-2fd3ea86.txt`
 - `mu/host/python/rcx_pi/selfhost/seed_integrity.py`
 - `mu/host/js/core/seed_loader.js`
@@ -133,7 +133,7 @@ edits exist.
 
 ## Grounding / Authorization
 
-- `TASKS.md:345` authorizes this `[NEXT-CODEX-POST-REDTEAM]`
+- `TASKS.md:348` authorizes this `[NEXT-CODEX-POST-REDTEAM]`
   `L4_ENABLER` lock wave, binds the
   `n3-rcx-load-seed-image-boundary-adapter-lock-2026-05-14` wave ID, records
   that no runtime code is edited by this lock wave, and carries the same-wave

@@ -407,3 +407,31 @@ Archived source snapshots for extracted non-blocking residue live in:
   `reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md`; this
   closeout did not implement runtime, Stage0, seed, scheduler, registry, parity,
   production `/mu`, host-oracle, ratchet-baseline, or Claude-related changes.
+
+2026-05-18 N3 deferred bridge residue closeout note:
+
+- Evidence command:
+  `find reports/deferred/non_blocking -maxdepth 1 -type f -name "*.md" -print | sort`.
+- Current non-blocking inventory after packet-named N3 bridge cleanup:
+
+```text
+reports/deferred/non_blocking/README.md
+reports/deferred/non_blocking/n3-autonomous-host-debt-reduction-plan-2026-05-14_bridge_nonblockers.md
+reports/deferred/non_blocking/n3-deferred-bridge-residue-closeout-2026-05-18_bridge_nonblockers.md
+reports/deferred/non_blocking/n3-js-seed-image-boundary-manifest-authority-narrowing-2026-05-17_bridge_nonblockers.md
+reports/deferred/non_blocking/n3-js-seed-image-negative-control-production-surface-removal-2026-05-17_bridge_nonblockers.md
+reports/deferred/non_blocking/n3-seed-registry-manifest-reduction-2026-05-14_bridge_nonblockers.md
+reports/deferred/non_blocking/phase-b-no-go-package-classification-repair-2026-05-15_bridge_nonblockers.md
+reports/deferred/non_blocking/recovery-gate-anti-theater-ratchet-routing-root-fix-2026-05-15_bridge_nonblockers.md
+reports/deferred/non_blocking/repo_truth_non_blockers_2026-03-14.md
+```
+
+- Archived packet-named generated N3 bridge residue after focused reproduction
+  and narrow packet/readme repair:
+  - `reports/archive/deferred/n3-rcx-load-seed-image-boundary-adapter-lock-2026-05-14_bridge_nonblockers_closed-by-n3-deferred-bridge-residue-closeout-2026-05-18.md`
+  - `reports/archive/deferred/n3-seed-image-authority-inventory-split-prereq-2026-05-15_bridge_nonblockers_closed-by-n3-deferred-bridge-residue-closeout-2026-05-18.md`
+  - `reports/archive/deferred/n3-stack-guard-depth-budget-production-lock-2026-05-14_bridge_nonblockers_closed-by-n3-deferred-bridge-residue-closeout-2026-05-18.md`
+- The same-wave generated bridge review packet remains active at
+  `reports/deferred/non_blocking/n3-deferred-bridge-residue-closeout-2026-05-18_bridge_nonblockers.md`.
+- This closeout did not edit runtime, substrate, seed, projection, ratchet
+  baseline, Claude, or implementation files and does not claim N3 closure.

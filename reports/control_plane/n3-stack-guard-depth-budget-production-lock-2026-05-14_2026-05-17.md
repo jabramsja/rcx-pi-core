@@ -33,14 +33,23 @@ or D009/P7 tests. A later bounded packet may reopen the boundary only after it
 can cite current file:line evidence proving the missing productionization
 prerequisites can be satisfied within a smaller scoped write set.
 
-Exact implementation write set for this NO-GO: none. The only current write set
-is the packet path named in Scope.
+Exact runtime/test implementation write set for this NO-GO: none. The Phase A
+packet edit and later same-wave control-plane package-refresh files are named in
+Scope.
 
 ## Scope
 
-This wave may edit only this governing packet:
+The Phase A NO-GO packet edit was limited to this governing packet:
 
 - `reports/control_plane/n3-stack-guard-depth-budget-production-lock-2026-05-14_2026-05-17.md`
+
+The later same-wave commit/package refresh scope is limited to these
+control-plane files:
+
+- `TASKS.md`
+- `reports/control_plane/n3-stack-guard-depth-budget-production-lock-2026-05-14_2026-05-17.md`
+- `reports/deferred/non_blocking/n3-stack-guard-depth-budget-production-lock-2026-05-14_bridge_nonblockers.md`
+- `reports/l4_wave_indicators/n3-stack-guard-depth-budget-production-lock-2026-05-14.json`
 
 Allowed Phase A evidence sources:
 
@@ -56,10 +65,10 @@ Explicitly out of scope for this packet:
 
 - Runtime implementation changes.
 - Test implementation changes.
-- `TASKS.md` tracker edits.
-- Generated indicators, archive packets, deferred packets, source files,
-  ratchet baselines, dispatcher records, Claude-related files, and closeout
-  surfaces.
+- Source files, tests, archive packets, ratchet baselines, dispatcher records,
+  Claude-related files, and closeout surfaces.
+- Any `TASKS.md`, indicator, or deferred packet edit outside the same-wave
+  control-plane package-refresh files listed above.
 - Any claim that stack_guard is eliminated, L4 is complete, or production depth
   validation is already structural.
 
@@ -234,8 +243,11 @@ Required ratchet and test expectations for any reopened GO:
 
 - This is a packet-only Phase A repair.
 - Do not implement the stack_guard/depth-budget production change in this wave.
-- Do not edit `TASKS.md`, runtime files, tests, generated indicators, archive
-  packets, deferred packets, or any path other than this packet.
+- Do not edit runtime files, tests, archive packets, source files, ratchet
+  baselines, dispatcher records, Claude-related files, or closeout surfaces.
+- Same-wave `TASKS.md`, indicator, and generated deferred-packet edits are
+  allowed only for the four-file control-plane package-refresh scope listed in
+  this packet.
 - Do not add host-only semantics, make Python or JavaScript "smarter" as a
   substrate workaround, or broaden the Mu object model.
 - Do not claim stack_guard elimination, full L4 completion, bootstrap
@@ -276,9 +288,12 @@ Required ratchet and test expectations for any reopened GO:
 
 ## Phase B Packet-Only Implementation Record
 
-Changed file:
+Current package file scope:
 
+- `TASKS.md`
 - `reports/control_plane/n3-stack-guard-depth-budget-production-lock-2026-05-14_2026-05-17.md`
+- `reports/deferred/non_blocking/n3-stack-guard-depth-budget-production-lock-2026-05-14_bridge_nonblockers.md`
+- `reports/l4_wave_indicators/n3-stack-guard-depth-budget-production-lock-2026-05-14.json`
 
 Validation command policy:
 
@@ -307,7 +322,7 @@ Questions? Concerns? Thoughts? -- Think hard
 - Purpose: Phase B mechanically collected and staged this same-wave L4 indicator before pre-commit supervisor review so the tracker note, Gate 8 package, and governing packet describe one staged scope.
 - Scope binding: no indicator file other than the artifact above is in scope for this wave.
 - Current staged files:
-  - `mu/tools/session/check_codex_startup_state.py`
+  - `TASKS.md`
   - `reports/control_plane/n3-stack-guard-depth-budget-production-lock-2026-05-14_2026-05-17.md`
   - `reports/deferred/non_blocking/n3-stack-guard-depth-budget-production-lock-2026-05-14_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/n3-stack-guard-depth-budget-production-lock-2026-05-14.json`
@@ -333,7 +348,7 @@ Questions? Concerns? Thoughts? -- Think hard
 - Tracker note sha256: `81b8cbda57b2da80563c5eb523608752f6700002062034be8ec508459480a8d9`
 - Indicator artifact: `reports/l4_wave_indicators/n3-stack-guard-depth-budget-production-lock-2026-05-14.json`
 - Evidence command: `python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id n3-stack-guard-depth-budget-production-lock-2026-05-14 --output reports/l4_wave_indicators/n3-stack-guard-depth-budget-production-lock-2026-05-14.json`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-stack-guard-depth-budget-production-lock-2026-05-14_2026-05-17.md. (2) Commit handoff carries 5 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface..
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-stack-guard-depth-budget-production-lock-2026-05-14_2026-05-17.md. (2) Commit handoff carries 4 wave-owned file(s) with pre-commit supervisor receipt pending for the current staged package. (3) No test files were present in the wave-owned diff, so indicator collection is the mechanical evidence surface..
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/n3-stack-guard-depth-budget-production-lock-2026-05-14.json`
 - Current staged files:
