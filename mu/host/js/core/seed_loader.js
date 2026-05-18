@@ -262,6 +262,14 @@ const MU_BINARY_CODEC = Object.freeze({
       );
     }
     if (Array.isArray(binaryBytes)) {
+      for (let i = 0; i < binaryBytes.length; i++) {
+        const byte = binaryBytes[i];
+        if (!Number.isInteger(byte) || byte < 0 || byte > 255) {
+          throw new TypeError(
+            `MuBinary byte array entry at index ${i} must be an integer in 0..255`
+          );
+        }
+      }
       return Buffer.from(binaryBytes);
     }
     throw new TypeError(
