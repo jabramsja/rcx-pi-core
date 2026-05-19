@@ -440,6 +440,13 @@ def _tasks_backtick_value(line: str, label: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _line_is_next_codex_post_redteam_queue_entry(line: str) -> bool:
+    return (
+        "FOUNDER-ORDERED-REDTEAM-" in line
+        or "NEXT-CODEX-POST-REDTEAM" in line
+    )
+
+
 def _founder_ordered_task_packet_for_wave(repo_root: Path, wave_id: str) -> str:
     normalized_wave = normalize_wave_id(wave_id)
     if not normalized_wave:
@@ -449,7 +456,7 @@ def _founder_ordered_task_packet_for_wave(repo_root: Path, wave_id: str) -> str:
     except OSError:
         return ""
     for line in lines:
-        if "FOUNDER-ORDERED-REDTEAM-" not in line:
+        if not _line_is_next_codex_post_redteam_queue_entry(line):
             continue
         entry_wave = normalize_wave_id(_tasks_backtick_value(line, "Wave ID"))
         if entry_wave != normalized_wave:
@@ -629,6 +636,94 @@ def _tracked_packet_wave_conflict_result(
         "request_for_claude": (
             "Regenerate routing against the correct same-wave packet, or update "
             "the packet identity through a bounded Phase A packet before dispatch."
+        ),
+    }
+
+
+def _same_wave_tasks_authority_exists(
+    repo_root: Path,
+    *,
+    wave_id: str,
+    tracked_packet: str,
+) -> bool:
+    packet = _phase_b_plan_routing_packet(repo_root, tracked_packet)
+    if not packet:
+        return False
+    if _founder_ordered_task_packet_for_wave(repo_root, wave_id) == packet:
+        return True
+    return _tasks_tracker_entry_exists(
+        repo_root,
+        wave_id=wave_id,
+        tracked_packet=packet,
+    )
+
+
+def _routing_candidate_authority_wave_id(
+    repo_root: Path,
+    record: dict[str, Any],
+    candidate: dict[str, Any],
+) -> str:
+    routed_wave = _routing_candidate_wave_id(record, candidate)
+    if routed_wave:
+        return routed_wave
+    tracked_packet = str(candidate.get("tracked_packet") or "").strip()
+    if tracked_packet:
+        packet_wave = read_control_plane_packet_wave_id(repo_root, tracked_packet)
+        if packet_wave:
+            return packet_wave
+    fallback = str(record.get("wave_name") or record.get("wave_id") or "").strip()
+    normalized = normalize_wave_id(fallback) if fallback else ""
+    return normalized if normalized != "wave-unknown" else ""
+
+
+def _missing_next_codex_tracker_authority_result(
+    repo_root: Path,
+    record: dict[str, Any],
+    *,
+    decision: str,
+    executor_name: str,
+) -> dict[str, Any] | None:
+    task_id = _canonicalize_surface_task_id(str(record.get("task_id") or ""))
+    if task_id != "[NEXT-CODEX-POST-REDTEAM]":
+        return None
+    missing: list[str] = []
+    for candidate in _selected_routing_candidate_dicts(record):
+        tracked_packet = str(candidate.get("tracked_packet") or "").strip()
+        if not tracked_packet:
+            continue
+        routed_wave = _routing_candidate_authority_wave_id(
+            repo_root,
+            record,
+            candidate,
+        )
+        if not routed_wave:
+            continue
+        if _same_wave_tasks_authority_exists(
+            repo_root,
+            wave_id=routed_wave,
+            tracked_packet=tracked_packet,
+        ):
+            continue
+        missing.append(f"{routed_wave} -> {tracked_packet}")
+    if not missing:
+        return None
+    return {
+        "status": "held",
+        "decision": decision,
+        "executor": executor_name,
+        "summary": (
+            "Routing held because NEXT-CODEX-POST-REDTEAM packet authority is "
+            "missing from TASKS.md."
+        ),
+        "message": (
+            "Refusing to dispatch a bounded NEXT-CODEX-POST-REDTEAM candidate "
+            "without a same-wave TASKS.md queue entry or tracker note for the "
+            "exact wave/packet pair: " + "; ".join(missing)
+        ),
+        "request_for_claude": (
+            "Create or repair the same-wave TASKS.md authority for the packet, "
+            "or regenerate routing to a packet that already has same-wave "
+            "TASKS.md authority; do not run Phase A from an orphan packet path."
         ),
     }
 
@@ -3270,6 +3365,14 @@ def dispatch(
             )
             if packet_wave_conflict is not None:
                 return packet_wave_conflict
+            missing_tracker_authority = _missing_next_codex_tracker_authority_result(
+                repo,
+                record,
+                decision=decision,
+                executor_name=executor_name,
+            )
+            if missing_tracker_authority is not None:
+                return missing_tracker_authority
             empty_tracker_update = _empty_tracker_update_hold_result(
                 record,
                 decision=decision,
@@ -3296,6 +3399,14 @@ def dispatch(
     )
     if packet_wave_conflict is not None:
         return packet_wave_conflict
+    missing_tracker_authority = _missing_next_codex_tracker_authority_result(
+        repo,
+        record,
+        decision=decision,
+        executor_name=executor_name,
+    )
+    if missing_tracker_authority is not None:
+        return missing_tracker_authority
 
     empty_tracker_update = _empty_tracker_update_hold_result(
         record,

@@ -510,6 +510,17 @@ class TestDispatcherFreshnessRefresh:
             "# open packet\n\nStatus: Routed - Phase A required before implementation\n",
             encoding="utf-8",
         )
+        (repo / "TASKS.md").write_text(
+            (
+                "## Ra\n\n"
+                "  8. **[N3-OPEN-WAVE] PHASE A REQUIRED.** "
+                "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+                "Wave ID: `open-wave-2026-05-07`. "
+                f"Packet: `{open_packet}`. "
+                "FOUNDER_OVERRIDE:open-wave-2026-05-07.\n"
+            ),
+            encoding="utf-8",
+        )
         stale_record = {
             "decision": "ROUTE_PHASE_A",
             "summary": "stale completed route",
@@ -1332,6 +1343,93 @@ class TestDispatcherFreshnessRefresh:
         assert package["merged_pr"] == 966
         assert package["merge_sha"] == current_head
         assert package["wave_name"] == "founder-ordered-post-merge-queue-empty"
+
+    def test_next_codex_queue_parsers_accept_n3_entries_without_founder_label(
+        self, tmp_path,
+    ):
+        packet_rel = "reports/control_plane/n3_current_wave_2026-05-19.md"
+        packet = tmp_path / packet_rel
+        packet.parent.mkdir(parents=True)
+        packet.write_text(
+            "# N3 Current Wave\n\n"
+            "Status: ROUTED - PHASE A REQUIRED\n"
+            "Wave ID: n3-current-wave-2026-05-19\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "TASKS.md").write_text(
+            (
+                "## Ra\n\n"
+                "  8. **[N3-CURRENT-WAVE] PHASE A REQUIRED.** "
+                "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+                "Wave ID: `n3-current-wave-2026-05-19`. "
+                "Class: `L4_ENABLER`. Category: `/mu` structural. "
+                f"Packet: `{packet_rel}`. "
+                "FOUNDER_OVERRIDE:n3-current-wave-2026-05-19.\n"
+            ),
+            encoding="utf-8",
+        )
+
+        assert dispatch_mod._founder_ordered_task_packet_for_wave(  # ANTICHEAT_OK: parser regression
+            tmp_path,
+            "n3-current-wave-2026-05-19",
+        ) == packet_rel
+        assert common_mod.read_founder_ordered_task_state(
+            tmp_path,
+            wave_id="n3-current-wave-2026-05-19",
+            tracked_packet=packet_rel,
+        ) == "PHASE A REQUIRED."
+        entry = commit_mod._next_open_founder_ordered_queue_entry(tmp_path)  # ANTICHEAT_OK: parser regression
+        assert entry is not None
+        assert entry["wave_id"] == "n3-current-wave-2026-05-19"
+        assert entry["packet"] == packet_rel
+
+    def test_next_codex_phase_a_holds_orphan_packet_before_executor(
+        self, tmp_path, monkeypatch,
+    ):
+        packet_rel = "reports/control_plane/n3_orphan_packet_2026-05-19.md"
+        packet = tmp_path / packet_rel
+        packet.parent.mkdir(parents=True)
+        packet.write_text(
+            "# N3 Orphan Packet\n\n"
+            "Status: ACTIVE / ROUTING OPEN\n"
+            "Wave ID: n3-orphan-packet-2026-05-19\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "TASKS.md").write_text("## Ra\n", encoding="utf-8")
+
+        def fail_if_executor_runs(*_args, **_kwargs):
+            pytest.fail("orphan NEXT-CODEX-POST-REDTEAM packet must hold before Phase A")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fail_if_executor_runs)
+        monkeypatch.setattr(
+            dispatch_mod,
+            "ensure_not_agent_review_mode",
+            lambda *a, **k: None,
+        )
+
+        result = dispatch_mod.dispatch(
+            {
+                "decision": "ROUTE_PHASE_A",
+                "summary": "orphan n3 route",
+                "wave_name": "n3-orphan-packet-2026-05-19",
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "next_candidates": [
+                    {
+                        "candidate": "n3-orphan-packet-2026-05-19",
+                        "bounded": True,
+                        "tracked_packet": packet_rel,
+                    }
+                ],
+            },
+            repo_root=tmp_path,
+            skip_freshness=True,
+        )
+
+        assert result["status"] == "held"
+        assert result["executor"] == "phase_a_executor"
+        assert "without a same-wave TASKS.md queue entry or tracker note" in result["message"]
+        assert "n3-orphan-packet-2026-05-19" in result["message"]
+        assert packet_rel in result["message"]
 
 
 # ===========================================================================

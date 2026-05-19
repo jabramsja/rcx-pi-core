@@ -919,6 +919,13 @@ def _tasks_queue_backtick_value(line: str, label: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _line_is_next_codex_post_redteam_queue_entry(line: str) -> bool:
+    return (
+        "FOUNDER-ORDERED-REDTEAM-" in line
+        or "NEXT-CODEX-POST-REDTEAM" in line
+    )
+
+
 def read_founder_ordered_task_state(
     repo_root: Path,
     *,
@@ -941,7 +948,7 @@ def read_founder_ordered_task_state(
         r"^\s*\d+\.\s+\*\*\[(?P<label>[^\]]+)\]\s*(?P<state>.*?)\*\*"
     )
     for line in lines:
-        if "FOUNDER-ORDERED-REDTEAM-" not in line:
+        if not _line_is_next_codex_post_redteam_queue_entry(line):
             continue
         match = state_re.match(line)
         if not match:
