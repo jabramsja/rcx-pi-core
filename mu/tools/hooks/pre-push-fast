@@ -5,7 +5,7 @@
 #
 # Install: ln -sf ../../tools/pre-push-fast .git/hooks/pre-push
 
-echo "Running pre-push check (dev.sh → audit_fast.sh)..."
+echo "Running pre-push check (semantic purity → dev.sh → audit_fast.sh)..."
 echo ""
 
 # Get repo root
@@ -83,6 +83,15 @@ if [ -f "$REPO_ROOT/tools/checks/check_untracked_artifacts.sh" ]; then
         echo "   Clean up before pushing, or add to .untracked_artifact_allowlist."
         exit 1
     fi
+fi
+
+# CI green-gate treats semantic debt reductions as ratchet-tightening failures.
+# Run it locally before the fast audit so Step 11 catches threshold drift pre-push.
+if ! "$REPO_ROOT/tools/audit_semantic_purity.sh"; then
+    echo ""
+    echo "❌ Semantic purity audit failed."
+    echo "   Tighten host-debt thresholds or fix the reported semantic purity issue before pushing."
+    exit 1
 fi
 
 # Run fast audit (not --full, which is redundant with CI)

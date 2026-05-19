@@ -508,10 +508,10 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
 
 # ---------------------------------------------------------------------------
 # Stage 0 micro-kernel (D005 production)
-# Accumulator-style match + recursive substitute. Parallel path to _match_inner/substitute.
+# Worklist-style match + substitute. Parallel path to _match_inner/substitute.
 # Proves circular dependency is breakable. See L4DecisionCard.v0.md D005.
-# Host debt: same surface as match()/substitute() — isinstance dispatch, Python call stack,
-#   .append() mutation in _stage0_substitute. Markers added Wave H (2026-03-11).
+# Host debt: same surface as match()/substitute() — isinstance dispatch and
+# structural host traversal. Markers added Wave H (2026-03-11).
 # ---------------------------------------------------------------------------
 
 # Stage 0 is the sole production path since Wave H (2026-03-11).
@@ -521,115 +521,119 @@ def _match_inner(pattern: Mu, input_value: Mu, _depth: int = 0,
 # direct unit testing and parity regression tests.
 
 
-@host_recursion(
-    "Stage 0 micro-match: isinstance dispatch + recursive dict traversal. "
-    "BOOTSTRAP PRIMITIVE: breaks circular dependency (kernel → match → kernel). "
-    "P7W4: list branch removed (dead code — all kernel inputs normalized to head/tail)."
-)
 @host_builtin(
-    "isinstance, .keys(), .get(), 'in' — reduced from 7 to 3 builtins (P7W4). "
-    "len/zip/set eliminated: list branch dead code; len() Gate-3 replaced with truthiness. "
-    "Sole production path (flag removed Wave 4). Tracked separately from match() for ratchet accuracy."
+    "Stage 0 micro-match still depends on host type/key primitives while "
+    "dict traversal is explicit worklist structure. Sole production path "
+    "(flag removed Wave 4). Tracked separately from match() for ratchet accuracy."
 )
 def _stage0_match(pattern, input_value, bindings=None, _depth=0):
-    """Stage 0 match: accumulator-style bindings. Returns NO_MATCH on failure."""
-    if _depth > MAX_MU_DEPTH:
-        return NO_MATCH
+    """Stage 0 match: worklist-style bindings. Returns NO_MATCH on failure."""
     current = bindings if bindings is not None else {}
-    # Variable site
-    if is_var(pattern):
-        name = pattern["var"]
-        if not name:
+    work = [(pattern, input_value, _depth)]
+    while work:
+        pattern, input_value, depth = work.pop()
+        if depth > MAX_MU_DEPTH:
             return NO_MATCH
-        if name in current:
-            # Use mu_hash_cached (NOT mu_hash_control_cached) — control hash
-            # canonicalizes 0.0→0 which breaks int/float type distinction.
-            if mu_hash_cached(current[name]) != mu_hash_cached(input_value):
+        # Variable site
+        if is_var(pattern):
+            name = pattern["var"]
+            if not name:
                 return NO_MATCH
-            return current
-        return {**current, name: input_value}
-    # None
-    if pattern is None:
-        return current if input_value is None else NO_MATCH
-    # Bool (before int — bool is subclass of int)
-    if isinstance(pattern, bool):
-        if isinstance(input_value, bool) and pattern == input_value:
-            return current
-        return NO_MATCH
-    # Int
-    if isinstance(pattern, int):
-        if isinstance(input_value, int) and not isinstance(input_value, bool):
-            if pattern == input_value:
-                return current
-        return NO_MATCH
-    # Float
-    if isinstance(pattern, float):
-        if isinstance(input_value, float) and pattern == input_value:
-            return current
-        return NO_MATCH
-    # String
-    if isinstance(pattern, str):
-        if isinstance(input_value, str) and pattern == input_value:
-            return current
-        return NO_MATCH
-    # List branch REMOVED (P7W4): After normalization, all lists become head/tail
-    # linked lists (dicts). No kernel-path code passes raw Python lists to
-    # _stage0_match. Verified: zero seed patterns/bodies contain raw arrays.
-    # If a raw list reaches here, it falls through to NO_MATCH (correct behavior).
-
-    # Dict (Gate-3: allow pattern to omit _type when input has _type="list")
-    if isinstance(pattern, dict):
-        if not isinstance(input_value, dict):
+            if name in current:
+                # Use mu_hash_cached (NOT mu_hash_control_cached) — control hash
+                # canonicalizes 0.0→0 which breaks int/float type distinction.
+                if mu_hash_cached(current[name]) != mu_hash_cached(input_value):
+                    return NO_MATCH
+                continue
+            current = {**current, name: input_value}
+            continue
+        # None
+        if pattern is None:
+            if input_value is None:
+                continue
             return NO_MATCH
-        # P7W4: dict_keys views support set operations directly (Python 3).
-        # Eliminates set() wrapper — 2 fewer host builtins on kernel hot path.
-        pattern_keys = pattern.keys()
-        input_keys = input_value.keys()
-        if pattern_keys != input_keys:
-            extra_is_type = (input_keys - pattern_keys == {"_type"})
-            no_pattern_extra = not (pattern_keys - input_keys)
-            type_is_list = (input_value.get("_type") == "list")
-            if not (extra_is_type and no_pattern_extra and type_is_list):
+        # Bool (before int — bool is subclass of int)
+        if isinstance(pattern, bool):
+            if isinstance(input_value, bool) and pattern == input_value:
+                continue
+            return NO_MATCH
+        # Int
+        if isinstance(pattern, int):
+            if isinstance(input_value, int) and not isinstance(input_value, bool):
+                if pattern == input_value:
+                    continue
+            return NO_MATCH
+        # Float
+        if isinstance(pattern, float):
+            if isinstance(input_value, float) and pattern == input_value:
+                continue
+            return NO_MATCH
+        # String
+        if isinstance(pattern, str):
+            if isinstance(input_value, str) and pattern == input_value:
+                continue
+            return NO_MATCH
+        # List branch REMOVED (P7W4): After normalization, all lists become
+        # head/tail linked lists (dicts). No kernel-path code passes raw
+        # Python lists to _stage0_match. Verified: zero seed patterns/bodies
+        # contain raw arrays. If a raw list reaches here, it falls through to
+        # NO_MATCH (correct behavior).
+
+        # Dict (Gate-3: allow pattern to omit _type when input has _type="list")
+        if isinstance(pattern, dict):
+            if not isinstance(input_value, dict):
                 return NO_MATCH
-        merged = current
-        for key in pattern:
-            merged = _stage0_match(pattern[key], input_value[key], merged, _depth + 1)
-            if merged is NO_MATCH:
-                return NO_MATCH
-        return merged
-    return NO_MATCH
+            pattern_keys = pattern.keys()
+            input_keys = input_value.keys()
+            if pattern_keys != input_keys:
+                extra_is_type = (input_keys - pattern_keys == {"_type"})
+                no_pattern_extra = not (pattern_keys - input_keys)
+                type_is_list = (input_value.get("_type") == "list")
+                if not (extra_is_type and no_pattern_extra and type_is_list):
+                    return NO_MATCH
+            for key in reversed(tuple(pattern)):
+                work.append((pattern[key], input_value[key], depth + 1))
+            continue
+        return NO_MATCH
+    return current
 
 
-@host_recursion(
-    "Stage 0 micro-substitute: isinstance dispatch + recursive dict/list traversal. "
-    "BOOTSTRAP PRIMITIVE: breaks circular dependency (kernel → subst → kernel). "
-    "Same host surface as substitute but ~27 LOC simple tree walk. "
-    "Mutation eliminated (P7 Wave 1): dict/list built via generator expressions."
-)
+@host_recursion("Legacy P7 marker retained; structural worklist traversal has no self-recursive calls.")
 def _stage0_substitute(body, bindings, _depth=0):
-    """Stage 0 substitute: recursive tree walk. Raises on unbound variable."""
-    if _depth > MAX_MU_DEPTH:
-        raise TypeError(f"Max depth exceeded in substitute ({MAX_MU_DEPTH})")
-    if body is None:
-        return None
-    if isinstance(body, (bool, int, float, str)):
-        return body
-    if isinstance(body, dict):
-        if is_var(body):
-            name = get_var_name(body)
-            if name not in bindings:
-                raise KeyError(f"Unbound variable: {name}")
-            return bindings[name]
-        return dict(
-            (k, _stage0_substitute(v, bindings, _depth + 1))
-            for k, v in body.items()
-        )
-    if isinstance(body, list):
-        return list(
-            _stage0_substitute(item, bindings, _depth + 1)
-            for item in body
-        )
-    return body
+    """Stage 0 substitute: worklist tree walk. Raises on unbound variable."""
+    values = ()
+    work = (("eval", body, _depth, None),)
+    while work:
+        op, value, depth, meta = work[-1]
+        work = work[:-1]
+        if op == "build":
+            start = len(values) - len(meta)
+            chunk, values = values[start:], values[:start]
+            built = dict(zip(meta, chunk)) if value == "dict" else list(chunk)
+            values += (built,)
+            continue
+        if depth > MAX_MU_DEPTH:
+            raise TypeError(f"Max depth exceeded in substitute ({MAX_MU_DEPTH})")
+        if value is None or isinstance(value, (bool, int, float, str)):
+            values += (value,)
+            continue
+        if isinstance(value, dict):
+            if is_var(value):
+                name = get_var_name(value)
+                if name not in bindings:
+                    raise KeyError(f"Unbound variable: {name}")
+                values += (bindings[name],)
+            else:
+                items = tuple(value.items())
+                work += (("build", "dict", depth, tuple(k for k, _ in items)),)
+                work += tuple(("eval", item_value, depth + 1, None) for _, item_value in reversed(items))
+            continue
+        if isinstance(value, list):
+            work += (("build", "list", depth, tuple(value)),)
+            work += tuple(("eval", item, depth + 1, None) for item in reversed(value))
+            continue
+        values += (value,)
+    return values[-1]
 
 
 # BOUNDARY: substitute() is OFF the kernel execution path since Stage 0 became default (Wave H).

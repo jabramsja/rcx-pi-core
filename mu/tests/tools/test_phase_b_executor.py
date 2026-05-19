@@ -4103,6 +4103,17 @@ class TestFinalPytestGate:
             "package/tests/cli_test.py",
         ]
 
+    def test_pytest_gate_includes_bootstrap_core_carveout_gate(self):
+        selected = pb_mod._select_pytest_gate_files([  # ANTICHEAT_OK: locks runtime gate mirror for bootstrap_core.js
+            "mu/host/js/core/bootstrap_core.js",
+            "mu/tests/l4_gates/test_stage0_production_pilot_gate.py",
+        ])
+
+        assert selected == [
+            "tests/l4_gates/test_bootstrap_core_carveout_gate.py",
+            "mu/tests/l4_gates/test_stage0_production_pilot_gate.py",
+        ]
+
     def test_structural_tracker_note_includes_l4_required_proof_fields(self):
         note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: locks Phase B tracker-note generator contract
             wave_id="post-redteam-engine-state-scheduler-reduction-2026-04-30",

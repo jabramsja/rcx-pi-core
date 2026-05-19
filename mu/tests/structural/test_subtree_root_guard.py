@@ -281,6 +281,38 @@ class TestUntrackedArtifactChecker:
             "audit_fast.sh must enforce check_untracked_artifacts as BLOCKING"
         )
 
+    def test_audit_fast_staged_tooling_followups_are_l4_enablers(self):
+        """Staged tooling-only follow-ups must not inherit structural wave class."""
+        audit = REPO_ROOT / "mu" / "tools" / "audits" / "audit_fast.sh"
+        content = audit.read_text()
+        staged_idx = content.index("STAGED_FILES=")
+        enabler_idx = content.index("--wave-class L4_ENABLER")
+        assert staged_idx < enabler_idx, (
+            "audit_fast.sh must classify staged tooling-only follow-ups before L4 check"
+        )
+        non_runtime_guard = 'if ! printf \'%s\\n\' "$STAGED_FILES" | _l4_has_runtime_files; then'
+        wave_id_guard = 'if [ -z "$WAVE_ID_FLAG" ]; then'
+        assert non_runtime_guard in content, (
+            "audit_fast.sh must classify all staged non-runtime diffs as L4_ENABLER"
+        )
+        non_runtime_idx = content.index(non_runtime_guard)
+        wave_id_guard_idx = content.index(wave_id_guard, non_runtime_idx)
+        assert non_runtime_idx < wave_id_guard_idx < enabler_idx, (
+            "L4_ENABLER classification must not be hidden behind an empty wave-id guard"
+        )
+        assert "_l4_has_runtime_files" in content, (
+            "audit_fast.sh must distinguish runtime from tooling-only staged diffs"
+        )
+        assert "_l4_branch_wave_id" in content, (
+            "audit_fast.sh must bind staged tooling follow-ups to the branch wave id"
+        )
+        assert "WAVE_ID_FLAG=\"--wave-id=$STAGED_WAVE_ID\"" in content, (
+            "audit_fast.sh must avoid auto-binding staged follow-ups to an unrelated tracker note"
+        )
+        assert "-z \"$WAVE_ID_FLAG\"" in content, (
+            "audit_fast.sh must preserve explicit wave-id binding when TASKS.md is staged"
+        )
+
     def test_checker_wired_into_pre_push(self):
         """pre-push-fast must call check_untracked_artifacts.sh as BLOCKING."""
         hook = REPO_ROOT / "mu" / "tools" / "hooks" / "pre-push-fast"
@@ -309,6 +341,19 @@ class TestUntrackedArtifactChecker:
         )
         assert "sanitize_local_git_env" in content, (
             "pre-push-fast must centralize local git env sanitization"
+        )
+
+    def test_pre_push_runs_semantic_purity_before_fast_audit(self):
+        """pre-push-fast must catch CI semantic-debt ratchet failures locally."""
+        hook = REPO_ROOT / "mu" / "tools" / "hooks" / "pre-push-fast"
+        content = hook.read_text()
+        semantic_idx = content.index("tools/audit_semantic_purity.sh")
+        dev_idx = content.index('$REPO_ROOT/dev.sh')
+        assert semantic_idx < dev_idx, (
+            "pre-push-fast must run semantic purity before dev.sh/audit_fast"
+        )
+        assert "exit 1" in content[semantic_idx:dev_idx], (
+            "pre-push-fast must fail closed when semantic purity fails"
         )
 
     def test_dev_and_audit_fast_sanitize_hook_git_env(self):

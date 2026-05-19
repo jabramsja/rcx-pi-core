@@ -1325,10 +1325,53 @@ def _refresh_tracker_note_bridge_rounds(
     return re.sub(r"bridge rounds=\d+", f"bridge rounds={rounds}", note)
 
 
+_STRUCTURAL_WORKLOAD_EVIDENCE_MODULES = {
+    "seed_auto_execution": (
+        "test_seed_auto_execution_contract",
+        "test_check_seed_auto_execution_contract",
+    ),
+    "rcx_engine_cycle": ("test_rcx_engine_workload_contract",),
+    "execution_layer_truth": ("test_execution_layer_truth_contract",),
+}
+
+
+def _tracker_note_declares_l4_structural(note: str) -> bool:
+    return re.search(r"\bClass:\s*`?L4_STRUCTURAL`?", note or "") is not None
+
+
+def _has_l4_gate_test_path(test_files: list[str]) -> bool:
+    return any(
+        path.startswith(("mu/tests/l4_gates/", "tests/l4_gates/"))
+        for path in test_files
+    )
+
+
+def _structural_workload_evidence_modules(note: str) -> tuple[str, ...]:
+    workload_target = _tracker_marker_value(note, "workload_target").strip("` .")
+    return _STRUCTURAL_WORKLOAD_EVIDENCE_MODULES.get(workload_target, ())
+
+
+def _test_files_cover_structural_tracker_evidence(note: str, test_files: list[str]) -> bool:
+    """Return whether replacement pytest files still satisfy L4 structural evidence."""
+    if not _has_l4_gate_test_path(test_files):
+        return False
+    required_modules = _structural_workload_evidence_modules(note)
+    if required_modules and not any(
+        module in path for module in required_modules for path in test_files
+    ):
+        return False
+    return True
+
+
 def _refresh_tracker_note_test_evidence(note: str, staged_paths: list[str]) -> str:
     """Align generated tracker-note pytest evidence with the rebuilt staged scope."""
     test_files = _collect_wave_test_files(staged_paths)
     if not test_files:
+        return note
+    if (
+        _tracker_note_declares_l4_structural(note)
+        and not _test_files_cover_structural_tracker_evidence(note, test_files)
+    ):
         return note
     evidence_command = (
         "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
@@ -2555,6 +2598,13 @@ def _is_test_file(path: str) -> bool:
     )
 
 
+_RUNTIME_TARGETED_TESTS = {
+    "mu/host/js/core/bootstrap_core.js": (
+        "tests/l4_gates/test_bootstrap_core_carveout_gate.py",
+    ),
+}
+
+
 def _canonical_repo_test_path(repo_root: Path, path: str) -> str:
     """Canonicalize repo-relative test paths so symlink mirrors dedupe cleanly."""
     normalized = path.replace("\\", "/")
@@ -2570,6 +2620,9 @@ def _collect_commit_test_files(repo_root: Path, staged_files: list[str]) -> list
     candidates: set[str] = set()
     for path in staged_files:
         normalized = path.replace("\\", "/")
+        for test_path in _RUNTIME_TARGETED_TESTS.get(normalized, ()):
+            if (repo_root / test_path).exists():
+                candidates.add(_canonical_repo_test_path(repo_root, test_path))
         if _is_test_file(normalized) and normalized.endswith(".py"):
             candidates.add(_canonical_repo_test_path(repo_root, normalized))
             continue
