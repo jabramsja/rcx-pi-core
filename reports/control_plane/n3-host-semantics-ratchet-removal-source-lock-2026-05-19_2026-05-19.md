@@ -14,9 +14,9 @@ Purpose: Contract active: founder XML + repo protocol in force.
 
 This packet locks one bounded Phase A source-lock after PR #991 and the bridge
 REQUEST_CHANGES review. It does not authorize direct Phase B implementation in
-this rewrite turn. Because current `TASKS.md` does not contain a
-detector-visible same-wave tracker entry for this exact wave id, downstream
-structural implementation must remain held until that tracker entry exists.
+this rewrite turn. The committed package now satisfies the detector-visible
+tracker gate: `TASKS.md:381` names this exact wave id and packet path, so
+downstream structural review must not treat tracker absence as blocking.
 
 Selected next slice: Stage0 match/substitute host-semantics marker reduction.
 
@@ -39,9 +39,9 @@ Explicitly excluded from the selected slice:
 - Any other marker, file, directory, or broad host-semantics inventory not
   listed in the selected downstream slice above.
 
-Candidate downstream implementation scope, only after the detector-visible
-TASKS tracker condition is satisfied and only if Phase B proves the selected
-slice is removable or structurally reducible:
+Candidate downstream implementation scope, with the detector-visible TASKS
+tracker condition satisfied by `TASKS.md:381` and only if Phase B proves the
+selected slice is removable or structurally reducible:
 - Selected Python implementation lines in
   `mu/host/python/rcx_pi/selfhost/eval_seed.py`.
 - Selected JavaScript implementation lines in
@@ -69,16 +69,16 @@ host semantics rather than adding Python/JavaScript host semantics.
 
 Concrete bounded tasks for this Phase A packet:
 1. Lock this separate bounded control-plane packet for the still-open
-   `[NEXT-CODEX-POST-REDTEAM]` current phase. `TASKS.md:559-560` authorizes
+   `[NEXT-CODEX-POST-REDTEAM]` current phase. `TASKS.md:557-560` authorizes
    only future bounded work not already proven by landed slices, so this packet
    must not replay the landed engine-state/scheduler slice or use old
    control-surface packets as substantive closure evidence.
-2. Preserve the current tracker gap honestly. `TASKS.md:564` and
-   `reports/control_plane/post_redteam_structural_queue_2026-03-20.md:110-113`
-   require both a bounded packet and a detector-visible TASKS tracker entry.
-   This rewrite updates the packet only; it does not edit TASKS. A later
-   tracker-sync step must add the exact wave id and packet path before any
-   Phase B structural implementation starts.
+2. Record the current tracker gate honestly. `TASKS.md:381` contains the
+   detector-visible same-wave tracker entry for this exact wave id and packet
+   path, satisfying the bounded-packet-plus-tracker requirement cited by
+   `reports/control_plane/post_redteam_structural_queue_2026-03-20.md:110-113`.
+   Any remaining Phase B hold must come from selected-slice proof, validation,
+   or scope failure, not from a missing TASKS tracker entry.
 3. Select exactly one next marker slice. This packet selects only the Stage0
    match/substitute slice spanning the Python `eval_seed.py` markers and the
    JavaScript `bootstrap_core.js:443` and `bootstrap_core.js:517` Stage0
@@ -106,15 +106,16 @@ Concrete bounded tasks for this Phase A packet:
 
 ## Constraints
 
-- No code, test, TASKS, status, changelog, report index, indicator, commit,
-  push, PR, or closeout edits are authorized by this rewrite turn.
-- No downstream Phase B implementation may begin from this packet unless a
-  detector-visible `TASKS.md` tracker entry names this exact wave id and packet
-  path, and same-wave control authority is mechanically derivable from that
-  tracker entry plus this packet.
+- No code, test, additional TASKS, status, changelog, report index, indicator,
+  commit, push, PR, or closeout edits are authorized by this packet-local
+  remediation.
+- The detector-visible tracker prerequisite is satisfied for this wave by
+  `TASKS.md:381`; downstream Phase B authority still requires same-wave control
+  authority to be mechanically derivable from that tracker entry plus this
+  packet.
 - Stage0 edits are in scope only for a later authorized Phase B attempt, only
   inside the selected Stage0 match/substitute lines named in Scope, and only
-  after the TASKS tracker condition is satisfied.
+  while the `TASKS.md:381` tracker binding remains present.
 - No edit to `mu/host/js/core/bootstrap_core.js:293` is in scope for this
   selected slice.
 - No ratchet baseline update may count as proof of reduction.
@@ -130,7 +131,7 @@ Concrete bounded tasks for this Phase A packet:
 
 ## Stop Conditions
 
-- Stop before any Phase B code edit if `TASKS.md` does not contain a
+- Stop before any Phase B code edit if current `TASKS.md` no longer contains a
   detector-visible same-wave tracker entry for
   `n3-host-semantics-ratchet-removal-source-lock-2026-05-19` and this packet
   path.
@@ -162,9 +163,10 @@ Concrete bounded tasks for this Phase A packet:
 - This packet explicitly excludes `mu/host/js/core/bootstrap_core.js:293` from
   the selected slice.
 - This packet does not claim that its packet-local `FOUNDER_OVERRIDE` is a
-  detector-visible TASKS tracker entry. Downstream Phase B starts only after
-  TASKS contains the exact same-wave tracker entry required by the governing
-  queue.
+  detector-visible TASKS tracker entry. The detector-visible tracker entry is
+  `TASKS.md:381`, which names this exact wave id and packet path; downstream
+  Phase B must use that entry plus this packet as the same-wave authority
+  binding.
 - The in-scope downstream write surface is bounded to the selected
   implementation files and focused proof directories named in Scope.
 - Downstream Phase B produces either:
@@ -183,15 +185,16 @@ Concrete bounded tasks for this Phase A packet:
 
 ## Grounding / Authorization
 
-- `TASKS.md:556-560` keeps `[NEXT-CODEX-POST-REDTEAM]` UNPARKED and OPEN:
+- Current `TASKS.md` keeps `[NEXT-CODEX-POST-REDTEAM]` UNPARKED and OPEN:
   the current phase allows only future bounded work not already proven by
   landed slices, and it explicitly says remaining structural reduction requires
   separate bounded packets.
-- `TASKS.md:564` says every wave requires a control-plane packet plus a
-  `TASKS.md` tracker entry. Current targeted lookup shows this wave id and
-  `FOUNDER_OVERRIDE:n3-host-semantics-ratchet-removal-source-lock-2026-05-19`
-  appear in this packet, not in `TASKS.md`.
-- `TASKS.md:573` records the predecessor same-task source-lock prerequisite.
+- `TASKS.md:381` satisfies the detector-visible tracker gate for this package:
+  it records the same wave id,
+  `n3-host-semantics-ratchet-removal-source-lock-2026-05-19`, and this packet
+  path,
+  `reports/control_plane/n3-host-semantics-ratchet-removal-source-lock-2026-05-19_2026-05-19.md`.
+- `TASKS.md:574` records the predecessor same-task source-lock prerequisite.
   This packet preserves that predecessor closure, does not replay it, and does
   not import the predecessor's historical implementation exclusions as the
   current selected-slice scope.
@@ -207,10 +210,10 @@ Concrete bounded tasks for this Phase A packet:
   `_stage0_match` and `_stage0_substitute` host markers at
   `mu/host/python/rcx_pi/selfhost/eval_seed.py:524-533` and
   `mu/host/python/rcx_pi/selfhost/eval_seed.py:603-609`.
-- This packet satisfies only the separate bounded packet portion of the queue
-  rule. It authorizes packetization and later review routing only; it does not
-  authorize implementation during this rewrite turn or before the same-wave
-  TASKS tracker entry exists.
+- This packet satisfies the separate bounded packet portion of the queue rule,
+  and `TASKS.md:381` satisfies the same-wave detector-visible tracker portion.
+  The pair authorizes packetization and later review routing only; it does not
+  authorize implementation during this packet-local remediation.
 - FOUNDER_OVERRIDE:n3-host-semantics-ratchet-removal-source-lock-2026-05-19
 
 Questions? Concerns? Thoughts? -- Think hard
