@@ -163,6 +163,25 @@ def _python_load_verified_seed_image_result(
     return {"ok": True, "ids": [proj["id"] for proj in seed["projections"]]}
 
 
+def _python_load_verified_seed_binary_image_result(
+    seed_name: str,
+    seed_bytes: bytes,
+    binary_bytes: bytes,
+    expected_proof: dict[str, object],
+) -> dict[str, object]:
+    try:
+        seed = load_verified_seed_image(
+            seed_name,
+            seed_bytes,
+            verify=True,
+            binary_image=binary_bytes,
+            expected_binary_proof=expected_proof,
+        )
+    except Exception as exc:  # tests compare fail-closed behavior across substrates
+        return {"ok": False, "error": str(exc), "name": type(exc).__name__}
+    return {"ok": True, "ids": [proj["id"] for proj in seed["projections"]]}
+
+
 def _js_load_verified_seed_image_result(
     seed_name: str,
     raw_json: str,
@@ -445,6 +464,59 @@ def _js_seed_binary_migration_proof_result(
     return json.loads(proc.stdout)
 
 
+def _js_load_verified_seed_binary_image_result(
+    seed_name: str,
+    seed_bytes: bytes,
+    binary_bytes: bytes,
+    expected_proof: dict[str, object],
+) -> dict[str, object]:
+    js_script = """
+    const fs = require('fs');
+    const {
+      loadVerifiedSeedImage,
+      SEED_IMAGE_VERIFICATION_MODES,
+    } = require('./mu/host/js/core/seed_loader');
+    const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+    const seedBytes = Buffer.from(input.seedBytesBase64, 'base64');
+    const binaryBytes = Buffer.from(input.binaryBytesBase64, 'base64');
+    try {
+      const seed = loadVerifiedSeedImage(
+        input.seedName,
+        seedBytes,
+        SEED_IMAGE_VERIFICATION_MODES.CLI,
+        binaryBytes,
+        input.expectedProof
+      );
+      console.log(JSON.stringify({
+        ok: true,
+        ids: seed.projections.map(p => p.id),
+      }));
+    } catch (e) {
+      console.log(JSON.stringify({
+        ok: false,
+        error: e.message,
+        name: e.name,
+      }));
+    }
+    """
+    payload = {
+        "seedName": seed_name,
+        "seedBytesBase64": base64.b64encode(seed_bytes).decode("ascii"),
+        "binaryBytesBase64": base64.b64encode(binary_bytes).decode("ascii"),
+        "expectedProof": expected_proof,
+    }
+    proc = subprocess.run(
+        ["node", "-e", js_script],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO),
+        timeout=10,
+    )
+    assert proc.returncode == 0, f"JS seed binary image probe failed: {proc.stderr}"
+    return json.loads(proc.stdout)
+
+
 def _js_seed_dependencies() -> dict[str, list[str]]:
     js_script = """
     const { SEED_DEPENDENCIES } = require('./mu/host/js/core/seed_loader');
@@ -586,10 +658,10 @@ class TestSeedChecksumParity:
         source = (_REPO / "mu" / "host" / "js" / "core" / "seed_loader.js").read_text()
         main_source = (_REPO / "mu" / "host" / "js" / "cli" / "main.js").read_text()
 
-        public_sig = (
-            "function loadVerifiedSeedImage(seedName, seedBytes, verificationMode)"
-        )
-        assert public_sig in source
+        assert "function loadVerifiedSeedImage(" in source
+        assert "verificationMode," in source
+        assert "binaryImage = null" in source
+        assert "expectedBinaryProof = null" in source
         assert "loadCliVerifiedSeedImage" not in source
         assert "loadVerifiedSeedImageForNegativeControl" not in source
         assert "SEED_IMAGE_VERIFICATION_MODES.CORE" in source
@@ -738,7 +810,9 @@ class TestProjectionLoaderBinaryDecoderParity:
 
         assert "decodeMuBinaryValue" in source
         assert "decodeSeedBinaryProjections" in source
-        assert "function loadVerifiedSeedImage(seedName, seedBytes, verificationMode)" in source
+        assert "function loadVerifiedSeedImage(" in source
+        assert "binaryImage = null" in source
+        assert "expectedBinaryProof = null" in source
 
         json_boundary = source[
             source.index("function loadVerifiedSeedImage"):
@@ -749,8 +823,7 @@ class TestProjectionLoaderBinaryDecoderParity:
             source.index("function getSeedChecksum")
         ]
 
-        assert "decodeSeedBinaryProjections(" not in json_boundary
-        assert "decodeMuBinaryValue(" not in json_boundary
+        assert "if (hasBinaryImage)" in json_boundary
         assert "decodeSeedBinaryProjections(" not in path_wrapper
         assert "loadVerifiedSeedImage(" in path_wrapper
         assert "SEED_IMAGE_VERIFICATION_MODES.CORE" in path_wrapper
@@ -1627,6 +1700,80 @@ class TestProductionLoaderBoundaryParity:
 
             assert py_result == {"ok": True, "ids": expected_ids}
             assert js_result == {"ok": True, "ids": expected_ids}
+
+    def test_opt_in_smaller_seed_image_pilot_preserves_json_rollback(self):
+        """The smaller image pilot stays explicit while Python fails closed."""
+        seed_name = "rcx_engine.v1.json"
+        seed_bytes = get_seed_path(seed_name).read_bytes()
+        expected_ids = EXPECTED_PROJECTION_IDS[seed_name]
+        binary_image, proof = generate_seed_binary_migration_artifact(
+            seed_name,
+            seed_bytes,
+        )
+
+        py_binary = _python_load_verified_seed_binary_image_result(
+            seed_name,
+            seed_bytes,
+            binary_image,
+            proof,
+        )
+        js_binary = _js_load_verified_seed_binary_image_result(
+            seed_name,
+            seed_bytes,
+            binary_image,
+            proof,
+        )
+        py_json = _python_load_verified_seed_image_result(
+            seed_name,
+            seed_bytes,
+            verify=True,
+        )
+        js_json = _js_load_registered_seed_image_bytes_result(seed_name, seed_bytes)
+
+        assert py_binary["ok"] is False
+        assert py_binary["name"] == "SeedBinaryMigrationError"
+        assert "Mu-native sidecar adapter" in str(py_binary["error"])
+        assert js_binary == {"ok": True, "ids": expected_ids}
+        assert py_json == {"ok": True, "ids": expected_ids}
+        assert js_json == {"ok": True, "ids": expected_ids}
+
+    def test_opt_in_smaller_seed_image_tamper_rejects_with_json_rollback_intact(self):
+        """Sidecar failure must not change the default JSON seed loading path."""
+        seed_name = "rcx_engine.v1.json"
+        seed_bytes = get_seed_path(seed_name).read_bytes()
+        expected_ids = EXPECTED_PROJECTION_IDS[seed_name]
+        binary_image, proof = generate_seed_binary_migration_artifact(
+            seed_name,
+            seed_bytes,
+        )
+        tampered_binary = binary_image + b"\x00"
+
+        py_binary = _python_load_verified_seed_binary_image_result(
+            seed_name,
+            seed_bytes,
+            tampered_binary,
+            proof,
+        )
+        js_binary = _js_load_verified_seed_binary_image_result(
+            seed_name,
+            seed_bytes,
+            tampered_binary,
+            proof,
+        )
+        py_json = _python_load_verified_seed_image_result(
+            seed_name,
+            seed_bytes,
+            verify=True,
+        )
+        js_json = _js_load_registered_seed_image_bytes_result(seed_name, seed_bytes)
+
+        assert py_binary["ok"] is False
+        assert py_binary["name"] == "SeedBinaryMigrationError"
+        assert "Mu-native sidecar adapter" in str(py_binary["error"])
+        assert js_binary["ok"] is False
+        assert "Trailing data" in str(js_binary["error"])
+        assert py_json == {"ok": True, "ids": expected_ids}
+        assert js_json == {"ok": True, "ids": expected_ids}
 
     def test_tampered_known_seed_fails_closed_in_both_byte_boundaries(self):
         """The same tampered known seed image is rejected before parse on both substrates."""

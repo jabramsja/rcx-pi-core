@@ -309,6 +309,9 @@ def load_verified_seed_image(
     seed_name: str,
     seed_bytes: bytes,
     verify: bool = True,
+    *,
+    binary_image: bytes | None = None,
+    expected_binary_proof: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Deterministically verify, parse, and validate a JSON seed image.
@@ -317,6 +320,10 @@ def load_verified_seed_image(
         seed_name: Registered seed filename.
         seed_bytes: Raw seed JSON bytes.
         verify: If True, verify checksum and structure. Default True.
+        binary_image: Optional smaller MuBinary sidecar bytes for an explicit
+            pilot load. Python fails this path closed until a Mu-native adapter
+            is available. Default None keeps JSON as the production path.
+        expected_binary_proof: Required proof object when binary_image is set.
 
     Returns:
         Parsed seed dict.
@@ -340,6 +347,16 @@ def load_verified_seed_image(
     if verify:
         validate_seed_structure(seed_name, seed)
         validate_projection_ids(seed_name, seed)
+
+    if (binary_image is None) != (expected_binary_proof is None):
+        raise ValueError(
+            "binary_image and expected_binary_proof must be provided together"
+        )
+    if binary_image is not None:
+        raise SeedBinaryMigrationError(
+            "Python bootstrap seed loader does not materialize binary sidecars; "
+            "keep the JSON seed image until a Mu-native sidecar adapter is available"
+        )
 
     return seed
 
