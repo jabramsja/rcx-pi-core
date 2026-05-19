@@ -168,18 +168,18 @@ Questions? Concerns? Thoughts? -- Think hard
 - Refresh wave: `n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19`
 - Active packet: `reports/control_plane/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19_2026-05-19.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `a7a64ac61dd793cf79f9c556a20f62f4992f8911d6ec8695996a36ac78be30e8`
+- Tracker note sha256: `11db5b7f4748a34fcc7c89fa59363b55fb969e780beb4e5d1ec7d6fe89beb03a`
 - Indicator artifact: `reports/l4_wave_indicators/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/structural/test_subtree_root_guard.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19_2026-05-19.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/l4_gates/test_stage0_production_pilot_gate.py::TestStage0CanonicalVectors mu/tests/l4_gates/test_stage0_production_pilot_gate.py::TestParityWithMatchInner mu/tests/l4_gates/test_stage0_production_pilot_gate.py::TestLOCBudget mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF25JsStage0MatchEmptyVar mu/tests/parity/test_js_vm_bridge_parity.py::TestMatchVmBridgeParity mu/tests/parity/test_js_vm_bridge_parity.py::TestSubstVmBridgeParity mu/tests/structural/test_execution_layer_truth_contract.py::TestD005Stage0Contract --tb=short && node mu/host/js/eval_step.js && python3 mu/tools/checks/check_host_semantics_ratchet.py --json && python3 tools/checks/check_host_authority_inventory_ratchet.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19_2026-05-19.md. (2) Final evidence covers Stage0 L4 gates, JavaScript parity smoke, host-semantics ratchet, authority inventory ratchet, and the execution_layer_truth proof binding. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19.json`
 - Current staged files:
   - `TASKS.md`
   - `mu/tests/structural/test_subtree_root_guard.py`
+  - `mu/tests/tools/test_commit_executor_receipt.py`
   - `mu/tools/audits/audit_fast.sh`
-  - `mu/tools/audits/audit_semantic_purity.sh`
-  - `mu/tools/hooks/pre-push-fast`
+  - `mu/tools/executors/commit_executor.py`
   - `reports/control_plane/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19_2026-05-19.md`
   - `reports/l4_wave_indicators/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

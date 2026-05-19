@@ -290,6 +290,16 @@ class TestUntrackedArtifactChecker:
         assert staged_idx < enabler_idx, (
             "audit_fast.sh must classify staged tooling-only follow-ups before L4 check"
         )
+        non_runtime_guard = 'if ! printf \'%s\\n\' "$STAGED_FILES" | _l4_has_runtime_files; then'
+        wave_id_guard = 'if [ -z "$WAVE_ID_FLAG" ]; then'
+        assert non_runtime_guard in content, (
+            "audit_fast.sh must classify all staged non-runtime diffs as L4_ENABLER"
+        )
+        non_runtime_idx = content.index(non_runtime_guard)
+        wave_id_guard_idx = content.index(wave_id_guard, non_runtime_idx)
+        assert non_runtime_idx < wave_id_guard_idx < enabler_idx, (
+            "L4_ENABLER classification must not be hidden behind an empty wave-id guard"
+        )
         assert "_l4_has_runtime_files" in content, (
             "audit_fast.sh must distinguish runtime from tooling-only staged diffs"
         )

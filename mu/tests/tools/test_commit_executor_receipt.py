@@ -2793,6 +2793,41 @@ class TestReceiptChainEndToEnd:
         assert "11 wave-owned file(s)" not in tasks_text
         assert "11 wave-owned file(s)" not in packet_text
 
+    def test_structural_truth_refresh_does_not_replace_evidence_with_tooling_only_scope(self):
+        wave_id = "structural-evidence-preserve-wave"
+        tracker_note = (
+            f"- Tracker sync note (2026-05-19, {wave_id}): **TEST.**. "
+            "Class: L4_STRUCTURAL. target_gate_id: G8. workload_target: execution_layer_truth. "
+            "host_semantics_delta_before: runtime proof before. "
+            "host_semantics_delta_after: runtime proof after. "
+            "structural_artifact_ref: mu/host/js/core/bootstrap_core.js; "
+            "mu/tests/l4_gates/test_stage0_production_pilot_gate.py; "
+            "mu/tests/structural/test_execution_layer_truth_contract.py. "
+            "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+            "mu/tests/l4_gates/test_stage0_production_pilot_gate.py "
+            "mu/tests/structural/test_execution_layer_truth_contract.py`. "
+            "evidence_delta: (1) Final pytest gate covered 2 test file(s). "
+            "progress_proof_before: before. progress_proof_after: after. "
+            "post_gate_contract_sweep: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+            "mu/tests/structural/test_execution_layer_truth_contract.py`. "
+            "primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. "
+            f"indicator_artifact_ref: reports/l4_wave_indicators/{wave_id}.json. "
+            f"indicator_collection_command: python3 tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} "
+            f"--output reports/l4_wave_indicators/{wave_id}.json. "
+            "bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. "
+            "boot0_track_id: V1. boot0_progress_state: HOLD."
+        )
+
+        refreshed = commit_mod._refresh_tracker_note_test_evidence(  # ANTICHEAT_OK: locks structural evidence preservation
+            tracker_note,
+            ["mu/tests/structural/test_subtree_root_guard.py"],
+        )
+
+        assert refreshed == tracker_note
+        assert "mu/tests/l4_gates/test_stage0_production_pilot_gate.py" in refreshed
+        assert "mu/tests/structural/test_execution_layer_truth_contract.py" in refreshed
+        assert "test_subtree_root_guard.py" not in refreshed
+
     def test_same_wave_followup_touches_tasks_when_tracker_relevant_files_change(self, tmp_path):
         from collections import namedtuple
 

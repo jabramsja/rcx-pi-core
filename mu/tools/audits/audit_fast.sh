@@ -182,10 +182,15 @@ if git diff --cached --name-only | grep -q .; then
     # shellcheck source=/dev/null
     source tools/checks/derive_wave_id.sh "$L4_BRANCH" --staged
     L4_CLASS_FLAG=()
-    if [ -z "$WAVE_ID_FLAG" ] && ! printf '%s\n' "$STAGED_FILES" | _l4_has_runtime_files; then
-        STAGED_WAVE_ID="$(_l4_branch_wave_id "$L4_BRANCH")"
-        if [ -n "$STAGED_WAVE_ID" ]; then
-            WAVE_ID_FLAG="--wave-id=$STAGED_WAVE_ID"
+    # Staged tooling/control-plane follow-up commits on a structural branch
+    # must be judged as L4_ENABLER diffs even when TASKS.md-derived wave id
+    # binding points at the branch-wide structural tracker note.
+    if ! printf '%s\n' "$STAGED_FILES" | _l4_has_runtime_files; then
+        if [ -z "$WAVE_ID_FLAG" ]; then
+            STAGED_WAVE_ID="$(_l4_branch_wave_id "$L4_BRANCH")"
+            if [ -n "$STAGED_WAVE_ID" ]; then
+                WAVE_ID_FLAG="--wave-id=$STAGED_WAVE_ID"
+            fi
         fi
         L4_CLASS_FLAG=(--wave-class L4_ENABLER)
     fi
