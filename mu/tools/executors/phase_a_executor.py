@@ -1546,8 +1546,9 @@ def lock_plan(
     if review_lock_lines:
         # Bridge implementers sometimes use this transient sentinel while the
         # packet is under review.  After bridge GO, lock_plan owns the canonical
-        # transition and converts it through UNLOCKED before setting LOCKED.
-        canonical_lock_line = "Phase-A-Lock: UNLOCKED"
+        # transition.  Normalize directly to the final LOCKED state in memory so
+        # an interrupted process cannot persist a dispatchable UNLOCKED packet.
+        canonical_lock_line = "Phase-A-Lock: LOCKED"
         hdr_lines = header.splitlines(keepends=True)
         for i, line in enumerate(hdr_lines):
             if line.rstrip("\r\n") == phase_a_lock_header_lines[0]:
@@ -1561,7 +1562,6 @@ def lock_plan(
             )
         header = "".join(hdr_lines)
         content = header + body
-        full_path.write_text(content, encoding="utf-8")
         header, body = _split_plan_header(content)
     unlocked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*UNLOCKED[ \t]*$", header)
     locked_lines = re.findall(r"(?m)^Phase-A-Lock:\s*LOCKED[ \t]*$", header)
