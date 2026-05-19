@@ -81,14 +81,14 @@ RCX tracks host debt at three distinct granularities. Each ledger answers a diff
 
 | Ledger | Count | What It Measures | Baseline Source |
 |--------|-------|------------------|-----------------|
-| **Tracked markers** | 7 | Narrow official `@host_*` debt marker sites (3 Py marker + 4 JS marker) | `tools/checks/host_semantics_baseline.json` |
+| **Tracked markers** | 5 | Narrow official `@host_*` debt marker sites (2 Py marker + 3 JS marker) | `tools/checks/host_semantics_baseline.json` |
 | **Authority sites** | 217 | Named runtime sites with host-authority signals (120 Python + 97 JavaScript) | `tools/checks/host_authority_inventory_baseline.json` |
 | **Total inventory sites** | 312 | Full named host-runtime surface (181 Python + 131 JavaScript) | `tools/checks/host_authority_inventory_baseline.json` |
 
 ```
 THRESHOLD: 9 (dashboard/pre-commit semantic ceiling)
-CURRENT: 7 (3 Py marker + 4 JS marker — per host_semantics_baseline.json)
-FLOOR: 7 (see archive/status_debt_history.md for wave-by-wave explanation)
+CURRENT: 5 (2 Py marker + 3 JS marker — per host_semantics_baseline.json)
+FLOOR: 5 (see archive/status_debt_history.md for wave-by-wave explanation)
 INFRA_CEILING: 135
 INFRA_CURRENT: 135
 ```
@@ -161,6 +161,6 @@ Current Exhaustion Layer: META_CIRCULAR
 - Debt marker history: [`archive/status_debt_history.md`](archive/status_debt_history.md)
 - L3/L4 architecture details: [`mu/docs/core/L3SubstrateArchitecture.v0.md`](mu/docs/core/L3SubstrateArchitecture.v0.md)
 
-**Last updated:** 2026-05-19 (N3 step-kernel VM iteration marker truth ratchet — tracked marker floor 8→7)
+**Last updated:** 2026-05-19 (N3 list-to-linked boundary demotion — tracked marker floor 7→5)
 **Next milestone:** Hemisphere Metabolization Contract remains the closed milestone baseline (E1-E5 all MET). Canonical authorization remains TASKS.md.
 **Active NEXT items:** See TASKS.md.

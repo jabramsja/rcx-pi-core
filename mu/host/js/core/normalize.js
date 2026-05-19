@@ -412,7 +412,7 @@ function normalizeProjection(proj) {
 
 /**
  * Convert array to linked list for kernel input.
- * @host_iteration: data conversion loop (parity with Python list_to_linked)
+ * BOUNDARY: bounded boundary-normalization conversion loop (parity with Python list_to_linked)
  */
 function listToLinked(arr) {
   if (!Array.isArray(arr) || arr.length === 0) {
