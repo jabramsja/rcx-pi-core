@@ -13,11 +13,13 @@ from pathlib import Path
 
 import pytest
 
+from mu.tests.tools.module_loader import load_module
 from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.engine_pipeline import run_engine_pipeline
 
 from rcx_pi.selfhost.projection_loader import load_verified_seed, get_seed_path
 from rcx_pi.selfhost.mu_type import mu_equal
+from tests.repo_root import REPO_ROOT
 
 pytestmark = [pytest.mark.slow]
 
@@ -181,6 +183,37 @@ class TestD005Stage0Contract:
         ]
         assert js_match.count("stage0Match(") == 1
         assert js_subst.count("stage0Substitute(") == 1
+
+    def test_bootstrap_core_change_selects_pre_commit_carveout_gate(self, tmp_path):
+        """Runtime Stage0 JS changes must bind to the bootstrap core carveout gate."""
+        commit_mod = load_module(
+            "commit_executor_truth_contract",
+            REPO_ROOT / "mu" / "tools" / "executors" / "commit_executor.py",
+        )
+        repo = tmp_path / "repo"
+        gate = repo / "tests" / "l4_gates" / "test_bootstrap_core_carveout_gate.py"
+        gate.parent.mkdir(parents=True)
+        gate.write_text("def test_gate(): pass\n")
+
+        selected = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: proof-binding gate selection
+            repo,
+            ["mu/host/js/core/bootstrap_core.js"],
+        )
+
+        assert selected == ["tests/l4_gates/test_bootstrap_core_carveout_gate.py"]
+
+    def test_bootstrap_core_change_selects_phase_b_carveout_gate(self):
+        """Phase B handoff validation must see the same bootstrap core gate."""
+        phase_b_mod = load_module(
+            "phase_b_executor_truth_contract",
+            REPO_ROOT / "mu" / "tools" / "executors" / "phase_b_executor.py",
+        )
+
+        selected = phase_b_mod._select_pytest_gate_files(  # ANTICHEAT_OK: proof-binding gate selection
+            ["mu/host/js/core/bootstrap_core.js"],
+        )
+
+        assert selected == ["tests/l4_gates/test_bootstrap_core_carveout_gate.py"]
 
     def test_no_stage0_in_wrapper_functions(self):
         """Forbidden wrappers (step/match/substitute) must not reference

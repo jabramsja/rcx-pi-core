@@ -52,6 +52,26 @@ def _count_code_lines(func):
     ])
 
 
+def _count_js_code_lines(path: Path) -> int:
+    """Count non-blank, non-comment JS lines."""
+    count = 0
+    in_block_comment = False
+    for line in path.read_text().splitlines():
+        stripped = line.strip()
+        if in_block_comment:
+            if "*/" in stripped:
+                in_block_comment = False
+            continue
+        if stripped.startswith("/*"):
+            if "*/" not in stripped:
+                in_block_comment = True
+            continue
+        if stripped.startswith("//") or stripped.startswith("*") or stripped == "":
+            continue
+        count += 1
+    return count
+
+
 def _has_subscript_assignment(source: str) -> list[str]:
     """AST-based: find any subscript assignment (e.g. x[k] = v)."""
     tree = ast.parse(source)
@@ -311,6 +331,11 @@ class TestLOCBudget:
         total = _count_code_lines(_stage0_match) + _count_code_lines(_stage0_substitute)
         # Limit 110: 79 LOC core + ~21 LOC decorators + margin
         assert total <= 110, f"Total Stage 0 is {total} LOC (limit 110)"
+
+    def test_js_bootstrap_core_loc_budget(self):
+        path = REPO_ROOT / "mu" / "host" / "js" / "core" / "bootstrap_core.js"
+        loc = _count_js_code_lines(path)
+        assert loc <= 405, f"bootstrap_core.js is {loc} LOC (limit 405)"
 
 
 # ===========================================================================

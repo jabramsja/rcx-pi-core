@@ -448,12 +448,9 @@ function stage0Match(pattern, input, bindings, _depth = 0) {
   const work = [{ pattern, input, depth: _depth }];
   while (work.length > 0) {
     const frame = work.pop();
-    pattern = frame.pattern;
-    input = frame.input;
+    pattern = frame.pattern; input = frame.input;
     const depth = frame.depth;
-    if (depth > MAX_DEPTH) {
-      return NO_MATCH;
-    }
+    if (depth > MAX_DEPTH) return NO_MATCH;
 
     // Variable site
     if (isVar(pattern)) {
@@ -462,28 +459,23 @@ function stage0Match(pattern, input, bindings, _depth = 0) {
       if (Object.hasOwn(current, name)) {
         // Non-linear conflict: use muHashCached (NOT muHashControlCached —
         // control hash canonicalizes 0.0→0, breaking int/float distinction).
-        if (muHashCached(current[name]) !== muHashCached(input)) {
-          return NO_MATCH;
-        }
-        continue;
+        if (muHashCached(current[name]) !== muHashCached(input)) return NO_MATCH;
+      } else {
+        current = Object.assign(Object.create(null), current, { [name]: input });
       }
-      const merged = Object.create(null);
-      for (const [k, v] of Object.entries(current)) { merged[k] = v; }
-      merged[name] = input;
-      current = merged;
       continue;
     }
 
     // Null
     if (pattern === null) {
-      if (input === null) continue;
-      return NO_MATCH;
+      if (input !== null) return NO_MATCH;
+      continue;
     }
 
     // Primitives (=== handles bool/int distinction in JS)
     if (typeof pattern !== 'object') {
-      if (pattern === input) continue;
-      return NO_MATCH;
+      if (pattern !== input) return NO_MATCH;
+      continue;
     }
 
     // Array branch REMOVED (P7W4): After normalization, all arrays become head/tail
@@ -493,28 +485,17 @@ function stage0Match(pattern, input, bindings, _depth = 0) {
 
     // Object (Gate-3: allow pattern to omit _type when input has _type="list")
     if (typeof pattern === 'object') {
-      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
-        return NO_MATCH;
-      }
-      const pKeys = Object.keys(pattern);
-      const iKeys = Object.keys(input);
-      const iKeySet = new Set(iKeys);
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) return NO_MATCH;
+      const pKeys = Object.keys(pattern), iKeys = Object.keys(input), iKeySet = new Set(iKeys);
       if (pKeys.length !== iKeys.length) {
-        const pKeySet = new Set(pKeys);
-        const inputExtra = iKeys.filter(k => !pKeySet.has(k));
-        const patternExtra = pKeys.filter(k => !iKeySet.has(k));
-        const typeIsList = (input._type === 'list');
-        if (!(inputExtra.length === 1 && inputExtra[0] === '_type' && patternExtra.length === 0 && typeIsList)) {
-          return NO_MATCH;
-        }
+        const pKeySet = new Set(pKeys), inputExtra = iKeys.filter(k => !pKeySet.has(k));
+        const patternExtra = pKeys.filter(k => !iKeySet.has(k)), typeIsList = (input._type === 'list');
+        if (!(inputExtra.length === 1 && inputExtra[0] === '_type' && patternExtra.length === 0 && typeIsList)) return NO_MATCH;
       } else {
-        for (const k of pKeys) {
-          if (!iKeySet.has(k)) return NO_MATCH;
-        }
+        for (const k of pKeys) if (!iKeySet.has(k)) return NO_MATCH;
       }
       for (let i = pKeys.length - 1; i >= 0; i--) {
-        const k = pKeys[i];
-        work.push({ pattern: pattern[k], input: input[k], depth: depth + 1 });
+        const k = pKeys[i]; work.push({ pattern: pattern[k], input: input[k], depth: depth + 1 });
       }
       continue;
     }
@@ -528,32 +509,22 @@ function stage0Match(pattern, input, bindings, _depth = 0) {
  * @host_recursion — legacy debt-dashboard marker; traversal is worklist-based.
  */
 function stage0Substitute(body, bindings, _depth = 0) {
-  const values = [];
-  const work = [{ op: 'eval', value: body, depth: _depth }];
+  const values = [], work = [{ op: 'eval', value: body, depth: _depth }];
   while (work.length > 0) {
     const frame = work.pop();
     if (frame.op === 'list') {
-      const start = values.length - frame.count;
-      const items = values.slice(start);
-      values.length = start;
-      values.push(muContainers.list(items));
+      const start = values.length - frame.count, items = values.slice(start);
+      values.length = start; values.push(muContainers.list(items));
       continue;
     }
     if (frame.op === 'record') {
-      const start = values.length - frame.keys.length;
-      const result = muContainers.record();
-      for (let i = 0; i < frame.keys.length; i++) {
-        result[frame.keys[i]] = values[start + i];
-      }
-      values.length = start;
-      values.push(result);
+      const start = values.length - frame.keys.length, result = muContainers.record();
+      for (let i = 0; i < frame.keys.length; i++) result[frame.keys[i]] = values[start + i];
+      values.length = start; values.push(result);
       continue;
     }
-    const value = frame.value;
-    const depth = frame.depth;
-    if (depth > MAX_DEPTH) {
-      throw new Error(`Stage 0 substitute depth exceeded ${MAX_DEPTH}`);
-    }
+    const value = frame.value, depth = frame.depth;
+    if (depth > MAX_DEPTH) throw new Error(`Stage 0 substitute depth exceeded ${MAX_DEPTH}`);
     if (value === null || typeof value !== 'object') {
       values.push(value);
       continue;
@@ -568,16 +539,12 @@ function stage0Substitute(body, bindings, _depth = 0) {
     }
     if (Array.isArray(value)) {
       work.push({ op: 'list', count: value.length });
-      for (let i = value.length - 1; i >= 0; i--) {
-        work.push({ op: 'eval', value: value[i], depth: depth + 1 });
-      }
+      for (let i = value.length - 1; i >= 0; i--) work.push({ op: 'eval', value: value[i], depth: depth + 1 });
       continue;
     }
     const entries = Object.entries(value);
     work.push({ op: 'record', keys: entries.map(([k]) => k) });
-    for (let i = entries.length - 1; i >= 0; i--) {
-      work.push({ op: 'eval', value: entries[i][1], depth: depth + 1 });
-    }
+    for (let i = entries.length - 1; i >= 0; i--) work.push({ op: 'eval', value: entries[i][1], depth: depth + 1 });
   }
   return values.pop();
 }

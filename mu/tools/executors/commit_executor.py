@@ -2555,6 +2555,13 @@ def _is_test_file(path: str) -> bool:
     )
 
 
+_RUNTIME_TARGETED_TESTS = {
+    "mu/host/js/core/bootstrap_core.js": (
+        "tests/l4_gates/test_bootstrap_core_carveout_gate.py",
+    ),
+}
+
+
 def _canonical_repo_test_path(repo_root: Path, path: str) -> str:
     """Canonicalize repo-relative test paths so symlink mirrors dedupe cleanly."""
     normalized = path.replace("\\", "/")
@@ -2570,6 +2577,9 @@ def _collect_commit_test_files(repo_root: Path, staged_files: list[str]) -> list
     candidates: set[str] = set()
     for path in staged_files:
         normalized = path.replace("\\", "/")
+        for test_path in _RUNTIME_TARGETED_TESTS.get(normalized, ()):
+            if (repo_root / test_path).exists():
+                candidates.add(_canonical_repo_test_path(repo_root, test_path))
         if _is_test_file(normalized) and normalized.endswith(".py"):
             candidates.add(_canonical_repo_test_path(repo_root, normalized))
             continue

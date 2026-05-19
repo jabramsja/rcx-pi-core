@@ -4351,6 +4351,20 @@ class TestCommitExecutorPytestGate:
             "tests/test_direct_stage.py",
         ]
 
+    def test_collect_commit_test_files_includes_bootstrap_core_carveout_gate(self, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / "mu" / "host" / "js" / "core").mkdir(parents=True)
+        (repo / "tests" / "l4_gates").mkdir(parents=True)
+        (repo / "mu" / "host" / "js" / "core" / "bootstrap_core.js").write_text("module.exports = {}\n")
+        (repo / "tests" / "l4_gates" / "test_bootstrap_core_carveout_gate.py").write_text("def test_gate(): pass\n")
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: locks targeted runtime gate mapping
+            repo,
+            ["mu/host/js/core/bootstrap_core.js"],
+        )
+
+        assert result == ["tests/l4_gates/test_bootstrap_core_carveout_gate.py"]
+
     def test_collect_commit_test_files_dedupes_symlinked_test_mirrors(self, tmp_path):
         repo = tmp_path / "repo"
         (repo / "mu" / "tools").mkdir(parents=True)

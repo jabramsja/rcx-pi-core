@@ -1052,8 +1052,27 @@ def _is_pytest_gate_file(path: str) -> bool:
     return path.startswith("mu/tests/") or "/test_" in path or path.endswith("_test.py")
 
 
+_RUNTIME_TARGETED_TESTS = {
+    "mu/host/js/core/bootstrap_core.js": (
+        "tests/l4_gates/test_bootstrap_core_carveout_gate.py",
+    ),
+}
+
+
 def _select_pytest_gate_files(changed_files: list[str]) -> list[str]:
-    return [path for path in changed_files if _is_pytest_gate_file(path)]
+    selected: list[str] = []
+    seen: set[str] = set()
+    for path in changed_files:
+        normalized = path.replace("\\", "/")
+        candidates = []
+        if _is_pytest_gate_file(normalized):
+            candidates.append(normalized)
+        candidates.extend(_RUNTIME_TARGETED_TESTS.get(normalized, ()))
+        for candidate in candidates:
+            if candidate not in seen:
+                selected.append(candidate)
+                seen.add(candidate)
+    return selected
 
 
 def select_private_attr_gate_files(changed_files: list[str]) -> list[str]:
