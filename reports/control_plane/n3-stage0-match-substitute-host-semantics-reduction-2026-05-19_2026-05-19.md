@@ -103,6 +103,7 @@ No selected marker is `removable-now` in this bounded wave. The selected markers
 Precise prerequisite route:
 
 - Successor packet route: `reports/control_plane/n3-stage0-match-substitute-structural-worklist-prerequisite-2026-05-19.md`.
+- Routed packet status: materialized as a route-only prerequisite packet. It does not authorize runtime, substrate, seed, ratchet, or test edits until the successor packet first gains detector-visible `TASKS.md` tracker authority for its exact wave ID and packet path.
 - Required successor purpose: replace the selected Stage0 recursive host tree walks and Python builtin/type-dispatch marker with a parity-preserving structural worklist or self-hosted match/substitute default-path reduction, expressed in Mu/Stage0 structure rather than Python or JavaScript host semantics.
 - Required successor authority before implementation: a detector-visible same-wave `TASKS.md` tracker entry, explicit Python/JS write set, focused Stage0/parity negative controls proving behavior and marker reduction, host-semantics ratchet proof with no baseline update, host-authority inventory ratchet proof, strict L4 structural contract, and indicator collection.
 - Current wave outcome: no runtime code edits; no selected marker removal; no host-semantics reduction claim.
