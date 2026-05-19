@@ -4,18 +4,18 @@
       "host_builtin": 2,
       "host_iteration": 2,
       "host_mutation": 0,
-      "host_recursion": 2
+      "host_recursion": 0
     },
     "python": {
       "host_builtin": 1,
       "host_iteration": 3,
       "host_mutation": 0,
-      "host_recursion": 2
+      "host_recursion": 0
     }
   },
-  "generated_at": "2026-03-19T16:49:43.816893Z",
+  "generated_at": "2026-05-19T00:00:00Z",
   "schema_version": 1,
-  "total": 12,
-  "total_javascript": 6,
-  "total_python": 6
+  "total": 8,
+  "total_javascript": 4,
+  "total_python": 4
 }

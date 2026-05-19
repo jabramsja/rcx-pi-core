@@ -92,3 +92,17 @@ class TestPreCommitDocDetection:
         assert "mu/docs/roadmap/" not in pattern, (
             f"Pattern {pattern!r} still includes legacy mu/docs/roadmap/ special-case"
         )
+
+    def test_debt_threshold_parser_takes_first_status_number(self):
+        """THRESHOLD parsing must ignore explanatory numbers on the same line."""
+        text = HOOK_PATH.read_text()
+        threshold_lines = [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip().startswith("THRESHOLD=")
+        ]
+        assert threshold_lines, "pre-commit-doc-check missing THRESHOLD assignment"
+        threshold_line = threshold_lines[0]
+        assert "grep -E '^THRESHOLD:' STATUS.md" in threshold_line
+        assert "grep -oE '[0-9]+'" in threshold_line
+        assert "head -1" in threshold_line

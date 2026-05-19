@@ -144,19 +144,25 @@ class TestMarkerRemoved:
                 return
         pytest.fail("Could not find 'def _stage0_substitute(' in eval_seed.py")
 
-    def test_host_recursion_retained(self):
-        """@host_recursion must remain — recursion is still on trusted path."""
+    def test_no_host_recursion_on_stage0_substitute(self):
+        """Source scan: stale @host_recursion must not mark worklist substitute."""
         source = EVAL_SEED_PATH.read_text()
         lines = source.splitlines()
         for i, line in enumerate(lines):
             if line.strip().startswith("def _stage0_substitute("):
                 window = "\n".join(lines[max(0, i - 10):i])
-                assert "@host_recursion" in window, (
-                    "@host_recursion removed from _stage0_substitute but "
-                    "recursion is still present — marker must be retained"
+                assert "@host_recursion" not in window, (
+                    "@host_recursion still marks _stage0_substitute even though "
+                    "the trusted traversal is worklist-based"
                 )
                 return
         pytest.fail("Could not find 'def _stage0_substitute(' in eval_seed.py")
+
+    def test_stage0_substitute_has_no_self_recursive_calls(self):
+        """Source scan: _stage0_substitute must remain worklist/no-self-call."""
+        source = _get_function_source(_stage0_substitute)
+        assert source.count("_stage0_substitute(") == 1
+        assert "while work:" in source
 
     def test_ratchet_mutation_zero(self):
         """Ratchet must show Python host_mutation == 0."""

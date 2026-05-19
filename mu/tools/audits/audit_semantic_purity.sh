@@ -687,30 +687,29 @@ echo "== 19. Host Debt: Threshold Check =="
 # - AST_OK: infra bypasses are scaffolding (acceptable, not counted)
 # - Deferred reviews ("PHASE N REVIEW") count as debt to prevent silent accumulation
 #
-# CURRENT STATE (Phase 8c, 2026-03-07):
-# - 11 = HOST DEBT FLOOR (irreducible bootstrap substrate; was 12 before CP-S1A)
-# - This is NOT a target for reduction - these are bootstrap primitives
+# CURRENT STATE (Phase 8c, 2026-05-19):
+# - 10 = Python semantic-debt audit floor after stale Stage0 recursion marker cleanup
+# - This is NOT a target for reduction without source-proven structural replacement
 #
-# BREAKDOWN (must match STATUS.md):
-#   @host_recursion:  2 (eval_seed match/substitute - BOOTSTRAP)
-#   @host_builtin:    3 (eval_seed, deep_eval)
-#   @host_iteration:  3 (run_mu, step_kernel_mu, run_mu_structural - BOOTSTRAP)
-#   @host_mutation:   2 (eval_seed, deep_eval)
-#   AST_OK bootstrap: 2 (eval_seed list/dict comprehensions)
+# PYTHON-ONLY BREAKDOWN (STATUS.md tracks cross-substrate marker total):
+#   @host_recursion:  0 (Stage0 match/substitute are explicit worklists)
+#   @host_builtin:    3 (eval_seed Stage0 match + deep_eval utility decorators)
+#   @host_iteration:  2 (step_kernel_mu, _step_kernel_with_vm decorators)
+#   @host_mutation:   1 (deep_eval history recording utility decorator)
+#   AST_OK bootstrap: 4 (stage0_vm structural copy/materialization)
 #   ─────────────────────
-#   TOTAL:           12
+#   TOTAL:           10
 #
-# WHY 11 IS THE CURRENT PYTHON-ONLY CEILING:
-# The match() and substitute() in eval_seed.py are NOT "reference implementations" -
-# they ARE the bootstrap primitives that eval_step() uses to apply ANY projection.
-# Eliminating them would require eval_step to not exist (circular dependency).
-# L3/L4 would require fundamentally different architecture.
+# WHY 10 IS THE CURRENT PYTHON-ONLY CEILING:
+# The remaining markers are current bootstrap/boundary debt. Stage0 match/substitute
+# traversal is still host code, but the stale host-recursion claim is gone because
+# the current source uses explicit worklists with no self-recursive calls.
 #
 # Python-only debt threshold.
-# This script scans all rcx_pi/ (including deep_eval.py) = 7 decorators + 4 AST_OK bootstrap = 11.
-# Wave 5: 4 eval_seed.py markers reclassified from bootstrap to infra.
-# STATUS.md THRESHOLD is cross-substrate (16 = 6 Py ratchet + 6 JS + 4 AST_OK).
-DEBT_THRESHOLD=11
+# This script scans all rcx_pi/ = 6 Python decorators + 4 AST_OK bootstrap = 10.
+# STATUS.md CURRENT/FLOOR are cross-substrate tracked markers (8 = 4 Py ratchet + 4 JS);
+# STATUS.md THRESHOLD remains 10 for the legacy dashboard/pre-commit semantic ceiling.
+DEBT_THRESHOLD=10
 if [ -z "$DEBT_THRESHOLD" ]; then
     echo "ERROR: Could not read THRESHOLD from STATUS.md"
     exit 1
@@ -725,7 +724,8 @@ fi
 # HISTORY (for archaeology, not policy):
 # 6→23 (comprehensive marking), 23→21 (Phase 6a), 21→19 (6b), 19→15 (6c),
 # 15→14 (PR #163), 14→11 (6d), 11→14 (7d-1 @host_iteration), 14→12 (Phase 8b),
-# 12→11 (N3 Stage0 worklist removed one Python @host_recursion marker)
+# 12→10 Python audit floor / 12→8 tracked markers
+# (N3 Stage0 worklist truth removed stale Python/JS @host_recursion markers)
 
 echo "Counting all semantic debt markers..."
 

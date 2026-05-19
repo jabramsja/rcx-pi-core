@@ -598,7 +598,6 @@ def _stage0_match(pattern, input_value, bindings=None, _depth=0):
     return current
 
 
-@host_recursion("Legacy P7 marker retained; structural worklist traversal has no self-recursive calls.")
 def _stage0_substitute(body, bindings, _depth=0):
     """Stage 0 substitute: worklist tree walk. Raises on unbound variable."""
     values = ()

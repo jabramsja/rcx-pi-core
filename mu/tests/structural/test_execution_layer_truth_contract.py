@@ -167,12 +167,17 @@ class TestD005Stage0Contract:
         py_match = inspect.getsource(_stage0_match)
         py_subst = inspect.getsource(_stage0_substitute)
         assert "@host_recursion" not in py_match
+        assert "@host_recursion" not in py_subst
         assert py_match.count("_stage0_match(") == 1
         assert py_subst.count("_stage0_substitute(") == 1
         assert ".append(" not in py_subst
 
         repo_root = Path(__file__).resolve().parents[2]
         js_source = (repo_root / "host/js/core/bootstrap_core.js").read_text()
+        js_stage0 = js_source[
+            js_source.index("// Stage 0 micro-kernel"):
+            js_source.index("module.exports")
+        ]
         js_match = js_source[
             js_source.index("function stage0Match"):
             js_source.index("function stage0Substitute")
@@ -181,6 +186,7 @@ class TestD005Stage0Contract:
             js_source.index("function stage0Substitute"):
             js_source.index("module.exports")
         ]
+        assert "@host_recursion" not in js_stage0
         assert js_match.count("stage0Match(") == 1
         assert js_subst.count("stage0Substitute(") == 1
 
