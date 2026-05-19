@@ -247,6 +247,28 @@ class TestF25JsStage0MatchEmptyVar:
         assert proc.returncode == 0, f"JS stage0Match empty-var failed: {proc.stderr}"
         assert proc.stdout.strip() == "PASS"
 
+    def test_js_stage0_nested_worklist(self):
+        """Direct JS Stage0 nested match/substitute must use the parity worklist."""
+        js_script = (
+            "const { stage0Match, stage0Substitute } = require('./mu/host/js/core/bootstrap_core');\n"
+            "const pattern = {outer: {left: {var: 'x'}, right: {var: 'x'}}};\n"
+            "const value = {outer: {left: 7, right: 7}};\n"
+            "const bindings = stage0Match(pattern, value);\n"
+            "const output = stage0Substitute({ok: true, value: {var: 'x'}}, bindings);\n"
+            "if (JSON.stringify(output) !== JSON.stringify({ok: true, value: 7})) {\n"
+            "  process.stderr.write('FAIL: got ' + JSON.stringify(output));\n"
+            "  process.exit(1);\n"
+            "}\n"
+            "console.log('PASS');\n"
+        )
+        proc = subprocess.run(
+            ["node", "-e", js_script],
+            capture_output=True, text=True,
+            cwd=str(REPO_ROOT), timeout=10,
+        )
+        assert proc.returncode == 0, f"JS Stage0 nested worklist failed: {proc.stderr}"
+        assert proc.stdout.strip() == "PASS"
+
 
 # ---------------------------------------------------------------------------
 # F-12: bindings_to_dict non-string name guard

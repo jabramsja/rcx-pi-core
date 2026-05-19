@@ -434,110 +434,152 @@ function run(projections, input, maxSteps = MAX_RUN_STEPS) {
 
 // ---------------------------------------------------------------------------
 // Stage 0 micro-kernel (D005 — sole production path since Wave H 2026-03-11)
-// Pure-merge match + substitute. Flag removed Wave 9 (parity with Python).
+// Worklist match + substitute. Flag removed Wave 9 (parity with Python).
 // See L4DecisionCard.v0.md D005.
 // ---------------------------------------------------------------------------
 
 /**
- * Stage 0 match: pure merge, no mutation. Returns NO_MATCH on failure.
- * @host_recursion — Stage 0 recursive pattern matching (bootstrap primitive).
+ * Stage 0 match: pure merge, explicit worklist. Returns NO_MATCH on failure.
+ * @host_recursion — legacy debt-dashboard marker; traversal is worklist-based.
  * P7W4: Array branch removed (dead code — all kernel inputs normalized to head/tail).
  */
 function stage0Match(pattern, input, bindings, _depth = 0) {
-  if (_depth > MAX_DEPTH) {
-    return NO_MATCH;
-  }
-  const current = bindings ?? Object.create(null);
-
-  // Variable site
-  if (isVar(pattern)) {
-    const name = pattern.var;
-    if (!name) return NO_MATCH;  // F-25: parity with Python _stage0_match:376-377
-    if (Object.hasOwn(current, name)) {
-      // Non-linear conflict: use muHashCached (NOT muHashControlCached —
-      // control hash canonicalizes 0.0→0, breaking int/float distinction).
-      if (muHashCached(current[name]) !== muHashCached(input)) {
-        return NO_MATCH;
-      }
-      return current;
-    }
-    const merged = Object.create(null);
-    for (const [k, v] of Object.entries(current)) { merged[k] = v; }
-    merged[name] = input;
-    return merged;
-  }
-
-  // Null
-  if (pattern === null) {
-    return input === null ? current : NO_MATCH;
-  }
-
-  // Primitives (=== handles bool/int distinction in JS)
-  if (typeof pattern !== 'object') {
-    return pattern === input ? current : NO_MATCH;
-  }
-
-  // Array branch REMOVED (P7W4): After normalization, all arrays become head/tail
-  // linked lists (objects). No kernel-path code passes raw JS arrays to stage0Match.
-  // Verified: zero seed patterns/bodies contain raw arrays.
-  // If a raw array reaches here, it falls through to the object branch or NO_MATCH.
-
-  // Object (Gate-3: allow pattern to omit _type when input has _type="list")
-  if (typeof pattern === 'object') {
-    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+  let current = bindings ?? Object.create(null);
+  const work = [{ pattern, input, depth: _depth }];
+  while (work.length > 0) {
+    const frame = work.pop();
+    pattern = frame.pattern;
+    input = frame.input;
+    const depth = frame.depth;
+    if (depth > MAX_DEPTH) {
       return NO_MATCH;
     }
-    const pKeys = new Set(Object.keys(pattern));
-    const iKeys = new Set(Object.keys(input));
-    if (pKeys.size !== iKeys.size) {
-      const inputExtra = [...iKeys].filter(k => !pKeys.has(k));
-      const patternExtra = [...pKeys].filter(k => !iKeys.has(k));
-      const typeIsList = (input._type === 'list');
-      if (!(inputExtra.length === 1 && inputExtra[0] === '_type' && patternExtra.length === 0 && typeIsList)) {
+
+    // Variable site
+    if (isVar(pattern)) {
+      const name = pattern.var;
+      if (!name) return NO_MATCH;  // F-25: parity with Python _stage0_match
+      if (Object.hasOwn(current, name)) {
+        // Non-linear conflict: use muHashCached (NOT muHashControlCached —
+        // control hash canonicalizes 0.0→0, breaking int/float distinction).
+        if (muHashCached(current[name]) !== muHashCached(input)) {
+          return NO_MATCH;
+        }
+        continue;
+      }
+      const merged = Object.create(null);
+      for (const [k, v] of Object.entries(current)) { merged[k] = v; }
+      merged[name] = input;
+      current = merged;
+      continue;
+    }
+
+    // Null
+    if (pattern === null) {
+      if (input === null) continue;
+      return NO_MATCH;
+    }
+
+    // Primitives (=== handles bool/int distinction in JS)
+    if (typeof pattern !== 'object') {
+      if (pattern === input) continue;
+      return NO_MATCH;
+    }
+
+    // Array branch REMOVED (P7W4): After normalization, all arrays become head/tail
+    // linked lists (objects). No kernel-path code passes raw JS arrays to stage0Match.
+    // Verified: zero seed patterns/bodies contain raw arrays.
+    // If a raw array reaches here, it falls through to the object branch or NO_MATCH.
+
+    // Object (Gate-3: allow pattern to omit _type when input has _type="list")
+    if (typeof pattern === 'object') {
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
         return NO_MATCH;
       }
-    } else {
-      for (const k of pKeys) {
-        if (!iKeys.has(k)) return NO_MATCH;
+      const pKeys = Object.keys(pattern);
+      const iKeys = Object.keys(input);
+      const iKeySet = new Set(iKeys);
+      if (pKeys.length !== iKeys.length) {
+        const pKeySet = new Set(pKeys);
+        const inputExtra = iKeys.filter(k => !pKeySet.has(k));
+        const patternExtra = pKeys.filter(k => !iKeySet.has(k));
+        const typeIsList = (input._type === 'list');
+        if (!(inputExtra.length === 1 && inputExtra[0] === '_type' && patternExtra.length === 0 && typeIsList)) {
+          return NO_MATCH;
+        }
+      } else {
+        for (const k of pKeys) {
+          if (!iKeySet.has(k)) return NO_MATCH;
+        }
       }
+      for (let i = pKeys.length - 1; i >= 0; i--) {
+        const k = pKeys[i];
+        work.push({ pattern: pattern[k], input: input[k], depth: depth + 1 });
+      }
+      continue;
     }
-    let merged = current;
-    for (const k of pKeys) {
-      merged = stage0Match(pattern[k], input[k], merged, _depth + 1);
-      if (merged === NO_MATCH) return NO_MATCH;
-    }
-    return merged;
+    return NO_MATCH;
   }
-
-  return NO_MATCH;
+  return current;
 }
 
 /**
- * Stage 0 substitute: recursive tree walk. Throws on unbound variable.
- * @host_recursion — Stage 0 recursive substitution (bootstrap primitive)
+ * Stage 0 substitute: explicit worklist tree walk. Throws on unbound variable.
+ * @host_recursion — legacy debt-dashboard marker; traversal is worklist-based.
  */
 function stage0Substitute(body, bindings, _depth = 0) {
-  if (_depth > MAX_DEPTH) {
-    throw new Error(`Stage 0 substitute depth exceeded ${MAX_DEPTH}`);
-  }
-  if (body === null || typeof body !== 'object') {
-    return body;
-  }
-  if (isVar(body)) {
-    const name = body.var;
-    if (!Object.hasOwn(bindings, name)) {
-      throw new Error(`Unbound variable: ${name}`);
+  const values = [];
+  const work = [{ op: 'eval', value: body, depth: _depth }];
+  while (work.length > 0) {
+    const frame = work.pop();
+    if (frame.op === 'list') {
+      const start = values.length - frame.count;
+      const items = values.slice(start);
+      values.length = start;
+      values.push(muContainers.list(items));
+      continue;
     }
-    return bindings[name];
+    if (frame.op === 'record') {
+      const start = values.length - frame.keys.length;
+      const result = muContainers.record();
+      for (let i = 0; i < frame.keys.length; i++) {
+        result[frame.keys[i]] = values[start + i];
+      }
+      values.length = start;
+      values.push(result);
+      continue;
+    }
+    const value = frame.value;
+    const depth = frame.depth;
+    if (depth > MAX_DEPTH) {
+      throw new Error(`Stage 0 substitute depth exceeded ${MAX_DEPTH}`);
+    }
+    if (value === null || typeof value !== 'object') {
+      values.push(value);
+      continue;
+    }
+    if (isVar(value)) {
+      const name = value.var;
+      if (!Object.hasOwn(bindings, name)) {
+        throw new Error(`Unbound variable: ${name}`);
+      }
+      values.push(bindings[name]);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      work.push({ op: 'list', count: value.length });
+      for (let i = value.length - 1; i >= 0; i--) {
+        work.push({ op: 'eval', value: value[i], depth: depth + 1 });
+      }
+      continue;
+    }
+    const entries = Object.entries(value);
+    work.push({ op: 'record', keys: entries.map(([k]) => k) });
+    for (let i = entries.length - 1; i >= 0; i--) {
+      work.push({ op: 'eval', value: entries[i][1], depth: depth + 1 });
+    }
   }
-  if (Array.isArray(body)) {
-    return muContainers.list(body.map(elem => stage0Substitute(elem, bindings, _depth + 1)));
-  }
-  const result = muContainers.record();
-  for (const [k, v] of Object.entries(body)) {
-    result[k] = stage0Substitute(v, bindings, _depth + 1);
-  }
-  return result;
+  return values.pop();
 }
 
 module.exports = {

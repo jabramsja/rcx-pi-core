@@ -97,6 +97,15 @@ class TestStage0CanonicalVectors:
         )
         assert result == {"head": 1, "tail": 2}
 
+    def test_structural_worklist_match_and_subst(self):
+        pattern = {"outer": {"left": {"var": "x"}, "right": {"var": "x"}}}
+        input_value = {"outer": {"left": 7, "right": 7}}
+        assert _stage0_match(pattern, input_value) == {"x": 7}
+        assert _stage0_substitute(
+            {"ok": True, "value": {"var": "x"}},
+            {"x": {"nested": [1, 2, 3]}},
+        ) == {"ok": True, "value": {"nested": [1, 2, 3]}}
+
 
 # ===========================================================================
 # TestParityWithMatchInner
@@ -130,6 +139,7 @@ class TestParityWithMatchInner:
         ({"a": {"var": "x"}, "b": {"var": "y"}}, {"a": 1, "b": 2}),
         ({"a": {"var": "x"}, "b": {"var": "x"}}, {"a": 1, "b": 1}),  # nonlinear agree
         ({"a": {"var": "x"}, "b": {"var": "x"}}, {"a": 1, "b": 2}),  # nonlinear conflict
+        ({"a": {"b": {"var": "x"}}}, {"a": {"b": 3}}),  # nested worklist path
         ({"a": 1}, {"a": 1, "b": 2}),  # extra key in input
     ]
 
@@ -159,6 +169,7 @@ class TestParityWithMatchInner:
         (123, {}, 123),
         ([1, {"var": "x"}, 3], {"x": 2}, [1, 2, 3]),
         ({"a": {"var": "x"}, "b": 1}, {"x": 99}, {"a": 99, "b": 1}),
+        ({"a": [{"var": "x"}, {"b": {"var": "y"}}]}, {"x": 1, "y": 2}, {"a": [1, {"b": 2}]}),
     ]
 
     @pytest.mark.parametrize("body,bindings,expected", SUBST_CASES,

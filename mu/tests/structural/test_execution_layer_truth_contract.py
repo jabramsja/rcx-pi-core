@@ -9,6 +9,8 @@ Proves that claimed execution layers are distinguishable via observer evidence:
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from rcx_pi.selfhost.eval_seed import step
@@ -154,6 +156,31 @@ class TestD005Stage0Contract:
         from rcx_pi.selfhost.eval_seed import _stage0_match, _stage0_substitute  # ANTICHEAT_OK: contract test
         assert callable(_stage0_match)
         assert callable(_stage0_substitute)
+
+    def test_stage0_sources_use_structural_worklists(self):
+        """Stage 0 match/substitute must not retain recursive host traversal."""
+        import inspect
+        from rcx_pi.selfhost.eval_seed import _stage0_match, _stage0_substitute  # ANTICHEAT_OK: contract test
+
+        py_match = inspect.getsource(_stage0_match)
+        py_subst = inspect.getsource(_stage0_substitute)
+        assert "@host_recursion" not in py_match
+        assert py_match.count("_stage0_match(") == 1
+        assert py_subst.count("_stage0_substitute(") == 1
+        assert ".append(" not in py_subst
+
+        repo_root = Path(__file__).resolve().parents[2]
+        js_source = (repo_root / "host/js/core/bootstrap_core.js").read_text()
+        js_match = js_source[
+            js_source.index("function stage0Match"):
+            js_source.index("function stage0Substitute")
+        ]
+        js_subst = js_source[
+            js_source.index("function stage0Substitute"):
+            js_source.index("module.exports")
+        ]
+        assert js_match.count("stage0Match(") == 1
+        assert js_subst.count("stage0Substitute(") == 1
 
     def test_no_stage0_in_wrapper_functions(self):
         """Forbidden wrappers (step/match/substitute) must not reference
