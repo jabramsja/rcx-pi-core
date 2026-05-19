@@ -628,9 +628,17 @@ const verifySeedBinaryMigrationArtifact = MU_BINARY_CODEC.verifyMigrationArtifac
  * @param {string} seedName - Seed filename (e.g., 'terminal_classify.v1.json')
  * @param {Buffer|string} seedBytes - Raw seed JSON bytes
  * @param {string} verificationMode - Closed manifest view selector
+ * @param {?Buffer} binaryImage - Optional smaller MuBinary sidecar bytes
+ * @param {?object} expectedBinaryProof - Required proof object when binaryImage is set
  * @returns {object} Parsed seed object
  */
-function loadVerifiedSeedImage(seedName, seedBytes, verificationMode) {
+function loadVerifiedSeedImage(
+  seedName,
+  seedBytes,
+  verificationMode,
+  binaryImage = null,
+  expectedBinaryProof = null
+) {
   const imageBytes = Buffer.isBuffer(seedBytes) ? seedBytes : Buffer.from(seedBytes);
   const verificationView = SEED_IMAGE_VERIFICATION_VIEWS[verificationMode];
   if (!verificationView) {
@@ -791,6 +799,30 @@ function loadVerifiedSeedImage(seedName, seedBytes, verificationMode) {
     throw new Error(
       `Seed projection IDs mismatch: ${seedName} ` +
       `(expected ${JSON.stringify(expectedIds)}, got ${JSON.stringify(actualIds)})`
+    );
+  }
+
+  const hasBinaryImage = binaryImage !== null && binaryImage !== undefined;
+  const hasBinaryProof = expectedBinaryProof !== null && expectedBinaryProof !== undefined;
+  if (hasBinaryImage !== hasBinaryProof) {
+    throw new Error('binaryImage and expectedBinaryProof must be provided together');
+  }
+  if (hasBinaryImage) {
+    const binaryBytes = MU_BINARY_CODEC.toBuffer(binaryImage);
+    MU_BINARY_CODEC.verifyMigrationArtifact(
+      seedName,
+      imageBytes,
+      binaryBytes,
+      expectedBinaryProof,
+      verificationMode
+    );
+    return muCopy(
+      {
+        ...seed,
+        projections: MU_BINARY_CODEC.decodeSeedProjections(binaryBytes),
+      },
+      true,
+      'Verified binary seed image'
     );
   }
 

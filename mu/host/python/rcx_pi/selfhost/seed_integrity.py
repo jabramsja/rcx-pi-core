@@ -13,6 +13,7 @@ See mu/docs/core/SelfHosting.v0.md for design.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 from typing import Any
@@ -309,6 +310,9 @@ def load_verified_seed_image(
     seed_name: str,
     seed_bytes: bytes,
     verify: bool = True,
+    *,
+    binary_image: bytes | None = None,
+    expected_binary_proof: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Deterministically verify, parse, and validate a JSON seed image.
@@ -317,6 +321,9 @@ def load_verified_seed_image(
         seed_name: Registered seed filename.
         seed_bytes: Raw seed JSON bytes.
         verify: If True, verify checksum and structure. Default True.
+        binary_image: Optional smaller MuBinary sidecar bytes for an explicit
+            pilot load. Default None keeps JSON as the production path.
+        expected_binary_proof: Required proof object when binary_image is set.
 
     Returns:
         Parsed seed dict.
@@ -340,6 +347,36 @@ def load_verified_seed_image(
     if verify:
         validate_seed_structure(seed_name, seed)
         validate_projection_ids(seed_name, seed)
+
+    if (binary_image is None) != (expected_binary_proof is None):
+        raise ValueError(
+            "binary_image and expected_binary_proof must be provided together"
+        )
+    if binary_image is not None:
+        migration_tool_path = _MU_DIR / "tools" / "util" / "seed_binary_migration.py"
+        migration_spec = importlib.util.spec_from_file_location(
+            "_rcx_seed_binary_migration",
+            migration_tool_path,
+        )
+        if migration_spec is None or migration_spec.loader is None:
+            raise SeedBinaryMigrationError(
+                f"Unable to load seed binary migration adapter: {migration_tool_path}"
+            )
+        seed_binary_migration = importlib.util.module_from_spec(migration_spec)
+        migration_spec.loader.exec_module(seed_binary_migration)
+
+        seed_binary_migration.verify_seed_binary_migration_artifact(
+            seed_name,
+            seed_bytes,
+            binary_image,
+            expected_binary_proof,
+        )
+        return {
+            **seed,
+            "projections": seed_binary_migration.decode_seed_binary_projections(
+                binary_image
+            ),
+        }
 
     return seed
 

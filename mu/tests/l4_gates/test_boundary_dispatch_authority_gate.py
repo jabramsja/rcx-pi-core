@@ -14,8 +14,10 @@ Usage:
 
 from __future__ import annotations
 
+import base64
 import inspect
 import json
+import os
 import re
 import subprocess
 import sys
@@ -1059,11 +1061,8 @@ class TestJsSeedLoaderBinaryDecoderSidecarLock:
             source.index("function getSeedChecksum")
         ]
 
-        assert "decodeSeedBinaryProjections(" not in json_boundary, (
-            "JSON seed image boundary must remain the production parse/verify path"
-        )
-        assert "decodeMuBinaryValue(" not in json_boundary, (
-            "JSON seed image boundary must not dispatch to the binary sidecar"
+        assert "if (hasBinaryImage)" in json_boundary, (
+            "binary sidecar decode must stay behind an explicit opt-in guard"
         )
         assert "decodeSeedBinaryProjections(" not in path_wrapper, (
             "path loader must not flip from JSON seed images to binary projections"
@@ -1141,8 +1140,8 @@ class TestProjectionLoaderSeedMigrationIntegrityChainBoundary:
             "decode_seed_binary_projections",
             "encode_seed_binary_projections",
         ):
-            assert forbidden not in py_json_boundary
             assert forbidden not in py_path_wrapper
+        assert "if binary_image is not None:" in py_json_boundary
 
         js_source = (
             REPO_ROOT / "mu" / "host" / "js" / "core" / "seed_loader.js"
@@ -1163,13 +1162,140 @@ class TestProjectionLoaderSeedMigrationIntegrityChainBoundary:
             "decodeSeedBinaryProjections(",
             "decodeMuBinaryValue(",
         ):
-            assert forbidden not in json_boundary
             assert forbidden not in path_wrapper
+        assert "if (hasBinaryImage)" in json_boundary
 
         js_code = """
         const sl = require('./mu/host/js/core/seed_loader');
         sl.decodeSeedBinaryProjections = function() {
           throw new Error('binary sidecar called from JSON loader');
+        };
+        const seed = sl.loadVerifiedSeed('rcx_engine.v1.json', 'programs');
+        console.log(JSON.stringify({
+          ok: true,
+          ids: seed.projections.map(p => p.id),
+        }));
+        """
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {
+            "ok": True,
+            "ids": EXPECTED_PROJECTION_IDS[seed_name],
+        }
+
+    def test_smaller_image_pilot_adapter_is_opt_in_and_preserves_json_default(
+        self,
+        tmp_path,
+    ):
+        """The production pilot adapter must not become the default seed loader."""
+        seed_name = "rcx_engine.v1.json"
+        seed_bytes = get_seed_path(seed_name).read_bytes()
+        binary_image, proof = generate_seed_binary_migration_artifact(
+            seed_name,
+            seed_bytes,
+        )
+
+        binary_seed = load_verified_seed_image(
+            seed_name,
+            seed_bytes,
+            verify=True,
+            binary_image=binary_image,
+            expected_binary_proof=proof,
+        )
+        assert [proj["id"] for proj in binary_seed["projections"]] == EXPECTED_PROJECTION_IDS[
+            seed_name
+        ]
+
+        host_context_script = """
+import base64
+import json
+from rcx_pi.selfhost.seed_integrity import load_verified_seed_image
+
+payload = json.loads(input())
+seed = load_verified_seed_image(
+    payload["seed_name"],
+    base64.b64decode(payload["seed_bytes"]),
+    verify=True,
+    binary_image=base64.b64decode(payload["binary_image"]),
+    expected_binary_proof=payload["proof"],
+)
+print(json.dumps({"ids": [projection["id"] for projection in seed["projections"]]}))
+"""
+        host_context = subprocess.run(
+            [sys.executable, "-c", host_context_script],
+            input=json.dumps(
+                {
+                    "seed_name": seed_name,
+                    "seed_bytes": base64.b64encode(seed_bytes).decode("ascii"),
+                    "binary_image": base64.b64encode(binary_image).decode("ascii"),
+                    "proof": proof,
+                }
+            ),
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+            env={
+                **os.environ,
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONPATH": str(REPO_ROOT / "mu" / "host" / "python"),
+            },
+        )
+        assert host_context.returncode == 0, host_context.stderr
+        assert json.loads(host_context.stdout) == {
+            "ids": EXPECTED_PROJECTION_IDS[seed_name],
+        }
+
+        py_source = (
+            REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "seed_integrity.py"
+        ).read_text()
+        assert "binary_image: bytes | None = None" in py_source
+        assert "expected_binary_proof: dict[str, Any] | None = None" in py_source
+        py_json_boundary = py_source[
+            py_source.index("def load_verified_seed_image("):
+            py_source.index("# BOOTSTRAP_PRIMITIVE: projection_loader")
+        ]
+        py_path_wrapper = py_source[
+            py_source.index("def load_verified_seed(seed_path: Path"):
+            py_source.index("def get_mu_dir")
+        ]
+        for forbidden in (
+            "verify_seed_binary_migration_artifact(",
+            "decode_seed_binary_projections(",
+        ):
+            assert forbidden not in py_path_wrapper
+        assert "if binary_image is not None:" in py_json_boundary
+        assert "from mu.tools" not in py_json_boundary
+
+        js_source = (
+            REPO_ROOT / "mu" / "host" / "js" / "core" / "seed_loader.js"
+        ).read_text()
+        assert "binaryImage = null" in js_source
+        assert "expectedBinaryProof = null" in js_source
+        json_boundary = js_source[
+            js_source.index("function loadVerifiedSeedImage"):
+            js_source.index("/**\n * Load and verify a seed file.")
+        ]
+        path_wrapper = js_source[
+            js_source.index("function loadVerifiedSeed(seedName, subdir)"):
+            js_source.index("function getSeedChecksum")
+        ]
+        for forbidden in (
+            "verifySeedBinaryMigrationArtifact(",
+            "decodeSeedBinaryProjections(",
+            "decodeMuBinaryValue(",
+        ):
+            assert forbidden not in path_wrapper
+        assert "if (hasBinaryImage)" in json_boundary
+
+        js_code = """
+        const sl = require('./mu/host/js/core/seed_loader');
+        sl.verifySeedBinaryMigrationArtifact = function() {
+          throw new Error('binary proof adapter called from JSON loader');
         };
         const seed = sl.loadVerifiedSeed('rcx_engine.v1.json', 'programs');
         console.log(JSON.stringify({
