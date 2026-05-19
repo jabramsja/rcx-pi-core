@@ -32,6 +32,7 @@ from .seed_integrity import (
     SEED_CHECKSUMS,
     EXPECTED_PROJECTION_IDS,
     SEED_REGISTRY_MANIFEST,
+    RUN_ALGORITHM_AUTHORITY_SEEDS,
 )
 from .projection_loader import make_projection_loader
 
@@ -740,18 +741,6 @@ def _boundary_op_hash_trace(request, req_input, max_algorithm_iterations):
     return hash_trace_for_recurrence(req_input)
 
 
-# Authority: only these seeds are loadable through run_algorithm boundary dispatch.
-# Parity: matches JS seedProjectionMap keys (main.js:228-233).
-_SCHEDULER_ALGORITHM_SEED = "rcx_engine_scheduler.v1.json"
-_ALGORITHM_SEED_ALLOWLIST = frozenset({  # AST_OK: security allowlist — frozen constant
-    "recurrence.v1.json",
-    "recurrence.v2.json",
-    "exhaustion.v1.json",
-    "fix.v1.json",
-    _SCHEDULER_ALGORITHM_SEED,
-})
-
-
 def _boundary_op_run_algorithm(request, req_input, max_algorithm_iterations):
     """Handler for 'run_algorithm' boundary operation."""
     if "algorithm" not in request:
@@ -761,10 +750,10 @@ def _boundary_op_run_algorithm(request, req_input, max_algorithm_iterations):
     if not isinstance(algo_name, str):
         raise RcxEngineError("api.bad_request",
             f"run_algorithm 'algorithm' must be string, got {type(algo_name).__name__}")
-    if algo_name not in _ALGORITHM_SEED_ALLOWLIST:
+    if algo_name not in RUN_ALGORITHM_AUTHORITY_SEEDS:
         raise RcxEngineError("api.bad_request",
             f"run_algorithm 'algorithm' must be an authorized algorithm seed, "
-            f"got {algo_name!r}. Allowed: {sorted(_ALGORITHM_SEED_ALLOWLIST)}")
+            f"got {algo_name!r}. Allowed: {sorted(RUN_ALGORITHM_AUTHORITY_SEEDS)}")
     algo_projs = load_verified_seed(get_seed_path(algo_name))["projections"]
     return _run_sub_algorithm(algo_projs, req_input, max_algorithm_iterations)
 

@@ -17,7 +17,7 @@ const { muCopy } = require('./stage0_vm');
 const SEED_REGISTRY_MANIFEST_NAME = 'seed_registry_manifest.v1.json';
 const SEED_REGISTRY_MANIFEST_SCHEMA = 'rcx.seed_registry_manifest.v1';
 const SEED_REGISTRY_MANIFEST_SHA256 =
-  '175ba95a371914f3d38bbe960ccd9300b44ea907d020164deb25947292bb7d29';
+  '74dea09a1022ecaba89e8834b9a8bff3f9498f05b6fb4d79b0e5d0ad8707597f';
 
 const manifestPath = path.join(__dirname, '..', '..', '..', SEED_REGISTRY_MANIFEST_NAME);
 const manifestBytes = fs.readFileSync(manifestPath);
@@ -126,6 +126,43 @@ for (const [seedName, record] of Object.entries(manifestSeeds)) {
 }
 
 const SEED_REGISTRY_RECORDS = SEED_REGISTRY_MANIFEST.seeds;
+const EXPECTED_RUN_ALGORITHM_AUTHORITY_SEEDS = Object.freeze([
+  'exhaustion.v1.json',
+  'fix.v1.json',
+  'rcx_engine_scheduler.v1.json',
+  'recurrence.v1.json',
+  'recurrence.v2.json',
+]);
+const RUN_ALGORITHM_AUTHORITY_SEEDS = Object.create(null);
+for (const [seedName, record] of Object.entries(SEED_REGISTRY_RECORDS)) {
+  if (!Object.prototype.hasOwnProperty.call(record, 'authority')) {
+    continue;
+  }
+  const authority = record.authority;
+  if (authority === null || typeof authority !== 'object' || Array.isArray(authority)) {
+    throw new Error(`Seed registry manifest record for ${seedName} authority must be a plain object`);
+  }
+  if (!Object.prototype.hasOwnProperty.call(authority, 'run_algorithm')) {
+    throw new Error(`Seed registry manifest record for ${seedName} authority missing 'run_algorithm'`);
+  }
+  if (typeof authority.run_algorithm !== 'boolean') {
+    throw new Error(
+      `Seed registry manifest record for ${seedName} authority.run_algorithm must be boolean`
+    );
+  }
+  if (authority.run_algorithm) {
+    RUN_ALGORITHM_AUTHORITY_SEEDS[seedName] = true;
+  }
+}
+Object.freeze(RUN_ALGORITHM_AUTHORITY_SEEDS);
+const runAlgorithmAuthoritySeedNames = Object.keys(RUN_ALGORITHM_AUTHORITY_SEEDS).sort();
+if (JSON.stringify(runAlgorithmAuthoritySeedNames) !== JSON.stringify(EXPECTED_RUN_ALGORITHM_AUTHORITY_SEEDS)) {
+  throw new Error(
+    'Seed registry manifest authority.run_algorithm set mismatch: ' +
+    `expected ${JSON.stringify(EXPECTED_RUN_ALGORITHM_AUTHORITY_SEEDS)}, ` +
+    `got ${JSON.stringify(runAlgorithmAuthoritySeedNames)}`
+  );
+}
 const SEED_CHECKSUMS = Object.create(null);
 const EXPECTED_PROJECTION_IDS = Object.create(null);
 const CORE_SEED_CHECKSUMS = Object.create(null);
@@ -871,6 +908,7 @@ module.exports = {
   SEED_BINARY_CHECKSUM_POLICY_ID,
   SEED_IMAGE_VERIFICATION_MODES,
   SEED_REGISTRY_MANIFEST,
+  RUN_ALGORITHM_AUTHORITY_SEEDS,
   SEED_CHECKSUMS,
   EXPECTED_PROJECTION_IDS,
   CORE_SEED_CHECKSUMS,
