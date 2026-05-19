@@ -140,6 +140,13 @@ for _seed_name, _record in _SEED_REGISTRY_RECORDS.items():
     if _record["dependencies"]:
         SEED_DEPENDENCIES[_seed_name] = list(_record["dependencies"])
 
+SEED_BINARY_MIGRATION_POLICY_ID = "rcx.seed_binary_migration.v1.integer_projection_sidecar"
+SEED_BINARY_CHECKSUM_POLICY_ID = "sha256:json+mu-binary-projections.v1"
+
+
+class SeedBinaryMigrationError(ValueError):
+    """Raised when a generated seed binary sidecar fails migration policy."""
+
 
 def validate_seed_dependencies(loaded_seeds: set[str]) -> list[str]:
     """

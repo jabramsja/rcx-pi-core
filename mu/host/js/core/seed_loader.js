@@ -239,6 +239,10 @@ const MU_BINARY_TAGS = Object.freeze({
   DICT: 0x07,
 });
 
+const SEED_BINARY_MIGRATION_POLICY_ID = 'rcx.seed_binary_migration.v1.integer_projection_sidecar';
+const SEED_BINARY_CHECKSUM_POLICY_ID = 'sha256:json+mu-binary-projections.v1';
+const SEED_BINARY_PROJECTION_KEY_ORDER = Object.freeze(['id', 'pattern', 'body']);
+
 class MuBinaryDecodeError extends Error {
   constructor(message) {
     super(message);
@@ -370,6 +374,9 @@ const MU_BINARY_CODEC = Object.freeze({
             `Dict key must decode to string, got ${typeof key} at offset ${offset}`
           );
         }
+        if (Object.prototype.hasOwnProperty.call(result, key)) {
+          throw new MuBinaryDecodeError(`Duplicate dict key '${key}' at offset ${tagOffset}`);
+        }
         const valueDecoded = this.decodeAt(data, offset);
         result[key] = valueDecoded[0];
         offset = valueDecoded[1];
@@ -462,6 +469,13 @@ const MU_BINARY_CODEC = Object.freeze({
           throw new MuBinaryDecodeError(`Seed binary projection ${i} missing key '${key}'`);
         }
       }
+      const projectionKeys = Object.keys(proj);
+      if (JSON.stringify(projectionKeys) !== JSON.stringify(SEED_BINARY_PROJECTION_KEY_ORDER)) {
+        throw new MuBinaryDecodeError(
+          `Seed binary projection ${i} has non-canonical key order: ` +
+          `${JSON.stringify(projectionKeys)}`
+        );
+      }
       if (typeof proj.id !== 'string') {
         throw new MuBinaryDecodeError(
           `Seed binary projection ${i} id must be a string, got ${typeof proj.id}`
@@ -472,10 +486,142 @@ const MU_BINARY_CODEC = Object.freeze({
     }
     return muCopy(projections, true, 'Decoded binary seed projections');
   },
+
+  requireMigrationPolicy(policyId) {
+    if (policyId !== SEED_BINARY_MIGRATION_POLICY_ID) {
+      throw new Error(`Unsupported seed binary migration policy: ${policyId}`);
+    }
+  },
+
+  minimalSeedProjections(seed) {
+    return seed.projections.map(projection => ({
+      id: projection.id,
+      pattern: projection.pattern,
+      body: projection.body,
+    }));
+  },
+
+  proofChainPayload(seedName, jsonSha256, binarySha256, projectionIds, migrationPolicyId) {
+    return {
+      binary_sha256: binarySha256,
+      checksum_policy_id: SEED_BINARY_CHECKSUM_POLICY_ID,
+      json_sha256: jsonSha256,
+      migration_policy_id: migrationPolicyId,
+      projection_ids: projectionIds,
+      seed_name: seedName,
+    };
+  },
+
+  proofChainSha256(payload) {
+    return crypto
+      .createHash('sha256')
+      .update(Buffer.from(JSON.stringify(payload), 'utf8'))
+      .digest('hex');
+  },
+
+  buildMigrationProof(
+    seedName,
+    seedBytes,
+    binaryImage,
+    verificationMode,
+    migrationPolicyId = SEED_BINARY_MIGRATION_POLICY_ID
+  ) {
+    this.requireMigrationPolicy(migrationPolicyId);
+    const imageBytes = Buffer.isBuffer(seedBytes) ? seedBytes : Buffer.from(seedBytes);
+    const binaryBytes = this.toBuffer(binaryImage);
+    const verificationView = SEED_IMAGE_VERIFICATION_VIEWS[verificationMode];
+    if (!verificationView) {
+      throw new Error(`Unknown seed image verification mode: ${verificationMode}`);
+    }
+
+    const seed = loadVerifiedSeedImage(seedName, imageBytes, verificationMode);
+    const decodedProjections = this.decodeSeedProjections(binaryBytes);
+    const decodedProjectionIds = decodedProjections.map(projection => projection.id);
+    const expectedProjectionIds = verificationView.projectionIdRegistry[seedName];
+    if (JSON.stringify(decodedProjectionIds) !== JSON.stringify(expectedProjectionIds)) {
+      throw new Error(
+        `Seed binary projection ID mismatch for ${seedName}: ` +
+        `expected ${JSON.stringify(expectedProjectionIds)}, got ${JSON.stringify(decodedProjectionIds)}`
+      );
+    }
+
+    const expectedProjections = this.minimalSeedProjections(seed);
+    if (JSON.stringify(decodedProjections) !== JSON.stringify(expectedProjections)) {
+      throw new Error(`Seed binary source/binary mismatch for ${seedName}`);
+    }
+    if (binaryBytes.length >= imageBytes.length) {
+      throw new Error(
+        `Generated seed binary image for ${seedName} is not smaller than JSON ` +
+        `(${binaryBytes.length} >= ${imageBytes.length})`
+      );
+    }
+
+    const jsonSha256 = crypto.createHash('sha256').update(imageBytes).digest('hex');
+    const binarySha256 = crypto.createHash('sha256').update(binaryBytes).digest('hex');
+    const chainPayload = this.proofChainPayload(
+      seedName,
+      jsonSha256,
+      binarySha256,
+      decodedProjectionIds,
+      migrationPolicyId
+    );
+    return {
+      seed_name: seedName,
+      migration_policy_id: migrationPolicyId,
+      checksum_policy_id: SEED_BINARY_CHECKSUM_POLICY_ID,
+      json_sha256: jsonSha256,
+      binary_sha256: binarySha256,
+      proof_chain_sha256: this.proofChainSha256(chainPayload),
+      projection_ids: decodedProjectionIds,
+      projection_count: decodedProjections.length,
+      json_size: imageBytes.length,
+      binary_size: binaryBytes.length,
+      binary_is_smaller: binaryBytes.length < imageBytes.length,
+    };
+  },
+
+  verifyMigrationArtifact(
+    seedName,
+    seedBytes,
+    binaryImage,
+    expectedProof,
+    verificationMode,
+    migrationPolicyId = SEED_BINARY_MIGRATION_POLICY_ID
+  ) {
+    if (expectedProof === null || typeof expectedProof !== 'object' || Array.isArray(expectedProof)) {
+      throw new Error('Seed binary proof must be an object');
+    }
+    const computedProof = this.buildMigrationProof(
+      seedName,
+      seedBytes,
+      binaryImage,
+      verificationMode,
+      migrationPolicyId
+    );
+    const expectedKeys = Object.keys(expectedProof).sort();
+    const computedKeys = Object.keys(computedProof).sort();
+    if (JSON.stringify(expectedKeys) !== JSON.stringify(computedKeys)) {
+      throw new Error(
+        `Seed binary proof key set mismatch for ${seedName}: ` +
+        `expected keys ${JSON.stringify(expectedKeys)}, got ${JSON.stringify(computedKeys)}`
+      );
+    }
+    for (const key of computedKeys) {
+      if (JSON.stringify(expectedProof[key]) !== JSON.stringify(computedProof[key])) {
+        throw new Error(
+          `Seed binary proof mismatch for ${seedName}: ${key} ` +
+          `expected ${JSON.stringify(expectedProof[key])}, got ${JSON.stringify(computedProof[key])}`
+        );
+      }
+    }
+    return computedProof;
+  },
 });
 
 const decodeMuBinaryValue = MU_BINARY_CODEC.decodeValue.bind(MU_BINARY_CODEC);
 const decodeSeedBinaryProjections = MU_BINARY_CODEC.decodeSeedProjections.bind(MU_BINARY_CODEC);
+const buildSeedBinaryMigrationProof = MU_BINARY_CODEC.buildMigrationProof.bind(MU_BINARY_CODEC);
+const verifySeedBinaryMigrationArtifact = MU_BINARY_CODEC.verifyMigrationArtifact.bind(MU_BINARY_CODEC);
 
 /**
  * Verify, parse, and validate a seed JSON image without performing file I/O.
@@ -686,7 +832,11 @@ module.exports = {
   validateSeedDependencies,
   decodeMuBinaryValue,
   decodeSeedBinaryProjections,
+  buildSeedBinaryMigrationProof,
+  verifySeedBinaryMigrationArtifact,
   MuBinaryDecodeError,
+  SEED_BINARY_MIGRATION_POLICY_ID,
+  SEED_BINARY_CHECKSUM_POLICY_ID,
   SEED_IMAGE_VERIFICATION_MODES,
   SEED_REGISTRY_MANIFEST,
   SEED_CHECKSUMS,
