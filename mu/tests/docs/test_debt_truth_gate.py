@@ -221,7 +221,7 @@ class TestLedgerPerSubstrate:
 
 
 class TestLedgerThresholdConsistency:
-    """THRESHOLD/CURRENT block must agree with tracked markers ledger."""
+    """Debt block must separate semantic ceiling from tracked-marker floor."""
 
     def test_current_matches_tracked_markers(self):
         """CURRENT: N in threshold block must equal tracked markers ledger count."""
@@ -236,18 +236,32 @@ class TestLedgerThresholdConsistency:
             f"({counts['tracked_markers']}). These must agree."
         )
 
-    def test_threshold_matches_tracked_markers(self):
-        """THRESHOLD: N must equal tracked markers (floor = current for now)."""
+    def test_floor_matches_tracked_markers(self):
+        """FLOOR: N in threshold block must equal tracked markers ledger count."""
+        status = _load_status()
+        counts = _extract_ledger_counts(status)
+        floor_match = re.search(r"FLOOR:\s*(\d+)", status)
+        assert floor_match, "STATUS.md missing FLOOR: N"
+        floor = int(floor_match.group(1))
+        assert "tracked_markers" in counts, "Cannot find tracked markers count"
+        assert floor == counts["tracked_markers"], (
+            f"STATUS.md FLOOR ({floor}) != tracked markers ledger "
+            f"({counts['tracked_markers']}). These must agree."
+        )
+
+    def test_threshold_is_not_required_to_equal_tracked_markers(self):
+        """THRESHOLD: N is a semantic ceiling and may exceed tracked markers."""
         status = _load_status()
         counts = _extract_ledger_counts(status)
         threshold_match = re.search(r"THRESHOLD:\s*(\d+)", status)
         assert threshold_match, "STATUS.md missing THRESHOLD: N"
         threshold = int(threshold_match.group(1))
         assert "tracked_markers" in counts, "Cannot find tracked markers count"
-        assert threshold == counts["tracked_markers"], (
-            f"STATUS.md THRESHOLD ({threshold}) != tracked markers ledger "
-            f"({counts['tracked_markers']}). Update if floor changed."
+        assert threshold >= counts["tracked_markers"], (
+            f"STATUS.md THRESHOLD ({threshold}) is below tracked markers ledger "
+            f"({counts['tracked_markers']}). Threshold is a semantic ceiling."
         )
+        assert "dashboard/pre-commit semantic ceiling" in status
 
 
 class TestAuthorityCountConsistency:

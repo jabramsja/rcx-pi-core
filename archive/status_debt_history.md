@@ -38,7 +38,7 @@ These cannot be eliminated because Stage 0 match/substitute are the irreducible 
 
 The 8 counts explicitly marked @host_* sites across L2 kernel, utilities, and Stage0 VM. Known untracked host work includes: JS Stage0 builtin surface (stage0Match/stage0Substitute use host isinstance/keys/get internally without host-recursion markers), lambda-calculus boundary guards (assert_not_lambda_calculus/assertNotLambdaCalculus perform unmarked host recursion/isinstance/set traversal at apply_projection boundary).
 
-STATUS.md `THRESHOLD`, `CURRENT`, and `FLOOR` track this 8-marker cross-substrate baseline.
+STATUS.md `CURRENT` and `FLOOR` track this 8-marker cross-substrate baseline. STATUS.md `THRESHOLD` is the dashboard/pre-commit semantic ceiling and currently matches the 10-site semantic audit floor.
 
 ## Wave-by-Wave Changes
 

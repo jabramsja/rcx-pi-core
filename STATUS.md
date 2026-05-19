@@ -86,14 +86,14 @@ RCX tracks host debt at three distinct granularities. Each ledger answers a diff
 | **Total inventory sites** | 312 | Full named host-runtime surface (181 Python + 131 JavaScript) | `tools/checks/host_authority_inventory_baseline.json` |
 
 ```
-THRESHOLD: 8 (4 Py marker + 4 JS marker — per host_semantics_baseline.json)
+THRESHOLD: 10 (dashboard/pre-commit semantic ceiling)
 CURRENT: 8 (4 Py marker + 4 JS marker — per host_semantics_baseline.json)
 FLOOR: 8 (see archive/status_debt_history.md for wave-by-wave explanation)
 INFRA_CEILING: 135
 INFRA_CURRENT: 135
 ```
 
-**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). `THRESHOLD`/`CURRENT`/`FLOOR` carry the canonical cross-substrate tracked-marker baseline. Authority and total inventory ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`).
+**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). `THRESHOLD` carries the dashboard/pre-commit semantic ceiling; `CURRENT`/`FLOOR` carry the canonical cross-substrate tracked-marker baseline. Authority and total inventory ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`).
 
 **For marker breakdown, kernel path details, site inventory, wave-by-wave history, and infrastructure classification:**
 

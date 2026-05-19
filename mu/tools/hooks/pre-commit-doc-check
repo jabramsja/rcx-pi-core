@@ -41,8 +41,8 @@ fi
 # === 2. Check debt ceiling (BLOCKING) ===
 if [ -f "./tools/debt_dashboard.sh" ]; then
     DEBT_JSON=$(./tools/debt_dashboard.sh --json 2>/dev/null || echo '{}')
-    CURRENT=$(echo "$DEBT_JSON" | grep -o '"total_semantic": [0-9]*' | grep -o '[0-9]*' || echo "0")
-    THRESHOLD=$(grep -E '^THRESHOLD:' STATUS.md 2>/dev/null | grep -o '[0-9]*' || echo "999")
+    CURRENT=$(echo "$DEBT_JSON" | grep -oE '"total_semantic": [0-9]+' | grep -oE '[0-9]+' | head -1 || echo "0")
+    THRESHOLD=$(grep -E '^THRESHOLD:' STATUS.md 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo "999")
 
     if [ "$CURRENT" -gt "$THRESHOLD" ]; then
         echo ""

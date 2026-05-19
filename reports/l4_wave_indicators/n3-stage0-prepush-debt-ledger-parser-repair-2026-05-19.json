@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-stage0-prepush-debt-ledger-parser-repair-2026-05-19",
+  "repeat_run_speedup_ratio": 1.312551,
+  "parity_diff_count": 4,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.256918,
+  "repeat_run_raw_seconds": [
+    0.337218,
+    0.256918
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.337218
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.594136
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-19T17:57:38Z",
+  "collector_version": "2.2.0"
+}
