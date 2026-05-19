@@ -700,17 +700,17 @@ echo "== 19. Host Debt: Threshold Check =="
 #   ─────────────────────
 #   TOTAL:           12
 #
-# WHY 12 IS THE FLOOR:
+# WHY 11 IS THE CURRENT PYTHON-ONLY CEILING:
 # The match() and substitute() in eval_seed.py are NOT "reference implementations" -
 # they ARE the bootstrap primitives that eval_step() uses to apply ANY projection.
 # Eliminating them would require eval_step to not exist (circular dependency).
 # L3/L4 would require fundamentally different architecture.
 #
 # Python-only debt threshold.
-# This script scans all rcx_pi/ (including deep_eval.py) = 8 decorators + 4 AST_OK bootstrap = 12.
+# This script scans all rcx_pi/ (including deep_eval.py) = 7 decorators + 4 AST_OK bootstrap = 11.
 # Wave 5: 4 eval_seed.py markers reclassified from bootstrap to infra.
 # STATUS.md THRESHOLD is cross-substrate (16 = 6 Py ratchet + 6 JS + 4 AST_OK).
-DEBT_THRESHOLD=12
+DEBT_THRESHOLD=11
 if [ -z "$DEBT_THRESHOLD" ]; then
     echo "ERROR: Could not read THRESHOLD from STATUS.md"
     exit 1
@@ -724,7 +724,8 @@ fi
 #
 # HISTORY (for archaeology, not policy):
 # 6→23 (comprehensive marking), 23→21 (Phase 6a), 21→19 (6b), 19→15 (6c),
-# 15→14 (PR #163), 14→11 (6d), 11→14 (7d-1 @host_iteration), 14→12 (Phase 8b)
+# 15→14 (PR #163), 14→11 (6d), 11→14 (7d-1 @host_iteration), 14→12 (Phase 8b),
+# 12→11 (N3 Stage0 worklist removed one Python @host_recursion marker)
 
 echo "Counting all semantic debt markers..."
 

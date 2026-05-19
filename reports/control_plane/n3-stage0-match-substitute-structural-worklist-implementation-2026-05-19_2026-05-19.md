@@ -30,6 +30,9 @@ Future Phase B implementation, after same-wave `TASKS.md` authority exists, may 
 
 The reviewed packet path is the suffixed path above. Do not create a second unsuffixed control packet for this Phase A plan.
 
+- `reports/deferred/non_blocking/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19_bridge_nonblockers.md`
+  - Same-wave Phase B/commit generated deferred non-blocking bridge findings packet only; no unrelated deferred report is authorized by this wave.
+
 ## Work Items
 
 1. Before any runtime edit, add detector-visible same-wave `TASKS.md` authority for `n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19`. The current fixed-string search for that implementation wave in `TASKS.md` exits 1 with no output; `TASKS.md:383` authorizes only the prerequisite wave.
@@ -147,3 +150,36 @@ python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id n3-stag
 - Same-wave packet authorization for this control packet rewrite: FOUNDER_OVERRIDE:n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19. This packet override does not replace the required `TASKS.md` same-wave tracker entry before runtime edits.
 
 Questions? Concerns? Thoughts? -- Think hard
+
+<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:start -->
+## Same-Wave Deferred Non-Blocking Authorization
+
+- Refresh wave: `n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19`
+- Purpose: Phase B and commit automation may stage the same-wave non-blocking bridge findings packet as deferred follow-up instead of blocking an otherwise commit-ready wave.
+- Authorized deferred packet(s):
+  - `reports/deferred/non_blocking/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19_bridge_nonblockers.md`
+- Scope binding: the packet(s) above are in scope only as generated same-wave non-blocking bridge findings packets.
+- Acceptance binding: the final touched-file set may include the packet(s) above when they are also present in `deferred_items` or current staged files.
+<!-- SAME_WAVE_DEFERRED_NON_BLOCKING_AUTH:end -->
+
+<!-- COMMIT_PATH_TRUTH_REFRESH:start -->
+## Commit Path Truth Refresh
+
+- Refresh wave: `n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19`
+- Active packet: `reports/control_plane/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19_2026-05-19.md`
+- Commit status: `pre_commit_supervisor_pending`
+- Tracker note sha256: `a7a64ac61dd793cf79f9c556a20f62f4992f8911d6ec8695996a36ac78be30e8`
+- Indicator artifact: `reports/l4_wave_indicators/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19.json`
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/structural/test_subtree_root_guard.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19_2026-05-19.md. (2) Final pytest gate covered 1 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence handles:
+  - `indicator`: `reports/l4_wave_indicators/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19.json`
+- Current staged files:
+  - `TASKS.md`
+  - `mu/tests/structural/test_subtree_root_guard.py`
+  - `mu/tools/audits/audit_fast.sh`
+  - `mu/tools/audits/audit_semantic_purity.sh`
+  - `mu/tools/hooks/pre-push-fast`
+  - `reports/control_plane/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19_2026-05-19.md`
+  - `reports/l4_wave_indicators/n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19.json`
+<!-- COMMIT_PATH_TRUTH_REFRESH:end -->

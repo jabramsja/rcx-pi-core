@@ -1,24 +1,24 @@
 {
   "wave_id": "n3-stage0-match-substitute-structural-worklist-implementation-2026-05-19",
-  "repeat_run_speedup_ratio": 1.082048,
+  "repeat_run_speedup_ratio": 1.38828,
   "parity_diff_count": 6,
   "net_host_semantic_delta": -1,
-  "step_growth_slope": 0.25768,
+  "step_growth_slope": 0.242209,
   "repeat_run_raw_seconds": [
-    0.278822,
-    0.25768
+    0.336254,
+    0.242209
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.278822
+      "elapsed_seconds": 0.336254
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.536502
+      "elapsed_seconds": 0.578463
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-19T15:21:18Z",
+  "collection_timestamp_utc": "2026-05-19T15:41:44Z",
   "collector_version": "2.2.0"
 }

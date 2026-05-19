@@ -148,18 +148,48 @@ python3 tools/checks/check_bootstrap_purity_ratchet.py
 echo "== 1q) Boot layer boundary check =="
 python3 tools/checks/check_boot_layer_boundaries.py
 
+_l4_has_runtime_files() {
+    grep -Eq \
+        '^(mu/host/|mu/substrate/|mu/closures/|mu/bridge/|mu/programs/|rcx_pi/selfhost/|mu/tools/compilers/)'
+}
+
+_l4_branch_wave_id() {
+    local branch="$1"
+    local suffix=""
+    if [[ "$branch" == codex/* ]]; then
+        suffix="${branch#codex/}"
+    elif [[ "$branch" == jabramsja/* ]]; then
+        suffix="${branch#jabramsja/}"
+    fi
+    if [[ "$suffix" =~ ^(.+)-restart(-.+)?$ ]]; then
+        suffix="${BASH_REMATCH[1]}"
+    fi
+    if [ -n "$suffix" ] && grep -qE "Tracker sync note \([^,]+, ${suffix}\):" TASKS.md 2>/dev/null; then
+        printf '%s' "$suffix"
+    fi
+}
+
 echo "== 1m) L4 execution contract check =="
 # Derive wave-id from branch name when TASKS.md is in the scope being checked.
 # Supports codex/* and jabramsja/* branch naming conventions.
 # Follow-up CI/tooling commits that don't change TASKS.md skip wave-class enforcement.
 L4_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 if git diff --cached --name-only | grep -q .; then
+    STAGED_FILES="$(git diff --cached --name-only)"
     # Shared exact-match derivation prevents restart branches from forcing a
     # bogus wave id into the L4 checker when TASKS.md carries the canonical
     # tracked wave instead.
     # shellcheck source=/dev/null
     source tools/checks/derive_wave_id.sh "$L4_BRANCH" --staged
-    python3 tools/checks/enforce_l4_execution_contract.py --staged $WAVE_ID_FLAG
+    L4_CLASS_FLAG=()
+    if [ -z "$WAVE_ID_FLAG" ] && ! printf '%s\n' "$STAGED_FILES" | _l4_has_runtime_files; then
+        STAGED_WAVE_ID="$(_l4_branch_wave_id "$L4_BRANCH")"
+        if [ -n "$STAGED_WAVE_ID" ]; then
+            WAVE_ID_FLAG="--wave-id=$STAGED_WAVE_ID"
+        fi
+        L4_CLASS_FLAG=(--wave-class L4_ENABLER)
+    fi
+    python3 tools/checks/enforce_l4_execution_contract.py --staged $WAVE_ID_FLAG "${L4_CLASS_FLAG[@]}"
 else
     # No staged files — use committed range.
     # L4 contract must evaluate the FULL wave diff from dev, not per-push
