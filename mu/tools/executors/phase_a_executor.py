@@ -405,6 +405,7 @@ _PHASE_A_LOCK_CANONICAL_RE = re.compile(r"^Phase-A-Lock:\s*(UNLOCKED|LOCKED)[ \t
 _PHASE_A_LOCK_DECORATED_RE = re.compile(
     r"^Phase-A-Lock:\s*(UNLOCKED|LOCKED)[ \t]+\([^()\n]+\)[ \t]*$"
 )
+_PHASE_A_LOCK_REVIEW_RE = re.compile(r"^Phase-A-Lock:\s*LOCKED_FOR_REVIEW[ \t]*$")
 _PHASE_A_H2_RE = re.compile(r"^##(?!#)(?:[ \t]+|$)")
 _BRIDGE_RENDERED_SECTION_RE = re.compile(r"^##(?!#)[ \t]+(.+?)[ \t]*$")
 
@@ -1497,6 +1498,7 @@ def lock_plan(
         if line.lstrip().startswith("Phase-A-Lock:")
     ]
     decorated_lock_values: list[str] = []
+    review_lock_lines: list[str] = []
     malformed_lock_lines: list[str] = []
     for line in phase_a_lock_header_lines:
         if line != line.lstrip():
@@ -1508,6 +1510,9 @@ def lock_plan(
         decorated_match = _PHASE_A_LOCK_DECORATED_RE.match(line)
         if decorated_match:
             decorated_lock_values.append(decorated_match.group(1))
+            continue
+        if _PHASE_A_LOCK_REVIEW_RE.match(line):
+            review_lock_lines.append(line)
             continue
         malformed_lock_lines.append(line)
     if len(phase_a_lock_header_lines) > 1:
@@ -1533,6 +1538,26 @@ def lock_plan(
             raise PhaseAExecutorError(
                 f"Expected exactly one Phase-A-Lock header line in {plan_path}, "
                 f"found no rewritable decorated line"
+            )
+        header = "".join(hdr_lines)
+        content = header + body
+        full_path.write_text(content, encoding="utf-8")
+        header, body = _split_plan_header(content)
+    if review_lock_lines:
+        # Bridge implementers sometimes use this transient sentinel while the
+        # packet is under review.  After bridge GO, lock_plan owns the canonical
+        # transition and converts it through UNLOCKED before setting LOCKED.
+        canonical_lock_line = "Phase-A-Lock: UNLOCKED"
+        hdr_lines = header.splitlines(keepends=True)
+        for i, line in enumerate(hdr_lines):
+            if line.rstrip("\r\n") == phase_a_lock_header_lines[0]:
+                line_ending = "\n" if line.endswith("\n") else ""
+                hdr_lines[i] = f"{canonical_lock_line}{line_ending}"
+                break
+        else:
+            raise PhaseAExecutorError(
+                f"Expected exactly one Phase-A-Lock header line in {plan_path}, "
+                f"found no rewritable review sentinel"
             )
         header = "".join(hdr_lines)
         content = header + body
