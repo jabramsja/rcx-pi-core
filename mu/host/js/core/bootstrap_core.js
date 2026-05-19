@@ -440,7 +440,7 @@ function run(projections, input, maxSteps = MAX_RUN_STEPS) {
 
 /**
  * Stage 0 match: pure merge, explicit worklist. Returns NO_MATCH on failure.
- * @host_recursion — legacy debt-dashboard marker; traversal is worklist-based.
+ * Traversal is worklist-based; there are no self-recursive calls.
  * P7W4: Array branch removed (dead code — all kernel inputs normalized to head/tail).
  */
 function stage0Match(pattern, input, bindings, _depth = 0) {
@@ -506,7 +506,7 @@ function stage0Match(pattern, input, bindings, _depth = 0) {
 
 /**
  * Stage 0 substitute: explicit worklist tree walk. Throws on unbound variable.
- * @host_recursion — legacy debt-dashboard marker; traversal is worklist-based.
+ * Traversal is worklist-based; there are no self-recursive calls.
  */
 function stage0Substitute(body, bindings, _depth = 0) {
   const values = [], work = [{ op: 'eval', value: body, depth: _depth }];

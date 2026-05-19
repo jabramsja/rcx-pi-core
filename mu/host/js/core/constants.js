@@ -31,9 +31,8 @@
  *     (normalize/denormalize/runEnginePipeline reclassified: BOUNDARY, off kernel path — P7W4)
  *     (collectOntologyEvidence reclassified: boundary-effect servicing, off kernel path — P7W3)
  *
- *   recursion debt: 2
- *     - stage0Match()       - Stage 0 recursive pattern matching (bootstrap primitive, P7W4: list branch removed)
- *     - stage0Substitute()  - Stage 0 recursive substitution (bootstrap primitive)
+ *   recursion debt: 0
+ *     (stage0Match/stage0Substitute now use explicit worklists with no self-recursive calls — N3 2026-05-19)
  *     (match/substitute reclassified: BOUNDARY, off kernel path since Wave H — P7W4)
  *     (normalize/denormalize reclassified: BOUNDARY, off kernel path — P7W4)
  *
@@ -42,8 +41,8 @@
  *     - isValidMu()         - type validation
  *     (muEqual demoted: test-only convenience wrapper, delegates to muHashCached — P7W2)
  *
- * TOTAL JS DEBT: 6 (2 iteration + 2 recursion + 2 builtin)
- * Cross-substrate total: 11 (Py 5 + JS 6)
+ * TOTAL JS DEBT: 4 (2 iteration + 0 recursion + 2 builtin)
+ * Cross-substrate total: 8 (Py 4 + JS 4)
  * Ratchet baseline: tools/checks/host_semantics_baseline.json (canonical counts)
  *
  * This debt represents the IRREDUCIBLE BOOTSTRAP - the same operations

@@ -81,19 +81,19 @@ RCX tracks host debt at three distinct granularities. Each ledger answers a diff
 
 | Ledger | Count | What It Measures | Baseline Source |
 |--------|-------|------------------|-----------------|
-| **Tracked markers** | 12 | Narrow official `@host_*` debt marker sites (6 Py decorator + 6 JS decorator) | `tools/checks/host_semantics_baseline.json` |
+| **Tracked markers** | 8 | Narrow official `@host_*` debt marker sites (4 Py marker + 4 JS marker) | `tools/checks/host_semantics_baseline.json` |
 | **Authority sites** | 217 | Named runtime sites with host-authority signals (120 Python + 97 JavaScript) | `tools/checks/host_authority_inventory_baseline.json` |
 | **Total inventory sites** | 312 | Full named host-runtime surface (181 Python + 131 JavaScript) | `tools/checks/host_authority_inventory_baseline.json` |
 
 ```
-THRESHOLD: 12
-CURRENT: 12 (6 Py decorator + 6 JS decorator — per host_semantics_baseline.json)
-FLOOR: 12 (see archive/status_debt_history.md for wave-by-wave explanation)
+THRESHOLD: 8 (4 Py marker + 4 JS marker — per host_semantics_baseline.json)
+CURRENT: 8 (4 Py marker + 4 JS marker — per host_semantics_baseline.json)
+FLOOR: 8 (see archive/status_debt_history.md for wave-by-wave explanation)
 INFRA_CEILING: 135
 INFRA_CURRENT: 135
 ```
 
-**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). Authority and total inventory ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`).
+**Direction:** Tracked markers monotonically decrease (enforced by `check_host_semantics_ratchet.py`). `THRESHOLD`/`CURRENT`/`FLOOR` carry the canonical cross-substrate tracked-marker baseline. Authority and total inventory ratcheted against baseline (enforced by `check_host_authority_inventory_ratchet.py`).
 
 **For marker breakdown, kernel path details, site inventory, wave-by-wave history, and infrastructure classification:**
 
@@ -161,6 +161,6 @@ Current Exhaustion Layer: META_CIRCULAR
 - Debt marker history: [`archive/status_debt_history.md`](archive/status_debt_history.md)
 - L3/L4 architecture details: [`mu/docs/core/L3SubstrateArchitecture.v0.md`](mu/docs/core/L3SubstrateArchitecture.v0.md)
 
-**Last updated:** 2026-04-08 (STATUS.md optimization — 489→~160 lines, content extracted to dedicated reference docs)
+**Last updated:** 2026-05-19 (N3 Stage0 worklist recursion marker truth ratchet — tracked marker floor 12→8)
 **Next milestone:** Hemisphere Metabolization Contract remains the closed milestone baseline (E1-E5 all MET). Canonical authorization remains TASKS.md.
 **Active NEXT items:** See TASKS.md.

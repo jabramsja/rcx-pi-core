@@ -192,8 +192,8 @@ if ! grep -q "DEBT SUMMARY" "$JS_HEADER_FILE"; then
     ERRORS=$((ERRORS + 1))
 fi
 
-# Check that key functions have debt markers (scan across all modules)
-echo "Checking key functions have debt markers:"
+# Check that key functions have debt markers or replacement truth checks.
+echo "Checking key functions have debt markers or worklist truth checks:"
 
 check_function_marker() {
     local func_name="$1"
@@ -219,9 +219,59 @@ check_function_marker "runAlgorithmWithBridge" "BOUNDARY"
 check_function_marker "runEnginePipelineRecursive" "BOUNDARY"
 # collectOntologyEvidence reclassified as boundary (off kernel path) — P7 Wave 3
 # runEnginePipeline reclassified as BOUNDARY (off kernel path — orchestrator) — P7W4
-# match/substitute reclassified as BOUNDARY (off kernel path since Wave H) — P7W4
-check_function_marker "stage0Match" "@host_recursion"
-check_function_marker "stage0Substitute" "@host_recursion"
+# Stage0 match/substitute use explicit worklists and have no self-recursive calls.
+check_stage0_worklist_no_self_call() {
+    local func_name="$1"
+    if python3 - "$JS_DIR/core/bootstrap_core.js" "$func_name" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+func_name = sys.argv[2]
+source = path.read_text(encoding="utf-8")
+needle = f"function {func_name}("
+start = source.find(needle)
+if start < 0:
+    print(f"missing {needle}", file=sys.stderr)
+    sys.exit(1)
+brace_start = source.find("{", start)
+depth = 0
+end = None
+for idx in range(brace_start, len(source)):
+    char = source[idx]
+    if char == "{":
+        depth += 1
+    elif char == "}":
+        depth -= 1
+        if depth == 0:
+            end = idx + 1
+            break
+if end is None:
+    print(f"could not find end of {func_name}", file=sys.stderr)
+    sys.exit(1)
+func_source = source[start:end]
+comment_window = source[max(0, start - 300):end]
+call_count = len(re.findall(rf"\b{re.escape(func_name)}\s*\(", func_source))
+if call_count != 1:
+    print(f"{func_name} self-call count is {call_count - 1}; expected 0", file=sys.stderr)
+    sys.exit(1)
+if "@host_recursion" in comment_window:
+    print(f"{func_name} still has @host_recursion marker text", file=sys.stderr)
+    sys.exit(1)
+if "work" not in func_source or "while (work.length > 0)" not in func_source:
+    print(f"{func_name} missing explicit worklist traversal", file=sys.stderr)
+    sys.exit(1)
+PY
+    then
+        echo "  ✓ $func_name has worklist/no-self-call truth"
+    else
+        echo "  ✗ $func_name failed worklist/no-self-call truth"
+        ERRORS=$((ERRORS + 1))
+    fi
+}
+check_stage0_worklist_no_self_call "stage0Match"
+check_stage0_worklist_no_self_call "stage0Substitute"
 # normalize/denormalize reclassified as BOUNDARY (off kernel path) — P7W4
 # muEqual demoted to test-only (P7 Wave 2) — no longer tracked as @host_builtin
 check_function_marker "muHash" "@host_builtin"
@@ -234,7 +284,7 @@ if [ $ERRORS -gt 0 ]; then
     exit 1
 fi
 
-echo "PASSED: All JS debt markers present"
+echo "PASSED: All JS debt marker and worklist truth checks passed"
 echo ""
 TOTAL=$((HOST_ITERATION + HOST_RECURSION + HOST_BUILTIN))
 echo "Note: JS debt ($TOTAL) = $HOST_ITERATION iteration + $HOST_RECURSION recursion + $HOST_BUILTIN builtin"
