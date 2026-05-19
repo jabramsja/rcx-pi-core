@@ -31,14 +31,15 @@ source-grounded GO/NO-GO decision and, on GO, an exact Phase B write set.
 Candidate Phase B scope, if Phase A returns GO, is limited to:
 
 - `mu/host/python/rcx_pi/selfhost/seed_integrity.py` - Python seed-image
-  boundary, JSON rollback, and opt-in smaller-image loading adapter only.
+  boundary, JSON rollback, and fail-closed opt-in smaller-image boundary until
+  a Mu-native sidecar adapter exists.
 - `mu/host/js/core/seed_loader.js` - JavaScript seed-image boundary, JSON
   rollback, and opt-in smaller-image loading adapter only.
 - `mu/tools/util/seed_binary_migration.py` - existing deterministic
   JSON-to-smaller-image generation and proof-chain utility only if pilot
   validation needs a bounded production adapter or fixture-generation guard.
-- `mu/tests/parity/test_seed_loading_parity.py` - Python/JavaScript parity for
-  the pilot path and rollback path.
+- `mu/tests/parity/test_seed_loading_parity.py` - JavaScript pilot coverage,
+  Python fail-closed boundary coverage, and Python/JavaScript rollback parity.
 - `mu/tests/l4_gates/test_boundary_dispatch_authority_gate.py` - production
   boundary proof that the pilot remains opt-in and does not make host code the
   semantic authority.
@@ -116,8 +117,9 @@ without a new packet or explicit founder authorization.
   obsolete; record the evidence and route the next bounded N3 candidate.
 - Stop with NO-GO if the pilot requires a production default flip or JSON
   rollback removal.
-- Stop with NO-GO if Python and JavaScript cannot prove equivalent behavior for
-  the pilot path and rollback path.
+- Stop with NO-GO if JavaScript cannot prove the positive pilot path, Python
+  cannot prove fail-closed sidecar handling without new host capability, or
+  Python and JavaScript cannot prove equivalent JSON rollback behavior.
 - Stop with NO-GO if implementation would require seed registry redesign,
   full D010 productionization, broad public Micro-ABI redesign, host-oracle
   changes, Stage0/scheduler changes, ratchet baseline edits, or Claude-related
@@ -138,8 +140,9 @@ without a new packet or explicit founder authorization.
 - Any production pilot remains opt-in or gated; JSON seed loading remains the
   default and rollback path unless a later founder-authorized packet explicitly
   changes that default.
-- Python and JavaScript prove equivalent smaller-image pilot behavior and
-  equivalent JSON rollback behavior.
+- JavaScript proves positive smaller-image pilot behavior, Python proves
+  explicit fail-closed sidecar handling without new host capability, and Python
+  and JavaScript prove equivalent JSON rollback behavior.
 - Host-semantics and host-authority ratchets report no unaccepted increase.
 - Phase A authorization cites detector-visible `TASKS.md` authority for the
   governing N3 ordered plan and the ordered queue entry for this exact wave.

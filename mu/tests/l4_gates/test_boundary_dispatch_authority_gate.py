@@ -38,6 +38,7 @@ from rcx_pi.selfhost.engine_pipeline import (
 from rcx_pi.selfhost.seed_integrity import (
     EXPECTED_PROJECTION_IDS,
     SEED_CHECKSUMS,
+    SeedBinaryMigrationError,
     compute_checksum,
     get_seed_path,
     load_verified_seed,
@@ -1200,16 +1201,14 @@ class TestProjectionLoaderSeedMigrationIntegrityChainBoundary:
             seed_bytes,
         )
 
-        binary_seed = load_verified_seed_image(
-            seed_name,
-            seed_bytes,
-            verify=True,
-            binary_image=binary_image,
-            expected_binary_proof=proof,
-        )
-        assert [proj["id"] for proj in binary_seed["projections"]] == EXPECTED_PROJECTION_IDS[
-            seed_name
-        ]
+        with pytest.raises(SeedBinaryMigrationError, match="Mu-native sidecar adapter"):
+            load_verified_seed_image(
+                seed_name,
+                seed_bytes,
+                verify=True,
+                binary_image=binary_image,
+                expected_binary_proof=proof,
+            )
 
         host_context_script = """
 import base64
@@ -1217,14 +1216,18 @@ import json
 from rcx_pi.selfhost.seed_integrity import load_verified_seed_image
 
 payload = json.loads(input())
-seed = load_verified_seed_image(
-    payload["seed_name"],
-    base64.b64decode(payload["seed_bytes"]),
-    verify=True,
-    binary_image=base64.b64decode(payload["binary_image"]),
-    expected_binary_proof=payload["proof"],
-)
-print(json.dumps({"ids": [projection["id"] for projection in seed["projections"]]}))
+try:
+    seed = load_verified_seed_image(
+        payload["seed_name"],
+        base64.b64decode(payload["seed_bytes"]),
+        verify=True,
+        binary_image=base64.b64decode(payload["binary_image"]),
+        expected_binary_proof=payload["proof"],
+    )
+except Exception as exc:
+    print(json.dumps({"ok": False, "name": type(exc).__name__, "error": str(exc)}))
+else:
+    print(json.dumps({"ok": True, "ids": [projection["id"] for projection in seed["projections"]]}))
 """
         host_context = subprocess.run(
             [sys.executable, "-c", host_context_script],
@@ -1246,15 +1249,17 @@ print(json.dumps({"ids": [projection["id"] for projection in seed["projections"]
             },
         )
         assert host_context.returncode == 0, host_context.stderr
-        assert json.loads(host_context.stdout) == {
-            "ids": EXPECTED_PROJECTION_IDS[seed_name],
-        }
+        host_payload = json.loads(host_context.stdout)
+        assert host_payload["ok"] is False
+        assert host_payload["name"] == "SeedBinaryMigrationError"
+        assert "Mu-native sidecar adapter" in host_payload["error"]
 
         py_source = (
             REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "seed_integrity.py"
         ).read_text()
         assert "binary_image: bytes | None = None" in py_source
         assert "expected_binary_proof: dict[str, Any] | None = None" in py_source
+        assert "importlib" not in py_source
         py_json_boundary = py_source[
             py_source.index("def load_verified_seed_image("):
             py_source.index("# BOOTSTRAP_PRIMITIVE: projection_loader")
@@ -1268,6 +1273,7 @@ print(json.dumps({"ids": [projection["id"] for projection in seed["projections"]
             "decode_seed_binary_projections(",
         ):
             assert forbidden not in py_path_wrapper
+            assert forbidden not in py_json_boundary
         assert "if binary_image is not None:" in py_json_boundary
         assert "from mu.tools" not in py_json_boundary
 

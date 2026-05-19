@@ -13,7 +13,6 @@ See mu/docs/core/SelfHosting.v0.md for design.
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 from pathlib import Path
 from typing import Any
@@ -322,7 +321,8 @@ def load_verified_seed_image(
         seed_bytes: Raw seed JSON bytes.
         verify: If True, verify checksum and structure. Default True.
         binary_image: Optional smaller MuBinary sidecar bytes for an explicit
-            pilot load. Default None keeps JSON as the production path.
+            pilot load. Python fails this path closed until a Mu-native adapter
+            is available. Default None keeps JSON as the production path.
         expected_binary_proof: Required proof object when binary_image is set.
 
     Returns:
@@ -353,30 +353,10 @@ def load_verified_seed_image(
             "binary_image and expected_binary_proof must be provided together"
         )
     if binary_image is not None:
-        migration_tool_path = _MU_DIR / "tools" / "util" / "seed_binary_migration.py"
-        migration_spec = importlib.util.spec_from_file_location(
-            "_rcx_seed_binary_migration",
-            migration_tool_path,
+        raise SeedBinaryMigrationError(
+            "Python bootstrap seed loader does not materialize binary sidecars; "
+            "keep the JSON seed image until a Mu-native sidecar adapter is available"
         )
-        if migration_spec is None or migration_spec.loader is None:
-            raise SeedBinaryMigrationError(
-                f"Unable to load seed binary migration adapter: {migration_tool_path}"
-            )
-        seed_binary_migration = importlib.util.module_from_spec(migration_spec)
-        migration_spec.loader.exec_module(seed_binary_migration)
-
-        seed_binary_migration.verify_seed_binary_migration_artifact(
-            seed_name,
-            seed_bytes,
-            binary_image,
-            expected_binary_proof,
-        )
-        return {
-            **seed,
-            "projections": seed_binary_migration.decode_seed_binary_projections(
-                binary_image
-            ),
-        }
 
     return seed
 

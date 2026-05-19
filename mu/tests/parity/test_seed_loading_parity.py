@@ -1701,8 +1701,8 @@ class TestProductionLoaderBoundaryParity:
             assert py_result == {"ok": True, "ids": expected_ids}
             assert js_result == {"ok": True, "ids": expected_ids}
 
-    def test_opt_in_smaller_seed_image_pilot_matches_json_rollback(self):
-        """The smaller image pilot is explicit and returns the same projection IDs."""
+    def test_opt_in_smaller_seed_image_pilot_preserves_json_rollback(self):
+        """The smaller image pilot stays explicit while Python fails closed."""
         seed_name = "rcx_engine.v1.json"
         seed_bytes = get_seed_path(seed_name).read_bytes()
         expected_ids = EXPECTED_PROJECTION_IDS[seed_name]
@@ -1730,7 +1730,9 @@ class TestProductionLoaderBoundaryParity:
         )
         js_json = _js_load_registered_seed_image_bytes_result(seed_name, seed_bytes)
 
-        assert py_binary == {"ok": True, "ids": expected_ids}
+        assert py_binary["ok"] is False
+        assert py_binary["name"] == "SeedBinaryMigrationError"
+        assert "Mu-native sidecar adapter" in str(py_binary["error"])
         assert js_binary == {"ok": True, "ids": expected_ids}
         assert py_json == {"ok": True, "ids": expected_ids}
         assert js_json == {"ok": True, "ids": expected_ids}
@@ -1766,7 +1768,8 @@ class TestProductionLoaderBoundaryParity:
         js_json = _js_load_registered_seed_image_bytes_result(seed_name, seed_bytes)
 
         assert py_binary["ok"] is False
-        assert "Trailing data" in str(py_binary["error"])
+        assert py_binary["name"] == "SeedBinaryMigrationError"
+        assert "Mu-native sidecar adapter" in str(py_binary["error"])
         assert js_binary["ok"] is False
         assert "Trailing data" in str(js_binary["error"])
         assert py_json == {"ok": True, "ids": expected_ids}
