@@ -1032,7 +1032,6 @@ _STAGE0_VM_CUTOVER = True  # S1-B: VM path is now primary (founder GO 2026-03-15
 _STAGE0_SHADOW_ENABLED = False  # S1-B: Shadow disabled (cutover=True makes shadow dead code)
 
 
-@host_iteration("P7-d kernel step: host for kernel.v1/bridge, VM for match.v2/subst.v2")  # S1-C: now ALL via VM; annotation text preserved for baseline compatibility
 def _step_kernel_with_vm(
     kernel_bundle: dict,
     bridge_bundle: dict | None,

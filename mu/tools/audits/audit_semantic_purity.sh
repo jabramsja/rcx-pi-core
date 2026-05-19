@@ -688,28 +688,28 @@ echo "== 19. Host Debt: Threshold Check =="
 # - Deferred reviews ("PHASE N REVIEW") count as debt to prevent silent accumulation
 #
 # CURRENT STATE (Phase 8c, 2026-05-19):
-# - 10 = Python semantic-debt audit floor after stale Stage0 recursion marker cleanup
+# - 9 = Python semantic-debt audit floor after stale _step_kernel_with_vm marker cleanup
 # - This is NOT a target for reduction without source-proven structural replacement
 #
 # PYTHON-ONLY BREAKDOWN (STATUS.md tracks cross-substrate marker total):
 #   @host_recursion:  0 (Stage0 match/substitute are explicit worklists)
 #   @host_builtin:    3 (eval_seed Stage0 match + deep_eval utility decorators)
-#   @host_iteration:  2 (step_kernel_mu, _step_kernel_with_vm decorators)
+#   @host_iteration:  1 (step_kernel_mu decorator)
 #   @host_mutation:   1 (deep_eval history recording utility decorator)
 #   AST_OK bootstrap: 4 (stage0_vm structural copy/materialization)
 #   ─────────────────────
-#   TOTAL:           10
+#   TOTAL:           9
 #
-# WHY 10 IS THE CURRENT PYTHON-ONLY CEILING:
+# WHY 9 IS THE CURRENT PYTHON-ONLY CEILING:
 # The remaining markers are current bootstrap/boundary debt. Stage0 match/substitute
 # traversal is still host code, but the stale host-recursion claim is gone because
 # the current source uses explicit worklists with no self-recursive calls.
 #
 # Python-only debt threshold.
-# This script scans all rcx_pi/ = 6 Python decorators + 4 AST_OK bootstrap = 10.
-# STATUS.md CURRENT/FLOOR are cross-substrate tracked markers (8 = 4 Py ratchet + 4 JS);
-# STATUS.md THRESHOLD remains 10 for the legacy dashboard/pre-commit semantic ceiling.
-DEBT_THRESHOLD=10
+# This script scans all rcx_pi/ = 5 Python decorators + 4 AST_OK bootstrap = 9.
+# STATUS.md CURRENT/FLOOR are cross-substrate tracked markers (7 = 3 Py ratchet + 4 JS);
+# STATUS.md THRESHOLD remains 9 for the legacy dashboard/pre-commit semantic ceiling.
+DEBT_THRESHOLD=9
 if [ -z "$DEBT_THRESHOLD" ]; then
     echo "ERROR: Could not read THRESHOLD from STATUS.md"
     exit 1
@@ -725,7 +725,9 @@ fi
 # 6→23 (comprehensive marking), 23→21 (Phase 6a), 21→19 (6b), 19→15 (6c),
 # 15→14 (PR #163), 14→11 (6d), 11→14 (7d-1 @host_iteration), 14→12 (Phase 8b),
 # 12→10 Python audit floor / 12→8 tracked markers
-# (N3 Stage0 worklist truth removed stale Python/JS @host_recursion markers)
+# (N3 Stage0 worklist truth removed stale Python/JS @host_recursion markers),
+# 10→9 Python audit floor / 8→7 tracked markers
+# (N3 step-kernel VM truth removed stale _step_kernel_with_vm @host_iteration marker)
 
 echo "Counting all semantic debt markers..."
 

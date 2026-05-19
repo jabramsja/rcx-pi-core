@@ -2668,13 +2668,27 @@ def _resolve_private_attr_checker(repo_root: Path) -> Path | None:
     return None
 
 
+def _resolve_underscore_import_checker(repo_root: Path) -> Path | None:
+    """Resolve the tracked test underscored-import checker."""
+    candidates = [
+        repo_root / "mu" / "tools" / "checks" / "linters" / "check_underscore_imports.py",
+        repo_root / "tools" / "checks" / "linters" / "check_underscore_imports.py",
+        SCRIPT_DIR.parents[1] / "tools" / "checks" / "linters" / "check_underscore_imports.py",
+        SCRIPT_DIR.parents[2] / "tools" / "checks" / "linters" / "check_underscore_imports.py",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def run_private_attr_test_gate(
     repo_root: Path,
     staged_files: list[str],
     *,
     timeout: int = 120,
 ) -> dict[str, Any]:
-    """Run the repo's private-attribute checker when staged Python tests changed."""
+    """Run test anti-cheat checkers when staged Python tests changed."""
     gate_files = _collect_private_attr_gate_files(repo_root, staged_files)
     if not gate_files:
         return {
@@ -2685,31 +2699,46 @@ def run_private_attr_test_gate(
             "stderr": "",
             "test_files": [],
         }
-    checker = _resolve_private_attr_checker(repo_root)
-    if checker is None:
+    checker_specs = [
+        ("private-attr checker", _resolve_private_attr_checker(repo_root)),
+        ("underscored-import checker", _resolve_underscore_import_checker(repo_root)),
+    ]
+    missing = [name for name, checker in checker_specs if checker is None]
+    if missing:
         return {
             "passed": False,
             "skipped": False,
             "exit_code": 127,
             "stdout": "",
-            "stderr": "private-attr checker not found",
+            "stderr": f"{', '.join(missing)} not found",
             "test_files": gate_files,
         }
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+    exit_code = 0
     try:
-        completed = subprocess.run(
-            [sys.executable, str(checker), str(repo_root)],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-        )
+        for checker_name, checker in checker_specs:
+            assert checker is not None
+            completed = subprocess.run(
+                [sys.executable, str(checker), str(repo_root)],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+            if completed.stdout:
+                stdout_parts.append(completed.stdout)
+            if completed.stderr:
+                stderr_parts.append(completed.stderr)
+            if completed.returncode != 0 and exit_code == 0:
+                exit_code = completed.returncode
         return {
-            "passed": completed.returncode == 0,
+            "passed": exit_code == 0,
             "skipped": False,
-            "exit_code": completed.returncode,
-            "stdout": completed.stdout,
-            "stderr": completed.stderr,
+            "exit_code": exit_code,
+            "stdout": "\n".join(part.rstrip("\n") for part in stdout_parts),
+            "stderr": "\n".join(part.rstrip("\n") for part in stderr_parts),
             "test_files": gate_files,
         }
     except subprocess.TimeoutExpired:
@@ -2717,8 +2746,8 @@ def run_private_attr_test_gate(
             "passed": False,
             "skipped": False,
             "exit_code": -1,
-            "stdout": "",
-            "stderr": f"private-attr checker timed out after {timeout}s",
+            "stdout": "\n".join(part.rstrip("\n") for part in stdout_parts),
+            "stderr": f"test anti-cheat checker timed out after {timeout}s",
             "test_files": gate_files,
         }
 
@@ -9204,7 +9233,7 @@ def _run_commit_pipeline_impl(
         }
     if not private_attr_gate.get("skipped"):
         log(
-            "Step 8c: private-attr test-integrity gate passed for "
+            "Step 8c: private-attr/import test-integrity gate passed for "
             f"{len(private_attr_gate.get('test_files') or [])} staged test file(s)"
         )
 

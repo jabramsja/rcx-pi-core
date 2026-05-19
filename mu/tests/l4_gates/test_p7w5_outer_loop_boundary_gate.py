@@ -6,11 +6,12 @@ Validates:
   Part B: JavaScript reclassification — run(), runStructural(),
     runAlgorithmWithBridge(), runEnginePipelineRecursive() removed from
     @host_iteration, marked BOUNDARY.
-  Part C: list_to_linked/listToLinked stay @host_iteration (on kernel path).
+  Part C: step_kernel_with_vm has no stale @host_iteration marker after S1-C.
+  Part D: list_to_linked/listToLinked stay @host_iteration (on kernel path).
 
 Anti-laundering: All reclassified functions are provably OFF the kernel execution path.
-Kernel path: step_kernel_mu → _step_trusted → _apply_projection_trusted →
-  _stage0_match/_stage0_substitute (Python) / step → stage0Match/stage0Substitute (JS).
+Kernel path: step_kernel_mu → _step_kernel_with_vm → Stage0 VM for all
+  Python projection groups / step → stage0Match/stage0Substitute (JS).
 The reclassified functions CALL the kernel but are not ON the kernel path.
 list_to_linked/listToLinked are ON the kernel path (called by step_kernel_mu/step).
 
@@ -18,6 +19,7 @@ Evidence for: P7 Host Semantics Reduction, target gate G8.
 L4 class: L4_STRUCTURAL.
 """
 
+import ast
 import inspect
 import json
 import subprocess
@@ -38,10 +40,23 @@ JS_BOOTSTRAP_PATH = REPO_ROOT / "mu" / "host" / "js" / "core" / "bootstrap_core.
 JS_KERNEL_PATH = REPO_ROOT / "mu" / "host" / "js" / "engine" / "kernel.js"
 JS_NORMALIZE_PATH = REPO_ROOT / "mu" / "host" / "js" / "core" / "normalize.js"
 JS_PIPELINE_PATH = REPO_ROOT / "mu" / "host" / "js" / "engine" / "pipeline.js"
+STEP_MU_PATH = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
 
 
 def _get_function_source(func):
     return textwrap.dedent(inspect.getsource(func))
+
+
+def _get_function_source_from_file(path: Path, name: str) -> str:
+    source = path.read_text()
+    tree = ast.parse(source, filename=str(path))
+    lines = source.splitlines()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            decorator_lines = [decorator.lineno for decorator in node.decorator_list]
+            start = min([node.lineno, *decorator_lines]) - 1
+            return textwrap.dedent("\n".join(lines[start:node.end_lineno]))
+    pytest.fail(f"{name} not found in {path}")
 
 
 # ===========================================================================
@@ -86,10 +101,19 @@ class TestPythonOuterLoopBoundary:
             "step_kernel_mu lost @host_iteration — this is the irreducible kernel loop!"
         )
 
+    def test_step_kernel_with_vm_has_no_host_iteration_decorator(self):
+        """_step_kernel_with_vm dispatches through Stage0 VM, not host projection iteration."""
+        source = _get_function_source_from_file(STEP_MU_PATH, "_step_kernel_with_vm")
+        assert "@host_iteration" not in source, (
+            "_step_kernel_with_vm still has stale @host_iteration marker after S1-C VM cutover"
+        )
+        assert "ALL projections via Stage0 VM" in source, (
+            "_step_kernel_with_vm source must keep explicit Stage0 VM cutover grounding"
+        )
+
     def test_list_to_linked_still_has_host_iteration(self):
         """list_to_linked MUST still have @host_iteration (on kernel path via step_kernel_mu)."""
-        path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
-        text = path.read_text()
+        text = STEP_MU_PATH.read_text()
         for line in text.splitlines():
             if "for item in reversed(items):" in line:
                 assert "@host_iteration" in line, (
