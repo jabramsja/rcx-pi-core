@@ -4513,6 +4513,8 @@ class TestCommitExecutorPytestGate:
             "sys.exit(1)\n",
             encoding="utf-8",
         )
+        underscore_checker = repo / "mu" / "tools" / "checks" / "linters" / "check_underscore_imports.py"
+        underscore_checker.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
 
         sup_receipt_path = ".scratch/step6_receipt.json"
         (repo / ".scratch").mkdir(parents=True, exist_ok=True)
@@ -4560,6 +4562,80 @@ class TestCommitExecutorPytestGate:
         error_text = "\n".join(result["errors"])
         assert "private-attr test-integrity gate failed before local commit creation" in error_text
         assert "ERROR: Found private attr access in tests/" in error_text
+        assert "git_commit" not in result.get("steps_completed", [])
+        assert not any(cmd[:2] == ["git", "commit"] for cmd in seen_commands)
+
+    def test_run_commit_pipeline_blocks_underscore_import_gate_before_git_commit(self, tmp_path):
+        from collections import namedtuple
+        import subprocess
+        import types
+
+        repo = _setup_repo(tmp_path)
+        (repo / "mu" / "tests").mkdir(parents=True, exist_ok=True)
+        (repo / "mu" / "tests" / "test_file.py").write_text(
+            "def test_smoke():\n    assert True\n",
+            encoding="utf-8",
+        )
+        linters = repo / "mu" / "tools" / "checks" / "linters"
+        linters.mkdir(parents=True, exist_ok=True)
+        (linters / "check_private_attr_access.py").write_text(
+            "import sys\nsys.exit(0)\n",
+            encoding="utf-8",
+        )
+        (linters / "check_underscore_imports.py").write_text(
+            "import sys\n"
+            "print('ERROR: Found underscored imports from rcx_pi:')\n"
+            "print('  mu/tests/test_file.py:3: from rcx_pi.selfhost.step_mu import _private_helper')\n"
+            "sys.exit(1)\n",
+            encoding="utf-8",
+        )
+
+        sup_receipt_path = ".scratch/step6_receipt.json"
+        (repo / ".scratch").mkdir(parents=True, exist_ok=True)
+        (repo / sup_receipt_path).write_text(json.dumps({
+            "decision": "COMMIT_GO",
+            "staged_sha": "fresh_sha",
+            "timestamp_utc": "2026-03-24T00:00:00+00:00",
+        }))
+
+        SupervisorResult = namedtuple("SupervisorResult", ["decision", "summary", "receipt_path"])
+        fake_result = SupervisorResult(
+            decision="COMMIT_GO",
+            summary="test",
+            receipt_path=sup_receipt_path,
+        )
+
+        mock_client = types.ModuleType("meta_bridge_client")
+        mock_client.run_meta_bridge_package = lambda *a, **kw: fake_result
+        mock_client.MetaBridgeClientError = Exception
+
+        real_subprocess_run = subprocess.run
+        seen_commands: list[list[str]] = []
+
+        def intercept_subprocess_run(args, *run_args, **run_kwargs):
+            command = list(args) if isinstance(args, (list, tuple)) else [str(args)]
+            seen_commands.append(command)
+            if command[:2] == ["git", "commit"]:
+                raise AssertionError("git commit should not run after underscored-import gate failure")
+            return real_subprocess_run(args, *run_args, **run_kwargs)
+
+        handoff = _make_new_schema_handoff(
+            files_to_stage=["file.py", "mu/tests/test_file.py"],
+        )
+        with patch.dict(sys.modules, {"meta_bridge_client": mock_client}), \
+             patch.object(
+                 commit_mod,
+                 "_run_pytest_on_files",
+                 return_value={"exit_code": 0, "stdout": "", "stderr": "", "passed": True},
+             ), \
+             patch.object(commit_mod.subprocess, "run", side_effect=intercept_subprocess_run):
+            result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+        assert result["status"] == "error"
+        assert result["step"] == "private_attr_gate"
+        error_text = "\n".join(result["errors"])
+        assert "private-attr test-integrity gate failed before local commit creation" in error_text
+        assert "ERROR: Found underscored imports from rcx_pi" in error_text
         assert "git_commit" not in result.get("steps_completed", [])
         assert not any(cmd[:2] == ["git", "commit"] for cmd in seen_commands)
 

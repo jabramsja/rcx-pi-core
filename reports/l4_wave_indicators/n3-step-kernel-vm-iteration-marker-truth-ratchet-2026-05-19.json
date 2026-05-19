@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-step-kernel-vm-iteration-marker-truth-ratchet-2026-05-19",
+  "repeat_run_speedup_ratio": 1.318408,
+  "parity_diff_count": 4,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.25962,
+  "repeat_run_raw_seconds": [
+    0.342285,
+    0.25962
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.342285
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.601905
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-19T19:36:24Z",
+  "collector_version": "2.2.0"
+}
