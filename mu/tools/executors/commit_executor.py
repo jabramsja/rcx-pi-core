@@ -7272,6 +7272,13 @@ def _tracker_note_wave_id(line: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _line_is_next_codex_post_redteam_queue_entry(line: str) -> bool:
+    return (
+        "FOUNDER-ORDERED-REDTEAM-" in line
+        or "NEXT-CODEX-POST-REDTEAM" in line
+    )
+
+
 _MU_STRUCTURAL_PHASE_A_AUTHORIZATION_RE = re.compile(
     r"(?i)\b(?:ROUTED\s*[-/]\s*)?PHASE\s+A\s+(?:REQUIRED|AUTHORIZED|LOCKED)\b"
 )
@@ -7368,7 +7375,7 @@ def _founder_ordered_queue_entries(repo_root: Path) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     seen_wave_ids: set[str] = set()
     for line in lines:
-        if "FOUNDER-ORDERED-REDTEAM-" not in line:
+        if not _line_is_next_codex_post_redteam_queue_entry(line):
             continue
         if "Wave ID:" not in line or "Packet:" not in line:
             continue
