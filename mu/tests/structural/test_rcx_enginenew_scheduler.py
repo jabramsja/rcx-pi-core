@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 
 from rcx_pi.selfhost.engine_pipeline import _service_boundary_effect  # ANTICHEAT_OK: boundary dispatch regression test
-from rcx_pi.selfhost.seed_integrity import get_seed_path, load_verified_seed
+from rcx_pi.selfhost.seed_integrity import (
+    RUN_ALGORITHM_AUTHORITY_SEEDS,
+    get_seed_path,
+    load_verified_seed,
+)
 from tests.conftest import run_until_stable
 from tests.repo_root import REPO_ROOT
 
@@ -72,6 +76,7 @@ def test_scheduler_seed_is_registered_with_verified_loader():
     assert [p["id"] for p in seed["projections"]] == [
         p["id"] for p in _load_seed()["projections"]
     ]
+    assert SCHEDULER_SEED_NAME in RUN_ALGORITHM_AUTHORITY_SEEDS
 
 
 def test_scheduler_selects_lexicographic_head_from_finite_pool():

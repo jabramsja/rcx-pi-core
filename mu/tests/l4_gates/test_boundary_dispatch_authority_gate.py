@@ -15,6 +15,8 @@ Usage:
 from __future__ import annotations
 
 import base64
+import copy
+import hashlib
 import inspect
 import json
 import os
@@ -33,11 +35,12 @@ from rcx_pi.selfhost.engine_pipeline import (
     _clear_boundary_ops_cache,  # ANTICHEAT_OK: gate verifies cache-clear parity
     _service_boundary_effect,  # ANTICHEAT_OK: gate verifies dispatch structure
     _BOUNDARY_DISPATCH,  # ANTICHEAT_OK: gate verifies dispatch map keys
-    _ALGORITHM_SEED_ALLOWLIST,  # ANTICHEAT_OK: gate verifies algorithm seed authority (F-22)
 )
 from rcx_pi.selfhost.seed_integrity import (
     EXPECTED_PROJECTION_IDS,
+    RUN_ALGORITHM_AUTHORITY_SEEDS,
     SEED_CHECKSUMS,
+    SEED_REGISTRY_MANIFEST,
     SeedBinaryMigrationError,
     compute_checksum,
     get_seed_path,
@@ -58,6 +61,13 @@ PY_STEP_MU = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "eng
 JS_PIPELINE = REPO_ROOT / "mu" / "host" / "js" / "engine" / "pipeline.js"
 
 EXPECTED_OPS = frozenset({"run_trace", "hash_trace", "run_algorithm"})
+EXPECTED_RUN_ALGORITHM_AUTHORITY_SEEDS = frozenset({
+    "recurrence.v1.json",
+    "recurrence.v2.json",
+    "exhaustion.v1.json",
+    "fix.v1.json",
+    "rcx_engine_scheduler.v1.json",
+})
 
 # Stub emit function for tests (collects events)
 _events = []
@@ -1431,12 +1441,11 @@ class TestBehaviorPreservation:
 
 
 class TestAlgorithmSeedAllowlist:
-    """Gate: boundary run_algorithm rejects non-algorithm seeds (F-22).
+    """Gate: boundary run_algorithm follows manifest authority metadata (F-22).
 
     Python _boundary_op_run_algorithm previously accepted any of 17 registered
-    seed names via get_seed_path(). JS already restricts to 4 via
-    seedProjectionMap (main.js:228-233). This gate proves Python now matches
-    that authority model.
+    seed names via get_seed_path(). This gate proves Python and JS now derive
+    authority from seed_registry_manifest.v1.json metadata, not seed-map shape.
     """
 
     def _make_run_algorithm_request(self, algo_name):
@@ -1448,6 +1457,144 @@ class TestAlgorithmSeedAllowlist:
             "inject_key": "algo_result",
             "algorithm": algo_name,
         }
+
+    def _run_python_seed_integrity_import_with_records(self, tmp_path, seed_records):
+        manifest = {
+            "schema": SEED_REGISTRY_MANIFEST["schema"],
+            "seeds": seed_records,
+        }
+        manifest_text = json.dumps(manifest, indent=2) + "\n"
+        manifest_hash = hashlib.sha256(manifest_text.encode("utf-8")).hexdigest()
+
+        temp_module = (
+            tmp_path / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "seed_integrity.py"
+        )
+        temp_module.parent.mkdir(parents=True)
+        source = (
+            REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "seed_integrity.py"
+        ).read_text()
+        source = re.sub(
+            r'SEED_REGISTRY_MANIFEST_SHA256 = \(\s*"[0-9a-f]+"\s*\)',
+            f'SEED_REGISTRY_MANIFEST_SHA256 = (\n    "{manifest_hash}"\n)',
+            source,
+            count=1,
+            flags=re.S,
+        )
+        temp_module.write_text(source)
+        (tmp_path / "mu" / "seed_registry_manifest.v1.json").write_text(manifest_text)
+
+        script = f"""
+import importlib.util
+spec = importlib.util.spec_from_file_location("temp_seed_integrity", {str(temp_module)!r})
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+print("OK")
+"""
+        return subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+
+    def _run_js_seed_loader_import_with_records(self, seed_records):
+        manifest = {
+            "schema": SEED_REGISTRY_MANIFEST["schema"],
+            "seeds": seed_records,
+        }
+        manifest_text = json.dumps(manifest, separators=(",", ":"))
+        manifest_hash = hashlib.sha256(manifest_text.encode("utf-8")).hexdigest()
+        js_code = f"""
+        const fs = require('fs');
+        const path = require('path');
+        const vm = require('vm');
+        const sourcePath = path.join(process.cwd(), 'mu/host/js/core/seed_loader.js');
+        const source = fs.readFileSync(sourcePath, 'utf8').replace(
+          /const SEED_REGISTRY_MANIFEST_SHA256 =\\n  '[0-9a-f]{{64}}';/,
+          "const SEED_REGISTRY_MANIFEST_SHA256 =\\n  '{manifest_hash}';"
+        );
+        const manifestBytes = Buffer.from({json.dumps(manifest_text)}, 'utf8');
+        const fakeFs = Object.assign(Object.create(null), fs, {{
+          readFileSync(p, options) {{
+            if (String(p).endsWith('seed_registry_manifest.v1.json')) {{
+              return manifestBytes;
+            }}
+            return fs.readFileSync(p, options);
+          }}
+        }});
+        const sandbox = {{
+          require(name) {{
+            if (name === 'fs') return fakeFs;
+            if (name === './stage0_vm') return {{ muCopy(value) {{ return value; }} }};
+            return require(name);
+          }},
+          module: {{ exports: {{}} }},
+          exports: {{}},
+          __dirname: path.join(process.cwd(), 'mu/host/js/core'),
+          TextDecoder,
+          Buffer,
+          console,
+        }};
+        try {{
+          vm.runInNewContext(source, sandbox, {{ filename: 'seed_loader.js' }});
+          console.log('OK');
+        }} catch (e) {{
+          console.error(e.message);
+          process.exit(1);
+        }}
+        """
+        return subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+
+    def test_python_manifest_authority_matches_expected_migration_set(self):
+        """Python exports exactly the manifest-authorized migration set."""
+        manifest_allowed = frozenset(
+            name for name, meta in SEED_REGISTRY_MANIFEST["seeds"].items()
+            if meta.get("authority", {}).get("run_algorithm") is True
+        )
+
+        assert RUN_ALGORITHM_AUTHORITY_SEEDS == EXPECTED_RUN_ALGORITHM_AUTHORITY_SEEDS
+        assert manifest_allowed == EXPECTED_RUN_ALGORITHM_AUTHORITY_SEEDS
+
+    def test_python_manifest_authority_rejects_unexpected_true_seed(self, tmp_path):
+        """Manifest validator fails closed if any extra seed gains authority."""
+        records = copy.deepcopy(SEED_REGISTRY_MANIFEST["seeds"])
+        records["kernel.v1.json"]["authority"] = {"run_algorithm": True}
+
+        result = self._run_python_seed_integrity_import_with_records(tmp_path, records)
+        assert result.returncode != 0
+        assert "authority.run_algorithm set mismatch" in result.stderr
+
+    def test_python_manifest_authority_rejects_malformed_metadata(self, tmp_path):
+        """Manifest validator fails closed on unreadable authority metadata."""
+        records = copy.deepcopy(SEED_REGISTRY_MANIFEST["seeds"])
+        records["kernel.v1.json"]["authority"] = []
+
+        result = self._run_python_seed_integrity_import_with_records(tmp_path, records)
+        assert result.returncode != 0
+        assert "authority must be a dict" in result.stderr
+
+    def test_python_manifest_authority_rejects_missing_run_algorithm_key(self, tmp_path):
+        """Manifest validator fails closed when authority lacks run_algorithm."""
+        records = copy.deepcopy(SEED_REGISTRY_MANIFEST["seeds"])
+        records["kernel.v1.json"]["authority"] = {}
+
+        result = self._run_python_seed_integrity_import_with_records(tmp_path, records)
+        assert result.returncode != 0
+        assert "authority missing 'run_algorithm'" in result.stderr
+
+    def test_python_manifest_authority_rejects_non_boolean_run_algorithm(self, tmp_path):
+        """Manifest validator fails closed on non-boolean run_algorithm metadata."""
+        records = copy.deepcopy(SEED_REGISTRY_MANIFEST["seeds"])
+        records["kernel.v1.json"]["authority"] = {"run_algorithm": "true"}
+
+        result = self._run_python_seed_integrity_import_with_records(tmp_path, records)
+        assert result.returncode != 0
+        assert "authority.run_algorithm must be bool" in result.stderr
 
     def test_python_rejects_kernel_seed(self):
         """Python run_algorithm rejects kernel.v1.json (not an algorithm seed)."""
@@ -1553,27 +1700,68 @@ class TestAlgorithmSeedAllowlist:
         )
         assert called[0], "fix.v1.json must reach _run_sub_algorithm"
 
-    def test_python_allowlist_matches_js_seed_map(self):
-        """Python _ALGORITHM_SEED_ALLOWLIST matches JS seedProjectionMap keys."""
-        js_main = (REPO_ROOT / "mu" / "host" / "js" / "cli" / "main.js").read_text()
-        # Extract seedProjectionMap keys from JS source.
-        # Format: const seedProjectionMap = Object.assign(Object.create(null), {
-        #   'recurrence.v1.json': ...,
-        # });
-        match = re.search(
-            r"const seedProjectionMap\s*=\s*Object\.assign\(Object\.create\(null\),\s*\{(.*?)\}\)",
-            js_main, re.DOTALL,
+    def test_python_accepts_scheduler_v1(self, monkeypatch):
+        """Python run_algorithm accepts rcx_engine_scheduler.v1.json (authorized)."""
+        _events.clear()
+        called = [False]
+
+        def _fake_run_sub_algorithm(projs, inp, max_iters):
+            called[0] = True
+            return {"result": "fake"}
+
+        import rcx_pi.selfhost.engine_pipeline as engine_pipeline_mod
+        monkeypatch.setattr(engine_pipeline_mod, "_run_sub_algorithm", _fake_run_sub_algorithm)
+        request = self._make_run_algorithm_request("rcx_engine_scheduler.v1.json")
+        _service_boundary_effect(
+            request, max_algorithm_iterations=10,
+            emit_fn=_stub_emit, step=0, state={},
         )
-        assert match, "seedProjectionMap not found in main.js"
-        map_body = match.group(1)
-        js_keys = set(re.findall(r"'([^']+\.json)'", map_body))
-        assert js_keys == _ALGORITHM_SEED_ALLOWLIST, (
-            f"Python allowlist {sorted(_ALGORITHM_SEED_ALLOWLIST)} != "
-            f"JS seedProjectionMap keys {sorted(js_keys)}"
+        assert called[0], "rcx_engine_scheduler.v1.json must reach _run_sub_algorithm"
+
+    def test_python_manifest_authority_matches_js_manifest_authority(self):
+        """Python and JS export the same manifest-derived run_algorithm authority."""
+        js_code = """
+        const seedLoader = require('./mu/host/js/core/seed_loader');
+        console.log(JSON.stringify(Object.keys(seedLoader.RUN_ALGORITHM_AUTHORITY_SEEDS).sort()));
+        """
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, text=True, cwd=str(REPO_ROOT),
+        )
+        assert result.returncode == 0, f"JS failed: {result.stderr}"
+        assert json.loads(result.stdout) == sorted(
+            EXPECTED_RUN_ALGORITHM_AUTHORITY_SEEDS
         )
 
+    def test_js_manifest_authority_rejects_malformed_metadata(self):
+        """JS manifest validator fails closed on unreadable authority metadata."""
+        records = copy.deepcopy(SEED_REGISTRY_MANIFEST["seeds"])
+        records["kernel.v1.json"]["authority"] = []
+
+        result = self._run_js_seed_loader_import_with_records(records)
+        assert result.returncode != 0
+        assert "authority must be a plain object" in result.stderr
+
+    def test_js_manifest_authority_rejects_non_boolean_metadata(self):
+        """JS manifest validator fails closed on non-boolean run_algorithm."""
+        records = copy.deepcopy(SEED_REGISTRY_MANIFEST["seeds"])
+        records["kernel.v1.json"]["authority"] = {"run_algorithm": "true"}
+
+        result = self._run_js_seed_loader_import_with_records(records)
+        assert result.returncode != 0
+        assert "authority.run_algorithm must be boolean" in result.stderr
+
+    def test_js_manifest_authority_rejects_unexpected_true_seed(self):
+        """JS manifest validator fails closed if any extra seed gains authority."""
+        records = copy.deepcopy(SEED_REGISTRY_MANIFEST["seeds"])
+        records["kernel.v1.json"]["authority"] = {"run_algorithm": True}
+
+        result = self._run_js_seed_loader_import_with_records(records)
+        assert result.returncode != 0
+        assert "authority.run_algorithm set mismatch" in result.stderr
+
     def test_js_rejects_non_algorithm_seed(self):
-        """JS run_algorithm rejects kernel.v1.json (not in allowlist)."""
+        """JS run_algorithm rejects kernel.v1.json (not manifest-authorized)."""
         js_code = """
         const pipeline = require('./mu/host/js/engine/pipeline');
         const seedMap = Object.create(null);
@@ -1629,13 +1817,10 @@ class TestAlgorithmSeedAllowlist:
         assert result.returncode == 0, f"JS failed: {result.stderr}"
         assert result.stdout.strip() == "OK", f"JS rogue injection: {result.stdout.strip()}"
 
-    def test_js_allowlist_matches_python_allowlist(self):
-        """JS _ALGORITHM_SEED_ALLOWLIST matches Python _ALGORITHM_SEED_ALLOWLIST.
-
-        Derives expected values from Python allowlist (not hardcoded) to prevent drift.
-        """
+    def test_js_manifest_authority_accepts_expected_set(self):
+        """JS accepts exactly the Python manifest-authorized set."""
         import json as _json
-        py_allowed = sorted(_ALGORITHM_SEED_ALLOWLIST)
+        py_allowed = sorted(RUN_ALGORITHM_AUTHORITY_SEEDS)
         allowed_json = _json.dumps(py_allowed)
         js_code = f"""
         const pipeline = require('./mu/host/js/engine/pipeline');
@@ -1651,8 +1836,8 @@ class TestAlgorithmSeedAllowlist:
                     1, function(){{}}, 0, {{}}
                 );
             }} catch(e) {{
-                if (e.message && e.message.includes('authorized algorithm seed')) {{
-                    console.log('FAIL: ' + s + ' rejected by allowlist');
+            if (e.message && e.message.includes('authorized algorithm seed')) {{
+                    console.log('FAIL: ' + s + ' rejected by manifest authority');
                     ok = false;
                 }}
             }}
@@ -1679,18 +1864,15 @@ class TestAlgorithmSeedAllowlist:
             capture_output=True, text=True, cwd=str(REPO_ROOT),
         )
         assert result.returncode == 0, f"JS failed: {result.stderr}"
-        assert result.stdout.strip() == "OK", f"JS allowlist parity: {result.stdout.strip()}"
+        assert result.stdout.strip() == "OK", f"JS manifest authority: {result.stdout.strip()}"
 
     def test_js_allowlist_rejects_prototype_pollution(self):
-        """N12 regression: JS allowlist must not be vulnerable to prototype-chain key injection."""
+        """JS manifest authority must not accept prototype-chain key injection."""
         js_code = """
         const pipeline = require('./mu/host/js/engine/pipeline');
-        // Attempt to inject via prototype chain — if allowlist is a plain object
-        // with Object.prototype, 'constructor' and 'toString' would be truthy.
-        // A null-prototype object rejects all prototype keys.
+        Object.prototype['rogue.v1.json'] = true;
         const seedMap = Object.create(null);
         seedMap['recurrence.v1.json'] = [{id:'p',pattern:{},body:{}}];
-        // Try a prototype key as algorithm name — must be rejected
         try {
             pipeline.serviceBoundaryEffect(
                 [], seedMap,
@@ -1699,6 +1881,19 @@ class TestAlgorithmSeedAllowlist:
             );
             console.log('FAIL: constructor not rejected');
         } catch(e) {
+            if (!(e.message && e.message.includes('authorized algorithm seed'))) {
+                console.log('FAIL: wrong constructor error: ' + e.message);
+            }
+        }
+        try {
+            pipeline.serviceBoundaryEffect(
+                [], seedMap,
+                {operation:'run_algorithm',input:{},context:{},inject_key:'r',algorithm:'rogue.v1.json'},
+                1, function(){}, 0, {}
+            );
+            console.log('FAIL: inherited rogue not rejected');
+        } catch(e) {
+            delete Object.prototype['rogue.v1.json'];
             if (e.message && e.message.includes('authorized algorithm seed')) {
                 console.log('OK');
             } else {

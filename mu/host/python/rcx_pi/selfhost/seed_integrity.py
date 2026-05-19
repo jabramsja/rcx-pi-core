@@ -25,7 +25,7 @@ from typing import Any
 SEED_REGISTRY_MANIFEST_NAME = "seed_registry_manifest.v1.json"
 SEED_REGISTRY_MANIFEST_SCHEMA = "rcx.seed_registry_manifest.v1"
 SEED_REGISTRY_MANIFEST_SHA256 = (
-    "175ba95a371914f3d38bbe960ccd9300b44ea907d020164deb25947292bb7d29"
+    "74dea09a1022ecaba89e8834b9a8bff3f9498f05b6fb4d79b0e5d0ad8707597f"
 )
 
 _MU_DIR = Path(__file__).resolve().parents[4]
@@ -125,6 +125,44 @@ for _seed_name, _record in _MANIFEST_SEEDS.items():
             )
 
 _SEED_REGISTRY_RECORDS: dict[str, dict[str, Any]] = SEED_REGISTRY_MANIFEST["seeds"]
+
+_EXPECTED_RUN_ALGORITHM_AUTHORITY_SEEDS = frozenset((
+    "recurrence.v1.json",
+    "recurrence.v2.json",
+    "exhaustion.v1.json",
+    "fix.v1.json",
+    "rcx_engine_scheduler.v1.json",
+))
+_run_algorithm_authority_seed_names: set[str] = set()
+for _seed_name, _record in _SEED_REGISTRY_RECORDS.items():
+    if "authority" not in _record:
+        continue
+    _authority = _record["authority"]
+    if not isinstance(_authority, dict):
+        raise ValueError(
+            f"Seed registry manifest record for {_seed_name} authority must be a dict"
+        )
+    if "run_algorithm" not in _authority:
+        raise ValueError(
+            f"Seed registry manifest record for {_seed_name} authority missing "
+            "'run_algorithm'"
+        )
+    _run_algorithm = _authority["run_algorithm"]
+    if not isinstance(_run_algorithm, bool):
+        raise ValueError(
+            f"Seed registry manifest record for {_seed_name} "
+            "authority.run_algorithm must be bool"
+        )
+    if _run_algorithm:
+        _run_algorithm_authority_seed_names.add(_seed_name)
+
+RUN_ALGORITHM_AUTHORITY_SEEDS = frozenset(_run_algorithm_authority_seed_names)
+if RUN_ALGORITHM_AUTHORITY_SEEDS != _EXPECTED_RUN_ALGORITHM_AUTHORITY_SEEDS:
+    raise ValueError(
+        "Seed registry manifest authority.run_algorithm set mismatch: "
+        f"expected {sorted(_EXPECTED_RUN_ALGORITHM_AUTHORITY_SEEDS)}, "
+        f"got {sorted(RUN_ALGORITHM_AUTHORITY_SEEDS)}"
+    )
 
 # Compatibility views: static seed truth is manifest data, not host literals.
 SEED_CHECKSUMS: dict[str, str] = {}

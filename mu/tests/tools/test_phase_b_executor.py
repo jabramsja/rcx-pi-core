@@ -170,6 +170,40 @@ class TestPhaseBWaveClassResolution:
         assert "host_semantics_delta_before" not in note
         assert "structural_artifact_ref" not in note
 
+    def test_control_plane_phase_a_only_structural_packet_packages_as_enabler(self):
+        plan = (
+            "Class: L4_STRUCTURAL successor, with this packet rewrite as control-plane Phase A only\n"
+            "\n"
+            "Purpose: This packet does not authorize implementation while same-wave tracker "
+            "proof is absent.\n"
+            "\n"
+            "This Phase A rewrite may change only this packet.\n"
+            "At this packet rewrite, implementation is not authorized.\n"
+        )
+
+        note = pb_mod.build_phase_b_tracker_note(
+            wave_id="control-plane-phase-a-only-structural-wave",
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/control_plane_phase_a_only.md",
+            plan_content=plan,
+            changed_files=[
+                "TASKS.md",
+                "reports/control_plane/control_plane_phase_a_only.md",
+                "reports/l4_wave_indicators/control-plane-phase-a-only-structural-wave.json",
+            ],
+            test_files=[],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=1,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        assert "Class: L4_ENABLER" in note
+        assert "host_semantics_delta_before" not in note
+        assert "structural_artifact_ref" not in note
+
     def test_smaller_prerequisite_alone_does_not_downgrade_structural_packet(self):
         plan = (
             "Class: L4_STRUCTURAL\n"

@@ -1237,7 +1237,12 @@ def _plan_declares_routing_boundary(plan_content: str) -> bool:
     return (
         "not an implementation packet" in text
         or "phase a routing boundary" in text
+        or "control-plane phase a only" in text
+        or "control plane phase a only" in text
+        or "phase a rewrite may change only this packet" in text
         or "locked later phase b plan" in text
+        or "does not authorize implementation" in text
+        or "implementation is not authorized" in text
         or "no-go package" in text
         or "no-go before commit readiness" in text
         or "stopped before commit readiness" in text

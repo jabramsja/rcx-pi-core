@@ -135,6 +135,9 @@
       ],
       "status": "legacy-poc",
       "dependencies": [],
+      "authority": {
+        "run_algorithm": true
+      },
       "js_cli_registered": true,
       "js_core_locked": false
     },
@@ -158,6 +161,9 @@
       ],
       "status": "legacy-poc",
       "dependencies": [],
+      "authority": {
+        "run_algorithm": true
+      },
       "js_cli_registered": true,
       "js_core_locked": false
     },
@@ -234,6 +240,9 @@
       ],
       "status": "production",
       "dependencies": [],
+      "authority": {
+        "run_algorithm": true
+      },
       "js_cli_registered": true,
       "js_core_locked": true
     },
@@ -325,6 +334,9 @@
       ],
       "status": "production",
       "dependencies": [],
+      "authority": {
+        "run_algorithm": true
+      },
       "js_cli_registered": true,
       "js_core_locked": false
     },
@@ -341,6 +353,9 @@
       ],
       "status": "production",
       "dependencies": [],
+      "authority": {
+        "run_algorithm": true
+      },
       "js_cli_registered": true,
       "js_core_locked": false
     },
