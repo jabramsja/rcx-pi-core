@@ -140,6 +140,39 @@ def test_lock_plan_inserts_missing_authoritative_routing_identity(tmp_path):
     assert "Task: narrative-only body value" in content
 
 
+def test_lock_plan_normalizes_review_sentinel_after_bridge_go(tmp_path):
+    repo = tmp_path / "repo"
+    reports = repo / "reports" / "control_plane"
+    reports.mkdir(parents=True)
+    plan = reports / "parallel_pipeline_agent_teams.md"
+    plan.write_text(
+        "# Parallel Pipeline Agent Teams\n\n"
+        "Date: 2026-04-30\n"
+        "Status: Phase A\n"
+        "Task: [PARALLEL-PIPELINE]\n"
+        "Wave ID: parallel-pipeline-agent-teams\n"
+        "Phase-A-Lock: LOCKED_FOR_REVIEW\n"
+        "\n"
+        "## Scope\n"
+        "Bridge-stage review sentinel.\n",
+        encoding="utf-8",
+    )
+
+    phase_a_mod.lock_plan(
+        repo,
+        "reports/control_plane/parallel_pipeline_agent_teams.md",
+        routing_record={
+            "task_id": "[PARALLEL-PIPELINE]",
+            "wave_name": "parallel-pipeline-agent-teams",
+        },
+    )
+
+    header = plan.read_text(encoding="utf-8").split("## Scope", 1)[0]
+    assert "Phase-A-Lock: LOCKED\n" in header
+    assert "LOCKED_FOR_REVIEW" not in header
+    assert "Status: Phase B (locked, implementing)\n" in header
+
+
 def test_run_phase_a_emits_entered_reviewer_and_go_events(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
