@@ -41,7 +41,7 @@ from rcx_pi.selfhost.seed_integrity import (
     load_verified_seed,
     load_verified_seed_image,
 )
-from mu.tools.seed_binary_migration import (
+from mu.tools.util.seed_binary_migration import (
     decode_seed_binary_projections,
     generate_seed_binary_migration_artifact,
 )
@@ -1109,7 +1109,7 @@ class TestProjectionLoaderSeedMigrationIntegrityChainBoundary:
         assert proof["binary_is_smaller"] is True
         assert decode_seed_binary_projections(binary_image)
 
-        import mu.tools.seed_binary_migration as migration_tool_mod
+        import mu.tools.util.seed_binary_migration as migration_tool_mod
 
         def _sidecar_called(_binary_image):
             raise AssertionError("binary sidecar called from JSON loader")

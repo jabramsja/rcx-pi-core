@@ -43,8 +43,8 @@ from rcx_pi.selfhost.seed_integrity import (
     load_verified_seed,
     load_verified_seed_image,
 )
-import mu.tools.seed_binary_migration as seed_binary_migration_tool
-from mu.tools.seed_binary_migration import (
+import mu.tools.util.seed_binary_migration as seed_binary_migration_tool
+from mu.tools.util.seed_binary_migration import (
     SeedBinaryMigrationError,
     decode_seed_binary_projections,
     encode_seed_binary_projections,
@@ -1062,7 +1062,7 @@ class TestProjectionLoaderSeedMigrationIntegrityChain:
         validate = subprocess.run(
             [
                 sys.executable,
-                str(_REPO / "mu" / "tools" / "seed_binary_migration.py"),
+                str(_REPO / "mu" / "tools" / "util" / "seed_binary_migration.py"),
                 "validate",
                 "--seed-name",
                 seed_name,
@@ -1252,7 +1252,7 @@ class TestProjectionLoaderSeedMigrationIntegrityChain:
         seed_path = get_seed_path(seed_name)
         binary_path = tmp_path / "classify.v1.mub"
         proof_path = tmp_path / "classify.v1.mub.proof.json"
-        tool = _REPO / "mu" / "tools" / "seed_binary_migration.py"
+        tool = _REPO / "mu" / "tools" / "util" / "seed_binary_migration.py"
 
         assert seed_name in SEED_CHECKSUMS
         assert seed_name not in _js_seed_checksums()
@@ -1314,7 +1314,7 @@ class TestProjectionLoaderSeedMigrationIntegrityChain:
         seed_path = get_seed_path(seed_name)
         binary_path = tmp_path / "rcx_engine.v1.mub"
         proof_path = tmp_path / "rcx_engine.v1.mub.proof.json"
-        tool = _REPO / "mu" / "tools" / "seed_binary_migration.py"
+        tool = _REPO / "mu" / "tools" / "util" / "seed_binary_migration.py"
 
         generate = subprocess.run(
             [
@@ -1424,7 +1424,7 @@ class TestProjectionLoaderSeedMigrationIntegrityChain:
         seed_copy = tmp_path / seed_name
         seed_copy.write_bytes(seed_source.read_bytes())
         seed_copy_sha = compute_checksum(seed_copy.read_bytes())
-        tool = _REPO / "mu" / "tools" / "seed_binary_migration.py"
+        tool = _REPO / "mu" / "tools" / "util" / "seed_binary_migration.py"
 
         input_overlap_proof = tmp_path / "input-overlap.proof.json"
         input_overlap = subprocess.run(

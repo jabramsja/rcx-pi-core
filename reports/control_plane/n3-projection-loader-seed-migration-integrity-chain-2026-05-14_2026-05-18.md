@@ -150,7 +150,7 @@ Implemented in the scoped files:
   policy id, checksum policy id, and shared fail-closed migration exception.
   It does not call binary sidecar logic from `load_verified_seed_image` or
   `load_verified_seed`.
-- `mu/tools/seed_binary_migration.py` is the bounded JSON-to-smaller-MuBinary
+- `mu/tools/util/seed_binary_migration.py` is the bounded JSON-to-smaller-MuBinary
   generation/validation tool. It verifies an already-valid JSON seed image,
   emits deterministic sidecar bytes, validates source/binary identity, and
   writes/validates the reproducible proof chain.
@@ -184,7 +184,6 @@ Local validation results:
 - `PYTHONHASHSEED=0 python3 -m pytest tests/docs/test_growth_caps.py -q`
   exits `0`, proving the tool-script cap now covers the authorized migration
   tool without bypassing the growth gate.
-
 No deferred report was opened for the stop-hook pass because the unresolved
 surface was this same-wave control-plane packet, which is included in the
 authorized rewrite scope and is reconciled here.
