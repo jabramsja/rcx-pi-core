@@ -62,7 +62,7 @@ This Phase A packet is acceptable when:
 
 - It contains detector-visible scope, work items, constraints, stop conditions, acceptance criteria, and grounding/authorization sections.
 - It carries `FOUNDER_OVERRIDE:n3-engine-pipeline-thin-core-source-lock-2026-05-14` as packet provenance only, not as a substitute for a detector-visible `TASKS.md` tracker sync note.
-- It grounds the route in the `[NEXT-CODEX-POST-REDTEAM]` TASKS queue while explicitly recording that the direct target wave id is absent from TASKS at packet-rewrite time.
+- It grounds the route in the `[NEXT-CODEX-POST-REDTEAM]` TASKS queue while explicitly recording the historical pre-tracker lookup miss and the current detector-visible tracker note.
 - It excludes the landed broad-host-surface structural slice and the implemented projection-loader JS binary decoder parity wave from pending work and successor acceptance criteria.
 
 A successor GO packet is acceptable only if it adds:
@@ -80,21 +80,23 @@ A successor GO packet is acceptable only if it adds:
 - TASKS authority: `TASKS.md` line 561 records the founder-ordered `[NEXT-CODEX-POST-REDTEAM]` directive to proceed autonomously through dispatcher/pipeline work, with a control-plane packet and tracker entry required per wave.
 - TASKS predecessor state: `TASKS.md` line 568 marks `broad-host-surface-next-structural-slice-2026-05-13` as landed; this packet must not reopen that predecessor as unresolved.
 - TASKS prerequisite state: `TASKS.md` line 569 marks `n3-projection-loader-js-binary-decoder-parity-2026-05-14` as implemented with local evidence; this packet must not relist the sidecar binary decoder parity work as pending.
-- Target-wave lookup at packet-rewrite time: `rg -n "n3-engine-pipeline-thin-core-source-lock-2026-05-14" TASKS.md` exits `1`, so the target wave id is not directly present in TASKS.
+- Historical target-wave lookup at packet-rewrite time: `rg -n "n3-engine-pipeline-thin-core-source-lock-2026-05-14" TASKS.md` exited `1` before the tracker sync note existed. That is historical packet-rewrite evidence, not current tracker truth.
+- Current target-wave lookup after tracker sync: `rg -n "n3-engine-pipeline-thin-core-source-lock-2026-05-14" TASKS.md` exits `0` and matches the detector-visible tracker sync note at `TASKS.md:378`.
 - Same-wave detector override / source-lock marker: `FOUNDER_OVERRIDE:n3-engine-pipeline-thin-core-source-lock-2026-05-14`.
-- Authorization result: blocked for implementation. Current strict L4 validation binds `--wave-id` only against parsed `TASKS.md` tracker sync notes (`tools/checks/enforce_l4_execution_contract.py:2233-2243`), and the target-wave lookup above exits `1`. This packet must therefore return NO-GO instead of claiming detector-visible same-wave implementation authority from packet-local override text.
+- Authorization result: tracker authority is now detector-visible for this docs/control-plane package through the `TASKS.md` tracker sync note. This does not authorize runtime implementation; the `run_algorithm` candidate still returns NO-GO on the Mu-owned authority-source blocker below.
 
 ## Phase A Output
 
 Decision: NO-GO.
 
-Two stop conditions fire before implementation:
+One implementation stop condition remains after tracker sync. The earlier
+same-wave tracker-authorization blocker is historical only:
 
-- Same-wave L4 authorization cannot be derived mechanically from this packet's
+- Before the tracker sync note was added, same-wave L4 authorization could not
+  be derived mechanically from this packet's
   `FOUNDER_OVERRIDE:n3-engine-pipeline-thin-core-source-lock-2026-05-14` plus
-  TASKS queue grounding. `rg -n "n3-engine-pipeline-thin-core-source-lock-2026-05-14" TASKS.md`
-  exits `1`, and the current strict checker reports the wave id missing because
-  it parses tracker sync notes from `TASKS.md`, not packet-local override text.
+  TASKS queue grounding. After the tracker sync note at `TASKS.md:378`, that
+  blocker no longer applies to the committed docs/control-plane package.
 - The remaining `run_algorithm` candidate cannot preserve the current accepted
   algorithm seed set from the locked authority read sources named by the GO
   draft. `mu/programs/rcx_engine.v1.json` requests only `fix.v1.json`
@@ -130,8 +132,9 @@ Closed predecessor surfaces stay closed:
 
 This packet locks no implementation write set. The prior GO draft's successor
 write set is explicitly rejected because its authority read sources cannot derive
-the preserved accepted set and because this same wave is not detector-visible to
-strict L4 validation without a `TASKS.md` tracker sync note.
+the preserved accepted set. The earlier detector-visibility blocker was resolved
+by the `TASKS.md` tracker sync note for this package and is not a current NO-GO
+basis.
 
 Precise N3 residue, if the outer dispatcher continues this route:
 `n3-engine-pipeline-run-algorithm-authority-source-prereq-2026-05-19`.
@@ -158,19 +161,23 @@ Explicit non-write set preserved for this packet:
 
 ## Evidence Commands
 
-Phase B-local commands that reproduce the two blocking findings:
+Current evidence commands separating resolved tracker authorization from the
+remaining source-authority blocker:
 
 ```bash
 rg -n "n3-engine-pipeline-thin-core-source-lock-2026-05-14" TASKS.md
-python3 tools/checks/enforce_l4_execution_contract.py --staged --wave-id n3-engine-pipeline-thin-core-source-lock-2026-05-14 --wave-class L4_ENABLER
+python3 tools/checks/enforce_l4_execution_contract.py --range 3e3850c^..3e3850c --wave-id n3-engine-pipeline-thin-core-source-lock-2026-05-14 --wave-class L4_ENABLER
 rg -n '"algorithm": "(recurrence\.v1\.json|recurrence\.v2\.json|exhaustion\.v1\.json|fix\.v1\.json|rcx_engine_scheduler\.v1\.json)"' mu/programs/rcx_engine.v1.json
 rg -n 'algorithm|seed_kind|authority' mu/seed_registry_manifest.v1.json
 ```
 
-Expected result: the first, second, and fourth commands fail for the reasons
-recorded above; the third command prints only `fix.v1.json`,
-`recurrence.v2.json`, and `exhaustion.v1.json` requests from
-`rcx_engine.v1.json`.
+Expected current result: the first command prints the `TASKS.md:378` tracker
+sync note and exits `0`; the committed-range L4 check exits `0` for the
+L4_ENABLER docs/control-plane package; the third command prints only
+`fix.v1.json`, `recurrence.v2.json`, and `exhaustion.v1.json` requests from
+`rcx_engine.v1.json`; the fourth command still exits `1`, proving the manifest
+does not provide an `algorithm`, `seed_kind`, or `authority` source that can
+derive the complete accepted `run_algorithm` seed set.
 
 ## Rollback / Default Path
 
