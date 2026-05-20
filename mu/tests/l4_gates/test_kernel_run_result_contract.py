@@ -21,7 +21,43 @@ from rcx_pi.selfhost.step_mu import step_kernel_mu
 # -- KernelRunResult shape contract --
 
 REQUIRED_FIELDS = {"output", "stall", "termination_reason", "steps_used", "max_steps"}
-VALID_TERM_REASONS = {"projection_applied", "kernel_stall", "hash_stall", "max_steps_exhausted"}
+VALID_TERM_REASONS = {
+    "projection_applied",
+    "kernel_stall",
+    "hash_stall",
+    "max_steps_exhausted",
+    "fuel_exhausted",
+}
+FUEL_FIELDS = {"fuel_supplied", "fuel_remaining", "fuel_exhausted"}
+SHARED_RESULT_FIELDS = (
+    "output",
+    "stall",
+    "termination_reason",
+    "steps_used",
+    "max_steps",
+)
+
+
+def _shared_kernel_result(meta: dict) -> dict:
+    return {field: meta[field] for field in SHARED_RESULT_FIELDS}
+
+
+def _make_kernel_fuel(count: int):
+    fuel = None
+    for _ in range(count):
+        fuel = {"head": None, "tail": fuel}
+    return fuel
+
+
+def _fuel_remaining_count(fuel) -> int:
+    count = 0
+    cursor = fuel
+    while cursor is not None:
+        assert isinstance(cursor, dict), f"fuel cursor must be dict/null, got {type(cursor).__name__}"
+        assert set(cursor) == {"head", "tail"}
+        count += 1
+        cursor = cursor["tail"]
+    return count
 
 
 class TestKernelRunResultPython:
@@ -93,7 +129,7 @@ class TestKernelRunResultPython:
 class TestKernelRunResultJS:
     """JS stepKernel via --json-api (live seeded kernel) must produce KernelRunResult."""
 
-    def _run_json_api(self, payload: dict) -> dict:
+    def _run_json_api_response(self, payload: dict) -> dict:
         """Run JS via eval_step.js --json-api with real seed loading."""
         result = subprocess.run(
             ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(payload)],
@@ -106,7 +142,10 @@ class TestKernelRunResultJS:
         idx = stdout.find(marker)
         assert idx >= 0, f"No JSON_API_RESPONSE in output: {stdout[-200:]}"
         json_str = stdout[idx + len(marker):]
-        resp = json.loads(json_str.strip())
+        return json.loads(json_str.strip())
+
+    def _run_json_api(self, payload: dict) -> dict:
+        resp = self._run_json_api_response(payload)
         assert resp.get("success"), f"JS API error: {resp.get('error', 'unknown')}"
         return resp["result"]
 
@@ -123,6 +162,7 @@ class TestKernelRunResultJS:
         assert meta["stall"] is False
         assert isinstance(meta["steps_used"], int)
         assert isinstance(meta["max_steps"], int)
+        assert not (FUEL_FIELDS & set(meta)), "default path must not emit fuel metadata"
 
     def test_kernel_stall_has_required_fields(self):
         """JS live kernel produces KernelRunResult on stall."""
@@ -135,6 +175,7 @@ class TestKernelRunResultJS:
         assert REQUIRED_FIELDS <= set(meta.keys())
         assert meta["termination_reason"] == "kernel_stall"
         assert meta["stall"] is True
+        assert not (FUEL_FIELDS & set(meta)), "default path must not emit fuel metadata"
 
     def test_max_steps_stall_true(self):
         """JS live kernel: max_steps must have stall=true (NB4 parity)."""
@@ -149,6 +190,174 @@ class TestKernelRunResultJS:
         })
         assert meta["termination_reason"] == "max_steps_exhausted"
         assert meta["stall"] is True, "JS NB4: max_steps must have stall=true"
+        assert not (FUEL_FIELDS & set(meta)), "default path must not emit fuel metadata"
+
+    def test_kernel_fuel_zero_exhausts_before_attempting_step(self):
+        """JS live kernel consumes no step when caller supplies empty Mu fuel."""
+        meta = self._run_json_api({
+            "action": "step_kernel_meta",
+            "projections": [{"pattern": {"x": 1}, "body": {"x": 2}}],
+            "input": {"x": 1},
+            "maxSteps": 100,
+            "kernelFuel": None,
+        })
+        assert REQUIRED_FIELDS <= set(meta.keys())
+        assert meta["termination_reason"] == "fuel_exhausted"
+        assert meta["stall"] is True
+        assert meta["output"] == {"x": 1}
+        assert meta["steps_used"] == 0
+        assert meta["max_steps"] == 100
+        assert meta["fuel_supplied"] is True
+        assert meta["fuel_remaining"] is None
+        assert meta["fuel_exhausted"] is True
+
+    def test_kernel_fuel_exhaustion_consumes_one_node_per_kernel_step(self):
+        """JS live kernel classifies exact structural-fuel exhaustion at maxSteps."""
+        fuel_count = 3
+        meta = self._run_json_api({
+            "action": "step_kernel_meta",
+            "projections": [
+                {"pattern": {"s": "a"}, "body": {"s": "b"}},
+                {"pattern": {"s": "b"}, "body": {"s": "a"}},
+            ],
+            "input": {"s": "a"},
+            "maxSteps": fuel_count,
+            "kernelFuel": _make_kernel_fuel(fuel_count),
+        })
+        assert REQUIRED_FIELDS <= set(meta.keys())
+        assert meta["termination_reason"] == "fuel_exhausted"
+        assert meta["stall"] is True
+        assert meta["steps_used"] == fuel_count
+        assert meta["max_steps"] == fuel_count
+        assert meta["fuel_supplied"] is True
+        assert meta["fuel_remaining"] is None
+        assert meta["fuel_exhausted"] is True
+
+    def test_kernel_fuel_numeric_cap_wins_when_fuel_remains(self):
+        """JS live kernel reports max_steps_exhausted when fuel remains at the cap."""
+        max_steps = 3
+        fuel_count = 5
+        meta = self._run_json_api({
+            "action": "step_kernel_meta",
+            "projections": [
+                {"pattern": {"s": "a"}, "body": {"s": "b"}},
+                {"pattern": {"s": "b"}, "body": {"s": "a"}},
+            ],
+            "input": {"s": "a"},
+            "maxSteps": max_steps,
+            "kernelFuel": _make_kernel_fuel(fuel_count),
+        })
+        assert REQUIRED_FIELDS <= set(meta.keys())
+        assert meta["termination_reason"] == "max_steps_exhausted"
+        assert meta["stall"] is True
+        assert meta["steps_used"] == max_steps
+        assert meta["max_steps"] == max_steps
+        assert meta["fuel_supplied"] is True
+        assert meta["fuel_exhausted"] is False
+        assert _fuel_remaining_count(meta["fuel_remaining"]) == fuel_count - max_steps
+
+    def test_kernel_fuel_success_reports_remaining_mu_fuel(self):
+        """JS live kernel returns unconsumed Mu fuel when fuel exceeds required steps."""
+        fuel_count = 80
+        meta = self._run_json_api({
+            "action": "step_kernel_meta",
+            "projections": [{"pattern": {"x": 1}, "body": {"x": 2}}],
+            "input": {"x": 1},
+            "maxSteps": 100,
+            "kernelFuel": _make_kernel_fuel(fuel_count),
+        })
+        assert REQUIRED_FIELDS <= set(meta.keys())
+        assert meta["termination_reason"] == "projection_applied"
+        assert meta["stall"] is False
+        assert meta["output"] == {"x": 2}
+        assert meta["fuel_supplied"] is True
+        assert meta["fuel_exhausted"] is False
+        assert 0 < meta["steps_used"] < fuel_count
+        assert _fuel_remaining_count(meta["fuel_remaining"]) == fuel_count - meta["steps_used"]
+
+    def test_kernel_fuel_success_shared_result_matches_python(self):
+        """Fuel-backed JS success preserves the Python/JS KernelRunResult contract."""
+        projections = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        input_value = {"x": 1}
+        max_steps = 100
+        fuel_count = 80
+
+        js_meta = self._run_json_api({
+            "action": "step_kernel_meta",
+            "projections": projections,
+            "input": input_value,
+            "maxSteps": max_steps,
+            "kernelFuel": _make_kernel_fuel(fuel_count),
+        })
+        py_meta = step_kernel_mu(
+            projections,
+            input_value,
+            return_meta=True,
+            max_steps=max_steps,
+        )
+
+        assert _shared_kernel_result(js_meta) == _shared_kernel_result(py_meta)
+        assert js_meta["fuel_supplied"] is True
+        assert js_meta["fuel_exhausted"] is False
+        assert _fuel_remaining_count(js_meta["fuel_remaining"]) == (
+            fuel_count - py_meta["steps_used"]
+        )
+
+    def test_kernel_fuel_exhaustion_shared_result_matches_python_budget(self):
+        """JS fuel exhaustion matches Python's shared fields for the same step budget."""
+        projections = [
+            {"pattern": {"s": "a"}, "body": {"s": "b"}},
+            {"pattern": {"s": "b"}, "body": {"s": "a"}},
+        ]
+        input_value = {"s": "a"}
+        fuel_count = 4
+        max_steps = 100
+
+        js_meta = self._run_json_api({
+            "action": "step_kernel_meta",
+            "projections": projections,
+            "input": input_value,
+            "maxSteps": max_steps,
+            "kernelFuel": _make_kernel_fuel(fuel_count),
+        })
+        py_meta = step_kernel_mu(
+            projections,
+            input_value,
+            return_meta=True,
+            max_steps=fuel_count,
+        )
+
+        assert js_meta["output"] == py_meta["output"]
+        assert js_meta["stall"] == py_meta["stall"] is True
+        assert js_meta["steps_used"] == py_meta["steps_used"] == fuel_count
+        assert js_meta["termination_reason"] == "fuel_exhausted"
+        assert py_meta["termination_reason"] == "max_steps_exhausted"
+        assert js_meta["max_steps"] == max_steps
+        assert py_meta["max_steps"] == fuel_count
+        assert js_meta["fuel_supplied"] is True
+        assert js_meta["fuel_remaining"] is None
+        assert js_meta["fuel_exhausted"] is True
+
+    @pytest.mark.parametrize(
+        "kernel_fuel",
+        [
+            {"head": None, "tail": 0},
+            {"head": None, "tail": None, "extra": None},
+            [],
+        ],
+    )
+    def test_kernel_fuel_rejects_non_linked_mu_data(self, kernel_fuel):
+        """JSON API fuel is fail-closed as Mu head/tail linked-list data."""
+        resp = self._run_json_api_response({
+            "action": "step_kernel_meta",
+            "projections": [{"pattern": {"x": 1}, "body": {"x": 2}}],
+            "input": {"x": 1},
+            "maxSteps": 100,
+            "kernelFuel": kernel_fuel,
+        })
+        assert not resp.get("success")
+        assert resp.get("error_code") == "api.bad_request"
+        assert "kernelFuel" in resp.get("error", "")
 
     def test_field_set_parity_with_python(self):
         """JS and Python KernelRunResult must have identical required field sets."""

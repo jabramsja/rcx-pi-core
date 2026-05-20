@@ -352,18 +352,23 @@ function handleJsonApi(apiArg, seeds) {
         }
       }
     } else if (request.action === 'step_kernel_meta') {
-      const { input, projections: domainProjs, maxSteps: reqMaxSteps, kernelMode } = request;
+      const { input, projections: domainProjs, maxSteps: reqMaxSteps, kernelMode, kernelFuel } = request;
+      const hasKernelFuel = Object.hasOwn(request, 'kernelFuel');
       guardMaxSteps(reqMaxSteps, 'maxSteps');
       try {
         const kernelProjs = (kernelMode === 'bridge')
           ? allProjectionsWithBridge
           : allProjections;
-        const meta = stepKernel(kernelProjs, input, domainProjs ?? [], {
+        const kernelOptions = {
           maxSteps: reqMaxSteps ?? 100,
           returnMeta: true,
           validationMode: 'domain',
           vmConfig: (kernelMode === 'bridge') ? vmConfigBridge : vmConfig,
-        });
+        };
+        if (hasKernelFuel) {
+          kernelOptions.kernelFuel = kernelFuel;
+        }
+        const meta = stepKernel(kernelProjs, input, domainProjs ?? [], kernelOptions);
         response = { success: true, result: meta };
       } catch (e) {
         response = { success: false, error_code: classifyError(e), error: e.message };

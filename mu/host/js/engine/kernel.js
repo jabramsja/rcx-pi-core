@@ -71,10 +71,32 @@ function _stepKernelWithVM(kernelBundle, bridgeBundle, matchBundle, substBundle,
  *
  * @host_iteration — active kernel driver loop over maxSteps
  */
-function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps, vmConfig) {
+function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps, vmConfig, kernelFuel = undefined) {
   let current = kernelInput;
   let currentHash = muHashControlCached(kernelInput, 'stepKernel');
+  const fuelSupplied = kernelFuel !== undefined;
+  let fuelCursor = kernelFuel;
   for (let i = 0; i < maxSteps; i++) {
+    if (fuelSupplied) {
+      if (fuelCursor === null) {
+        validator(domainInput, 'stepKernel output');
+        return {
+          output: domainInput,
+          stall: true,
+          termination_reason: 'fuel_exhausted',
+          steps_used: i,
+          max_steps: maxSteps,
+          fuel_supplied: true,
+          fuel_remaining: null,
+          fuel_exhausted: true,
+        };
+      }
+      if (typeof fuelCursor !== 'object' || Array.isArray(fuelCursor) ||
+          !Object.hasOwn(fuelCursor, 'head') || !Object.hasOwn(fuelCursor, 'tail')) {
+        throw new Error('SECURITY: kernelFuel must be a Mu head/tail linked list');
+      }
+    }
+
     let result = undefined;
     if (vmConfig && _STAGE0_VM_CUTOVER) {
       result = _stepKernelWithVM(
@@ -99,13 +121,16 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
         }
       }
     }
+    if (fuelSupplied) {
+      fuelCursor = fuelCursor.tail;
+    }
 
     if (isKernelTerminal(result)) {
       const stall = result._stall === true;
       const reason = stall ? 'kernel_stall' : 'projection_applied';
       if (stall) {
         validator(domainInput, 'stepKernel output');
-        return {
+        const meta = {
           output: domainInput,
           stall: true,
           termination_reason: reason,
@@ -113,17 +138,35 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
           max_steps: maxSteps,
           undefined_motif: makeUndefinedMotif('kernel', domainInput, null, 'no_matching_projection'),
         };
+        if (fuelSupplied) {
+          meta.fuel_supplied = true;
+          meta.fuel_remaining = fuelCursor;
+          meta.fuel_exhausted = false;
+        }
+        return meta;
       }
       const output = denormalize(result._result);
       validator(output, 'stepKernel output');
-      return { output, stall: false, termination_reason: reason, steps_used: i + 1, max_steps: maxSteps };
+      const meta = { output, stall: false, termination_reason: reason, steps_used: i + 1, max_steps: maxSteps };
+      if (fuelSupplied) {
+        meta.fuel_supplied = true;
+        meta.fuel_remaining = fuelCursor;
+        meta.fuel_exhausted = false;
+      }
+      return meta;
     }
 
     if (!isKernelIntermediate(result)) {
       const resultHash = muHashControlCached(result, 'stepKernel.stall');
       if (resultHash === currentHash) {
         validator(domainInput, 'stepKernel output');
-        return { output: domainInput, stall: true, termination_reason: 'hash_stall', steps_used: i + 1, max_steps: maxSteps };
+        const meta = { output: domainInput, stall: true, termination_reason: 'hash_stall', steps_used: i + 1, max_steps: maxSteps };
+        if (fuelSupplied) {
+          meta.fuel_supplied = true;
+          meta.fuel_remaining = fuelCursor;
+          meta.fuel_exhausted = false;
+        }
+        return meta;
       }
       currentHash = resultHash;
     }
@@ -131,7 +174,20 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     current = result;
   }
   validator(domainInput, 'stepKernel output');
-  return { output: domainInput, stall: true, termination_reason: 'max_steps_exhausted', steps_used: maxSteps, max_steps: maxSteps };
+  const fuelExhaustedAtLimit = fuelSupplied && fuelCursor === null;
+  const meta = {
+    output: domainInput,
+    stall: true,
+    termination_reason: fuelExhaustedAtLimit ? 'fuel_exhausted' : 'max_steps_exhausted',
+    steps_used: maxSteps,
+    max_steps: maxSteps,
+  };
+  if (fuelSupplied) {
+    meta.fuel_supplied = true;
+    meta.fuel_remaining = fuelCursor;
+    meta.fuel_exhausted = fuelExhaustedAtLimit;
+  }
+  return meta;
 }
 
 // _stepKernelCoreNonMeta DELETED (Wave 1).
@@ -148,7 +204,9 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
     shouldNormalize = true,
     validationMode = 'domain',
     returnMeta = false,
+    kernelFuel = undefined,
   } = options;
+  const hasKernelFuel = Object.hasOwn(options, 'kernelFuel');
 
   let validator;
   if (validationMode === 'domain') {
@@ -202,6 +260,21 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
   // Bridge algorithm execution (runAlgorithmWithBridge) bypasses stepKernel entirely.
   rejectNonlinearProjections(domainProjections, 'stepKernel');
 
+  if (hasKernelFuel) {
+    if (!isValidMu(kernelFuel)) {
+      throw new Error('SECURITY: kernelFuel must be valid Mu linked-list data');
+    }
+    let fuelCursor = kernelFuel;
+    for (let fuelNodeCount = 0; fuelCursor !== null; fuelNodeCount++) {
+      if (typeof fuelCursor !== 'object' || Array.isArray(fuelCursor) ||
+          !Object.hasOwn(fuelCursor, 'head') || !Object.hasOwn(fuelCursor, 'tail') ||
+          Object.keys(fuelCursor).length !== 2) {
+        throw new Error('SECURITY: kernelFuel must be a Mu head/tail linked list');
+      }
+      fuelCursor = fuelCursor.tail;
+    }
+  }
+
   const normalizedInput = shouldNormalize ? normalize(domainInput) : domainInput;
   const normalizedProjs = shouldNormalize
     ? domainProjections.map(normalizeProjection)
@@ -220,18 +293,19 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
   const vmConfig = options.vmConfig || null;
 
   if (returnMeta) {
-    return _stepKernelCore(projections, kernelInput, domainInput, validator, maxSteps, vmConfig);
+    return _stepKernelCore(projections, kernelInput, domainInput, validator, maxSteps, vmConfig, hasKernelFuel ? kernelFuel : undefined);
   }
 
   // Non-meta mode: compatibility shim over canonical _stepKernelCore.
   // Preserves FULL legacy { result, steps, stalled, trace } observable behavior.
   // result = normalize(output) so caller's denormalize() round-trips correctly.
   // stalled preserves legacy semantics (false on max-steps — NB4 public debt deferred).
-  const canonical = _stepKernelCore(projections, kernelInput, domainInput, validator, maxSteps, vmConfig);
-  const isLegacyStall = canonical.termination_reason === 'hash_stall' || canonical.termination_reason === 'kernel_stall';
+  const canonical = _stepKernelCore(projections, kernelInput, domainInput, validator, maxSteps, vmConfig, hasKernelFuel ? kernelFuel : undefined);
+  const isFuelExhaustion = canonical.termination_reason === 'fuel_exhausted';
+  const isLegacyStall = canonical.termination_reason === 'hash_stall' || canonical.termination_reason === 'kernel_stall' || isFuelExhaustion;
   return muContainers.record([
     ['result', normalize(canonical.output)],  // re-normalize so caller denormalize() works
-    ['steps', isLegacyStall ? canonical.steps_used - 1 : canonical.steps_used],  // legacy uses 0-indexed steps on stall
+    ['steps', isFuelExhaustion ? canonical.steps_used : isLegacyStall ? canonical.steps_used - 1 : canonical.steps_used],  // legacy uses 0-indexed steps on stall
     ['stalled', isLegacyStall],  // legacy: false on max-steps (NB4 public debt deferred)
     ['trace', muContainers.list()],
   ]);

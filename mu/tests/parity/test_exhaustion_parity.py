@@ -19,6 +19,7 @@ import pytest
 from rcx_pi.selfhost.eval_seed import step
 from rcx_pi.selfhost.kernel import reset_step_budget
 from rcx_pi.selfhost.seed_integrity import load_verified_seed, get_seed_path
+from rcx_pi.selfhost.step_mu import step_kernel_mu
 from tests.conftest import run_until_stable
 
 import subprocess
@@ -567,6 +568,109 @@ def _run_js_d006_fuel_bridge(input_value: dict) -> dict:
     return json.loads(result.stdout)
 
 
+def _make_js_kernel_fuel(count: int):
+    fuel = None
+    for _ in range(count):
+        fuel = {"head": None, "tail": fuel}
+    return fuel
+
+
+def _js_kernel_fuel_remaining_count(fuel) -> int:
+    count = 0
+    cursor = fuel
+    while cursor is not None:
+        assert isinstance(cursor, dict), f"fuel cursor must be dict/null, got {type(cursor).__name__}"
+        assert set(cursor) == {"head", "tail"}
+        count += 1
+        cursor = cursor["tail"]
+    return count
+
+
+def _run_js_step_kernel_meta_response(payload: dict) -> dict:
+    result = subprocess.run(
+        ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(payload)],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    marker = "JSON_API_RESPONSE:"
+    idx = result.stdout.find(marker)
+    assert idx >= 0, f"No JSON_API_RESPONSE in output: {result.stdout[-200:]}"
+    return json.loads(result.stdout[idx + len(marker):].strip())
+
+
+def _run_js_step_kernel_meta(payload: dict) -> dict:
+    response = _run_js_step_kernel_meta_response(payload)
+    assert response.get("success"), response.get("error")
+    return response["result"]
+
+
+def _assert_js_kernel_fuel_success_matches_python(
+    projections,
+    state,
+    fuel_count: int,
+    max_steps: int = 100,
+) -> dict:
+    js_meta = _run_js_step_kernel_meta({
+        "action": "step_kernel_meta",
+        "projections": projections,
+        "input": state,
+        "maxSteps": max_steps,
+        "kernelFuel": _make_js_kernel_fuel(fuel_count),
+    })
+    py_meta = step_kernel_mu(
+        projections,
+        state,
+        return_meta=True,
+        max_steps=max_steps,
+    )
+
+    shared_fields = ("output", "stall", "termination_reason", "steps_used", "max_steps")
+    for field in shared_fields:
+        assert js_meta[field] == py_meta[field], field
+    assert js_meta["fuel_supplied"] is True
+    assert js_meta["fuel_exhausted"] is False
+    assert _js_kernel_fuel_remaining_count(js_meta["fuel_remaining"]) == (
+        fuel_count - py_meta["steps_used"]
+    )
+    return js_meta
+
+
+def _assert_js_kernel_fuel_exhaustion_matches_python_budget(
+    projections,
+    state,
+    fuel_count: int,
+    max_steps: int = 100,
+) -> dict:
+    js_meta = _run_js_step_kernel_meta({
+        "action": "step_kernel_meta",
+        "projections": projections,
+        "input": state,
+        "maxSteps": max_steps,
+        "kernelFuel": _make_js_kernel_fuel(fuel_count),
+    })
+    py_meta = step_kernel_mu(
+        projections,
+        state,
+        return_meta=True,
+        max_steps=fuel_count,
+    )
+
+    assert js_meta["output"] == py_meta["output"]
+    assert js_meta["stall"] == py_meta["stall"] is True
+    assert js_meta["steps_used"] == py_meta["steps_used"] == fuel_count
+    assert js_meta["termination_reason"] == "fuel_exhausted"
+    assert py_meta["termination_reason"] == "max_steps_exhausted"
+    assert js_meta["max_steps"] == max_steps
+    assert py_meta["max_steps"] == fuel_count
+    assert js_meta["fuel_supplied"] is True
+    assert js_meta["fuel_remaining"] is None
+    assert js_meta["fuel_exhausted"] is True
+    return js_meta
+
+
 def _python_d006_fuel_run_observed(projections, state, fuel_count: int) -> dict:
     fuel = D006.make_fuel(fuel_count)
     trace = []
@@ -717,6 +821,62 @@ def test_js_d006_fuel_adapter_calls_existing_step_once_per_fuel_node():
     assert result["stepCalls"] == len(result["statuses"])
     assert result["stepCalls"] == result["remainingCounts"][0] - result["remainingCounts"][-1]
     assert proof["fuelStepCallsStepCount"] == 1
+
+
+def test_js_d006_production_step_kernel_meta_consumes_kernel_fuel_nodes():
+    fuel_count = 3
+    meta = _assert_js_kernel_fuel_exhaustion_matches_python_budget(
+        D006.V3_PROJECTIONS,
+        D006.V3_INPUT,
+        fuel_count,
+        max_steps=fuel_count,
+    )
+    assert meta["termination_reason"] == "fuel_exhausted"
+    assert meta["stall"] is True
+    assert meta["steps_used"] == fuel_count
+    assert meta["fuel_supplied"] is True
+    assert meta["fuel_remaining"] is None
+    assert meta["fuel_exhausted"] is True
+
+
+def test_js_d006_production_step_kernel_meta_reports_remaining_kernel_fuel():
+    fuel_count = 80
+    meta = _assert_js_kernel_fuel_success_matches_python(
+        D006.V2_PROJECTIONS,
+        D006.V2_INPUT,
+        fuel_count,
+    )
+    assert meta["termination_reason"] == "projection_applied"
+    assert meta["stall"] is False
+    assert meta["output"] == {"status": "done", "value": 1}
+    assert meta["fuel_supplied"] is True
+    assert meta["fuel_exhausted"] is False
+    assert 0 < meta["steps_used"] < fuel_count
+    assert _js_kernel_fuel_remaining_count(meta["fuel_remaining"]) == fuel_count - meta["steps_used"]
+
+
+def test_js_d006_production_step_kernel_meta_rejects_bad_kernel_fuel():
+    response = _run_js_step_kernel_meta_response({
+        "action": "step_kernel_meta",
+        "projections": D006.V2_PROJECTIONS,
+        "input": D006.V2_INPUT,
+        "maxSteps": 100,
+        "kernelFuel": {"head": None, "tail": 0},
+    })
+    assert response["success"] is False
+    assert response["error_code"] == "api.bad_request"
+    assert "kernelFuel" in response["error"]
+
+
+def test_js_d006_production_default_path_has_no_kernel_fuel_metadata():
+    meta = _run_js_step_kernel_meta({
+        "action": "step_kernel_meta",
+        "projections": D006.V2_PROJECTIONS,
+        "input": D006.V2_INPUT,
+        "maxSteps": 100,
+    })
+    assert meta["termination_reason"] == "projection_applied"
+    assert {"fuel_supplied", "fuel_remaining", "fuel_exhausted"}.isdisjoint(meta)
 
 
 def test_js_d006_step_path_does_not_inspect_fuel():

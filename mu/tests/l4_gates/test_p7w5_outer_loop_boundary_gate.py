@@ -176,6 +176,9 @@ class TestJSOuterLoopBoundary:
                 assert "for (let i = 0; i < maxSteps; i++)" in body, (
                     "JS _stepKernelCore must remain the maxSteps kernel driver loop"
                 )
+                assert "kernelFuel" in body and "fuel_remaining" in body, (
+                    "JS _stepKernelCore must thread opt-in Mu fuel without moving the host_iteration marker"
+                )
                 break
         else:
             pytest.fail("JS _stepKernelCore() function not found")
