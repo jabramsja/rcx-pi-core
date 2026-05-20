@@ -4,15 +4,15 @@ Archived: 2026-04-08. This is the wave-by-wave narrative of how host debt marker
 
 ---
 
-## Current Marker Breakdown (7 = 3 Py marker + 4 JS marker)
+## Current Marker Breakdown (5 = 2 Py marker + 3 JS marker)
 
 - @host_recursion: 0 (Stage0 match/substitute traversal is explicit worklist/no-self-call in both Python and JS)
 - @host_builtin: 3 (1 Py + 2 JS: match/builtin surface)
-- @host_iteration: 4 (2 Py + 2 JS: step_kernel_mu + list_to_linked + JS step + JS listToLinked — BOOTSTRAP)
+- @host_iteration: 2 (1 Py + 1 JS: step_kernel_mu + JS step — BOOTSTRAP)
 - @host_mutation: 0 (eliminated in W6A)
 - AST_OK bootstrap: 8 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009 + 2 stage0_vm template materialization from P7-a + 2 stage0_vm _mu_copy from P7-a bot review fix)
 
-Per-category markers: Py = 0 recursion + 1 builtin + 2 iteration + 0 mutation; JS = 0 recursion + 2 builtin + 2 iteration.
+Per-category markers: Py = 0 recursion + 1 builtin + 1 iteration + 0 mutation; JS = 0 recursion + 2 builtin + 1 iteration.
 
 ## Kernel Path (post S1-C)
 
@@ -24,7 +24,7 @@ step_kernel_mu/step() → _step_kernel_with_vm → stage0_vm_step for ALL 33 pro
 2. `_stage0_substitute()` in eval_seed.py — no tracked host-recursion marker remains; traversal is explicit worklist/no-self-call
 3. `step_kernel_mu()` in step_mu.py — @host_iteration (kernel execution loop — Forth's NEXT)
 4. `_step_kernel_with_vm()` in step_mu.py — unmarked Stage0 VM dispatch for ALL 4 seed groups; remaining loops are coverage bookkeeping over VM attempt traces
-5. `list_to_linked()` in step_mu.py — @host_iteration (inline; called by step_kernel_mu to build _projs linked list)
+5. `list_to_linked()` in step_mu.py — BOUNDARY boundary-normalization evidence (called by step_kernel_mu to build _projs linked list)
 6. AST_OK bootstrap: 4 (eval_seed list/dict comprehensions: 2 integer path + 2 budget path from D009)
 
 ## Utility Debt (3 sites)
@@ -34,11 +34,11 @@ step_kernel_mu/step() → _step_kernel_with_vm → stage0_vm_step for ALL 33 pro
 
 These cannot be eliminated because Stage 0 match/substitute are the irreducible bootstrap, step_kernel_mu is Forth's NEXT, and deep_eval provides iterative projection application with state tracking.
 
-## Why 7 Is the Floor (Lower Bound)
+## Why 5 Is the Floor (Lower Bound)
 
-The 7 counts explicitly marked @host_* sites across L2 kernel, utilities, and Stage0 VM. Known untracked host work includes: JS Stage0 builtin surface (stage0Match/stage0Substitute use host isinstance/keys/get internally without host-recursion markers), lambda-calculus boundary guards (assert_not_lambda_calculus/assertNotLambdaCalculus perform unmarked host recursion/isinstance/set traversal at apply_projection boundary).
+The 5 counts explicitly marked @host_* sites across L2 kernel, utilities, and Stage0 VM. Known untracked host work includes: bounded list-to-linked boundary-normalization loops in Python and JavaScript, JS Stage0 builtin surface (stage0Match/stage0Substitute use host isinstance/keys/get internally without host-recursion markers), lambda-calculus boundary guards (assert_not_lambda_calculus/assertNotLambdaCalculus perform unmarked host recursion/isinstance/set traversal at apply_projection boundary).
 
-STATUS.md `CURRENT` and `FLOOR` track this 7-marker cross-substrate baseline. STATUS.md `THRESHOLD` is the dashboard/pre-commit semantic ceiling and currently matches the 9-site semantic audit floor.
+STATUS.md `CURRENT` and `FLOOR` track this 5-marker cross-substrate baseline. STATUS.md `THRESHOLD` is the dashboard/pre-commit semantic ceiling and currently matches the 9-site semantic audit floor.
 
 ## Wave-by-Wave Changes
 
@@ -63,6 +63,8 @@ STATUS.md `CURRENT` and `FLOOR` track this 7-marker cross-substrate baseline. ST
 **N3 Stage0 worklist recursion marker truth ratchet (2026-05-19):** Removed stale host-recursion markers from Python `_stage0_substitute()` and JS `stage0Match()` / `stage0Substitute()` after direct source proof showed explicit worklist traversal with no self-recursive calls. Tracked marker floor 12→8.
 
 **N3 step-kernel VM iteration marker truth ratchet (2026-05-19):** Removed stale host-iteration marker from Python `_step_kernel_with_vm()` after direct source and gate proof showed projection execution is delegated to Stage0 VM for all seed groups and the remaining loops are coverage bookkeeping over VM attempt traces. Tracked marker floor 8→7.
+
+**N3 list-to-linked boundary demotion (2026-05-19):** Reclassified Python `list_to_linked()` and JavaScript `listToLinked()` as bounded boundary-normalization conversion loops after direct parity coverage proved matching empty, single-item, multi-item, and nested Mu value conversion behavior. Tracked marker floor 7→5; host-authority inventory remains unchanged because the converter functions, names, call sites, and loops remain present.
 
 **Phase 7d-2/7d-3 CLOSED:** Phase 8 decided "accept as bootstrap primitive." for-loop in step_kernel_mu accepted as irreducible.
 

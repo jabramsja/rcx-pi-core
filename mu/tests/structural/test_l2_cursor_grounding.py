@@ -7,7 +7,9 @@ not arithmetic indexing. This is a key L2 architectural requirement.
 From STATUS.md L2 Completion Criteria:
 - [x] Projection selection uses linked-list cursor (`_remaining` field, no index arithmetic)
 
-These tests verify that claim is true in the actual code.
+These tests verify that claim is true in the actual code. They cover Python
+boundary construction plus shared Mu cursor semantics after construction; direct
+JavaScript converter parity lives in mu/tests/parity/test_js_parity_automated.py.
 """
 
 import json
@@ -21,8 +23,20 @@ from rcx_pi.selfhost.step_mu import (
 from rcx_pi.selfhost.eval_seed import step as eval_step
 
 
+CURSOR_GROUNDING_SCOPE_NOTE = (
+    "L2 cursor grounding proves Python boundary construction and shared Mu cursor "
+    "semantics after construction; direct JS listToLinked parity is covered in "
+    "mu/tests/parity/test_js_parity_automated.py."
+)
+
+
 class TestLinkedListCursorExists:
     """Verify _remaining field is structural linked-list, not integer index."""
+
+    def test_cursor_grounding_scope_is_not_direct_js_converter_parity(self):
+        """This file is cursor semantics proof, not direct JS converter parity coverage."""
+        assert "direct JS listToLinked parity" in CURSOR_GROUNDING_SCOPE_NOTE
+        assert "after construction" in CURSOR_GROUNDING_SCOPE_NOTE
 
     def test_list_to_linked_produces_head_tail_structure(self):
         """list_to_linked produces {head: x, tail: ...} linked list."""

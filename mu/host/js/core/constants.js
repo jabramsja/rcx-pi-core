@@ -23,9 +23,9 @@
  *   (mu_equal eliminated: now derivable from muHashCached, Content-Addressed Mu Level 1)
  *
  * SEMANTIC DEBT (host operations that would need structural replacement):
- *   iteration debt: 2
+ *   iteration debt: 1
  *     - step()                    - for loop over projections (irreducible kernel core)
- *     - listToLinked()            - array-to-linked-list conversion (on kernel path via step)
+ *     (listToLinked reclassified: BOUNDARY, bounded boundary-normalization conversion loop)
  *     (run/runStructural/runAlgorithmWithBridge/runEnginePipelineRecursive
  *      reclassified: BOUNDARY, outer loop scaffolding off kernel path — P7W5)
  *     (normalize/denormalize/runEnginePipeline reclassified: BOUNDARY, off kernel path — P7W4)
@@ -41,8 +41,8 @@
  *     - isValidMu()         - type validation
  *     (muEqual demoted: test-only convenience wrapper, delegates to muHashCached — P7W2)
  *
- * TOTAL JS DEBT: 4 (2 iteration + 0 recursion + 2 builtin)
- * Cross-substrate total: 8 (Py 4 + JS 4)
+ * TOTAL JS DEBT: 3 (1 iteration + 0 recursion + 2 builtin)
+ * Cross-substrate total: 5 (Py 2 + JS 3)
  * Ratchet baseline: tools/checks/host_semantics_baseline.json (canonical counts)
  *
  * This debt represents the IRREDUCIBLE BOOTSTRAP - the same operations

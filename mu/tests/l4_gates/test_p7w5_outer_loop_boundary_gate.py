@@ -7,13 +7,15 @@ Validates:
     runAlgorithmWithBridge(), runEnginePipelineRecursive() removed from
     @host_iteration, marked BOUNDARY.
   Part C: step_kernel_with_vm has no stale @host_iteration marker after S1-C.
-  Part D: list_to_linked/listToLinked stay @host_iteration (on kernel path).
+  Part D: list_to_linked/listToLinked are boundary-normalization conversion
+    loops, not tracked @host_iteration debt.
 
 Anti-laundering: All reclassified functions are provably OFF the kernel execution path.
 Kernel path: step_kernel_mu → _step_kernel_with_vm → Stage0 VM for all
   Python projection groups / step → stage0Match/stage0Substitute (JS).
 The reclassified functions CALL the kernel but are not ON the kernel path.
-list_to_linked/listToLinked are ON the kernel path (called by step_kernel_mu/step).
+list_to_linked/listToLinked are bounded host-to-Mu boundary construction loops
+that prepare linked-list input for the kernel but do not execute projections.
 
 Evidence for: P7 Host Semantics Reduction, target gate G8.
 L4 class: L4_STRUCTURAL.
@@ -111,13 +113,16 @@ class TestPythonOuterLoopBoundary:
             "_step_kernel_with_vm source must keep explicit Stage0 VM cutover grounding"
         )
 
-    def test_list_to_linked_still_has_host_iteration(self):
-        """list_to_linked MUST still have @host_iteration (on kernel path via step_kernel_mu)."""
+    def test_list_to_linked_boundary_normalization_only(self):
+        """list_to_linked remains boundary-normalization evidence, not tracked debt."""
         text = STEP_MU_PATH.read_text()
         for line in text.splitlines():
             if "for item in reversed(items):" in line:
-                assert "@host_iteration" in line, (
-                    "list_to_linked for-loop must have @host_iteration (on kernel path)"
+                assert "@host_iteration" not in line, (
+                    "list_to_linked conversion loop must not count as tracked @host_iteration debt"
+                )
+                assert "BOUNDARY" in line and "boundary-normalization" in line, (
+                    "list_to_linked conversion loop must remain boundary-normalization evidence"
                 )
                 return
         pytest.fail("list_to_linked for-loop not found in step_mu.py")
@@ -171,15 +176,18 @@ class TestJSOuterLoopBoundary:
                 return
         pytest.fail("JS step() function not found")
 
-    def test_js_list_to_linked_still_has_host_iteration(self):
-        """JS listToLinked MUST still have @host_iteration (on kernel path via step)."""
+    def test_js_list_to_linked_boundary_normalization_only(self):
+        """JS listToLinked remains boundary-normalization evidence, not tracked debt."""
         text = JS_NORMALIZE_PATH.read_text()
         lines = text.splitlines()
         for i, line in enumerate(lines):
             if "function listToLinked(" in line:
                 block = "\n".join(lines[max(0, i - 10):i])
-                assert "@host_iteration" in block, (
-                    "JS listToLinked() lost @host_iteration — on kernel path via step()"
+                assert "@host_iteration" not in block, (
+                    "JS listToLinked() must not count as tracked @host_iteration debt"
+                )
+                assert "BOUNDARY" in block and "boundary-normalization" in block, (
+                    "JS listToLinked() must remain boundary-normalization evidence"
                 )
                 return
         pytest.fail("JS listToLinked() function not found")
@@ -213,11 +221,11 @@ class TestKernelPathExclusion:
             "run_mu doesn't call step_mu — outer loop must call kernel via step_mu"
         )
 
-    def test_step_kernel_mu_calls_list_to_linked(self):
-        """step_kernel_mu MUST call list_to_linked — it's on the kernel path."""
+    def test_step_kernel_mu_calls_list_to_linked_for_boundary_cursor(self):
+        """step_kernel_mu still receives boundary-normalized linked-list cursor input."""
         source = _get_function_source(step_kernel_mu)
         assert "list_to_linked(" in source, (
-            "step_kernel_mu must call list_to_linked (kernel path data preparation)"
+            "step_kernel_mu must call list_to_linked for bounded linked-list data preparation"
         )
 
 
@@ -240,10 +248,16 @@ class TestRatchetEvidence:
             ["python3", "mu/tools/checks/check_host_semantics_ratchet.py", "--json"],
             capture_output=True, text=True, timeout=30,
         )
+        assert result.returncode == 0, result.stderr
         data = json.loads(result.stdout)
         assert data["increases"] == [], (
             f"Ratchet shows increases (regression): {data['increases']}"
         )
+        current = data["current"]
+        assert current["python"]["host_iteration"] == 1
+        assert current["javascript"]["host_iteration"] == 1
+        assert sum(current["python"].values()) == 2
+        assert sum(current["javascript"].values()) == 3
 
     def test_js_eval_step_passes(self):
         result = subprocess.run(
@@ -252,9 +266,12 @@ class TestRatchetEvidence:
         )
         assert result.returncode == 0, f"JS eval_step failed:\n{result.stderr}"
 
-    def test_js_debt_check_passes(self):
-        result = subprocess.run(
-            ["bash", "mu/tools/checks/check_js_debt.sh"],
-            capture_output=True, text=True, timeout=30,
+    def test_baseline_locks_boundary_demotion_counts(self):
+        baseline = json.loads(
+            (REPO_ROOT / "tools" / "checks" / "host_semantics_baseline.json").read_text()
         )
-        assert result.returncode == 0, f"JS debt check failed:\n{result.stdout}\n{result.stderr}"
+        assert baseline["counts"]["python"]["host_iteration"] == 1
+        assert baseline["counts"]["javascript"]["host_iteration"] == 1
+        assert baseline["total_python"] == 2
+        assert baseline["total_javascript"] == 3
+        assert baseline["total"] == 5

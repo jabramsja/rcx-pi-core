@@ -22,6 +22,8 @@ from hypothesis import strategies as st
 # Root directory of the project (symlink-safe — see tests/repo_root.py)
 from tests.repo_root import REPO_ROOT as ROOT
 
+from rcx_pi.selfhost.step_mu import list_to_linked
+
 
 def _read_all_js_source() -> str:
     """Read all JS module files concatenated (monolith was split into modules)."""
@@ -42,6 +44,54 @@ def _run_node_json(script: str):
     )
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
+
+
+def _run_node_json_with_input(script: str, input_value):
+    result = subprocess.run(
+        ["node", "-e", textwrap.dedent(script)],
+        input=json.dumps(input_value),
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+class TestListToLinkedConverterParity:
+    """Focused Python/JavaScript list-to-linked converter parity coverage."""
+
+    NODE_BRIDGE = """
+    const fs = require('fs');
+    const { listToLinked } = require('./mu/host/js/core/normalize');
+
+    const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+    process.stdout.write(JSON.stringify(listToLinked(input)));
+    """
+
+    @pytest.mark.parametrize(
+        ("case_name", "items"),
+        [
+            ("empty", []),
+            ("single_item", [{"kind": "atom", "value": "x"}]),
+            ("multi_item", [1, {"var": "x"}, {"literal": None}]),
+            (
+                "nested_mu_values",
+                [
+                    {
+                        "kind": "pair",
+                        "left": {"var": "x"},
+                        "right": {"head": 1, "tail": {"head": 2, "tail": None}},
+                    },
+                    {"pattern": {"head": "a", "tail": None}, "body": {"var": "out"}},
+                ],
+            ),
+        ],
+    )
+    def test_python_and_js_list_to_linked_outputs_match(self, case_name, items):
+        """Converters match for empty, single-item, multi-item, and nested Mu values."""
+        assert list_to_linked(items) == _run_node_json_with_input(self.NODE_BRIDGE, items), case_name
 
 
 class TestStage0VMAttemptTraceParity:
