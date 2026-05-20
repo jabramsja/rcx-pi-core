@@ -29,7 +29,6 @@ See mu/docs/core/MetaCircularKernel.v0.md for kernel design.
 from __future__ import annotations
 
 import json
-
 from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted, _apply_projection_trusted, match as stage0_match
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
@@ -1164,7 +1163,7 @@ def _step_kernel_with_vm(
     return input_value  # stall
 
 
-@host_iteration("Kernel execution loop - mechanical driver (Phase 8b simplified)")
+@host_iteration("Kernel execution loop - residual watchdog; supplied Mu fuel owns progress")
 def step_kernel_mu(
     projections: list[Mu],
     input_value: Mu,
@@ -1178,9 +1177,10 @@ def step_kernel_mu(
     """
     Try each projection in order using structural kernel projections.
 
-    Phase 8b: MECHANICAL driver - no semantic decisions inside the loop.
-    The for-loop is the bootstrap primitive (like Forth's NEXT). It stays.
-    Semantic decisions moved to structural kernel projections.
+    Mechanical driver with a residual host watchdog. When linked-list
+    ``kernel_fuel`` is supplied, semantic progress is owned by that Mu cursor;
+    ``max_steps`` is checked only as a hard pre-step watchdog. The no-fuel
+    compatibility path remains residual host-iteration debt.
 
     The kernel works as a state machine:
     1. kernel.wrap: Wraps input and projections into kernel state
@@ -1195,7 +1195,8 @@ def step_kernel_mu(
     - mu_hash_control_cached(): Detect no-progress stall (hash comparison)
 
     L2 FULL: Projection SELECTION is structural (linked-list cursor).
-    Projection EXECUTION uses Python for-loop (accepted as bootstrap primitive per Phase 8 decision).
+    Projection EXECUTION uses a residual host driver; supplied kernel_fuel
+    narrows progress authority to a Mu linked-list cursor.
 
     Args:
         projections: List of domain projections to try.
@@ -1223,6 +1224,19 @@ def step_kernel_mu(
         ValueError: If kernel projections appear after domain projections (security).
         ValueError: If input contains kernel-reserved fields (security).
     """
+    if isinstance(max_steps, bool):  # AST_OK:security - watchdog type guard
+        raise ValueError("SECURITY: max_steps must be a finite integer watchdog, got bool")
+    if isinstance(max_steps, int):  # AST_OK:security - watchdog type guard
+        watchdog_steps = max_steps
+    elif isinstance(max_steps, float) and max_steps.is_integer():  # AST_OK:security - watchdog type guard
+        watchdog_steps = int(max_steps)
+    else:
+        raise ValueError(
+            f"SECURITY: max_steps must be a finite integer watchdog, got {type(max_steps).__name__}"
+        )
+    if watchdog_steps < 0:
+        raise ValueError(f"SECURITY: max_steps must be >= 0, got {watchdog_steps}")
+    max_steps = watchdog_steps
     assert_mu(input_value, "step_kernel_mu.input")
 
     if validation_mode == "domain":
@@ -1309,9 +1323,8 @@ def step_kernel_mu(
     current = kernel_entry
     current_hash = mu_hash_control_cached(kernel_entry, "step_kernel_mu")
     # BOOTSTRAP_PRIMITIVE: max_steps
-    # This is the irreducible resource exhaustion guard.
-    # Cannot be structural (would require arithmetic on fuel).
-    # Prevents infinite execution - analogous to watchdog timer.
+    # Residual watchdog boundary. Supplied linked-list fuel owns semantic
+    # progress; the numeric cap only prevents an unbounded host driver.
     # See mu/docs/core/BootstrapPrimitives.v0.md
     budget = get_step_budget()
     started_budget = False
@@ -1333,22 +1346,26 @@ def step_kernel_mu(
                 fuel_probe = fuel_probe["tail"]
         fuel_cursor = kernel_fuel
 
-        # Phase 8b: Simplified mechanical loop - no semantic decisions inside
-        for step_i in range(max_steps):
+        # Residual mechanical loop. Fuel-supplied progress follows the Mu
+        # linked-list cursor; max_steps is checked only as a watchdog.
+        steps_used = 0
+        while (not fuel_supplied) or (fuel_cursor is not None):
+            if steps_used >= max_steps:
+                validator(input_value, "step_kernel_mu output")
+                canonical = {
+                    "output": input_value,
+                    "stall": True,
+                    "termination_reason": "max_steps_exhausted",
+                    "steps_used": steps_used,
+                    "max_steps": max_steps,
+                }
+                if fuel_supplied:
+                    canonical["fuel_supplied"] = True
+                    canonical["fuel_remaining"] = fuel_cursor
+                    canonical["fuel_exhausted"] = False
+                return canonical if return_meta else canonical["output"]
+
             if fuel_supplied:
-                if fuel_cursor is None:
-                    validator(input_value, "step_kernel_mu output")
-                    canonical = {
-                        "output": input_value,
-                        "stall": True,
-                        "termination_reason": "fuel_exhausted",
-                        "steps_used": step_i,
-                        "max_steps": max_steps,
-                        "fuel_supplied": True,
-                        "fuel_remaining": None,
-                        "fuel_exhausted": True,
-                    }
-                    return canonical if return_meta else canonical["output"]
                 if (
                     not isinstance(fuel_cursor, dict)  # ANTICHEAT_OK: linked-list fuel boundary
                     or set(fuel_cursor.keys()) != {"head", "tail"}
@@ -1388,6 +1405,7 @@ def step_kernel_mu(
 
             if fuel_supplied:
                 fuel_cursor = fuel_cursor["tail"]
+            steps_used += 1
 
             # Terminal state check - simple structural marker detection
             if is_kernel_terminal(result):
@@ -1399,7 +1417,7 @@ def step_kernel_mu(
                     "output": output,
                     "stall": bool(is_stall),
                     "termination_reason": reason,
-                    "steps_used": step_i + 1,
+                    "steps_used": steps_used,
                     "max_steps": max_steps,
                 }
                 if is_stall:
@@ -1426,7 +1444,7 @@ def step_kernel_mu(
                         "output": input_value,
                         "stall": True,
                         "termination_reason": "hash_stall",
-                        "steps_used": step_i + 1,
+                        "steps_used": steps_used,
                         "max_steps": max_steps,
                     }
                     if fuel_supplied:
@@ -1438,20 +1456,19 @@ def step_kernel_mu(
 
             current = result
 
-        # Max steps exceeded - return original input (stall)
+        # Supplied Mu fuel exhausted before the next kernel step.
         validator(input_value, "step_kernel_mu output")
-        fuel_exhausted_at_limit = fuel_supplied and fuel_cursor is None
         canonical = {
             "output": input_value,
             "stall": True,
-            "termination_reason": "fuel_exhausted" if fuel_exhausted_at_limit else "max_steps_exhausted",
-            "steps_used": max_steps,
+            "termination_reason": "fuel_exhausted",
+            "steps_used": steps_used,
             "max_steps": max_steps,
         }
         if fuel_supplied:
             canonical["fuel_supplied"] = True
             canonical["fuel_remaining"] = fuel_cursor
-            canonical["fuel_exhausted"] = fuel_exhausted_at_limit
+            canonical["fuel_exhausted"] = True
         return canonical if return_meta else canonical["output"]
     finally:
         if started_budget:

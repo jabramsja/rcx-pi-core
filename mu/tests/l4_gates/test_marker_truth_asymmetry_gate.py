@@ -138,8 +138,8 @@ class TestMarkerTruthAsymmetryGate:
         assert ratchet["current"]["python"]["host_iteration"] == 1
         assert ratchet["current"]["javascript"]["host_iteration"] == 1
 
-    def test_js_active_kernel_core_loop_carries_host_iteration_marker(self):
-        """JS tracked iteration marker belongs to the active _stepKernelCore maxSteps loop."""
+    def test_js_active_kernel_core_loop_is_mu_fuel_governed_with_watchdog(self):
+        """JS tracked iteration marker now names the residual fuel-governed watchdog loop."""
         path = REPO_ROOT / "mu" / "host" / "js" / "engine" / "kernel.js"
         lines = path.read_text().splitlines()
         function_index = _find_line_index(lines, "function _stepKernelCore(")
@@ -147,13 +147,21 @@ class TestMarkerTruthAsymmetryGate:
         body = _js_function_body(lines, function_index)
 
         assert "@host_iteration" in jsdoc, (
-            "_stepKernelCore must carry the tracked JS @host_iteration marker"
+            "_stepKernelCore must carry the residual JS @host_iteration marker"
         )
-        assert "active kernel driver loop" in jsdoc and "maxSteps" in jsdoc, (
-            "_stepKernelCore marker must name the active maxSteps driver loop"
+        assert "residual kernel driver watchdog" in jsdoc
+        assert "supplied Mu fuel owns progress" in jsdoc
+        assert "for (let i = 0; i < maxSteps; i++)" not in body, (
+            "_stepKernelCore reintroduced the old maxSteps-owned kernel loop"
         )
-        assert "for (let i = 0; i < maxSteps; i++)" in body, (
-            "_stepKernelCore must still own the active maxSteps kernel driver loop"
+        assert "while (!fuelSupplied || fuelCursor !== null)" in body, (
+            "_stepKernelCore must drive supplied-fuel progress from the Mu linked-list cursor"
+        )
+        assert "if (stepsUsed >= maxSteps)" in body, (
+            "_stepKernelCore must keep maxSteps as a watchdog check"
+        )
+        assert "fuelCursor = fuelCursor.tail" in body and "stepsUsed++" in body, (
+            "_stepKernelCore must consume one Mu fuel node per kernel step"
         )
 
     def test_js_host_iteration_inventory_is_not_stale_bootstrap_step_only(self):

@@ -10,12 +10,14 @@ design packet (v3, 2026-03-16).
 
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 
 import pytest
 
 from rcx_pi.selfhost.step_mu import step_kernel_mu
+from tests.repo_root import REPO_ROOT
 
 
 # -- KernelRunResult shape contract --
@@ -36,8 +38,6 @@ SHARED_RESULT_FIELDS = (
     "steps_used",
     "max_steps",
 )
-
-
 def _shared_kernel_result(meta: dict) -> dict:
     return {field: meta[field] for field in SHARED_RESULT_FIELDS}
 
@@ -145,6 +145,61 @@ class TestKernelRunResultPython:
         assert meta["fuel_remaining"] is None
         assert meta["fuel_exhausted"] is True
 
+    def test_kernel_fuel_numeric_watchdog_reports_remaining_fuel(self):
+        """Python numeric cap is a watchdog when Mu fuel still remains."""
+        projs = [
+            {"pattern": {"s": "a"}, "body": {"s": "b"}},
+            {"pattern": {"s": "b"}, "body": {"s": "a"}},
+        ]
+        max_steps = 3
+        fuel_count = 5
+        meta = step_kernel_mu(
+            projs,
+            {"s": "a"},
+            return_meta=True,
+            max_steps=max_steps,
+            kernel_fuel=_make_kernel_fuel(fuel_count),
+        )
+        assert REQUIRED_FIELDS <= set(meta.keys())
+        assert meta["termination_reason"] == "max_steps_exhausted"
+        assert meta["stall"] is True
+        assert meta["steps_used"] == max_steps
+        assert meta["max_steps"] == max_steps
+        assert meta["fuel_supplied"] is True
+        assert meta["fuel_exhausted"] is False
+        assert _fuel_remaining_count(meta["fuel_remaining"]) == fuel_count - max_steps
+
+    @pytest.mark.parametrize(
+        "bad_max_steps",
+        [
+            pytest.param(float("nan"), id="nan"),
+            pytest.param(float("inf"), id="positive-infinity"),
+            pytest.param(float("-inf"), id="negative-infinity"),
+        ],
+    )
+    def test_kernel_watchdog_rejects_non_finite_max_steps(self, bad_max_steps):
+        """Python rejects non-finite watchdog values before the fuel driver can run."""
+        with pytest.raises(ValueError, match="max_steps"):
+            step_kernel_mu(
+                [{"pattern": {"x": 1}, "body": {"x": 2}}],
+                {"x": 1},
+                return_meta=True,
+                max_steps=bad_max_steps,
+                kernel_fuel=_make_kernel_fuel(2),
+            )
+
+    def test_python_watchdog_guard_does_not_add_math_host_capability(self):
+        """The watchdog guard must not import math into the runtime kernel."""
+        step_mu_path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+        tree = ast.parse(step_mu_path.read_text(), filename=str(step_mu_path))
+        imported_modules = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_modules.update(alias.name.split(".", 1)[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported_modules.add(node.module.split(".", 1)[0])
+        assert "math" not in imported_modules
+
     def test_kernel_fuel_success_reports_remaining_mu_fuel(self):
         """Python successful projection returns remaining Mu fuel."""
         fuel_count = 80
@@ -228,7 +283,7 @@ class TestKernelRunResultJS:
         """Run JS via eval_step.js --json-api with real seed loading."""
         result = subprocess.run(
             ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(payload)],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
         )
         assert result.returncode == 0, f"JS error: {result.stderr}"
         # Extract JSON_API_RESPONSE from stdout (self-tests print first)
@@ -243,6 +298,36 @@ class TestKernelRunResultJS:
         resp = self._run_json_api_response(payload)
         assert resp.get("success"), f"JS API error: {resp.get('error', 'unknown')}"
         return resp["result"]
+
+    def _run_direct_step_kernel_with_max_steps(self, max_steps_expr: str) -> dict:
+        script = f"""
+const {{ stepKernel }} = require('./mu/host/js/engine/kernel');
+try {{
+  stepKernel(
+    [],
+    {{ x: 1 }},
+    [{{ pattern: {{ x: 1 }}, body: {{ x: 2 }} }}],
+    {{
+      returnMeta: true,
+      maxSteps: {max_steps_expr},
+      kernelFuel: {{ head: null, tail: {{ head: null, tail: null }} }},
+    }}
+  );
+  console.log(JSON.stringify({{ success: true }}));
+}} catch (e) {{
+  console.log(JSON.stringify({{
+    success: false,
+    error_code: e.error_code || null,
+    error: e.message,
+  }}));
+}}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        return json.loads(result.stdout.strip())
 
     def test_projection_applied_has_required_fields(self):
         """JS live kernel produces KernelRunResult on successful projection."""
@@ -328,8 +413,8 @@ class TestKernelRunResultJS:
         assert meta["fuel_remaining"] is None
         assert meta["fuel_exhausted"] is True
 
-    def test_kernel_fuel_numeric_cap_wins_when_fuel_remains(self):
-        """JS live kernel reports max_steps_exhausted when fuel remains at the cap."""
+    def test_kernel_fuel_numeric_watchdog_reports_remaining_fuel(self):
+        """JS live kernel reports watchdog exhaustion while Mu fuel remains."""
         max_steps = 3
         fuel_count = 5
         meta = self._run_json_api({
@@ -350,6 +435,21 @@ class TestKernelRunResultJS:
         assert meta["fuel_supplied"] is True
         assert meta["fuel_exhausted"] is False
         assert _fuel_remaining_count(meta["fuel_remaining"]) == fuel_count - max_steps
+
+    @pytest.mark.parametrize(
+        "max_steps_expr",
+        [
+            pytest.param("NaN", id="nan"),
+            pytest.param("Infinity", id="positive-infinity"),
+            pytest.param("-Infinity", id="negative-infinity"),
+        ],
+    )
+    def test_direct_step_kernel_watchdog_rejects_non_finite_max_steps(self, max_steps_expr):
+        """JS direct stepKernel rejects non-finite watchdog values before the fuel driver can run."""
+        resp = self._run_direct_step_kernel_with_max_steps(max_steps_expr)
+        assert resp["success"] is False
+        assert resp.get("error_code") == "api.bad_request"
+        assert "maxSteps" in resp.get("error", "")
 
     def test_kernel_fuel_success_reports_remaining_mu_fuel(self):
         """JS live kernel returns unconsumed Mu fuel when fuel exceeds required steps."""
@@ -389,6 +489,7 @@ class TestKernelRunResultJS:
             input_value,
             return_meta=True,
             max_steps=max_steps,
+            kernel_fuel=_make_kernel_fuel(fuel_count),
         )
 
         assert _shared_kernel_result(js_meta) == _shared_kernel_result(py_meta)
