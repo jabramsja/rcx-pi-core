@@ -2426,14 +2426,15 @@ class TestStartupFlowSuppressionGatePath:
         assert invoked_commands[0] == [
             "python3",
             "tools/checks/enforce_l4_execution_contract.py",
-            "--staged",
-            "--wave-id",
-            "test-wave",
             "--wave-class",
             "L4_STRUCTURAL",
+            "--wave-id",
+            "test-wave",
+            "--files",
+            "mu/host/js/engine/pipeline.js",
         ]
 
-    def test_l4_contract_gate_uses_staged_diff_for_classless_runtime_override(self):
+    def test_l4_contract_gate_uses_package_scope_for_classless_runtime_override(self):
         package = self._make_package()
         package.update({
             "wave_name": "comment-only-wave",
@@ -2459,12 +2460,13 @@ class TestStartupFlowSuppressionGatePath:
         assert invoked_commands[0] == [
             "python3",
             "tools/checks/enforce_l4_execution_contract.py",
-            "--staged",
             "--wave-id",
             "comment-only-wave",
+            "--files",
+            "mu/host/js/core/constants.js",
         ]
 
-    def test_l4_contract_gate_uses_staged_diff_for_enabler_runtime_override(self):
+    def test_l4_contract_gate_uses_package_scope_for_enabler_runtime_override(self):
         package = self._make_package()
         package.update({
             "wave_name": "comment-only-tooling-wave",
@@ -2492,11 +2494,12 @@ class TestStartupFlowSuppressionGatePath:
         assert invoked_commands[0] == [
             "python3",
             "tools/checks/enforce_l4_execution_contract.py",
-            "--staged",
-            "--wave-id",
-            "comment-only-tooling-wave",
             "--wave-class",
             "L4_ENABLER",
+            "--wave-id",
+            "comment-only-tooling-wave",
+            "--files",
+            "mu/host/js/core/constants.js",
         ]
 
     def test_gate6_runs_when_skip_startup_gates_false(self):

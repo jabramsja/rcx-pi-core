@@ -1366,10 +1366,20 @@ def _init_staged_l4_checker_repo(tmp_path: Path, wave_id: str) -> Path:
         "# baseline\n",
         encoding="utf-8",
     )
+    (repo / "mu" / "host" / "js" / "core").mkdir(parents=True)
+    (repo / "mu" / "host" / "js" / "core" / "constants.js").write_text(
+        "// baseline debt marker\n",
+        encoding="utf-8",
+    )
+    (repo / "mu" / "host" / "js" / "core" / "unrelated.js").write_text(
+        "export function unrelated() { return 1; }\n",
+        encoding="utf-8",
+    )
     (repo / "TASKS.md").write_text(
         "## Ra\n\n"
         f"- Tracker sync note (2026-05-07, {wave_id}): **CURRENT.** "
         "Class: L4_ENABLER. Category: tooling/control-plane. target_gate_id: G8. "
+        "no_op_proof: package-owned runtime edits are comment-only when present. "
         "evidence_command: python3 tools/checks/enforce_l4_execution_contract.py --staged. "
         "evidence_delta: changed control-plane staged binding. "
         "progress_proof_before: canonical staged checker reported no wave class for changed control-plane files. "
@@ -1467,6 +1477,53 @@ class TestStagedIndicatorBinding:
         assert result.returncode == 1
         assert "Wave class: (none)" in result.stdout
         assert "no wave class marker found" in result.stdout
+
+    def test_files_mode_uses_package_scoped_staged_diff_for_runtime_override(self, tmp_path: Path) -> None:
+        wave_id = "comment-only-runtime-files-wave"
+        repo = _init_staged_l4_checker_repo(tmp_path, wave_id)
+        (repo / "mu" / "host" / "js" / "core" / "constants.js").write_text(
+            "// refined debt marker only\n",
+            encoding="utf-8",
+        )
+        (repo / "mu" / "host" / "js" / "core" / "unrelated.js").write_text(
+            "export function unrelated() { return 2; }\n",
+            encoding="utf-8",
+        )
+        _write_l4_indicator(repo, wave_id)
+        subprocess.run(
+            [
+                "git",
+                "add",
+                "--",
+                "mu/host/js/core/constants.js",
+                "mu/host/js/core/unrelated.js",
+                f"reports/l4_wave_indicators/{wave_id}.json",
+            ],
+            cwd=repo,
+            check=True,
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "tools/checks/enforce_l4_execution_contract.py",
+                "--wave-class",
+                "L4_ENABLER",
+                "--wave-id",
+                wave_id,
+                "--files",
+                "mu/host/js/core/constants.js",
+                f"reports/l4_wave_indicators/{wave_id}.json",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Runtime files: 1" in result.stdout
+        assert "allowing comment-only runtime edit" in result.stdout
+        assert "L4 Execution Contract v2: L4_ENABLER compliant" in result.stdout
 
 
 # =============================================================================

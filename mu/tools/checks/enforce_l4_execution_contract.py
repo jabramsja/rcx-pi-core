@@ -797,6 +797,17 @@ def get_diff_staged() -> str:
     return result.stdout
 
 
+def get_diff_staged_for_files(files: list[str]) -> str:
+    """Get staged diff content scoped to an explicit tracked file list."""
+    if not files:
+        return ""
+    result = subprocess.run(
+        ["git", "diff", "--cached", "-U0", "--"] + files,
+        capture_output=True, text=True, check=True,
+    )
+    return result.stdout
+
+
 def get_diff_range(git_range: str) -> str:
     """Get diff content for a range."""
     result = subprocess.run(
@@ -2204,7 +2215,7 @@ def main() -> int:
         diff_text = get_diff_range(args.range) if changed_files else None
     else:
         changed_files = filter_to_tracked_files(args.files or [])
-        diff_text = None
+        diff_text = get_diff_staged_for_files(changed_files) if changed_files else None
 
     # Empty-scope policy — applies AFTER untracked filtering
     if not changed_files:

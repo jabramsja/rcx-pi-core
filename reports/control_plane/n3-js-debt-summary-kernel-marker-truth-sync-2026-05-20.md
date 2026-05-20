@@ -253,26 +253,17 @@ Questions? Concerns? Thoughts? -- Think hard
 - Refresh wave: `n3-js-debt-summary-kernel-marker-truth-sync-2026-05-20`
 - Active packet: `reports/control_plane/n3-js-debt-summary-kernel-marker-truth-sync-2026-05-20.md`
 - Commit status: `pre_commit_supervisor_pending`
-- Tracker note sha256: `be1ddc0c5eea226b836698626ef500c102fae68f61d43f2e5d812f8a1851eb00`
+- Tracker note sha256: `5ebcb590e9eec065b379ab0f1099d7dbf2f8f39174432b3da0896ec87ca85e3f`
 - Indicator artifact: `reports/l4_wave_indicators/n3-js-debt-summary-kernel-marker-truth-sync-2026-05-20.json`
-- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_l4_execution_contract_enforcement.py mu/tests/tools/test_meta_bridge_supervisor.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_tracker_sync_note_generation.py`.
-- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-js-debt-summary-kernel-marker-truth-sync-2026-05-20.md. (2) Final pytest gate covered 5 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_l4_execution_contract_enforcement.py mu/tests/tools/test_meta_bridge_supervisor.py`.
+- Evidence delta: (1) Phase B converged on the locked plan at reports/control_plane/n3-js-debt-summary-kernel-marker-truth-sync-2026-05-20.md. (2) Final pytest gate covered 2 test file(s) from the wave-owned diff. (3) Pre-commit supervisor receipt remains pending for the current staged package.
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/n3-js-debt-summary-kernel-marker-truth-sync-2026-05-20.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/host/js/core/constants.js`
-  - `mu/tests/tools/test_commit_executor_receipt.py`
   - `mu/tests/tools/test_l4_execution_contract_enforcement.py`
   - `mu/tests/tools/test_meta_bridge_supervisor.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
-  - `mu/tests/tools/test_tracker_sync_note_generation.py`
-  - `mu/tools/agents/meta_bridge_supervisor.py`
   - `mu/tools/checks/enforce_l4_execution_contract.py`
-  - `mu/tools/executors/commit_executor.py`
-  - `mu/tools/executors/phase_b_executor.py`
-  - `mu/tools/executors/tracker_sync_note.py`
   - `reports/control_plane/n3-js-debt-summary-kernel-marker-truth-sync-2026-05-20.md`
-  - `reports/deferred/non_blocking/n3-js-kernel-iteration-marker-truth-alignment-2026-05-20_bridge_nonblockers.md`
   - `reports/l4_wave_indicators/n3-js-debt-summary-kernel-marker-truth-sync-2026-05-20.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
