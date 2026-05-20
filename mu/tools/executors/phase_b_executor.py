@@ -1285,6 +1285,10 @@ def _plan_declares_routing_boundary(plan_content: str) -> bool:
         or "cannot authorize implementation" in text
         or "does not authorize implementation" in text
         or "implementation is not authorized" in text
+        or "does not authorize editing tasks.md or implementation files" in text
+        or "do not solve the implementation" in text
+        or "phase b is not authorized" in text
+        or "stop before phase b implementation" in text
         or "no implementation, commit automation, or count-reduction claim is authorized" in text
         or "no-go package" in text
         or "no-go before commit readiness" in text
