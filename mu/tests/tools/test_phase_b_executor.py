@@ -237,6 +237,39 @@ class TestPhaseBWaveClassResolution:
         assert "host_semantics_delta_before" not in note
         assert "structural_artifact_ref" not in note
 
+    def test_stop_condition_only_structural_packet_packages_as_enabler(self):
+        plan = (
+            "Wave Class: L4_STRUCTURAL (planned /mu structural host-semantics reduction)\n"
+            "\n"
+            "This rewrite does not authorize editing TASKS.md or implementation files in the current turn.\n"
+            "Do not solve the implementation in this Phase A packet-rewrite turn.\n"
+            "Stop before Phase B implementation if TASKS.md still lacks a same-wave tracker entry.\n"
+            "Phase B is not authorized until this packet is locked and TASKS.md contains the exact wave id.\n"
+        )
+
+        note = pb_mod.build_phase_b_tracker_note(
+            wave_id="stop-condition-only-structural-wave",
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/stop_condition_only.md",
+            plan_content=plan,
+            changed_files=[
+                "TASKS.md",
+                "reports/control_plane/stop_condition_only.md",
+                "reports/l4_wave_indicators/stop-condition-only-structural-wave.json",
+            ],
+            test_files=[],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=3,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        assert "Class: L4_ENABLER" in note
+        assert "host_semantics_delta_before" not in note
+        assert "structural_artifact_ref" not in note
+
     def test_smaller_prerequisite_alone_does_not_downgrade_structural_packet(self):
         plan = (
             "Class: L4_STRUCTURAL\n"
