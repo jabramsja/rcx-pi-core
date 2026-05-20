@@ -73,6 +73,9 @@ function _stepKernelWithVM(kernelBundle, bridgeBundle, matchBundle, substBundle,
  * Caller-supplied kernelFuel consumes one Mu linked-list node per kernel step.
  * Omitted kernelFuel preserves the legacy no-fuel watchdog path without
  * synthesizing a host-counted compatibility fuel budget from maxSteps.
+ * Removing that omitted-fuel path requires a separate Mu continuation-state
+ * caller migration; do not hide it behind helper, recursion, or synthetic
+ * maxSteps-derived fuel.
  */
 function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps, vmConfig, kernelFuel = undefined) {
   if (typeof maxSteps !== 'number' || !Number.isFinite(maxSteps) || !Number.isInteger(maxSteps)) {

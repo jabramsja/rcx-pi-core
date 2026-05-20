@@ -114,8 +114,14 @@ class TestPythonOuterLoopBoundary:
         assert "list_to_linked([None] * (max_steps + 1))" not in source, (
             "step_kernel_mu must not construct host-counted no-fuel compatibility fuel"
         )
+        assert "compatibility_fuel" not in source, (
+            "step_kernel_mu must not hide omitted-fuel compatibility behind a helper fuel cursor"
+        )
         assert "[None] *" not in source, (
             "step_kernel_mu must not turn max_steps into a host-sized fuel list"
+        )
+        assert "range(max_steps)" not in source, (
+            "step_kernel_mu must not reintroduce max_steps as the semantic loop owner"
         )
         assert "if steps_used >= max_steps:" in source, (
             "step_kernel_mu must keep max_steps as a watchdog check, not the loop owner"
@@ -208,6 +214,12 @@ class TestJSOuterLoopBoundary:
                 )
                 assert "listToLinked(compatibilityFuelItems)" not in body, (
                     "JS _stepKernelCore must not convert a maxSteps-sized host list into fuel"
+                )
+                assert "compatibilityFuel" not in body, (
+                    "JS _stepKernelCore must not hide omitted-fuel compatibility behind a helper fuel cursor"
+                )
+                assert "Array.from" not in body and ".fill(" not in body, (
+                    "JS _stepKernelCore must not construct host-sized synthetic fuel arrays"
                 )
                 assert "if (stepsUsed >= maxSteps)" in body, (
                     "JS _stepKernelCore must keep maxSteps as a watchdog check, not the loop owner"
