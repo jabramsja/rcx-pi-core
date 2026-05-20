@@ -16,6 +16,7 @@ import subprocess
 
 import pytest
 
+import rcx_pi.selfhost.step_mu as step_mu_mod
 from rcx_pi.selfhost.step_mu import step_kernel_mu
 from tests.repo_root import REPO_ROOT
 
@@ -102,6 +103,34 @@ class TestKernelRunResultPython:
         assert meta["termination_reason"] == "max_steps_exhausted"
         assert meta["stall"] is True, "NB4 fix: max_steps must have stall=True"
         assert meta["steps_used"] == 4
+        assert FUEL_FIELDS.isdisjoint(meta), (
+            "omitted kernel_fuel compatibility must not expose internal fuel metadata"
+        )
+
+    def test_no_fuel_compatibility_does_not_build_max_steps_fuel(self, monkeypatch):
+        """Omitted kernel_fuel must not turn max_steps into a host-sized fuel list."""
+        lengths = []
+        original = step_mu_mod.list_to_linked
+
+        def spy_list_to_linked(items):
+            lengths.append(len(items))
+            return original(items)
+
+        monkeypatch.setattr(step_mu_mod, "list_to_linked", spy_list_to_linked)
+        max_steps = 4
+        meta = step_mu_mod.step_kernel_mu(
+            [
+                {"pattern": {"s": "a"}, "body": {"s": "b"}},
+                {"pattern": {"s": "b"}, "body": {"s": "a"}},
+            ],
+            {"s": "a"},
+            return_meta=True,
+            max_steps=max_steps,
+        )
+
+        assert meta["termination_reason"] == "max_steps_exhausted"
+        assert meta["steps_used"] == max_steps
+        assert max_steps + 1 not in lengths, lengths
 
     def test_kernel_fuel_zero_exhausts_before_attempting_step(self):
         """Python kernel fuel uses explicit empty Mu fuel as execution authority."""

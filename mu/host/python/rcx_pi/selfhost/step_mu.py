@@ -1178,9 +1178,10 @@ def step_kernel_mu(
     Try each projection in order using structural kernel projections.
 
     Mechanical driver with a residual host watchdog. When linked-list
-    ``kernel_fuel`` is supplied, semantic progress is owned by that Mu cursor;
-    ``max_steps`` is checked only as a hard pre-step watchdog. The no-fuel
-    compatibility path remains residual host-iteration debt.
+    ``kernel_fuel`` is supplied, semantic progress is owned by that Mu cursor.
+    Omitted ``kernel_fuel`` preserves the legacy no-fuel compatibility path
+    without synthesizing host-counted compatibility fuel; explicit ``None``
+    still means empty fuel. ``max_steps`` remains a hard pre-step watchdog.
 
     The kernel works as a state machine:
     1. kernel.wrap: Wraps input and projections into kernel state
@@ -1196,7 +1197,8 @@ def step_kernel_mu(
 
     L2 FULL: Projection SELECTION is structural (linked-list cursor).
     Projection EXECUTION uses a residual host driver; supplied kernel_fuel
-    narrows progress authority to a Mu linked-list cursor.
+    narrows progress authority to a Mu linked-list cursor, while omitted
+    no-fuel compatibility remains residual host-iteration debt.
 
     Args:
         projections: List of domain projections to try.
@@ -1214,7 +1216,8 @@ def step_kernel_mu(
         max_steps: Maximum kernel iteration steps. Default 10000.
             For single-projection calls (e.g. apply_mu), 500 is sufficient.
         kernel_fuel: Optional Mu linked-list fuel. Omitted means legacy
-            max_steps-only execution. Explicit None means empty fuel.
+            max_steps-only execution without synthetic compatibility fuel.
+            Explicit None means empty fuel.
 
     Returns:
         Transformed value if any projection matched, input unchanged otherwise.
@@ -1323,8 +1326,8 @@ def step_kernel_mu(
     current = kernel_entry
     current_hash = mu_hash_control_cached(kernel_entry, "step_kernel_mu")
     # BOOTSTRAP_PRIMITIVE: max_steps
-    # Residual watchdog boundary. Supplied linked-list fuel owns semantic
-    # progress; the numeric cap only prevents an unbounded host driver.
+    # Residual watchdog boundary. Supplied linked-list fuel owns supplied-fuel
+    # progress; omitted no-fuel compatibility retains this numeric guard.
     # See mu/docs/core/BootstrapPrimitives.v0.md
     budget = get_step_budget()
     started_budget = False
@@ -1333,8 +1336,9 @@ def step_kernel_mu(
         started_budget = True
 
     try:
-        fuel_supplied = kernel_fuel is not _KERNEL_FUEL_UNSET
-        if fuel_supplied:
+        caller_supplied_fuel = kernel_fuel is not _KERNEL_FUEL_UNSET
+        fuel_cursor = kernel_fuel if caller_supplied_fuel else None
+        if caller_supplied_fuel:
             assert_mu(kernel_fuel, "step_kernel_mu.kernel_fuel")
             fuel_probe = kernel_fuel
             while fuel_probe is not None:
@@ -1344,12 +1348,11 @@ def step_kernel_mu(
                 ):
                     raise TypeError("SECURITY: kernel_fuel must be a Mu head/tail linked list")
                 fuel_probe = fuel_probe["tail"]
-        fuel_cursor = kernel_fuel
 
-        # Residual mechanical loop. Fuel-supplied progress follows the Mu
-        # linked-list cursor; max_steps is checked only as a watchdog.
+        # Mechanical loop over supplied Mu fuel, with retained no-fuel
+        # compatibility that does not synthesize a host-counted fuel budget.
         steps_used = 0
-        while (not fuel_supplied) or (fuel_cursor is not None):
+        while (not caller_supplied_fuel) or (fuel_cursor is not None):
             if steps_used >= max_steps:
                 validator(input_value, "step_kernel_mu output")
                 canonical = {
@@ -1359,13 +1362,13 @@ def step_kernel_mu(
                     "steps_used": steps_used,
                     "max_steps": max_steps,
                 }
-                if fuel_supplied:
+                if caller_supplied_fuel:
                     canonical["fuel_supplied"] = True
                     canonical["fuel_remaining"] = fuel_cursor
                     canonical["fuel_exhausted"] = False
                 return canonical if return_meta else canonical["output"]
 
-            if fuel_supplied:
+            if caller_supplied_fuel:
                 if (
                     not isinstance(fuel_cursor, dict)  # ANTICHEAT_OK: linked-list fuel boundary
                     or set(fuel_cursor.keys()) != {"head", "tail"}
@@ -1403,7 +1406,7 @@ def step_kernel_mu(
                                 f"P7-d shadow: output divergence — "
                                 f"host={result!r}, vm={vm_result!r}")
 
-            if fuel_supplied:
+            if caller_supplied_fuel:
                 fuel_cursor = fuel_cursor["tail"]
             steps_used += 1
 
@@ -1427,7 +1430,7 @@ def step_kernel_mu(
                         rhs=None,
                         cause="no_matching_projection",
                     )
-                if fuel_supplied:
+                if caller_supplied_fuel:
                     canonical["fuel_supplied"] = True
                     canonical["fuel_remaining"] = fuel_cursor
                     canonical["fuel_exhausted"] = False
@@ -1447,7 +1450,7 @@ def step_kernel_mu(
                         "steps_used": steps_used,
                         "max_steps": max_steps,
                     }
-                    if fuel_supplied:
+                    if caller_supplied_fuel:
                         canonical["fuel_supplied"] = True
                         canonical["fuel_remaining"] = fuel_cursor
                         canonical["fuel_exhausted"] = False
@@ -1465,7 +1468,7 @@ def step_kernel_mu(
             "steps_used": steps_used,
             "max_steps": max_steps,
         }
-        if fuel_supplied:
+        if caller_supplied_fuel:
             canonical["fuel_supplied"] = True
             canonical["fuel_remaining"] = fuel_cursor
             canonical["fuel_exhausted"] = True

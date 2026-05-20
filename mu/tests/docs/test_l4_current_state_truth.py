@@ -195,8 +195,17 @@ def test_stage0_vm_docs_match_shadow_path_wiring_and_l4_boundary() -> None:
     assert "for step_i in range(max_steps)" not in py_step, (
         "Python runtime reintroduced the old max_steps-owned kernel driver loop."
     )
-    assert "while (not fuel_supplied) or (fuel_cursor is not None):" in py_step, (
-        "Python runtime must show the residual fuel-cursor loop."
+    assert '@host_iteration("Kernel execution loop - residual watchdog; supplied Mu fuel owns progress")' in py_step, (
+        "Python runtime must keep the residual no-fuel kernel loop honestly marked."
+    )
+    assert "while (not caller_supplied_fuel) or (fuel_cursor is not None):" in py_step, (
+        "Python runtime must preserve no-fuel compatibility without synthetic fuel."
+    )
+    assert "list_to_linked([None] * (max_steps + 1))" not in py_step, (
+        "Python runtime must not construct host-counted no-fuel compatibility fuel."
+    )
+    assert "if caller_supplied_fuel:" in py_step and 'fuel_cursor = fuel_cursor["tail"]' in py_step, (
+        "Python runtime must consume Mu fuel only on the explicit supplied-fuel path."
     )
     assert "if steps_used >= max_steps:" in py_step, (
         "Python runtime must keep max_steps as a watchdog boundary."
@@ -211,8 +220,17 @@ def test_stage0_vm_docs_match_shadow_path_wiring_and_l4_boundary() -> None:
     assert "for (let i = 0; i < maxSteps; i++) {" not in js_kernel_core, (
         "JS runtime reintroduced the old maxSteps-owned kernel driver loop."
     )
-    assert "while (!fuelSupplied || fuelCursor !== null)" in js_kernel_core, (
-        "JS runtime must show the residual fuel-cursor loop."
+    assert "@host_iteration" in js_kernel[:js_kernel.index("function _stepKernelCore(")], (
+        "JS runtime must keep the residual no-fuel kernel loop honestly marked."
+    )
+    assert "while (!callerSuppliedFuel || fuelCursor !== null)" in js_kernel_core, (
+        "JS runtime must preserve no-fuel compatibility without synthetic fuel."
+    )
+    assert "compatibilityFuelNode <= maxSteps" not in js_kernel_core, (
+        "JS runtime must not construct host-counted no-fuel compatibility fuel."
+    )
+    assert "if (callerSuppliedFuel)" in js_kernel_core and "fuelCursor = fuelCursor.tail" in js_kernel_core, (
+        "JS runtime must consume Mu fuel only on the explicit supplied-fuel path."
     )
     assert "if (stepsUsed >= maxSteps)" in js_kernel_core, (
         "JS runtime must keep maxSteps as a watchdog boundary."

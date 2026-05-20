@@ -96,24 +96,32 @@ class TestPythonOuterLoopBoundary:
             "run_mu_structural missing BOUNDARY marker (reclassified P7W5)"
         )
 
-    def test_step_kernel_mu_has_residual_fuel_governed_watchdog_loop(self):
-        """step_kernel_mu keeps a residual marker while supplied Mu fuel owns progress."""
+    def test_step_kernel_mu_has_fuel_governed_watchdog_loop(self):
+        """step_kernel_mu keeps an honest residual marker until no-fuel loop removal."""
         source = _get_function_source(step_kernel_mu)
         assert "@host_iteration" in source, (
-            "step_kernel_mu still has residual host-iteration debt until the driver is fully structural"
+            "step_kernel_mu still has a residual no-fuel host loop and must stay marked"
         )
+        assert "residual watchdog" in source
         assert "supplied Mu fuel owns progress" in source
+        assert "without synthesizing host-counted compatibility fuel" in source
         assert "for step_i in range(max_steps)" not in source, (
             "step_kernel_mu reintroduced the old max_steps-owned kernel loop"
         )
-        assert "while (not fuel_supplied) or (fuel_cursor is not None):" in source, (
-            "step_kernel_mu must drive supplied-fuel progress from the Mu linked-list cursor"
+        assert "while (not caller_supplied_fuel) or (fuel_cursor is not None):" in source, (
+            "step_kernel_mu must preserve no-fuel compatibility without synthetic fuel"
+        )
+        assert "list_to_linked([None] * (max_steps + 1))" not in source, (
+            "step_kernel_mu must not construct host-counted no-fuel compatibility fuel"
+        )
+        assert "[None] *" not in source, (
+            "step_kernel_mu must not turn max_steps into a host-sized fuel list"
         )
         assert "if steps_used >= max_steps:" in source, (
             "step_kernel_mu must keep max_steps as a watchdog check, not the loop owner"
         )
-        assert 'fuel_cursor = fuel_cursor["tail"]' in source, (
-            "step_kernel_mu must consume one Mu fuel node per kernel step"
+        assert "if caller_supplied_fuel:" in source and 'fuel_cursor = fuel_cursor["tail"]' in source, (
+            "step_kernel_mu must consume Mu fuel only on the explicit supplied-fuel path"
         )
 
     def test_step_kernel_with_vm_has_no_host_iteration_decorator(self):
@@ -176,31 +184,39 @@ class TestJSOuterLoopBoundary:
     def test_js_run_engine_pipeline_recursive_boundary(self):
         self._check_js_function_boundary(JS_PIPELINE_PATH, "runEnginePipelineRecursive")
 
-    def test_js_active_kernel_core_has_residual_fuel_governed_watchdog_loop(self):
-        """JS _stepKernelCore keeps a residual marker while supplied Mu fuel owns progress."""
+    def test_js_active_kernel_core_has_fuel_governed_watchdog_loop(self):
+        """JS _stepKernelCore keeps an honest residual marker until no-fuel loop removal."""
         kernel_lines = JS_KERNEL_PATH.read_text().splitlines()
         for i, line in enumerate(kernel_lines):
             if "function _stepKernelCore(" in line:
                 block = "\n".join(kernel_lines[max(0, i - 10):i])
                 body = "\n".join(kernel_lines[i:i + 120])
                 assert "@host_iteration" in block, (
-                    "JS _stepKernelCore still has residual host-iteration debt until the driver is fully structural"
+                    "JS _stepKernelCore still has a residual no-fuel host loop and must stay marked"
                 )
+                assert "residual kernel driver watchdog" in block
                 assert "supplied Mu fuel owns progress" in block
+                assert "without" in block and "maxSteps" in block
                 assert "for (let i = 0; i < maxSteps; i++)" not in body, (
                     "JS _stepKernelCore reintroduced the old maxSteps-owned kernel loop"
                 )
-                assert "while (!fuelSupplied || fuelCursor !== null)" in body, (
-                    "JS _stepKernelCore must drive supplied-fuel progress from the Mu linked-list cursor"
+                assert "while (!callerSuppliedFuel || fuelCursor !== null)" in body, (
+                    "JS _stepKernelCore must preserve no-fuel compatibility without synthetic fuel"
+                )
+                assert "compatibilityFuelNode <= maxSteps" not in body, (
+                    "JS _stepKernelCore must not construct host-counted no-fuel compatibility fuel"
+                )
+                assert "listToLinked(compatibilityFuelItems)" not in body, (
+                    "JS _stepKernelCore must not convert a maxSteps-sized host list into fuel"
                 )
                 assert "if (stepsUsed >= maxSteps)" in body, (
                     "JS _stepKernelCore must keep maxSteps as a watchdog check, not the loop owner"
                 )
-                assert "kernelFuel" in body and "fuel_remaining" in body, (
-                    "JS _stepKernelCore must thread Mu fuel without moving the residual host_iteration marker"
+                assert "callerSuppliedFuel" in body and "fuel_remaining" in body, (
+                    "JS _stepKernelCore must keep fuel metadata scoped to explicit supplied fuel"
                 )
-                assert "fuelCursor = fuelCursor.tail" in body and "stepsUsed++" in body, (
-                    "JS _stepKernelCore must consume one Mu fuel node per kernel step"
+                assert "if (callerSuppliedFuel)" in body and "fuelCursor = fuelCursor.tail" in body, (
+                    "JS _stepKernelCore must consume Mu fuel only on the explicit supplied-fuel path"
                 )
                 break
         else:
@@ -277,7 +293,7 @@ class TestKernelPathExclusion:
 # ===========================================================================
 
 class TestRatchetEvidence:
-    """Verify ratchet reflects the P7W5 reduction."""
+    """Verify ratchet reflects honest residual kernel markers."""
 
     def test_ratchet_passes(self):
         result = subprocess.run(

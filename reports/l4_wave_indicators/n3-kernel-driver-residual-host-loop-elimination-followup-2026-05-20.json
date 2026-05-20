@@ -1,24 +1,24 @@
 {
   "wave_id": "n3-kernel-driver-residual-host-loop-elimination-followup-2026-05-20",
-  "repeat_run_speedup_ratio": 1.297026,
+  "repeat_run_speedup_ratio": 1.289474,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.266482,
+  "step_growth_slope": 0.269116,
   "repeat_run_raw_seconds": [
-    0.345634,
-    0.266482
+    0.347018,
+    0.269116
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.345634
+      "elapsed_seconds": 0.347018
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.612116
+      "elapsed_seconds": 0.616134
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-20T16:03:46Z",
+  "collection_timestamp_utc": "2026-05-20T17:20:11Z",
   "collector_version": "2.2.0"
 }
