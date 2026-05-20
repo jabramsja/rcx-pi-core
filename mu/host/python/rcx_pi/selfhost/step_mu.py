@@ -1224,11 +1224,11 @@ def step_kernel_mu(
         ValueError: If kernel projections appear after domain projections (security).
         ValueError: If input contains kernel-reserved fields (security).
     """
-    if isinstance(max_steps, bool):  # AST_OK:infra - watchdog type guard
+    if isinstance(max_steps, bool):  # AST_OK:security - watchdog type guard
         raise ValueError("SECURITY: max_steps must be a finite integer watchdog, got bool")
-    if isinstance(max_steps, int):  # AST_OK:infra - watchdog type guard
+    if isinstance(max_steps, int):  # AST_OK:security - watchdog type guard
         watchdog_steps = max_steps
-    elif isinstance(max_steps, float) and max_steps.is_integer():  # AST_OK:infra - watchdog type guard
+    elif isinstance(max_steps, float) and max_steps.is_integer():  # AST_OK:security - watchdog type guard
         watchdog_steps = int(max_steps)
     else:
         raise ValueError(

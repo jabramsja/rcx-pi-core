@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import ast
 import json
-from pathlib import Path
 import subprocess
 
 import pytest
 
 from rcx_pi.selfhost.step_mu import step_kernel_mu
+from tests.repo_root import REPO_ROOT
 
 
 # -- KernelRunResult shape contract --
@@ -38,9 +38,6 @@ SHARED_RESULT_FIELDS = (
     "steps_used",
     "max_steps",
 )
-REPO_ROOT = Path(__file__).resolve().parents[3]
-
-
 def _shared_kernel_result(meta: dict) -> dict:
     return {field: meta[field] for field in SHARED_RESULT_FIELDS}
 
