@@ -4150,10 +4150,19 @@ def _count_exact_wave_id_mentions(text: str, wave_id: str) -> int:
 
 def _is_canonical_tracker_note_line(line: str, wave_id: str) -> bool:
     """Return True when *line* is a parseable canonical tracker note for *wave_id*."""
-    return bool(re.match(
-        rf"^- Tracker sync note \(([^,]+),\s*{re.escape(wave_id)}\):\s*\*\*[^*]+\*\*.*\bClass:\s*",
+    header_match = re.match(
+        rf"^- Tracker sync note \(([^,]+),\s*{re.escape(wave_id)}\):\s*\*\*[^*]+\*\*",
         line,
-    ))
+    )
+    if not header_match:
+        return False
+    return (
+        bool(re.search(r"\bClass:\s*", line))
+        or (
+            "contract_path: classless FOUNDER_OVERRIDE comment-only runtime override" in line
+            and f"FOUNDER_OVERRIDE:{wave_id}" in line
+        )
+    )
 
 
 def _is_tracker_followup_note_line(line: str, wave_id: str) -> bool:

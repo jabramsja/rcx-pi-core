@@ -76,6 +76,20 @@ def _with_founder_override(note: str, token: str) -> str:
     return f"{note} FOUNDER_OVERRIDE:{token} (test authorization)"
 
 
+def test_classless_comment_runtime_override_is_canonical_tracker_note_line():
+    wave_id = "classless-comment-runtime-2026-05-20"
+    line = (
+        f"- Tracker sync note (2026-05-20, {wave_id}): **TEST.** "
+        "contract_path: classless FOUNDER_OVERRIDE comment-only runtime override. "
+        "target_gate_id: G8. no_op_proof: comment-only runtime text. "
+        f"FOUNDER_OVERRIDE:{wave_id}. "
+        "primary_blocker_class: INTEGRATION. "
+        "primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION."
+    )
+
+    assert commit_mod._is_canonical_tracker_note_line(line, wave_id)  # ANTICHEAT_OK: locks classless tracker-note acceptance
+
+
 def test_build_commit_handoff_replaces_stale_tracker_override_with_same_wave_packet(
     tmp_path,
 ):

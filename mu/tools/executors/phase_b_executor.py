@@ -134,6 +134,16 @@ _MAINTENANCE_FORBIDDEN_PREFIXES = (
     "mu/tools/compilers/",
     "tools/compilers/",
 )
+_CONTROL_PLANE_TOOLING_PREFIXES = (
+    ".github/workflows/",
+    "tools/checks/",
+    "mu/tools/agents/",
+    "mu/tools/executors/",
+    "mu/tools/checks/",
+    "mu/tools/hooks/",
+    "mu/tools/observability/",
+    "mu/tools/recovery/",
+)
 _SUPERVISOR_OVERRIDE_WAVE_CLASSES = {"L4_ENABLER", "MAINTENANCE"}
 
 
@@ -1251,6 +1261,18 @@ def _phase_b_scope_has_runtime_substrate_file(changed_files: list[str]) -> bool:
     return any(path.startswith(_MAINTENANCE_FORBIDDEN_PREFIXES) for path in changed_files)
 
 
+def _phase_b_scope_has_control_plane_tooling_file(changed_files: list[str]) -> bool:
+    return any(path.startswith(_CONTROL_PLANE_TOOLING_PREFIXES) for path in changed_files)
+
+
+def _plan_declares_classless_comment_only_runtime_override(plan_content: str) -> bool:
+    text = (plan_content or "").lower().replace("`", "")
+    return (
+        "classless founder_override comment-only runtime override" in text
+        or "classless founder_override comment/docstring-only runtime override" in text
+    )
+
+
 def _plan_declares_routing_boundary(plan_content: str) -> bool:
     text = (plan_content or "").lower()
     return (
@@ -1282,6 +1304,10 @@ def _effective_phase_b_tracker_wave_class(
     an enabler, even when the selected future route is structural.
     """
     if _phase_b_scope_has_runtime_substrate_file(changed_files):
+        if _plan_declares_classless_comment_only_runtime_override(plan_content):
+            if _phase_b_scope_has_control_plane_tooling_file(changed_files):
+                return "L4_ENABLER"
+            return ""
         return "L4_STRUCTURAL"
     if wave_class != "L4_STRUCTURAL":
         return wave_class
@@ -4033,6 +4059,16 @@ def _build_phase_b_tracker_note(
         "progress_proof_before": progress_before,
         "progress_proof_after": progress_after,
     }
+    runtime_comment_override = (
+        _plan_declares_classless_comment_only_runtime_override(plan_content)
+        and _phase_b_scope_has_runtime_substrate_file(changed_files)
+    )
+    if not wave_class or (wave_class == "L4_ENABLER" and runtime_comment_override):
+        tracker_kwargs["no_op_proof"] = (
+            "wave-owned runtime/substrate edits are comment-only debt-map text "
+            "with zero executable runtime delta, bound to the same-wave "
+            "FOUNDER_OVERRIDE and revalidated from the staged diff"
+        )
     if wave_class == "L4_STRUCTURAL":
         tracker_kwargs.update({
             "workload_target": _infer_structural_workload_target(changed_files, plan_content),
@@ -4561,10 +4597,15 @@ def _finalize_phase_b_pre_supervisor_tracker_note(
     package_founder_override = ""
 
     for _attempt in range(2):
+        note_wave_class = _effective_phase_b_tracker_wave_class(
+            wave_class,
+            plan_content=plan_content,
+            changed_files=final_scope,
+        )
         tracker_note = build_phase_b_tracker_note(
             wave_id=wave_id,
             task_id=task_id,
-            wave_class=wave_class,
+            wave_class=note_wave_class,
             target_gate_id=target_gate_id,
             plan_path=plan_path,
             plan_content=plan_content,
@@ -4581,7 +4622,7 @@ def _finalize_phase_b_pre_supervisor_tracker_note(
         raw_founder_override = _extract_founder_override_from_tracker_note(tracker_note)
         package_founder_override = _supervisor_package_founder_override_token(
             raw_founder_override,
-            wave_class=wave_class,
+            wave_class=note_wave_class,
         )
         tracker_sync_error, tracker_note_modified = _sync_phase_b_tasks_tracker_note(
             repo_root,
@@ -6971,7 +7012,7 @@ def run_phase_b(
         if effective_wave_class != wave_class:
             log(
                 "Phase B packaging class adjusted from "
-                f"{wave_class} to {effective_wave_class} for planning-only scope"
+                f"{wave_class} to {effective_wave_class} for package scope"
             )
             wave_class = effective_wave_class
         (

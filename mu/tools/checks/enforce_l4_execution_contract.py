@@ -1553,6 +1553,51 @@ def enforce(
     runtime_files = [f for f in changed_files if is_runtime_file(f)]
     control_plane_files = [f for f in changed_files if is_control_plane_file(f)]
 
+    def _comment_only_runtime_override_errors() -> tuple[bool, list[str]]:
+        """Return (override_ok, errors) for wave-bound no-op runtime text edits."""
+        override_id = None
+        if notes and override_wave_bound:
+            for n in notes[:1]:  # only check bound note (position 0)
+                oid = n.get("founder_override")
+                if oid:
+                    override_id = oid
+                    break
+
+        if not (override_id and diff_text):
+            return False, []
+
+        comment_only, violations = is_comment_only_runtime_diff(
+            diff_text, runtime_files, old_ref=old_ref,
+        )
+        if not comment_only:
+            return False, [
+                f"FOUNDER_OVERRIDE:{override_id} rejected — "
+                f"runtime diff contains executable changes: {violations[:3]}"
+            ]
+
+        note = notes[0]
+        missing_meta: list[str] = []
+        if not note.get("no_op_proof"):
+            missing_meta.append("no_op_proof")
+        if not note.get("gate"):
+            missing_meta.append("target_gate_id")
+        if missing_meta:
+            return False, [
+                f"FOUNDER_OVERRIDE:{override_id} rejected — "
+                f"missing required metadata: {', '.join(missing_meta)}"
+            ]
+
+        replay_ok, replay_errors = check_founder_override_replay(notes)
+        if not replay_ok:
+            return False, replay_errors
+
+        print(
+            f"  FOUNDER_OVERRIDE:{override_id} active — "
+            f"allowing comment-only runtime edit "
+            f"({len(runtime_files)} runtime file(s))"
+        )
+        return True, []
+
     # Fail-closed: governed runtime/control-plane changes without class marker
     if not wave_class:
         if runtime_files:
@@ -1563,48 +1608,18 @@ def enforce(
             #   c) Tracker note has no_op_proof + target_gate_id
             #   d) Override ID not replayed (existing replay protection)
             #   e) Override must be wave-bound (--wave-id), not stale top-note
-            override_id = None
-            if notes and override_wave_bound:
-                for n in notes[:1]:  # only check bound note (position 0)
-                    oid = n.get("founder_override")
-                    if oid:
-                        override_id = oid
-                        break
-
-            if override_id and diff_text:
-                comment_only, violations = is_comment_only_runtime_diff(
-                    diff_text, runtime_files, old_ref=old_ref,
-                )
-                if not comment_only:
+            override_ok, override_errors = _comment_only_runtime_override_errors()
+            if override_errors:
+                errors.extend(override_errors)
+                return False, errors
+            if override_ok:
+                if control_plane_files:
                     errors.append(
-                        f"FOUNDER_OVERRIDE:{override_id} rejected — "
-                        f"runtime diff contains executable changes: "
-                        f"{violations[:3]}"
+                        "FAIL-CLOSED: Critical control-plane tooling files changed but "
+                        "no wave class marker found. "
+                        f"Control-plane files: {control_plane_files[:5]}"
                     )
                     return False, errors
-                # Require no_op_proof and target_gate_id in the note
-                note = notes[0]
-                missing_meta: list[str] = []
-                if not note.get("no_op_proof"):
-                    missing_meta.append("no_op_proof")
-                if not note.get("gate"):
-                    missing_meta.append("target_gate_id")
-                if missing_meta:
-                    errors.append(
-                        f"FOUNDER_OVERRIDE:{override_id} rejected — "
-                        f"missing required metadata: {', '.join(missing_meta)}"
-                    )
-                    return False, errors
-                # Replay protection — must run BEFORE early return
-                replay_ok, replay_errors = check_founder_override_replay(notes)
-                if not replay_ok:
-                    errors.extend(replay_errors)
-                    return False, errors
-                print(
-                    f"  FOUNDER_OVERRIDE:{override_id} active — "
-                    f"allowing comment-only runtime edit "
-                    f"({len(runtime_files)} runtime file(s))"
-                )
                 return True, []
 
             errors.append(
@@ -1863,10 +1878,14 @@ def enforce(
     # --- L4_ENABLER ---
     elif wave_class == "L4_ENABLER":
         if runtime_files:
-            errors.append(
-                f"L4_ENABLER wave touches runtime/substrate files (forbidden). "
-                f"Runtime files: {runtime_files[:5]}. Use L4_STRUCTURAL instead."
-            )
+            override_ok, override_errors = _comment_only_runtime_override_errors()
+            if override_errors:
+                errors.extend(override_errors)
+            elif not override_ok:
+                errors.append(
+                    f"L4_ENABLER wave touches runtime/substrate files (forbidden). "
+                    f"Runtime files: {runtime_files[:5]}. Use L4_STRUCTURAL instead."
+                )
         if notes:
             current = notes[0]
             if current["gate"] is None:

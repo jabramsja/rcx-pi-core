@@ -246,6 +246,33 @@ class TestL4EnablerEnforcement:
         assert not passed
         assert any("L4_ENABLER" in e for e in errors)
 
+    def test_enabler_allows_comment_only_runtime_with_bound_override(self) -> None:
+        notes = [_make_note(
+            wave_class="L4_ENABLER",
+            wave_id="enabler-comment-runtime",
+            founder_override="enabler-comment-runtime",
+            no_op_proof="comment-only runtime text plus control-plane automation fix",
+            gate="G8",
+            evidence_command="PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_l4_execution_contract_enforcement.py",
+            evidence_delta="control-plane gate now validates comment-only runtime text from staged diff",
+            progress_proof_before="supervisor used file lists without runtime diff text",
+            progress_proof_after="supervisor validates the staged diff for runtime no-op proof",
+        )]
+        files = [
+            "mu/host/python/rcx_pi/selfhost/step_mu.py",
+            "mu/tools/executors/phase_b_executor.py",
+        ]
+
+        passed, errors = enforce(
+            "L4_ENABLER",
+            files,
+            _COMMENT_ONLY_DIFF,
+            notes=notes,
+            override_wave_bound=True,
+        )
+
+        assert passed, errors
+
     def test_enabler_followup_can_bind_parent_structural_note_without_host_delta_claim(self) -> None:
         notes = [{
             "wave_id": "same-wave-structural-parent",
@@ -2292,6 +2319,24 @@ class TestFounderOverrideCommentOnlyBypass:
         )
         assert not passed
         assert any("FAIL-CLOSED" in e for e in errors)
+
+    def test_classless_runtime_override_with_control_plane_file_fails(self) -> None:
+        """Negative: classless no-op runtime override cannot hide tooling changes."""
+        notes = [_make_note(
+            wave_class="",
+            founder_override="FO-006-control-plane",
+            no_op_proof="comment cleanup",
+            gate="G5",
+        )]
+        passed, errors = enforce(
+            None,
+            [*_RUNTIME_FILES, "mu/tools/executors/phase_b_executor.py"],
+            _COMMENT_ONLY_DIFF,
+            notes,
+            override_wave_bound=True,
+        )
+        assert not passed
+        assert any("control-plane" in e and "no wave class" in e for e in errors)
 
     def test_duplicate_override_id_fails_replay(self) -> None:
         """Negative: same FOUNDER_OVERRIDE ID in window → replay rejection."""
