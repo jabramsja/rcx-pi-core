@@ -309,8 +309,12 @@ class TestPhaseBWaveClassResolution:
         assert (
             "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
             "mu/tests/l4_gates/test_wave11_hardening_gate.py "
-            "mu/tests/tools/test_phase_b_executor.py`"
+            "mu/tests/tools/test_phase_b_executor.py && "
+            "python3 tools/checks/enforce_l4_execution_contract.py --files "
+            "mu/host/js/engine/pipeline.js"
         ) in note
+        assert "reports/l4_wave_indicators/structural-wave-2026-05-13.json --wave-id" in note
+        assert "--wave-id structural-wave-2026-05-13 --wave-class L4_STRUCTURAL" in note
         assert "Final pytest gate covered 2 test file(s)" in note
 
 
@@ -4307,6 +4311,36 @@ class TestFinalPytestGate:
         assert "post_gate_contract_sweep: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short" in note
         assert "mu/tests/structural/test_rcx_engine_state_seed.py" in note
         assert "tools/checks/enforce_l4_execution_contract.py --staged" not in note
+        assert "tools/checks/enforce_l4_execution_contract.py --files" in note
+        assert "reports/l4_wave_indicators/post-redteam-engine-state-scheduler-reduction-2026-04-30.json --wave-id" in note
+
+    def test_structural_tracker_note_l4_files_command_includes_indicator_artifact(self):
+        wave_id = "n3-kernel-driver-mu-driver-boundary-design-2026-05-20"
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: locks current bot finding repair
+            wave_id=wave_id,
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path=f"reports/control_plane/{wave_id}.md",
+            plan_content="Class: L4_STRUCTURAL\n",
+            changed_files=[
+                "TASKS.md",
+                f"reports/control_plane/{wave_id}.md",
+                "mu/host/python/rcx_pi/selfhost/step_mu.py",
+                "mu/host/js/engine/kernel.js",
+                "mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py",
+            ],
+            test_files=["mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py"],
+            receipt_path=".agent_bus/meta/pre_commit_receipts/r.json",
+            bridge_rounds=2,
+            reentry=False,
+        )
+
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        assert f"indicator_artifact_ref: {indicator_path}" in note
+        assert "tools/checks/enforce_l4_execution_contract.py --files TASKS.md" in note
+        assert f"mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py {indicator_path}" in note
+        assert f"--wave-id {wave_id} --wave-class L4_STRUCTURAL" in note
 
     def test_pytest_failure_blocks_commit_ready(self, tmp_path):
         """If final pytest gate fails, status must be error, not commit_ready."""

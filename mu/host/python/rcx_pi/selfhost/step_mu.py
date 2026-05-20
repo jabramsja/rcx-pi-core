@@ -1182,6 +1182,9 @@ def step_kernel_mu(
     Omitted ``kernel_fuel`` preserves the legacy no-fuel compatibility path
     without synthesizing host-counted compatibility fuel; explicit ``None``
     still means empty fuel. ``max_steps`` remains a hard pre-step watchdog.
+    Removing this omitted-fuel path requires a separate Mu continuation-state
+    caller migration; do not hide it behind helper, recursion, or synthetic
+    max_steps-derived fuel.
 
     The kernel works as a state machine:
     1. kernel.wrap: Wraps input and projections into kernel state

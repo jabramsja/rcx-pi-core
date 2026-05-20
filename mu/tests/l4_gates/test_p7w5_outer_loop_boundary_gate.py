@@ -61,6 +61,20 @@ def _get_function_source_from_file(path: Path, name: str) -> str:
     pytest.fail(f"{name} not found in {path}")
 
 
+def _js_function_body(lines: list[str], function_index: int) -> str:
+    body = []
+    depth = 0
+    opened = False
+    for line in lines[function_index:]:
+        body.append(line)
+        if "{" in line:
+            opened = True
+        depth += line.count("{") - line.count("}")
+        if opened and depth == 0:
+            return "\n".join(body)
+    pytest.fail(f"Could not find JS function body ending after line {function_index + 1}")
+
+
 # ===========================================================================
 # Part A: Python Reclassification Tests
 # ===========================================================================
@@ -114,8 +128,14 @@ class TestPythonOuterLoopBoundary:
         assert "list_to_linked([None] * (max_steps + 1))" not in source, (
             "step_kernel_mu must not construct host-counted no-fuel compatibility fuel"
         )
+        assert "compatibility_fuel" not in source, (
+            "step_kernel_mu must not hide omitted-fuel compatibility behind a helper fuel cursor"
+        )
         assert "[None] *" not in source, (
             "step_kernel_mu must not turn max_steps into a host-sized fuel list"
+        )
+        assert "range(max_steps)" not in source, (
+            "step_kernel_mu must not reintroduce max_steps as the semantic loop owner"
         )
         assert "if steps_used >= max_steps:" in source, (
             "step_kernel_mu must keep max_steps as a watchdog check, not the loop owner"
@@ -190,7 +210,7 @@ class TestJSOuterLoopBoundary:
         for i, line in enumerate(kernel_lines):
             if "function _stepKernelCore(" in line:
                 block = "\n".join(kernel_lines[max(0, i - 10):i])
-                body = "\n".join(kernel_lines[i:i + 120])
+                body = _js_function_body(kernel_lines, i)
                 assert "@host_iteration" in block, (
                     "JS _stepKernelCore still has a residual no-fuel host loop and must stay marked"
                 )
@@ -208,6 +228,12 @@ class TestJSOuterLoopBoundary:
                 )
                 assert "listToLinked(compatibilityFuelItems)" not in body, (
                     "JS _stepKernelCore must not convert a maxSteps-sized host list into fuel"
+                )
+                assert "compatibilityFuel" not in body, (
+                    "JS _stepKernelCore must not hide omitted-fuel compatibility behind a helper fuel cursor"
+                )
+                assert "Array.from" not in body and ".fill(" not in body, (
+                    "JS _stepKernelCore must not construct host-sized synthetic fuel arrays"
                 )
                 assert "if (stepsUsed >= maxSteps)" in body, (
                     "JS _stepKernelCore must keep maxSteps as a watchdog check, not the loop owner"
