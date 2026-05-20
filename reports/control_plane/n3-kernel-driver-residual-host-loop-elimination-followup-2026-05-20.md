@@ -67,3 +67,23 @@ substrate-specific behavior.
 
 This packet is not Phase B authorization. It must be locked by Phase A and
 paired with a detector-visible `TASKS.md` tracker entry before implementation.
+
+<!-- COMMIT_PATH_TRUTH_REFRESH:start -->
+## Commit Path Truth Refresh
+
+- Refresh wave: `n3-kernel-driver-residual-host-loop-elimination-followup-2026-05-20`
+- Active packet: `reports/control_plane/n3-kernel-driver-residual-host-loop-elimination-followup-2026-05-20.md`
+- Commit status: `pre_commit_supervisor_pending`
+- Tracker note sha256: `4982a3dfe1d5ba3f2c918ea160e35bd4a4d1847b894ba6fc2cce2e52b0a5a1cf`
+- Indicator artifact: `reports/l4_wave_indicators/n3-kernel-driver-residual-host-loop-elimination-followup-2026-05-20.json`
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_executor_dispatch.py`.
+- Evidence delta: (1) Routed commit handoff scopes 5 wave-owned file(s). (2) Evidence gate exercises 1 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/n3-kernel-driver-residual-host-loop-elimination-followup-2026-05-20.json..
+- Evidence handles:
+  - `indicator`: `reports/l4_wave_indicators/n3-kernel-driver-residual-host-loop-elimination-followup-2026-05-20.json`
+- Current staged files:
+  - `TASKS.md`
+  - `mu/tests/tools/test_executor_dispatch.py`
+  - `mu/tools/executors/executor_common.py`
+  - `reports/control_plane/n3-kernel-driver-residual-host-loop-elimination-followup-2026-05-20.md`
+  - `reports/l4_wave_indicators/n3-kernel-driver-residual-host-loop-elimination-followup-2026-05-20.json`
+<!-- COMMIT_PATH_TRUTH_REFRESH:end -->
