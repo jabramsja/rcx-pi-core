@@ -39,7 +39,7 @@ if str(CHECKS_DIR) not in sys.path:
     sys.path.insert(0, str(CHECKS_DIR))
 
 from bridge_adapters import BridgeAdapterError, get_adapter, load_bridge_config, run_adapter
-from enforce_l4_execution_contract import is_runtime_file, parse_tracker_notes
+from enforce_l4_execution_contract import parse_tracker_notes
 from executor_common import (
     ensure_not_agent_review_mode,
     ensure_bridge_config_path,
@@ -1217,23 +1217,13 @@ def run_validation_gates(
         if changed:
             wave_class = str(package.get("wave_class") or "").strip()
             wave_name = str(package.get("wave_name") or "").strip()
-            needs_staged_diff = bool(wave_name) and (
-                not wave_class
-                or any(is_runtime_file(str(path)) for path in changed)
-            )
             cmd = ["python3", "tools/checks/enforce_l4_execution_contract.py"]
-            if needs_staged_diff:
-                cmd.append("--staged")
+            if wave_class:
+                cmd.extend(["--wave-class", wave_class])
+            if wave_name:
                 cmd.extend(["--wave-id", wave_name])
-                if wave_class:
-                    cmd.extend(["--wave-class", wave_class])
-            else:
-                if wave_class:
-                    cmd.extend(["--wave-class", wave_class])
-                if wave_name:
-                    cmd.extend(["--wave-id", wave_name])
-                cmd.append("--files")
-                cmd.extend(changed)
+            cmd.append("--files")
+            cmd.extend(changed)
             exit_code, output = run_validation_command(repo_root, cmd)
             if exit_code == 0:
                 results.append(ValidationResult("L4 contract", True))
