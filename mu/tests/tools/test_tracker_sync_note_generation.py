@@ -95,6 +95,28 @@ def _make_enabler_fields(**overrides: str) -> TrackerSyncNoteFields:
     return TrackerSyncNoteFields(**defaults)
 
 
+def _make_classless_comment_override_fields(**overrides: str) -> TrackerSyncNoteFields:
+    defaults = dict(
+        wave_id="test-classless-comment-runtime",
+        title="TEST — classless runtime comment override",
+        wave_class="",
+        target_gate_id="G8",
+        no_op_proof="comment-only runtime text update",
+        evidence_command="python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-classless-comment-runtime --output reports/l4_wave_indicators/test-classless-comment-runtime.json",
+        evidence_delta="(1) Runtime file text changed only in comments. (2) No executable delta.",
+        progress_proof_before="Debt map named the stale marker owner",
+        progress_proof_after="Debt map names the active marker owner",
+        founder_override="test-classless-comment-runtime",
+        primary_blocker_class="INTEGRATION",
+        primary_invariant_id="INV_STRUCTURAL_FORWARD_MOTION",
+        indicator_artifact_ref="reports/l4_wave_indicators/test-classless-comment-runtime.json",
+        indicator_collection_command="python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id test-classless-comment-runtime --output reports/l4_wave_indicators/test-classless-comment-runtime.json",
+        date="2026-03-23",
+    )
+    defaults.update(overrides)
+    return TrackerSyncNoteFields(**defaults)
+
+
 class TestRenderTrackerSyncNote:
     """Test that rendered notes match L4 contract parser expectations."""
 
@@ -148,12 +170,32 @@ class TestRenderTrackerSyncNote:
         assert L4_UNBLOCKS_WAVE_RE.search(note)
         assert L4_UNBLOCKS_BLOCKER_RE.search(note)
 
+    def test_classless_comment_runtime_override_note_has_no_class_marker(self):
+        fields = _make_classless_comment_override_fields()
+        note = render_tracker_sync_note(fields)
+
+        assert L4_NOTE_HEADER_RE.search(note), "L4 header regex must match"
+        assert not L4_CLASS_RE.search(note), "classless override must not emit Class:"
+        assert "contract_path: classless FOUNDER_OVERRIDE comment-only runtime override" in note
+        assert L4_GATE_RE.search(note), "target gate regex must match"
+        assert L4_NOP_RE.search(note), "no_op_proof regex must match"
+        assert L4_EVIDENCE_CMD_RE.search(note), "evidence_command must be present"
+        assert L4_EVIDENCE_DELTA_RE.search(note), "evidence_delta must be present"
+        assert L4_PROGRESS_BEFORE_RE.search(note), "progress_proof_before must be present"
+        assert L4_PROGRESS_AFTER_RE.search(note), "progress_proof_after must be present"
+        assert L4_FOUNDER_OVERRIDE_RE.search(note), "FOUNDER_OVERRIDE must be present"
+
 
 class TestValidateFields:
     """Test field validation catches missing/invalid fields."""
 
     def test_valid_maintenance_fields(self):
         fields = _make_maintenance_fields()
+        errors = validate_fields(fields)
+        assert errors == []
+
+    def test_valid_classless_comment_runtime_override_fields(self):
+        fields = _make_classless_comment_override_fields()
         errors = validate_fields(fields)
         assert errors == []
 

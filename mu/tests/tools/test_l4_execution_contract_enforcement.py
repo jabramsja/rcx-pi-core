@@ -246,6 +246,33 @@ class TestL4EnablerEnforcement:
         assert not passed
         assert any("L4_ENABLER" in e for e in errors)
 
+    def test_enabler_allows_comment_only_runtime_with_bound_override(self) -> None:
+        notes = [_make_note(
+            wave_class="L4_ENABLER",
+            wave_id="enabler-comment-runtime",
+            founder_override="enabler-comment-runtime",
+            no_op_proof="comment-only runtime text plus control-plane automation fix",
+            gate="G8",
+            evidence_command="PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_l4_execution_contract_enforcement.py",
+            evidence_delta="control-plane gate now validates comment-only runtime text from staged diff",
+            progress_proof_before="supervisor used file lists without runtime diff text",
+            progress_proof_after="supervisor validates the staged diff for runtime no-op proof",
+        )]
+        files = [
+            "mu/host/python/rcx_pi/selfhost/step_mu.py",
+            "mu/tools/executors/phase_b_executor.py",
+        ]
+
+        passed, errors = enforce(
+            "L4_ENABLER",
+            files,
+            _COMMENT_ONLY_DIFF,
+            notes=notes,
+            override_wave_bound=True,
+        )
+
+        assert passed, errors
+
     def test_enabler_followup_can_bind_parent_structural_note_without_host_delta_claim(self) -> None:
         notes = [{
             "wave_id": "same-wave-structural-parent",
@@ -1339,10 +1366,20 @@ def _init_staged_l4_checker_repo(tmp_path: Path, wave_id: str) -> Path:
         "# baseline\n",
         encoding="utf-8",
     )
+    (repo / "mu" / "host" / "js" / "core").mkdir(parents=True)
+    (repo / "mu" / "host" / "js" / "core" / "constants.js").write_text(
+        "// baseline debt marker\n",
+        encoding="utf-8",
+    )
+    (repo / "mu" / "host" / "js" / "core" / "unrelated.js").write_text(
+        "export function unrelated() { return 1; }\n",
+        encoding="utf-8",
+    )
     (repo / "TASKS.md").write_text(
         "## Ra\n\n"
         f"- Tracker sync note (2026-05-07, {wave_id}): **CURRENT.** "
         "Class: L4_ENABLER. Category: tooling/control-plane. target_gate_id: G8. "
+        "no_op_proof: package-owned runtime edits are comment-only when present. "
         "evidence_command: python3 tools/checks/enforce_l4_execution_contract.py --staged. "
         "evidence_delta: changed control-plane staged binding. "
         "progress_proof_before: canonical staged checker reported no wave class for changed control-plane files. "
@@ -1440,6 +1477,53 @@ class TestStagedIndicatorBinding:
         assert result.returncode == 1
         assert "Wave class: (none)" in result.stdout
         assert "no wave class marker found" in result.stdout
+
+    def test_files_mode_uses_package_scoped_staged_diff_for_runtime_override(self, tmp_path: Path) -> None:
+        wave_id = "comment-only-runtime-files-wave"
+        repo = _init_staged_l4_checker_repo(tmp_path, wave_id)
+        (repo / "mu" / "host" / "js" / "core" / "constants.js").write_text(
+            "// refined debt marker only\n",
+            encoding="utf-8",
+        )
+        (repo / "mu" / "host" / "js" / "core" / "unrelated.js").write_text(
+            "export function unrelated() { return 2; }\n",
+            encoding="utf-8",
+        )
+        _write_l4_indicator(repo, wave_id)
+        subprocess.run(
+            [
+                "git",
+                "add",
+                "--",
+                "mu/host/js/core/constants.js",
+                "mu/host/js/core/unrelated.js",
+                f"reports/l4_wave_indicators/{wave_id}.json",
+            ],
+            cwd=repo,
+            check=True,
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "tools/checks/enforce_l4_execution_contract.py",
+                "--wave-class",
+                "L4_ENABLER",
+                "--wave-id",
+                wave_id,
+                "--files",
+                "mu/host/js/core/constants.js",
+                f"reports/l4_wave_indicators/{wave_id}.json",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Runtime files: 1" in result.stdout
+        assert "allowing comment-only runtime edit" in result.stdout
+        assert "L4 Execution Contract v2: L4_ENABLER compliant" in result.stdout
 
 
 # =============================================================================
@@ -2292,6 +2376,24 @@ class TestFounderOverrideCommentOnlyBypass:
         )
         assert not passed
         assert any("FAIL-CLOSED" in e for e in errors)
+
+    def test_classless_runtime_override_with_control_plane_file_fails(self) -> None:
+        """Negative: classless no-op runtime override cannot hide tooling changes."""
+        notes = [_make_note(
+            wave_class="",
+            founder_override="FO-006-control-plane",
+            no_op_proof="comment cleanup",
+            gate="G5",
+        )]
+        passed, errors = enforce(
+            None,
+            [*_RUNTIME_FILES, "mu/tools/executors/phase_b_executor.py"],
+            _COMMENT_ONLY_DIFF,
+            notes,
+            override_wave_bound=True,
+        )
+        assert not passed
+        assert any("control-plane" in e and "no wave class" in e for e in errors)
 
     def test_duplicate_override_id_fails_replay(self) -> None:
         """Negative: same FOUNDER_OVERRIDE ID in window → replay rejection."""

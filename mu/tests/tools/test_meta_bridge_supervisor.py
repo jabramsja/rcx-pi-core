@@ -2434,6 +2434,74 @@ class TestStartupFlowSuppressionGatePath:
             "mu/host/js/engine/pipeline.js",
         ]
 
+    def test_l4_contract_gate_uses_package_scope_for_classless_runtime_override(self):
+        package = self._make_package()
+        package.update({
+            "wave_name": "comment-only-wave",
+            "wave_class": "",
+            "changed_files": ["mu/host/js/core/constants.js"],
+        })
+        invoked_commands = []
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            invoked_commands.append([str(c) for c in cmd])
+            return 0, "passed"
+
+        with patch.object(meta, "run_validation_command", side_effect=mock_run_validation), \
+             patch.object(meta, "check_dirty_state", return_value=meta.ValidationResult("dirty_state", True)), \
+             patch.object(meta, "check_deferred_blockers", return_value=meta.ValidationResult("deferred_blockers", True)), \
+             patch.object(meta, "check_tasks_authorization", return_value=meta.ValidationResult("tasks_auth", True)):
+            results, all_passed = meta.run_validation_gates(
+                REPO_ROOT, package, verbose=False, skip_startup_gates=True
+            )
+
+        assert any(r.name == "L4 contract" and r.passed for r in results)
+        assert all_passed is True
+        assert invoked_commands[0] == [
+            "python3",
+            "tools/checks/enforce_l4_execution_contract.py",
+            "--wave-id",
+            "comment-only-wave",
+            "--files",
+            "mu/host/js/core/constants.js",
+        ]
+
+    def test_l4_contract_gate_uses_package_scope_for_enabler_runtime_override(self):
+        package = self._make_package()
+        package.update({
+            "wave_name": "comment-only-tooling-wave",
+            "wave_class": "L4_ENABLER",
+            "changed_files": [
+                "mu/host/js/core/constants.js",
+            ],
+        })
+        invoked_commands = []
+
+        def mock_run_validation(repo_root, cmd, **kw):
+            invoked_commands.append([str(c) for c in cmd])
+            return 0, "passed"
+
+        with patch.object(meta, "run_validation_command", side_effect=mock_run_validation), \
+             patch.object(meta, "check_dirty_state", return_value=meta.ValidationResult("dirty_state", True)), \
+             patch.object(meta, "check_deferred_blockers", return_value=meta.ValidationResult("deferred_blockers", True)), \
+             patch.object(meta, "check_tasks_authorization", return_value=meta.ValidationResult("tasks_auth", True)):
+            results, all_passed = meta.run_validation_gates(
+                REPO_ROOT, package, verbose=False, skip_startup_gates=True
+            )
+
+        assert any(r.name == "L4 contract" and r.passed for r in results)
+        assert all_passed is True
+        assert invoked_commands[0] == [
+            "python3",
+            "tools/checks/enforce_l4_execution_contract.py",
+            "--wave-class",
+            "L4_ENABLER",
+            "--wave-id",
+            "comment-only-tooling-wave",
+            "--files",
+            "mu/host/js/core/constants.js",
+        ]
+
     def test_gate6_runs_when_skip_startup_gates_false(self):
         """Gate 6 (attestation) must call founder_session_attest.sh
         when skip_startup_gates=False (default)."""

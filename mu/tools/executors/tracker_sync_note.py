@@ -17,7 +17,9 @@ from pathlib import Path
 from typing import Any
 
 
-# L4 wave classes (must match enforce_l4_execution_contract.py _CLASS_RE)
+# L4 wave classes (must match enforce_l4_execution_contract.py _CLASS_RE).
+# A blank wave_class is also supported for the separate wave-bound
+# FOUNDER_OVERRIDE comment-only runtime override path in the L4 checker.
 VALID_WAVE_CLASSES = frozenset({"L4_STRUCTURAL", "L4_ENABLER", "MAINTENANCE"})
 
 # Valid blocker classes
@@ -107,8 +109,22 @@ def validate_fields(fields: TrackerSyncNoteFields) -> list[str]:
         errors.append("wave_id is required")
     if not fields.title or not fields.title.strip():
         errors.append("title is required")
-    if fields.wave_class not in VALID_WAVE_CLASSES:
+    classless_comment_override = not fields.wave_class
+    if fields.wave_class and fields.wave_class not in VALID_WAVE_CLASSES:
         errors.append(f"wave_class must be one of {sorted(VALID_WAVE_CLASSES)}, got: {fields.wave_class}")
+    if classless_comment_override:
+        if not fields.founder_override:
+            errors.append("founder_override required for classless comment-only runtime override")
+        if not fields.no_op_proof:
+            errors.append("no_op_proof required for classless comment-only runtime override")
+        if not fields.evidence_command:
+            errors.append("evidence_command required for classless comment-only runtime override")
+        if not fields.evidence_delta:
+            errors.append("evidence_delta required for classless comment-only runtime override")
+        if not fields.progress_proof_before:
+            errors.append("progress_proof_before required for classless comment-only runtime override")
+        if not fields.progress_proof_after:
+            errors.append("progress_proof_after required for classless comment-only runtime override")
     if not fields.target_gate_id:
         errors.append("target_gate_id is required")
     if fields.primary_blocker_class not in VALID_BLOCKER_CLASSES:
@@ -160,7 +176,10 @@ def render_tracker_sync_note(fields: TrackerSyncNoteFields) -> str:
 
     parts: list[str] = []
     parts.append(f"- Tracker sync note ({fields.date}, {fields.wave_id}): **{fields.title}.**")
-    parts.append(f"Class: {fields.wave_class}")
+    if fields.wave_class:
+        parts.append(f"Class: {fields.wave_class}")
+    else:
+        parts.append("contract_path: classless FOUNDER_OVERRIDE comment-only runtime override")
     parts.append(f"target_gate_id: {fields.target_gate_id}")
     if fields.packet_ref:
         parts.append(f"Packet: `{fields.packet_ref}`")

@@ -1390,6 +1390,27 @@ class TestLoadPlanPacketPathTraversal:
             ],
         ) == "L4_STRUCTURAL"
 
+    def test_effective_phase_b_tracker_wave_class_preserves_classless_runtime_override(self):
+        assert pb_mod._effective_phase_b_tracker_wave_class(  # ANTICHEAT_OK: tests final-scope class derivation
+            "L4_ENABLER",
+            plan_content="Contract path: classless FOUNDER_OVERRIDE comment-only runtime override\n",
+            changed_files=[
+                "mu/host/js/core/constants.js",
+                "reports/l4_wave_indicators/comment-only-wave.json",
+            ],
+        ) == ""
+
+    def test_effective_phase_b_tracker_wave_class_uses_enabler_for_override_plus_control_plane(self):
+        assert pb_mod._effective_phase_b_tracker_wave_class(  # ANTICHEAT_OK: tests mixed no-op runtime plus tooling class derivation
+            "L4_ENABLER",
+            plan_content="Contract path: classless FOUNDER_OVERRIDE comment-only runtime override\n",
+            changed_files=[
+                "mu/host/js/core/constants.js",
+                "mu/tools/executors/phase_b_executor.py",
+                "reports/l4_wave_indicators/comment-only-wave.json",
+            ],
+        ) == "L4_ENABLER"
+
     def test_header_metadata_wins_over_later_narrative_bullets(self, tmp_path):
         """Canonical header metadata must not be overwritten by later bullets."""
         repo = tmp_path / "repo"
@@ -2491,6 +2512,110 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert "TASKS.md" in final_scope
         assert "Class: L4_STRUCTURAL" in note
         assert "workload_target:" in note
+        assert raw_override == f"FOUNDER_OVERRIDE:{wave_id}"
+        assert package_override == ""
+
+    def test_pre_supervisor_tracker_note_uses_classless_comment_runtime_override(
+        self,
+        tmp_path,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+        wave_id = "runtime-comment-override-pre-supervisor-wave-2026-05-20"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        plan_content = (
+            "Contract path: classless FOUNDER_OVERRIDE comment-only runtime override\n"
+            f"Authorization: FOUNDER_OVERRIDE:{wave_id}\n"
+        )
+
+        with patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kwargs: sorted(set(files))):
+            (
+                note,
+                raw_override,
+                package_override,
+                modified,
+                final_scope,
+                error,
+            ) = pb_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: locks classless comment-only runtime override packaging
+                repo,
+                wave_id=wave_id,
+                task_id="[NEXT-CODEX-POST-REDTEAM]",
+                wave_class="L4_ENABLER",
+                target_gate_id="G8",
+                plan_path="reports/control_plane/runtime_comment_override.md",
+                plan_content=plan_content,
+                changed_files=[
+                    "mu/host/js/core/constants.js",
+                    "reports/control_plane/runtime_comment_override.md",
+                    indicator_path,
+                ],
+                test_files=[],
+                receipt_path=".scratch/phase_b_supervisor_package.json",
+                bridge_status={"rounds": 1},
+                reentry=False,
+                founder_override=wave_id,
+            )
+
+        assert error is None
+        assert modified is True
+        assert "TASKS.md" in final_scope
+        assert "Class:" not in note
+        assert "contract_path: classless FOUNDER_OVERRIDE comment-only runtime override" in note
+        assert "no_op_proof:" in note
+        assert raw_override == f"FOUNDER_OVERRIDE:{wave_id}"
+        assert package_override == ""
+
+    def test_pre_supervisor_tracker_note_uses_enabler_for_comment_override_plus_control_plane(
+        self,
+        tmp_path,
+    ):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "TASKS.md").write_text("## Ra\n\n---\n", encoding="utf-8")
+        wave_id = "runtime-comment-override-tooling-wave-2026-05-20"
+        indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+        plan_content = (
+            "Contract path: classless FOUNDER_OVERRIDE comment-only runtime override\n"
+            f"Authorization: FOUNDER_OVERRIDE:{wave_id}\n"
+        )
+
+        with patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_collect_commit_bound_files", side_effect=lambda _repo, files, **_kwargs: sorted(set(files))):
+            (
+                note,
+                raw_override,
+                package_override,
+                modified,
+                final_scope,
+                error,
+            ) = pb_mod._finalize_phase_b_pre_supervisor_tracker_note(  # ANTICHEAT_OK: locks mixed tooling plus comment-only runtime override packaging
+                repo,
+                wave_id=wave_id,
+                task_id="[NEXT-CODEX-POST-REDTEAM]",
+                wave_class="L4_ENABLER",
+                target_gate_id="G8",
+                plan_path="reports/control_plane/runtime_comment_override.md",
+                plan_content=plan_content,
+                changed_files=[
+                    "mu/host/js/core/constants.js",
+                    "mu/tools/executors/phase_b_executor.py",
+                    "reports/control_plane/runtime_comment_override.md",
+                    indicator_path,
+                ],
+                test_files=[],
+                receipt_path=".scratch/phase_b_supervisor_package.json",
+                bridge_status={"rounds": 1},
+                reentry=False,
+                founder_override=wave_id,
+            )
+
+        assert error is None
+        assert modified is True
+        assert "TASKS.md" in final_scope
+        assert "Class: L4_ENABLER" in note
+        assert "no_op_proof:" in note
         assert raw_override == f"FOUNDER_OVERRIDE:{wave_id}"
         assert package_override == f"FOUNDER_OVERRIDE:{wave_id}"
 

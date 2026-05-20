@@ -24,7 +24,8 @@
  *
  * SEMANTIC DEBT (host operations that would need structural replacement):
  *   iteration debt: 1
- *     - step()                    - for loop over projections (irreducible kernel core)
+ *     - _stepKernelCore()         - for loop over maxSteps (active engine kernel driver loop)
+ *     (bootstrap_core.step remains BOUNDARY projection-scan evidence, not the tracked loop)
  *     (listToLinked reclassified: BOUNDARY, bounded boundary-normalization conversion loop)
  *     (run/runStructural/runAlgorithmWithBridge/runEnginePipelineRecursive
  *      reclassified: BOUNDARY, outer loop scaffolding off kernel path — P7W5)

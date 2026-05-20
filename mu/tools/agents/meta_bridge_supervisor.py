@@ -1215,9 +1215,9 @@ def run_validation_gates(
     if enforcer.exists():
         changed = package.get("changed_files", [])
         if changed:
-            cmd = ["python3", "tools/checks/enforce_l4_execution_contract.py"]
             wave_class = str(package.get("wave_class") or "").strip()
             wave_name = str(package.get("wave_name") or "").strip()
+            cmd = ["python3", "tools/checks/enforce_l4_execution_contract.py"]
             if wave_class:
                 cmd.extend(["--wave-class", wave_class])
             if wave_name:
