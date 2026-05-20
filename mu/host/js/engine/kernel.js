@@ -67,9 +67,12 @@ function _stepKernelWithVM(kernelBundle, bridgeBundle, matchBundle, substBundle,
 /**
  * Internal: kernel loop only (returnMeta path).
  * Caller must provide pre-validated, pre-normalized kernelInput.
- * No validation, no normalization — just the state machine.
+ * No input/projection validation or normalization — just the state machine.
  *
- * @host_iteration — residual kernel driver watchdog; supplied Mu fuel owns progress
+ * @host_iteration — residual kernel driver watchdog; supplied Mu fuel owns progress.
+ * Caller-supplied kernelFuel consumes one Mu linked-list node per kernel step.
+ * Omitted kernelFuel preserves the legacy no-fuel watchdog path without
+ * synthesizing a host-counted compatibility fuel budget from maxSteps.
  */
 function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps, vmConfig, kernelFuel = undefined) {
   if (typeof maxSteps !== 'number' || !Number.isFinite(maxSteps) || !Number.isInteger(maxSteps)) {
@@ -83,10 +86,10 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
   }
   let current = kernelInput;
   let currentHash = muHashControlCached(kernelInput, 'stepKernel');
-  const fuelSupplied = kernelFuel !== undefined;
+  const callerSuppliedFuel = kernelFuel !== undefined;
   let fuelCursor = kernelFuel;
   let stepsUsed = 0;
-  while (!fuelSupplied || fuelCursor !== null) {
+  while (!callerSuppliedFuel || fuelCursor !== null) {
     if (stepsUsed >= maxSteps) {
       validator(domainInput, 'stepKernel output');
       const meta = {
@@ -96,7 +99,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
         steps_used: stepsUsed,
         max_steps: maxSteps,
       };
-      if (fuelSupplied) {
+      if (callerSuppliedFuel) {
         meta.fuel_supplied = true;
         meta.fuel_remaining = fuelCursor;
         meta.fuel_exhausted = false;
@@ -104,7 +107,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
       return meta;
     }
 
-    if (fuelSupplied) {
+    if (callerSuppliedFuel) {
       if (typeof fuelCursor !== 'object' || Array.isArray(fuelCursor) ||
           !Object.hasOwn(fuelCursor, 'head') || !Object.hasOwn(fuelCursor, 'tail')) {
         throw new Error('SECURITY: kernelFuel must be a Mu head/tail linked list');
@@ -135,7 +138,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
         }
       }
     }
-    if (fuelSupplied) {
+    if (callerSuppliedFuel) {
       fuelCursor = fuelCursor.tail;
     }
     stepsUsed++;
@@ -153,7 +156,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
           max_steps: maxSteps,
           undefined_motif: makeUndefinedMotif('kernel', domainInput, null, 'no_matching_projection'),
         };
-        if (fuelSupplied) {
+        if (callerSuppliedFuel) {
           meta.fuel_supplied = true;
           meta.fuel_remaining = fuelCursor;
           meta.fuel_exhausted = false;
@@ -163,7 +166,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
       const output = denormalize(result._result);
       validator(output, 'stepKernel output');
       const meta = { output, stall: false, termination_reason: reason, steps_used: stepsUsed, max_steps: maxSteps };
-      if (fuelSupplied) {
+      if (callerSuppliedFuel) {
         meta.fuel_supplied = true;
         meta.fuel_remaining = fuelCursor;
         meta.fuel_exhausted = false;
@@ -176,7 +179,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
       if (resultHash === currentHash) {
         validator(domainInput, 'stepKernel output');
         const meta = { output: domainInput, stall: true, termination_reason: 'hash_stall', steps_used: stepsUsed, max_steps: maxSteps };
-        if (fuelSupplied) {
+        if (callerSuppliedFuel) {
           meta.fuel_supplied = true;
           meta.fuel_remaining = fuelCursor;
           meta.fuel_exhausted = false;
@@ -196,7 +199,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     steps_used: stepsUsed,
     max_steps: maxSteps,
   };
-  if (fuelSupplied) {
+  if (callerSuppliedFuel) {
     meta.fuel_supplied = true;
     meta.fuel_remaining = fuelCursor;
     meta.fuel_exhausted = true;

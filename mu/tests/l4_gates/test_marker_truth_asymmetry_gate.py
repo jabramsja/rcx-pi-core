@@ -3,9 +3,10 @@ Non-blocker sweep (2026-03-14): HOST_LOOP markers added to _match_inner loops,
 projection_runner.py AST_OK infra markers added (projection_runner.py retired in Wave 3F). Ratchet baseline unchanged.
 
 Proves that scoped sites have honest markers: list_to_linked is
-BOUNDARY boundary-normalization evidence, not tracked @host_iteration, while
+BOUNDARY boundary-normalization evidence, not tracked @host_iteration,
 collectOntologyEvidence (Py+JS) was reclassified to BOUNDARY in P7 Wave 3
-(off kernel path). Ratchet baseline reflects the corrected counts.
+(off kernel path), and the residual no-fuel kernel-driver loops stay marked
+until a real structural elimination removes the host loops themselves.
 """
 from __future__ import annotations
 
@@ -114,8 +115,8 @@ class TestMarkerTruthAsymmetryGate:
                 return
         pytest.fail("collectOntologyEvidence function not found in pipeline.js")
 
-    def test_ratchet_baseline_reflects_current(self):
-        """Ratchet baseline reflects direct list_to_linked/listToLinked demotion."""
+    def test_ratchet_baseline_remains_current_until_structural_reduction(self):
+        """Ratchet baseline stays current while residual no-fuel loops remain."""
         baseline_path = REPO_ROOT / "tools" / "checks" / "host_semantics_baseline.json"
         data = json.loads(baseline_path.read_text())
         py = data["counts"]["python"]
@@ -137,9 +138,10 @@ class TestMarkerTruthAsymmetryGate:
         )
         assert ratchet["current"]["python"]["host_iteration"] == 1
         assert ratchet["current"]["javascript"]["host_iteration"] == 1
+        assert ratchet["decreases"] == []
 
     def test_js_active_kernel_core_loop_is_mu_fuel_governed_with_watchdog(self):
-        """JS tracked iteration marker now names the residual fuel-governed watchdog loop."""
+        """JS kernel core has an honest residual marker and no synthetic no-fuel fuel."""
         path = REPO_ROOT / "mu" / "host" / "js" / "engine" / "kernel.js"
         lines = path.read_text().splitlines()
         function_index = _find_line_index(lines, "function _stepKernelCore(")
@@ -147,31 +149,38 @@ class TestMarkerTruthAsymmetryGate:
         body = _js_function_body(lines, function_index)
 
         assert "@host_iteration" in jsdoc, (
-            "_stepKernelCore must carry the residual JS @host_iteration marker"
+            "_stepKernelCore still has a residual no-fuel host loop and must stay marked"
         )
         assert "residual kernel driver watchdog" in jsdoc
         assert "supplied Mu fuel owns progress" in jsdoc
+        assert "without" in jsdoc and "maxSteps" in jsdoc
         assert "for (let i = 0; i < maxSteps; i++)" not in body, (
             "_stepKernelCore reintroduced the old maxSteps-owned kernel loop"
         )
-        assert "while (!fuelSupplied || fuelCursor !== null)" in body, (
-            "_stepKernelCore must drive supplied-fuel progress from the Mu linked-list cursor"
+        assert "while (!callerSuppliedFuel || fuelCursor !== null)" in body, (
+            "_stepKernelCore must preserve legacy no-fuel compatibility without synthetic fuel"
+        )
+        assert "compatibilityFuelNode <= maxSteps" not in body, (
+            "_stepKernelCore must not construct host-counted no-fuel compatibility fuel"
+        )
+        assert "listToLinked(compatibilityFuelItems)" not in body, (
+            "_stepKernelCore must not convert a maxSteps-sized host list into fuel"
         )
         assert "if (stepsUsed >= maxSteps)" in body, (
             "_stepKernelCore must keep maxSteps as a watchdog check"
         )
-        assert "fuelCursor = fuelCursor.tail" in body and "stepsUsed++" in body, (
-            "_stepKernelCore must consume one Mu fuel node per kernel step"
+        assert "if (callerSuppliedFuel)" in body and "fuelCursor = fuelCursor.tail" in body, (
+            "_stepKernelCore must consume Mu fuel only on the explicit supplied-fuel path"
         )
 
-    def test_js_host_iteration_inventory_is_not_stale_bootstrap_step_only(self):
-        """The sole JS host-iteration marker is on the active kernel loop, not bootstrap step."""
+    def test_js_host_iteration_inventory_tracks_active_kernel_loop(self):
+        """The sole JS host-iteration marker is on the active kernel loop."""
         kernel_path = REPO_ROOT / "mu" / "host" / "js" / "engine" / "kernel.js"
         bootstrap_path = REPO_ROOT / "mu" / "host" / "js" / "core" / "bootstrap_core.js"
         sites = _js_host_iteration_sites()
 
         assert len(sites) == 1, (
-            "JS @host_iteration marker count must remain one; move the marker, do not add one"
+            "JS @host_iteration marker count must remain one until true structural reduction"
         )
         assert sites[0][0] == kernel_path, (
             f"JS @host_iteration must be in kernel.js, got {sites}"

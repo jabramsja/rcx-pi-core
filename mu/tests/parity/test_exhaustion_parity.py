@@ -896,6 +896,36 @@ def test_js_d006_production_default_path_has_no_kernel_fuel_metadata():
     assert {"fuel_supplied", "fuel_remaining", "fuel_exhausted"}.isdisjoint(meta)
 
 
+def test_js_python_default_no_fuel_watchdog_parity_has_no_fuel_metadata():
+    projections = [
+        {"pattern": {"s": "a"}, "body": {"s": "b"}},
+        {"pattern": {"s": "b"}, "body": {"s": "a"}},
+    ]
+    state = {"s": "a"}
+    max_steps = 4
+
+    js_meta = _run_js_step_kernel_meta({
+        "action": "step_kernel_meta",
+        "projections": projections,
+        "input": state,
+        "maxSteps": max_steps,
+    })
+    py_meta = step_kernel_mu(
+        projections,
+        state,
+        return_meta=True,
+        max_steps=max_steps,
+    )
+
+    shared_fields = ("output", "stall", "termination_reason", "steps_used", "max_steps")
+    for field in shared_fields:
+        assert js_meta[field] == py_meta[field], field
+    assert js_meta["termination_reason"] == "max_steps_exhausted"
+    assert js_meta["steps_used"] == py_meta["steps_used"] == max_steps
+    assert {"fuel_supplied", "fuel_remaining", "fuel_exhausted"}.isdisjoint(js_meta)
+    assert {"fuel_supplied", "fuel_remaining", "fuel_exhausted"}.isdisjoint(py_meta)
+
+
 def test_js_d006_step_path_does_not_inspect_fuel():
     step_source = _extract_js_function(
         (ROOT / "mu/host/js/core/bootstrap_core.js").read_text(),
