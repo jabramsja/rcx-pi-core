@@ -192,14 +192,30 @@ def test_stage0_vm_docs_match_shadow_path_wiring_and_l4_boundary() -> None:
 
     assert "_STAGE0_VM_CUTOVER = True" in py_step  # S1-B: cutover active
     assert "_STAGE0_SHADOW_ENABLED = False" in py_step  # S1-B: shadow disabled
-    assert "for step_i in range(max_steps)" in py_step, (
-        "Python runtime no longer shows the host loop that keeps L4 incomplete."
+    assert "for step_i in range(max_steps)" not in py_step, (
+        "Python runtime reintroduced the old max_steps-owned kernel driver loop."
+    )
+    assert "while (not fuel_supplied) or (fuel_cursor is not None):" in py_step, (
+        "Python runtime must show the residual fuel-cursor loop."
+    )
+    assert "if steps_used >= max_steps:" in py_step, (
+        "Python runtime must keep max_steps as a watchdog boundary."
     )
 
     assert "const _STAGE0_VM_CUTOVER = true;" in js_kernel  # S1-B: cutover active
     assert "let _STAGE0_SHADOW_ENABLED = false;" in js_kernel  # S1-B: shadow disabled
-    assert "for (let i = 0; i < maxSteps; i++) {" in js_kernel, (
-        "JS runtime no longer shows the host loop that keeps L4 incomplete."
+    js_kernel_core = js_kernel[
+        js_kernel.index("function _stepKernelCore("):
+        js_kernel.index("// _stepKernelCoreNonMeta DELETED")
+    ]
+    assert "for (let i = 0; i < maxSteps; i++) {" not in js_kernel_core, (
+        "JS runtime reintroduced the old maxSteps-owned kernel driver loop."
+    )
+    assert "while (!fuelSupplied || fuelCursor !== null)" in js_kernel_core, (
+        "JS runtime must show the residual fuel-cursor loop."
+    )
+    assert "if (stepsUsed >= maxSteps)" in js_kernel_core, (
+        "JS runtime must keep maxSteps as a watchdog boundary."
     )
 
 

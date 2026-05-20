@@ -12,7 +12,7 @@ Validates:
 
 Anti-laundering: All reclassified functions are provably OFF the kernel execution path.
 Kernel path: step_kernel_mu → _step_kernel_with_vm → Stage0 VM for all
-  Python projection groups / _stepKernelCore → _stepTrusted (JS).
+  Python projection groups / _stepKernelCore → Stage0 VM or _stepTrusted (JS).
 The reclassified functions CALL the kernel but are not ON the kernel path.
 list_to_linked/listToLinked are bounded host-to-Mu boundary construction loops
 that prepare linked-list input for the kernel but do not execute projections.
@@ -96,11 +96,24 @@ class TestPythonOuterLoopBoundary:
             "run_mu_structural missing BOUNDARY marker (reclassified P7W5)"
         )
 
-    def test_step_kernel_mu_still_has_host_iteration(self):
-        """step_kernel_mu MUST still have @host_iteration (irreducible kernel core)."""
+    def test_step_kernel_mu_has_residual_fuel_governed_watchdog_loop(self):
+        """step_kernel_mu keeps a residual marker while supplied Mu fuel owns progress."""
         source = _get_function_source(step_kernel_mu)
         assert "@host_iteration" in source, (
-            "step_kernel_mu lost @host_iteration — this is the irreducible kernel loop!"
+            "step_kernel_mu still has residual host-iteration debt until the driver is fully structural"
+        )
+        assert "supplied Mu fuel owns progress" in source
+        assert "for step_i in range(max_steps)" not in source, (
+            "step_kernel_mu reintroduced the old max_steps-owned kernel loop"
+        )
+        assert "while (not fuel_supplied) or (fuel_cursor is not None):" in source, (
+            "step_kernel_mu must drive supplied-fuel progress from the Mu linked-list cursor"
+        )
+        assert "if steps_used >= max_steps:" in source, (
+            "step_kernel_mu must keep max_steps as a watchdog check, not the loop owner"
+        )
+        assert 'fuel_cursor = fuel_cursor["tail"]' in source, (
+            "step_kernel_mu must consume one Mu fuel node per kernel step"
         )
 
     def test_step_kernel_with_vm_has_no_host_iteration_decorator(self):
@@ -163,21 +176,31 @@ class TestJSOuterLoopBoundary:
     def test_js_run_engine_pipeline_recursive_boundary(self):
         self._check_js_function_boundary(JS_PIPELINE_PATH, "runEnginePipelineRecursive")
 
-    def test_js_active_kernel_core_still_has_host_iteration(self):
-        """JS _stepKernelCore owns @host_iteration; bootstrap step is boundary scan."""
+    def test_js_active_kernel_core_has_residual_fuel_governed_watchdog_loop(self):
+        """JS _stepKernelCore keeps a residual marker while supplied Mu fuel owns progress."""
         kernel_lines = JS_KERNEL_PATH.read_text().splitlines()
         for i, line in enumerate(kernel_lines):
             if "function _stepKernelCore(" in line:
                 block = "\n".join(kernel_lines[max(0, i - 10):i])
-                body = "\n".join(kernel_lines[i:i + 80])
+                body = "\n".join(kernel_lines[i:i + 120])
                 assert "@host_iteration" in block, (
-                    "JS _stepKernelCore lost @host_iteration — this is the active kernel loop!"
+                    "JS _stepKernelCore still has residual host-iteration debt until the driver is fully structural"
                 )
-                assert "for (let i = 0; i < maxSteps; i++)" in body, (
-                    "JS _stepKernelCore must remain the maxSteps kernel driver loop"
+                assert "supplied Mu fuel owns progress" in block
+                assert "for (let i = 0; i < maxSteps; i++)" not in body, (
+                    "JS _stepKernelCore reintroduced the old maxSteps-owned kernel loop"
+                )
+                assert "while (!fuelSupplied || fuelCursor !== null)" in body, (
+                    "JS _stepKernelCore must drive supplied-fuel progress from the Mu linked-list cursor"
+                )
+                assert "if (stepsUsed >= maxSteps)" in body, (
+                    "JS _stepKernelCore must keep maxSteps as a watchdog check, not the loop owner"
                 )
                 assert "kernelFuel" in body and "fuel_remaining" in body, (
-                    "JS _stepKernelCore must thread opt-in Mu fuel without moving the host_iteration marker"
+                    "JS _stepKernelCore must thread Mu fuel without moving the residual host_iteration marker"
+                )
+                assert "fuelCursor = fuelCursor.tail" in body and "stepsUsed++" in body, (
+                    "JS _stepKernelCore must consume one Mu fuel node per kernel step"
                 )
                 break
         else:

@@ -69,28 +69,42 @@ function _stepKernelWithVM(kernelBundle, bridgeBundle, matchBundle, substBundle,
  * Caller must provide pre-validated, pre-normalized kernelInput.
  * No validation, no normalization — just the state machine.
  *
- * @host_iteration — active kernel driver loop over maxSteps
+ * @host_iteration — residual kernel driver watchdog; supplied Mu fuel owns progress
  */
 function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps, vmConfig, kernelFuel = undefined) {
+  if (typeof maxSteps !== 'number' || !Number.isFinite(maxSteps) || !Number.isInteger(maxSteps)) {
+    throw new RcxError(
+      'api.bad_request',
+      `maxSteps must be a finite integer watchdog, got ${typeof maxSteps}`
+    );
+  }
+  if (maxSteps < 0) {
+    throw new RcxError('api.bad_request', `maxSteps must be >= 0, got ${maxSteps}`);
+  }
   let current = kernelInput;
   let currentHash = muHashControlCached(kernelInput, 'stepKernel');
   const fuelSupplied = kernelFuel !== undefined;
   let fuelCursor = kernelFuel;
-  for (let i = 0; i < maxSteps; i++) {
-    if (fuelSupplied) {
-      if (fuelCursor === null) {
-        validator(domainInput, 'stepKernel output');
-        return {
-          output: domainInput,
-          stall: true,
-          termination_reason: 'fuel_exhausted',
-          steps_used: i,
-          max_steps: maxSteps,
-          fuel_supplied: true,
-          fuel_remaining: null,
-          fuel_exhausted: true,
-        };
+  let stepsUsed = 0;
+  while (!fuelSupplied || fuelCursor !== null) {
+    if (stepsUsed >= maxSteps) {
+      validator(domainInput, 'stepKernel output');
+      const meta = {
+        output: domainInput,
+        stall: true,
+        termination_reason: 'max_steps_exhausted',
+        steps_used: stepsUsed,
+        max_steps: maxSteps,
+      };
+      if (fuelSupplied) {
+        meta.fuel_supplied = true;
+        meta.fuel_remaining = fuelCursor;
+        meta.fuel_exhausted = false;
       }
+      return meta;
+    }
+
+    if (fuelSupplied) {
       if (typeof fuelCursor !== 'object' || Array.isArray(fuelCursor) ||
           !Object.hasOwn(fuelCursor, 'head') || !Object.hasOwn(fuelCursor, 'tail')) {
         throw new Error('SECURITY: kernelFuel must be a Mu head/tail linked list');
@@ -124,6 +138,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     if (fuelSupplied) {
       fuelCursor = fuelCursor.tail;
     }
+    stepsUsed++;
 
     if (isKernelTerminal(result)) {
       const stall = result._stall === true;
@@ -134,7 +149,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
           output: domainInput,
           stall: true,
           termination_reason: reason,
-          steps_used: i + 1,
+          steps_used: stepsUsed,
           max_steps: maxSteps,
           undefined_motif: makeUndefinedMotif('kernel', domainInput, null, 'no_matching_projection'),
         };
@@ -147,7 +162,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
       }
       const output = denormalize(result._result);
       validator(output, 'stepKernel output');
-      const meta = { output, stall: false, termination_reason: reason, steps_used: i + 1, max_steps: maxSteps };
+      const meta = { output, stall: false, termination_reason: reason, steps_used: stepsUsed, max_steps: maxSteps };
       if (fuelSupplied) {
         meta.fuel_supplied = true;
         meta.fuel_remaining = fuelCursor;
@@ -160,7 +175,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
       const resultHash = muHashControlCached(result, 'stepKernel.stall');
       if (resultHash === currentHash) {
         validator(domainInput, 'stepKernel output');
-        const meta = { output: domainInput, stall: true, termination_reason: 'hash_stall', steps_used: i + 1, max_steps: maxSteps };
+        const meta = { output: domainInput, stall: true, termination_reason: 'hash_stall', steps_used: stepsUsed, max_steps: maxSteps };
         if (fuelSupplied) {
           meta.fuel_supplied = true;
           meta.fuel_remaining = fuelCursor;
@@ -174,18 +189,17 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     current = result;
   }
   validator(domainInput, 'stepKernel output');
-  const fuelExhaustedAtLimit = fuelSupplied && fuelCursor === null;
   const meta = {
     output: domainInput,
     stall: true,
-    termination_reason: fuelExhaustedAtLimit ? 'fuel_exhausted' : 'max_steps_exhausted',
-    steps_used: maxSteps,
+    termination_reason: 'fuel_exhausted',
+    steps_used: stepsUsed,
     max_steps: maxSteps,
   };
   if (fuelSupplied) {
     meta.fuel_supplied = true;
     meta.fuel_remaining = fuelCursor;
-    meta.fuel_exhausted = fuelExhaustedAtLimit;
+    meta.fuel_exhausted = true;
   }
   return meta;
 }
@@ -207,6 +221,15 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
     kernelFuel = undefined,
   } = options;
   const hasKernelFuel = Object.hasOwn(options, 'kernelFuel');
+  if (typeof maxSteps !== 'number' || !Number.isFinite(maxSteps) || !Number.isInteger(maxSteps)) {
+    throw new RcxError(
+      'api.bad_request',
+      `maxSteps must be a finite integer watchdog, got ${typeof maxSteps}`
+    );
+  }
+  if (maxSteps < 0) {
+    throw new RcxError('api.bad_request', `maxSteps must be >= 0, got ${maxSteps}`);
+  }
 
   let validator;
   if (validationMode === 'domain') {
