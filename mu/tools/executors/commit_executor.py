@@ -738,6 +738,21 @@ def _tracked_packet_path_from_record(record: dict[str, Any]) -> str:
     return paths[0] if paths else ""
 
 
+def _discover_staged_same_wave_control_packet(repo_root: Path, wave_id: str) -> str:
+    """Find a staged control-plane packet that declares the current wave id."""
+    normalized_wave_id = normalize_wave_id(wave_id)
+    if not normalized_wave_id:
+        return ""
+    for path in _current_staged_diff_paths(repo_root):
+        normalized = _normalize_repo_relpath(path)
+        if not normalized.startswith("reports/control_plane/") or not normalized.endswith(".md"):
+            continue
+        packet_text = _git_index_text_for_repo_path(repo_root, normalized)
+        if packet_text and _packet_declares_same_wave_id(packet_text, normalized_wave_id):
+            return normalized
+    return ""
+
+
 def _normalize_target_gate_id(value: Any) -> str:
     gate = str(value or "").strip().strip("`.,;")
     return gate if TARGET_GATE_ID_RE.fullmatch(gate) else ""
@@ -6439,6 +6454,11 @@ def prepare_handoff_from_routing_record(
 
     # Normalize wave_id for branch naming
     wave_id = normalize_wave_id(wave_name)
+    if standalone and not _tracked_packet_path_from_record(record):
+        staged_packet = _discover_staged_same_wave_control_packet(repo_root, wave_id)
+        if staged_packet:
+            record = copy.deepcopy(record)
+            record["tracked_packet"] = staged_packet
     wave_class = _resolve_wave_class(
         record,
         repo_root,
