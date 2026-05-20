@@ -625,14 +625,20 @@ def _assert_js_kernel_fuel_success_matches_python(
         state,
         return_meta=True,
         max_steps=max_steps,
+        kernel_fuel=_make_js_kernel_fuel(fuel_count),
     )
 
     shared_fields = ("output", "stall", "termination_reason", "steps_used", "max_steps")
     for field in shared_fields:
         assert js_meta[field] == py_meta[field], field
     assert js_meta["fuel_supplied"] is True
+    assert py_meta["fuel_supplied"] is True
     assert js_meta["fuel_exhausted"] is False
+    assert py_meta["fuel_exhausted"] is False
     assert _js_kernel_fuel_remaining_count(js_meta["fuel_remaining"]) == (
+        fuel_count - py_meta["steps_used"]
+    )
+    assert _js_kernel_fuel_remaining_count(py_meta["fuel_remaining"]) == (
         fuel_count - py_meta["steps_used"]
     )
     return js_meta
@@ -655,19 +661,22 @@ def _assert_js_kernel_fuel_exhaustion_matches_python_budget(
         projections,
         state,
         return_meta=True,
-        max_steps=fuel_count,
+        max_steps=max_steps,
+        kernel_fuel=_make_js_kernel_fuel(fuel_count),
     )
 
     assert js_meta["output"] == py_meta["output"]
     assert js_meta["stall"] == py_meta["stall"] is True
     assert js_meta["steps_used"] == py_meta["steps_used"] == fuel_count
     assert js_meta["termination_reason"] == "fuel_exhausted"
-    assert py_meta["termination_reason"] == "max_steps_exhausted"
-    assert js_meta["max_steps"] == max_steps
-    assert py_meta["max_steps"] == fuel_count
+    assert py_meta["termination_reason"] == "fuel_exhausted"
+    assert js_meta["max_steps"] == py_meta["max_steps"] == max_steps
     assert js_meta["fuel_supplied"] is True
+    assert py_meta["fuel_supplied"] is True
     assert js_meta["fuel_remaining"] is None
+    assert py_meta["fuel_remaining"] is None
     assert js_meta["fuel_exhausted"] is True
+    assert py_meta["fuel_exhausted"] is True
     return js_meta
 
 
@@ -866,6 +875,14 @@ def test_js_d006_production_step_kernel_meta_rejects_bad_kernel_fuel():
     assert response["success"] is False
     assert response["error_code"] == "api.bad_request"
     assert "kernelFuel" in response["error"]
+    with pytest.raises(TypeError, match="kernel_fuel"):
+        step_kernel_mu(
+            D006.V2_PROJECTIONS,
+            D006.V2_INPUT,
+            return_meta=True,
+            max_steps=100,
+            kernel_fuel={"head": None, "tail": 0},
+        )
 
 
 def test_js_d006_production_default_path_has_no_kernel_fuel_metadata():

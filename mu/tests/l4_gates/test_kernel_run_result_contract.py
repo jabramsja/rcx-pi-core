@@ -103,6 +103,101 @@ class TestKernelRunResultPython:
         assert meta["stall"] is True, "NB4 fix: max_steps must have stall=True"
         assert meta["steps_used"] == 4
 
+    def test_kernel_fuel_zero_exhausts_before_attempting_step(self):
+        """Python kernel fuel uses explicit empty Mu fuel as execution authority."""
+        meta = step_kernel_mu(
+            [{"pattern": {"x": 1}, "body": {"x": 2}}],
+            {"x": 1},
+            return_meta=True,
+            max_steps=100,
+            kernel_fuel=None,
+        )
+        assert REQUIRED_FIELDS <= set(meta.keys())
+        assert meta["termination_reason"] == "fuel_exhausted"
+        assert meta["stall"] is True
+        assert meta["output"] == {"x": 1}
+        assert meta["steps_used"] == 0
+        assert meta["max_steps"] == 100
+        assert meta["fuel_supplied"] is True
+        assert meta["fuel_remaining"] is None
+        assert meta["fuel_exhausted"] is True
+
+    def test_kernel_fuel_exhaustion_is_authority_not_max_steps(self):
+        """Python Mu fuel exhaustion terminates before the numeric watchdog cap."""
+        projs = [
+            {"pattern": {"s": "a"}, "body": {"s": "b"}},
+            {"pattern": {"s": "b"}, "body": {"s": "a"}},
+        ]
+        fuel_count = 4
+        meta = step_kernel_mu(
+            projs,
+            {"s": "a"},
+            return_meta=True,
+            max_steps=100,
+            kernel_fuel=_make_kernel_fuel(fuel_count),
+        )
+        assert REQUIRED_FIELDS <= set(meta.keys())
+        assert meta["termination_reason"] == "fuel_exhausted"
+        assert meta["stall"] is True
+        assert meta["steps_used"] == fuel_count
+        assert meta["max_steps"] == 100
+        assert meta["fuel_supplied"] is True
+        assert meta["fuel_remaining"] is None
+        assert meta["fuel_exhausted"] is True
+
+    def test_kernel_fuel_success_reports_remaining_mu_fuel(self):
+        """Python successful projection returns remaining Mu fuel."""
+        fuel_count = 80
+        meta = step_kernel_mu(
+            [{"pattern": {"x": 1}, "body": {"x": 2}}],
+            {"x": 1},
+            return_meta=True,
+            max_steps=100,
+            kernel_fuel=_make_kernel_fuel(fuel_count),
+        )
+        assert REQUIRED_FIELDS <= set(meta.keys())
+        assert meta["termination_reason"] == "projection_applied"
+        assert meta["stall"] is False
+        assert meta["output"] == {"x": 2}
+        assert meta["fuel_supplied"] is True
+        assert meta["fuel_exhausted"] is False
+        assert 0 < meta["steps_used"] < fuel_count
+        assert _fuel_remaining_count(meta["fuel_remaining"]) == fuel_count - meta["steps_used"]
+
+    @pytest.mark.parametrize(
+        "kernel_fuel",
+        [
+            [],
+            {"head": None, "tail": 0},
+            {"head": None, "tail": None, "extra": None},
+        ],
+    )
+    def test_kernel_fuel_rejects_non_linked_mu_data(self, kernel_fuel):
+        """Python kernel fuel fails closed when consumed fuel is not head/tail linked-list data."""
+        projs = [
+            {"pattern": {"s": "a"}, "body": {"s": "b"}},
+            {"pattern": {"s": "b"}, "body": {"s": "a"}},
+        ]
+        with pytest.raises(TypeError, match="kernel_fuel"):
+            step_kernel_mu(
+                projs,
+                {"s": "a"},
+                return_meta=True,
+                max_steps=4,
+                kernel_fuel=kernel_fuel,
+            )
+
+    def test_kernel_fuel_rejects_malformed_tail_before_returning_remaining(self):
+        """Python validates the full fuel list before returning remaining fuel."""
+        with pytest.raises(TypeError, match="kernel_fuel"):
+            step_kernel_mu(
+                [{"pattern": {"x": 1}, "body": {"x": 2}}],
+                {"x": 1},
+                return_meta=True,
+                max_steps=100,
+                kernel_fuel={"head": None, "tail": 0},
+            )
+
     def test_undefined_motif_only_on_kernel_stall(self):
         """undefined_motif must NOT be present on non-kernel_stall results."""
         # projection_applied
@@ -324,19 +419,22 @@ class TestKernelRunResultJS:
             projections,
             input_value,
             return_meta=True,
-            max_steps=fuel_count,
+            max_steps=max_steps,
+            kernel_fuel=_make_kernel_fuel(fuel_count),
         )
 
         assert js_meta["output"] == py_meta["output"]
         assert js_meta["stall"] == py_meta["stall"] is True
         assert js_meta["steps_used"] == py_meta["steps_used"] == fuel_count
         assert js_meta["termination_reason"] == "fuel_exhausted"
-        assert py_meta["termination_reason"] == "max_steps_exhausted"
-        assert js_meta["max_steps"] == max_steps
-        assert py_meta["max_steps"] == fuel_count
+        assert py_meta["termination_reason"] == "fuel_exhausted"
+        assert js_meta["max_steps"] == py_meta["max_steps"] == max_steps
         assert js_meta["fuel_supplied"] is True
+        assert py_meta["fuel_supplied"] is True
         assert js_meta["fuel_remaining"] is None
+        assert py_meta["fuel_remaining"] is None
         assert js_meta["fuel_exhausted"] is True
+        assert py_meta["fuel_exhausted"] is True
 
     @pytest.mark.parametrize(
         "kernel_fuel",

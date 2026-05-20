@@ -3456,6 +3456,53 @@ class TestWaveIdBounds:
         assert "mu/tests/l4_gates/" in handoff["tracker_note_text"]
         assert "no_op_proof:" not in handoff["tracker_note_text"]
 
+    def test_prepare_handoff_from_routing_record_standalone_discovers_staged_same_wave_packet(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "n3-runtime-retry"
+        packet_path = "reports/control_plane/n3-runtime-retry_2026-05-20.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Packet\n"
+            f"Wave ID: {wave_id}\n"
+            "Class: L4_STRUCTURAL\n"
+            "Target gate: G8\n",
+            encoding="utf-8",
+        )
+        runtime_path = repo / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_path.write_text("# staged runtime retry\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "--", packet_path, "mu/host/python/rcx_pi/selfhost/step_mu.py"],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+
+        record = {
+            "wave_name": wave_id,
+            "summary": "structural staged retry",
+            "decision": "ROUTE_PHASE_A",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "next_candidates": [{"candidate": wave_id}],
+        }
+
+        handoff, errors = commit_mod.prepare_handoff_from_routing_record(
+            record,
+            repo,
+            standalone=True,
+        )
+
+        assert errors == []
+        assert handoff is not None
+        assert handoff["wave_class"] == "L4_STRUCTURAL"
+        assert handoff["tracked_packet"] == packet_path
+        assert "Class: L4_STRUCTURAL" in handoff["tracker_note_text"]
+        assert f"Packet: `{packet_path}`" in handoff["tracker_note_text"]
+        assert "no_op_proof:" not in handoff["tracker_note_text"]
+
     def test_prepare_handoff_from_routing_record_standalone_preserves_existing_structural_tracker_note(self, tmp_path):
         import subprocess
 

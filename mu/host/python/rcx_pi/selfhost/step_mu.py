@@ -44,6 +44,10 @@ _load_tc_projections, _clear_tc_proj_cache = make_projection_loader("terminal_cl
 # Cached loader for hemisphere seed (A9: hemisphere key authority displacement)
 _load_hemi_projections, _clear_hemi_proj_cache = make_projection_loader("hemispheres.v1.json")
 
+# Sentinel for "caller did not provide kernel fuel"; distinct from None, which
+# is valid Mu data and means an exhausted linked-list fuel value.
+_KERNEL_FUEL_UNSET: object = object()
+
 
 # =============================================================================
 # Typed Engine Error (parity with JS RcxError)
@@ -1169,6 +1173,7 @@ def step_kernel_mu(
     validation_mode: str = "domain",
     return_meta: bool = False,
     max_steps: int = 10000,
+    kernel_fuel: object = _KERNEL_FUEL_UNSET,
 ) -> Mu | dict[str, Mu]:
     """
     Try each projection in order using structural kernel projections.
@@ -1204,9 +1209,11 @@ def step_kernel_mu(
             `output` (Mu), `stall` (bool), `termination_reason` (str),
             `steps_used` (int), `max_steps` (int).
             Reason enum: projection_applied, kernel_stall, hash_stall,
-            max_steps_exhausted.
+            max_steps_exhausted, fuel_exhausted.
         max_steps: Maximum kernel iteration steps. Default 10000.
             For single-projection calls (e.g. apply_mu), 500 is sufficient.
+        kernel_fuel: Optional Mu linked-list fuel. Omitted means legacy
+            max_steps-only execution. Explicit None means empty fuel.
 
     Returns:
         Transformed value if any projection matched, input unchanged otherwise.
@@ -1312,9 +1319,42 @@ def step_kernel_mu(
         budget.start()
         started_budget = True
 
-    # Phase 8b: Simplified mechanical loop - no semantic decisions inside
     try:
+        fuel_supplied = kernel_fuel is not _KERNEL_FUEL_UNSET
+        if fuel_supplied:
+            assert_mu(kernel_fuel, "step_kernel_mu.kernel_fuel")
+            fuel_probe = kernel_fuel
+            while fuel_probe is not None:
+                if (
+                    not isinstance(fuel_probe, dict)  # ANTICHEAT_OK: linked-list fuel boundary
+                    or set(fuel_probe.keys()) != {"head", "tail"}
+                ):
+                    raise TypeError("SECURITY: kernel_fuel must be a Mu head/tail linked list")
+                fuel_probe = fuel_probe["tail"]
+        fuel_cursor = kernel_fuel
+
+        # Phase 8b: Simplified mechanical loop - no semantic decisions inside
         for step_i in range(max_steps):
+            if fuel_supplied:
+                if fuel_cursor is None:
+                    validator(input_value, "step_kernel_mu output")
+                    canonical = {
+                        "output": input_value,
+                        "stall": True,
+                        "termination_reason": "fuel_exhausted",
+                        "steps_used": step_i,
+                        "max_steps": max_steps,
+                        "fuel_supplied": True,
+                        "fuel_remaining": None,
+                        "fuel_exhausted": True,
+                    }
+                    return canonical if return_meta else canonical["output"]
+                if (
+                    not isinstance(fuel_cursor, dict)  # ANTICHEAT_OK: linked-list fuel boundary
+                    or set(fuel_cursor.keys()) != {"head", "tail"}
+                ):
+                    raise TypeError("SECURITY: kernel_fuel must be a Mu head/tail linked list")
+
             # Account for kernel-driver work in the shared global budget.
             budget.consume(1)
             # P7-d: shadow mode or cutover mode
@@ -1346,6 +1386,9 @@ def step_kernel_mu(
                                 f"P7-d shadow: output divergence — "
                                 f"host={result!r}, vm={vm_result!r}")
 
+            if fuel_supplied:
+                fuel_cursor = fuel_cursor["tail"]
+
             # Terminal state check - simple structural marker detection
             if is_kernel_terminal(result):
                 is_stall = result.get("_stall") is True
@@ -1366,6 +1409,10 @@ def step_kernel_mu(
                         rhs=None,
                         cause="no_matching_projection",
                     )
+                if fuel_supplied:
+                    canonical["fuel_supplied"] = True
+                    canonical["fuel_remaining"] = fuel_cursor
+                    canonical["fuel_exhausted"] = False
                 return canonical if return_meta else canonical["output"]
 
             # Stall check - no change means no progress
@@ -1382,6 +1429,10 @@ def step_kernel_mu(
                         "steps_used": step_i + 1,
                         "max_steps": max_steps,
                     }
+                    if fuel_supplied:
+                        canonical["fuel_supplied"] = True
+                        canonical["fuel_remaining"] = fuel_cursor
+                        canonical["fuel_exhausted"] = False
                     return canonical if return_meta else canonical["output"]
                 current_hash = result_hash
 
@@ -1389,13 +1440,18 @@ def step_kernel_mu(
 
         # Max steps exceeded - return original input (stall)
         validator(input_value, "step_kernel_mu output")
+        fuel_exhausted_at_limit = fuel_supplied and fuel_cursor is None
         canonical = {
             "output": input_value,
             "stall": True,
-            "termination_reason": "max_steps_exhausted",
+            "termination_reason": "fuel_exhausted" if fuel_exhausted_at_limit else "max_steps_exhausted",
             "steps_used": max_steps,
             "max_steps": max_steps,
         }
+        if fuel_supplied:
+            canonical["fuel_supplied"] = True
+            canonical["fuel_remaining"] = fuel_cursor
+            canonical["fuel_exhausted"] = fuel_exhausted_at_limit
         return canonical if return_meta else canonical["output"]
     finally:
         if started_budget:
