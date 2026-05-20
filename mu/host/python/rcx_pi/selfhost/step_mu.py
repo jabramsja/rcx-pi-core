@@ -1319,21 +1319,21 @@ def step_kernel_mu(
         budget.start()
         started_budget = True
 
-    fuel_supplied = kernel_fuel is not _KERNEL_FUEL_UNSET
-    if fuel_supplied:
-        assert_mu(kernel_fuel, "step_kernel_mu.kernel_fuel")
-        fuel_probe = kernel_fuel
-        while fuel_probe is not None:
-            if (
-                not isinstance(fuel_probe, dict)  # ANTICHEAT_OK: linked-list fuel boundary
-                or set(fuel_probe.keys()) != {"head", "tail"}
-            ):
-                raise TypeError("SECURITY: kernel_fuel must be a Mu head/tail linked list")
-            fuel_probe = fuel_probe["tail"]
-    fuel_cursor = kernel_fuel
-
-    # Phase 8b: Simplified mechanical loop - no semantic decisions inside
     try:
+        fuel_supplied = kernel_fuel is not _KERNEL_FUEL_UNSET
+        if fuel_supplied:
+            assert_mu(kernel_fuel, "step_kernel_mu.kernel_fuel")
+            fuel_probe = kernel_fuel
+            while fuel_probe is not None:
+                if (
+                    not isinstance(fuel_probe, dict)  # ANTICHEAT_OK: linked-list fuel boundary
+                    or set(fuel_probe.keys()) != {"head", "tail"}
+                ):
+                    raise TypeError("SECURITY: kernel_fuel must be a Mu head/tail linked list")
+                fuel_probe = fuel_probe["tail"]
+        fuel_cursor = kernel_fuel
+
+        # Phase 8b: Simplified mechanical loop - no semantic decisions inside
         for step_i in range(max_steps):
             if fuel_supplied:
                 if fuel_cursor is None:
