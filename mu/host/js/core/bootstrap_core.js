@@ -290,7 +290,8 @@ function applyProjection(projection, input) {
  * Apply first matching projection.
  * This is the irreducible core — analogous to Forth's NEXT.
  *
- * @host_iteration — for loop over projections (first-match-wins)
+ * BOUNDARY: projection scan used by bootstrap helpers; tracked iteration lives
+ * on the active engine kernel driver loop.
  */
 function step(projections, input) {
   if (!isValidMu(input)) {

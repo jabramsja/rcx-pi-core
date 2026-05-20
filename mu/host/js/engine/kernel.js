@@ -68,12 +68,14 @@ function _stepKernelWithVM(kernelBundle, bridgeBundle, matchBundle, substBundle,
  * Internal: kernel loop only (returnMeta path).
  * Caller must provide pre-validated, pre-normalized kernelInput.
  * No validation, no normalization — just the state machine.
+ *
+ * @host_iteration — active kernel driver loop over maxSteps
  */
 function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps, vmConfig) {
   let current = kernelInput;
   let currentHash = muHashControlCached(kernelInput, 'stepKernel');
   for (let i = 0; i < maxSteps; i++) {
-    let result;
+    let result = undefined;
     if (vmConfig && _STAGE0_VM_CUTOVER) {
       result = _stepKernelWithVM(
         vmConfig.kernelBundle, vmConfig.bridgeBundle,
