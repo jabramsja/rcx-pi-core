@@ -3700,9 +3700,17 @@ def _build_default_tracker_note_text(
     if wave_class == "L4_STRUCTURAL":
         gate_tests = _select_l4_gate_test_files(test_files)
         evidence_targets = gate_tests or ["mu/tests/l4_gates/"]
+        contract_files: list[str] = []
+        for path in [*wave_files, indicator_path]:
+            normalized = str(path or "").strip()
+            if normalized and normalized not in contract_files:
+                contract_files.append(normalized)
         evidence_command = (
             "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
             + " ".join(evidence_targets)
+            + " && python3 tools/checks/enforce_l4_execution_contract.py --files "
+            + " ".join(contract_files)
+            + f" --wave-id {wave_id} --wave-class {wave_class}"
         )
         evidence_delta = (
             f"(1) Routed standalone commit handoff scopes {len(wave_files)} wave-owned file(s). "

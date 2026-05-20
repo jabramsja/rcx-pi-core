@@ -76,6 +76,27 @@ def _with_founder_override(note: str, token: str) -> str:
     return f"{note} FOUNDER_OVERRIDE:{token} (test authorization)"
 
 
+def test_default_structural_tracker_note_l4_files_command_includes_indicator_artifact():
+    wave_id = "standalone-structural-indicator-proof"
+    note = commit_mod._build_default_tracker_note_text(  # ANTICHEAT_OK: locks standalone structural tracker evidence
+        wave_id=wave_id,
+        wave_class="L4_STRUCTURAL",
+        target_gate_id="G8",
+        commit_message="feat: structural proof",
+        files_to_stage=[
+            "mu/host/python/rcx_pi/selfhost/step_mu.py",
+            "mu/tests/l4_gates/test_kernel_run_result_contract.py",
+        ],
+        tracked_packet=f"reports/control_plane/{wave_id}.md",
+    )
+
+    indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+    assert f"indicator_artifact_ref: {indicator_path}" in note
+    assert "tools/checks/enforce_l4_execution_contract.py --files" in note
+    assert f"mu/tests/l4_gates/test_kernel_run_result_contract.py {indicator_path}" in note
+    assert f"--wave-id {wave_id} --wave-class L4_STRUCTURAL" in note
+
+
 def test_classless_comment_runtime_override_is_canonical_tracker_note_line():
     wave_id = "classless-comment-runtime-2026-05-20"
     line = (

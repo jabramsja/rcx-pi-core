@@ -3984,11 +3984,29 @@ def _build_phase_b_tracker_note(
         display_task = wave_id
 
     indicator_path = f"reports/l4_wave_indicators/{wave_id}.json"
+
+    def _append_l4_files_contract(command: str) -> str:
+        if wave_class != "L4_STRUCTURAL":
+            return command
+        contract_files: list[str] = []
+        for path in [*changed_files, indicator_path]:
+            normalized = str(path or "").strip()
+            if normalized and normalized not in contract_files:
+                contract_files.append(normalized)
+        files_arg = " ".join(contract_files)
+        return (
+            f"{command} && python3 tools/checks/enforce_l4_execution_contract.py "
+            f"--files {files_arg} --wave-id {wave_id} --wave-class {wave_class}"
+        )
+
     effective_test_files = list(test_files)
     if not effective_test_files and wave_class == "L4_STRUCTURAL":
         effective_test_files = _select_pytest_gate_files(changed_files)
     if effective_test_files:
-        evidence_command = "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short " + " ".join(effective_test_files)
+        evidence_command = _append_l4_files_contract(
+            "PYTHONHASHSEED=0 python3 -m pytest -x --tb=short "
+            + " ".join(effective_test_files)
+        )
         if pre_supervisor:
             evidence_delta = (
                 f"(1) Phase B converged on the locked plan at {plan_path}. "
@@ -4003,7 +4021,7 @@ def _build_phase_b_tracker_note(
                 f"(3) Commit handoff carries explicit receipt authority at {receipt_path}."
             )
     else:
-        evidence_command = (
+        evidence_command = _append_l4_files_contract(
             f"python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave_id} "
             f"--output {indicator_path}"
         )
