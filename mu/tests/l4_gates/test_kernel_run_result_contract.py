@@ -10,6 +10,7 @@ design packet (v3, 2026-03-16).
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 import subprocess
@@ -189,6 +190,18 @@ class TestKernelRunResultPython:
                 max_steps=bad_max_steps,
                 kernel_fuel=_make_kernel_fuel(2),
             )
+
+    def test_python_watchdog_guard_does_not_add_math_host_capability(self):
+        """The watchdog guard must not import math into the runtime kernel."""
+        step_mu_path = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
+        tree = ast.parse(step_mu_path.read_text(), filename=str(step_mu_path))
+        imported_modules = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_modules.update(alias.name.split(".", 1)[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported_modules.add(node.module.split(".", 1)[0])
+        assert "math" not in imported_modules
 
     def test_kernel_fuel_success_reports_remaining_mu_fuel(self):
         """Python successful projection returns remaining Mu fuel."""

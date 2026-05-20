@@ -29,8 +29,6 @@ See mu/docs/core/MetaCircularKernel.v0.md for kernel design.
 from __future__ import annotations
 
 import json
-import math
-
 from .eval_seed import NO_MATCH, host_iteration, step as eval_step, _step_trusted, _apply_projection_trusted, match as stage0_match
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
@@ -1230,7 +1228,7 @@ def step_kernel_mu(
         raise ValueError("SECURITY: max_steps must be a finite integer watchdog, got bool")
     if isinstance(max_steps, int):  # AST_OK:infra - watchdog type guard
         watchdog_steps = max_steps
-    elif isinstance(max_steps, float) and math.isfinite(max_steps) and max_steps.is_integer():  # AST_OK:infra - watchdog type guard
+    elif isinstance(max_steps, float) and max_steps.is_integer():  # AST_OK:infra - watchdog type guard
         watchdog_steps = int(max_steps)
     else:
         raise ValueError(
