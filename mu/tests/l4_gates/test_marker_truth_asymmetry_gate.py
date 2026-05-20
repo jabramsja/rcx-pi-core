@@ -18,6 +18,48 @@ import pytest
 from tests.repo_root import REPO_ROOT
 
 
+def _find_line_index(lines: list[str], needle: str) -> int:
+    for index, line in enumerate(lines):
+        if needle in line:
+            return index
+    pytest.fail(f"Could not find line containing {needle!r}")
+
+
+def _leading_jsdoc_block(lines: list[str], function_index: int) -> str:
+    for index in range(function_index - 1, -1, -1):
+        if lines[index].strip() == "/**":
+            return "\n".join(lines[index:function_index])
+        if lines[index].strip().startswith("function "):
+            break
+    pytest.fail(f"Could not find JSDoc block before line {function_index + 1}")
+
+
+def _js_function_body(lines: list[str], function_index: int) -> str:
+    body = []
+    depth = 0
+    opened = False
+    for line in lines[function_index:]:
+        body.append(line)
+        if "{" in line:
+            opened = True
+        depth += line.count("{") - line.count("}")
+        if opened and depth == 0:
+            return "\n".join(body)
+    pytest.fail(f"Could not find JS function body ending after line {function_index + 1}")
+
+
+def _js_host_iteration_sites() -> list[tuple[Path, int, str]]:
+    sites = []
+    js_root = REPO_ROOT / "mu" / "host" / "js"
+    for path in sorted(js_root.rglob("*.js")):
+        if "/tests/" in path.as_posix():
+            continue
+        for line_no, line in enumerate(path.read_text().splitlines(), 1):
+            if "@host_iteration" in line:
+                sites.append((path, line_no, line))
+    return sites
+
+
 class TestMarkerTruthAsymmetryGate:
     """Gate: marker-truth sites honestly marked as tracked debt or boundary evidence."""
 
@@ -95,6 +137,53 @@ class TestMarkerTruthAsymmetryGate:
         )
         assert ratchet["current"]["python"]["host_iteration"] == 1
         assert ratchet["current"]["javascript"]["host_iteration"] == 1
+
+    def test_js_active_kernel_core_loop_carries_host_iteration_marker(self):
+        """JS tracked iteration marker belongs to the active _stepKernelCore maxSteps loop."""
+        path = REPO_ROOT / "mu" / "host" / "js" / "engine" / "kernel.js"
+        lines = path.read_text().splitlines()
+        function_index = _find_line_index(lines, "function _stepKernelCore(")
+        jsdoc = _leading_jsdoc_block(lines, function_index)
+        body = _js_function_body(lines, function_index)
+
+        assert "@host_iteration" in jsdoc, (
+            "_stepKernelCore must carry the tracked JS @host_iteration marker"
+        )
+        assert "active kernel driver loop" in jsdoc and "maxSteps" in jsdoc, (
+            "_stepKernelCore marker must name the active maxSteps driver loop"
+        )
+        assert "for (let i = 0; i < maxSteps; i++)" in body, (
+            "_stepKernelCore must still own the active maxSteps kernel driver loop"
+        )
+
+    def test_js_host_iteration_inventory_is_not_stale_bootstrap_step_only(self):
+        """The sole JS host-iteration marker is on the active kernel loop, not bootstrap step."""
+        kernel_path = REPO_ROOT / "mu" / "host" / "js" / "engine" / "kernel.js"
+        bootstrap_path = REPO_ROOT / "mu" / "host" / "js" / "core" / "bootstrap_core.js"
+        sites = _js_host_iteration_sites()
+
+        assert len(sites) == 1, (
+            "JS @host_iteration marker count must remain one; move the marker, do not add one"
+        )
+        assert sites[0][0] == kernel_path, (
+            f"JS @host_iteration must be in kernel.js, got {sites}"
+        )
+        assert all(site[0] != bootstrap_path for site in sites), (
+            "bootstrap_core.step must not retain stale JS @host_iteration tracking"
+        )
+
+    def test_js_bootstrap_step_is_boundary_not_tracked_host_iteration(self):
+        """bootstrap_core.step may scan projections, but it is not the tracked kernel loop."""
+        path = REPO_ROOT / "mu" / "host" / "js" / "core" / "bootstrap_core.js"
+        lines = path.read_text().splitlines()
+        function_index = _find_line_index(lines, "function step(projections, input)")
+        jsdoc = _leading_jsdoc_block(lines, function_index)
+        body = _js_function_body(lines, function_index)
+
+        assert "@host_iteration" not in jsdoc
+        assert "@host_iteration" not in body
+        assert "BOUNDARY" in jsdoc
+        assert "for (const proj of projections)" in body
 
 
 class TestMT2IsinstanceMarkerCoverage:

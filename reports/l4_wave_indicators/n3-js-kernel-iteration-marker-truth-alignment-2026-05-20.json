@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-js-kernel-iteration-marker-truth-alignment-2026-05-20",
+  "repeat_run_speedup_ratio": 1.291716,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.264425,
+  "repeat_run_raw_seconds": [
+    0.341562,
+    0.264425
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.341562
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.605987
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-20T03:48:39Z",
+  "collector_version": "2.2.0"
+}

@@ -12,7 +12,7 @@ Validates:
 
 Anti-laundering: All reclassified functions are provably OFF the kernel execution path.
 Kernel path: step_kernel_mu → _step_kernel_with_vm → Stage0 VM for all
-  Python projection groups / step → stage0Match/stage0Substitute (JS).
+  Python projection groups / _stepKernelCore → _stepTrusted (JS).
 The reclassified functions CALL the kernel but are not ON the kernel path.
 list_to_linked/listToLinked are bounded host-to-Mu boundary construction loops
 that prepare linked-list input for the kernel but do not execute projections.
@@ -163,15 +163,32 @@ class TestJSOuterLoopBoundary:
     def test_js_run_engine_pipeline_recursive_boundary(self):
         self._check_js_function_boundary(JS_PIPELINE_PATH, "runEnginePipelineRecursive")
 
-    def test_js_step_still_has_host_iteration(self):
-        """JS step() MUST still have @host_iteration (irreducible kernel core)."""
-        text = JS_BOOTSTRAP_PATH.read_text()
-        lines = text.splitlines()
-        for i, line in enumerate(lines):
-            if "function step(" in line:
-                block = "\n".join(lines[max(0, i - 10):i])
+    def test_js_active_kernel_core_still_has_host_iteration(self):
+        """JS _stepKernelCore owns @host_iteration; bootstrap step is boundary scan."""
+        kernel_lines = JS_KERNEL_PATH.read_text().splitlines()
+        for i, line in enumerate(kernel_lines):
+            if "function _stepKernelCore(" in line:
+                block = "\n".join(kernel_lines[max(0, i - 10):i])
+                body = "\n".join(kernel_lines[i:i + 80])
                 assert "@host_iteration" in block, (
-                    "JS step() lost @host_iteration — this is the irreducible kernel loop!"
+                    "JS _stepKernelCore lost @host_iteration — this is the active kernel loop!"
+                )
+                assert "for (let i = 0; i < maxSteps; i++)" in body, (
+                    "JS _stepKernelCore must remain the maxSteps kernel driver loop"
+                )
+                break
+        else:
+            pytest.fail("JS _stepKernelCore() function not found")
+
+        bootstrap_lines = JS_BOOTSTRAP_PATH.read_text().splitlines()
+        for i, line in enumerate(bootstrap_lines):
+            if "function step(" in line:
+                block = "\n".join(bootstrap_lines[max(0, i - 10):i])
+                assert "@host_iteration" not in block, (
+                    "JS bootstrap_core.step must not retain stale @host_iteration tracking"
+                )
+                assert "BOUNDARY" in block, (
+                    "JS bootstrap_core.step must remain boundary evidence after marker move"
                 )
                 return
         pytest.fail("JS step() function not found")

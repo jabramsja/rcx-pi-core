@@ -208,7 +208,7 @@ check_function_marker() {
     fi
 }
 
-check_function_marker "step" "@host_iteration"
+check_function_marker "_stepKernelCore" "@host_iteration"
 # run/runStructural/runAlgorithmWithBridge/runEnginePipelineRecursive
 # reclassified as BOUNDARY (outer loop scaffolding, off kernel path) — P7W5
 check_function_marker "run" "BOUNDARY"
