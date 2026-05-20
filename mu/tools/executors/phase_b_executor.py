@@ -1282,10 +1282,14 @@ def _plan_declares_routing_boundary(plan_content: str) -> bool:
         or "control plane phase a only" in text
         or "phase a rewrite may change only this packet" in text
         or "locked later phase b plan" in text
+        or "cannot authorize implementation" in text
         or "does not authorize implementation" in text
         or "implementation is not authorized" in text
+        or "no implementation, commit automation, or count-reduction claim is authorized" in text
         or "no-go package" in text
         or "no-go before commit readiness" in text
+        or "no-go for implementation" in text
+        or "no-go prerequisite stop" in text
         or "stopped before commit readiness" in text
         or "no accepted executable runtime delta" in text
     )
