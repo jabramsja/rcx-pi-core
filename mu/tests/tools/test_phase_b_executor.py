@@ -170,6 +170,39 @@ class TestPhaseBWaveClassResolution:
         assert "host_semantics_delta_before" not in note
         assert "structural_artifact_ref" not in note
 
+    def test_no_go_for_implementation_packet_without_runtime_packages_as_enabler(self):
+        plan = (
+            "Class: L4_STRUCTURAL\n"
+            "\n"
+            "Status: Phase A (NO-GO prerequisite stop - same-wave TASKS tracker absent)\n"
+            "The packet cannot authorize implementation while the tracker entry is absent.\n"
+            "No implementation, commit automation, or count-reduction claim is authorized by this packet.\n"
+            "Authorization conclusion: NO-GO for implementation.\n"
+        )
+
+        note = pb_mod.build_phase_b_tracker_note(
+            wave_id="no-go-for-implementation-structural-wave",
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/no_go_for_implementation.md",
+            plan_content=plan,
+            changed_files=[
+                "TASKS.md",
+                "reports/control_plane/no_go_for_implementation.md",
+                "reports/l4_wave_indicators/no-go-for-implementation-structural-wave.json",
+            ],
+            test_files=[],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=2,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        assert "Class: L4_ENABLER" in note
+        assert "host_semantics_delta_before" not in note
+        assert "structural_artifact_ref" not in note
+
     def test_control_plane_phase_a_only_structural_packet_packages_as_enabler(self):
         plan = (
             "Class: L4_STRUCTURAL successor, with this packet rewrite as control-plane Phase A only\n"

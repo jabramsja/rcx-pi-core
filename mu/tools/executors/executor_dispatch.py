@@ -856,10 +856,19 @@ def _plan_requires_pre_phase_b_tracker_entry(repo_root: Path, plan_path: str) ->
     except OSError:
         return False
     lowered = content.lower()
+    tracker_precondition = "tasks.md" in lowered and "tracker entr" in lowered
+    prerequisite_stop = (
+        "no-go prerequisite stop" in lowered
+        or "no-go for implementation" in lowered
+        or "cannot authorize implementation" in lowered
+        or "no implementation, commit automation, or count-reduction claim is authorized" in lowered
+    )
     return (
-        "before phase b dispatch" in lowered
-        and "tasks.md" in lowered
-        and "tracker entr" in lowered
+        tracker_precondition
+        and (
+            "before phase b dispatch" in lowered
+            or prerequisite_stop
+        )
     )
 
 
