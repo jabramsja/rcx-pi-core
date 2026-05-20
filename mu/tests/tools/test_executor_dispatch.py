@@ -496,6 +496,45 @@ class TestDispatcherFreshnessRefresh:
         assert result["completed_candidates"][0]["tracked_packet"] == packet_rel
         assert calls == []
 
+    def test_dispatch_stops_phase_b_implementation_complete_candidate_before_phase_executor(
+        self, tmp_path, monkeypatch,
+    ):
+        repo, _ = _init_builder_repo(tmp_path)
+        packet_rel = "reports/control_plane/seed_packet.md"
+        (repo / packet_rel).write_text(
+            "# seed packet\n\nStatus: Phase B (implementation-complete, bridge-converged)\n",
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_A",
+            "summary": "stale implementation-complete route",
+            "wave_name": "builder-wave-2026-04-20",
+            "task_id": "[PIPELINE-RECOVERY]",
+            "next_candidates": [
+                {
+                    "candidate": "builder-wave-2026-04-20",
+                    "bounded": True,
+                    "tracked_packet": packet_rel,
+                }
+            ],
+        }
+        calls = []
+
+        def fake_run(args, cwd, timeout):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout='{"status":"success"}', stderr="")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", fake_run)
+
+        result = dispatch_mod.dispatch(record, repo_root=repo, skip_freshness=True)
+
+        assert result["status"] == "stopped"
+        assert "already-complete bounded candidate" in result["message"]
+        assert result["completed_candidates"][0]["status"] == (
+            "Phase B (implementation-complete, bridge-converged)"
+        )
+        assert calls == []
+
     def test_dispatch_refreshes_stale_canonical_completed_candidate_before_stop(
         self, tmp_path, monkeypatch,
     ):
@@ -13913,6 +13952,11 @@ class TestRoutingRecordBuilderCompletedPacketRejection:
     def test_status_predicate_treats_completed_with_pending_detail_as_complete(self):
         assert common_mod.packet_status_is_completed(
             "COMPLETED (commit-ready, pre-commit supervisor pending)"
+        ) is True
+
+    def test_status_predicate_treats_implementation_complete_as_complete(self):
+        assert common_mod.packet_status_is_completed(
+            "Phase B (implementation-complete, bridge-converged)"
         ) is True
 
     def test_rejects_completed_control_plane_packet(self, tmp_path):
