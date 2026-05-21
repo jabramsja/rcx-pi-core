@@ -203,6 +203,39 @@ class TestKernelRunResultPython:
                 max_steps=100,
             )
 
+    def test_continuation_resume_rejects_forged_match_no_match_for_matching_projection(self):
+        """Continuation resume must reject no_match when the selected projection matches."""
+        projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
+        forged = {
+            "tag": "kernel_driver_continuation_state",
+            "version": 1,
+            "kernel_state": {
+                "_mode": "match_done",
+                "_status": "no_match",
+                "_match_ctx": {
+                    "_input": step_mu_mod.normalize_for_match({"x": 1}),
+                    "_body": step_mu_mod.normalize_for_match({"x": 2}),
+                    "_remaining": None,
+                },
+            },
+            "domain_input": {"x": 1},
+            "projection_cursor": None,
+            "remaining_fuel": None,
+            "fuel_mode": "omitted_compatibility",
+            "steps_used": 5,
+            "watchdog_cap": 100,
+            "terminal": {"reached": False, "reason": None, "error": None},
+        }
+
+        with pytest.raises(ValueError, match="kernel_state"):
+            step_kernel_mu(
+                projs,
+                {"x": 1},
+                continuation_state=forged,
+                return_packet=True,
+                max_steps=100,
+            )
+
     def test_continuation_resume_rejects_forged_match_success_precursor(self):
         """Packet mode must not advance a forged match state into success."""
         projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]
@@ -1023,6 +1056,98 @@ try {
     trust({ x: 0 }),
     [trust({ pattern: { x: 1 }, body: { x: 2 } })],
     { continuationState: state, returnPacket: true, maxSteps: 100 }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_rejects_forged_match_no_match_for_matching_projection(self):
+        """JS continuation resume rejects no_match when the selected projection matches."""
+        script = """
+const fs = require('fs');
+const path = require('path');
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const stage0Vm = require('./mu/host/js/core/stage0_vm');
+const { normalize } = require('./mu/host/js/core/normalize');
+const {
+  getSeedSubdir,
+  loadVerifiedSeedImage,
+  SEED_IMAGE_VERIFICATION_MODES,
+} = require('./mu/host/js/core/seed_loader');
+const muRoot = path.join(process.cwd(), 'mu');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const kernel = loadVerifiedSeedImage(
+  'kernel.v1.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('kernel.v1.json'), 'kernel.v1.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const matchSeed = loadVerifiedSeedImage(
+  'match.v2.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('match.v2.json'), 'match.v2.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const substSeed = loadVerifiedSeedImage(
+  'subst.v2.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('subst.v2.json'), 'subst.v2.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const compiledDir = path.join(muRoot, 'stage0', 'compiled');
+const kernelBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'kernel_v1.compiled.v1.json'), 'utf8'));
+const matchBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'match_v2.compiled.v1.json'), 'utf8'));
+const substBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'subst_v2.compiled.v1.json'), 'utf8'));
+stage0Vm.validateBundle(kernelBundle);
+stage0Vm.validateBundle(matchBundle);
+stage0Vm.validateBundle(substBundle);
+const allProjections = muContainers.list([...kernel.projections, ...matchSeed.projections, ...substSeed.projections]);
+const vmConfig = { kernelBundle, bridgeBundle: null, matchBundle, substBundle };
+const domainProjection = trust({ pattern: { x: 1 }, body: { x: 2 } });
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['_mode', 'match_done'],
+    ['_status', 'no_match'],
+    ['_match_ctx', muContainers.record([
+      ['_input', normalize(trust({ x: 1 }))],
+      ['_body', normalize(trust({ x: 2 }))],
+      ['_remaining', null],
+    ])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 5],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', false],
+    ['reason', null],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    allProjections,
+    trust({ x: 1 }),
+    [domainProjection],
+    { continuationState: state, returnPacket: true, maxSteps: 100, vmConfig }
   );
   console.log(JSON.stringify({ success: true }));
 } catch (e) {

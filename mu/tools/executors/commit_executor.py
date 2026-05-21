@@ -3546,6 +3546,63 @@ def _dirty_tracker_relevant_paths_for_handoff(
     return _tracker_relevant_paths_for_handoff(dirty_ordered, [])
 
 
+def _staged_tracker_relevant_paths(repo_root: Path) -> list[str]:
+    try:
+        proc = _run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+            cwd=repo_root,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError:
+        return []
+    return _tracker_relevant_paths_for_handoff(proc.stdout.splitlines(), [])
+
+
+def _tracker_file_will_be_staged(
+    repo_root: Path,
+    files_to_stage: list[str],
+    force_add_files: list[str] | None = None,
+) -> bool:
+    tracker_paths = {"STATUS.md", "TASKS.md"}
+    try:
+        staged = _run(
+            ["git", "diff", "--cached", "--name-only", "--", *sorted(tracker_paths)],
+            cwd=repo_root,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError:
+        staged = None
+    if staged is not None:
+        for line in staged.stdout.splitlines():
+            if _normalize_repo_relpath(line) in tracker_paths:
+                return True
+
+    candidate_paths = {
+        _normalize_repo_relpath(path)
+        for path in [*(files_to_stage or []), *((force_add_files or []))]
+        if isinstance(path, str)
+    }
+    if not (candidate_paths & tracker_paths):
+        return False
+
+    try:
+        proc = _run(
+            ["git", "status", "--porcelain", "--", *sorted(tracker_paths)],
+            cwd=repo_root,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError:
+        return False
+    for line in proc.stdout.splitlines():
+        parsed = _parse_porcelain_status_line(line)
+        if parsed is None:
+            continue
+        _, raw_path = parsed
+        if _normalize_repo_relpath(raw_path) in tracker_paths:
+            return True
+    return False
+
+
 def _build_tracker_followup_note(*, wave_id: str, tracker_paths: list[str]) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     preview = ", ".join(tracker_paths[:3])
@@ -3574,8 +3631,10 @@ def _sync_tracker_followup_line(
             None,
         )
 
-    should_emit_followup = bool(tracker_paths) and not tracker_file_staged
     followup_idx = tracker_followup_indices[0] if tracker_followup_indices else None
+    should_emit_followup = bool(tracker_paths) and (
+        not tracker_file_staged or followup_idx is not None
+    )
     if not should_emit_followup:
         if followup_idx is None:
             return False, None, None
@@ -8589,15 +8648,20 @@ def _run_commit_pipeline_impl(
         start_idx=ra_idx,
         end_idx=ra_end_idx,
     )
-    tracker_relevant_paths = _dirty_tracker_relevant_paths_for_handoff(
+    tracker_relevant_paths = _dedupe_repo_paths(
+        [
+            *_dirty_tracker_relevant_paths_for_handoff(
+                repo_root,
+                list(handoff["files_to_stage"]),
+                list(handoff.get("force_add_files", [])),
+            ),
+            *_staged_tracker_relevant_paths(repo_root),
+        ]
+    )
+    tracker_file_staged = _tracker_file_will_be_staged(
         repo_root,
         list(handoff["files_to_stage"]),
         list(handoff.get("force_add_files", [])),
-    )
-    tracker_file_staged = any(
-        path in {"TASKS.md", "STATUS.md"}
-        for path in [*handoff["files_to_stage"], *handoff.get("force_add_files", [])]
-        if isinstance(path, str)
     )
     note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
 

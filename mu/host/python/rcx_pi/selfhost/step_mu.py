@@ -36,9 +36,6 @@ from .eval_seed import (
     _step_trusted,
     _apply_projection_trusted,
     match as stage0_match,
-    _stage0_substitute,
-    is_var,
-    get_var_name,
 )
 from .match_mu import match_mu, normalize_for_match, denormalize_from_match
 from .subst_mu import subst_mu
@@ -1218,6 +1215,7 @@ _KERNEL_MATCH_DONE_SUCCESS_KEYS = frozenset({  # AST_OK: constant - continuation
 _KERNEL_MATCH_DONE_NO_MATCH_KEYS = frozenset({"_mode", "_status", "_match_ctx"})  # AST_OK: constant - continuation key contract
 _KERNEL_MATCH_REQUEST_STATE_KEYS = frozenset({"match", "_match_ctx"})  # AST_OK: constant - continuation key contract
 _KERNEL_SUBST_REQUEST_STATE_KEYS = frozenset({"subst", "_subst_ctx"})  # AST_OK: constant - continuation key contract
+_KERNEL_SUBST_DONE_KEYS = frozenset({"_mode", "_result", "_subst_ctx"})  # AST_OK: constant - continuation key contract
 _KERNEL_MATCH_LOOKUP_STATE_KEYS = frozenset({  # AST_OK: constant - continuation key contract
     "mode",
     "_phase",
@@ -1512,6 +1510,8 @@ def step_kernel_mu(
         if mu_hash(continuation_state["domain_input"]) != mu_hash(input_value):
             raise ValueError("SECURITY: continuation_state domain_input is not bound to supplied input")
 
+        from rcx_pi.selfhost.stage0_vm import _stage0_vm_run_bounded_trusted  # W6A: trusted path — loader-cached validator
+
         projection_hashes: set[str] = set()
         body_hashes: set[str] = set()
         projection_contexts: list[dict[str, Mu]] = []
@@ -1531,14 +1531,42 @@ def step_kernel_mu(
                 raise TypeError("SECURITY: kernel projection cursor head must be a normalized projection")
             projection_hashes.add(mu_hash(projection_authority))
             body_hashes.add(mu_hash(projection_authority["body"]))
+            match_result = None
+            if validation_mode == "domain":
+                match_outcome = _stage0_vm_run_bounded_trusted(
+                    match_bundle,
+                    {
+                        "match": {
+                            "pattern": projection_authority["pattern"],
+                            "value": kernel_entry["_step"],
+                        },
+                        "_match_ctx": {
+                            "_input": kernel_entry["_step"],
+                            "_body": projection_authority["body"],
+                            "_remaining": projection_authority_cursor["tail"],
+                        },
+                    },
+                    terminal_field="_mode",
+                    terminal_value="match_done",
+                )
+                if match_outcome["status"] == "terminal":
+                    match_result = match_outcome["root"]
             projection_contexts.append({
                 "projection": projection_authority,
+                "rest": projection_authority_cursor["tail"],
                 "body_hash": mu_hash(projection_authority["body"]),
                 "rest_hash": mu_hash(projection_authority_cursor["tail"]),
                 "cursor_hash": mu_hash(projection_authority_cursor),
                 "prefix_cleared": not prefix_has_match,
+                "match_result": match_result,
             })
-            if stage0_match(projection_authority["pattern"], kernel_entry["_step"]) is not NO_MATCH:
+            if (
+                validation_mode == "domain"
+                and
+                isinstance(match_result, dict)  # AST_OK:infra - VM match terminal guard
+                and match_result.get("_mode") == "match_done"
+                and match_result.get("_status") == "success"
+            ):
                 prefix_has_match = True
             projection_authority_cursor = projection_authority_cursor["tail"]
         exhausted_prefix_cleared = not prefix_has_match
@@ -1566,8 +1594,6 @@ def step_kernel_mu(
             raise ValueError("SECURITY: continuation_state projection_cursor missing for kernel projection state")
         if kernel_state_is_object and is_kernel_terminal(kernel_state):
             raise ValueError("SECURITY: continuation_state kernel_state must be nonterminal")
-        if isinstance(kernel_state, dict) and kernel_state.get("_mode") == "subst_done":  # AST_OK:infra - continuation phase authority guard
-            raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
         if (
             isinstance(kernel_state, dict)  # AST_OK:infra - continuation phase authority guard
             and kernel_state.get("_mode") == "kernel"
@@ -1587,12 +1613,16 @@ def step_kernel_mu(
                     raise TypeError("SECURITY: continuation_state kernel projection cursor must be a Mu head/tail list")
                 remaining_cursor_hash = mu_hash(remaining_cursor)
                 for context in projection_contexts:
-                    if context["cursor_hash"] == remaining_cursor_hash and context["prefix_cleared"]:
+                    if (
+                        context["cursor_hash"] == remaining_cursor_hash
+                        and (validation_mode != "domain" or context["prefix_cleared"])
+                    ):
                         remaining_cursor_bound = True
                         break
             if not remaining_cursor_bound:
                 raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
         if isinstance(kernel_state, dict):  # AST_OK:infra - continuation phase authority guard
+            kernel_state_keys = set(kernel_state.keys())
             if "_match_ctx" in kernel_state:
                 match_ctx = kernel_state["_match_ctx"]
                 if not isinstance(match_ctx, dict):  # AST_OK:infra - continuation phase authority guard
@@ -1608,7 +1638,7 @@ def step_kernel_mu(
                     if (
                         context["rest_hash"] == match_rest_hash
                         and context["body_hash"] == match_body_hash
-                        and context["prefix_cleared"]
+                        and (validation_mode != "domain" or context["prefix_cleared"])
                     ):
                         match_candidates.append(context)
                 if not match_candidates:
@@ -1629,6 +1659,10 @@ def step_kernel_mu(
                     if mu_hash(match_request["value"]) != normalized_input_hash:
                         raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
                 if (
+                    validation_mode == "domain"
+                    and
+                    kernel_state_keys == _KERNEL_MATCH_STATE_KEYS
+                    and
                     kernel_state.get("mode") == "match"
                     and kernel_state.get("pattern_focus") is None
                     and kernel_state.get("value_focus") is None
@@ -1636,97 +1670,53 @@ def step_kernel_mu(
                 ):
                     success_bound_to_input = False
                     for context in match_candidates:
-                        expected_bindings = stage0_match(
-                            context["projection"]["pattern"],
-                            kernel_entry["_step"],
-                        )
-                        if expected_bindings is NO_MATCH or not isinstance(expected_bindings, dict):  # AST_OK:infra - stage0_match contract guard
+                        match_result = context["match_result"]
+                        if (
+                            not isinstance(match_result, dict)  # AST_OK:infra - VM match terminal guard
+                            or match_result.get("_mode") != "match_done"
+                            or match_result.get("_status") != "success"
+                        ):
                             continue
                         if "bindings" not in kernel_state:
                             raise TypeError("SECURITY: continuation_state binding cursor must be a Mu dict or null")
                         actual_bindings = kernel_state["bindings"]
-                        expected_names = set(expected_bindings.keys())
-                        if actual_bindings is None:
-                            bindings_match = not expected_names
-                        else:
-                            bindings_match = True
-                            seen_names: set[str] = set()
-                            binding_cursor = actual_bindings
-                            while binding_cursor is not None:
-                                if not isinstance(binding_cursor, dict):  # AST_OK:infra - Mu binding-list guard
-                                    raise TypeError("SECURITY: continuation_state binding cursor must be a Mu dict or null")
-                                if set(binding_cursor.keys()) != {"name", "value", "rest"}:
-                                    raise ValueError("SECURITY: continuation_state binding cursor key set mismatch")
-                                binding_name = binding_cursor["name"]
-                                if not isinstance(binding_name, str):  # AST_OK:infra - binding name guard
-                                    raise TypeError("SECURITY: continuation_state binding name must be string")
-                                if binding_name not in expected_bindings:
-                                    bindings_match = False
-                                    break
-                                if mu_hash(binding_cursor["value"]) != mu_hash(expected_bindings[binding_name]):
-                                    bindings_match = False
-                                    break
-                                seen_names.add(binding_name)
-                                binding_cursor = binding_cursor["rest"]
-                            if not expected_names <= seen_names:
-                                bindings_match = False
-                        if bindings_match:
+                        if mu_hash(actual_bindings) == mu_hash(match_result["_bindings"]):
                             success_bound_to_input = True
                             break
                     if not success_bound_to_input:
                         raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
                 if kernel_state.get("_mode") == "match_done":
                     status = kernel_state.get("_status")
-                    if status == "success":
+                    if status == "success" and validation_mode == "domain":
                         success_bound_to_input = False
                         for context in match_candidates:
-                            expected_bindings = stage0_match(
-                                context["projection"]["pattern"],
-                                kernel_entry["_step"],
-                            )
-                            if expected_bindings is NO_MATCH or not isinstance(expected_bindings, dict):  # AST_OK:infra - stage0_match contract guard
+                            match_result = context["match_result"]
+                            if (
+                                not isinstance(match_result, dict)  # AST_OK:infra - VM match terminal guard
+                                or match_result.get("_mode") != "match_done"
+                                or match_result.get("_status") != "success"
+                            ):
                                 continue
                             if "_bindings" not in kernel_state:
                                 raise TypeError("SECURITY: continuation_state binding cursor must be a Mu dict or null")
                             actual_bindings = kernel_state["_bindings"]
-                            expected_names = set(expected_bindings.keys())
-                            if actual_bindings is None:
-                                bindings_match = not expected_names
-                            else:
-                                bindings_match = True
-                                seen_names: set[str] = set()
-                                binding_cursor = actual_bindings
-                                while binding_cursor is not None:
-                                    if not isinstance(binding_cursor, dict):  # AST_OK:infra - Mu binding-list guard
-                                        raise TypeError("SECURITY: continuation_state binding cursor must be a Mu dict or null")
-                                    if set(binding_cursor.keys()) != {"name", "value", "rest"}:
-                                        raise ValueError("SECURITY: continuation_state binding cursor key set mismatch")
-                                    binding_name = binding_cursor["name"]
-                                    if not isinstance(binding_name, str):  # AST_OK:infra - binding name guard
-                                        raise TypeError("SECURITY: continuation_state binding name must be string")
-                                    if binding_name not in expected_bindings:
-                                        bindings_match = False
-                                        break
-                                    if mu_hash(binding_cursor["value"]) != mu_hash(expected_bindings[binding_name]):
-                                        bindings_match = False
-                                        break
-                                    seen_names.add(binding_name)
-                                    binding_cursor = binding_cursor["rest"]
-                                if not expected_names <= seen_names:
-                                    bindings_match = False
-                            if bindings_match:
+                            if mu_hash(actual_bindings) == mu_hash(match_result["_bindings"]):
                                 success_bound_to_input = True
                                 break
                         if not success_bound_to_input:
                             raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                    elif status == "success":
+                        pass
                     elif status == "no_match":
-                        any_candidate_matches = False
-                        for context in match_candidates:
-                            if stage0_match(context["projection"]["pattern"], kernel_entry["_step"]) is not NO_MATCH:
-                                any_candidate_matches = True
-                                break
-                        if any_candidate_matches:
-                            raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                        if validation_mode == "domain":
+                            for context in match_candidates:
+                                match_result = context["match_result"]
+                                if (
+                                    isinstance(match_result, dict)  # AST_OK:infra - VM match terminal guard
+                                    and match_result.get("_mode") == "match_done"
+                                    and match_result.get("_status") == "success"
+                                ):
+                                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
                     else:
                         raise ValueError("SECURITY: continuation_state match_done status mismatch")
 
@@ -1758,106 +1748,57 @@ def step_kernel_mu(
                         continue
                     if subst_body_hash is not None and context["body_hash"] != subst_body_hash:
                         continue
-                    if not context["prefix_cleared"]:
+                    if validation_mode == "domain" and not context["prefix_cleared"]:
                         continue
                     subst_candidates.append(context)
                 if not subst_candidates:
                     raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
                 subst_bound_to_input = False
                 for context in subst_candidates:
-                    expected_bindings = stage0_match(
-                        context["projection"]["pattern"],
-                        kernel_entry["_step"],
-                    )
-                    if expected_bindings is NO_MATCH or not isinstance(expected_bindings, dict):  # AST_OK:infra - stage0_match contract guard
+                    match_result = context["match_result"]
+                    if (
+                        not isinstance(match_result, dict)  # AST_OK:infra - VM match terminal guard
+                        or match_result.get("_mode") != "match_done"
+                        or match_result.get("_status") != "success"
+                    ):
                         continue
-                    expected_names = set(expected_bindings.keys())
-                    if subst_bindings is None:
-                        bindings_match = not expected_names
-                    else:
-                        bindings_match = True
-                        seen_names: set[str] = set()
-                        binding_cursor = subst_bindings
-                        while binding_cursor is not None:
-                            if not isinstance(binding_cursor, dict):  # AST_OK:infra - Mu binding-list guard
-                                raise TypeError("SECURITY: continuation_state binding cursor must be a Mu dict or null")
-                            if set(binding_cursor.keys()) != {"name", "value", "rest"}:
-                                raise ValueError("SECURITY: continuation_state binding cursor key set mismatch")
-                            binding_name = binding_cursor["name"]
-                            if not isinstance(binding_name, str):  # AST_OK:infra - binding name guard
-                                raise TypeError("SECURITY: continuation_state binding name must be string")
-                            if binding_name not in expected_bindings:
-                                bindings_match = False
-                                break
-                            if mu_hash(binding_cursor["value"]) != mu_hash(expected_bindings[binding_name]):
-                                bindings_match = False
-                                break
-                            seen_names.add(binding_name)
-                            binding_cursor = binding_cursor["rest"]
-                        if not expected_names <= seen_names:
-                            bindings_match = False
+                    expected_bindings = match_result["_bindings"]
+                    subst_outcome = _stage0_vm_run_bounded_trusted(
+                        subst_bundle,
+                        {
+                            "subst": {
+                                "body": context["projection"]["body"],
+                                "bindings": expected_bindings,
+                            },
+                            "_subst_ctx": {
+                                "_input": kernel_entry["_step"],
+                                "_remaining": context["rest"],
+                            },
+                        },
+                        terminal_field="_mode",
+                        terminal_value="subst_done",
+                    )
+                    expected_subst = subst_outcome["root"] if subst_outcome["status"] == "terminal" else None
+                    if not isinstance(expected_subst, dict) or expected_subst.get("_mode") != "subst_done":  # AST_OK:infra - VM subst terminal guard
+                        continue
+                    if kernel_state.get("_mode") == "subst_done":
+                        if mu_hash(kernel_state.get("_result")) == mu_hash(expected_subst["_result"]):
+                            subst_bound_to_input = True
+                            break
+                        continue
+                    bindings_match = mu_hash(subst_bindings) == mu_hash(expected_bindings)
                     if (
                         bindings_match
                         and kernel_state.get("mode") == "subst"
                         and kernel_state.get("phase") == "result"
                         and kernel_state.get("context") is None
+                        and mu_hash(kernel_state.get("focus")) != mu_hash(expected_subst["_result"])
                     ):
-                        try:
-                            expected_focus = _stage0_substitute(
-                                context["projection"]["body"],
-                                expected_bindings,
-                            )
-                        except KeyError as exc:
-                            error_text = exc.args[0] if exc.args else str(exc)
-                            prefix = "Unbound variable: "
-                            if not isinstance(error_text, str) or not error_text.startswith(prefix):  # AST_OK:infra - unbound error extraction guard
-                                raise
-                            expected_values: tuple[Mu, ...] = ()
-                            expected_work = (("eval", context["projection"]["body"], 0, None),)
-                            while expected_work:
-                                expected_op, expected_value, expected_depth, expected_meta = expected_work[-1]
-                                expected_work = expected_work[:-1]
-                                if expected_op == "build":
-                                    start = len(expected_values) - len(expected_meta)
-                                    chunk, expected_values = expected_values[start:], expected_values[:start]
-                                    built = dict(zip(expected_meta, chunk)) if expected_value == "dict" else list(chunk)
-                                    expected_values += (built,)
-                                    continue
-                                if expected_depth > MAX_MU_DEPTH:
-                                    raise TypeError(f"Max depth exceeded in substitute ({MAX_MU_DEPTH})")
-                                if expected_value is None or isinstance(expected_value, (bool, int, float, str)):  # AST_OK:infra - validation oracle scalar guard
-                                    expected_values += (expected_value,)
-                                    continue
-                                if isinstance(expected_value, dict):  # AST_OK:infra - validation oracle over Mu dicts
-                                    if is_var(expected_value):
-                                        expected_name = get_var_name(expected_value)
-                                        if expected_name in expected_bindings:
-                                            expected_values += (expected_bindings[expected_name],)
-                                        else:
-                                            expected_values += ({"_error": "unbound_variable", "_name": expected_name},)
-                                    else:
-                                        expected_items = tuple(expected_value.items())
-                                        expected_work += (("build", "dict", expected_depth, tuple(k for k, _ in expected_items)),)
-                                        expected_work += tuple(
-                                            ("eval", item_value, expected_depth + 1, None)
-                                            for _, item_value in reversed(expected_items)
-                                        )
-                                    continue
-                                if isinstance(expected_value, list):  # AST_OK:infra - validation oracle over Mu lists
-                                    expected_work += (("build", "list", expected_depth, tuple(expected_value)),)
-                                    expected_work += tuple(
-                                        ("eval", item, expected_depth + 1, None)
-                                        for item in reversed(expected_value)
-                                    )
-                                    continue
-                                expected_values += (expected_value,)
-                            expected_focus = expected_values[-1]
-                        if mu_hash(kernel_state.get("focus")) != mu_hash(expected_focus):
-                            bindings_match = False
+                        bindings_match = False
                     if bindings_match:
                         subst_bound_to_input = True
                         break
-                if not subst_bound_to_input:
+                if not subst_bound_to_input and validation_mode == "domain":
                     raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
         if kernel_state_is_object and not projection_hashes:
             expected_empty_state = {
@@ -1901,7 +1842,6 @@ def step_kernel_mu(
                     raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
                 state_nodes.extend(state_node.values())
         if kernel_state_is_object:
-            kernel_state_keys = set(kernel_state.keys())
             if "_mode" in kernel_state:
                 kernel_state_mode = kernel_state.get("_mode")
                 if kernel_state_mode == "kernel":
@@ -1920,7 +1860,8 @@ def step_kernel_mu(
                     if kernel_state_keys != expected_kernel_state_keys:
                         raise ValueError("SECURITY: continuation_state kernel_state key set mismatch")
                 elif kernel_state_mode == "subst_done":
-                    raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
+                    if kernel_state_keys != _KERNEL_SUBST_DONE_KEYS:
+                        raise ValueError("SECURITY: continuation_state kernel_state key set mismatch")
                 else:
                     raise ValueError("SECURITY: continuation_state kernel_state mode mismatch")
             elif "mode" in kernel_state:
@@ -1955,6 +1896,8 @@ def step_kernel_mu(
                 elif "_mode" in kernel_state:
                     if kernel_state.get("_mode") == "match_done":
                         minimum_steps_used = 4
+                    elif kernel_state.get("_mode") == "subst_done":
+                        minimum_steps_used = 8
                 elif "mode" in kernel_state:
                     if kernel_state.get("mode") == "match":
                         minimum_steps_used = 3
@@ -2080,37 +2023,6 @@ def step_kernel_mu(
         if caller_supplied_fuel:
             fuel_cursor = fuel_cursor["tail"]
         steps_used += 1
-
-        if (
-            isinstance(result, dict)  # AST_OK:infra - subst terminal packet extraction guard
-            and result.get("_mode") == "subst_done"
-            and "_result" in result
-            and "_subst_ctx" in result
-        ):
-            output = denormalize_from_match(result["_result"])
-            validator(output, "step_kernel_mu output")
-            canonical = {
-                "output": output,
-                "stall": False,
-                "termination_reason": "projection_applied",
-                "steps_used": steps_used,
-                "max_steps": watchdog_cap,
-            }
-            if caller_supplied_fuel:
-                canonical["fuel_supplied"] = True
-                canonical["fuel_remaining"] = fuel_cursor
-                canonical["fuel_exhausted"] = False
-            packet = {
-                "kind": "terminal",
-                "result": canonical,
-                "continuation": None,
-            }
-            if return_packet:
-                return packet
-            meta = packet["result"]
-            if return_meta:
-                return meta
-            return meta["output"]
 
         # Terminal state check - simple structural marker detection
         if is_kernel_terminal(result):

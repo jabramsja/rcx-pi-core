@@ -637,6 +637,128 @@ def test_tracker_followup_refreshes_when_canonical_note_updates(tmp_path):
     assert runtime_rel not in followup_lines[0]
 
 
+def test_tracker_followup_ignores_clean_declared_tracker_file(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    wave_id = "tracker-followup-clean-declared-tasks-wave"
+    runtime_rel = "mu/host/python/rcx_pi/selfhost/step_mu.py"
+    pipeline_rel = "mu/tools/executors/commit_executor.py"
+    runtime_path = repo / runtime_rel
+    pipeline_path = repo / pipeline_rel
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    pipeline_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_path.write_text("# committed runtime\n", encoding="utf-8")
+    pipeline_path.write_text("# committed pipeline\n", encoding="utf-8")
+    tracker_note = _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"]
+    (repo / "TASKS.md").write_text(f"## Ra\n\n{tracker_note}\n---\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "baseline tracker state"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    runtime_path.write_text("# dirty runtime follow-up\n", encoding="utf-8")
+    pipeline_path.write_text("# dirty pipeline follow-up\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--", runtime_rel, pipeline_rel], cwd=repo, check=True, capture_output=True)
+
+    handoff = _make_new_schema_handoff(
+        wave_id=wave_id,
+        files_to_stage=["TASKS.md", runtime_rel],
+        scope_items=[runtime_rel],
+        fixes_implemented=["emit tracker follow-up when declared TASKS.md is clean"],
+    )
+    with patch.object(
+        commit_mod,
+        "_load_repo_meta_bridge_client",
+        side_effect=ImportError("stop after tracker sync"),
+    ):
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+    assert result["step"] == "build_and_run_supervisor"
+    tasks_content = (repo / "TASKS.md").read_text(encoding="utf-8")
+    followup_lines = [
+        line for line in tasks_content.splitlines()
+        if line.startswith("- Tracker sync follow-up") and wave_id in line
+    ]
+    assert len(followup_lines) == 1
+    assert runtime_rel in followup_lines[0]
+    assert pipeline_rel in followup_lines[0]
+
+
+def test_tracker_followup_preserves_existing_staged_followup(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    wave_id = "tracker-followup-existing-staged-wave"
+    runtime_rel = "mu/host/python/rcx_pi/selfhost/step_mu.py"
+    pipeline_rel = "mu/tools/executors/commit_executor.py"
+    runtime_path = repo / runtime_rel
+    pipeline_path = repo / pipeline_rel
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    pipeline_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_path.write_text("# committed runtime\n", encoding="utf-8")
+    pipeline_path.write_text("# committed pipeline\n", encoding="utf-8")
+    tracker_note = _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"]
+    (repo / "TASKS.md").write_text(f"## Ra\n\n{tracker_note}\n---\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "baseline tracker state"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    runtime_path.write_text("# dirty runtime follow-up\n", encoding="utf-8")
+    pipeline_path.write_text("# dirty pipeline follow-up\n", encoding="utf-8")
+    stale_followup = (
+        f"- Tracker sync follow-up (2026-05-17T00:00:00Z, {wave_id}): "
+        "same-wave follow-up commit touched tracker-relevant file(s) without "
+        f"phase/task-state change: {runtime_rel}.\n"
+    )
+    (repo / "TASKS.md").write_text(
+        f"## Ra\n\n{tracker_note}\n{stale_followup}---\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "--", runtime_rel, pipeline_rel, "TASKS.md"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+    handoff = _make_new_schema_handoff(
+        wave_id=wave_id,
+        files_to_stage=[runtime_rel, pipeline_rel],
+        scope_items=[runtime_rel, pipeline_rel],
+        fixes_implemented=["preserve staged tracker follow-up across retry"],
+    )
+    with patch.object(
+        commit_mod,
+        "_load_repo_meta_bridge_client",
+        side_effect=ImportError("stop after tracker sync"),
+    ):
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+    assert result["step"] == "build_and_run_supervisor"
+    tasks_content = (repo / "TASKS.md").read_text(encoding="utf-8")
+    followup_lines = [
+        line for line in tasks_content.splitlines()
+        if line.startswith("- Tracker sync follow-up") and wave_id in line
+    ]
+    assert len(followup_lines) == 1
+    assert runtime_rel in followup_lines[0]
+    assert pipeline_rel in followup_lines[0]
+    staged_tasks = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "--", "TASKS.md"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert staged_tasks == ["TASKS.md"]
+
+
 def _setup_repo(tmp_path):
     """Create a minimal git repo for pipeline tests."""
     import subprocess

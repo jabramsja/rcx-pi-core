@@ -14,7 +14,7 @@ const muContainers = require('../core/container_factory');
 const { normalize, denormalize, normalizeProjection, listToLinked } = require('../core/normalize');
 const { validateNoKernelReservedFields, validateAlgorithmRuntimeFields, rejectNonlinearProjections } = require('../core/security');
 const { step, match, isKernelTerminal, isKernelIntermediate, makeUndefinedMotif, stage0Match, stage0Substitute, _stepTrusted, _applyProjectionTrusted } = require('../core/bootstrap_core');
-const { _stage0VmStepTrusted, muDeepEqual } = require('../core/stage0_vm'); // W6A: trusted path — bundles loaded at module level in main.js // CONTRABAND_OK: stage0_vm is our module, not Node.js vm
+const { _stage0VmStepTrusted, stage0VmRun, muDeepEqual } = require('../core/stage0_vm'); // W6A: trusted path — bundles loaded at module level in main.js // CONTRABAND_OK: stage0_vm is our module, not Node.js vm
 
 // S1-B: VM cutover flags (parity with Python step_mu.py)
 // Founder GO 2026-03-15: VM path is now primary for match.v2/subst.v2
@@ -244,6 +244,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     const projectionHashes = new Set();
     const bodyHashes = new Set();
     const projectionContexts = [];
+    const useVmMatchValidation = Boolean(vmConfig && vmConfig.matchBundle);
     let prefixHasMatch = false;
     let projectionAuthorityCursor = kernelInput._projs;
     while (projectionAuthorityCursor !== null) {
@@ -263,14 +264,38 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
       }
       projectionHashes.add(muHash(projectionAuthority));
       bodyHashes.add(muHash(projectionAuthority.body));
+      let matchResult = null;
+      let legacyMatchBindings = NO_MATCH;
+      if (useVmMatchValidation) {
+        const matchOutcome = stage0VmRun(vmConfig.matchBundle, muContainers.record([
+          ['match', muContainers.record([
+            ['pattern', projectionAuthority.pattern],
+            ['value', kernelInput._step],
+          ])],
+          ['_match_ctx', muContainers.record([
+            ['_input', kernelInput._step],
+            ['_body', projectionAuthority.body],
+            ['_remaining', projectionAuthorityCursor.tail],
+          ])],
+        ]), 100);
+        matchResult = matchOutcome.root;
+      } else {
+        legacyMatchBindings = stage0Match(projectionAuthority.pattern, kernelInput._step, null);
+      }
       projectionContexts.push({
         projection: projectionAuthority,
         bodyHash: muHash(projectionAuthority.body),
         restHash: muHash(projectionAuthorityCursor.tail),
         cursorHash: muHash(projectionAuthorityCursor),
         prefixCleared: !prefixHasMatch,
+        matchResult,
+        legacyMatchBindings,
       });
-      if (stage0Match(projectionAuthority.pattern, kernelInput._step, null) !== NO_MATCH) {
+      const projectionMatches = useVmMatchValidation
+        ? matchResult !== null && typeof matchResult === 'object' && !Array.isArray(matchResult) &&
+            matchResult._mode === 'match_done' && matchResult._status === 'success'
+        : legacyMatchBindings !== NO_MATCH;
+      if (projectionMatches) {
         prefixHasMatch = true;
       }
       projectionAuthorityCursor = projectionAuthorityCursor.tail;
@@ -278,6 +303,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     const exhaustedPrefixCleared = !prefixHasMatch;
     const kernelState = continuationState.kernel_state;
     const kernelStateIsObject = kernelState !== null && typeof kernelState === 'object' && !Array.isArray(kernelState);
+    const enforcePrefixCleared = validator !== validateAlgorithmRuntimeFields;
     if (!kernelStateIsObject) {
       // Scalar Mu states can only come from the defensive hash-stall path:
       // they carry no projection authority and must resume as cursorless,
@@ -309,10 +335,6 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
       throw new Error('SECURITY: continuationState kernel_state must be nonterminal');
     }
     if (kernelState !== null && typeof kernelState === 'object' && !Array.isArray(kernelState) &&
-        kernelState._mode === 'subst_done') {
-      throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
-    }
-    if (kernelState !== null && typeof kernelState === 'object' && !Array.isArray(kernelState) &&
         kernelState._mode === 'kernel' && kernelState._phase === 'try') {
       if (!Object.hasOwn(kernelState, '_remaining')) {
         throw new Error('SECURITY: continuationState kernel_state key set mismatch');
@@ -330,7 +352,8 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
         }
         const remainingCursorHash = muHash(remainingCursor);
         for (const context of projectionContexts) {
-          if (context.cursorHash === remainingCursorHash && context.prefixCleared) {
+          if (context.cursorHash === remainingCursorHash &&
+              (!enforcePrefixCleared || context.prefixCleared)) {
             remainingCursorBound = true;
             break;
           }
@@ -357,7 +380,9 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
         const matchRestHash = muHash(matchCtx._remaining);
         const matchBodyHash = muHash(matchCtx._body);
         for (const context of projectionContexts) {
-          if (context.restHash === matchRestHash && context.bodyHash === matchBodyHash && context.prefixCleared) {
+          if (context.restHash === matchRestHash &&
+              context.bodyHash === matchBodyHash &&
+              (!enforcePrefixCleared || context.prefixCleared)) {
             matchCandidates.push(context);
           }
         }
@@ -451,69 +476,78 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
           if (kernelState._status === 'success') {
             let successBoundToInput = false;
             for (const context of matchCandidates) {
-              const expectedBindings = stage0Match(context.projection.pattern, kernelInput._step, null);
-              if (expectedBindings === NO_MATCH ||
-                  expectedBindings === null ||
-                  typeof expectedBindings !== 'object' ||
-                  Array.isArray(expectedBindings)) {
-                continue;
-              }
               const actualBindings = kernelState._bindings;
-              const expectedNames = new Set(Object.keys(expectedBindings));
-              let bindingsMatch = false;
-              if (actualBindings === null) {
-                bindingsMatch = expectedNames.size === 0;
+              if (context.matchResult !== null && typeof context.matchResult === 'object' && !Array.isArray(context.matchResult)) {
+                if (context.matchResult._mode !== 'match_done' || context.matchResult._status !== 'success') {
+                  continue;
+                }
+                if (muHash(actualBindings) === muHash(context.matchResult._bindings)) {
+                  successBoundToInput = true;
+                  break;
+                }
               } else {
-                bindingsMatch = true;
-                const seenNames = new Set();
-                let bindingCursor = actualBindings;
-                while (bindingCursor !== null) {
-                  if (bindingCursor === null || typeof bindingCursor !== 'object' || Array.isArray(bindingCursor)) {
-                    throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
-                  }
-                  keys = Object.keys(bindingCursor).sort();
-                  if (keys.length !== 3 || keys[0] !== 'name' || keys[1] !== 'rest' || keys[2] !== 'value') {
-                    throw new Error('SECURITY: continuationState binding cursor key set mismatch');
-                  }
-                  if (typeof bindingCursor.name !== 'string') {
-                    throw new Error('SECURITY: continuationState binding name must be string');
-                  }
-                  if (!Object.hasOwn(expectedBindings, bindingCursor.name)) {
-                    bindingsMatch = false;
-                    break;
-                  }
-                  if (muHash(bindingCursor.value) !== muHash(expectedBindings[bindingCursor.name])) {
-                    bindingsMatch = false;
-                    break;
-                  }
-                  seenNames.add(bindingCursor.name);
-                  bindingCursor = bindingCursor.rest;
+                const expectedBindings = context.legacyMatchBindings;
+                if (expectedBindings === NO_MATCH ||
+                    expectedBindings === null ||
+                    typeof expectedBindings !== 'object' ||
+                    Array.isArray(expectedBindings)) {
+                  continue;
                 }
-                for (const name of expectedNames) {
-                  if (!seenNames.has(name)) {
-                    bindingsMatch = false;
-                    break;
+                const expectedNames = new Set(Object.keys(expectedBindings));
+                let bindingsMatch = false;
+                if (actualBindings === null) {
+                  bindingsMatch = expectedNames.size === 0;
+                } else {
+                  bindingsMatch = true;
+                  const seenNames = new Set();
+                  let bindingCursor = actualBindings;
+                  while (bindingCursor !== null) {
+                    if (bindingCursor === null || typeof bindingCursor !== 'object' || Array.isArray(bindingCursor)) {
+                      throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
+                    }
+                    keys = Object.keys(bindingCursor).sort();
+                    if (keys.length !== 3 || keys[0] !== 'name' || keys[1] !== 'rest' || keys[2] !== 'value') {
+                      throw new Error('SECURITY: continuationState binding cursor key set mismatch');
+                    }
+                    if (typeof bindingCursor.name !== 'string') {
+                      throw new Error('SECURITY: continuationState binding name must be string');
+                    }
+                    if (!Object.hasOwn(expectedBindings, bindingCursor.name)) {
+                      bindingsMatch = false;
+                      break;
+                    }
+                    if (muHash(bindingCursor.value) !== muHash(expectedBindings[bindingCursor.name])) {
+                      bindingsMatch = false;
+                      break;
+                    }
+                    seenNames.add(bindingCursor.name);
+                    bindingCursor = bindingCursor.rest;
+                  }
+                  for (const name of expectedNames) {
+                    if (!seenNames.has(name)) {
+                      bindingsMatch = false;
+                      break;
+                    }
                   }
                 }
-              }
-              if (bindingsMatch) {
-                successBoundToInput = true;
-                break;
+                if (bindingsMatch) {
+                  successBoundToInput = true;
+                  break;
+                }
               }
             }
             if (!successBoundToInput) {
               throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
             }
           } else if (kernelState._status === 'no_match') {
-            let anyCandidateMatches = false;
             for (const context of matchCandidates) {
-              if (stage0Match(context.projection.pattern, kernelInput._step, null) !== NO_MATCH) {
-                anyCandidateMatches = true;
-                break;
+              if (context.matchResult !== null && typeof context.matchResult === 'object' && !Array.isArray(context.matchResult)) {
+                if (context.matchResult._mode === 'match_done' && context.matchResult._status === 'success') {
+                  throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+                }
+              } else if (context.legacyMatchBindings !== NO_MATCH) {
+                throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
               }
-            }
-            if (anyCandidateMatches) {
-              throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
             }
           } else {
             throw new Error('SECURITY: continuationState match_done status mismatch');
@@ -559,7 +593,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
           if (substBodyHash !== null && context.bodyHash !== substBodyHash) {
             continue;
           }
-          if (!context.prefixCleared) {
+          if (enforcePrefixCleared && !context.prefixCleared) {
             continue;
           }
           substCandidates.push(context);
@@ -574,6 +608,26 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
               expectedBindings === null ||
               typeof expectedBindings !== 'object' ||
               Array.isArray(expectedBindings)) {
+            continue;
+          }
+          if (kernelState._mode === 'subst_done') {
+            let expectedResult = null;
+            try {
+              expectedResult = stage0Substitute(context.projection.body, expectedBindings);
+            } catch (error) {
+              const prefix = 'Unbound variable: ';
+              if (!error || typeof error.message !== 'string' || !error.message.startsWith(prefix)) {
+                throw error;
+              }
+              expectedResult = muContainers.record([
+                ['_error', 'unbound_variable'],
+                ['_name', error.message.slice(prefix.length)],
+              ]);
+            }
+            if (muHash(kernelState._result) === muHash(expectedResult)) {
+              substBoundToInput = true;
+              break;
+            }
             continue;
           }
           const expectedNames = new Set(Object.keys(expectedBindings));
@@ -719,7 +773,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
             throw new Error('SECURITY: continuationState kernel_state match_done status mismatch');
           }
         } else if (kernelState._mode === 'subst_done') {
-          throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+          expectedKernelStateKeys = ['_mode', '_result', '_subst_ctx'];
         } else {
           throw new Error('SECURITY: continuationState kernel_state mode mismatch');
         }
@@ -763,16 +817,18 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
         if (kernelStateKeys.length === 2 && kernelStateKeys[0] === '_match_ctx' && kernelStateKeys[1] === 'match') {
           minimumStepsUsed = 2;
         } else if (kernelStateKeys.length === 2 && kernelStateKeys[0] === '_subst_ctx' && kernelStateKeys[1] === 'subst') {
-          minimumStepsUsed = 6;
+          minimumStepsUsed = 5;
         } else if (Object.hasOwn(kernelState, '_mode')) {
           if (kernelState._mode === 'match_done') {
-            minimumStepsUsed = kernelState._status === 'success' ? 5 : 4;
+            minimumStepsUsed = 4;
+          } else if (kernelState._mode === 'subst_done') {
+            minimumStepsUsed = 8;
           }
         } else if (Object.hasOwn(kernelState, 'mode')) {
           if (kernelState.mode === 'match') {
             minimumStepsUsed = 3;
           } else if (kernelState.mode === 'subst') {
-            minimumStepsUsed = 7;
+            minimumStepsUsed = 6;
           }
         }
         if (minimumStepsUsed !== null && continuationState.steps_used < minimumStepsUsed) {
@@ -877,31 +933,6 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     fuelCursor = fuelCursor.tail;
   }
   stepsUsed++;
-
-  if (result !== null && typeof result === 'object' && !Array.isArray(result) &&
-      result._mode === 'subst_done' &&
-      Object.hasOwn(result, '_result') &&
-      Object.hasOwn(result, '_subst_ctx')) {
-    const output = denormalize(result._result);
-    validator(output, 'stepKernel output');
-    const canonical = {
-      output,
-      stall: false,
-      termination_reason: 'projection_applied',
-      steps_used: stepsUsed,
-      max_steps: watchdogCap,
-    };
-    if (callerSuppliedFuel) {
-      canonical.fuel_supplied = true;
-      canonical.fuel_remaining = fuelCursor;
-      canonical.fuel_exhausted = false;
-    }
-    return {
-      kind: 'terminal',
-      result: canonical,
-      continuation: null,
-    };
-  }
 
   if (isKernelTerminal(result)) {
     const stall = result._stall === true;
