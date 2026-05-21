@@ -4294,12 +4294,11 @@ class TestFinalPytestGate:
         assert kwargs["env"]["PYTHONHASHSEED"] == "0"
 
     def test_pytest_gate_ignores_non_python_test_fixtures(self):
-        selected = pb_mod._select_pytest_gate_files([  # ANTICHEAT_OK: regression for final pytest target selection
+        selected = pb_mod.select_pytest_gate_files([
             "mu/tests/fixtures/rcx_engine_state_minimal.json",
             "mu/tests/fixtures/rcx_enginenew_scheduler_operator_pool.json",
             "mu/tests/parity/test_rcx_engine_scheduler_parity.py",
             "mu/tests/structural/test_rcx_enginenew_scheduler.py",
-            "mu/tools/executors/phase_b_executor.py",
             "package/tests/test_cli.py",
             "package/tests/cli_test.py",
             "reports/test_plan.md",
@@ -4313,7 +4312,7 @@ class TestFinalPytestGate:
         ]
 
     def test_pytest_gate_includes_bootstrap_core_carveout_gate(self):
-        selected = pb_mod._select_pytest_gate_files([  # ANTICHEAT_OK: locks runtime gate mirror for bootstrap_core.js
+        selected = pb_mod.select_pytest_gate_files([
             "mu/host/js/core/bootstrap_core.js",
             "mu/tests/l4_gates/test_stage0_production_pilot_gate.py",
         ])
@@ -11200,6 +11199,116 @@ class TestSdkReviewDepthContract:
     def test_phase_b_bridge_turn_timeout_config_rejects_invalid_value(self):
         with pytest.raises(pb_mod.PhaseBExecutorError, match="Invalid bridge turn timeout"):
             pb_mod._resolve_bridge_turn_timeout({"bridge_turn_timeouts": {"phase_b": -1}}, "phase_b", 300)  # ANTICHEAT_OK: testing config resolver
+
+    def test_phase_b_pytest_gate_timeout_allows_pre_push_budget(self):
+        assert pb_mod.resolve_pytest_gate_timeout(18000) == 2400
+
+    def test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values(self):
+        assert pb_mod.resolve_pytest_gate_timeout(0) == 300
+        assert pb_mod.resolve_pytest_gate_timeout("not-a-timeout") == 300
+
+    def test_pytest_selector_hints_max_steps_guard_matrix_diff(self):
+        diff_text = """
+@@ -1826,6 +1826,9 @@ class TestEngineHelpersParity:
++# Engine actions use one outer iteration in this guard matrix because these
++# cases prove API cap validation only; deeper engine convergence has separate
++# parity coverage with small structural budgets below.
+ _MAX_STEPS_GUARDED_ACTIONS = [
+@@ -1849,7 +1849,7 @@ _MAX_STEPS_GUARDED_ACTIONS = [
+-        {"maxEngineIterations": 5},
++        {"maxEngineIterations": 1},
+@@ -1880,7 +1880,7 @@ _GUARDED_ACTION_BASE_ARGS = {
+-    "run_engine_with_routing": {"maxEngineIterations": 5},
++    "run_engine_with_routing": {"maxEngineIterations": 1},
+"""
+        assert pb_mod.pytest_selector_hints_for_diff(
+            "mu/tests/parity/test_js_parity_automated.py",
+            diff_text,
+        ) == ["mu/tests/parity/test_js_parity_automated.py::TestAPIMaxStepsGuard"]
+
+    def test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate(self, monkeypatch):
+        diff_text = """
+@@ -1849,7 +1849,10 @@ _MAX_STEPS_GUARDED_ACTIONS = [
+-        {"maxEngineIterations": 5},
++        {"maxEngineIterations": 1},
++def test_unrelated_behavior():
++    assert new_behavior
+"""
+        assert pb_mod.pytest_selector_hints_for_diff(
+            "mu/tests/parity/test_js_parity_automated.py",
+            diff_text,
+        ) == []
+
+        monkeypatch.setattr(pb_mod, "pytest_gate_diff_text", lambda repo_root, path: diff_text)
+
+        assert pb_mod.select_pytest_gate_files(
+            ["mu/tests/parity/test_js_parity_automated.py"],
+            Path("."),
+        ) == ["mu/tests/parity/test_js_parity_automated.py"]
+
+    def test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file(self, monkeypatch):
+        diff_text = """
+@@ -11260,6 +11260,10 @@ class TestSdkReviewDepthContract:
+     def test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors(self):
+         assert pb_mod.select_pytest_gate_files(["mu/tools/executors/phase_b_executor.py"]) == [
++
++    def test_new_selector_regression_not_in_hint_list(self):
++        assert False
+"""
+        assert pb_mod.pytest_selector_hints_for_diff(
+            "mu/tests/tools/test_phase_b_executor.py",
+            diff_text,
+        ) == []
+
+        monkeypatch.setattr(pb_mod, "pytest_gate_diff_text", lambda repo_root, path: diff_text)
+
+        assert pb_mod.select_pytest_gate_files(
+            ["mu/tests/tools/test_phase_b_executor.py"],
+            Path("."),
+        ) == ["mu/tests/tools/test_phase_b_executor.py"]
+
+    def test_pytest_gate_diff_text_includes_staged_and_unstaged_diff(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+        target = repo / "sample.py"
+        target.write_text("alpha\nbeta\n", encoding="utf-8")
+        subprocess.run(["git", "add", "sample.py"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+
+        target.write_text("_MAX_STEPS_GUARDED_ACTIONS\nbeta\n", encoding="utf-8")
+        subprocess.run(["git", "add", "sample.py"], cwd=repo, check=True)
+        target.write_text("_MAX_STEPS_GUARDED_ACTIONS\n_GUARDED_ACTION_BASE_ARGS\n", encoding="utf-8")
+
+        diff_text = pb_mod.pytest_gate_diff_text(repo, "sample.py")
+
+        assert "_MAX_STEPS_GUARDED_ACTIONS" in diff_text
+        assert "_GUARDED_ACTION_BASE_ARGS" in diff_text
+
+    def test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors(self):
+        assert pb_mod.select_pytest_gate_files(["mu/tools/executors/phase_b_executor.py"]) == [
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_allows_pre_push_budget",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_guard_matrix_diff",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_gate_diff_text_includes_staged_and_unstaged_diff",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors",
+        ]
+
+    def test_select_pytest_gate_files_skips_missing_targeted_executor_tests(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        executor = repo / "mu" / "tools" / "executors" / "phase_b_executor.py"
+        executor.parent.mkdir(parents=True)
+        executor.write_text("print('wave fixture')\n", encoding="utf-8")
+
+        assert pb_mod.select_pytest_gate_files(
+            ["mu/tools/executors/phase_b_executor.py"],
+            repo,
+        ) == []
 
     def test_bridge_process_snapshot_fail_open_on_permission_error(self, tmp_path, monkeypatch):
         monkeypatch.setattr(pb_mod.os, "kill", lambda pid, sig: None)

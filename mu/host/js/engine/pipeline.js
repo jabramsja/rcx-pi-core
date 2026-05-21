@@ -1183,6 +1183,7 @@ module.exports = {
   runAlgorithmWithBridge,
   runSubAlgorithm,
   hashTraceForRecurrence,
+  validateDomainBoundary: validateNoKernelReservedFields,
   serviceBoundaryEffect,
   runEnginePipeline,
   runEnginePipelineRecursive,

@@ -9,9 +9,8 @@
 const { RcxError } = require('../core/constants');
 const muContainers = require('../core/container_factory');
 const { HEMISPHERE_KEYS, HEMISPHERE_KEY_ORDER, setsEqual, defaultHemispheres, deriveEngineExitReason } = require('../core/terminal_classification');
-const { validateNoKernelReservedFields } = require('../core/security');
 const { stepKernel } = require('./kernel');
-const { runEnginePipeline, runEnginePipelineRecursive } = require('./pipeline');
+const { runEnginePipeline, runEnginePipelineRecursive, validateDomainBoundary } = require('./pipeline');
 
 const KERNEL_DRIVER_BOUNDARY_WATCHDOG = 1000;
 
@@ -30,7 +29,7 @@ function runHemisphereRouting(allProjections, hemisphereProjections, engineResul
       ['hemispheres', hemispheres],
     ])],
   ]);
-  validateNoKernelReservedFields(wrapped, 'runHemisphereRouting input');
+  validateDomainBoundary(wrapped, 'runHemisphereRouting input');
   let current = wrapped;
   const limit = 30;
   for (let i = 0; i < limit; i++) {
@@ -133,7 +132,7 @@ function runMetabolizationCycle(allProjections, metabolizeCycleProjections, hemi
       ['hemispheres', hemispheres],
     ])],
   ]);
-  validateNoKernelReservedFields(wrapped, 'runMetabolizationCycle input');
+  validateDomainBoundary(wrapped, 'runMetabolizationCycle input');
   const stepBudget = Math.max(20, 4 * entryCount + 10);
 
   let current = wrapped;

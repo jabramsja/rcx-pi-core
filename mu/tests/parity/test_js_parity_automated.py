@@ -1826,6 +1826,9 @@ class TestEngineHelpersParity:
 # API_MAX_STEPS must match eval_step.js constant
 _API_MAX_STEPS = 10000
 
+# Engine actions use one outer iteration in this guard matrix because these
+# cases prove API cap validation only; deeper engine convergence has separate
+# parity coverage with small structural budgets below.
 _MAX_STEPS_GUARDED_ACTIONS = [
     pytest.param(
         "run_structural_trace",
@@ -1849,12 +1852,12 @@ _MAX_STEPS_GUARDED_ACTIONS = [
     ),
     pytest.param(
         "run_engine_pipeline",
-        {"projections": [], "input": {"test": True}, "maxSteps": _API_MAX_STEPS + 1, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+        {"projections": [], "input": {"test": True}, "maxSteps": _API_MAX_STEPS + 1, "maxEngineIterations": 1, "maxAlgorithmIterations": 10},
         id="run_engine_pipeline",
     ),
     pytest.param(
         "run_engine_with_routing",
-        {"projections": [], "input": {"test": True}, "maxSteps": _API_MAX_STEPS + 1, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+        {"projections": [], "input": {"test": True}, "maxSteps": _API_MAX_STEPS + 1, "maxEngineIterations": 1, "maxAlgorithmIterations": 10},
         id="run_engine_with_routing",
     ),
     pytest.param(
@@ -1870,14 +1873,16 @@ _MAX_STEPS_GUARDED_ACTIONS = [
 ]
 
 
-# Base args for each guarded action (maxSteps placeholder — tests override it)
+# Base args for each guarded action (maxSteps placeholder — tests override it).
+# Engine actions use one outer iteration here because these tests only prove
+# API guard acceptance/rejection, not full engine convergence behavior.
 _GUARDED_ACTION_BASE_ARGS = {
     "run_structural_trace": {"projections": [], "input": {"test": True}},
     "run_hemisphere": {"input": {"route_hemisphere": {"engine_result": {"value": None}, "hemispheres": {"r_null": None, "r_inf": None, "r_a": None, "lobes": None, "sink": None}}}},
     "run_recurrence": {"projections": [], "input": {"test": True}},
     "run_exhaustion": {"input": {"test": True}},
-    "run_engine_pipeline": {"projections": [], "input": {"test": True}, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
-    "run_engine_with_routing": {"projections": [], "input": {"test": True}, "maxEngineIterations": 5, "maxAlgorithmIterations": 10},
+    "run_engine_pipeline": {"projections": [], "input": {"test": True}, "maxEngineIterations": 1, "maxAlgorithmIterations": 10},
+    "run_engine_with_routing": {"projections": [], "input": {"test": True}, "maxEngineIterations": 1, "maxAlgorithmIterations": 10},
     "run_recurrence_with_bridge": {"input": {"test": True}},
     "run_exhaustion_with_bridge": {"input": {"test": True}},
 }

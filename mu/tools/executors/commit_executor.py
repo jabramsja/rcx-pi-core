@@ -2660,7 +2660,56 @@ _RUNTIME_TARGETED_TESTS = {
     "mu/host/js/core/bootstrap_core.js": (
         "tests/l4_gates/test_bootstrap_core_carveout_gate.py",
     ),
+    "mu/tools/executors/commit_executor.py": (
+        "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+    ),
+    "mu/tests/tools/test_commit_executor_receipt.py": (
+        "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+    ),
+    "mu/tools/executors/phase_b_executor.py": (
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_allows_pre_push_budget",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_guard_matrix_diff",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_gate_diff_text_includes_staged_and_unstaged_diff",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_skips_missing_targeted_executor_tests",
+    ),
+    "mu/tests/tools/test_phase_b_executor.py": (
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_allows_pre_push_budget",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_guard_matrix_diff",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_gate_diff_text_includes_staged_and_unstaged_diff",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_skips_missing_targeted_executor_tests",
+    ),
 }
+
+_PYTEST_DIFF_SELECTOR_HINTS = {
+    "mu/tests/parity/test_js_parity_automated.py": (
+        (
+            ("_MAX_STEPS_GUARDED_ACTIONS", "_GUARDED_ACTION_BASE_ARGS"),
+            (
+                "maxEngineIterations",
+                "Engine actions use one outer iteration",
+                "API cap validation",
+                "deeper engine convergence",
+                "parity coverage with small structural budgets below",
+                "Base args for each guarded action",
+                "API guard acceptance/rejection",
+                "full engine convergence behavior",
+            ),
+            ("mu/tests/parity/test_js_parity_automated.py::TestAPIMaxStepsGuard",),
+        ),
+    ),
+}
+
+
+def _pytest_selector_path(selector: str) -> str:
+    return selector.split("::", 1)[0]
 
 
 def _canonical_repo_test_path(repo_root: Path, path: str) -> str:
@@ -2673,16 +2722,124 @@ def _canonical_repo_test_path(repo_root: Path, path: str) -> str:
         return normalized
 
 
+def _canonical_repo_test_selector(repo_root: Path, selector: str) -> str:
+    path, separator, suffix = selector.partition("::")
+    canonical_path = _canonical_repo_test_path(repo_root, path)
+    if not separator:
+        return canonical_path
+    return f"{canonical_path}{separator}{suffix}"
+
+
+def _pytest_gate_diff_text(repo_root: Path, path: str) -> str:
+    diff_parts: list[str] = []
+    for args in (
+        ("git", "diff", "--cached", "--", path),
+        ("git", "diff", "--", path),
+    ):
+        result = subprocess.run(
+            args,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout:
+            diff_parts.append(result.stdout)
+    return "\n".join(diff_parts)
+
+
+def _changed_diff_hunks(diff_text: str) -> list[str]:
+    hunks: list[str] = []
+    current_hunk: list[str] = []
+    for line in diff_text.splitlines():
+        if line.startswith("@@ "):
+            if current_hunk:
+                hunks.append("\n".join(current_hunk))
+            current_hunk = [line]
+        elif current_hunk:
+            current_hunk.append(line)
+    if current_hunk:
+        hunks.append("\n".join(current_hunk))
+    return [
+        hunk
+        for hunk in hunks
+        if any(
+            (line.startswith("+") and not line.startswith("+++"))
+            or (line.startswith("-") and not line.startswith("---"))
+            for line in hunk.splitlines()
+        )
+    ]
+
+
+def _changed_diff_lines(hunk: str) -> list[str]:
+    return [
+        line[1:].strip()
+        for line in hunk.splitlines()
+        if (
+            (line.startswith("+") and not line.startswith("+++"))
+            or (line.startswith("-") and not line.startswith("---"))
+        )
+    ]
+
+
+def _diff_hunks_match_only_markers(
+    diff_text: str,
+    hunk_markers: tuple[str, ...],
+    changed_line_markers: tuple[str, ...],
+) -> bool:
+    changed_hunks = _changed_diff_hunks(diff_text)
+    if not changed_hunks:
+        return False
+    if not all(any(marker in hunk for marker in hunk_markers) for hunk in changed_hunks):
+        return False
+    effective_changed_line_markers = changed_line_markers or hunk_markers
+    return all(
+        any(marker in changed_line for marker in effective_changed_line_markers)
+        for hunk in changed_hunks
+        for changed_line in _changed_diff_lines(hunk)
+    )
+
+
+def _pytest_selector_hints_for_diff(path: str, diff_text: str) -> list[str]:
+    selectors: list[str] = []
+    for hunk_markers, changed_line_markers, hinted_selectors in _PYTEST_DIFF_SELECTOR_HINTS.get(path, ()):
+        if _diff_hunks_match_only_markers(diff_text, hunk_markers, changed_line_markers):
+            selectors.extend(hinted_selectors)
+    return selectors
+
+
+def _runtime_targeted_tests_for_path(repo_root: Path, path: str) -> tuple[str, ...]:
+    candidates = _RUNTIME_TARGETED_TESTS.get(path, ())
+    return tuple(
+        selector
+        for selector in candidates
+        if (repo_root / _pytest_selector_path(selector)).exists()
+    )
+
+
 def _collect_commit_test_files(repo_root: Path, staged_files: list[str]) -> list[str]:
     """Collect staged test files and mirrored test files for staged Python code."""
     candidates: set[str] = set()
     for path in staged_files:
         normalized = path.replace("\\", "/")
-        for test_path in _RUNTIME_TARGETED_TESTS.get(normalized, ()):
-            if (repo_root / test_path).exists():
-                candidates.add(_canonical_repo_test_path(repo_root, test_path))
         if _is_test_file(normalized) and normalized.endswith(".py"):
-            candidates.add(_canonical_repo_test_path(repo_root, normalized))
+            selector_hints = _pytest_selector_hints_for_diff(
+                normalized,
+                _pytest_gate_diff_text(repo_root, normalized),
+            )
+            if selector_hints:
+                candidates.update(
+                    _canonical_repo_test_selector(repo_root, selector)
+                    for selector in selector_hints
+                    if (repo_root / _pytest_selector_path(selector)).exists()
+                )
+            else:
+                candidates.add(_canonical_repo_test_path(repo_root, normalized))
+            continue
+        targeted_tests = _runtime_targeted_tests_for_path(repo_root, normalized)
+        for test_path in targeted_tests:
+            candidates.add(_canonical_repo_test_selector(repo_root, test_path))
+        if targeted_tests:
             continue
         if not normalized.endswith(".py"):
             continue

@@ -4933,6 +4933,135 @@ class TestCommitExecutorPytestGate:
 
         assert result == ["mu/tests/tools/test_example_executor.py"]
 
+    def test_collect_commit_test_files_uses_max_steps_guard_selector_for_narrow_diff(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        test_path = "mu/tests/parity/test_js_parity_automated.py"
+        target = repo / test_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "_MAX_STEPS_GUARDED_ACTIONS = (\n"
+            "    ('run_engine_with_routing', {'maxEngineIterations': 5}),\n"
+            ")\n"
+            "_GUARDED_ACTION_BASE_ARGS = {\n"
+            "    'run_engine_with_routing': 'deeper engine convergence',\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True)
+        target.write_text(
+            "_MAX_STEPS_GUARDED_ACTIONS = (\n"
+            "    ('run_engine_with_routing', {'maxEngineIterations': 1}),\n"
+            ")\n"
+            "_GUARDED_ACTION_BASE_ARGS = {\n"
+            "    'run_engine_with_routing': 'deeper engine convergence',\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "--", test_path], cwd=repo, check=True, capture_output=True)
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: locks commit Step 8b selector narrowing
+            repo,
+            [test_path],
+        )
+
+        assert result == [
+            "mu/tests/parity/test_js_parity_automated.py::TestAPIMaxStepsGuard",
+        ]
+
+    def test_collect_commit_test_files_falls_back_to_full_file_for_mixed_parity_diff(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        test_path = "mu/tests/parity/test_js_parity_automated.py"
+        target = repo / test_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "_MAX_STEPS_GUARDED_ACTIONS = (\n"
+            "    ('run_engine_with_routing', {'maxEngineIterations': 5}),\n"
+            ")\n"
+            "UNRELATED_ASSERTION = 1\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True)
+        target.write_text(
+            "_MAX_STEPS_GUARDED_ACTIONS = (\n"
+            "    ('run_engine_with_routing', {'maxEngineIterations': 1}),\n"
+            ")\n"
+            "UNRELATED_ASSERTION = 2\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "--", test_path], cwd=repo, check=True, capture_output=True)
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: locks mixed-diff fallback behavior
+            repo,
+            [test_path],
+        )
+
+        assert result == ["mu/tests/parity/test_js_parity_automated.py"]
+
+    def test_collect_commit_test_files_targets_commit_executor_gate_class(self, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / "mu" / "tests" / "tools").mkdir(parents=True)
+        (repo / "mu" / "tests" / "tools" / "test_commit_executor_receipt.py").write_text(
+            "class TestCommitExecutorPytestGate: pass\n",
+            encoding="utf-8",
+        )
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: locks commit-executor self-test targeting
+            repo,
+            ["mu/tools/executors/commit_executor.py"],
+        )
+
+        assert result == [
+            "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+        ]
+
+    def test_collect_commit_test_files_uses_full_file_for_direct_mapped_test_file(self, tmp_path):
+        repo = tmp_path / "repo"
+        test_path = "mu/tests/tools/test_phase_b_executor.py"
+        target = repo / test_path
+        target.parent.mkdir(parents=True)
+        target.write_text(
+            "class TestSdkReviewDepthContract: pass\n"
+            "def test_unrelated_new_failure(): assert False\n",
+            encoding="utf-8",
+        )
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: direct test-file edits must not be hidden by selector maps
+            repo,
+            [test_path],
+        )
+
+        assert result == [test_path]
+
+    def test_collect_commit_test_files_targets_phase_b_executor_selectors(self, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / "mu" / "tests" / "tools").mkdir(parents=True)
+        (repo / "mu" / "tests" / "tools" / "test_phase_b_executor.py").write_text(
+            "class TestSdkReviewDepthContract: pass\n",
+            encoding="utf-8",
+        )
+
+        result = commit_mod._collect_commit_test_files(  # ANTICHEAT_OK: locks Phase B executor recovery selectors
+            repo,
+            ["mu/tools/executors/phase_b_executor.py"],
+        )
+
+        assert result == [
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_allows_pre_push_budget",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_gate_diff_text_includes_staged_and_unstaged_diff",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_guard_matrix_diff",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_skips_missing_targeted_executor_tests",
+            "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors",
+        ]
+
     def test_run_commit_pipeline_blocks_on_targeted_pytest_failure(self, tmp_path):
         from collections import namedtuple
         import types

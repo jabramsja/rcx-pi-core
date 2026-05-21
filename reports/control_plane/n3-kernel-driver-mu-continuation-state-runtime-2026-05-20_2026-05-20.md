@@ -30,6 +30,50 @@ convergence, is limited to the predecessor packet's locked write set:
 The runtime goal is to implement the Mu-owned kernel-driver continuation-state
 boundary in Python and JavaScript while preserving public behavior and parity.
 
+## Post-commit pre-push repair addendum
+
+After commit continuation resumed, the commit executor reached pre-push-fast and
+failed on two gates before the push path:
+
+- `tests/structural/test_engine_pipeline_discipline.py::TestJsEnginePipelineShapeGovernance::test_dependency_direction_and_boundary_authority`
+  because `mu/host/js/engine/routing.js` imported `../core/security` directly.
+- `tests/parity/test_js_parity_automated.py::TestAPIMaxStepsGuard::test_max_steps_at_cap_accepted[run_engine_with_routing]`
+  because the guard-only fixture spent the API timeout budget driving five
+  Boot1 engine iterations even though that test only proves maxSteps cap
+  acceptance/rejection.
+
+Same-wave repair scope is limited to `mu/host/js/cli/main.js`,
+`mu/host/js/engine/pipeline.js`, `mu/host/js/engine/routing.js`,
+`mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py`,
+`mu/tests/parity/test_js_parity_automated.py`, `mu/tools/executors/phase_b_executor.py`,
+`mu/tests/tools/test_phase_b_executor.py`, `mu/tools/executors/commit_executor.py`,
+`mu/tests/tools/test_commit_executor_receipt.py`, `TASKS.md`, and this packet. The repair
+does not change `KernelDriverStepPacket` or `KernelDriverContinuationState`
+semantics: JSON API dispatch now avoids the human CLI self-test side effect,
+routing delegates reserved-field validation through the existing pipeline
+boundary authority, maxSteps guard fixtures remain scoped to API validation
+rather than deeper engine convergence, and the Phase B final pytest timeout cap
+now matches the repo's pre-push-fast budget so broad parity gates are not
+short-circuited by the pipeline. The Phase B final pytest selector also maps
+the maxSteps guard-matrix diff to `TestAPIMaxStepsGuard`, so unrelated slow
+property fuzzers do not block a guard-only repair while other edits still fall
+back to the broader file-level gate.
+
+After Phase B converged on that selector repair, commit executor Step 8b still
+replayed the full JS parity file and full executor test modules for the staged
+package and timed out at the 720-second targeted-pytest budget. The same-wave
+commit-executor repair mirrors Phase B's selector hints in the commit gate:
+maxSteps guard-matrix diffs now select `TestAPIMaxStepsGuard`, explicit
+commit/Phase-B executor mappings select the relevant recovery test classes or
+methods, and direct edits to those test modules no longer fall back to full-file
+execution when a selector mapping exists. This is a pipeline recovery fix only;
+it does not alter runtime packet semantics, routing semantics, continuation
+state, or substrate authority. Bridge Round 1 repair also adds the newly staged
+`test_select_pytest_gate_files_skips_missing_targeted_executor_tests` Phase B
+selector regression to commit Step 8b's targeted selector list, so the
+missing-targeted-test guard runs with the narrowed commit gate instead of being
+skipped.
+
 ## Work items
 
 1. Implement the cross-substrate `KernelDriverStepPacket` contract with one

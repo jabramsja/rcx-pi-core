@@ -44,6 +44,7 @@ JS_KERNEL_PATH = REPO_ROOT / "mu" / "host" / "js" / "engine" / "kernel.js"
 JS_NORMALIZE_PATH = REPO_ROOT / "mu" / "host" / "js" / "core" / "normalize.js"
 JS_PIPELINE_PATH = REPO_ROOT / "mu" / "host" / "js" / "engine" / "pipeline.js"
 JS_ROUTING_PATH = REPO_ROOT / "mu" / "host" / "js" / "engine" / "routing.js"
+JS_CLI_MAIN_PATH = REPO_ROOT / "mu" / "host" / "js" / "cli" / "main.js"
 STEP_MU_PATH = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
 
 
@@ -213,10 +214,11 @@ class TestJSOuterLoopBoundary:
         self._check_js_function_boundary(JS_PIPELINE_PATH, "runEnginePipelineRecursive")
 
     def test_js_routing_continuation_driver_is_bounded_packet_boundary(self):
-        """Routing/metabolization must drive explicit packets without default 10000-step laundering."""
+        """Routing/metabolization must drive explicit packets through kernel domain validation."""
         routing_lines = JS_ROUTING_PATH.read_text().splitlines()
         routing_text = "\n".join(routing_lines)
         assert "const KERNEL_DRIVER_BOUNDARY_WATCHDOG = 1000;" in routing_text
+        assert "../core/security" not in routing_text
 
         for func_name in ("runHemisphereRouting", "runMetabolizationCycle"):
             for i, line in enumerate(routing_lines):
@@ -226,12 +228,38 @@ class TestJSOuterLoopBoundary:
             else:
                 pytest.fail(f"JS {func_name}() function not found in routing.js")
 
-            assert "validateNoKernelReservedFields(wrapped" in body
+            assert "validateNoKernelReservedFields(wrapped" not in body
+            assert "validateDomainBoundary(wrapped" in body
             assert "returnPacket: true" in body
             assert "continuationState: packet.continuation" in body
             assert "validationMode: 'algorithm_runtime'" in body
             assert "maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG" in body
             assert "maxSteps: 10000" not in body
+
+    def test_json_api_dispatch_does_not_run_cli_self_tests(self):
+        """JSON API parity calls must not pay the human CLI self-test suite."""
+        request = {
+            "action": "step_kernel_meta",
+            "input": "a",
+            "projections": [{"id": "test.rewrite", "pattern": "a", "body": "b"}],
+            "maxSteps": 1,
+        }
+        result = subprocess.run(
+            ["node", "mu/host/js/eval_step.js", "--json-api", json.dumps(request)],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "JSON_API_RESPONSE:" in result.stdout
+        assert "Same projections, same semantics" not in result.stdout
+        assert "All tests passed" not in result.stdout
+
+    def test_json_api_dispatch_precedes_self_tests_in_cli_main(self):
+        """Source lock: cli/main.js dispatches JSON API before requiring self_tests."""
+        source = JS_CLI_MAIN_PATH.read_text(encoding="utf-8")
+        json_idx = source.index("if (process.argv.includes('--json-api'))")
+        self_tests_require_idx = source.index("require('../tests/self_tests')")
+        self_tests_call_idx = source.index("runSelfTests(seedsContext)")
+        assert json_idx < self_tests_require_idx < self_tests_call_idx
 
     def test_js_active_kernel_core_is_single_step_packet_boundary(self):
         """JS _stepKernelCore returns one terminal-or-continuation packet per call."""

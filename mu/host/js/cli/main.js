@@ -5,8 +5,8 @@
  * This is the runtime entrypoint. When executed directly or via eval_step.js shim:
  *   1. Loads and verifies 12 seeds at startup (+ registered lazy/runtime seeds on demand)
  *   2. Composes projection arrays
- *   3. Runs self-tests (console output with "All tests passed: true")
- *   4. If --json-api in process.argv, delegates to api/json_handlers.js
+ *   3. If --json-api in process.argv, delegates to api/json_handlers.js
+ *   4. Otherwise runs self-tests (console output with "All tests passed: true")
  *
  * BOOTSTRAP_PRIMITIVE: projection_loader
  * (fs.readFileSync is the irreducible I/O primitive)
@@ -203,13 +203,14 @@ const seedsContext = {
   stage0VmStep, muDeepEqual,
 };
 
-// Run self-tests
-const runSelfTests = require('../tests/self_tests');
-runSelfTests(seedsContext);
-
 // JSON API mode
 if (process.argv.includes('--json-api')) {
   const apiArg = process.argv[process.argv.indexOf('--json-api') + 1];
   const { handleJsonApi } = require('../api/json_handlers');
   handleJsonApi(apiArg, seedsContext);
+} else {
+  // Run self-tests for the human CLI path only. JSON API parity calls need the
+  // same loaded seed context without paying the diagnostic self-test suite.
+  const runSelfTests = require('../tests/self_tests');
+  runSelfTests(seedsContext);
 }

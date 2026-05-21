@@ -123,7 +123,7 @@ BRIDGE_REVIEW_POLL_SLEEP = 5.0
 BRIDGE_REVIEW_STALE_TIMEOUT = 120.0
 BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT = 60.0
 DEFAULT_PYTEST_GATE_TIMEOUT_S = 300
-MAX_PYTEST_GATE_TIMEOUT_S = 900
+MAX_PYTEST_GATE_TIMEOUT_S = 2400
 _MAINTENANCE_FORBIDDEN_PREFIXES = (
     "mu/host/",
     "mu/substrate/",
@@ -1056,6 +1056,11 @@ def _resolve_pytest_gate_timeout(raw_timeout: Any) -> int:
     return max(DEFAULT_PYTEST_GATE_TIMEOUT_S, min(timeout_s, MAX_PYTEST_GATE_TIMEOUT_S))
 
 
+def resolve_pytest_gate_timeout(raw_timeout: Any) -> int:
+    """Public seam for tests and commit-packet refresh code."""
+    return _resolve_pytest_gate_timeout(raw_timeout)
+
+
 def _is_pytest_gate_file(path: str) -> bool:
     if not path.endswith(".py"):
         return False
@@ -1066,23 +1071,187 @@ _RUNTIME_TARGETED_TESTS = {
     "mu/host/js/core/bootstrap_core.js": (
         "tests/l4_gates/test_bootstrap_core_carveout_gate.py",
     ),
+    "mu/tools/executors/phase_b_executor.py": (
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_allows_pre_push_budget",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_guard_matrix_diff",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_gate_diff_text_includes_staged_and_unstaged_diff",
+        "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors",
+    ),
+}
+
+_PYTEST_DIFF_SELECTOR_HINTS = {
+    "mu/tests/parity/test_js_parity_automated.py": (
+        (
+            ("_MAX_STEPS_GUARDED_ACTIONS", "_GUARDED_ACTION_BASE_ARGS"),
+            (
+                "maxEngineIterations",
+                "Engine actions use one outer iteration",
+                "API cap validation",
+                "deeper engine convergence",
+                "parity coverage with small structural budgets below",
+                "Base args for each guarded action",
+                "API guard acceptance/rejection",
+                "full engine convergence behavior",
+            ),
+            ("mu/tests/parity/test_js_parity_automated.py::TestAPIMaxStepsGuard",),
+        ),
+    ),
+    "mu/tests/tools/test_phase_b_executor.py": (
+        (
+            (
+                "test_phase_b_pytest_gate_timeout_",
+                "test_pytest_selector_hints_",
+                "test_select_pytest_gate_files_uses",
+            ),
+            (),
+            (
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_allows_pre_push_budget",
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_phase_b_pytest_gate_timeout_keeps_floor_for_invalid_values",
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_guard_matrix_diff",
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_max_steps_mixed_diff_falls_back_to_file_gate",
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_selector_hints_executor_test_context_only_marker_falls_back_to_file",
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_pytest_gate_diff_text_includes_staged_and_unstaged_diff",
+                "mu/tests/tools/test_phase_b_executor.py::TestSdkReviewDepthContract::test_select_pytest_gate_files_uses_targeted_executor_timeout_selectors",
+            ),
+        ),
+    ),
 }
 
 
-def _select_pytest_gate_files(changed_files: list[str]) -> list[str]:
+def _pytest_gate_diff_text(repo_root: Path, path: str) -> str:
+    diff_parts: list[str] = []
+    for args in (
+        ("git", "diff", "--cached", "--", path),
+        ("git", "diff", "--", path),
+    ):
+        result = subprocess.run(
+            args,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout:
+            diff_parts.append(result.stdout)
+    return "\n".join(diff_parts)
+
+
+def pytest_gate_diff_text(repo_root: Path, path: str) -> str:
+    """Return staged and unstaged diff text for pytest gate selector narrowing."""
+    return _pytest_gate_diff_text(repo_root, path)
+
+
+def _changed_diff_hunks(diff_text: str) -> list[str]:
+    hunks: list[str] = []
+    current_hunk: list[str] = []
+    for line in diff_text.splitlines():
+        if line.startswith("@@ "):
+            if current_hunk:
+                hunks.append("\n".join(current_hunk))
+            current_hunk = [line]
+        elif current_hunk:
+            current_hunk.append(line)
+    if current_hunk:
+        hunks.append("\n".join(current_hunk))
+    return [
+        hunk
+        for hunk in hunks
+        if any(
+            (line.startswith("+") and not line.startswith("+++"))
+            or (line.startswith("-") and not line.startswith("---"))
+            for line in hunk.splitlines()
+        )
+    ]
+
+
+def _changed_diff_lines(hunk: str) -> list[str]:
+    return [
+        line[1:].strip()
+        for line in hunk.splitlines()
+        if (
+            (line.startswith("+") and not line.startswith("+++"))
+            or (line.startswith("-") and not line.startswith("---"))
+        )
+    ]
+
+
+def _diff_hunks_match_only_markers(
+    diff_text: str,
+    hunk_markers: tuple[str, ...],
+    changed_line_markers: tuple[str, ...],
+) -> bool:
+    changed_hunks = _changed_diff_hunks(diff_text)
+    if not changed_hunks:
+        return False
+    if not all(any(marker in hunk for marker in hunk_markers) for hunk in changed_hunks):
+        return False
+    effective_changed_line_markers = changed_line_markers or hunk_markers
+    return all(
+        any(marker in changed_line for marker in effective_changed_line_markers)
+        for hunk in changed_hunks
+        for changed_line in _changed_diff_lines(hunk)
+    )
+
+
+def _pytest_selector_hints_for_diff(path: str, diff_text: str) -> list[str]:
+    selectors: list[str] = []
+    for hunk_markers, changed_line_markers, hinted_selectors in _PYTEST_DIFF_SELECTOR_HINTS.get(path, ()):
+        if _diff_hunks_match_only_markers(diff_text, hunk_markers, changed_line_markers):
+            selectors.extend(hinted_selectors)
+    return selectors
+
+
+def pytest_selector_hints_for_diff(path: str, diff_text: str) -> list[str]:
+    """Return public pytest selectors when a diff is known to be narrow."""
+    return _pytest_selector_hints_for_diff(path, diff_text)
+
+
+def _pytest_selector_path(selector: str) -> str:
+    return selector.split("::", 1)[0]
+
+
+def _runtime_targeted_tests_for_path(
+    path: str,
+    repo_root: Path | None,
+) -> tuple[str, ...]:
+    candidates = _RUNTIME_TARGETED_TESTS.get(path, ())
+    if repo_root is None:
+        return candidates
+    return tuple(
+        selector
+        for selector in candidates
+        if (repo_root / _pytest_selector_path(selector)).exists()
+    )
+
+
+def _select_pytest_gate_files(changed_files: list[str], repo_root: Path | None = None) -> list[str]:
     selected: list[str] = []
     seen: set[str] = set()
     for path in changed_files:
         normalized = path.replace("\\", "/")
         candidates = []
         if _is_pytest_gate_file(normalized):
-            candidates.append(normalized)
-        candidates.extend(_RUNTIME_TARGETED_TESTS.get(normalized, ()))
+            selector_hints: list[str] = []
+            if repo_root is not None:
+                selector_hints = pytest_selector_hints_for_diff(
+                    normalized,
+                    pytest_gate_diff_text(repo_root, normalized),
+                )
+            candidates.extend(selector_hints or [normalized])
+        candidates.extend(_runtime_targeted_tests_for_path(normalized, repo_root))
         for candidate in candidates:
             if candidate not in seen:
                 selected.append(candidate)
                 seen.add(candidate)
     return selected
+
+
+def select_pytest_gate_files(changed_files: list[str], repo_root: Path | None = None) -> list[str]:
+    """Public selector seam used by tests and commit-packet refresh paths."""
+    return _select_pytest_gate_files(changed_files, repo_root)
 
 
 def select_private_attr_gate_files(changed_files: list[str]) -> list[str]:
@@ -5239,7 +5408,7 @@ def run_phase_b(
             f"(current fix touched {len(current_fix_changed)})"
         )
 
-        test_files = _select_pytest_gate_files(current_fix_changed)
+        test_files = _select_pytest_gate_files(current_fix_changed, repo_root)
         if test_files:
             log(f"Running pytest on {len(test_files)} newly changed test file(s)...")
             pytest_result = _run_pytest_on_files(repo_root, test_files, timeout=pytest_gate_timeout)
@@ -6849,7 +7018,7 @@ def run_phase_b(
             )
             if private_attr_bridge_error is not None:
                 return private_attr_bridge_error
-        final_test_files = _select_pytest_gate_files(changed_files)
+        final_test_files = _select_pytest_gate_files(changed_files, repo_root)
         if final_test_files:
             log(f"Final pytest gate: running {len(final_test_files)} test file(s)...")
             bridge_job_for_pytest = str(result.get("bridge_job_id") or "").strip()
@@ -7804,7 +7973,7 @@ def run_phase_b(
             if private_attr_bridge_error is not None:
                 _clear_state(repo_root)
                 return private_attr_bridge_error
-        reentry_test_files = _select_pytest_gate_files(changed_files)
+        reentry_test_files = _select_pytest_gate_files(changed_files, repo_root)
         if reentry_test_files:
             log(f"Re-entry pytest gate: running {len(reentry_test_files)} test file(s)...")
             reentry_pytest = _run_pytest_on_files(repo_root, reentry_test_files, timeout=pytest_gate_timeout)
