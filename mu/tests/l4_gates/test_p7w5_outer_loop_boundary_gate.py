@@ -43,6 +43,7 @@ JS_BOOTSTRAP_PATH = REPO_ROOT / "mu" / "host" / "js" / "core" / "bootstrap_core.
 JS_KERNEL_PATH = REPO_ROOT / "mu" / "host" / "js" / "engine" / "kernel.js"
 JS_NORMALIZE_PATH = REPO_ROOT / "mu" / "host" / "js" / "core" / "normalize.js"
 JS_PIPELINE_PATH = REPO_ROOT / "mu" / "host" / "js" / "engine" / "pipeline.js"
+JS_ROUTING_PATH = REPO_ROOT / "mu" / "host" / "js" / "engine" / "routing.js"
 STEP_MU_PATH = REPO_ROOT / "mu" / "host" / "python" / "rcx_pi" / "selfhost" / "step_mu.py"
 
 
@@ -210,6 +211,27 @@ class TestJSOuterLoopBoundary:
 
     def test_js_run_engine_pipeline_recursive_boundary(self):
         self._check_js_function_boundary(JS_PIPELINE_PATH, "runEnginePipelineRecursive")
+
+    def test_js_routing_continuation_driver_is_bounded_packet_boundary(self):
+        """Routing/metabolization must drive explicit packets without default 10000-step laundering."""
+        routing_lines = JS_ROUTING_PATH.read_text().splitlines()
+        routing_text = "\n".join(routing_lines)
+        assert "const KERNEL_DRIVER_BOUNDARY_WATCHDOG = 1000;" in routing_text
+
+        for func_name in ("runHemisphereRouting", "runMetabolizationCycle"):
+            for i, line in enumerate(routing_lines):
+                if f"function {func_name}(" in line:
+                    body = _js_function_body(routing_lines, i)
+                    break
+            else:
+                pytest.fail(f"JS {func_name}() function not found in routing.js")
+
+            assert "validateNoKernelReservedFields(wrapped" in body
+            assert "returnPacket: true" in body
+            assert "continuationState: packet.continuation" in body
+            assert "validationMode: 'algorithm_runtime'" in body
+            assert "maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG" in body
+            assert "maxSteps: 10000" not in body
 
     def test_js_active_kernel_core_is_single_step_packet_boundary(self):
         """JS _stepKernelCore returns one terminal-or-continuation packet per call."""

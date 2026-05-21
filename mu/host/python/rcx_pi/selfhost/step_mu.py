@@ -1330,9 +1330,9 @@ def step_kernel_mu(
     if watchdog_steps < 0:
         raise ValueError(f"SECURITY: max_steps must be >= 0, got {watchdog_steps}")
     max_steps = watchdog_steps
-    if not isinstance(return_meta, bool):  # AST_OK:infra - compatibility guard
+    if not isinstance(return_meta, bool):  # AST_OK: boundary - compatibility guard
         raise TypeError("SECURITY: return_meta must be bool")
-    if not isinstance(return_packet, bool):  # AST_OK:infra - compatibility guard
+    if not isinstance(return_packet, bool):  # AST_OK: boundary - compatibility guard
         raise TypeError("SECURITY: return_packet must be bool")
     if continuation_state is not None and kernel_fuel is not _KERNEL_FUEL_UNSET:
         raise ValueError("SECURITY: continuation_state carries remaining_fuel; do not also pass kernel_fuel")
@@ -1433,27 +1433,27 @@ def step_kernel_mu(
         domain_input = input_value
     else:
         assert_mu(continuation_state, "step_kernel_mu.continuation_state")
-        if not isinstance(continuation_state, dict):  # AST_OK:infra - continuation shape guard
+        if not isinstance(continuation_state, dict):  # AST_OK: boundary - continuation shape guard
             raise TypeError("SECURITY: continuation_state must be a Mu dict")
         if set(continuation_state.keys()) != _KERNEL_DRIVER_CONTINUATION_KEYS:
             raise ValueError("SECURITY: continuation_state key set mismatch")
         if continuation_state.get("tag") != "kernel_driver_continuation_state":
             raise ValueError("SECURITY: continuation_state tag mismatch")
         continuation_version = continuation_state.get("version")
-        if isinstance(continuation_version, bool) or continuation_version != 1:  # AST_OK:infra - JS parity guard
+        if isinstance(continuation_version, bool) or continuation_version != 1:  # AST_OK: boundary - JS parity guard
             raise ValueError("SECURITY: continuation_state version mismatch")
         fuel_mode = continuation_state.get("fuel_mode")
         if fuel_mode not in ("explicit", "omitted_compatibility"):
             raise ValueError("SECURITY: continuation_state fuel_mode mismatch")
         raw_steps_used = continuation_state.get("steps_used")
-        if isinstance(raw_steps_used, bool) or not isinstance(raw_steps_used, int):  # AST_OK:infra - continuation shape guard
+        if isinstance(raw_steps_used, bool) or not isinstance(raw_steps_used, int):  # AST_OK: boundary - continuation shape guard
             raise TypeError("SECURITY: continuation_state.steps_used must be a non-negative integer")
         if raw_steps_used < 0:
             raise ValueError("SECURITY: continuation_state.steps_used must be >= 0")
         raw_watchdog_cap = continuation_state.get("watchdog_cap")
         if raw_watchdog_cap is None:
             raise ValueError("SECURITY: continuation_state.watchdog_cap must match supplied max_steps")
-        if isinstance(raw_watchdog_cap, bool) or not isinstance(raw_watchdog_cap, int):  # AST_OK:infra - continuation shape guard
+        if isinstance(raw_watchdog_cap, bool) or not isinstance(raw_watchdog_cap, int):  # AST_OK: boundary - continuation shape guard
             raise TypeError("SECURITY: continuation_state.watchdog_cap must be a non-negative integer")
         if raw_watchdog_cap < 0:
             raise ValueError("SECURITY: continuation_state.watchdog_cap must be >= 0")
@@ -1461,34 +1461,34 @@ def step_kernel_mu(
             raise ValueError("SECURITY: continuation_state.watchdog_cap must match supplied max_steps")
         projection_cursor = continuation_state.get("projection_cursor")
         if projection_cursor is not None:
-            if not isinstance(projection_cursor, dict):  # AST_OK:infra - continuation shape guard
+            if not isinstance(projection_cursor, dict):  # AST_OK: boundary - continuation shape guard
                 raise TypeError("SECURITY: projection_cursor must be a Mu dict or null")
             if set(projection_cursor.keys()) != _KERNEL_PROJECTION_CURSOR_KEYS:
                 raise ValueError("SECURITY: projection_cursor key set mismatch")
             if projection_cursor.get("tag") != "kernel_projection_cursor":
                 raise ValueError("SECURITY: projection_cursor tag mismatch")
             projection_cursor_version = projection_cursor.get("version")
-            if isinstance(projection_cursor_version, bool) or projection_cursor_version != 1:  # AST_OK:infra - JS parity guard
+            if isinstance(projection_cursor_version, bool) or projection_cursor_version != 1:  # AST_OK: boundary - JS parity guard
                 raise ValueError("SECURITY: projection_cursor version mismatch")
             cursor_position = projection_cursor.get("position")
-            if isinstance(cursor_position, bool) or not isinstance(cursor_position, int):  # AST_OK:infra - continuation shape guard
+            if isinstance(cursor_position, bool) or not isinstance(cursor_position, int):  # AST_OK: boundary - continuation shape guard
                 raise TypeError("SECURITY: projection_cursor.position must be a non-negative integer")
             if cursor_position < 0:
                 raise ValueError("SECURITY: projection_cursor.position must be >= 0")
-            if not isinstance(projection_cursor.get("exhausted"), bool):  # AST_OK:infra - continuation shape guard
+            if not isinstance(projection_cursor.get("exhausted"), bool):  # AST_OK: boundary - continuation shape guard
                 raise TypeError("SECURITY: projection_cursor.exhausted must be bool")
         terminal = continuation_state.get("terminal")
-        if not isinstance(terminal, dict):  # AST_OK:infra - continuation shape guard
+        if not isinstance(terminal, dict):  # AST_OK: boundary - continuation shape guard
             raise TypeError("SECURITY: continuation terminal metadata must be a Mu dict")
         if set(terminal.keys()) != _KERNEL_TERMINAL_METADATA_KEYS:
             raise ValueError("SECURITY: continuation terminal metadata key set mismatch")
-        if not isinstance(terminal.get("reached"), bool):  # AST_OK:infra - continuation shape guard
+        if not isinstance(terminal.get("reached"), bool):  # AST_OK: boundary - continuation shape guard
             raise TypeError("SECURITY: continuation terminal.reached must be bool")
         reason = terminal.get("reason")
         if reason is not None and reason not in _KERNEL_TERMINAL_REASONS:
             raise ValueError("SECURITY: continuation terminal.reason mismatch")
         error = terminal.get("error")
-        if error is not None and not isinstance(error, str):  # AST_OK:infra - continuation shape guard
+        if error is not None and not isinstance(error, str):  # AST_OK: boundary - continuation shape guard
             raise TypeError("SECURITY: continuation terminal.error must be string or null")
         remaining_fuel = continuation_state.get("remaining_fuel")
         if fuel_mode == "explicit":
@@ -1519,13 +1519,13 @@ def step_kernel_mu(
         projection_authority_cursor = kernel_entry["_projs"]
         while projection_authority_cursor is not None:
             if (
-                not isinstance(projection_authority_cursor, dict)  # AST_OK:infra - Mu linked-list authority guard
+                not isinstance(projection_authority_cursor, dict)  # AST_OK: boundary - Mu linked-list authority guard
                 or set(projection_authority_cursor.keys()) != {"head", "tail"}
             ):
                 raise TypeError("SECURITY: kernel projection cursor must be a Mu head/tail linked list")
             projection_authority = projection_authority_cursor["head"]
             if (
-                not isinstance(projection_authority, dict)  # AST_OK:infra - normalized projection authority guard
+                not isinstance(projection_authority, dict)  # AST_OK: boundary - normalized projection authority guard
                 or set(projection_authority.keys()) != _KERNEL_PROJECTION_KEYS
             ):
                 raise TypeError("SECURITY: kernel projection cursor head must be a normalized projection")
@@ -1563,7 +1563,7 @@ def step_kernel_mu(
             if (
                 validation_mode == "domain"
                 and
-                isinstance(match_result, dict)  # AST_OK:infra - VM match terminal guard
+                isinstance(match_result, dict)  # AST_OK: boundary - VM match terminal guard
                 and match_result.get("_mode") == "match_done"
                 and match_result.get("_status") == "success"
             ):
@@ -1572,7 +1572,7 @@ def step_kernel_mu(
         exhausted_prefix_cleared = not prefix_has_match
 
         kernel_state = continuation_state["kernel_state"]
-        kernel_state_is_object = isinstance(kernel_state, dict)  # AST_OK:infra - continuation phase authority guard
+        kernel_state_is_object = isinstance(kernel_state, dict)  # AST_OK: boundary - continuation phase authority guard
         if not kernel_state_is_object:
             # Scalar Mu states can only come from the defensive hash-stall path:
             # they carry no projection authority and must resume as cursorless,
@@ -1595,7 +1595,7 @@ def step_kernel_mu(
         if kernel_state_is_object and is_kernel_terminal(kernel_state):
             raise ValueError("SECURITY: continuation_state kernel_state must be nonterminal")
         if (
-            isinstance(kernel_state, dict)  # AST_OK:infra - continuation phase authority guard
+            isinstance(kernel_state, dict)  # AST_OK: boundary - continuation phase authority guard
             and kernel_state.get("_mode") == "kernel"
             and kernel_state.get("_phase") == "try"
         ):
@@ -1607,7 +1607,7 @@ def step_kernel_mu(
                 remaining_cursor_bound = exhausted_prefix_cleared
             else:
                 if (
-                    not isinstance(remaining_cursor, dict)  # AST_OK:infra - Mu linked-list authority guard
+                    not isinstance(remaining_cursor, dict)  # AST_OK: boundary - Mu linked-list authority guard
                     or set(remaining_cursor.keys()) != {"head", "tail"}
                 ):
                     raise TypeError("SECURITY: continuation_state kernel projection cursor must be a Mu head/tail list")
@@ -1621,11 +1621,11 @@ def step_kernel_mu(
                         break
             if not remaining_cursor_bound:
                 raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
-        if isinstance(kernel_state, dict):  # AST_OK:infra - continuation phase authority guard
+        if isinstance(kernel_state, dict):  # AST_OK: boundary - continuation phase authority guard
             kernel_state_keys = set(kernel_state.keys())
             if "_match_ctx" in kernel_state:
                 match_ctx = kernel_state["_match_ctx"]
-                if not isinstance(match_ctx, dict):  # AST_OK:infra - continuation phase authority guard
+                if not isinstance(match_ctx, dict):  # AST_OK: boundary - continuation phase authority guard
                     raise TypeError("SECURITY: continuation_state _match_ctx must be a Mu dict")
                 if set(match_ctx.keys()) != _KERNEL_MATCH_CTX_KEYS:
                     raise ValueError("SECURITY: continuation_state _match_ctx key set mismatch")
@@ -1645,7 +1645,7 @@ def step_kernel_mu(
                     raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
                 if "match" in kernel_state:
                     match_request = kernel_state["match"]
-                    if not isinstance(match_request, dict):  # AST_OK:infra - continuation phase authority guard
+                    if not isinstance(match_request, dict):  # AST_OK: boundary - continuation phase authority guard
                         raise TypeError("SECURITY: continuation_state match request must be a Mu dict")
                     if set(match_request.keys()) != _KERNEL_MATCH_REQUEST_KEYS:
                         raise ValueError("SECURITY: continuation_state match request key set mismatch")
@@ -1672,7 +1672,7 @@ def step_kernel_mu(
                     for context in match_candidates:
                         match_result = context["match_result"]
                         if (
-                            not isinstance(match_result, dict)  # AST_OK:infra - VM match terminal guard
+                            not isinstance(match_result, dict)  # AST_OK: boundary - VM match terminal guard
                             or match_result.get("_mode") != "match_done"
                             or match_result.get("_status") != "success"
                         ):
@@ -1692,7 +1692,7 @@ def step_kernel_mu(
                         for context in match_candidates:
                             match_result = context["match_result"]
                             if (
-                                not isinstance(match_result, dict)  # AST_OK:infra - VM match terminal guard
+                                not isinstance(match_result, dict)  # AST_OK: boundary - VM match terminal guard
                                 or match_result.get("_mode") != "match_done"
                                 or match_result.get("_status") != "success"
                             ):
@@ -1712,7 +1712,7 @@ def step_kernel_mu(
                             for context in match_candidates:
                                 match_result = context["match_result"]
                                 if (
-                                    isinstance(match_result, dict)  # AST_OK:infra - VM match terminal guard
+                                    isinstance(match_result, dict)  # AST_OK: boundary - VM match terminal guard
                                     and match_result.get("_mode") == "match_done"
                                     and match_result.get("_status") == "success"
                                 ):
@@ -1722,7 +1722,7 @@ def step_kernel_mu(
 
             if "_subst_ctx" in kernel_state:
                 subst_ctx = kernel_state["_subst_ctx"]
-                if not isinstance(subst_ctx, dict):  # AST_OK:infra - continuation phase authority guard
+                if not isinstance(subst_ctx, dict):  # AST_OK: boundary - continuation phase authority guard
                     raise TypeError("SECURITY: continuation_state _subst_ctx must be a Mu dict")
                 if set(subst_ctx.keys()) != _KERNEL_SUBST_CTX_KEYS:
                     raise ValueError("SECURITY: continuation_state _subst_ctx key set mismatch")
@@ -1732,7 +1732,7 @@ def step_kernel_mu(
                 subst_bindings = None
                 if "subst" in kernel_state:
                     subst_request = kernel_state["subst"]
-                    if not isinstance(subst_request, dict):  # AST_OK:infra - continuation phase authority guard
+                    if not isinstance(subst_request, dict):  # AST_OK: boundary - continuation phase authority guard
                         raise TypeError("SECURITY: continuation_state subst request must be a Mu dict")
                     if set(subst_request.keys()) != _KERNEL_SUBST_REQUEST_KEYS:
                         raise ValueError("SECURITY: continuation_state subst request key set mismatch")
@@ -1757,7 +1757,7 @@ def step_kernel_mu(
                 for context in subst_candidates:
                     match_result = context["match_result"]
                     if (
-                        not isinstance(match_result, dict)  # AST_OK:infra - VM match terminal guard
+                        not isinstance(match_result, dict)  # AST_OK: boundary - VM match terminal guard
                         or match_result.get("_mode") != "match_done"
                         or match_result.get("_status") != "success"
                     ):
@@ -1779,7 +1779,7 @@ def step_kernel_mu(
                         terminal_value="subst_done",
                     )
                     expected_subst = subst_outcome["root"] if subst_outcome["status"] == "terminal" else None
-                    if not isinstance(expected_subst, dict) or expected_subst.get("_mode") != "subst_done":  # AST_OK:infra - VM subst terminal guard
+                    if not isinstance(expected_subst, dict) or expected_subst.get("_mode") != "subst_done":  # AST_OK: boundary - VM subst terminal guard
                         continue
                     if kernel_state.get("_mode") == "subst_done":
                         if mu_hash(kernel_state.get("_result")) == mu_hash(expected_subst["_result"]):
@@ -1816,7 +1816,7 @@ def step_kernel_mu(
             state_nodes = [kernel_state]
             while state_nodes:
                 state_node = state_nodes.pop()
-                if not isinstance(state_node, dict):  # AST_OK:infra - Mu state authority traversal
+                if not isinstance(state_node, dict):  # AST_OK: boundary - Mu state authority traversal
                     continue
                 state_node_keys = set(state_node.keys())
                 if state_node_keys == _KERNEL_PROJECTION_KEYS and mu_hash(state_node) not in projection_hashes:
@@ -1827,7 +1827,7 @@ def step_kernel_mu(
                     projection_cursor = state_node[projection_cursor_key]
                     while projection_cursor is not None:
                         if (
-                            not isinstance(projection_cursor, dict)  # AST_OK:infra - Mu linked-list authority guard
+                            not isinstance(projection_cursor, dict)  # AST_OK: boundary - Mu linked-list authority guard
                             or set(projection_cursor.keys()) != {"head", "tail"}
                         ):
                             raise TypeError("SECURITY: continuation_state kernel projection cursor must be a Mu head/tail list")
@@ -2064,7 +2064,7 @@ def step_kernel_mu(
             return meta["output"]
 
         if (
-            isinstance(result, dict)  # AST_OK:infra - empty projection terminal extraction
+            isinstance(result, dict)  # AST_OK: boundary - empty projection terminal extraction
             and result.get("_mode") == "kernel"
             and result.get("_phase") == "try"
             and result.get("_remaining") is None
@@ -2178,7 +2178,7 @@ def step_kernel_mu(
             return meta["output"]
 
         projection_cursor = None
-        if isinstance(result, dict) and "_remaining" in result:  # AST_OK:infra - continuation shape construction
+        if isinstance(result, dict) and "_remaining" in result:  # AST_OK: boundary - continuation shape construction
             projection_cursor = {
                 "tag": "kernel_projection_cursor",
                 "version": 1,

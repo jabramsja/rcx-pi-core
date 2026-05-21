@@ -21,6 +21,7 @@ const { runHemisphereRouting, runMetabolizationCycle, runEngineWithRouting } = r
 const API_MAX_STEPS = 10000;
 const API_MAX_ENGINE_ITERATIONS = 100;
 const API_MAX_ALGORITHM_ITERATIONS = 200;
+const API_KERNEL_DRIVER_BOUNDARY_WATCHDOG = 1000;
 
 function guardMaxSteps(value, fieldName) {
   if (value == null) return;
@@ -261,17 +262,31 @@ function handleJsonApi(apiArg, seeds) {
       const { input, maxSteps } = request;
       try {
         guardMaxSteps(maxSteps, 'maxSteps');
+        validateNoKernelReservedFields(input, 'run_hemisphere input');
         let current = input;
         let steps = 0;
         const limit = maxSteps ?? 100;
         while (steps < limit) {
           let packet = stepKernel(
-            allProjections, current, hemisphereProjections, { returnPacket: true, vmConfig }
+            allProjections, current, hemisphereProjections,
+            {
+              maxSteps: API_KERNEL_DRIVER_BOUNDARY_WATCHDOG,
+              validationMode: 'algorithm_runtime',
+              returnPacket: true,
+              vmConfig,
+            }
           );
+          // BOUNDARY: JSON hemisphere endpoint drives explicit kernel continuation values.
           while (packet.kind === 'continuation') {
             packet = stepKernel(
               allProjections, current, hemisphereProjections,
-              { returnPacket: true, vmConfig, continuationState: packet.continuation }
+              {
+                maxSteps: API_KERNEL_DRIVER_BOUNDARY_WATCHDOG,
+                validationMode: 'algorithm_runtime',
+                returnPacket: true,
+                vmConfig,
+                continuationState: packet.continuation,
+              }
             );
           }
           const wrapped = packet.result;

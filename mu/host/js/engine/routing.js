@@ -9,8 +9,11 @@
 const { RcxError } = require('../core/constants');
 const muContainers = require('../core/container_factory');
 const { HEMISPHERE_KEYS, HEMISPHERE_KEY_ORDER, setsEqual, defaultHemispheres, deriveEngineExitReason } = require('../core/terminal_classification');
+const { validateNoKernelReservedFields } = require('../core/security');
 const { stepKernel } = require('./kernel');
 const { runEnginePipeline, runEnginePipelineRecursive } = require('./pipeline');
+
+const KERNEL_DRIVER_BOUNDARY_WATCHDOG = 1000;
 
 /**
  * Route engine result to hemispheres with input shape validation.
@@ -27,17 +30,30 @@ function runHemisphereRouting(allProjections, hemisphereProjections, engineResul
       ['hemispheres', hemispheres],
     ])],
   ]);
+  validateNoKernelReservedFields(wrapped, 'runHemisphereRouting input');
   let current = wrapped;
   const limit = 30;
   for (let i = 0; i < limit; i++) {
     let packet = stepKernel(
       allProjections, current, hemisphereProjections,
-      { returnPacket: true, vmConfig: vmConfig || null }
+      {
+        maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG,
+        validationMode: 'algorithm_runtime',
+        returnPacket: true,
+        vmConfig: vmConfig || null,
+      }
     );
+    // BOUNDARY: routing drives explicit Mu continuation data returned by the kernel driver.
     while (packet.kind === 'continuation') {
       packet = stepKernel(
         allProjections, current, hemisphereProjections,
-        { returnPacket: true, vmConfig: vmConfig || null, continuationState: packet.continuation }
+        {
+          maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG,
+          validationMode: 'algorithm_runtime',
+          returnPacket: true,
+          vmConfig: vmConfig || null,
+          continuationState: packet.continuation,
+        }
       );
     }
     const meta = packet.result;
@@ -117,18 +133,31 @@ function runMetabolizationCycle(allProjections, metabolizeCycleProjections, hemi
       ['hemispheres', hemispheres],
     ])],
   ]);
+  validateNoKernelReservedFields(wrapped, 'runMetabolizationCycle input');
   const stepBudget = Math.max(20, 4 * entryCount + 10);
 
   let current = wrapped;
   for (let i = 0; i < stepBudget; i++) {
     let packet = stepKernel(
       allProjections, current, metabolizeCycleProjections,
-      { returnPacket: true, vmConfig: vmConfig || null }
+      {
+        maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG,
+        validationMode: 'algorithm_runtime',
+        returnPacket: true,
+        vmConfig: vmConfig || null,
+      }
     );
+    // BOUNDARY: metabolization drives explicit Mu continuation data returned by the kernel driver.
     while (packet.kind === 'continuation') {
       packet = stepKernel(
         allProjections, current, metabolizeCycleProjections,
-        { returnPacket: true, vmConfig: vmConfig || null, continuationState: packet.continuation }
+        {
+          maxSteps: KERNEL_DRIVER_BOUNDARY_WATCHDOG,
+          validationMode: 'algorithm_runtime',
+          returnPacket: true,
+          vmConfig: vmConfig || null,
+          continuationState: packet.continuation,
+        }
       );
     }
     const meta = packet.result;
