@@ -177,7 +177,19 @@ module.exports = function runSelfTests(seeds) {
   try { stepKernel(allProjections, trustTestMu({ op: 'test', nested: { deep: { _mode: 'forged' } } }), [testProjection]); }
   catch (e) { nestedReservedRejected = e.message.includes('_mode') && e.message.includes('reserved'); }
   console.log(`Nested _mode in input rejected: ${nestedReservedRejected}`);
-  try { stepKernel(allProjections, trustTestMu({ op: 'double', value: 99 }), [testProjection], { maxSteps: 50 }); cleanDataAccepted = true; }
+  try {
+    let cleanPacket = stepKernel(
+      allProjections, trustTestMu({ op: 'double', value: 99 }), [testProjection],
+      { maxSteps: 50, vmConfig, returnPacket: true }
+    );
+    while (cleanPacket.kind === 'continuation') {
+      cleanPacket = stepKernel(
+        allProjections, trustTestMu({ op: 'double', value: 99 }), [testProjection],
+        { maxSteps: 50, vmConfig, returnPacket: true, continuationState: cleanPacket.continuation }
+      );
+    }
+    cleanDataAccepted = cleanPacket.kind === 'terminal';
+  }
   catch (e) { console.log('Clean data failed:', e.message); }
   console.log(`Clean domain data accepted: ${cleanDataAccepted}`);
   const passReservedFields = reservedFieldRejected && nestedReservedRejected && cleanDataAccepted;
@@ -210,8 +222,17 @@ module.exports = function runSelfTests(seeds) {
       }
     } else {
       try {
-        const { result } = stepKernel(allProjections, vector.input, [vector.projection], { maxSteps: 100, vmConfig });
-        const denormalized = denormalize(result);
+        let packet = stepKernel(
+          allProjections, vector.input, [vector.projection],
+          { maxSteps: 100, vmConfig, returnPacket: true }
+        );
+        while (packet.kind === 'continuation') {
+          packet = stepKernel(
+            allProjections, vector.input, [vector.projection],
+            { maxSteps: 100, vmConfig, returnPacket: true, continuationState: packet.continuation }
+          );
+        }
+        const denormalized = packet.result.output;
         if (muEqual(denormalized, vector.expected_output)) { console.log(`  ✓ ${vector.id}`); parityPassed++; }
         else { console.log(`  ✗ ${vector.id}: got ${JSON.stringify(denormalized)}, expected ${JSON.stringify(vector.expected_output)}`); parityFailed++; }
       } catch (e) { console.log(`  ✗ ${vector.id}: ERROR - ${e.message}`); parityFailed++; }
@@ -489,12 +510,19 @@ module.exports = function runSelfTests(seeds) {
     };
     try {
       // Run a simple kernel step through bridge path with VM shadow
-      const bridgeResult = stepKernel(
+      let bridgePacket = stepKernel(
         allProjectionsWithBridge, trustTestMu({ op: 'double', value: 42 }),
         trustTestMu([{ pattern: { op: 'double', value: { var: 'n' } }, body: { result: { var: 'n' } } }]),
-        { maxSteps: 50, vmConfig: vmConfigBridge }
+        { maxSteps: 50, vmConfig: vmConfigBridge, returnPacket: true }
       );
-      const hasBridgeResult = bridgeResult && 'result' in bridgeResult;
+      while (bridgePacket.kind === 'continuation') {
+        bridgePacket = stepKernel(
+          allProjectionsWithBridge, trustTestMu({ op: 'double', value: 42 }),
+          trustTestMu([{ pattern: { op: 'double', value: { var: 'n' } }, body: { result: { var: 'n' } } }]),
+          { maxSteps: 50, vmConfig: vmConfigBridge, returnPacket: true, continuationState: bridgePacket.continuation }
+        );
+      }
+      const hasBridgeResult = bridgePacket.kind === 'terminal' && bridgePacket.result && 'output' in bridgePacket.result;
       console.log(`  Bridge-mode stepKernel with vmConfig: ${hasBridgeResult} (expected: true)`);
       bridgeShadowPassed = bridgeShadowPassed && hasBridgeResult;
     } catch (e) {
@@ -517,11 +545,19 @@ module.exports = function runSelfTests(seeds) {
     }
     // Stall case: bridge mode, no domain projection matches
     try {
-      const bridgeStallResult = stepKernel(
+      let bridgeStallPacket = stepKernel(
         allProjectionsWithBridge, 'no_match_input',
         trustTestMu([{ pattern: { op: 'never', value: { var: 'x' } }, body: { var: 'x' } }]),
-        { maxSteps: 50, returnMeta: true, vmConfig: vmConfigBridge }
+        { maxSteps: 50, returnPacket: true, vmConfig: vmConfigBridge }
       );
+      while (bridgeStallPacket.kind === 'continuation') {
+        bridgeStallPacket = stepKernel(
+          allProjectionsWithBridge, 'no_match_input',
+          trustTestMu([{ pattern: { op: 'never', value: { var: 'x' } }, body: { var: 'x' } }]),
+          { maxSteps: 50, returnPacket: true, vmConfig: vmConfigBridge, continuationState: bridgeStallPacket.continuation }
+        );
+      }
+      const bridgeStallResult = bridgeStallPacket.result;
       const stallDetected = bridgeStallResult.stall === true;
       console.log(`  Bridge-mode stall with vmConfig: ${stallDetected} (expected: true)`);
       bridgeShadowPassed = bridgeShadowPassed && stallDetected;

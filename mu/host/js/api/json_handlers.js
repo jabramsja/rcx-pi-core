@@ -104,10 +104,16 @@ function handleJsonApi(apiArg, seeds) {
     if (request.action === 'run_vector') {
       const { input, projection } = request;
       try {
-        const { result } = stepKernel(
-          allProjections, input, [projection], { maxSteps: 100, vmConfig }
+        let packet = stepKernel(
+          allProjections, input, [projection], { maxSteps: 100, vmConfig, returnPacket: true }
         );
-        const denormalized = denormalize(result);
+        while (packet.kind === 'continuation') {
+          packet = stepKernel(
+            allProjections, input, [projection],
+            { maxSteps: 100, vmConfig, returnPacket: true, continuationState: packet.continuation }
+          );
+        }
+        const denormalized = packet.result.output;
         response = { success: true, result: denormalized };
       } catch (e) {
         response = { success: false, error_code: classifyError(e), error: e.message };
@@ -116,10 +122,16 @@ function handleJsonApi(apiArg, seeds) {
       const results = [];
       for (const vector of parityVectors.vectors) {
         try {
-          const { result } = stepKernel(
-            allProjections, vector.input, [vector.projection], { maxSteps: 100, vmConfig }
+          let packet = stepKernel(
+            allProjections, vector.input, [vector.projection], { maxSteps: 100, vmConfig, returnPacket: true }
           );
-          const denormalized = denormalize(result);
+          while (packet.kind === 'continuation') {
+            packet = stepKernel(
+              allProjections, vector.input, [vector.projection],
+              { maxSteps: 100, vmConfig, returnPacket: true, continuationState: packet.continuation }
+            );
+          }
+          const denormalized = packet.result.output;
           results.push({ id: vector.id, success: true, result: denormalized, expected: vector.expected_output });
         } catch (e) {
           results.push({ id: vector.id, success: false, error_code: classifyError(e), error: e.message });
@@ -253,9 +265,16 @@ function handleJsonApi(apiArg, seeds) {
         let steps = 0;
         const limit = maxSteps ?? 100;
         while (steps < limit) {
-          const wrapped = stepKernel(
-            allProjections, current, hemisphereProjections, { returnMeta: true, vmConfig }
+          let packet = stepKernel(
+            allProjections, current, hemisphereProjections, { returnPacket: true, vmConfig }
           );
+          while (packet.kind === 'continuation') {
+            packet = stepKernel(
+              allProjections, current, hemisphereProjections,
+              { returnPacket: true, vmConfig, continuationState: packet.continuation }
+            );
+          }
+          const wrapped = packet.result;
           if (wrapped.stall) break;
           current = wrapped.output;
           steps++;
@@ -361,15 +380,29 @@ function handleJsonApi(apiArg, seeds) {
           : allProjections;
         const kernelOptions = {
           maxSteps: reqMaxSteps ?? 100,
-          returnMeta: true,
+          returnPacket: true,
           validationMode: 'domain',
           vmConfig: (kernelMode === 'bridge') ? vmConfigBridge : vmConfig,
         };
         if (hasKernelFuel) {
           kernelOptions.kernelFuel = kernelFuel;
         }
-        const meta = stepKernel(kernelProjs, input, domainProjs ?? [], kernelOptions);
-        response = { success: true, result: meta };
+        let packet = stepKernel(kernelProjs, input, domainProjs ?? [], kernelOptions);
+        while (packet.kind === 'continuation') {
+          packet = stepKernel(
+            kernelProjs,
+            input,
+            domainProjs ?? [],
+            {
+              maxSteps: reqMaxSteps ?? 100,
+              returnPacket: true,
+              validationMode: 'domain',
+              vmConfig: (kernelMode === 'bridge') ? vmConfigBridge : vmConfig,
+              continuationState: packet.continuation,
+            }
+          );
+        }
+        response = { success: true, result: packet.result };
       } catch (e) {
         response = { success: false, error_code: classifyError(e), error: e.message };
       }

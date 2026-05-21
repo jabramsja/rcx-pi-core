@@ -30,10 +30,17 @@ function runHemisphereRouting(allProjections, hemisphereProjections, engineResul
   let current = wrapped;
   const limit = 30;
   for (let i = 0; i < limit; i++) {
-    const meta = stepKernel(
+    let packet = stepKernel(
       allProjections, current, hemisphereProjections,
-      { returnMeta: true, vmConfig: vmConfig || null }
+      { returnPacket: true, vmConfig: vmConfig || null }
     );
+    while (packet.kind === 'continuation') {
+      packet = stepKernel(
+        allProjections, current, hemisphereProjections,
+        { returnPacket: true, vmConfig: vmConfig || null, continuationState: packet.continuation }
+      );
+    }
+    const meta = packet.result;
     if (meta.stall) break;
     current = meta.output;
   }
@@ -114,10 +121,17 @@ function runMetabolizationCycle(allProjections, metabolizeCycleProjections, hemi
 
   let current = wrapped;
   for (let i = 0; i < stepBudget; i++) {
-    const meta = stepKernel(
+    let packet = stepKernel(
       allProjections, current, metabolizeCycleProjections,
-      { returnMeta: true, vmConfig: vmConfig || null }
+      { returnPacket: true, vmConfig: vmConfig || null }
     );
+    while (packet.kind === 'continuation') {
+      packet = stepKernel(
+        allProjections, current, metabolizeCycleProjections,
+        { returnPacket: true, vmConfig: vmConfig || null, continuationState: packet.continuation }
+      );
+    }
+    const meta = packet.result;
     if (meta.stall) break;
     current = meta.output;
   }

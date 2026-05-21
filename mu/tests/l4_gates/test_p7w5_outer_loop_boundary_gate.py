@@ -11,7 +11,7 @@ Validates:
     loops, not tracked @host_iteration debt.
 
 Anti-laundering: All reclassified functions are provably OFF the kernel execution path.
-Kernel path: step_kernel_mu → _step_kernel_with_vm → Stage0 VM for all
+Kernel path: step_kernel_mu(return_packet=True) → _step_kernel_with_vm → Stage0 VM for all
   Python projection groups / _stepKernelCore → Stage0 VM or _stepTrusted (JS).
 The reclassified functions CALL the kernel but are not ON the kernel path.
 list_to_linked/listToLinked are bounded host-to-Mu boundary construction loops
@@ -33,6 +33,7 @@ import pytest
 from rcx_pi.selfhost.step_mu import (
     run_mu,  # SPEED_OK: source inspection only
     run_mu_structural,  # SPEED_OK: source inspection only
+    step_mu,  # SPEED_OK: source inspection only
     step_kernel_mu,  # SPEED_OK: source inspection only
 )
 
@@ -110,20 +111,19 @@ class TestPythonOuterLoopBoundary:
             "run_mu_structural missing BOUNDARY marker (reclassified P7W5)"
         )
 
-    def test_step_kernel_mu_has_fuel_governed_watchdog_loop(self):
-        """step_kernel_mu keeps an honest residual marker until no-fuel loop removal."""
+    def test_step_kernel_mu_is_single_step_packet_boundary(self):
+        """step_kernel_mu(return_packet=True) returns one terminal-or-continuation packet per call."""
         source = _get_function_source(step_kernel_mu)
         assert "@host_iteration" in source, (
-            "step_kernel_mu still has a residual no-fuel host loop and must stay marked"
+            "step_kernel_mu still carries host transition authority and must stay ratchet-visible"
         )
-        assert "residual watchdog" in source
-        assert "supplied Mu fuel owns progress" in source
-        assert "without synthesizing host-counted compatibility fuel" in source
+        assert "single-step" in source
+        assert "KernelDriverStepPacket" in source
         assert "for step_i in range(max_steps)" not in source, (
             "step_kernel_mu reintroduced the old max_steps-owned kernel loop"
         )
-        assert "while (not caller_supplied_fuel) or (fuel_cursor is not None):" in source, (
-            "step_kernel_mu must preserve no-fuel compatibility without synthetic fuel"
+        assert "while (not caller_supplied_fuel) or (fuel_cursor is not None):" not in source, (
+            "step_kernel_mu must not retain the old omitted-fuel run-until-terminal loop"
         )
         assert "list_to_linked([None] * (max_steps + 1))" not in source, (
             "step_kernel_mu must not construct host-counted no-fuel compatibility fuel"
@@ -137,9 +137,16 @@ class TestPythonOuterLoopBoundary:
         assert "range(max_steps)" not in source, (
             "step_kernel_mu must not reintroduce max_steps as the semantic loop owner"
         )
-        assert "if steps_used >= max_steps:" in source, (
+        assert "if steps_used >= watchdog_cap:" in source, (
             "step_kernel_mu must keep max_steps as a watchdog check, not the loop owner"
         )
+        assert '"kind": "terminal"' in source
+        assert '"kind": "continuation"' in source
+        assert '"kernel_driver_continuation_state"' in source
+        assert "continuation_state" in source
+        assert "return_packet=True" in source
+        assert "BOUNDARY: legacy public no-fuel behavior" in source
+        assert "while packet[\"kind\"] == \"continuation\":" in source
         assert "if caller_supplied_fuel:" in source and 'fuel_cursor = fuel_cursor["tail"]' in source, (
             "step_kernel_mu must consume Mu fuel only on the explicit supplied-fuel path"
         )
@@ -204,24 +211,22 @@ class TestJSOuterLoopBoundary:
     def test_js_run_engine_pipeline_recursive_boundary(self):
         self._check_js_function_boundary(JS_PIPELINE_PATH, "runEnginePipelineRecursive")
 
-    def test_js_active_kernel_core_has_fuel_governed_watchdog_loop(self):
-        """JS _stepKernelCore keeps an honest residual marker until no-fuel loop removal."""
+    def test_js_active_kernel_core_is_single_step_packet_boundary(self):
+        """JS _stepKernelCore returns one terminal-or-continuation packet per call."""
         kernel_lines = JS_KERNEL_PATH.read_text().splitlines()
         for i, line in enumerate(kernel_lines):
             if "function _stepKernelCore(" in line:
                 block = "\n".join(kernel_lines[max(0, i - 10):i])
                 body = _js_function_body(kernel_lines, i)
                 assert "@host_iteration" in block, (
-                    "JS _stepKernelCore still has a residual no-fuel host loop and must stay marked"
+                    "JS _stepKernelCore still carries host transition authority and must stay ratchet-visible"
                 )
-                assert "residual kernel driver watchdog" in block
-                assert "supplied Mu fuel owns progress" in block
-                assert "without" in block and "maxSteps" in block
+                assert "single-step" in block
                 assert "for (let i = 0; i < maxSteps; i++)" not in body, (
                     "JS _stepKernelCore reintroduced the old maxSteps-owned kernel loop"
                 )
-                assert "while (!callerSuppliedFuel || fuelCursor !== null)" in body, (
-                    "JS _stepKernelCore must preserve no-fuel compatibility without synthetic fuel"
+                assert "while (!callerSuppliedFuel || fuelCursor !== null)" not in body, (
+                    "JS _stepKernelCore must not retain the omitted-fuel run-until-terminal loop"
                 )
                 assert "compatibilityFuelNode <= maxSteps" not in body, (
                     "JS _stepKernelCore must not construct host-counted no-fuel compatibility fuel"
@@ -235,12 +240,13 @@ class TestJSOuterLoopBoundary:
                 assert "Array.from" not in body and ".fill(" not in body, (
                     "JS _stepKernelCore must not construct host-sized synthetic fuel arrays"
                 )
-                assert "if (stepsUsed >= maxSteps)" in body, (
+                assert "if (stepsUsed >= watchdogCap)" in body, (
                     "JS _stepKernelCore must keep maxSteps as a watchdog check, not the loop owner"
                 )
-                assert "callerSuppliedFuel" in body and "fuel_remaining" in body, (
-                    "JS _stepKernelCore must keep fuel metadata scoped to explicit supplied fuel"
-                )
+                assert "kind: 'terminal'" in body
+                assert "kind: 'continuation'" in body
+                assert "kernel_driver_continuation_state" in body
+                assert "continuationState" in body
                 assert "if (callerSuppliedFuel)" in body and "fuelCursor = fuelCursor.tail" in body, (
                     "JS _stepKernelCore must consume Mu fuel only on the explicit supplied-fuel path"
                 )
@@ -299,11 +305,24 @@ class TestKernelPathExclusion:
             "step_kernel_mu calls run_mu_structural() — kernel does not call trace runner"
         )
 
-    def test_run_mu_calls_step_mu(self):
-        """run_mu MUST call step_mu — it's the outer driver that invokes the kernel."""
+    def test_step_mu_uses_reviewed_kernel_boundary(self):
+        """step_mu remains the reviewed public compatibility caller for the kernel."""
+        source = _get_function_source(step_mu)
+        assert "step_kernel_mu(" in source, (
+            "step_mu must stay the reviewed direct step_kernel_mu compatibility caller"
+        )
+        assert "while packet" not in source, (
+            "step_mu must not add a second host loop authority site"
+        )
+
+    def test_run_mu_uses_step_mu_boundary(self):
+        """run_mu repeats the reviewed step_mu boundary instead of becoming a raw kernel caller."""
         source = _get_function_source(run_mu)
         assert "step_mu(" in source, (
-            "run_mu doesn't call step_mu — outer loop must call kernel via step_mu"
+            "run_mu must drive progress through the reviewed step_mu boundary"
+        )
+        assert "step_kernel_mu(" not in source, (
+            "run_mu must not add an unreviewed raw step_kernel_mu callsite"
         )
 
     def test_step_kernel_mu_calls_list_to_linked_for_boundary_cursor(self):

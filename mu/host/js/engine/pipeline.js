@@ -135,8 +135,21 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps, vmConfig
       ['_step', normalizedInput],
       ['_projs', linkedProjs],
     ]);
-    // Wave 1: use canonical _stepKernelCore instead of retired _stepKernelCoreNonMeta
-    const canonical = _stepKernelCore(allProjs, kernelInput, current, validator, 10000, vmConfig || null);
+    // BOUNDARY: algorithm harness drives explicit kernel continuation values.
+    let packet = _stepKernelCore(allProjs, kernelInput, current, validator, 10000, vmConfig || null);
+    while (packet.kind === 'continuation') {
+      packet = _stepKernelCore(
+        allProjs,
+        kernelInput,
+        current,
+        validator,
+        10000,
+        vmConfig || null,
+        undefined,
+        packet.continuation
+      );
+    }
+    const canonical = packet.result;
     const next = canonical.output;  // already extracted + denormalized by _stepKernelCore
     validator(next, 'runAlgorithmWithBridge.intermediate');
     const nextHash = muHashControlCached(next, 'runAlgorithmWithBridge.stall');

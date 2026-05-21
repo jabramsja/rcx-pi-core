@@ -30,7 +30,6 @@ null = None
 # Root directory of the project (symlink-safe — see tests/repo_root.py)
 from tests.repo_root import REPO_ROOT as ROOT
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
