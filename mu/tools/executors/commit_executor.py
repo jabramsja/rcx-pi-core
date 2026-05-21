@@ -297,6 +297,15 @@ COMMIT_EXECUTOR_OUTER_BUDGET_S = _COMMIT_EXECUTOR_TIMEOUTS.get(
     "commit_executor", DEFAULT_EXECUTOR_CONFIG["timeouts"]["commit_executor"]
 )
 PRE_PUSH_FAST_TIMEOUT_S = _COMMIT_EXECUTOR_TIMEOUTS.get("pre_push_fast", 900)
+COMMIT_CI_WATCH_TIMEOUT_S = _COMMIT_EXECUTOR_TIMEOUTS.get(
+    "commit_ci_watch", DEFAULT_EXECUTOR_CONFIG["timeouts"]["commit_ci_watch"]
+)
+COMMIT_CI_POLL_TIMEOUT_S = _COMMIT_EXECUTOR_TIMEOUTS.get(
+    "commit_ci_poll", DEFAULT_EXECUTOR_CONFIG["timeouts"]["commit_ci_poll"]
+)
+COMMIT_CI_VERIFY_TIMEOUT_S = _COMMIT_EXECUTOR_TIMEOUTS.get(
+    "commit_ci_verify", DEFAULT_EXECUTOR_CONFIG["timeouts"]["commit_ci_verify"]
+)
 BOT_NO_ISSUES_COMMENT_RE = re.compile(
     r"Codex Review:\s*.*did(?:n't| not) find any major issues",
     re.IGNORECASE | re.DOTALL,
@@ -339,6 +348,9 @@ def _runtime_bus_artifact_match(path: str) -> str | None:
 # Validate sub-timeouts fit within outer budget at import time
 for _sub_name, _sub_val in [
     ("pre_push_fast", PRE_PUSH_FAST_TIMEOUT_S),
+    ("commit_ci_watch", COMMIT_CI_WATCH_TIMEOUT_S),
+    ("commit_ci_poll", COMMIT_CI_POLL_TIMEOUT_S),
+    ("commit_ci_verify", COMMIT_CI_VERIFY_TIMEOUT_S),
     ("bot_remediation", BOT_REMEDIATION_TIMEOUT_S),
 ]:
     if _sub_val > COMMIT_EXECUTOR_OUTER_BUDGET_S:
@@ -5748,9 +5760,14 @@ def _wait_for_pr_ci(
         )
         _run(
             ["gh", "pr", "checks", pr_number, "--watch", "--required"],
-            cwd=repo_root, timeout=600,
+            cwd=repo_root, timeout=COMMIT_CI_WATCH_TIMEOUT_S,
         )
-        if not _wait_for_required_checks_to_pass(repo_root, pr_number, timeout=900, log=log):
+        if not _wait_for_required_checks_to_pass(
+            repo_root,
+            pr_number,
+            timeout=COMMIT_CI_VERIFY_TIMEOUT_S,
+            log=log,
+        ):
             ci_failure = _summarize_required_ci_failures(repo_root, pr_number)
             return {
                 "status": "error",
@@ -5781,7 +5798,12 @@ def _wait_for_pr_ci(
                 f"{step_label}: gh pr checks exited ({exc.__class__.__name__}), "
                 "polling CI as fallback"
             )
-        if not _poll_ci_checks_fallback(repo_root, pr_number, timeout=900, log=log):
+        if not _poll_ci_checks_fallback(
+            repo_root,
+            pr_number,
+            timeout=COMMIT_CI_POLL_TIMEOUT_S,
+            log=log,
+        ):
             ci_failure = _summarize_required_ci_failures(repo_root, pr_number)
             return {
                 "status": "error",
@@ -5796,7 +5818,12 @@ def _wait_for_pr_ci(
                 "steps_completed": result["steps_completed"],
                 "pr_number": pr_number,
             }
-        if not _wait_for_required_checks_to_pass(repo_root, pr_number, timeout=900, log=log):
+        if not _wait_for_required_checks_to_pass(
+            repo_root,
+            pr_number,
+            timeout=COMMIT_CI_VERIFY_TIMEOUT_S,
+            log=log,
+        ):
             ci_failure = _summarize_required_ci_failures(repo_root, pr_number)
             return {
                 "status": "error",

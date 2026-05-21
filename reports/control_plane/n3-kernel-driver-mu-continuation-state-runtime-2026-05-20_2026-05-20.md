@@ -74,6 +74,30 @@ selector regression to commit Step 8b's targeted selector list, so the
 missing-targeted-test guard runs with the narrowed commit gate instead of being
 skipped.
 
+## Post-push CI wait recovery addendum
+
+After the same-wave runtime CI recovery commit pushed PR #1014, commit executor
+Step 14 failed its local wait while the required GitHub jobs were still running:
+`.scratch/commit_executor_live.log` reported `CI poll timed out after 900s`,
+and the executor error preserved `gh pr checks` output with `green-gate` and
+`test` still pending. Direct workflow reads showed `gh run view 26249405536
+--json status,conclusion,jobs` still in `Green gate (authoritative,
+python-only)` and `gh run view 26249407328 --json status,conclusion,jobs` still
+in `Run green gate`. This is a pipeline wait-budget defect, not evidence of a
+completed CI test failure.
+
+Same-wave repair scope adds only pipeline/control files:
+`mu/tools/executors/commit_executor.py`,
+`mu/tools/executors/executor_common.py`,
+`mu/tools/executors/executor_config.json`,
+`mu/tests/tools/test_commit_executor_receipt.py`, and
+`mu/tests/tools/test_executor_config_alignment.py`. The repair routes commit CI
+watch, fallback poll, and final verification wait ceilings through executor
+config, keeps those sub-timeouts within the commit executor outer budget, and
+adds a config/workflow alignment test proving the commit CI watch and poll
+budgets cover the longest required workflow `timeout-minutes` value. No runtime
+`/mu` semantic implementation files are in this recovery scope.
+
 ## Work items
 
 1. Implement the cross-substrate `KernelDriverStepPacket` contract with one
@@ -194,3 +218,28 @@ skipped.
   packet rationale: `rg -n "n3-kernel-driver-mu-continuation-state-runtime-2026-05-20" TASKS.md`
   exits 1 before this rewrite, so this packet must carry the same-wave runtime
   authorization explicitly.
+
+<!-- COMMIT_PATH_TRUTH_REFRESH:start -->
+## Commit Path Truth Refresh
+
+- Refresh wave: `n3-kernel-driver-mu-continuation-state-runtime-2026-05-20`
+- Active packet: `reports/control_plane/n3-kernel-driver-mu-continuation-state-runtime-2026-05-20_2026-05-20.md`
+- Commit status: `pre_commit_supervisor_pending`
+- Tracker note sha256: `52b54d3b7d1039d8bed11104590610f9a668d9c0f45de4d16ea25226fdacf072`
+- Indicator artifact: `reports/l4_wave_indicators/n3-kernel-driver-mu-continuation-state-runtime-2026-05-20.json`
+- Evidence command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_config_alignment.py`.
+- Evidence delta: (1) Routed commit handoff scopes 8 wave-owned file(s). (2) Evidence gate exercises 2 wave-owned test module(s). (3) Indicator artifact binds the wave to reports/l4_wave_indicators/n3-kernel-driver-mu-continuation-state-runtime-2026-05-20.json..
+- Evidence handles:
+  - `focused_pytest`: `PYTHONHASHSEED=0 python3 -m pytest -q tests/tools/test_commit_executor_receipt.py::TestCIPollFallbackTimeout tests/tools/test_commit_executor_receipt.py::TestRequiredCIGreenGuard::test_wait_for_pr_ci_rejects_watch_success_until_required_checks_green tests/tools/test_executor_config_alignment.py::TestCommitExecutorConfigBinding tests/tools/test_executor_config_alignment.py::TestDefaultMatchesLiveConfig --tb=short`
+  - `indicator`: `reports/l4_wave_indicators/n3-kernel-driver-mu-continuation-state-runtime-2026-05-20.json`
+  - `py_compile`: `python3 -m py_compile tools/executors/commit_executor.py tools/executors/executor_common.py tests/tools/test_executor_config_alignment.py tests/tools/test_commit_executor_receipt.py`
+- Current staged files:
+  - `TASKS.md`
+  - `mu/tests/tools/test_commit_executor_receipt.py`
+  - `mu/tests/tools/test_executor_config_alignment.py`
+  - `mu/tools/executors/commit_executor.py`
+  - `mu/tools/executors/executor_common.py`
+  - `mu/tools/executors/executor_config.json`
+  - `reports/control_plane/n3-kernel-driver-mu-continuation-state-runtime-2026-05-20_2026-05-20.md`
+  - `reports/l4_wave_indicators/n3-kernel-driver-mu-continuation-state-runtime-2026-05-20.json`
+<!-- COMMIT_PATH_TRUTH_REFRESH:end -->

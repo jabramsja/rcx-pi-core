@@ -5480,7 +5480,7 @@ class TestReviewFindingExtraction:
 
 
 class TestCIPollFallbackTimeout:
-    """Regression: _poll_ci_checks_fallback 900s budget tolerates observed green-gate wall time.
+    """Regression: fallback CI polling uses the configured commit CI budget.
 
     PR #783 (2026-04-17) demonstrated green-gate can take 5m7s (307s) after a
     bot-remediation push, which exceeded the former 300s fallback budget. The
@@ -5537,40 +5537,43 @@ class TestCIPollFallbackTimeout:
         return result, clock[0]
 
     def test_ci_poll_fallback_tolerates_green_gate_wall_time_over_5_minutes(self):
-        """With the 900s budget, CI completing at t=350s must return True.
+        """With the configured budget, CI completing at t=350s must return True.
 
         The former 300s budget would have false-positive timed out before this
-        transition. The bumped 900s budget must survive with 2.5x headroom.
+        transition. The configured budget must survive with headroom.
         """
         result, final_clock = self._run_fallback_with_simulated_clock(
             ci_transitions_to_success_at=350,
-            runtime_cap=900,
+            runtime_cap=commit_mod.COMMIT_CI_POLL_TIMEOUT_S,
         )
         assert result is True, (
-            f"Expected True (CI passed at t=350s under 900s budget), got {result}"
+            f"Expected True (CI passed at t=350s), got {result}"
         )
         assert final_clock >= 350, (
             f"Simulated clock should have advanced past 350s, got {final_clock}s"
         )
-        assert final_clock < 900, (
-            f"Simulated clock should not have hit the 900s cap, got {final_clock}s"
+        assert final_clock < commit_mod.COMMIT_CI_POLL_TIMEOUT_S, (
+            "Simulated clock should not have hit the configured cap, "
+            f"got {final_clock}s"
         )
 
     def test_ci_poll_fallback_still_times_out_at_new_budget(self):
-        """With the 900s budget, genuinely stalled CI must still return False.
+        """With the configured budget, genuinely stalled CI must still return False.
 
         Guards against the bump making the timeout unconditionally permissive —
         a CI that never completes must still hit the budget ceiling.
         """
         result, final_clock = self._run_fallback_with_simulated_clock(
             ci_transitions_to_success_at=None,
-            runtime_cap=900,
+            runtime_cap=commit_mod.COMMIT_CI_POLL_TIMEOUT_S,
         )
         assert result is False, (
-            f"Expected False (timed out at 900s budget), got {result}"
+            "Expected False (timed out at configured budget), "
+            f"got {result}"
         )
-        assert final_clock >= 900, (
-            f"Simulated clock should have exhausted the 900s budget, got {final_clock}s"
+        assert final_clock >= commit_mod.COMMIT_CI_POLL_TIMEOUT_S, (
+            "Simulated clock should have exhausted the configured budget, "
+            f"got {final_clock}s"
         )
 
 
@@ -5625,6 +5628,8 @@ class TestRequiredCIGreenGuard:
     def test_wait_for_pr_ci_rejects_watch_success_until_required_checks_green(self, tmp_path):
         import subprocess
 
+        watch_timeouts = []
+
         def completed(cmd, *, stdout="", stderr="", returncode=0):
             return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
 
@@ -5632,6 +5637,7 @@ class TestRequiredCIGreenGuard:
             if cmd == ["gh", "pr", "checks", "844", "--required"]:
                 return completed(cmd, stdout="test\tpending\n", returncode=8)
             if cmd == ["gh", "pr", "checks", "844", "--watch", "--required"]:
+                watch_timeouts.append(kwargs.get("timeout"))
                 return completed(cmd)
             if cmd == ["gh", "pr", "view", "844", "--json", "statusCheckRollup"]:
                 return completed(cmd, stdout=json.dumps({"statusCheckRollup": []}))
@@ -5664,6 +5670,7 @@ class TestRequiredCIGreenGuard:
         )
         assert "test\tpending" in response["ci_checks_output"]
         assert result["steps_completed"] == ["git_commit"]
+        assert watch_timeouts == [commit_mod.COMMIT_CI_WATCH_TIMEOUT_S]
 
     def test_wait_for_pr_ci_failure_payload_includes_failed_check_log_excerpt(self, tmp_path):
         import subprocess
