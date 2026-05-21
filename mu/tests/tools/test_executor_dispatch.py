@@ -6701,6 +6701,74 @@ class TestCommitContinuationAndBotFreshness:
         assert resumed["commit_sha"] == head_sha
         assert resumed["receipt_decision"] == "COMMIT_GO_HOLD_PUSH"
 
+    def test_stale_completed_route_uses_post_commit_continuation(self, tmp_path):
+        repo, env = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "jabramsja/test-wave-id"],
+            cwd=repo, capture_output=True, env=env, check=True,
+        )
+        packet = "reports/control_plane/test-wave-id.md"
+        (repo / packet).parent.mkdir(parents=True, exist_ok=True)
+        (repo / packet).write_text("Status: IMPLEMENTED / LOCAL EVIDENCE\n", encoding="utf-8")
+        (repo / "file1.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", packet, "file1.py"], cwd=repo, capture_output=True, env=env, check=True)
+        subprocess.run(["git", "commit", "-m", "wave complete"], cwd=repo, capture_output=True, env=env, check=True)
+        head_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+        bus_dir = repo / ".agent_bus"
+        canonical = bus_dir / "meta" / "post_merge_routing.json"
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        handoff_path = bus_dir / "executors" / "phase_b_handoff.json"
+        handoff_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_phase_b_handoff(
+            handoff_path,
+            wave_id="test-wave-id",
+            task_id="[TEST-1]",
+            tracked_packet=packet,
+        )
+        (bus_dir / "executors" / "commit_executor_test-wave-id.json").write_text(
+            json.dumps({
+                "version": 1,
+                "status": "post_commit_pending",
+                "target_branch": "jabramsja/test-wave-id",
+                "commit_sha": head_sha,
+                "receipt_decision": "COMMIT_GO",
+                "steps_completed": ["git_commit"],
+            }),
+            encoding="utf-8",
+        )
+        record = {
+            "decision": "ROUTE_PHASE_B",
+            "summary": "stale completed route",
+            "request_for_claude": "retry",
+            "wave_name": "test-wave-id",
+            "task_id": "[TEST-1]",
+            "state_sha": "stale-state-sha",
+            "next_candidates": [
+                {"candidate": "test-wave-id", "bounded": True, "tracked_packet": packet}
+            ],
+        }
+        canonical.write_text(json.dumps(record), encoding="utf-8")
+        retry_result = {"status": "success", "decision": "COMMIT_GO", "executor": "commit_executor"}
+
+        with (
+            patch.object(dispatch_mod, "_refresh_canonical_routing_record_state", return_value=(False, None)),
+            patch.object(dispatch_mod, "_auto_refresh_routing", return_value=(False, None)),
+            patch.object(dispatch_mod, "_retry_commit_only", return_value=retry_result) as retry_commit_only,
+        ):
+            result = dispatch_mod.dispatch(
+                record,
+                config=dispatch_mod.DEFAULT_EXECUTOR_CONFIG,
+                repo_root=repo,
+                routing_record_path=canonical,
+                bus_dir=".agent_bus",
+            )
+
+        assert result == retry_result
+        retry_commit_only.assert_called_once()
+
     def test_has_fresh_connector_review_requires_current_head_commit(self):
         pr_data = {
             "headRefOid": "abc123",

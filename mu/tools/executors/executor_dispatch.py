@@ -2623,6 +2623,81 @@ def _retry_commit_only(
         }
 
 
+def _post_commit_continuation_ready_for_record(
+    repo: Path,
+    record: dict[str, Any],
+    *,
+    bus_dir: str | Path | None = None,
+) -> tuple[bool, str]:
+    wave_id = normalize_wave_id(str(record.get("wave_name") or record.get("wave_id") or ""))
+    if not wave_id or wave_id == "wave-unknown":
+        return False, "routing record has no normalized wave id"
+
+    handoff_path = agent_bus_path(repo, bus_dir, "executors", "phase_b_handoff.json")
+    if not handoff_path.exists():
+        return False, f"Phase B handoff missing at {handoff_path}"
+    valid_handoff, handoff_msg = _validate_phase_b_handoff_identity(handoff_path, record)
+    if not valid_handoff:
+        return False, f"Phase B handoff does not match stale routing record: {handoff_msg}"
+
+    continuation_path = agent_bus_path(repo, bus_dir, "executors", f"commit_executor_{wave_id}.json")
+    if not continuation_path.exists():
+        return False, f"commit continuation missing at {continuation_path}"
+    try:
+        payload = json.loads(continuation_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return False, f"commit continuation unreadable at {continuation_path}: {exc}"
+    if not isinstance(payload, dict):
+        return False, "commit continuation is not a JSON object"
+    if payload.get("version") != 1:
+        return False, "commit continuation version is not 1"
+    if str(payload.get("status") or "").strip() != "post_commit_pending":
+        return False, "commit continuation is not post_commit_pending"
+    if str(payload.get("receipt_decision") or "").strip() not in {"COMMIT_GO", "COMMIT_GO_HOLD_PUSH"}:
+        return False, "commit continuation has no commit-capable receipt decision"
+
+    steps_completed = payload.get("steps_completed")
+    if not isinstance(steps_completed, list) or "git_commit" not in steps_completed:
+        return False, "commit continuation has not completed git_commit"
+    target_branch = str(payload.get("target_branch") or "").strip()
+    commit_sha = str(payload.get("commit_sha") or "").strip()
+    if not target_branch or not commit_sha:
+        return False, "commit continuation missing target_branch or commit_sha"
+
+    try:
+        current_branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{commit_sha}^{{commit}}"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", commit_sha, "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        return False, f"commit continuation git proof failed: {exc}"
+    if current_branch != target_branch:
+        return False, f"current branch {current_branch} does not match continuation target_branch {target_branch}"
+    if ancestor.returncode != 0:
+        return False, f"commit continuation commit {commit_sha} is not an ancestor of HEAD"
+
+    return True, f"post-commit continuation ready for {wave_id}"
+
+
 _DISPATCHER_ONLY_TIMEOUT_KEYS = frozenset({"commit_executor"})
 
 
@@ -3326,6 +3401,25 @@ def dispatch(
             else:
                 refreshed, refresh_record = _auto_refresh_routing(repo, verbose=verbose, bus_dir=bus_dir)
             if not refreshed or refresh_record is None:
+                continuation_ready, continuation_detail = _post_commit_continuation_ready_for_record(
+                    repo,
+                    record,
+                    bus_dir=bus_dir,
+                )
+                if continuation_ready:
+                    if verbose:
+                        print(
+                            "[dispatch] Stale completed routing has an active "
+                            f"post-commit continuation: {continuation_detail}"
+                        )
+                    return _retry_commit_only(
+                        repo,
+                        cfg,
+                        verbose=verbose,
+                        bus_dir=bus_dir,
+                    )
+                if verbose:
+                    print(f"[dispatch] No post-commit continuation resume: {continuation_detail}")
                 refresh_message = (
                     "Explicit routing record rebind failed — refresh the packet-owned routing file."
                     if is_noncanonical_explicit
