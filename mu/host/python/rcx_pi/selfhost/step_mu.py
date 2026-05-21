@@ -1521,6 +1521,7 @@ def step_kernel_mu(
         projection_hashes: set[str] = set()
         body_hashes: set[str] = set()
         projection_contexts: list[dict[str, Mu]] = []
+        projection_sequence_hashes: list[str] = []
         prefix_has_match = False
         projection_authority_cursor = kernel_entry["_projs"]
         while projection_authority_cursor is not None:
@@ -1535,8 +1536,11 @@ def step_kernel_mu(
                 or set(projection_authority.keys()) != _KERNEL_PROJECTION_KEYS
             ):
                 raise TypeError("SECURITY: kernel projection cursor head must be a normalized projection")
-            projection_hashes.add(mu_hash(projection_authority))
-            body_hashes.add(mu_hash(projection_authority["body"]))
+            projection_hash = mu_hash(projection_authority)
+            body_hash = mu_hash(projection_authority["body"])
+            projection_hashes.add(projection_hash)
+            body_hashes.add(body_hash)
+            projection_sequence_hashes.append(projection_hash)
             match_result = None
             if validation_mode == "domain":
                 match_outcome = _stage0_vm_run_bounded_trusted(
@@ -1559,10 +1563,11 @@ def step_kernel_mu(
                     match_result = match_outcome["root"]
             projection_contexts.append({
                 "projection": projection_authority,
+                "projection_hash": projection_hash,
+                "cursor": projection_authority_cursor,
                 "rest": projection_authority_cursor["tail"],
-                "body_hash": mu_hash(projection_authority["body"]),
-                "rest_hash": mu_hash(projection_authority_cursor["tail"]),
-                "cursor_hash": mu_hash(projection_authority_cursor),
+                "body_hash": body_hash,
+                "index": len(projection_contexts),
                 "prefix_cleared": not prefix_has_match,
                 "match_result": match_result,
             })
@@ -1576,6 +1581,10 @@ def step_kernel_mu(
                 prefix_has_match = True
             projection_authority_cursor = projection_authority_cursor["tail"]
         exhausted_prefix_cleared = not prefix_has_match
+        for context in projection_contexts:
+            index = context["index"]
+            context["cursor_signature"] = projection_sequence_hashes[index:]
+            context["rest_signature"] = projection_sequence_hashes[index + 1:]
 
         kernel_state = continuation_state["kernel_state"]
         kernel_state_is_object = isinstance(kernel_state, dict)  # AST_OK: boundary - continuation phase authority guard
@@ -1612,19 +1621,29 @@ def step_kernel_mu(
             if remaining_cursor is None:
                 remaining_cursor_bound = exhausted_prefix_cleared
             else:
-                if (
-                    not isinstance(remaining_cursor, dict)  # AST_OK: boundary - Mu linked-list authority guard
-                    or set(remaining_cursor.keys()) != {"head", "tail"}
-                ):
-                    raise TypeError("SECURITY: continuation_state kernel projection cursor must be a Mu head/tail list")
-                remaining_cursor_hash = mu_hash(remaining_cursor)
-                for context in projection_contexts:
+                remaining_cursor_signature = []
+                remaining_cursor_probe = remaining_cursor
+                while remaining_cursor_probe is not None:
                     if (
-                        context["cursor_hash"] == remaining_cursor_hash
-                        and (validation_mode != "domain" or context["prefix_cleared"])
+                        not isinstance(remaining_cursor_probe, dict)  # AST_OK: boundary - Mu linked-list authority guard
+                        or set(remaining_cursor_probe.keys()) != {"head", "tail"}
                     ):
-                        remaining_cursor_bound = True
-                        break
+                        raise TypeError("SECURITY: continuation_state kernel projection cursor must be a Mu head/tail list")
+                    remaining_projection = remaining_cursor_probe["head"]
+                    if (
+                        not isinstance(remaining_projection, dict)  # AST_OK: boundary - normalized projection authority guard
+                        or set(remaining_projection.keys()) != _KERNEL_PROJECTION_KEYS
+                    ):
+                        raise TypeError("SECURITY: continuation_state kernel projection cursor head must be a normalized projection")
+                    remaining_cursor_signature.append(mu_hash(remaining_projection))
+                    remaining_cursor_probe = remaining_cursor_probe["tail"]
+                for context in projection_contexts:
+                    if context["cursor_signature"] != remaining_cursor_signature:
+                        continue
+                    if validation_mode == "domain" and not context["prefix_cleared"]:
+                        continue
+                    remaining_cursor_bound = True
+                    break
             if not remaining_cursor_bound:
                 raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
         if isinstance(kernel_state, dict):  # AST_OK: boundary - continuation phase authority guard
@@ -1637,16 +1656,32 @@ def step_kernel_mu(
                     raise ValueError("SECURITY: continuation_state _match_ctx key set mismatch")
                 if mu_hash(match_ctx["_input"]) != normalized_input_hash:
                     raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
-                match_candidates = []
-                match_rest_hash = mu_hash(match_ctx["_remaining"])
                 match_body_hash = mu_hash(match_ctx["_body"])
-                for context in projection_contexts:
+                match_remaining_signature = []
+                match_remaining_probe = match_ctx["_remaining"]
+                while match_remaining_probe is not None:
                     if (
-                        context["rest_hash"] == match_rest_hash
-                        and context["body_hash"] == match_body_hash
-                        and (validation_mode != "domain" or context["prefix_cleared"])
+                        not isinstance(match_remaining_probe, dict)  # AST_OK: boundary - Mu linked-list authority guard
+                        or set(match_remaining_probe.keys()) != {"head", "tail"}
                     ):
-                        match_candidates.append(context)
+                        raise TypeError("SECURITY: continuation_state kernel projection cursor must be a Mu head/tail list")
+                    match_remaining_projection = match_remaining_probe["head"]
+                    if (
+                        not isinstance(match_remaining_projection, dict)  # AST_OK: boundary - normalized projection authority guard
+                        or set(match_remaining_projection.keys()) != _KERNEL_PROJECTION_KEYS
+                    ):
+                        raise TypeError("SECURITY: continuation_state kernel projection cursor head must be a normalized projection")
+                    match_remaining_signature.append(mu_hash(match_remaining_projection))
+                    match_remaining_probe = match_remaining_probe["tail"]
+                match_candidates = []
+                for context in projection_contexts:
+                    if context["rest_signature"] != match_remaining_signature:
+                        continue
+                    if context["body_hash"] != match_body_hash:
+                        continue
+                    if validation_mode == "domain" and not context["prefix_cleared"]:
+                        continue
+                    match_candidates.append(context)
                 if not match_candidates:
                     raise ValueError("SECURITY: continuation_state kernel_state is not bound to supplied projections/input")
                 if "match" in kernel_state:
@@ -1746,11 +1781,26 @@ def step_kernel_mu(
                     subst_bindings = subst_request["bindings"]
                 elif "bindings" in kernel_state:
                     subst_bindings = kernel_state["bindings"]
-                subst_candidates = []
-                subst_rest_hash = mu_hash(subst_ctx["_remaining"])
                 subst_body_hash = mu_hash(subst_body) if subst_body is not None else None
+                subst_remaining_signature = []
+                subst_remaining_probe = subst_ctx["_remaining"]
+                while subst_remaining_probe is not None:
+                    if (
+                        not isinstance(subst_remaining_probe, dict)  # AST_OK: boundary - Mu linked-list authority guard
+                        or set(subst_remaining_probe.keys()) != {"head", "tail"}
+                    ):
+                        raise TypeError("SECURITY: continuation_state kernel projection cursor must be a Mu head/tail list")
+                    subst_remaining_projection = subst_remaining_probe["head"]
+                    if (
+                        not isinstance(subst_remaining_projection, dict)  # AST_OK: boundary - normalized projection authority guard
+                        or set(subst_remaining_projection.keys()) != _KERNEL_PROJECTION_KEYS
+                    ):
+                        raise TypeError("SECURITY: continuation_state kernel projection cursor head must be a normalized projection")
+                    subst_remaining_signature.append(mu_hash(subst_remaining_projection))
+                    subst_remaining_probe = subst_remaining_probe["tail"]
+                subst_candidates = []
                 for context in projection_contexts:
-                    if context["rest_hash"] != subst_rest_hash:
+                    if context["rest_signature"] != subst_remaining_signature:
                         continue
                     if subst_body_hash is not None and context["body_hash"] != subst_body_hash:
                         continue

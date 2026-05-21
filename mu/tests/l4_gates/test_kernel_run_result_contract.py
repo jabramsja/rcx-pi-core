@@ -194,6 +194,44 @@ class TestKernelRunResultPython:
                 max_steps=100,
             )
 
+    def test_continuation_resume_binds_remaining_cursor_without_hashing_tail(self, monkeypatch):
+        """Continuation binding must compare projection cursors without hashing full tails."""
+        first = {"pattern": {"x": {"var": "v"}}, "body": {"winner": {"var": "v"}}}
+        second = {"pattern": {"x": {"var": "v"}}, "body": {"shadow": {"var": "v"}}}
+        projs = [first, second]
+        inp = {"x": 1}
+        packet = step_kernel_mu(projs, inp, return_packet=True, max_steps=100)
+        assert packet["kind"] == "continuation"
+        packet = step_kernel_mu(
+            projs,
+            inp,
+            continuation_state=packet["continuation"],
+            return_packet=True,
+            max_steps=100,
+        )
+        assert packet["kind"] == "continuation"
+        match_ctx = packet["continuation"]["kernel_state"]["_match_ctx"]
+        assert match_ctx["_remaining"] is not None
+
+        real_mu_hash = step_mu_mod.mu_hash
+
+        def guarded_mu_hash(value):
+            if isinstance(value, dict) and set(value.keys()) == {"head", "tail"}:
+                head = value["head"]
+                if isinstance(head, dict) and set(head.keys()) == {"pattern", "body"}:
+                    raise AssertionError("projection cursor tail was hashed")
+            return real_mu_hash(value)
+
+        monkeypatch.setattr(step_mu_mod, "mu_hash", guarded_mu_hash)
+        resumed = step_kernel_mu(
+            projs,
+            inp,
+            continuation_state=packet["continuation"],
+            return_packet=True,
+            max_steps=100,
+        )
+        assert resumed["kind"] == "continuation"
+
     def test_continuation_resume_rejects_forged_later_phase_projection_state(self):
         """Continuation resume must reject later states whose selected projection no longer matches."""
         projs = [{"pattern": {"x": 1}, "body": {"x": 2}}]

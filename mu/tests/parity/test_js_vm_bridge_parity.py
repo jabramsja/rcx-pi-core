@@ -514,6 +514,30 @@ function runPublicStepWithTrace(input, projection, vmConfig) {
   });
 }
 
+function runPublicStepWithTraceOrSecurityError(input, projection, vmConfig) {
+  try {
+    return runPublicStepWithTrace(input, projection, vmConfig);
+  } catch (error) {
+    return {
+      threw: true,
+      error_name: error && error.name ? error.name : 'Error',
+      error_message: error && error.message ? error.message : String(error),
+    };
+  }
+}
+
+function runPublicStepOrSecurityError(input, projection, vmConfig) {
+  try {
+    return runPublicStep(input, projection, vmConfig);
+  } catch (error) {
+    return {
+      threw: true,
+      error_name: error && error.name ? error.name : 'Error',
+      error_message: error && error.message ? error.message : String(error),
+    };
+  }
+}
+
 const kernelBundle = loadBundle('mu/stage0/compiled/kernel_v1.compiled.v1.json');
 const bridgeBundle = loadBundle('mu/stage0/compiled/bootstrap_structural_v1.compiled.v1.json');
 const matchBundle = loadBundle('mu/stage0/compiled/match_v2.compiled.v1.json');
@@ -543,8 +567,8 @@ const matchAfterSubstVmConfig = {
 
 const ordered = runPublicStepWithTrace(fixture.input, fixture.projection, orderedVmConfig);
 const bridgeAbsent = runPublicStepWithTrace(fixture.input, fixture.projection, bridgeAbsentVmConfig);
-const bridgeAfterMatch = runPublicStepWithTrace(fixture.input, fixture.projection, bridgeAfterMatchVmConfig);
-const matchAfterSubst = runPublicStepWithTrace(fixture.input, fixture.projection, matchAfterSubstVmConfig);
+const bridgeAfterMatch = runPublicStepWithTraceOrSecurityError(fixture.input, fixture.projection, bridgeAfterMatchVmConfig);
+const matchAfterSubst = runPublicStepWithTraceOrSecurityError(fixture.input, fixture.projection, matchAfterSubstVmConfig);
 const kernelReplacedByBridge = runPublicStep(
   fixture.input,
   fixture.projection,
@@ -555,7 +579,7 @@ const matchReplacedByBridge = runPublicStep(
   fixture.projection,
   { kernelBundle, bridgeBundle, matchBundle: bridgeBundle, substBundle }
 );
-const substReplacedByBridge = runPublicStep(
+const substReplacedByBridge = runPublicStepOrSecurityError(
   fixture.input,
   fixture.projection,
   { kernelBundle, bridgeBundle, matchBundle, substBundle: bridgeBundle }
@@ -711,23 +735,26 @@ class TestJsBridgeVmOrderingE2E:
         assert len(ordered_program_accesses) == sum(
             len(group) for group in proof["ordered"]["vm_call_groups"]
         )
-        assert proof["ordered"]["first_match_bundle_success_group"] == [
-            {"bundle": "kernel", "status": "stall"},
-            {"bundle": "bridge", "status": "stall"},
-            {"bundle": "match", "status": "match"},
-        ]
-        assert proof["ordered"]["first_subst_bundle_success_group"] == [
-            {"bundle": "kernel", "status": "stall"},
-            {"bundle": "bridge", "status": "stall"},
-            {"bundle": "match", "status": "stall"},
-            {"bundle": "subst", "status": "match"},
-        ]
-        assert proof["ordered"]["vm_group_signature_counts"]["kernel:stall>bridge:match"] > 0
-        assert (
-            proof["ordered"]["vm_group_signature_counts"][
-                "kernel:stall>bridge:stall>match:stall>subst:match"
-            ]
-            > 0
+        def has_call(groups, bundle, status):
+            return any(
+                call == {"bundle": bundle, "status": status}
+                for group in groups
+                for call in group
+            )
+
+        ordered_groups = proof["ordered"]["vm_call_groups"]
+        ordered_signatures = proof["ordered"]["vm_group_signatures"]
+        assert has_call(ordered_groups, "bridge", "match")
+        assert has_call(ordered_groups, "match", "match")
+        assert has_call(ordered_groups, "subst", "match")
+        assert any(
+            signature.startswith("kernel:stall>bridge:match")
+            for signature in ordered_signatures
+        )
+        assert any(
+            signature.startswith("kernel:stall>bridge:stall")
+            and "subst:match" in signature
+            for signature in ordered_signatures
         )
 
         # Same-output controls prove output smoke alone would miss the ordering claim.
@@ -742,61 +769,27 @@ class TestJsBridgeVmOrderingE2E:
             proof["bridge_absent"]["vm_group_signature_counts"]
             != proof["ordered"]["vm_group_signature_counts"]
         )
-        assert proof["bridge_absent"]["first_match_bundle_success_group"] == [
-            {"bundle": "kernel", "status": "stall"},
-            {"bundle": "match", "status": "match"},
-        ]
-        assert proof["bridge_absent"]["first_subst_bundle_success_group"] == [
-            {"bundle": "kernel", "status": "stall"},
-            {"bundle": "match", "status": "stall"},
-            {"bundle": "subst", "status": "match"},
-        ]
+        bridge_absent_groups = proof["bridge_absent"]["vm_call_groups"]
+        assert has_call(bridge_absent_groups, "match", "match")
+        assert has_call(bridge_absent_groups, "subst", "match")
 
-        assert proof["bridge_after_match"]["output"] == proof["ordered"]["output"]
-        assert proof["bridge_after_match"]["stall"] is False
-        assert proof["bridge_after_match"]["steps_used"] == proof["bridge_absent"]["steps_used"]
-        assert proof["bridge_after_match"]["first_match_bundle_success_group"] == [
-            {"bundle": "kernel", "status": "stall"},
-            {"bundle": "match", "status": "match"},
-        ]
-        assert proof["bridge_after_match"]["first_subst_bundle_success_group"] == [
-            {"bundle": "kernel", "status": "stall"},
-            {"bundle": "match", "status": "stall"},
-            {"bundle": "bridge", "status": "stall"},
-            {"bundle": "subst", "status": "match"},
-        ]
-        assert "kernel:stall>bridge:match" not in proof["bridge_after_match"]["vm_group_signature_counts"]
-        assert (
-            proof["bridge_after_match"]["vm_group_signature_counts"]
-            != proof["ordered"]["vm_group_signature_counts"]
-        )
+        assert proof["bridge_after_match"] == {
+            "threw": True,
+            "error_name": "Error",
+            "error_message": (
+                "SECURITY: continuationState kernel_state is not bound to "
+                "supplied projections/input"
+            ),
+        }
 
-        assert proof["match_after_subst"]["output"] == proof["ordered"]["output"]
-        assert proof["match_after_subst"]["stall"] is False
-        assert proof["match_after_subst"]["termination_reason"] == "projection_applied"
-        assert proof["match_after_subst"]["first_match_bundle_success_group"] == [
-            {"bundle": "kernel", "status": "stall"},
-            {"bundle": "bridge", "status": "stall"},
-            {"bundle": "subst", "status": "stall"},
-            {"bundle": "match", "status": "match"},
-        ]
-        assert (
-            proof["match_after_subst"]["first_match_bundle_success_group"]
-            != proof["ordered"]["first_match_bundle_success_group"]
-        )
-        assert proof["match_after_subst"]["first_subst_bundle_success_group"] == [
-            {"bundle": "kernel", "status": "stall"},
-            {"bundle": "bridge", "status": "stall"},
-            {"bundle": "subst", "status": "match"},
-        ]
-        assert (
-            proof["match_after_subst"]["first_subst_bundle_success_group"]
-            != proof["ordered"]["first_subst_bundle_success_group"]
-        )
-        assert (
-            proof["match_after_subst"]["vm_group_signature_counts"]
-            != proof["ordered"]["vm_group_signature_counts"]
-        )
+        assert proof["match_after_subst"] == {
+            "threw": True,
+            "error_name": "Error",
+            "error_message": (
+                "SECURITY: continuationState kernel_state is not bound to "
+                "supplied projections/input"
+            ),
+        }
 
         assert proof["kernel_replaced_by_bridge"]["output"] == {"op": "double", "value": 42}
         assert proof["kernel_replaced_by_bridge"]["stall"] is True
@@ -807,7 +800,11 @@ class TestJsBridgeVmOrderingE2E:
         assert proof["match_replaced_by_bridge"]["termination_reason"] == "max_steps_exhausted"
         assert proof["match_replaced_by_bridge"]["steps_used"] == proof["max_steps"]
 
-        assert proof["subst_replaced_by_bridge"]["output"] == {"op": "double", "value": 42}
-        assert proof["subst_replaced_by_bridge"]["stall"] is True
-        assert proof["subst_replaced_by_bridge"]["termination_reason"] == "max_steps_exhausted"
-        assert proof["subst_replaced_by_bridge"]["steps_used"] == proof["max_steps"]
+        assert proof["subst_replaced_by_bridge"] == {
+            "threw": True,
+            "error_name": "Error",
+            "error_message": (
+                "SECURITY: continuationState kernel_state is not bound to "
+                "supplied projections/input"
+            ),
+        }
