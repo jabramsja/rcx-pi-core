@@ -1999,6 +1999,30 @@ def _can_rekey_continuation_to_refreshed_handoff(handoff: dict[str, Any]) -> boo
     return str(handoff.get("caller") or "") == "phase_b"
 
 
+def _can_rekey_post_commit_continuation_to_handoff(
+    handoff: dict[str, Any] | None,
+    *,
+    wave_id: str,
+    target_branch: str,
+) -> bool:
+    """Allow Phase B handoff refreshes to resume an existing post-commit record."""
+    if not isinstance(handoff, dict):
+        return False
+    if not _can_rekey_continuation_to_refreshed_handoff(handoff):
+        return False
+    if str(handoff.get("wave_id") or "").strip() != wave_id:
+        return False
+    handoff_target_branch = str(handoff.get("target_branch") or "").strip()
+    if handoff_target_branch and handoff_target_branch != target_branch:
+        return False
+    tracked_packet = _normalize_repo_relpath(str(handoff.get("tracked_packet") or ""))
+    if not tracked_packet.startswith("reports/control_plane/"):
+        return False
+    if wave_id not in Path(tracked_packet).name:
+        return False
+    return True
+
+
 def _refresh_tasks_tracker_note_after_packet_truth(
     repo_root: Path,
     *,
@@ -3634,6 +3658,15 @@ def _build_tracker_followup_note(*, wave_id: str, tracker_paths: list[str]) -> s
     )
 
 
+def _tracker_followup_mentions_paths(line: str, tracker_paths: list[str]) -> bool:
+    return bool(tracker_paths) and all(path in line for path in tracker_paths)
+
+
+def _tracker_followup_insert_index(canonical_idx: int, tracker_followup_indices: list[int]) -> int:
+    following = [idx for idx in tracker_followup_indices if idx > canonical_idx]
+    return max(following) if following else canonical_idx
+
+
 def _sync_tracker_followup_line(
     lines: list[str],
     *,
@@ -3643,16 +3676,9 @@ def _sync_tracker_followup_line(
     tracker_paths: list[str],
     tracker_file_staged: bool,
 ) -> tuple[bool, str | None, str | None]:
-    if len(tracker_followup_indices) > 1:
-        return (
-            False,
-            f"wave_id '{wave_id}' has {len(tracker_followup_indices)} tracker follow-up notes in TASKS.md (duplicate)",
-            None,
-        )
-
-    followup_idx = tracker_followup_indices[0] if tracker_followup_indices else None
+    followup_idx = tracker_followup_indices[0] if len(tracker_followup_indices) == 1 else None
     should_emit_followup = bool(tracker_paths) and (
-        not tracker_file_staged or followup_idx is not None
+        not tracker_file_staged or bool(tracker_followup_indices)
     )
     if not should_emit_followup:
         if followup_idx is None:
@@ -3664,6 +3690,16 @@ def _sync_tracker_followup_line(
         wave_id=wave_id,
         tracker_paths=tracker_paths,
     )
+    if len(tracker_followup_indices) > 1:
+        if any(
+            _tracker_followup_mentions_paths(lines[idx], tracker_paths)
+            for idx in tracker_followup_indices
+        ):
+            return False, None, None
+        insert_idx = _tracker_followup_insert_index(canonical_idx, tracker_followup_indices)
+        lines.insert(insert_idx + 1, followup_line)
+        return True, None, "inserted"
+
     if followup_idx is None:
         lines.insert(canonical_idx + 1, followup_line)
         return True, None, "inserted"
@@ -4014,6 +4050,8 @@ def _load_post_commit_continuation(
     repo_root: Path,
     handoff_sha: str,
     target_branch: str,
+    wave_id: str | None = None,
+    handoff: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -4025,7 +4063,14 @@ def _load_post_commit_continuation(
     if payload.get("status") != CONTINUATION_ACTIVE_STATUS:
         return None
     if payload.get("handoff_sha") != handoff_sha:
-        return None
+        expected_wave_id = str(wave_id or "").strip()
+        if not expected_wave_id or not _can_rekey_post_commit_continuation_to_handoff(
+            handoff,
+            wave_id=expected_wave_id,
+            target_branch=target_branch,
+        ):
+            return None
+        payload["handoff_sha"] = handoff_sha
     if payload.get("target_branch") != target_branch:
         return None
 
@@ -4364,21 +4409,29 @@ def ensure_bot_remediation_tracker_followup(
         start_idx=ra_idx,
         end_idx=ra_end_idx,
     )
-    if len(tracker_followup_indices) > 1:
-        return {
-            "updated": False,
-            "tracker_paths": tracker_paths,
-            "errors": [
-                f"wave_id '{wave_id}' has {len(tracker_followup_indices)} tracker follow-up notes in TASKS.md (duplicate)"
-            ],
-        }
 
     followup_line = _build_tracker_followup_note(
         wave_id=wave_id,
         tracker_paths=tracker_paths,
     )
     updated = False
-    if tracker_followup_indices:
+    if len(tracker_followup_indices) > 1:
+        if any(
+            _tracker_followup_mentions_paths(lines[idx], tracker_paths)
+            for idx in tracker_followup_indices
+        ):
+            return {
+                "updated": False,
+                "tracker_paths": tracker_paths,
+                "path": "TASKS.md",
+            }
+        insert_idx = _tracker_followup_insert_index(
+            canonical_tracker_indices[0],
+            tracker_followup_indices,
+        )
+        lines.insert(insert_idx + 1, followup_line)
+        updated = True
+    elif tracker_followup_indices:
         followup_idx = tracker_followup_indices[0]
         if lines[followup_idx] != followup_line:
             lines[followup_idx] = followup_line
@@ -8436,6 +8489,8 @@ def _run_commit_pipeline_impl(
         repo_root=repo_root,
         handoff_sha=handoff_sha,
         target_branch=target_branch,
+        wave_id=wave_id,
+        handoff=handoff,
     )
     if continuation:
         result["steps_completed"] = list(continuation.get("steps_completed", []))

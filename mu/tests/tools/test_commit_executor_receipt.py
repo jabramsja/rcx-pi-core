@@ -383,6 +383,80 @@ def test_post_commit_pre_push_dirty_isolation_checkpoint_is_durable(tmp_path):
     assert loaded["pre_push_restored_paths"] == ["dirty.py"]
 
 
+def test_post_commit_continuation_rekeys_phase_b_handoff_refresh(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    wave_id = "continuation-rekey-wave"
+    target_branch = f"jabramsja/{wave_id}"
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "baseline"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "checkout", "-b", target_branch],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    (repo / "file.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "file.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "wave commit"], cwd=repo, check=True, capture_output=True)
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    continuation_path = commit_mod._continuation_record_path(repo, wave_id)  # ANTICHEAT_OK
+    continuation_path.parent.mkdir(parents=True, exist_ok=True)
+    continuation_path.write_text(
+        json.dumps(
+            {
+                "version": commit_mod.COMMIT_CONTINUATION_VERSION,
+                "status": commit_mod.CONTINUATION_ACTIVE_STATUS,
+                "handoff_sha": "old-phase-b-handoff-sha",
+                "target_branch": target_branch,
+                "commit_sha": head_sha,
+                "receipt_decision": "COMMIT_GO",
+                "steps_completed": ["validate_inputs", "ensure_feature_branch", "git_commit"],
+                "updated_at_unix": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    packet = f"reports/control_plane/{wave_id}_2026-05-21.md"
+    refreshed_handoff = _make_new_schema_handoff(
+        wave_id=wave_id,
+        target_branch=target_branch,
+        tracked_packet=packet,
+        files_to_stage=["file.py", packet],
+        force_add_files=[packet],
+    )
+    refreshed_handoff_sha = _canonical_handoff_sha_for_test(refreshed_handoff)
+
+    loaded = commit_mod._load_post_commit_continuation(  # ANTICHEAT_OK: direct continuation loader regression
+        continuation_path,
+        repo_root=repo,
+        handoff_sha=refreshed_handoff_sha,
+        target_branch=target_branch,
+        wave_id=wave_id,
+        handoff=refreshed_handoff,
+    )
+
+    assert loaded is not None
+    assert loaded["handoff_sha"] == refreshed_handoff_sha
+    blocked = commit_mod._load_post_commit_continuation(  # ANTICHEAT_OK: mismatched non-packet handoff must not rekey
+        continuation_path,
+        repo_root=repo,
+        handoff_sha="different-handoff-sha",
+        target_branch=target_branch,
+        wave_id=wave_id,
+        handoff={**refreshed_handoff, "tracked_packet": f"reports/deferred/{wave_id}.md"},
+    )
+    assert blocked is None
+
+
 def test_post_commit_pre_push_dirty_isolation_checkpoints_before_stash(tmp_path):
     import subprocess
 
@@ -503,6 +577,60 @@ def test_bot_remediation_tracker_followup_skips_when_tracker_file_scoped(tmp_pat
         "tracker_paths": ["mu/tools/executors/phase_b_executor.py"],
     }
     assert "Tracker sync follow-up" not in (repo / "TASKS.md").read_text(encoding="utf-8")
+
+
+def test_tracker_followup_preserves_multiple_historical_lines_when_clean():
+    wave_id = "multi-followup-clean-wave"
+    tracker_note = _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"]
+    first_followup = (
+        f"- Tracker sync follow-up (2026-05-21T00:00:00Z, {wave_id}): "
+        "same-wave follow-up commit touched tracker-relevant file(s) without "
+        "phase/task-state change: mu/host/js/engine/kernel.js.\n"
+    )
+    second_followup = (
+        f"- Tracker sync follow-up (2026-05-21T00:10:00Z, {wave_id}): "
+        "same-wave pipeline recovery follow-up touched tracker-relevant executor files "
+        "without runtime semantic change: mu/tools/executors/recovery_gate.py.\n"
+    )
+    lines = [
+        "## Ra\n",
+        "\n",
+        tracker_note + "\n",
+        first_followup,
+        second_followup,
+        "---\n",
+    ]
+    original = list(lines)
+
+    modified, error, action = commit_mod._sync_tracker_followup_line(  # ANTICHEAT_OK: direct tracker-ledger regression
+        lines,
+        wave_id=wave_id,
+        canonical_idx=2,
+        tracker_followup_indices=[3, 4],
+        tracker_paths=[],
+        tracker_file_staged=False,
+    )
+
+    assert (modified, error, action) == (False, None, None)
+    assert lines == original
+
+    new_path = "mu/tools/executors/commit_executor.py"
+    modified, error, action = commit_mod._sync_tracker_followup_line(  # ANTICHEAT_OK: direct tracker-ledger regression
+        lines,
+        wave_id=wave_id,
+        canonical_idx=2,
+        tracker_followup_indices=[3, 4],
+        tracker_paths=[new_path],
+        tracker_file_staged=False,
+    )
+
+    assert (modified, error, action) == (True, None, "inserted")
+    followup_lines = [
+        line for line in lines
+        if line.startswith("- Tracker sync follow-up") and wave_id in line
+    ]
+    assert len(followup_lines) == 3
+    assert new_path in followup_lines[-1]
 
 
 def test_structural_staged_followup_retargets_supervisor_class_when_branch_range_has_runtime():

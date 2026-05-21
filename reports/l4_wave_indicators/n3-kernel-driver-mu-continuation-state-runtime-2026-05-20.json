@@ -1,24 +1,24 @@
 {
   "wave_id": "n3-kernel-driver-mu-continuation-state-runtime-2026-05-20",
-  "repeat_run_speedup_ratio": 1.023866,
+  "repeat_run_speedup_ratio": 1.057573,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.228947,
+  "step_growth_slope": 0.248468,
   "repeat_run_raw_seconds": [
-    0.234411,
-    0.228947
+    0.262773,
+    0.248468
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.234411
+      "elapsed_seconds": 0.262773
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.463358
+      "elapsed_seconds": 0.511241
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-05-21T10:51:49Z",
+  "collection_timestamp_utc": "2026-05-21T11:08:13Z",
   "collector_version": "2.2.0"
 }
