@@ -244,7 +244,8 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     const projectionHashes = new Set();
     const bodyHashes = new Set();
     const projectionContexts = [];
-    const useVmMatchValidation = Boolean(vmConfig && vmConfig.matchBundle);
+    const useDomainValidation = validator !== validateAlgorithmRuntimeFields;
+    const useVmMatchValidation = useDomainValidation && Boolean(vmConfig && vmConfig.matchBundle);
     let prefixHasMatch = false;
     let projectionAuthorityCursor = kernelInput._projs;
     while (projectionAuthorityCursor !== null) {
@@ -279,11 +280,12 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
           ])],
         ]), 100);
         matchResult = matchOutcome.root;
-      } else {
+      } else if (useDomainValidation) {
         legacyMatchBindings = stage0Match(projectionAuthority.pattern, kernelInput._step, null);
       }
       projectionContexts.push({
         projection: projectionAuthority,
+        projectionRest: projectionAuthorityCursor.tail,
         bodyHash: muHash(projectionAuthority.body),
         restHash: muHash(projectionAuthorityCursor.tail),
         cursorHash: muHash(projectionAuthorityCursor),
@@ -295,7 +297,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
         ? matchResult !== null && typeof matchResult === 'object' && !Array.isArray(matchResult) &&
             matchResult._mode === 'match_done' && matchResult._status === 'success'
         : legacyMatchBindings !== NO_MATCH;
-      if (projectionMatches) {
+      if (useDomainValidation && projectionMatches) {
         prefixHasMatch = true;
       }
       projectionAuthorityCursor = projectionAuthorityCursor.tail;
@@ -303,7 +305,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     const exhaustedPrefixCleared = !prefixHasMatch;
     const kernelState = continuationState.kernel_state;
     const kernelStateIsObject = kernelState !== null && typeof kernelState === 'object' && !Array.isArray(kernelState);
-    const enforcePrefixCleared = validator !== validateAlgorithmRuntimeFields;
+    const enforcePrefixCleared = useDomainValidation;
     if (!kernelStateIsObject) {
       // Scalar Mu states can only come from the defensive hash-stall path:
       // they carry no projection authority and must resume as cursorless,
@@ -412,20 +414,37 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
             throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
           }
         }
-        if (kernelState.mode === 'match' &&
+        if (useDomainValidation &&
+            kernelState.mode === 'match' &&
             kernelState.pattern_focus === null &&
             kernelState.value_focus === null &&
             kernelState.stack === null) {
           let successBoundToInput = false;
           for (const context of matchCandidates) {
-            const expectedBindings = stage0Match(context.projection.pattern, kernelInput._step, null);
+            const actualBindings = kernelState.bindings;
+            const matchResult = useVmMatchValidation &&
+                context.matchResult !== null &&
+                typeof context.matchResult === 'object' &&
+                !Array.isArray(context.matchResult)
+              ? context.matchResult
+              : null;
+            if (matchResult !== null) {
+              if (matchResult._mode !== 'match_done' || matchResult._status !== 'success') {
+                continue;
+              }
+              if (muHash(actualBindings) === muHash(matchResult._bindings)) {
+                successBoundToInput = true;
+                break;
+              }
+              continue;
+            }
+            const expectedBindings = context.legacyMatchBindings;
             if (expectedBindings === NO_MATCH ||
                 expectedBindings === null ||
                 typeof expectedBindings !== 'object' ||
                 Array.isArray(expectedBindings)) {
               continue;
             }
-            const actualBindings = kernelState.bindings;
             const expectedNames = new Set(Object.keys(expectedBindings));
             let bindingsMatch = false;
             if (actualBindings === null) {
@@ -473,15 +492,21 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
           }
         }
         if (kernelState._mode === 'match_done') {
-          if (kernelState._status === 'success') {
+          if (kernelState._status === 'success' && useDomainValidation) {
             let successBoundToInput = false;
             for (const context of matchCandidates) {
               const actualBindings = kernelState._bindings;
-              if (context.matchResult !== null && typeof context.matchResult === 'object' && !Array.isArray(context.matchResult)) {
-                if (context.matchResult._mode !== 'match_done' || context.matchResult._status !== 'success') {
+              const matchResult = useVmMatchValidation &&
+                  context.matchResult !== null &&
+                  typeof context.matchResult === 'object' &&
+                  !Array.isArray(context.matchResult)
+                ? context.matchResult
+                : null;
+              if (matchResult !== null) {
+                if (matchResult._mode !== 'match_done' || matchResult._status !== 'success') {
                   continue;
                 }
-                if (muHash(actualBindings) === muHash(context.matchResult._bindings)) {
+                if (muHash(actualBindings) === muHash(matchResult._bindings)) {
                   successBoundToInput = true;
                   break;
                 }
@@ -539,14 +564,26 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
             if (!successBoundToInput) {
               throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
             }
+          } else if (kernelState._status === 'success') {
+            // Algorithm-runtime continuations are trusted Mu state: shape and
+            // cursor authority are checked above, while domain binding proof is
+            // intentionally limited to domain validation mode.
           } else if (kernelState._status === 'no_match') {
-            for (const context of matchCandidates) {
-              if (context.matchResult !== null && typeof context.matchResult === 'object' && !Array.isArray(context.matchResult)) {
-                if (context.matchResult._mode === 'match_done' && context.matchResult._status === 'success') {
+            if (useDomainValidation) {
+              for (const context of matchCandidates) {
+                const matchResult = useVmMatchValidation &&
+                    context.matchResult !== null &&
+                    typeof context.matchResult === 'object' &&
+                    !Array.isArray(context.matchResult)
+                  ? context.matchResult
+                  : null;
+                if (matchResult !== null) {
+                  if (matchResult._mode === 'match_done' && matchResult._status === 'success') {
+                    throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+                  }
+                } else if (context.legacyMatchBindings !== NO_MATCH) {
                   throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
                 }
-              } else if (context.legacyMatchBindings !== NO_MATCH) {
-                throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
               }
             }
           } else {
@@ -601,100 +638,158 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
         if (substCandidates.length === 0) {
           throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
         }
-        let substBoundToInput = false;
-        for (const context of substCandidates) {
-          const expectedBindings = stage0Match(context.projection.pattern, kernelInput._step, null);
-          if (expectedBindings === NO_MATCH ||
-              expectedBindings === null ||
-              typeof expectedBindings !== 'object' ||
-              Array.isArray(expectedBindings)) {
-            continue;
-          }
-          if (kernelState._mode === 'subst_done') {
-            let expectedResult = null;
-            try {
-              expectedResult = stage0Substitute(context.projection.body, expectedBindings);
-            } catch (error) {
-              const prefix = 'Unbound variable: ';
-              if (!error || typeof error.message !== 'string' || !error.message.startsWith(prefix)) {
-                throw error;
+        if (useDomainValidation) {
+          let substBoundToInput = false;
+          for (const context of substCandidates) {
+            let expectedBindings = context.legacyMatchBindings;
+            let expectedSubst = null;
+            if (useVmMatchValidation) {
+              const matchResult = useVmMatchValidation &&
+                  context.matchResult !== null &&
+                  typeof context.matchResult === 'object' &&
+                  !Array.isArray(context.matchResult)
+                ? context.matchResult
+                : null;
+              if (matchResult === null ||
+                  matchResult._mode !== 'match_done' ||
+                  matchResult._status !== 'success') {
+                continue;
               }
-              expectedResult = muContainers.record([
-                ['_error', 'unbound_variable'],
-                ['_name', error.message.slice(prefix.length)],
-              ]);
+              expectedBindings = matchResult._bindings;
+              const substOutcome = stage0VmRun(vmConfig.substBundle, muContainers.record([
+                ['subst', muContainers.record([
+                  ['body', context.projection.body],
+                  ['bindings', expectedBindings],
+                ])],
+                ['_subst_ctx', muContainers.record([
+                  ['_input', kernelInput._step],
+                  ['_remaining', context.projectionRest],
+                ])],
+              ]), 100);
+              expectedSubst = substOutcome.root;
+              if (expectedSubst === null ||
+                  typeof expectedSubst !== 'object' ||
+                  Array.isArray(expectedSubst) ||
+                  expectedSubst._mode !== 'subst_done') {
+                continue;
+              }
+              if (kernelState._mode === 'subst_done') {
+                if (muHash(kernelState._result) === muHash(expectedSubst._result)) {
+                  substBoundToInput = true;
+                  break;
+                }
+                continue;
+              }
+              let bindingsMatch = muHash(substBindings) === muHash(expectedBindings);
+              if (bindingsMatch &&
+                  kernelState.mode === 'subst' &&
+                  kernelState.phase === 'result' &&
+                  kernelState.context === null &&
+                  muHash(kernelState.focus) !== muHash(expectedSubst._result)) {
+                bindingsMatch = false;
+              }
+              if (bindingsMatch) {
+                substBoundToInput = true;
+                break;
+              }
+              continue;
             }
-            if (muHash(kernelState._result) === muHash(expectedResult)) {
+            if (expectedBindings === NO_MATCH ||
+                expectedBindings === null ||
+                typeof expectedBindings !== 'object' ||
+                Array.isArray(expectedBindings)) {
+              continue;
+            }
+            if (kernelState._mode === 'subst_done') {
+              let expectedResult = expectedSubst === null ? null : expectedSubst._result;
+              if (expectedSubst === null) {
+                try {
+                  expectedResult = stage0Substitute(context.projection.body, expectedBindings);
+                } catch (error) {
+                  const prefix = 'Unbound variable: ';
+                  if (!error || typeof error.message !== 'string' || !error.message.startsWith(prefix)) {
+                    throw error;
+                  }
+                  expectedResult = muContainers.record([
+                    ['_error', 'unbound_variable'],
+                    ['_name', error.message.slice(prefix.length)],
+                  ]);
+                }
+              }
+              if (muHash(kernelState._result) === muHash(expectedResult)) {
+                substBoundToInput = true;
+                break;
+              }
+              continue;
+            }
+            const expectedNames = new Set(Object.keys(expectedBindings));
+            let bindingsMatch = false;
+            if (substBindings === null) {
+              bindingsMatch = expectedNames.size === 0;
+            } else {
+              bindingsMatch = true;
+              const seenNames = new Set();
+              let bindingCursor = substBindings;
+              while (bindingCursor !== null) {
+                if (bindingCursor === null || typeof bindingCursor !== 'object' || Array.isArray(bindingCursor)) {
+                  throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
+                }
+                keys = Object.keys(bindingCursor).sort();
+                if (keys.length !== 3 || keys[0] !== 'name' || keys[1] !== 'rest' || keys[2] !== 'value') {
+                  throw new Error('SECURITY: continuationState binding cursor key set mismatch');
+                }
+                if (typeof bindingCursor.name !== 'string') {
+                  throw new Error('SECURITY: continuationState binding name must be string');
+                }
+                if (!Object.hasOwn(expectedBindings, bindingCursor.name)) {
+                  bindingsMatch = false;
+                  break;
+                }
+                if (muHash(bindingCursor.value) !== muHash(expectedBindings[bindingCursor.name])) {
+                  bindingsMatch = false;
+                  break;
+                }
+                seenNames.add(bindingCursor.name);
+                bindingCursor = bindingCursor.rest;
+              }
+              for (const name of expectedNames) {
+                if (!seenNames.has(name)) {
+                  bindingsMatch = false;
+                  break;
+                }
+              }
+            }
+            if (bindingsMatch &&
+                kernelState.mode === 'subst' &&
+                kernelState.phase === 'result' &&
+                kernelState.context === null) {
+              let expectedFocus = expectedSubst === null ? null : expectedSubst._result;
+              if (expectedSubst === null) {
+                try {
+                  expectedFocus = stage0Substitute(context.projection.body, expectedBindings);
+                } catch (error) {
+                  const prefix = 'Unbound variable: ';
+                  if (!error || typeof error.message !== 'string' || !error.message.startsWith(prefix)) {
+                    throw error;
+                  }
+                  expectedFocus = muContainers.record([
+                    ['_error', 'unbound_variable'],
+                    ['_name', error.message.slice(prefix.length)],
+                  ]);
+                }
+              }
+              if (muHash(kernelState.focus) !== muHash(expectedFocus)) {
+                bindingsMatch = false;
+              }
+            }
+            if (bindingsMatch) {
               substBoundToInput = true;
               break;
             }
-            continue;
           }
-          const expectedNames = new Set(Object.keys(expectedBindings));
-          let bindingsMatch = false;
-          if (substBindings === null) {
-            bindingsMatch = expectedNames.size === 0;
-          } else {
-            bindingsMatch = true;
-            const seenNames = new Set();
-            let bindingCursor = substBindings;
-            while (bindingCursor !== null) {
-              if (bindingCursor === null || typeof bindingCursor !== 'object' || Array.isArray(bindingCursor)) {
-                throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
-              }
-              keys = Object.keys(bindingCursor).sort();
-              if (keys.length !== 3 || keys[0] !== 'name' || keys[1] !== 'rest' || keys[2] !== 'value') {
-                throw new Error('SECURITY: continuationState binding cursor key set mismatch');
-              }
-              if (typeof bindingCursor.name !== 'string') {
-                throw new Error('SECURITY: continuationState binding name must be string');
-              }
-              if (!Object.hasOwn(expectedBindings, bindingCursor.name)) {
-                bindingsMatch = false;
-                break;
-              }
-              if (muHash(bindingCursor.value) !== muHash(expectedBindings[bindingCursor.name])) {
-                bindingsMatch = false;
-                break;
-              }
-              seenNames.add(bindingCursor.name);
-              bindingCursor = bindingCursor.rest;
-            }
-            for (const name of expectedNames) {
-              if (!seenNames.has(name)) {
-                bindingsMatch = false;
-                break;
-              }
-            }
+          if (!substBoundToInput) {
+            throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
           }
-          if (bindingsMatch &&
-              kernelState.mode === 'subst' &&
-              kernelState.phase === 'result' &&
-              kernelState.context === null) {
-            let expectedFocus = null;
-            try {
-              expectedFocus = stage0Substitute(context.projection.body, expectedBindings);
-            } catch (error) {
-              const prefix = 'Unbound variable: ';
-              if (!error || typeof error.message !== 'string' || !error.message.startsWith(prefix)) {
-                throw error;
-              }
-              expectedFocus = muContainers.record([
-                ['_error', 'unbound_variable'],
-                ['_name', error.message.slice(prefix.length)],
-              ]);
-            }
-            if (muHash(kernelState.focus) !== muHash(expectedFocus)) {
-              bindingsMatch = false;
-            }
-          }
-          if (bindingsMatch) {
-            substBoundToInput = true;
-            break;
-          }
-        }
-        if (!substBoundToInput) {
-          throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
         }
       }
     }

@@ -247,6 +247,9 @@ class TestJSOuterLoopBoundary:
                 assert "kind: 'continuation'" in body
                 assert "kernel_driver_continuation_state" in body
                 assert "continuationState" in body
+                assert "matchResultForContext" not in body, (
+                    "JS _stepKernelCore must not move continuation authority into a nested helper site"
+                )
                 assert "if (callerSuppliedFuel)" in body and "fuelCursor = fuelCursor.tail" in body, (
                     "JS _stepKernelCore must consume Mu fuel only on the explicit supplied-fuel path"
                 )
