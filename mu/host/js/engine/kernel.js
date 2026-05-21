@@ -218,6 +218,11 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
         typeof continuationState.terminal.error !== 'string') {
       throw new Error('SECURITY: terminal.error must be string or null');
     }
+    if (continuationState.terminal.reached !== false ||
+        continuationState.terminal.reason !== null ||
+        continuationState.terminal.error !== null) {
+      throw new Error('SECURITY: continuation terminal metadata must remain nonterminal');
+    }
     if (continuationState.fuel_mode === 'explicit') {
       if (!isValidMu(continuationState.remaining_fuel)) {
         throw new Error('SECURITY: kernelFuel must be valid Mu linked-list data');

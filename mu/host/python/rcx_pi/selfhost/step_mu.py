@@ -1490,6 +1490,12 @@ def step_kernel_mu(
         error = terminal.get("error")
         if error is not None and not isinstance(error, str):  # AST_OK: boundary - continuation shape guard
             raise TypeError("SECURITY: continuation terminal.error must be string or null")
+        if (
+            terminal.get("reached") is not False
+            or terminal.get("reason") is not None
+            or terminal.get("error") is not None
+        ):
+            raise ValueError("SECURITY: continuation terminal metadata must remain nonterminal")
         remaining_fuel = continuation_state.get("remaining_fuel")
         if fuel_mode == "explicit":
             assert_mu(remaining_fuel, "step_kernel_mu.continuation_state.remaining_fuel")

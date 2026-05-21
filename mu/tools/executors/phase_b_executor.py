@@ -4201,6 +4201,7 @@ def _build_phase_b_tracker_note(
         ),
         wave_class=wave_class,
         target_gate_id=target_gate_id,
+        packet_ref=plan_path if plan_path and not plan_path.startswith("<") else "",
         primary_blocker_class="INTEGRATION",
         primary_invariant_id="INV_STRUCTURAL_FORWARD_MOTION",
         indicator_artifact_ref=indicator_path,

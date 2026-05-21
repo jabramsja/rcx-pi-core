@@ -117,6 +117,31 @@ class TestKernelRunResultPython:
         assert packet["result"]["termination_reason"] == "fuel_exhausted"
         assert packet["result"]["fuel_supplied"] is True
 
+    def test_continuation_resume_rejects_terminal_metadata_claim(self):
+        """Continuation packets must not smuggle terminal result metadata."""
+        packet = step_kernel_mu(
+            [{"pattern": {"x": 1}, "body": {"x": 2}}],
+            {"x": 1},
+            max_steps=100,
+            return_packet=True,
+        )
+        assert packet["kind"] == "continuation"
+        forged = deepcopy(packet["continuation"])
+        forged["terminal"] = {
+            "reached": True,
+            "reason": "accepted",
+            "error": None,
+        }
+
+        with pytest.raises(ValueError, match="terminal metadata"):
+            step_kernel_mu(
+                [{"pattern": {"x": 1}, "body": {"x": 2}}],
+                {"x": 1},
+                continuation_state=forged,
+                return_packet=True,
+                max_steps=100,
+            )
+
     def test_continuation_resume_rejects_unsupplied_projection_state(self):
         """Continuation resume must not execute projections absent from the call."""
         forged_projection = {
@@ -938,6 +963,63 @@ try {
         payload = json.loads(result.stdout.strip())
         assert payload["success"] is False
         assert "kernel_state" in payload["error"]
+
+    def test_direct_step_kernel_rejects_terminal_metadata_claim(self):
+        """JS continuation resume rejects terminal metadata on continuation data."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+const { normalize, listToLinked } = require('./mu/host/js/core/normalize');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const projection = muContainers.record([
+  ['pattern', normalize(trust({ x: 1 }))],
+  ['body', normalize(trust({ x: 2 }))],
+]);
+const state = muContainers.record([
+  ['tag', 'kernel_driver_continuation_state'],
+  ['version', 1],
+  ['kernel_state', muContainers.record([
+    ['_step', normalize(trust({ x: 1 }))],
+    ['_projs', listToLinked([projection])],
+  ])],
+  ['domain_input', trust({ x: 1 })],
+  ['projection_cursor', null],
+  ['remaining_fuel', null],
+  ['fuel_mode', 'omitted_compatibility'],
+  ['steps_used', 1],
+  ['watchdog_cap', 100],
+  ['terminal', muContainers.record([
+    ['reached', true],
+    ['reason', 'accepted'],
+    ['error', null],
+  ])],
+]);
+try {
+  stepKernel(
+    [],
+    trust({ x: 1 }),
+    [trust({ pattern: { x: 1 }, body: { x: 2 } })],
+    { continuationState: state, returnMeta: true, maxSteps: 100 }
+  );
+  console.log(JSON.stringify({ success: true }));
+} catch (e) {
+  console.log(JSON.stringify({ success: false, error: e.message }));
+}
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        payload = json.loads(result.stdout.strip())
+        assert payload["success"] is False
+        assert "terminal metadata" in payload["error"]
 
     def test_direct_step_kernel_rejects_broader_matching_prefix_projection(self):
         """JS continuation resume must not skip an earlier matching caller projection."""

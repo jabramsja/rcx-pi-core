@@ -989,6 +989,7 @@ class TestPrepareCommitHandoff:
         assert "pipeline-test-run-2026-03-25): **PIPELINE-TEST-RUN — commit-ready Phase B handoff.**" in note
         assert "Class: L4_ENABLER" in note
         assert "target_gate_id: G8" in note
+        assert "Packet: `reports/control_plane/pipeline_test_run_2026-03-25.md`" in note
         assert "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -x --tb=short" in note
         assert "indicator_artifact_ref: reports/l4_wave_indicators/pipeline-test-run-2026-03-25.json" in note
         assert "progress_proof_after: Phase B emitted a commit-ready handoff for pipeline-test-run-2026-03-25" in note
