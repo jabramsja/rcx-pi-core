@@ -1299,6 +1299,51 @@ def _plan_declares_routing_boundary(plan_content: str) -> bool:
     )
 
 
+def _phase_b_declares_structural_runtime_intent(
+    plan_content: str,
+    routing_record: dict[str, Any] | None = None,
+) -> bool:
+    text_parts = [plan_content or ""]
+    if routing_record:
+        text_parts.extend(
+            str(routing_record.get(key) or "")
+            for key in ("summary", "request_for_claude", "wave_class")
+        )
+    text = " ".join(text_parts).lower().replace("`", "")
+    return (
+        "l4_structural implementation wave" in text
+        or "l4_structural runtime wave" in text
+    )
+
+
+def _reentry_findings_indicate_runtime_pre_push_failure(findings: Any) -> bool:
+    if isinstance(findings, (dict, list, tuple)):
+        try:
+            findings_text = json.dumps(findings, sort_keys=True)
+        except TypeError:
+            findings_text = str(findings)
+    else:
+        findings_text = str(findings or "")
+    text = findings_text.lower()
+    commit_gate_signal = (
+        "run_pre_push_script" in text
+        or "pre-push-fast failed" in text
+        or "pre-push failed" in text
+    )
+    runtime_failure_signal = any(
+        token in text
+        for token in (
+            "tests/structural/",
+            "tests/parity/",
+            "mu/tests/structural/",
+            "mu/tests/parity/",
+            "mu/host/",
+            "eval_step.js",
+        )
+    )
+    return commit_gate_signal and runtime_failure_signal
+
+
 def _effective_phase_b_tracker_wave_class(
     wave_class: str,
     *,
@@ -3517,6 +3562,8 @@ def _resolve_phase_b_wave_class(
     plan_wave_class = _parse_plan_wave_class(plan_content)
     if plan_wave_class:
         return plan_wave_class
+    if _phase_b_declares_structural_runtime_intent(plan_content, routing_record):
+        return "L4_STRUCTURAL"
     return str(routing_record.get("wave_class") or "").strip() or "L4_ENABLER"
 
 
@@ -5414,6 +5461,7 @@ def run_phase_b(
             "all_non_blocking": all_non_blocking,
             "finding_history": finding_history,
             "reentry_findings": reentry_findings,
+            "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
             "skip_reentry_implementer_once": True,
             "pending_reentry_bridge_round": pending_bridge_round,
         })
@@ -5927,6 +5975,11 @@ def run_phase_b(
         resume_after == "reentry_private_attr_remediation_pending_review"
     )
     _skip_to_reentry = resume_after == "needs_phase_b_reentry" or _resume_reentry_private_attr_review
+    reentry_runtime_pre_push_failure = bool(
+        (saved_state or {}).get("runtime_pre_push_failure_reentry")
+    ) or _reentry_findings_indicate_runtime_pre_push_failure(
+        (saved_state or {}).get("reentry_findings") if saved_state else ""
+    )
     _resume_bridge_fix_pending = resume_after == "bridge_fix_pending"
     _skip_through_bridge = (
         resume_after.startswith("bridge_round_")
@@ -7204,6 +7257,7 @@ def run_phase_b(
                 "all_non_blocking": all_non_blocking,
                 "finding_history": finding_history,
                 "reentry_findings": findings_for_impl,
+                "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
             })
 
         reentry_start_round = result["bridge_rounds"] + 1
@@ -7592,6 +7646,7 @@ def run_phase_b(
                     "finding_history": finding_history,
                     "reentry_findings": findings_for_impl,
                     "last_reentry_bridge_decision": bridge_decision,
+                    "runtime_pre_push_failure_reentry": reentry_runtime_pre_push_failure,
                 })
                 log("Re-entry: checkpointed bridge findings; re-invoking implementer in-branch")
                 pre_reentry_files = set(_collect_changed_files(repo_root))
@@ -7929,6 +7984,19 @@ def run_phase_b(
             if packet_scope_modified and plan_path not in changed_files:
                 changed_files.append(plan_path)
                 changed_files = sorted(set(changed_files))
+        if (
+            reentry_runtime_pre_push_failure
+            and _phase_b_declares_structural_runtime_intent(plan.get("content", ""), routing_record)
+            and not _phase_b_scope_has_runtime_substrate_file(changed_files)
+        ):
+            result["status"] = "error"
+            result["step"] = "reentry_runtime_pre_push_scope"
+            result["errors"] = [
+                "Refusing to convert a runtime pre-push failure re-entry for an "
+                "L4_STRUCTURAL implementation wave into a control-only commit-ready package. "
+                "Resume Phase B with a runtime/test structural fix or preserve the failure as a blocker."
+            ]
+            return result
         effective_wave_class = _effective_phase_b_tracker_wave_class(
             wave_class,
             plan_content=plan.get("content", ""),

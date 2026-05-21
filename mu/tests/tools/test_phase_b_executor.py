@@ -1450,6 +1450,19 @@ class TestLoadPlanPacketPathTraversal:
             content,
         ) == "L4_STRUCTURAL"
 
+    def test_structural_runtime_intent_in_packet_body_wins_over_default_enabler(self):
+        content = (
+            "# Runtime Packet\n"
+            "Status: Phase B\n"
+            "Purpose: This is an L4_STRUCTURAL implementation wave, not another "
+            "plan-only/control-plane package.\n"
+        )
+
+        assert pb_mod._resolve_phase_b_wave_class(  # ANTICHEAT_OK: testing package metadata authority
+            {},
+            content,
+        ) == "L4_STRUCTURAL"
+
     def test_effective_phase_b_tracker_wave_class_upgrades_runtime_scope_from_enabler(self):
         assert pb_mod._effective_phase_b_tracker_wave_class(  # ANTICHEAT_OK: tests final-scope class derivation
             "L4_ENABLER",
@@ -8606,6 +8619,69 @@ class TestResumeNeedsPhaseB:
         assert bridge_calls[0] >= 1
         # Should reach commit_ready (not error or supervisor_rejected)
         assert result["status"] == "commit_ready", f"Expected commit_ready, got {result}"
+
+    def test_runtime_pre_push_reentry_refuses_control_only_commit_ready(self, tmp_path):
+        """Runtime pre-push failures must not be repackaged as control-only COMMIT_GO."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "reports" / "control_plane").mkdir(parents=True)
+        (repo / "reports" / "control_plane" / "plan.md").write_text(
+            "# Plan\n"
+            "Phase-A-Lock: LOCKED\n"
+            "Purpose: This is an L4_STRUCTURAL implementation wave, not another "
+            "plan-only/control-plane package.\n",
+            encoding="utf-8",
+        )
+        (repo / ".scratch").mkdir()
+
+        changed_files = [
+            "TASKS.md",
+            "reports/control_plane/plan.md",
+            "reports/l4_wave_indicators/plan.json",
+        ]
+        state_dir = repo / ".agent_bus" / "executors"
+        state_dir.mkdir(parents=True)
+        (state_dir / "phase_b_state.json").write_text(json.dumps({
+            "plan_path": "reports/control_plane/plan.md",
+            "completed_step": "needs_phase_b_reentry",
+            "wave_id": "plan",
+            "bridge_rounds": 1,
+            "bridge_scope_fingerprint": pb_mod._bridge_scope_fingerprint(repo, changed_files),  # ANTICHEAT_OK: testing internal executor functions
+            "deferred_packet_path": None,
+            "implementer_changed": changed_files,
+            "executor_created": [],
+            "all_non_blocking": [],
+            "reentry_findings": (
+                "run_pre_push_script: pre-push-fast failed\n"
+                "FAILED tests/structural/test_engine_pipeline_discipline.py::test_rule\n"
+                "FAILED tests/parity/test_js_parity_automated.py::test_rule"
+            ),
+        }))
+
+        mock_impl = _make_mock_impl()
+        supervisor = MagicMock(return_value={
+            "exit_code": 0,
+            "parsed": {"decision": "COMMIT_GO", "summary": "", "status": "success", "findings": []},
+            "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+        })
+
+        with patch.dict(sys.modules, {"phase_b_implementer": mock_impl}), \
+             patch.object(pb_mod, "_collect_changed_files", return_value=changed_files), \
+             patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
+             patch.object(pb_mod, "run_bridge_review", return_value={
+                 "exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "reentry-go",
+             }), \
+             patch.object(pb_mod, "_read_bridge_render", return_value=""), \
+             patch.object(pb_mod, "_stage_files_for_pipeline", return_value=(True, "")), \
+             patch.object(pb_mod, "_collect_commit_bound_files", return_value=changed_files), \
+             patch.object(pb_mod, "_should_collect_l4_indicator_artifact", return_value=False), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor):
+            result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
+
+        assert result["status"] == "error"
+        assert result["step"] == "reentry_runtime_pre_push_scope"
+        assert "control-only commit-ready package" in result["errors"][0]
+        supervisor.assert_not_called()
 
     def test_resume_from_needs_phase_b_reentry_honors_post_implementer_checkpoint(self, tmp_path):
         """A saved post-implementer checkpoint reviews current fixes without re-running them."""
