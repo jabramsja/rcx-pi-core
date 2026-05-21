@@ -920,10 +920,6 @@ const {
   SEED_IMAGE_VERIFICATION_MODES,
 } = require('./mu/host/js/core/seed_loader');
 const muRoot = path.join(process.cwd(), 'mu');
-function loadVerifiedSeed(seedName) {
-  const seedPath = path.join(muRoot, getSeedSubdir(seedName), seedName);
-  return loadVerifiedSeedImage(seedName, fs.readFileSync(seedPath), SEED_IMAGE_VERIFICATION_MODES.CLI);
-}
 function trust(value) {
   if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
   if (value !== null && typeof value === 'object') {
@@ -931,9 +927,21 @@ function trust(value) {
   }
   return value;
 }
-const kernel = loadVerifiedSeed('kernel.v1.json');
-const matchSeed = loadVerifiedSeed('match.v2.json');
-const substSeed = loadVerifiedSeed('subst.v2.json');
+const kernel = loadVerifiedSeedImage(
+  'kernel.v1.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('kernel.v1.json'), 'kernel.v1.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const matchSeed = loadVerifiedSeedImage(
+  'match.v2.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('match.v2.json'), 'match.v2.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const substSeed = loadVerifiedSeedImage(
+  'subst.v2.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('subst.v2.json'), 'subst.v2.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
 const compiledDir = path.join(muRoot, 'stage0', 'compiled');
 const kernelBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'kernel_v1.compiled.v1.json'), 'utf8'));
 const matchBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'match_v2.compiled.v1.json'), 'utf8'));
@@ -1045,10 +1053,6 @@ const {
   SEED_IMAGE_VERIFICATION_MODES,
 } = require('./mu/host/js/core/seed_loader');
 const muRoot = path.join(process.cwd(), 'mu');
-function loadVerifiedSeed(seedName) {
-  const seedPath = path.join(muRoot, getSeedSubdir(seedName), seedName);
-  return loadVerifiedSeedImage(seedName, fs.readFileSync(seedPath), SEED_IMAGE_VERIFICATION_MODES.CLI);
-}
 function trust(value) {
   if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
   if (value !== null && typeof value === 'object') {
@@ -1056,9 +1060,21 @@ function trust(value) {
   }
   return value;
 }
-const kernel = loadVerifiedSeed('kernel.v1.json');
-const matchSeed = loadVerifiedSeed('match.v2.json');
-const substSeed = loadVerifiedSeed('subst.v2.json');
+const kernel = loadVerifiedSeedImage(
+  'kernel.v1.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('kernel.v1.json'), 'kernel.v1.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const matchSeed = loadVerifiedSeedImage(
+  'match.v2.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('match.v2.json'), 'match.v2.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
+const substSeed = loadVerifiedSeedImage(
+  'subst.v2.json',
+  fs.readFileSync(path.join(muRoot, getSeedSubdir('subst.v2.json'), 'subst.v2.json')),
+  SEED_IMAGE_VERIFICATION_MODES.CLI
+);
 const compiledDir = path.join(muRoot, 'stage0', 'compiled');
 const kernelBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'kernel_v1.compiled.v1.json'), 'utf8'));
 const matchBundle = JSON.parse(fs.readFileSync(path.join(compiledDir, 'match_v2.compiled.v1.json'), 'utf8'));
