@@ -1354,6 +1354,20 @@ def _tracker_note_declares_l4_structural(note: str) -> bool:
     return re.search(r"\bClass:\s*`?L4_STRUCTURAL`?", note or "") is not None
 
 
+def _tracker_note_declares_l4_enabler(note: str) -> bool:
+    return re.search(r"\bClass:\s*`?L4_ENABLER`?", note or "") is not None
+
+
+def _should_preserve_structural_tracker_note_for_control_refresh(
+    existing_note: str,
+    replacement_note: str,
+) -> bool:
+    return (
+        _tracker_note_declares_l4_structural(existing_note)
+        and _tracker_note_declares_l4_enabler(replacement_note)
+    )
+
+
 def _has_l4_gate_test_path(test_files: list[str]) -> bool:
     return any(
         path.startswith(("mu/tests/l4_gates/", "tests/l4_gates/"))
@@ -2022,6 +2036,11 @@ def _refresh_tasks_tracker_note_after_packet_truth(
     note_line = tracker_note_text if tracker_note_text.endswith("\n") else tracker_note_text + "\n"
     canonical_idx = canonical_tracker_indices[0]
     if lines[canonical_idx] == note_line:
+        return None
+    if _should_preserve_structural_tracker_note_for_control_refresh(
+        lines[canonical_idx],
+        note_line,
+    ):
         return None
 
     lines[canonical_idx] = note_line
@@ -8677,7 +8696,16 @@ def _run_commit_pipeline_impl(
     tasks_modified = False
     if canonical_tracker_indices:
         canonical_idx = canonical_tracker_indices[0]
-        if lines[canonical_idx] != note_line:
+        preserve_structural_tracker_note = _should_preserve_structural_tracker_note_for_control_refresh(
+            lines[canonical_idx],
+            note_line,
+        )
+        if preserve_structural_tracker_note:
+            log(
+                "Step 3: preserving existing L4_STRUCTURAL tracker note for "
+                f"{wave_id}; same-wave L4_ENABLER repair is represented as a follow-up"
+            )
+        elif lines[canonical_idx] != note_line:
             lines[canonical_idx] = note_line
             tasks_modified = True
             log(f"Step 3: tracker note updated for {wave_id}")
@@ -9710,7 +9738,14 @@ def _maybe_demote_completed_handoff_state_for_commit_retry(
     steps_completed = result.get("steps_completed")
     if not isinstance(steps_completed, list):
         return
-    if "git_commit" in steps_completed or result.get("commit_sha"):
+    post_commit_pre_push_failure = (
+        str(result.get("step") or "") == "run_pre_push_script"
+        and "git_commit" in steps_completed
+    )
+    if (
+        ("git_commit" in steps_completed or result.get("commit_sha"))
+        and not post_commit_pre_push_failure
+    ):
         return
     retry_state_restored = "restore_commit_retry_state" in steps_completed
     if "validate_receipt" not in steps_completed and not retry_state_restored:

@@ -637,6 +637,67 @@ def test_tracker_followup_refreshes_when_canonical_note_updates(tmp_path):
     assert runtime_rel not in followup_lines[0]
 
 
+def test_tracker_note_update_preserves_structural_canonical_note_for_control_repair(tmp_path):
+    import subprocess
+
+    repo = _setup_repo(tmp_path)
+    wave_id = "same-wave-structural-control-repair"
+    runtime_rel = "mu/host/js/engine/routing.js"
+    control_rel = "mu/tools/executors/phase_b_executor.py"
+    runtime_path = repo / runtime_rel
+    control_path = repo / control_rel
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    control_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_path.write_text("// committed runtime\n", encoding="utf-8")
+    control_path.write_text("# committed control\n", encoding="utf-8")
+    structural_note = (
+        f"- Tracker sync note (2026-05-21, {wave_id}): **Structural runtime proof.** "
+        "Class: L4_STRUCTURAL. target_gate_id: G8. workload_target: host_debt_reduction. "
+        "host_semantics_delta_before: runtime/substrate scope must remain structurally governed. "
+        "host_semantics_delta_after: runtime/substrate scope remains governed by structural proof. "
+        f"structural_artifact_ref: {runtime_rel}. "
+        "evidence_command: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py`. "
+        "post_gate_contract_sweep: `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/structural/ mu/tests/parity/`.\n"
+    )
+    (repo / "TASKS.md").write_text(f"## Ra\n\n{structural_note}\n---\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "baseline structural tracker note"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    control_path.write_text("# dirty control repair\n", encoding="utf-8")
+
+    handoff = _make_new_schema_handoff(
+        wave_id=wave_id,
+        wave_class="L4_ENABLER",
+        files_to_stage=[control_rel],
+        scope_items=[control_rel],
+        fixes_implemented=["preserve structural tracker note during control repair"],
+    )
+    with patch.object(
+        commit_mod,
+        "_load_repo_meta_bridge_client",
+        side_effect=ImportError("stop after tracker sync"),
+    ):
+        result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+
+    assert result["step"] == "build_and_run_supervisor"
+    tasks_content = (repo / "TASKS.md").read_text(encoding="utf-8")
+    canonical_lines = [
+        line for line in tasks_content.splitlines()
+        if line.startswith("- Tracker sync note") and wave_id in line
+    ]
+    assert canonical_lines == [structural_note.rstrip("\n")]
+    followup_lines = [
+        line for line in tasks_content.splitlines()
+        if line.startswith("- Tracker sync follow-up") and wave_id in line
+    ]
+    assert len(followup_lines) == 1
+    assert control_rel in followup_lines[0]
+
+
 def test_tracker_followup_ignores_clean_declared_tracker_file(tmp_path):
     import subprocess
 
@@ -1515,6 +1576,79 @@ class TestReceiptChainEndToEnd:
         assert durable_handoff["pre_commit_receipt_path"] == handoff["pre_commit_receipt_path"]
         assert "pre_commit_receipt" not in durable_handoff["evidence_handles"]
 
+    def test_pre_push_failure_after_commit_demotes_completed_packet_and_task_for_dispatch_retry(self, tmp_path):
+        import subprocess
+
+        repo = _setup_repo(tmp_path)
+        wave_id = "runtime-pre-push-failure-reentry-wave"
+        packet_path = "reports/control_plane/runtime_pre_push_failure_reentry_wave.md"
+        packet_file = repo / packet_path
+        packet_file.parent.mkdir(parents=True, exist_ok=True)
+        packet_file.write_text(
+            "# Packet\n\n"
+            "Status: COMPLETED (commit-ready, supervisor COMMIT_GO)\n"
+            f"Wave ID: {wave_id}\n",
+            encoding="utf-8",
+        )
+        (repo / "TASKS.md").write_text(
+            "## Ra\n"
+            "  6. **[FOUNDER-ORDERED-REDTEAM-RUNTIME-PRE-PUSH-FAILURE-REENTRY] "
+            "IMPLEMENTED / LOCAL EVIDENCE (2026-05-21).** "
+            "Task: `[NEXT-CODEX-POST-REDTEAM]`. "
+            f"Wave ID: `{wave_id}`. "
+            f"Packet: `{packet_path}`.\n",
+            encoding="utf-8",
+        )
+        handoff = _make_new_schema_handoff(
+            wave_id=wave_id,
+            tracked_packet=packet_path,
+            files_to_stage=[packet_path, "TASKS.md"],
+            scope_items=[packet_path],
+        )
+        result = {
+            "status": "error",
+            "step": "run_pre_push_script",
+            "errors": ["pre-push-fast failed"],
+            "steps_completed": [
+                "validate_inputs",
+                "ensure_feature_branch",
+                "build_and_run_supervisor",
+                "validate_receipt",
+                "run_pre_commit_script",
+                "git_commit",
+            ],
+        }
+
+        getattr(commit_mod, "_maybe_demote_completed_handoff_state_for_commit_retry")(
+            repo_root=repo,
+            handoff=handoff,
+            result=result,
+        )
+
+        assert result["status"] == "error"
+        assert set(result["commit_retry_state_demotion"]["changed"]) == {
+            packet_path,
+            "TASKS.md",
+        }
+        assert (
+            f"Status: {commit_mod.COMMIT_RETRY_PENDING_STATUS}"
+            in packet_file.read_text(encoding="utf-8")
+        )
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        assert (
+            "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT / LOCAL EVIDENCE "
+            "(2026-05-21)"
+        ) in tasks_text
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.splitlines()
+        assert packet_path in staged
+        assert "TASKS.md" in staged
+
     def test_pre_validation_failure_does_not_demote_completed_packet_state(self, tmp_path):
         repo = _setup_repo(tmp_path)
         wave_id = "founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06"
@@ -1911,6 +2045,41 @@ class TestReceiptChainEndToEnd:
         assert error is None
         assert len(add_calls) == 2
         assert new_note in (repo / "TASKS.md").read_text(encoding="utf-8")
+
+    def test_tracker_note_refresh_preserves_structural_note_for_control_repair(self, tmp_path):
+        import subprocess
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wave_id = "packet-structural-preserve-wave"
+        structural_note = (
+            f"- Tracker sync note (2026-05-21, {wave_id}): **Structural runtime proof.** "
+            "Class: L4_STRUCTURAL. target_gate_id: G8. workload_target: host_debt_reduction.\n"
+        )
+        enabler_note = (
+            f"- Tracker sync note (2026-05-21, {wave_id}): **Control repair.** "
+            "Class: L4_ENABLER. target_gate_id: G8.\n"
+        )
+        (repo / "TASKS.md").write_text(f"## Ra\n\n{structural_note}\n---\n", encoding="utf-8")
+        add_calls = []
+
+        def fake_run(args, **kwargs):
+            if args == ["git", "add", "--", "TASKS.md"]:
+                add_calls.append(args)
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with patch.object(commit_mod, "_run", side_effect=fake_run):
+            error = commit_mod.refresh_tasks_tracker_note_after_packet_truth(
+                repo,
+                wave_id=wave_id,
+                tracker_note_text=enabler_note,
+            )
+
+        tasks_text = (repo / "TASKS.md").read_text(encoding="utf-8")
+        assert error is None
+        assert structural_note in tasks_text
+        assert enabler_note not in tasks_text
+        assert add_calls == []
 
     def test_tracker_note_refresh_fails_closed_when_index_lock_persists(self, tmp_path):
         import subprocess
