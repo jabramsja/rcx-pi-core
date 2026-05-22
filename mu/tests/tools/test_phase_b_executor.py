@@ -33,6 +33,7 @@ pb_mod = load_module("phase_b_executor", _EXECUTORS_DIR / "phase_b_executor.py")
 pa_mod = load_module("phase_a_executor", _EXECUTORS_DIR / "phase_a_executor.py")
 impl_mod = load_module("phase_b_implementer", _EXECUTORS_DIR / "phase_b_implementer.py")
 commit_mod = load_module("commit_executor", _EXECUTORS_DIR / "commit_executor.py")
+common_mod = load_module("executor_common_for_phase_b_tests", _EXECUTORS_DIR / "executor_common.py")
 
 # Default valid routing record for tests that call run_phase_b.
 # Tests that specifically test routing validation should NOT use this.
@@ -200,6 +201,43 @@ class TestPhaseBWaveClassResolution:
         )
 
         assert "Class: L4_ENABLER" in note
+        assert "host_semantics_delta_before" not in note
+        assert "structural_artifact_ref" not in note
+
+    def test_no_go_marker_decision_without_runtime_packages_as_enabler(self):
+        plan = (
+            "Class: L4_STRUCTURAL\n"
+            "Status: Phase B (implementation-complete, bridge-converged)\n"
+            "Purpose: Phase A only. Decide whether residual Python/JavaScript "
+            "@host_iteration markers can honestly be removed. Do not implement runtime "
+            "changes in Phase A.\n\n"
+            "No Phase B implementation write set is authorized by this Phase A packet.\n"
+            "Decision: NO-GO.\n"
+            "No Phase B runtime, marker, ratchet-baseline, indicator, or successor "
+            "packet write set is authorized by this decision.\n"
+        )
+
+        note = pb_mod.build_phase_b_tracker_note(
+            wave_id="no-go-marker-decision-structural-wave",
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path="reports/control_plane/no_go_marker_decision.md",
+            plan_content=plan,
+            changed_files=[
+                "TASKS.md",
+                "reports/control_plane/no_go_marker_decision.md",
+                "reports/l4_wave_indicators/no-go-marker-decision-structural-wave.json",
+            ],
+            test_files=[],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=3,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        assert "Class: L4_ENABLER" in note
+        assert "no_op_proof:" not in note
         assert "host_semantics_delta_before" not in note
         assert "structural_artifact_ref" not in note
 
@@ -1526,6 +1564,14 @@ class TestLoadPlanPacketPathTraversal:
             ],
         ) == "L4_ENABLER"
 
+    def test_pre_supervisor_pending_status_is_not_dispatch_complete(self):
+        assert common_mod.packet_status_is_completed(  # ANTICHEAT_OK: locks reroute-safe pending status
+            pb_mod.PHASE_B_PRE_SUPERVISOR_PENDING_STATUS
+        ) is False
+        assert common_mod.packet_status_is_completed(
+            "Phase B (implementation-complete, bridge-converged)"
+        ) is True
+
     def test_header_metadata_wins_over_later_narrative_bullets(self, tmp_path):
         """Canonical header metadata must not be overwritten by later bullets."""
         repo = tmp_path / "repo"
@@ -2813,10 +2859,16 @@ class TestMaintenanceTrackerMetadataPropagation:
             "later packet amendment names the exact path.\n\n"
             "## Constraints\n\n"
             "- Do not touch indicator files without an exact path added by a later locked packet amendment.\n\n"
+            "- Aside from the same-wave `TASKS.md` tracker entry required to bind this packet, "
+            "this packet does not authorize creation of a new report, indicator, non-blocker, "
+            "archive record, successor packet, or unrelated tracker entry during this rewrite.\n\n"
             "## Acceptance criteria\n\n"
             "- Closeout updates, if any, are limited to directly required `TASKS.md` lines and this "
             "governing packet unless a later locked amendment names an exact indicator file path; "
             "all closeout text must cite the validation that proved the implementation.\n\n"
+            "## Phase A Result\n\n"
+            "No Phase B runtime, marker, ratchet-baseline, indicator, or successor packet\n"
+            "write set is authorized by this decision.\n\n"
             "## Phase B Closeout\n\n"
             "No indicator file was touched.\n",
             encoding="utf-8",
@@ -2844,6 +2896,9 @@ class TestMaintenanceTrackerMetadataPropagation:
         assert "No indicator file was touched" not in packet_text
         assert "Do not update indicator files unless" not in packet_text
         assert "Do not touch indicator files without" not in packet_text
+        assert "does not authorize creation of a new report, indicator" not in packet_text
+        assert "ratchet-baseline, indicator, or successor packet" not in packet_text
+        assert "authorized only for mechanical commit packaging" in packet_text
         staged = subprocess.run(
             ["git", "diff", "--cached", "--name-only"],
             cwd=repo,
