@@ -2423,6 +2423,8 @@ def _extract_founder_override_from_metadata_line(line: str) -> str:
     lowered = clean.lower()
     if clean.startswith("FOUNDER_OVERRIDE:"):
         token = clean.split(":", 1)[1].strip()
+    elif clean.startswith("`FOUNDER_OVERRIDE:"):
+        token = clean.split(":", 1)[1].strip()
     elif lowered.startswith(_FOUNDER_OVERRIDE_METADATA_PREFIXES):
         match = _FOUNDER_OVERRIDE_TOKEN_RE.search(clean)
         if not match:

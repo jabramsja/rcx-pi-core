@@ -51,6 +51,10 @@ packaged as the structural runtime wave.
   packet reached supervisor `COMMIT_GO`, then failed Step 8b because the commit
   gate ran all affected test files without the PR fast-shard marker filter:
   `targeted pytest gate failed (exit=-1): pytest timed out after 960s`.
+- The next commit executor run created local commit `53b8af47`, then failed
+  Step `run_pre_push_script` because `pre-push-fast` evaluates the full
+  `origin/dev...HEAD` runtime wave and the detector-visible tracker body did not
+  carry the runtime packet's same-wave marker-touch override token.
 
 ## Scope
 
@@ -63,6 +67,10 @@ Allowed write set for this repair:
 - `TASKS.md`, only for this L4_ENABLER tracker sync note
 - `mu/tools/executors/commit_executor.py`, only for the Step 8b fast-shard filter
 - `mu/tests/tools/test_commit_executor_receipt.py`, only for the Step 8b regression
+- `mu/tools/executors/phase_b_executor.py`, only for bare backticked
+  same-wave override extraction from structural packets
+- `mu/tests/tools/test_phase_b_executor.py`, only for the override-extraction
+  regression
 - `reports/control_plane/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.md`
 - `reports/l4_wave_indicators/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.json`
 
@@ -86,6 +94,10 @@ when the repair is resent through the pipeline.
   `-m "not slow and not fuzzer"` plus deterministic `ci_fast` environment.
   The slow evidence remains in the owned slow lanes rather than the serial
   commit hook path.
+- Make Phase B tracker-note generation extract bare backticked same-wave
+  `FOUNDER_OVERRIDE` lines from structural packets so packet-authorized
+  marker-touch waves produce detector-visible tracker override tokens before
+  commit handoff.
 
 ## Constraints
 
@@ -104,7 +116,9 @@ when the repair is resent through the pipeline.
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -n 4 --dist worksteal -m "not slow and not fuzzer" tests/parity/test_boot1_shadow_parity.py tests/parity/test_rcx_engine_scheduler_parity.py tests/l4_gates/test_boot1_default_pipeline_gate.py tests/l4_gates/test_boot1_default_routing_gate.py --timeout=300 --durations=20 --tb=short -q` passes.
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -n 4 --dist worksteal -m slow tests/l4_gates/test_boot1_default_pipeline_gate.py tests/l4_gates/test_boot1_default_routing_gate.py --timeout=300 --durations=20 --tb=short -q` passes.
 - `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate::test_run_pytest_on_files_uses_fast_shard_marker_filter --tb=short` passes.
+- `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_phase_b_executor.py::TestPrepareCommitHandoff::test_build_phase_b_tracker_note_reads_backticked_same_wave_override_line --tb=short` passes.
 - `PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -q -x --tb=short --import-mode=importlib -m "not slow and not fuzzer" mu/tests/l4_gates/test_boot1_default_pipeline_gate.py mu/tests/l4_gates/test_boot1_default_routing_gate.py mu/tests/parity/test_boot1_shadow_parity.py mu/tests/parity/test_rcx_engine_scheduler_parity.py` passes.
+- `python3 tools/checks/enforce_l4_execution_contract.py --range origin/dev...HEAD --wave-id n3-kernel-driver-mu-continuation-state-runtime-2026-05-20` passes.
 - `python3 tools/checks/check_host_semantics_ratchet.py` passes with no footprint increase.
 - `python3 tools/checks/check_host_authority_inventory_ratchet.py` passes with no unaccepted new authority sites.
 - `bash tools/checks/check_docs_consistency.sh` passes.
@@ -135,12 +149,8 @@ FOUNDER_OVERRIDE:n3-kernel-driver-ci-fast-shard-repair-2026-05-22
   - `indicator`: `reports/l4_wave_indicators/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/l4_gates/test_boot1_default_pipeline_gate.py`
-  - `mu/tests/l4_gates/test_boot1_default_routing_gate.py`
-  - `mu/tests/parity/test_boot1_shadow_parity.py`
-  - `mu/tests/parity/test_rcx_engine_scheduler_parity.py`
-  - `mu/tests/tools/test_commit_executor_receipt.py`
-  - `mu/tools/executors/commit_executor.py`
+  - `mu/tests/tools/test_phase_b_executor.py`
+  - `mu/tools/executors/phase_b_executor.py`
   - `reports/control_plane/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.md`
   - `reports/l4_wave_indicators/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

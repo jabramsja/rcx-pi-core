@@ -1079,6 +1079,37 @@ class TestPrepareCommitHandoff:
 
         assert f"FOUNDER_OVERRIDE:{wave_id}" in note
 
+    def test_build_phase_b_tracker_note_reads_backticked_same_wave_override_line(self):
+        wave_id = "n3-kernel-driver-mu-continuation-state-runtime-2026-05-20"
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: locks packet override extraction
+            wave_id=wave_id,
+            task_id="[NEXT-CODEX-POST-REDTEAM]",
+            wave_class="L4_STRUCTURAL",
+            target_gate_id="G8",
+            plan_path=(
+                "reports/control_plane/"
+                "n3-kernel-driver-mu-continuation-state-runtime-2026-05-20_2026-05-20.md"
+            ),
+            plan_content=(
+                "## Acceptance criteria\n"
+                "- The packet carries a same-wave authorization line:\n"
+                f"  `FOUNDER_OVERRIDE:{wave_id}`.\n"
+            ),
+            changed_files=[
+                "mu/host/js/engine/kernel.js",
+                "mu/host/js/engine/pipeline.js",
+                "mu/tests/l4_gates/test_kernel_run_result_contract.py",
+            ],
+            test_files=["mu/tests/l4_gates/test_kernel_run_result_contract.py"],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=12,
+            reentry=False,
+            pre_supervisor=True,
+        )
+
+        assert "Class: L4_STRUCTURAL" in note
+        assert f"FOUNDER_OVERRIDE:{wave_id}" in note
+
     def test_build_phase_b_tracker_note_derives_authorized_control_surface_override(self):
         note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: testing Phase B tracker-note helper
             wave_id="parallel-pipeline-monitor-identity-2026-04-30",
