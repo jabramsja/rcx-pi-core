@@ -24,8 +24,10 @@ packaged as the structural runtime wave.
 
 ## Root Cause Evidence
 
-- Current PR #1014 required checks show `green-gate` and `test` failed after
-  roughly 45 minutes.
+- Current PR #1014 `test` run `26268781617`, job `77317636981`, failed on
+  commit `e08f0ba2173bfccbdcae6bf29151c383ead3da7f` with one remaining
+  timeout: `tests/parity/test_rcx_engine_scheduler_parity.py::test_python_js_agree_on_scheduler_seed_path_selection`
+  timed out after 60 seconds in `_run_js_scheduler`.
 - Earlier green-gate run `26251622398`, job `77263960447`, reached the pytest
   summary in `[PY 10/17] Python test suite (excludes stress, slow, fuzzer)` and
   reported `18 failed, 8451 passed, 22 skipped, 1 warning in 2318.03s`.
@@ -88,6 +90,12 @@ when the repair is resent through the pipeline.
 - Increase the scheduler parity Node subprocess cap from 30s to 60s; local
   targeted fast proof measured a scheduler case at 31.90s, which exceeds the
   old cap while remaining under the new cap.
+- Mark only the scheduler success-path selection vector as `@pytest.mark.slow`
+  with a source-lock test so it stays in the owned slow lane; keep the scheduler
+  rejection/fail-closed parity vectors in the fast PR shard.
+- Bind the slow scheduler success-path vector to a slow-lane 180-second Node
+  subprocess cap while retaining the 60-second default for the fast scheduler
+  rejection/fail-closed vectors.
 - Preserve fast Boot1 security, validation, primitive-count, and source-lock
   coverage in `[PY 10/17]`.
 - Make commit executor Step 8b mirror the PR fast-shard marker filter with
@@ -117,6 +125,9 @@ when the repair is resent through the pipeline.
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -n 4 --dist worksteal -m slow tests/l4_gates/test_boot1_default_pipeline_gate.py tests/l4_gates/test_boot1_default_routing_gate.py --timeout=300 --durations=20 --tb=short -q` passes.
 - `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate::test_run_pytest_on_files_uses_fast_shard_marker_filter --tb=short` passes.
 - `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_phase_b_executor.py::TestPrepareCommitHandoff::test_build_phase_b_tracker_note_reads_backticked_same_wave_override_line --tb=short` passes.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -m "not slow and not fuzzer" tests/parity/test_rcx_engine_scheduler_parity.py --collect-only -q` reports the slow success-path vector deselected and the scheduler source-lock/rejection vectors selected.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -m slow tests/parity/test_rcx_engine_scheduler_parity.py --collect-only -q` reports the success-path vector selected by the slow lane.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -q -m slow tests/parity/test_rcx_engine_scheduler_parity.py --timeout=300 --tb=short` passes.
 - `PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -q -x --tb=short --import-mode=importlib -m "not slow and not fuzzer" mu/tests/l4_gates/test_boot1_default_pipeline_gate.py mu/tests/l4_gates/test_boot1_default_routing_gate.py mu/tests/parity/test_boot1_shadow_parity.py mu/tests/parity/test_rcx_engine_scheduler_parity.py` passes.
 - `python3 tools/checks/enforce_l4_execution_contract.py --range origin/dev...HEAD --wave-id n3-kernel-driver-mu-continuation-state-runtime-2026-05-20` passes.
 - `python3 tools/checks/check_host_semantics_ratchet.py` passes with no footprint increase.
@@ -149,8 +160,7 @@ FOUNDER_OVERRIDE:n3-kernel-driver-ci-fast-shard-repair-2026-05-22
   - `indicator`: `reports/l4_wave_indicators/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.json`
 - Current staged files:
   - `TASKS.md`
-  - `mu/tests/tools/test_phase_b_executor.py`
-  - `mu/tools/executors/phase_b_executor.py`
+  - `mu/tests/parity/test_rcx_engine_scheduler_parity.py`
   - `reports/control_plane/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.md`
   - `reports/l4_wave_indicators/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
