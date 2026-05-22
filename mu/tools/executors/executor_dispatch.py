@@ -3343,6 +3343,26 @@ def dispatch(
                 routing_record_path is not None
                 and routing_record_path.resolve() == _canonical_routing_record_path(repo, bus_dir)
             )
+            if not is_noncanonical_explicit and not is_inline_caller_owned:
+                continuation_ready, continuation_detail = _post_commit_continuation_ready_for_record(
+                    repo,
+                    record,
+                    bus_dir=bus_dir,
+                )
+                if continuation_ready:
+                    if verbose:
+                        print(
+                            "[dispatch] Stale completed routing has an active "
+                            f"post-commit continuation before refresh: {continuation_detail}"
+                        )
+                    return _retry_commit_only(
+                        repo,
+                        cfg,
+                        verbose=verbose,
+                        bus_dir=bus_dir,
+                    )
+                if verbose:
+                    print(f"[dispatch] No pre-refresh post-commit continuation resume: {continuation_detail}")
             if verbose:
                 print(f"[dispatch] Routing record stale: {msg}")
                 if is_noncanonical_explicit:
