@@ -5480,6 +5480,34 @@ class TestCommitExecutorPytestGate:
         assert env["RCX_CI"] == "1"
         assert env["HYPOTHESIS_PROFILE"] == "ci_fast"
 
+    def test_run_pytest_on_files_accepts_all_deselected_fast_marker_lane(self, tmp_path):
+        from types import SimpleNamespace
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        stdout = (
+            "collected 17 items / 17 deselected / 0 selected\n\n"
+            "============================ 17 deselected in 0.02s ============================"
+        )
+        with patch.object(
+            commit_mod.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=5, stdout=stdout, stderr=""),
+        ) as mock_run:
+            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: locks slow-only commit gate handling
+                repo,
+                ["mu/tests/l4_gates/test_observer_type_guard_gate.py"],
+            )
+
+        assert result["passed"] is True
+        assert result["exit_code"] == 5
+        args = mock_run.call_args.args[0]
+        assert ["-m", "not slow and not fuzzer"] in [
+            args[index:index + 2]
+            for index in range(len(args) - 1)
+        ]
+
 
 class TestReviewFindingExtraction:
     def _base_pr_data(self, *, head_sha="abc123", latest_reviews=None, review_threads=None, comments=None):

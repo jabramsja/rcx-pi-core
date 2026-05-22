@@ -94,6 +94,16 @@ packaged as the structural runtime wave.
   `test_*.py` below `mu/tests/`. The recovery consolidates the lane-lock source
   assertions into that existing growth-governance test file instead of raising
   the test-file cap.
+- Resend commit `5d924a37` reached PR #1014 CI, then both required checks failed
+  on the same merge-bounded L4 slow-lane timeout:
+  `tests/l4_gates/test_observer_type_guard_gate.py::TestPythonRoutingObserverTypeGuard::test_routing_accepts_valid_observer`
+  timed out after 300 seconds in `rcx_pi/selfhost/mu_type.py:245` during
+  `is_mu`. The failing test is a positive full routing execution with a valid
+  observer; the surrounding rejection/source-lock guard coverage remains bounded.
+- The same follow-up then failed commit executor Step 8b before commit because
+  the targeted fast pytest gate applied `-m "not slow and not fuzzer"` to a
+  changed slow-only test file, causing pytest to select zero tests and exit 5.
+  That is a commit-gate control bug, not a runtime semantic failure.
 
 ## Scope
 
@@ -104,6 +114,7 @@ Allowed write set for this repair:
 - `mu/tests/engine/test_engine_hemisphere_integration.py`
 - `mu/tests/l4_gates/test_boot1_default_pipeline_gate.py`
 - `mu/tests/l4_gates/test_boot1_default_routing_gate.py`
+- `mu/tests/l4_gates/test_observer_type_guard_gate.py`
 - `mu/tests/l4_gates/test_boot1_structural_iteration_gate.py`
 - `mu/tests/l4_gates/test_stage0_vm_performance.py`
 - `mu/tests/docs/test_growth_caps.py`
@@ -165,6 +176,12 @@ when the repair is resent through the pipeline.
 - Add source locks for the green-gate lane split and for the expensive Boot1 and
   Stage0 VM evidence classes so future changes cannot silently reintroduce the
   same merge-gate timeout shape.
+- Move the observer gate's positive full `run_engine_with_routing` execution into
+  `l4_expensive` while preserving the observer type rejection and source-lock
+  checks in `slow and not l4_expensive`.
+- Make commit executor Step 8b accept pytest's all-deselected exit code 5 only
+  when stdout proves the fast marker filter selected zero tests, and add a
+  regression for slow-only changed test files.
 
 ## Constraints
 
@@ -201,6 +218,9 @@ when the repair is resent through the pipeline.
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -q -m "slow and not l4_expensive" tests/l4_gates/test_boot1_default_routing_gate.py tests/l4_gates/test_boot1_structural_iteration_gate.py tests/l4_gates/test_stage0_vm_performance.py --timeout=300 --tb=short --durations=10` passes with `10 passed, 49 deselected in 183.47s`.
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -q -m l4_expensive tests/l4_gates/test_boot1_default_routing_gate.py tests/l4_gates/test_boot1_structural_iteration_gate.py tests/l4_gates/test_stage0_vm_performance.py --collect-only` reports `22/59 tests collected`.
 - `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -q tests/docs/test_growth_caps.py --tb=short` passes with `5 passed in 0.02s`.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -q -m "slow and not l4_expensive" tests/l4_gates/test_observer_type_guard_gate.py --timeout=300 --tb=short --durations=10` passes with `16 passed, 1 deselected in 34.63s`.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast python3 -m pytest -q -m l4_expensive tests/l4_gates/test_observer_type_guard_gate.py --collect-only` reports `1/17 tests collected`.
+- `PYTHONHASHSEED=0 python3 -m pytest -q mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate::test_run_pytest_on_files_accepts_all_deselected_fast_marker_lane --tb=short` passes.
 
 ## Proof Limits
 
@@ -226,14 +246,10 @@ FOUNDER_OVERRIDE:n3-kernel-driver-ci-fast-shard-repair-2026-05-22
 - Evidence handles:
   - `indicator`: `reports/l4_wave_indicators/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.json`
 - Current staged files:
-  - `.github/workflows/slow_tests.yml`
   - `TASKS.md`
-  - `mu/scripts/green_gate.sh`
-  - `mu/tests/docs/test_growth_caps.py`
-  - `mu/tests/l4_gates/test_boot1_default_routing_gate.py`
-  - `mu/tests/l4_gates/test_boot1_structural_iteration_gate.py`
-  - `mu/tests/l4_gates/test_stage0_vm_performance.py`
-  - `pyproject.toml`
+  - `mu/tests/l4_gates/test_observer_type_guard_gate.py`
+  - `mu/tests/tools/test_commit_executor_receipt.py`
+  - `mu/tools/executors/commit_executor.py`
   - `reports/control_plane/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.md`
   - `reports/l4_wave_indicators/n3-kernel-driver-ci-fast-shard-repair-2026-05-22.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

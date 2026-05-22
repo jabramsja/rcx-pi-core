@@ -133,6 +133,7 @@ class TestPythonRoutingObserverTypeGuard:
                 observer="not_a_list",
             )
 
+    @pytest.mark.l4_expensive
     def test_routing_accepts_valid_observer(self):
         """Valid list observer forwarded via kwargs works."""
         reset_step_budget()
@@ -143,6 +144,19 @@ class TestPythonRoutingObserverTypeGuard:
         )
         assert result is not None
         assert isinstance(observer, list)
+
+
+def _has_mark(obj, mark_name):
+    marks = getattr(obj, "pytestmark", [])
+    if not isinstance(marks, (list, tuple)):
+        marks = [marks]
+    return any(getattr(mark, "name", None) == mark_name for mark in marks)
+
+
+def test_routing_valid_observer_full_execution_remains_l4_expensive_marked():
+    """Lock the full positive routing execution out of merge-bounded L4 CI."""
+    target = TestPythonRoutingObserverTypeGuard.test_routing_accepts_valid_observer
+    assert _has_mark(target, "l4_expensive")
 
 
 # =============================================================================

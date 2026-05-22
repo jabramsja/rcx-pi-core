@@ -3047,11 +3047,16 @@ def _run_pytest_on_files(
                 "HYPOTHESIS_PROFILE": "ci_fast",
             },
         )
+        passed = result.returncode == 0 or _pytest_only_deselected_by_marker_filter(
+            result.returncode,
+            result.stdout,
+            result.stderr,
+        )
         return {
             "exit_code": result.returncode,
             "stdout": result.stdout,
             "stderr": result.stderr,
-            "passed": result.returncode == 0,
+            "passed": passed,
         }
     except subprocess.TimeoutExpired:
         return {
@@ -3060,6 +3065,13 @@ def _run_pytest_on_files(
             "stderr": f"pytest timed out after {effective_timeout}s",
             "passed": False,
         }
+
+
+def _pytest_only_deselected_by_marker_filter(returncode: int, stdout: str, stderr: str) -> bool:
+    """Return True when the fast-shard marker filter selected no tests by design."""
+    if returncode != 5 or stderr.strip():
+        return False
+    return "0 selected" in stdout and "deselected" in stdout
 
 
 def _parse_worktree_list(output: str) -> list[dict[str, str]]:
