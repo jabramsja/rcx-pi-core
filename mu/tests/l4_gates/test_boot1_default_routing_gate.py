@@ -115,6 +115,7 @@ class TestPythonBoot1Default:
 # JS: omitted flag defaults to Boot1
 # =============================================================================
 
+@pytest.mark.l4_expensive
 @pytest.mark.slow
 class TestJsBoot1Default:
     """JS run_engine_with_routing defaults to Boot1 recursive path.
@@ -203,6 +204,7 @@ class TestJsBoot1Default:
 # Cross-substrate parity: default behavior matches
 # =============================================================================
 
+@pytest.mark.l4_expensive
 @pytest.mark.slow
 class TestCrossSubstrateDefaultParity:
     """Both substrates must produce same result with omitted flag."""
@@ -228,11 +230,11 @@ class TestCrossSubstrateDefaultParity:
         assert py_val == js_val, f"Parity mismatch: Python={py_val}, JS={js_val}"
 
 
-def _has_slow_mark(obj):
+def _has_mark(obj, mark_name):
     marks = getattr(obj, "pytestmark", [])
     if not isinstance(marks, (list, tuple)):
         marks = [marks]
-    return any(getattr(mark, "name", None) == "slow" for mark in marks)
+    return any(getattr(mark, "name", None) == mark_name for mark in marks)
 
 
 def test_boot1_default_routing_expensive_classes_remain_slow_marked():
@@ -242,5 +244,17 @@ def test_boot1_default_routing_expensive_classes_remain_slow_marked():
         TestJsBoot1Default,
         TestCrossSubstrateDefaultParity,
     )
-    missing = [cls.__name__ for cls in expensive_classes if not _has_slow_mark(cls)]
+    missing = [cls.__name__ for cls in expensive_classes if not _has_mark(cls, "slow")]
     assert not missing, f"Default routing Boot1 classes must stay @pytest.mark.slow: {missing}"
+
+
+def test_boot1_default_routing_ci_expensive_classes_remain_l4_expensive_marked():
+    """Lock full JS/cross-substrate probes into the l4_expensive lane."""
+    expensive_classes = (
+        TestJsBoot1Default,
+        TestCrossSubstrateDefaultParity,
+    )
+    missing = [cls.__name__ for cls in expensive_classes if not _has_mark(cls, "l4_expensive")]
+    assert not missing, (
+        f"Default routing CI-expensive classes must stay @pytest.mark.l4_expensive: {missing}"
+    )

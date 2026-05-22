@@ -66,3 +66,18 @@ class TestGrowthCaps:
             f"Core docs count ({count}) exceeds baseline ({BASELINE_CORE_DOCS}) + cap ({CAP_CORE_DOCS}) = {limit}. "
             f"Archive stale docs, or request GROWTH_EXCEPTION with founder sign-off."
         )
+
+
+def test_green_gate_excludes_l4_expensive_from_merge_slow_lane():
+    """Merge green gate must not run full-budget L4 evidence tests."""
+    source = (REPO_ROOT / "mu" / "scripts" / "green_gate.sh").read_text()
+    assert '-m "slow and not l4_expensive" tests/l4_gates/' in source
+
+
+def test_slow_tests_workflow_owns_l4_expensive_lane():
+    """Nightly/manual slow workflow keeps the expensive evidence runnable."""
+    source = (REPO_ROOT / ".github" / "workflows" / "slow_tests.yml").read_text()
+    assert "timeout-minutes: 120" in source
+    assert '-m "slow and not l4_expensive"' in source
+    assert "-m l4_expensive" in source
+    assert "--timeout=900" in source

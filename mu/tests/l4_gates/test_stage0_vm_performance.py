@@ -206,6 +206,7 @@ def _time_kernel_mu(projections, input_value, n_runs=30, kernel_mode="core"):
     return times
 
 
+@pytest.mark.l4_expensive
 @pytest.mark.slow
 class TestTier2IntegrationWorkloads:
     """Tier 2: Full pipeline timing with statistical analysis.
@@ -332,3 +333,16 @@ class TestTier2IntegrationWorkloads:
             "workload": "engine_pipeline_cycling_cutover",
             "stats": stats,
         }))
+
+
+def _has_mark(obj, mark_name):
+    marks = getattr(obj, "pytestmark", [])
+    if not isinstance(marks, (list, tuple)):
+        marks = [marks]
+    return any(getattr(mark, "name", None) == mark_name for mark in marks)
+
+
+def test_stage0_vm_performance_tier2_remains_l4_expensive_marked():
+    """Lock repeated full-pipeline timing workloads into the l4_expensive lane."""
+    assert _has_mark(TestTier2IntegrationWorkloads, "slow")
+    assert _has_mark(TestTier2IntegrationWorkloads, "l4_expensive")

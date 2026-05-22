@@ -161,11 +161,13 @@ run_python() {
     --timeout="$PYTEST_TIMEOUT" -q
   echo
 
-  echo "[PY 10d/17] L4 gate evidence tests (slow-marked but merge-blocking)"
+  echo "[PY 10d/17] L4 gate evidence tests (merge-bounded slow lane)"
   # BR-2: 116 L4 gate tests are marked @pytest.mark.slow (they call run_mu,
   # run_engine_pipeline, etc.) but are fast enough for CI (~24s local, ~40s CI).
   # These are the L4 evidence tests that prove gate passage — must run at merge.
-  python3 -m pytest $PARALLEL_FLAG -m "slow" tests/l4_gates/ \
+  # The l4_expensive subset contains full cross-substrate/cutover evidence that
+  # has exceeded the merge gate budget; slow_tests.yml owns that lane.
+  python3 -m pytest $PARALLEL_FLAG -m "slow and not l4_expensive" tests/l4_gates/ \
     --timeout="$PYTEST_TIMEOUT" -q
   echo
 
