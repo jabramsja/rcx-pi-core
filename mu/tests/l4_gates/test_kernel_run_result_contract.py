@@ -895,6 +895,42 @@ class TestKernelRunResultPython:
 class TestKernelRunResultJS:
     """JS stepKernel via --json-api (live seeded kernel) must produce KernelRunResult."""
 
+    def test_algorithm_runtime_validation_does_not_use_host_cache_metadata(self):
+        """Algorithm-runtime validation authority must be derived each transition."""
+        source = (REPO_ROOT / "mu/host/js/engine/kernel.js").read_text(encoding="utf-8")
+
+        assert "new WeakMap" not in source
+        assert "new WeakSet" not in source
+        assert "runtimeValidationCache" not in source
+        assert "RUNTIME_VALIDATION_CACHE_METADATA" not in source
+
+    def test_js_return_packet_exposes_only_mu_continuation_fields(self):
+        """Internal continuation proof must not become public packet data."""
+        script = """
+const { stepKernel } = require('./mu/host/js/engine/kernel');
+const muContainers = require('./mu/host/js/core/container_factory');
+function trust(value) {
+  if (Array.isArray(value)) return muContainers.list(value.map(item => trust(item)));
+  if (value !== null && typeof value === 'object') {
+    return muContainers.record(Object.keys(value).map(key => [key, trust(value[key])]));
+  }
+  return value;
+}
+const packet = stepKernel(
+  [],
+  trust({ x: 1 }),
+  [{ pattern: trust({ x: 1 }), body: trust({ x: 2 }) }],
+  { returnPacket: true, maxSteps: 1 }
+);
+console.log(JSON.stringify(Object.keys(packet).sort()));
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=15,
+        )
+        assert result.returncode == 0, f"JS direct stepKernel error: {result.stderr}"
+        assert json.loads(result.stdout.strip()) == ["continuation", "kind", "result"]
+
     def _run_json_api_response(self, payload: dict) -> dict:
         """Run JS via eval_step.js --json-api with real seed loading."""
         result = subprocess.run(

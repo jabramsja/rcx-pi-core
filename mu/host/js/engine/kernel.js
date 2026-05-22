@@ -94,8 +94,9 @@ const KERNEL_TERMINAL_REASONS = Object.freeze([
   'malformed_fuel',
   'watchdog_exhausted',
 ]);
-const RUNTIME_VALIDATION_CACHE_METADATA = new WeakMap();
-
+const KERNEL_CONTINUATION_PROOF_TOKEN = Object.freeze({
+  tag: 'kernel_continuation_proof_token',
+});
 /**
  * Internal: single kernel-driver transition.
  * Caller must provide pre-validated, pre-normalized kernelInput or a
@@ -103,7 +104,7 @@ const RUNTIME_VALIDATION_CACHE_METADATA = new WeakMap();
  *
  * @host_iteration — single-step host transition marker retained until ratchet baseline update.
  */
-function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps, vmConfig, kernelFuel = undefined, continuationState = null, runtimeValidationCache = null) {
+function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps, vmConfig, kernelFuel = undefined, continuationState = null, continuationProof = null) {
   if (typeof maxSteps !== 'number' || !Number.isFinite(maxSteps) || !Number.isInteger(maxSteps)) {
     throw new RcxError(
       'api.bad_request',
@@ -247,79 +248,71 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     // Bind resume to the current call's supplied input/projection cursor before
     // stepping the embedded Mu kernel state.
     const normalizedInputHash = muHash(kernelInput._step);
-    if (muHash(continuationState.domain_input) !== muHash(domainInput)) {
+    const domainInputHash = muHash(domainInput);
+    if (muHash(continuationState.domain_input) !== domainInputHash) {
       throw new Error('SECURITY: continuationState domain_input is not bound to supplied input');
     }
+    const projectionAuthorityHash = muHash(kernelInput._projs);
+    const trustedContinuationProof =
+      continuationProof !== null &&
+      typeof continuationProof === 'object' &&
+      !Array.isArray(continuationProof) &&
+      continuationProof._token === KERNEL_CONTINUATION_PROOF_TOKEN &&
+      continuationProof.continuationHash === muHash(continuationState) &&
+      continuationProof.domainInputHash === domainInputHash &&
+      continuationProof.normalizedInputHash === normalizedInputHash &&
+      continuationProof.projectionAuthorityHash === projectionAuthorityHash &&
+      continuationProof.watchdogCap === watchdogCap;
     const useDomainValidation = validator !== validateAlgorithmRuntimeFields;
     const kernelState = continuationState.kernel_state;
     const kernelStateIsObject = kernelState !== null && typeof kernelState === 'object' && !Array.isArray(kernelState);
-    if (!useDomainValidation) {
+    if (!useDomainValidation && !trustedContinuationProof) {
       const continuationCursors = [];
       const bodyRestPairs = [];
       const patternRestPairs = [];
       const substResultChecks = [];
       const substStateChecks = [];
       const inProgressMatchChecks = [];
-      let projectionContexts = null;
+      const projectionContexts = [];
       let prefixHasMatchingProjection = false;
-      const projectionAuthorityHash = muHash(kernelInput._projs);
-      const cachedRuntimeValidation =
-        runtimeValidationCache !== null && typeof runtimeValidationCache === 'object'
-          ? RUNTIME_VALIDATION_CACHE_METADATA.get(runtimeValidationCache)
-          : null;
-      if (runtimeValidationCache !== null &&
-          typeof runtimeValidationCache === 'object' &&
-          cachedRuntimeValidation !== undefined &&
-          cachedRuntimeValidation.inputHash === normalizedInputHash &&
-          cachedRuntimeValidation.projectionAuthorityHash === projectionAuthorityHash &&
-          Array.isArray(cachedRuntimeValidation.projectionContexts)) {
-        projectionContexts = cachedRuntimeValidation.projectionContexts;
-        prefixHasMatchingProjection = cachedRuntimeValidation.prefixHasMatchingProjection === true;
-      } else {
-        projectionContexts = [];
-        let projectionAuthorityCursor = kernelInput._projs;
-        while (projectionAuthorityCursor !== null) {
-          if (typeof projectionAuthorityCursor !== 'object' || Array.isArray(projectionAuthorityCursor) ||
-              !Object.hasOwn(projectionAuthorityCursor, 'head') ||
-              !Object.hasOwn(projectionAuthorityCursor, 'tail') ||
-              Object.keys(projectionAuthorityCursor).length !== 2) {
-            throw new Error('SECURITY: kernel projection cursor must be a Mu head/tail linked list');
-          }
-          const projectionAuthority = projectionAuthorityCursor.head;
-          if (projectionAuthority === null || typeof projectionAuthority !== 'object' ||
-              Array.isArray(projectionAuthority) ||
-              !Object.hasOwn(projectionAuthority, 'pattern') ||
-              !Object.hasOwn(projectionAuthority, 'body') ||
-              Object.keys(projectionAuthority).length !== 2) {
-            throw new Error('SECURITY: kernel projection cursor head must be a normalized projection');
-          }
-          const matchBindings = stage0Match(projectionAuthority.pattern, kernelInput._step, null);
-          const projectionMatches = matchBindings !== NO_MATCH;
-          projectionContexts.push({
-            projection: projectionAuthority,
-            projectionCursor: projectionAuthorityCursor,
-            projectionRest: projectionAuthorityCursor.tail,
-            bodyHash: muHash(projectionAuthority.body),
-            patternHash: muHash(projectionAuthority.pattern),
-            restHash: muHash(projectionAuthorityCursor.tail),
-            cursorHash: muHash(projectionAuthorityCursor),
-            prefixCleared: !prefixHasMatchingProjection,
-            matchBindings,
-            projectionMatches,
-          });
-          if (projectionMatches) {
-            prefixHasMatchingProjection = true;
-          }
-          projectionAuthorityCursor = projectionAuthorityCursor.tail;
+      let projectionAuthorityCursor = kernelInput._projs;
+      while (projectionAuthorityCursor !== null) {
+        if (typeof projectionAuthorityCursor !== 'object' || Array.isArray(projectionAuthorityCursor) ||
+            !Object.hasOwn(projectionAuthorityCursor, 'head') ||
+            !Object.hasOwn(projectionAuthorityCursor, 'tail') ||
+            Object.keys(projectionAuthorityCursor).length !== 2) {
+          throw new Error('SECURITY: kernel projection cursor must be a Mu head/tail linked list');
         }
-        if (runtimeValidationCache !== null && typeof runtimeValidationCache === 'object') {
-          RUNTIME_VALIDATION_CACHE_METADATA.set(runtimeValidationCache, Object.freeze({
-            inputHash: normalizedInputHash,
-            projectionAuthorityHash,
-            projectionContexts: Object.freeze(projectionContexts),
-            prefixHasMatchingProjection,
-          }));
+        const projectionAuthority = projectionAuthorityCursor.head;
+        if (projectionAuthority === null || typeof projectionAuthority !== 'object' ||
+            Array.isArray(projectionAuthority) ||
+            !Object.hasOwn(projectionAuthority, 'pattern') ||
+            !Object.hasOwn(projectionAuthority, 'body') ||
+            Object.keys(projectionAuthority).length !== 2) {
+          throw new Error('SECURITY: kernel projection cursor head must be a normalized projection');
         }
+        let matchBindings = NO_MATCH;
+        let projectionMatches = false;
+        if (!prefixHasMatchingProjection) {
+          matchBindings = stage0Match(projectionAuthority.pattern, kernelInput._step, null);
+          projectionMatches = matchBindings !== NO_MATCH;
+        }
+        projectionContexts.push({
+          projection: projectionAuthority,
+          projectionCursor: projectionAuthorityCursor,
+          projectionRest: projectionAuthorityCursor.tail,
+          bodyHash: muHash(projectionAuthority.body),
+          patternHash: muHash(projectionAuthority.pattern),
+          restHash: muHash(projectionAuthorityCursor.tail),
+          cursorHash: muHash(projectionAuthorityCursor),
+          prefixCleared: !prefixHasMatchingProjection,
+          matchBindings,
+          projectionMatches,
+        });
+        if (projectionMatches) {
+          prefixHasMatchingProjection = true;
+        }
+        projectionAuthorityCursor = projectionAuthorityCursor.tail;
       }
       if (!kernelStateIsObject) {
         // Scalar Mu states can only come from the defensive hash-stall path:
@@ -1141,7 +1134,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
           throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
         }
       }
-    } else {
+    } else if (useDomainValidation) {
       const projectionHashes = new Set();
       const bodyHashes = new Set();
       const projectionContexts = [];
@@ -2052,25 +2045,34 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
       ['exhausted', result._remaining === null],
     ]);
   }
+  const continuation = muContainers.record([
+    ['tag', 'kernel_driver_continuation_state'],
+    ['version', 1],
+    ['kernel_state', result],
+    ['domain_input', effectiveDomainInput],
+    ['projection_cursor', projectionCursor],
+    ['remaining_fuel', callerSuppliedFuel ? fuelCursor : null],
+    ['fuel_mode', callerSuppliedFuel ? 'explicit' : 'omitted_compatibility'],
+    ['steps_used', stepsUsed],
+    ['watchdog_cap', watchdogCap],
+    ['terminal', muContainers.record([
+      ['reached', false],
+      ['reason', null],
+      ['error', null],
+    ])],
+  ]);
   return {
     kind: 'continuation',
     result: null,
-    continuation: muContainers.record([
-      ['tag', 'kernel_driver_continuation_state'],
-      ['version', 1],
-      ['kernel_state', result],
-      ['domain_input', effectiveDomainInput],
-      ['projection_cursor', projectionCursor],
-      ['remaining_fuel', callerSuppliedFuel ? fuelCursor : null],
-      ['fuel_mode', callerSuppliedFuel ? 'explicit' : 'omitted_compatibility'],
-      ['steps_used', stepsUsed],
-      ['watchdog_cap', watchdogCap],
-      ['terminal', muContainers.record([
-        ['reached', false],
-        ['reason', null],
-        ['error', null],
-      ])],
-    ]),
+    continuation,
+    continuationProof: Object.freeze({
+      _token: KERNEL_CONTINUATION_PROOF_TOKEN,
+      continuationHash: muHash(continuation),
+      domainInputHash: muHash(effectiveDomainInput),
+      normalizedInputHash: muHash(kernelInput._step),
+      projectionAuthorityHash: muHash(kernelInput._projs),
+      watchdogCap,
+    }),
   };
 }
 
@@ -2198,7 +2200,11 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
     continuationState
   );
   if (returnPacket) {
-    return packet;
+    return {
+      kind: packet.kind,
+      result: packet.result,
+      continuation: packet.continuation,
+    };
   }
 
   // BOUNDARY: public compatibility driver over explicit Mu continuation data.
@@ -2211,7 +2217,8 @@ function stepKernel(projections, domainInput, domainProjections, options = {}) {
       maxSteps,
       vmConfig,
       undefined,
-      packet.continuation
+      packet.continuation,
+      packet.continuationProof
     );
   }
   const canonical = packet.result;

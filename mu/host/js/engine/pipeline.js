@@ -136,7 +136,6 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps, vmConfig
       ['_projs', linkedProjs],
     ]);
     // BOUNDARY: algorithm harness drives explicit kernel continuation values.
-    const runtimeValidationCache = Object.create(null);
     let packet = _stepKernelCore(
       allProjs,
       kernelInput,
@@ -145,8 +144,7 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps, vmConfig
       10000,
       vmConfig || null,
       undefined,
-      null,
-      runtimeValidationCache
+      null
     );
     while (packet.kind === 'continuation') {
       packet = _stepKernelCore(
@@ -158,7 +156,7 @@ function runAlgorithmWithBridge(allProjs, input, domainProjs, maxSteps, vmConfig
         vmConfig || null,
         undefined,
         packet.continuation,
-        runtimeValidationCache
+        packet.continuationProof
       );
     }
     const canonical = packet.result;

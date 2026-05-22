@@ -3860,10 +3860,11 @@ def _sync_tracker_followup_line(
         tracker_paths=tracker_paths,
     )
     if len(tracker_followup_indices) > 1:
-        if any(
+        existing_followup_covers_scope = any(
             _tracker_followup_mentions_paths(lines[idx], tracker_paths)
             for idx in tracker_followup_indices
-        ):
+        )
+        if existing_followup_covers_scope and tracker_file_staged:
             return False, None, None
         insert_idx = _tracker_followup_insert_index(canonical_idx, tracker_followup_indices)
         lines.insert(insert_idx + 1, followup_line)

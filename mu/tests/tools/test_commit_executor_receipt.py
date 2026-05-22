@@ -633,6 +633,68 @@ def test_tracker_followup_preserves_multiple_historical_lines_when_clean():
     assert new_path in followup_lines[-1]
 
 
+def test_tracker_followup_reemits_existing_scope_when_tracker_not_staged():
+    wave_id = "multi-followup-restaged-wave"
+    tracker_note = _make_new_schema_handoff(wave_id=wave_id)["tracker_note_text"]
+    kernel_path = "mu/host/js/engine/kernel.js"
+    pipeline_path = "mu/host/js/engine/pipeline.js"
+    first_followup = (
+        f"- Tracker sync follow-up (2026-05-21T00:00:00Z, {wave_id}): "
+        "same-wave follow-up commit touched tracker-relevant file(s) without "
+        f"phase/task-state change: {kernel_path}, {pipeline_path}.\n"
+    )
+    second_followup = (
+        f"- Tracker sync follow-up (2026-05-21T00:10:00Z, {wave_id}): "
+        "same-wave pipeline recovery follow-up touched tracker-relevant executor files "
+        "without runtime semantic change: mu/tools/executors/recovery_gate.py.\n"
+    )
+    lines = [
+        "## Ra\n",
+        "\n",
+        tracker_note + "\n",
+        first_followup,
+        second_followup,
+        "---\n",
+    ]
+
+    modified, error, action = commit_mod._sync_tracker_followup_line(  # ANTICHEAT_OK: direct tracker-ledger regression
+        lines,
+        wave_id=wave_id,
+        canonical_idx=2,
+        tracker_followup_indices=[3, 4],
+        tracker_paths=[kernel_path, pipeline_path],
+        tracker_file_staged=False,
+    )
+
+    assert (modified, error, action) == (True, None, "inserted")
+    followup_lines = [
+        line for line in lines
+        if line.startswith("- Tracker sync follow-up") and wave_id in line
+    ]
+    assert len(followup_lines) == 3
+    assert kernel_path in followup_lines[-1]
+    assert pipeline_path in followup_lines[-1]
+
+    staged_lines = [
+        "## Ra\n",
+        "\n",
+        tracker_note + "\n",
+        first_followup,
+        second_followup,
+        "---\n",
+    ]
+    modified, error, action = commit_mod._sync_tracker_followup_line(  # ANTICHEAT_OK: direct tracker-ledger regression
+        staged_lines,
+        wave_id=wave_id,
+        canonical_idx=2,
+        tracker_followup_indices=[3, 4],
+        tracker_paths=[kernel_path, pipeline_path],
+        tracker_file_staged=True,
+    )
+
+    assert (modified, error, action) == (False, None, None)
+
+
 def test_structural_staged_followup_retargets_supervisor_class_when_branch_range_has_runtime():
     staged_files = [
         "TASKS.md",
