@@ -145,6 +145,9 @@ _CONTROL_PLANE_TOOLING_PREFIXES = (
     "mu/tools/recovery/",
 )
 _SUPERVISOR_OVERRIDE_WAVE_CLASSES = {"L4_ENABLER", "MAINTENANCE"}
+PHASE_B_PRE_SUPERVISOR_PENDING_STATUS = (
+    "Phase B (pre-supervisor pending, bridge-converged)"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1453,6 +1456,8 @@ def _plan_declares_routing_boundary(plan_content: str) -> bool:
         or "locked later phase b plan" in text
         or "cannot authorize implementation" in text
         or "does not authorize implementation" in text
+        or "no phase b implementation write set is authorized" in text
+        or "no phase b runtime" in text
         or "implementation is not authorized" in text
         or "does not authorize editing tasks.md or implementation files" in text
         or "do not solve the implementation" in text
@@ -4592,11 +4597,28 @@ def _reconcile_phase_b_indicator_scope_text(packet_text: str, *, indicator_path:
         refreshed,
     )
     refreshed = re.sub(
+        r"(?m)^- Aside from the same-wave `TASKS\.md` tracker entry required to bind "
+        r"this packet, this packet does not authorize creation of a new report, indicator,"
+        r"([^\n]*)$",
+        f"- Aside from the same-wave `TASKS.md` tracker entry and exact same-wave "
+        f"indicator artifact `{indicator_path}` required for commit packaging, this packet "
+        r"does not authorize creation of a new report,\1",
+        refreshed,
+    )
+    refreshed = re.sub(
         r"(?m)^- Closeout updates, if any, are limited to directly required "
         r"`TASKS\.md` lines and this governing packet unless [^\n]*$",
         f"- Closeout updates may include directly required `TASKS.md` lines, this governing "
         f"packet, and exact same-wave indicator artifact `{indicator_path}`; all closeout "
         "text must cite the validation that proved the implementation.",
+        refreshed,
+    )
+    refreshed = re.sub(
+        r"No Phase B runtime, marker, ratchet-baseline, indicator, or successor packet\n"
+        r"write set is authorized by this decision\.",
+        "No Phase B runtime, marker, ratchet-baseline, or successor packet\n"
+        "write set is authorized by this decision. The exact same-wave indicator\n"
+        f"artifact `{indicator_path}` is authorized only for mechanical commit packaging.",
         refreshed,
     )
     return refreshed.replace(
@@ -7100,17 +7122,16 @@ def run_phase_b(
         package_relpath = str(package_path.relative_to(repo_root))
 
         # Step 5b: Update tracked packet status before staging.
-        # Advances from "Phase A" to "Phase B (bridge-converged)" so the
-        # supervisor sees consistent state (Bug 1 fix, 2026-04-06).
-        # Deferred to "Phase B" (not "COMPLETED") until supervisor confirms
-        # COMMIT_GO — premature COMPLETED is incorrect if supervisor rejects
-        # (P2 bot finding, 2026-04-06).
+        # Advances from "Phase A" to a non-completed bridge-converged pending
+        # state so the supervisor sees consistent state without making failed
+        # pre-supervisor packages look completed to dispatcher reroute guards.
         # Guard: skip for planless mode where plan_path is a synthetic token
         # (P1 bot finding, 2026-04-06).
         if not plan_path.startswith("<"):
             update_plan_packet_status(
-                repo_root, plan_path,
-                "Phase B (implementation-complete, bridge-converged)",
+                repo_root,
+                plan_path,
+                PHASE_B_PRE_SUPERVISOR_PENDING_STATUS,
             )
             if plan_path not in changed_files:
                 changed_files.append(plan_path)

@@ -1,0 +1,24 @@
+{
+  "wave_id": "n3-kernel-driver-post-continuation-marker-reduction-2026-05-22",
+  "repeat_run_speedup_ratio": 1.007197,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.312645,
+  "repeat_run_raw_seconds": [
+    0.314895,
+    0.312645
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.314895
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.62754
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-05-22T09:47:50Z",
+  "collector_version": "2.2.0"
+}
