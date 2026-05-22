@@ -14725,6 +14725,53 @@ def test_diagnosis_prompt_caps_megabyte_jsonl_lines(tmp_path):
     assert "Respond with ONLY a JSON object" in prompt
 
 
+def test_diagnosis_prompt_includes_wait_ci_structured_failure_context(tmp_path):
+    result = {
+        "status": "error",
+        "step": "wait_ci",
+        "failure_class": "test_failure",
+        "errors": [
+            "CI checks failed. FAILED tests/l4_gates/"
+            "test_engine_transition_gate.py::TestJSClassifierSourceLock::"
+            "test_js_trampoline_run_engine_negative_control"
+        ],
+        "ci_failures": [
+            {
+                "name": "test",
+                "workflow": "CI",
+                "details_url": (
+                    "https://github.com/jabramsja/rcx-pi-core/actions/"
+                    "runs/26288230263/job/77381193282"
+                ),
+                "excerpt": (
+                    "subprocess.TimeoutExpired: Command ['node', "
+                    "'mu/host/js/eval_step.js'] timed out after 30 seconds"
+                ),
+            }
+        ],
+        "ci_checks_output": (
+            "test\tfail\t31m28s\thttps://github.com/jabramsja/"
+            "rcx-pi-core/actions/runs/26288230263/job/77381193282"
+        ),
+        "stdout": "",
+        "stderr": "",
+    }
+
+    prompt = rg_mod._build_diagnosis_prompt(  # ANTICHEAT_OK: CI context recovery regression
+        result,
+        "n3-terminal-hemisphere-ontology-authority-lock-2026-05-14",
+        0,
+        tmp_path,
+    )
+
+    assert "Structured failure context:" in prompt
+    assert "ci_failures:" in prompt
+    assert "ci_checks_output:" in prompt
+    assert "test_js_trampoline_run_engine_negative_control" in prompt
+    assert "runs/26288230263/job/77381193282" in prompt
+    assert "timed out after 30 seconds" in prompt
+
+
 _ANTI_THEATER_RATCHET_PYTEST_ID = (
     "mu/tests/l4_gates/test_wave_j_arch_gaps_gate.py::"
     "TestSeedDependencyParity::test_js_seed_dependencies_match_python"

@@ -406,6 +406,9 @@ _PHASE_A_LOCK_DECORATED_RE = re.compile(
     r"^Phase-A-Lock:\s*(UNLOCKED|LOCKED)[ \t]+\([^()\n]+\)[ \t]*$"
 )
 _PHASE_A_LOCK_REVIEW_RE = re.compile(r"^Phase-A-Lock:\s*LOCKED_FOR_REVIEW[ \t]*$")
+_PHASE_A_LOCK_PENDING_REVIEW_RE = re.compile(
+    r"^Phase-A-Lock:\s*UNLOCKED[ \t]+pending bridge re-review[ \t]*$"
+)
 _PHASE_A_H2_RE = re.compile(r"^##(?!#)(?:[ \t]+|$)")
 _BRIDGE_RENDERED_SECTION_RE = re.compile(r"^##(?!#)[ \t]+(.+?)[ \t]*$")
 
@@ -1511,7 +1514,10 @@ def lock_plan(
         if decorated_match:
             decorated_lock_values.append(decorated_match.group(1))
             continue
-        if _PHASE_A_LOCK_REVIEW_RE.match(line):
+        if (
+            _PHASE_A_LOCK_REVIEW_RE.match(line)
+            or _PHASE_A_LOCK_PENDING_REVIEW_RE.match(line)
+        ):
             review_lock_lines.append(line)
             continue
         malformed_lock_lines.append(line)
