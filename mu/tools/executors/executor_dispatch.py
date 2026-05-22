@@ -440,11 +440,31 @@ def _tasks_backtick_value(line: str, label: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+_TASKS_TRACKER_NOTE_HEADER_RE = re.compile(
+    r"^- Tracker sync note \([^,]+,\s*([^)]+)\):\s*\*\*[^*]+\*\*"
+)
+
+
 def _line_is_next_codex_post_redteam_queue_entry(line: str) -> bool:
     return (
         "FOUNDER-ORDERED-REDTEAM-" in line
         or "NEXT-CODEX-POST-REDTEAM" in line
     )
+
+
+def _tasks_control_plane_packet_value(repo_root: Path, line: str) -> str:
+    packet = _tasks_backtick_value(line, "Packet")
+    if not packet.startswith("reports/control_plane/"):
+        return ""
+    candidate = Path(packet)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        return ""
+    full_path = (repo_root / packet).resolve()
+    try:
+        full_path.relative_to((repo_root / "reports" / "control_plane").resolve())
+    except ValueError:
+        return ""
+    return packet
 
 
 def _founder_ordered_task_packet_for_wave(repo_root: Path, wave_id: str) -> str:
@@ -458,21 +478,18 @@ def _founder_ordered_task_packet_for_wave(repo_root: Path, wave_id: str) -> str:
     for line in lines:
         if not _line_is_next_codex_post_redteam_queue_entry(line):
             continue
+        tracker_match = _TASKS_TRACKER_NOTE_HEADER_RE.match(line)
         entry_wave = normalize_wave_id(_tasks_backtick_value(line, "Wave ID"))
+        if (not entry_wave or entry_wave == "wave-unknown") and tracker_match:
+            entry_wave = normalize_wave_id(tracker_match.group(1))
         if entry_wave != normalized_wave:
             continue
-        packet = _tasks_backtick_value(line, "Packet")
-        if not packet.startswith("reports/control_plane/"):
+        packet = _tasks_control_plane_packet_value(repo_root, line)
+        if not packet:
             return ""
-        candidate = Path(packet)
-        if candidate.is_absolute() or ".." in candidate.parts:
-            return ""
-        full_path = (repo_root / packet).resolve()
-        try:
-            full_path.relative_to((repo_root / "reports" / "control_plane").resolve())
-        except ValueError:
-            return ""
-        if full_path.is_file():
+        if tracker_match:
+            return packet
+        if (repo_root / packet).is_file():
             return packet
         return ""
     return ""
@@ -1013,6 +1030,8 @@ def _surface_record_for_chain(
                     record["task_id"] = canonical_task_id
         if args.surface == "commit":
             return record
+    if args.surface == "phase-a":
+        record = _enrich_founder_ordered_tracked_packets(repo_root, record)
     if args.surface != "phase-b":
         return record
 

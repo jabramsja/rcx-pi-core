@@ -87,6 +87,9 @@ class PhaseAExecutorError(RuntimeError):
 
 
 PLAN_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
+TRACKED_PACKET_DATE_SUFFIX_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}(?:_\d{4}-\d{2}-\d{2})*$"
+)
 ALLOWED_REVIEW_DEPTHS = {"quick", "full", "founder", "all"}
 RECOGNIZED_BRIDGE_DECISIONS = {
     "GO",
@@ -248,6 +251,11 @@ def extract_plan_scope(routing_record: dict[str, Any]) -> dict[str, str]:
         "decision": routing_record.get("decision", ""),
         "task_id": routing_record.get("task_id", ""),
         "wave_name": routing_record.get("wave_name", ""),
+        "tracked_packet": str(
+            candidate.get("tracked_packet")
+            or routing_record.get("tracked_packet")
+            or ""
+        ).strip(),
     }
 
 
@@ -289,6 +297,41 @@ def _find_tracked_packet(plan_dir: Path, plan_name: str) -> Path | None:
     # Return the most recent candidate even if it's a stub —
     # still better than creating a new dated duplicate
     return candidates[-1]
+
+
+def _tracked_plan_path_from_scope(
+    repo_root: Path,
+    plan_name: str,
+    scope: dict[str, str],
+) -> Path | None:
+    tracked_packet = str(scope.get("tracked_packet") or "").strip()
+    if not tracked_packet:
+        return None
+
+    candidate = Path(tracked_packet)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise PhaseAExecutorError(f"Unsafe tracked_packet: {tracked_packet!r}")
+    if candidate.suffix != ".md":
+        raise PhaseAExecutorError(f"tracked_packet must be a Markdown packet: {tracked_packet!r}")
+    stem = candidate.stem
+    date_suffixed_match = bool(
+        stem.startswith(f"{plan_name}_")
+        and TRACKED_PACKET_DATE_SUFFIX_RE.fullmatch(stem[len(plan_name) + 1 :])
+    )
+    if stem != plan_name and not date_suffixed_match:
+        raise PhaseAExecutorError(
+            f"tracked_packet stem {stem!r} does not match plan_name {plan_name!r}"
+        )
+
+    control_dir = (repo_root / "reports" / "control_plane").resolve()
+    full_path = (repo_root / candidate).resolve()
+    try:
+        full_path.relative_to(control_dir)
+    except ValueError as exc:
+        raise PhaseAExecutorError(
+            f"tracked_packet must be under reports/control_plane/: {tracked_packet!r}"
+        ) from exc
+    return full_path
 
 
 def _render_plan_draft_content(
@@ -357,6 +400,20 @@ def create_plan_draft(
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     content = _render_plan_draft_content(plan_name, scope, date_str=date_str)
 
+    tracked_path = _tracked_plan_path_from_scope(repo_root, plan_name, scope)
+    if tracked_path is not None:
+        tracked_path.parent.mkdir(parents=True, exist_ok=True)
+        if tracked_path.exists():
+            tracked_content = tracked_path.read_text(encoding="utf-8")
+            if (
+                _phase_a_header_allows_placeholder_refresh(tracked_content)
+                and _plan_is_placeholder_stub(tracked_content)
+            ):
+                tracked_path.write_text(content, encoding="utf-8")
+            return tracked_path
+        tracked_path.write_text(content, encoding="utf-8")
+        return tracked_path
+
     # Check for existing tracked packet first.
     existing = _find_tracked_packet(plan_dir, plan_name)
     if existing is not None:
@@ -411,6 +468,23 @@ _PHASE_A_LOCK_PENDING_REVIEW_RE = re.compile(
 )
 _PHASE_A_H2_RE = re.compile(r"^##(?!#)(?:[ \t]+|$)")
 _BRIDGE_RENDERED_SECTION_RE = re.compile(r"^##(?!#)[ \t]+(.+?)[ \t]*$")
+_STRICT_STAGED_L4_COMMAND_RE = re.compile(
+    r"(?:python3[ \t]+)?tools/checks/enforce_l4_execution_contract\.py"
+)
+_STRICT_STAGED_L4_COMMAND_WINDOW_CHARS = 800
+_STRICT_STAGED_L4_WAVE_RE = re.compile(
+    r"--wave-id(?:=|[ \t]+)"
+    r"(?:"
+    r'"(?P<double>[A-Za-z0-9][A-Za-z0-9_-]*)"'
+    r"|"
+    r"'(?P<single>[A-Za-z0-9][A-Za-z0-9_-]*)'"
+    r"|"
+    r"(?P<bare>[A-Za-z0-9][A-Za-z0-9_-]*)"
+    r")"
+)
+_TASKS_TRACKER_NOTE_HEADER_RE = re.compile(
+    r"^- Tracker sync note \([^,]+,\s*([^)]+)\):\s*\*\*[^*]+\*\*"
+)
 
 
 def _canonical_phase_a_section_title(stripped_line: str) -> str:
@@ -1464,6 +1538,141 @@ def _ensure_phase_a_identity_header(
     return header + body
 
 
+def _extract_strict_staged_l4_wave_ids(content: str) -> list[str]:
+    """Return unique --wave-id values from strict staged L4 commands."""
+    wave_ids: list[str] = []
+    seen: set[str] = set()
+    for command_match in _STRICT_STAGED_L4_COMMAND_RE.finditer(content):
+        command = content[
+            command_match.start():
+            command_match.start() + _STRICT_STAGED_L4_COMMAND_WINDOW_CHARS
+        ]
+        for boundary in ("`", "\n## "):
+            boundary_at = command.find(boundary)
+            if boundary_at != -1:
+                command = command[:boundary_at]
+        command = re.sub(r"\\\r?\n", " ", command)
+        command = re.sub(r"\s+", " ", command)
+        if "--staged" not in command:
+            continue
+        for wave_match in _STRICT_STAGED_L4_WAVE_RE.finditer(command):
+            raw_wave_id = (
+                wave_match.group("double")
+                or wave_match.group("single")
+                or wave_match.group("bare")
+                or ""
+            )
+            wave_id = normalize_wave_id(raw_wave_id)
+            if not wave_id or wave_id in seen:
+                continue
+            seen.add(wave_id)
+            wave_ids.append(wave_id)
+    return wave_ids
+
+
+def _phase_a_scope_mentions_tasks(content: str) -> bool:
+    """Return true when the Phase A Scope section explicitly includes TASKS.md."""
+    sections = _extract_phase_a_sections(content)
+    return any("TASKS.md" in body for body in sections.get("scope", []))
+
+
+def _phase_a_same_wave_authorization_exists(content: str, wave_id: str) -> bool:
+    """Return true when the packet carries wave-bound implementation authority."""
+    normalized_wave = normalize_wave_id(wave_id)
+    if not normalized_wave or normalized_wave == "wave-unknown":
+        return False
+    expected = f"FOUNDER_OVERRIDE:{normalized_wave}"
+    sections = _extract_phase_a_sections(content)
+    for body in sections.get("grounding", []):
+        for raw_line in body.splitlines():
+            line = raw_line.strip()
+            if expected not in line:
+                continue
+            candidate = re.sub(r"^(?:[-*]|\d+\.)\s*", "", line).strip()
+            candidate = candidate.strip("` ")
+            candidate = candidate.rstrip(".,;").strip("` ")
+            if candidate == expected:
+                return True
+            lower_candidate = candidate.lower()
+            for prefix in (
+                "same-wave authorization:",
+                "same wave authorization:",
+                "authorization:",
+                "founder override:",
+            ):
+                if not lower_candidate.startswith(prefix):
+                    continue
+                value = candidate[len(prefix):].strip().strip("` ")
+                value = value.rstrip(".,;").strip("` ")
+                if value == expected:
+                    return True
+    return False
+
+
+def _tasks_tracker_note_wave_exists(repo_root: Path, wave_id: str) -> bool:
+    """Return true when TASKS.md has a detector-visible tracker note wave id."""
+    normalized_wave = normalize_wave_id(wave_id)
+    if not normalized_wave:
+        return False
+    try:
+        lines = (repo_root / "TASKS.md").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        match = _TASKS_TRACKER_NOTE_HEADER_RE.match(line)
+        if not match:
+            continue
+        if normalize_wave_id(match.group(1)) != normalized_wave:
+            continue
+        if "Class:" in line or "FOUNDER_OVERRIDE:" in line:
+            return True
+    return False
+
+
+def _phase_a_strict_staged_l4_guard_errors(
+    repo_root: Path,
+    *,
+    plan_path: str,
+    content: str,
+    routing_record: dict[str, Any] | None,
+) -> list[str]:
+    """Fail closed before Phase A lock for ungrounded strict staged L4 commands."""
+    strict_wave_ids = _extract_strict_staged_l4_wave_ids(content)
+    if not strict_wave_ids:
+        return []
+
+    errors: list[str] = []
+    if not _phase_a_scope_mentions_tasks(content):
+        errors.append(
+            "packet requires strict staged L4 --wave-id validation but Scope does "
+            "not include TASKS.md tracker-sync authority"
+        )
+
+    packet_wave_id = _phase_a_wave_id(
+        routing_record or {},
+        plan_name=Path(plan_path).stem,
+        rel_plan_path=plan_path,
+        plan_content=content,
+    )
+    if not _phase_a_same_wave_authorization_exists(content, packet_wave_id):
+        errors.append(
+            "packet requires strict staged L4 --wave-id validation but lacks "
+            f"same-wave authorization FOUNDER_OVERRIDE:{packet_wave_id}"
+        )
+
+    missing_tracker = [
+        wave_id
+        for wave_id in strict_wave_ids
+        if not _tasks_tracker_note_wave_exists(repo_root, wave_id)
+    ]
+    if missing_tracker:
+        errors.append(
+            "TASKS.md lacks detector-visible tracker sync note(s) for strict "
+            "staged L4 wave id(s): " + ", ".join(missing_tracker)
+        )
+    return errors
+
+
 def lock_plan(
     repo_root: Path,
     plan_path: str,
@@ -1600,6 +1809,17 @@ def lock_plan(
         )
     # Exactly one control line exists — operate on header, then rejoin.
     if unlocked_lines:
+        strict_l4_errors = _phase_a_strict_staged_l4_guard_errors(
+            repo_root,
+            plan_path=plan_path,
+            content=content,
+            routing_record=routing_record,
+        )
+        if strict_l4_errors:
+            raise PhaseAExecutorError(
+                "Phase A strict staged L4 guard failed before lock: "
+                + "; ".join(strict_l4_errors)
+            )
         header, lock_replacements = re.subn(
             r"(?m)^Phase-A-Lock:\s*UNLOCKED[ \t]*$",
             "Phase-A-Lock: LOCKED",
