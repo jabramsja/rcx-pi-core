@@ -1807,19 +1807,19 @@ def lock_plan(
             f"Expected exactly one Phase-A-Lock control line in {plan_path}, "
             f"found {len(unlocked_lines)} unlocked and {len(locked_lines)} locked"
         )
-    strict_l4_errors = _phase_a_strict_staged_l4_guard_errors(
-        repo_root,
-        plan_path=plan_path,
-        content=content,
-        routing_record=routing_record,
-    )
-    if strict_l4_errors:
-        raise PhaseAExecutorError(
-            "Phase A strict staged L4 guard failed before lock: "
-            + "; ".join(strict_l4_errors)
-        )
     # Exactly one control line exists — operate on header, then rejoin.
     if unlocked_lines:
+        strict_l4_errors = _phase_a_strict_staged_l4_guard_errors(
+            repo_root,
+            plan_path=plan_path,
+            content=content,
+            routing_record=routing_record,
+        )
+        if strict_l4_errors:
+            raise PhaseAExecutorError(
+                "Phase A strict staged L4 guard failed before lock: "
+                + "; ".join(strict_l4_errors)
+            )
         header, lock_replacements = re.subn(
             r"(?m)^Phase-A-Lock:\s*UNLOCKED[ \t]*$",
             "Phase-A-Lock: LOCKED",
