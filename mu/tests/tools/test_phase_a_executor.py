@@ -90,6 +90,10 @@ def test_extract_plan_scope_carries_bounded_candidate_detail():
                 {
                     "candidate": "founder-ordered-redteam-wave-packet-seed-2026-05-05",
                     "bounded": True,
+                    "tracked_packet": (
+                        "reports/control_plane/"
+                        "founder-ordered-redteam-wave-packet-seed-2026-05-05.md"
+                    ),
                     "summary": "create code/docs/tests/tooling audit packets",
                     "request_for_claude": "carry founder-ordered audit queue details into Phase A",
                 },
@@ -104,6 +108,63 @@ def test_extract_plan_scope_carries_bounded_candidate_detail():
     assert "generic post-merge summary" in scope["summary"]
     assert "create code/docs/tests/tooling audit packets" in scope["summary"]
     assert scope["task_id"] == "[NEXT-CODEX-POST-REDTEAM]"
+    assert scope["tracked_packet"] == (
+        "reports/control_plane/founder-ordered-redteam-wave-packet-seed-2026-05-05.md"
+    )
+
+
+def test_create_plan_draft_creates_missing_tracked_packet_exact_path(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    plan = phase_a_mod.create_plan_draft(
+        repo,
+        "founder-ordered-redteam-wave-packet-seed-2026-05-05",
+        {
+            "request": "route exact canonical packet",
+            "summary": "phase a should not mint a dated duplicate",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "wave_name": "founder-ordered-redteam-wave-packet-seed-2026-05-05",
+            "tracked_packet": (
+                "reports/control_plane/"
+                "founder-ordered-redteam-wave-packet-seed-2026-05-05.md"
+            ),
+        },
+    )
+
+    assert plan == (
+        repo
+        / "reports"
+        / "control_plane"
+        / "founder-ordered-redteam-wave-packet-seed-2026-05-05.md"
+    )
+    assert plan.exists()
+    assert not list((repo / "reports" / "control_plane").glob("*_2026-*.md"))
+
+
+def test_create_plan_draft_accepts_date_suffixed_tracked_packet_path(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    wave_id = "example-wave-2026-05-22"
+    packet_rel = f"reports/control_plane/{wave_id}_2026-05-22.md"
+
+    plan = phase_a_mod.create_plan_draft(
+        repo,
+        wave_id,
+        {
+            "request": "route existing tracker packet",
+            "summary": "phase a should reuse the TASKS-bound suffixed packet",
+            "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+            "wave_name": wave_id,
+            "tracked_packet": packet_rel,
+        },
+    )
+
+    assert plan == repo / packet_rel
+    assert plan.exists()
+    assert not list(
+        (repo / "reports" / "control_plane").glob(f"{wave_id}_2026-05-22_*.md")
+    )
 
 
 def test_lock_plan_inserts_missing_authoritative_routing_identity(tmp_path):

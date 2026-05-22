@@ -440,6 +440,11 @@ def _tasks_backtick_value(line: str, label: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _tasks_tracker_note_wave_id(line: str) -> str:
+    match = re.search(r"^-?\s*Tracker sync note\s*\([^,]+,\s*([^)]+)\):", line)
+    return match.group(1).strip() if match else ""
+
+
 def _line_is_next_codex_post_redteam_queue_entry(line: str) -> bool:
     return (
         "FOUNDER-ORDERED-REDTEAM-" in line
@@ -458,11 +463,17 @@ def _founder_ordered_task_packet_for_wave(repo_root: Path, wave_id: str) -> str:
     for line in lines:
         if not _line_is_next_codex_post_redteam_queue_entry(line):
             continue
-        entry_wave = normalize_wave_id(_tasks_backtick_value(line, "Wave ID"))
+        entry_wave = normalize_wave_id(
+            _tasks_backtick_value(line, "Wave ID")
+            or _tasks_tracker_note_wave_id(line)
+        )
         if entry_wave != normalized_wave:
             continue
         packet = _tasks_backtick_value(line, "Packet")
-        if not packet.startswith("reports/control_plane/"):
+        if (
+            not packet.startswith("reports/control_plane/")
+            or Path(packet).suffix != ".md"
+        ):
             return ""
         candidate = Path(packet)
         if candidate.is_absolute() or ".." in candidate.parts:
@@ -472,9 +483,7 @@ def _founder_ordered_task_packet_for_wave(repo_root: Path, wave_id: str) -> str:
             full_path.relative_to((repo_root / "reports" / "control_plane").resolve())
         except ValueError:
             return ""
-        if full_path.is_file():
-            return packet
-        return ""
+        return packet
     return ""
 
 
@@ -974,6 +983,7 @@ def _surface_record_for_chain(
             record["dashboard_port"] = teammate_identity.get("dashboard_port")
             record["tmux_session"] = teammate_identity.get("tmux_session", "")
             record["teammate_worktree"] = str(getattr(args, "_teammate_worktree", ""))
+        return _enrich_founder_ordered_tracked_packets(repo_root, record)
     if args.surface == "commit" and getattr(args, "handoff", None):
         try:
             handoff = json.loads(args.handoff.read_text(encoding="utf-8"))

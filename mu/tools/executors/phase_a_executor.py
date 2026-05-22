@@ -87,6 +87,9 @@ class PhaseAExecutorError(RuntimeError):
 
 
 PLAN_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
+TRACKED_PACKET_DATE_SUFFIX_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}(?:_\d{4}-\d{2}-\d{2})*$"
+)
 ALLOWED_REVIEW_DEPTHS = {"quick", "full", "founder", "all"}
 RECOGNIZED_BRIDGE_DECISIONS = {
     "GO",
@@ -248,6 +251,11 @@ def extract_plan_scope(routing_record: dict[str, Any]) -> dict[str, str]:
         "decision": routing_record.get("decision", ""),
         "task_id": routing_record.get("task_id", ""),
         "wave_name": routing_record.get("wave_name", ""),
+        "tracked_packet": str(
+            candidate.get("tracked_packet")
+            or routing_record.get("tracked_packet")
+            or ""
+        ).strip(),
     }
 
 
@@ -289,6 +297,41 @@ def _find_tracked_packet(plan_dir: Path, plan_name: str) -> Path | None:
     # Return the most recent candidate even if it's a stub —
     # still better than creating a new dated duplicate
     return candidates[-1]
+
+
+def _tracked_plan_path_from_scope(
+    repo_root: Path,
+    plan_name: str,
+    scope: dict[str, str],
+) -> Path | None:
+    tracked_packet = str(scope.get("tracked_packet") or "").strip()
+    if not tracked_packet:
+        return None
+
+    candidate = Path(tracked_packet)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise PhaseAExecutorError(f"Unsafe tracked_packet: {tracked_packet!r}")
+    if candidate.suffix != ".md":
+        raise PhaseAExecutorError(f"tracked_packet must be a Markdown packet: {tracked_packet!r}")
+    stem = candidate.stem
+    date_suffixed_match = bool(
+        stem.startswith(f"{plan_name}_")
+        and TRACKED_PACKET_DATE_SUFFIX_RE.fullmatch(stem[len(plan_name) + 1 :])
+    )
+    if stem != plan_name and not date_suffixed_match:
+        raise PhaseAExecutorError(
+            f"tracked_packet stem {stem!r} does not match plan_name {plan_name!r}"
+        )
+
+    control_dir = (repo_root / "reports" / "control_plane").resolve()
+    full_path = (repo_root / candidate).resolve()
+    try:
+        full_path.relative_to(control_dir)
+    except ValueError as exc:
+        raise PhaseAExecutorError(
+            f"tracked_packet must be under reports/control_plane/: {tracked_packet!r}"
+        ) from exc
+    return full_path
 
 
 def _render_plan_draft_content(
@@ -356,6 +399,20 @@ def create_plan_draft(
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     content = _render_plan_draft_content(plan_name, scope, date_str=date_str)
+
+    tracked_path = _tracked_plan_path_from_scope(repo_root, plan_name, scope)
+    if tracked_path is not None:
+        tracked_path.parent.mkdir(parents=True, exist_ok=True)
+        if tracked_path.exists():
+            tracked_content = tracked_path.read_text(encoding="utf-8")
+            if (
+                _phase_a_header_allows_placeholder_refresh(tracked_content)
+                and _plan_is_placeholder_stub(tracked_content)
+            ):
+                tracked_path.write_text(content, encoding="utf-8")
+            return tracked_path
+        tracked_path.write_text(content, encoding="utf-8")
+        return tracked_path
 
     # Check for existing tracked packet first.
     existing = _find_tracked_packet(plan_dir, plan_name)

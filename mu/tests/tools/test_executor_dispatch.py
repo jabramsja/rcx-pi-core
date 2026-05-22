@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock, PropertyMock
 
 import pytest
@@ -862,6 +863,74 @@ class TestDispatcherFreshnessRefresh:
         assert result["status"] == "success"
         assert calls
         assert calls[0][calls[0].index("--plan-name") + 1] == Path(packet_rel).stem
+
+    def test_phase_a_surface_record_derives_tracker_note_packet_before_file_exists(
+        self, tmp_path,
+    ):
+        wave_id = "n3-js-evidence-walker-runtime-authority-parity-2026-05-22"
+        packet_rel = f"reports/control_plane/{wave_id}.md"
+        (tmp_path / "TASKS.md").write_text(
+            (
+                "## Queue\n"
+                f"- Tracker sync note (2026-05-22, {wave_id}): "
+                "**NEXT-CODEX-POST-REDTEAM - JS evidence walker parity.** "
+                "Class: L4_STRUCTURAL. "
+                f"Packet: `{packet_rel}`.\n"
+            ),
+            encoding="utf-8",
+        )
+
+        record = dispatch_mod._surface_record_for_chain(  # ANTICHEAT_OK: surface routing regression
+            SimpleNamespace(
+                surface="phase-a",
+                plan_name=wave_id,
+                task_id="[NEXT-CODEX-POST-REDTEAM]",
+                summary="",
+                request_for_claude="",
+            ),
+            tmp_path,
+        )
+
+        assert record["next_candidates"][0]["tracked_packet"] == packet_rel
+        assert not (tmp_path / packet_rel).exists()
+
+    def test_phase_a_surface_record_routes_date_suffixed_tracker_packet(
+        self, tmp_path,
+    ):
+        wave_id = "example-wave-2026-05-22"
+        packet_rel = f"reports/control_plane/{wave_id}_2026-05-22.md"
+        (tmp_path / "TASKS.md").write_text(
+            (
+                "## Queue\n"
+                f"- Tracker sync note (2026-05-22, {wave_id}): "
+                "**NEXT-CODEX-POST-REDTEAM - existing suffixed packet.** "
+                "Class: L4_ENABLER. "
+                f"Packet: `{packet_rel}`.\n"
+            ),
+            encoding="utf-8",
+        )
+
+        record = dispatch_mod._surface_record_for_chain(  # ANTICHEAT_OK: surface routing regression
+            SimpleNamespace(
+                surface="phase-a",
+                plan_name=wave_id,
+                task_id="[NEXT-CODEX-POST-REDTEAM]",
+                summary="",
+                request_for_claude="",
+            ),
+            tmp_path,
+        )
+        scope = phase_a_mod.extract_plan_scope(record)
+        plan = phase_a_mod.create_plan_draft(tmp_path, wave_id, scope)
+
+        assert record["next_candidates"][0]["tracked_packet"] == packet_rel
+        assert plan == tmp_path / packet_rel
+        assert plan.exists()
+        assert not list(
+            (tmp_path / "reports" / "control_plane").glob(
+                f"{wave_id}_2026-05-22_*.md"
+            )
+        )
 
     def test_dispatch_stops_completed_tasks_state_even_when_record_lacks_tracked_packet(
         self, tmp_path, monkeypatch,
@@ -11605,6 +11674,30 @@ class TestPhaseATrackedPacketReuse:
         assert path.exists()
         assert "brand_new_plan" in path.name
         assert "Phase-A-Lock: UNLOCKED" in path.read_text()
+
+    def test_creates_missing_date_suffixed_tracked_packet(self, tmp_path):
+        """TASKS-bound date-suffixed tracked_packet paths remain valid."""
+        wave_id = "example-wave-2026-05-22"
+        packet_rel = f"reports/control_plane/{wave_id}_2026-05-22.md"
+        path = phase_a_mod.create_plan_draft(
+            tmp_path,
+            wave_id,
+            {
+                "request": "create exact TASKS-bound packet",
+                "summary": "date-suffixed tracker note packet",
+                "task_id": "[NEXT-CODEX-POST-REDTEAM]",
+                "wave_name": wave_id,
+                "tracked_packet": packet_rel,
+            },
+        )
+
+        assert path == tmp_path / packet_rel
+        assert path.exists()
+        assert not list(
+            (tmp_path / "reports" / "control_plane").glob(
+                f"{wave_id}_2026-05-22_*.md"
+            )
+        )
 
     def test_prefers_locked_over_unlocked(self, tmp_path):
         """When both locked and unlocked exist, prefer the locked one."""
