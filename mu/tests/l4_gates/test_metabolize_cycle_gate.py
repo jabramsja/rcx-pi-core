@@ -105,6 +105,7 @@ class TestMetabolizeCycleJSParityGate:
 
 
 @pytest.mark.slow
+@pytest.mark.l4_expensive
 class TestMetabolizeCycleWiringGate:
     """Gate: metabolization is wired into run_engine_with_routing."""
 

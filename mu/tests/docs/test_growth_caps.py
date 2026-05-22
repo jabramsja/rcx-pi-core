@@ -6,6 +6,7 @@ See mu/docs/core/DocGovernance.v0.md § "Growth Caps" for policy.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,24 @@ CAP_TEST_FILES = 122  # +1 for test_executor_config_alignment.py; +1 for test_co
 CAP_TOOL_SCRIPTS = 48  # +1 for _resolve_live_root.sh; +2 for startup-hardening session tools (founder_learning_snapshot.py, check_codex_startup_state.py; founder sign-off 2026-04-15); +1 for pipeline_agent_pager.py (pager wave, founder sign-off 2026-04-17); +1 for check_private_attr_access.py (AST-anti-cheat wave, standing pipeline-bug-fix authorization 2026-04-20); +4 for Codex autoping session watcher scripts (codex_autoping_watch.py, codex_autoping_window.sh, ensure_codex_autoping.sh, render_codex_autoping_status.py; founder sign-off 2026-04-25); +1 for pipeline_monitor_identity.py (parallel pipeline monitor identity wave, founder sign-off 2026-04-30); +1 for seed_binary_migration.py (FOUNDER_OVERRIDE:n3-projection-loader-seed-migration-integrity-chain-2026-05-14)
 CAP_CORE_DOCS = 12  # +1 for L3SubstrateArchitecture.v0.md (extracted from STATUS.md)
 
+_L4_EXPENSIVE_SELECTOR_LOCKS = [
+    (
+        "tests/l4_gates/test_metabolize_cycle_gate.py",
+        "TestMetabolizeCycleWiringGate",
+        "test_python_metabolize_sink_to_r_null",
+    ),
+    (
+        "tests/l4_gates/test_metabolize_cycle_gate.py",
+        "TestMetabolizeCycleWiringGate",
+        "test_python_metabolize_lobes_promote",
+    ),
+    (
+        "tests/l4_gates/test_boot1_step_monotonicity_gate.py",
+        "TestPythonBoot1StepMonotonicity",
+        "test_multi_step_monotonic_and_grouped",
+    ),
+]
+
 
 def _count_test_files() -> int:
     """Count test_*.py files under mu/tests/."""
@@ -38,6 +57,66 @@ def _count_tool_scripts() -> int:
 def _count_core_docs() -> int:
     """Count .md files under mu/docs/ (all subdirs)."""
     return len(list((REPO_ROOT / "mu" / "docs").rglob("*.md")))
+
+
+def _pytest_marker_name(node: ast.AST) -> str | None:
+    """Return marker name for pytest.mark.<name> decorator/pytestmark entries."""
+    if isinstance(node, ast.Call):
+        return _pytest_marker_name(node.func)
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "pytest"
+    ):
+        return node.attr
+    return None
+
+
+def _pytest_marker_names_from_value(node: ast.AST) -> set[str]:
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return {
+            name
+            for item in node.elts
+            for name in [_pytest_marker_name(item)]
+            if name is not None
+        }
+    name = _pytest_marker_name(node)
+    return {name} if name is not None else set()
+
+
+def _pytestmark_names(module: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for statement in module.body:
+        if not isinstance(statement, ast.Assign):
+            continue
+        if any(isinstance(target, ast.Name) and target.id == "pytestmark" for target in statement.targets):
+            names.update(_pytest_marker_names_from_value(statement.value))
+    return names
+
+
+def _decorator_marker_names(node: ast.ClassDef | ast.FunctionDef) -> set[str]:
+    return {
+        name
+        for decorator in node.decorator_list
+        for name in [_pytest_marker_name(decorator)]
+        if name is not None
+    }
+
+
+def _find_class(module: ast.Module, class_name: str) -> ast.ClassDef:
+    for statement in module.body:
+        if isinstance(statement, ast.ClassDef) and statement.name == class_name:
+            return statement
+    raise AssertionError(f"Missing test class {class_name}")
+
+
+def _find_method(class_node: ast.ClassDef, method_name: str) -> ast.FunctionDef:
+    for statement in class_node.body:
+        if isinstance(statement, ast.FunctionDef) and statement.name == method_name:
+            return statement
+    raise AssertionError(f"Missing test method {class_node.name}::{method_name}")
 
 
 class TestGrowthCaps:
@@ -70,7 +149,7 @@ class TestGrowthCaps:
 
 def test_green_gate_excludes_l4_expensive_from_merge_slow_lane():
     """Merge green gate must not run full-budget L4 evidence tests."""
-    source = (REPO_ROOT / "mu" / "scripts" / "green_gate.sh").read_text()
+    source = (REPO_ROOT / "scripts" / "green_gate.sh").read_text()
     assert '-m "slow and not l4_expensive" tests/l4_gates/' in source
 
 
@@ -81,3 +160,21 @@ def test_slow_tests_workflow_owns_l4_expensive_lane():
     assert '-m "slow and not l4_expensive"' in source
     assert "-m l4_expensive" in source
     assert "--timeout=900" in source
+
+
+def test_pr1017_over_budget_l4_selectors_stay_slow_l4_expensive():
+    """PR #1017 over-budget selectors must stay out of merge green gate."""
+    required_markers = {"slow", "l4_expensive"}
+    for rel_path, class_name, method_name in _L4_EXPENSIVE_SELECTOR_LOCKS:
+        module = ast.parse((REPO_ROOT / rel_path).read_text(), filename=rel_path)
+        class_node = _find_class(module, class_name)
+        method_node = _find_method(class_node, method_name)
+        marker_names = (
+            _pytestmark_names(module)
+            | _decorator_marker_names(class_node)
+            | _decorator_marker_names(method_node)
+        )
+        assert required_markers <= marker_names, (
+            f"{rel_path}::{class_name}::{method_name} markers "
+            f"{sorted(marker_names)} must include {sorted(required_markers)}"
+        )
