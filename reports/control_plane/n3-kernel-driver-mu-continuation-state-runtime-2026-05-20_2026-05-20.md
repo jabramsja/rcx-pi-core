@@ -2,6 +2,7 @@
 
 Date: 2026-05-20
 Status: IMPLEMENTED / LOCAL EVIDENCE
+Class: L4_STRUCTURAL
 Task: [NEXT-CODEX-POST-REDTEAM]
 Wave ID: n3-kernel-driver-mu-continuation-state-runtime-2026-05-20
 Phase-A-Lock: LOCKED
@@ -97,6 +98,83 @@ config, keeps those sub-timeouts within the commit executor outer budget, and
 adds a config/workflow alignment test proving the commit CI watch and poll
 budgets cover the longest required workflow `timeout-minutes` value. No runtime
 `/mu` semantic implementation files are in this recovery scope.
+
+## Post-push green-gate runtime recovery addendum
+
+After the commit CI wait-budget repair pushed PR #1014, the required
+`green-gate` workflow completed and failed in the `Run green gate` step. The
+failure is now diagnostic evidence, not a pending-check timeout: `gh run view
+26251622398 --job 77263960447 --log-failed` reported `18 failed, 8451 passed,
+22 skipped, 1 warning in 2318.03s (0:38:38)`. The visible failures center on
+JavaScript kernel-driver continuation performance/convergence:
+
+- `tests/parity/test_rcx_engine_scheduler_parity.py::test_python_js_agree_on_scheduler_seed_path_selection`
+  timed out after 30 seconds on a Node `serviceBoundaryEffect(...)`
+  `run_algorithm` request.
+- `tests/l4_gates/test_boot1_default_pipeline_gate.py::TestJsPipelineBoot1Default::test_omitted_matches_explicit_true`
+  timed out after 60 seconds on `mu/host/js/eval_step.js --json-api
+  {"action": "run_engine_pipeline", ...}`.
+- `tests/l4_gates/test_boot1_default_routing_gate.py::TestJsBoot1Default`
+  timed out across omitted, explicit-true, and explicit-false routing cases.
+- `tests/parity/test_boot1_shadow_parity.py` timed out in several Python
+  shadow parity cases, with captured stacks inside Mu type/copy/match paths
+  while broad green-gate execution was already saturated by the slow JS path.
+
+Local focused evidence narrows the root repair target further:
+
+- `PYTHONHASHSEED=0 python3 -m pytest -q tests/parity/test_rcx_engine_scheduler_parity.py::test_python_js_agree_on_scheduler_seed_path_selection --tb=short`
+  reproduces the Node timeout locally.
+- `PYTHONHASHSEED=0 python3 -m pytest -q tests/l4_gates/test_boot1_default_pipeline_gate.py::TestJsPipelineBoot1Default::test_omitted_matches_explicit_true --tb=short`
+  passes locally but takes `30.56s`, leaving little CI headroom for a 60-second
+  CI timeout.
+- `PYTHONHASHSEED=0 python3 -m pytest -q tests/parity/test_boot1_shadow_parity.py::TestBoot1PythonShadowParity::test_paxos_freeze_parity --tb=short`
+  passes locally in `88.94s`, so this packet does not treat Python shadow
+  parity as the first repair target without new evidence.
+- A direct Node probe of `pipeline.runAlgorithmWithBridge(...)` with
+  `maxSteps=1` returns the correct scheduler result only after about `51.9s`.
+  A direct `pipeline.serviceBoundaryEffect(...)` probe with
+  `maxAlgorithmIterations=1` returns the same correct scheduler result only
+  after about `56.4s`. This proves the immediate defect is a single JavaScript
+  kernel-driver transition being too slow under the continuation-state
+  implementation; it is not caused by the outer `runSubAlgorithm` iteration
+  count.
+
+Grounding for Phase B repair:
+
+- `mu/host/js/engine/pipeline.js:139` through `:150` drives explicit
+  `_stepKernelCore(...)` continuation packets inside `runAlgorithmWithBridge`.
+- `mu/host/js/engine/kernel.js:105` through `:180` validates continuation
+  packet shape and cursor metadata.
+- `mu/host/js/engine/kernel.js:940` through `:1178` resumes continuation
+  state, runs one trusted kernel step, emits terminal packets, or materializes
+  the next `kernel_driver_continuation_state`.
+- `tests/parity/test_rcx_engine_scheduler_parity.py:99` through `:105`
+  enforces the JS scheduler parity timeout that currently fails.
+
+Same-wave Phase B recovery must stay structural and Mu-owned. Repair the JS
+kernel-driver continuation path so a single scheduler transition completes
+within the existing parity timeout while preserving the continuation packet
+shape, cursor binding, fail-closed validation, and Python/JavaScript result
+parity. Do not paper over the failure by only raising test timeouts. Prefer
+moving progress authority into existing Mu continuation data or removing
+duplicative host-side recomputation around continuation resume. Keep the
+write set within the locked runtime surface unless bridge review proves a
+narrower or broader exact subset is required; stop for founder if a necessary
+file falls outside the authorized runtime/test/control scope.
+
+Before Phase B could be routed, the routing-record builder rejected this
+same packet because its header still reads `Status: IMPLEMENTED / LOCAL
+EVIDENCE`. That guard is correct by default, but post-push CI recovery needs
+an explicit same-wave reroute path after evidence proves the pushed PR failed
+green-gate. Same-wave pipeline repair scope therefore also includes
+`tools/executors/executor_common.py`, `mu/tools/executors/executor_common.py`,
+`tools/executors/executor_dispatch.py`,
+`mu/tools/executors/executor_dispatch.py`, and
+`mu/tests/tools/test_executor_dispatch.py` to add a narrow
+`allow_completed_tracked_packet` builder/dispatcher option and regressions
+proving completed packets remain rejected unless this recovery override is
+passed. This is a pipeline-control repair only; it must not authorize runtime
+shortcuts or any host-semantic addition.
 
 ## Work items
 

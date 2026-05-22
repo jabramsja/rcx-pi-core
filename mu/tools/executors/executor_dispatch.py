@@ -519,12 +519,13 @@ def _completed_routing_candidates(
     record: dict[str, Any],
 ) -> list[dict[str, str]]:
     completed: list[dict[str, str]] = []
+    allow_completed_reroute = bool(record.get("allow_completed_tracked_packet"))
     for candidate in _selected_routing_candidate_dicts(record):
         tracked_packet = str(candidate.get("tracked_packet") or "").strip()
         if not tracked_packet:
             continue
         status = read_control_plane_packet_status(repo_root, tracked_packet)
-        if packet_status_is_completed(status):
+        if packet_status_is_completed(status) and not allow_completed_reroute:
             completed.append(
                 {
                     "tracked_packet": tracked_packet,
@@ -546,7 +547,7 @@ def _completed_routing_candidates(
             wave_id=task_wave,
             tracked_packet=tracked_packet,
         )
-        if packet_status_is_completed(task_state):
+        if packet_status_is_completed(task_state) and not allow_completed_reroute:
             completed.append(
                 {
                     "tracked_packet": tracked_packet,
@@ -3207,6 +3208,7 @@ def _refresh_canonical_routing_record_state(
         repo_root=repo_root,
         output_path=output_path or _canonical_routing_record_path(repo_root, bus_dir),
         bus_dir=bus_dir,
+        allow_completed_tracked_packet=bool(record.get("allow_completed_tracked_packet")),
     )
     if errors:
         if verbose:

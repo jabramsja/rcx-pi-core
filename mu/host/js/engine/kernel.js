@@ -94,6 +94,7 @@ const KERNEL_TERMINAL_REASONS = Object.freeze([
   'malformed_fuel',
   'watchdog_exhausted',
 ]);
+const RUNTIME_VALIDATION_CACHE_METADATA = new WeakMap();
 
 /**
  * Internal: single kernel-driver transition.
@@ -102,7 +103,7 @@ const KERNEL_TERMINAL_REASONS = Object.freeze([
  *
  * @host_iteration — single-step host transition marker retained until ratchet baseline update.
  */
-function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps, vmConfig, kernelFuel = undefined, continuationState = null) {
+function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator, maxSteps, vmConfig, kernelFuel = undefined, continuationState = null, runtimeValidationCache = null) {
   if (typeof maxSteps !== 'number' || !Number.isFinite(maxSteps) || !Number.isInteger(maxSteps)) {
     throw new RcxError(
       'api.bad_request',
@@ -162,6 +163,9 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     }
     if (continuationState.watchdog_cap !== maxSteps) {
       throw new Error('SECURITY: continuationState.watchdog_cap must match supplied maxSteps');
+    }
+    if (continuationState.steps_used >= continuationState.watchdog_cap) {
+      throw new Error('SECURITY: continuationState steps_used is not bound to watchdog_cap');
     }
     if (continuationState.projection_cursor !== null) {
       if (continuationState.projection_cursor === null ||
@@ -246,71 +250,960 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
     if (muHash(continuationState.domain_input) !== muHash(domainInput)) {
       throw new Error('SECURITY: continuationState domain_input is not bound to supplied input');
     }
-    const projectionHashes = new Set();
-    const bodyHashes = new Set();
-    const projectionContexts = [];
     const useDomainValidation = validator !== validateAlgorithmRuntimeFields;
-    const useVmMatchValidation = useDomainValidation && Boolean(vmConfig && vmConfig.matchBundle);
-    let prefixHasMatch = false;
-    let projectionAuthorityCursor = kernelInput._projs;
-    while (projectionAuthorityCursor !== null) {
-      if (typeof projectionAuthorityCursor !== 'object' || Array.isArray(projectionAuthorityCursor) ||
-          !Object.hasOwn(projectionAuthorityCursor, 'head') ||
-          !Object.hasOwn(projectionAuthorityCursor, 'tail') ||
-          Object.keys(projectionAuthorityCursor).length !== 2) {
-        throw new Error('SECURITY: kernel projection cursor must be a Mu head/tail linked list');
-      }
-      const projectionAuthority = projectionAuthorityCursor.head;
-      if (projectionAuthority === null || typeof projectionAuthority !== 'object' ||
-          Array.isArray(projectionAuthority) ||
-          !Object.hasOwn(projectionAuthority, 'pattern') ||
-          !Object.hasOwn(projectionAuthority, 'body') ||
-          Object.keys(projectionAuthority).length !== 2) {
-        throw new Error('SECURITY: kernel projection cursor head must be a normalized projection');
-      }
-      projectionHashes.add(muHash(projectionAuthority));
-      bodyHashes.add(muHash(projectionAuthority.body));
-      let matchResult = null;
-      let legacyMatchBindings = NO_MATCH;
-      if (useVmMatchValidation) {
-        const matchOutcome = stage0VmRun(vmConfig.matchBundle, muContainers.record([
-          ['match', muContainers.record([
-            ['pattern', projectionAuthority.pattern],
-            ['value', kernelInput._step],
-          ])],
-          ['_match_ctx', muContainers.record([
-            ['_input', kernelInput._step],
-            ['_body', projectionAuthority.body],
-            ['_remaining', projectionAuthorityCursor.tail],
-          ])],
-        ]), 100);
-        matchResult = matchOutcome.root;
-      } else if (useDomainValidation) {
-        legacyMatchBindings = stage0Match(projectionAuthority.pattern, kernelInput._step, null);
-      }
-      projectionContexts.push({
-        projection: projectionAuthority,
-        projectionRest: projectionAuthorityCursor.tail,
-        bodyHash: muHash(projectionAuthority.body),
-        restHash: muHash(projectionAuthorityCursor.tail),
-        cursorHash: muHash(projectionAuthorityCursor),
-        prefixCleared: !prefixHasMatch,
-        matchResult,
-        legacyMatchBindings,
-      });
-      const projectionMatches = useVmMatchValidation
-        ? matchResult !== null && typeof matchResult === 'object' && !Array.isArray(matchResult) &&
-            matchResult._mode === 'match_done' && matchResult._status === 'success'
-        : legacyMatchBindings !== NO_MATCH;
-      if (useDomainValidation && projectionMatches) {
-        prefixHasMatch = true;
-      }
-      projectionAuthorityCursor = projectionAuthorityCursor.tail;
-    }
-    const exhaustedPrefixCleared = !prefixHasMatch;
     const kernelState = continuationState.kernel_state;
     const kernelStateIsObject = kernelState !== null && typeof kernelState === 'object' && !Array.isArray(kernelState);
-    const enforcePrefixCleared = useDomainValidation;
+    if (!useDomainValidation) {
+      const continuationCursors = [];
+      const bodyRestPairs = [];
+      const patternRestPairs = [];
+      const substResultChecks = [];
+      const substStateChecks = [];
+      const inProgressMatchChecks = [];
+      let projectionContexts = null;
+      let prefixHasMatchingProjection = false;
+      const projectionAuthorityHash = muHash(kernelInput._projs);
+      const cachedRuntimeValidation =
+        runtimeValidationCache !== null && typeof runtimeValidationCache === 'object'
+          ? RUNTIME_VALIDATION_CACHE_METADATA.get(runtimeValidationCache)
+          : null;
+      if (runtimeValidationCache !== null &&
+          typeof runtimeValidationCache === 'object' &&
+          cachedRuntimeValidation !== undefined &&
+          cachedRuntimeValidation.inputHash === normalizedInputHash &&
+          cachedRuntimeValidation.projectionAuthorityHash === projectionAuthorityHash &&
+          Array.isArray(cachedRuntimeValidation.projectionContexts)) {
+        projectionContexts = cachedRuntimeValidation.projectionContexts;
+        prefixHasMatchingProjection = cachedRuntimeValidation.prefixHasMatchingProjection === true;
+      } else {
+        projectionContexts = [];
+        let projectionAuthorityCursor = kernelInput._projs;
+        while (projectionAuthorityCursor !== null) {
+          if (typeof projectionAuthorityCursor !== 'object' || Array.isArray(projectionAuthorityCursor) ||
+              !Object.hasOwn(projectionAuthorityCursor, 'head') ||
+              !Object.hasOwn(projectionAuthorityCursor, 'tail') ||
+              Object.keys(projectionAuthorityCursor).length !== 2) {
+            throw new Error('SECURITY: kernel projection cursor must be a Mu head/tail linked list');
+          }
+          const projectionAuthority = projectionAuthorityCursor.head;
+          if (projectionAuthority === null || typeof projectionAuthority !== 'object' ||
+              Array.isArray(projectionAuthority) ||
+              !Object.hasOwn(projectionAuthority, 'pattern') ||
+              !Object.hasOwn(projectionAuthority, 'body') ||
+              Object.keys(projectionAuthority).length !== 2) {
+            throw new Error('SECURITY: kernel projection cursor head must be a normalized projection');
+          }
+          const matchBindings = stage0Match(projectionAuthority.pattern, kernelInput._step, null);
+          const projectionMatches = matchBindings !== NO_MATCH;
+          projectionContexts.push({
+            projection: projectionAuthority,
+            projectionCursor: projectionAuthorityCursor,
+            projectionRest: projectionAuthorityCursor.tail,
+            bodyHash: muHash(projectionAuthority.body),
+            patternHash: muHash(projectionAuthority.pattern),
+            restHash: muHash(projectionAuthorityCursor.tail),
+            cursorHash: muHash(projectionAuthorityCursor),
+            prefixCleared: !prefixHasMatchingProjection,
+            matchBindings,
+            projectionMatches,
+          });
+          if (projectionMatches) {
+            prefixHasMatchingProjection = true;
+          }
+          projectionAuthorityCursor = projectionAuthorityCursor.tail;
+        }
+        if (runtimeValidationCache !== null && typeof runtimeValidationCache === 'object') {
+          RUNTIME_VALIDATION_CACHE_METADATA.set(runtimeValidationCache, Object.freeze({
+            inputHash: normalizedInputHash,
+            projectionAuthorityHash,
+            projectionContexts: Object.freeze(projectionContexts),
+            prefixHasMatchingProjection,
+          }));
+        }
+      }
+      if (!kernelStateIsObject) {
+        // Scalar Mu states can only come from the defensive hash-stall path:
+        // they carry no projection authority and must resume as cursorless,
+        // already-progressed continuations.
+        if (continuationState.projection_cursor !== null) {
+          throw new Error('SECURITY: continuationState projection_cursor is not bound to kernel_state');
+        }
+        if (continuationState.steps_used === 0) {
+          throw new Error('SECURITY: continuationState steps_used is not bound to kernel_state phase');
+        }
+        if (continuationState.steps_used >= watchdogCap) {
+          throw new Error('SECURITY: continuationState steps_used is not bound to watchdog_cap');
+        }
+      }
+      if (kernelStateIsObject && continuationState.projection_cursor !== null) {
+        if (continuationState.projection_cursor.position !== continuationState.steps_used) {
+          throw new Error('SECURITY: continuationState steps_used/projection_cursor mismatch');
+        }
+        if (!Object.hasOwn(kernelState, '_remaining')) {
+          throw new Error('SECURITY: continuationState projection_cursor is not bound to kernel_state');
+        }
+        if (continuationState.projection_cursor.exhausted !== (kernelState._remaining === null)) {
+          throw new Error('SECURITY: continuationState projection_cursor exhausted mismatch');
+        }
+      } else if (kernelStateIsObject && Object.hasOwn(kernelState, '_remaining')) {
+        throw new Error('SECURITY: continuationState projection_cursor missing for kernel projection state');
+      }
+      if (kernelStateIsObject && isKernelTerminal(kernelState)) {
+        throw new Error('SECURITY: continuationState kernel_state must be nonterminal');
+      }
+      if (kernelStateIsObject && Object.hasOwn(kernelState, '_remaining')) {
+        if (kernelState._mode === 'kernel' && kernelState._phase !== 'try') {
+          throw new Error('SECURITY: continuationState kernel_state phase mismatch');
+        }
+        if (kernelState._mode === 'kernel' && muHash(kernelState._input) !== normalizedInputHash) {
+          throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+        }
+        if (kernelState._remaining === null) {
+          let anyProjectionMatches = false;
+          for (const context of projectionContexts) {
+            if (context.projectionMatches) {
+              anyProjectionMatches = true;
+              break;
+            }
+          }
+          if (anyProjectionMatches) {
+            throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+          }
+        } else {
+          continuationCursors.push({
+            cursor: kernelState._remaining,
+            requirePrefixCleared: true,
+          });
+        }
+      }
+      if (kernelStateIsObject && kernelState._match_ctx !== undefined) {
+        const matchCtx = kernelState._match_ctx;
+        if (matchCtx === null || typeof matchCtx !== 'object' || Array.isArray(matchCtx)) {
+          throw new Error('SECURITY: continuationState _match_ctx must be a Mu object');
+        }
+        keys = Object.keys(matchCtx).sort();
+        if (keys.length !== 3 || keys[0] !== '_body' || keys[1] !== '_input' || keys[2] !== '_remaining') {
+          throw new Error('SECURITY: continuationState _match_ctx key set mismatch');
+        }
+        if (muHash(matchCtx._input) !== normalizedInputHash) {
+          throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+        }
+        continuationCursors.push({
+          cursor: matchCtx._remaining,
+          requirePrefixCleared: false,
+        });
+        let expectedMatchStatus = null;
+        let expectedBindings = null;
+        if (kernelState._mode === 'match_done') {
+          if (kernelState._status === 'success') {
+            expectedMatchStatus = 'success';
+            expectedBindings = kernelState._bindings;
+          } else if (kernelState._status === 'no_match') {
+            expectedMatchStatus = 'no_match';
+          } else {
+            throw new Error('SECURITY: continuationState match_done status mismatch');
+          }
+        }
+        bodyRestPairs.push([
+          matchCtx._body,
+          matchCtx._remaining,
+          expectedMatchStatus,
+          expectedBindings,
+        ]);
+        const finalMatchPrecursor =
+          kernelState.mode === 'match' &&
+          kernelState.pattern_focus === null &&
+          kernelState.value_focus === null &&
+          kernelState.stack === null;
+        const variablePatternFocus =
+          kernelState.mode === 'match' &&
+          kernelState.pattern_focus !== null &&
+          typeof kernelState.pattern_focus === 'object' &&
+          !Array.isArray(kernelState.pattern_focus) &&
+          Object.keys(kernelState.pattern_focus).length === 1 &&
+          typeof kernelState.pattern_focus.var === 'string';
+        if (Object.hasOwn(kernelState, 'bindings') &&
+            (finalMatchPrecursor || variablePatternFocus)) {
+          inProgressMatchChecks.push({
+            body: matchCtx._body,
+            rest: matchCtx._remaining,
+            state: kernelState,
+          });
+        }
+        if (Object.hasOwn(kernelState, 'match')) {
+          const matchRequest = kernelState.match;
+          if (matchRequest === null || typeof matchRequest !== 'object' || Array.isArray(matchRequest)) {
+            throw new Error('SECURITY: continuationState match request must be a Mu object');
+          }
+          keys = Object.keys(matchRequest).sort();
+          if (keys.length !== 2 || keys[0] !== 'pattern' || keys[1] !== 'value') {
+            throw new Error('SECURITY: continuationState match request key set mismatch');
+          }
+          if (muHash(matchRequest.value) !== normalizedInputHash) {
+            throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+          }
+          patternRestPairs.push([matchRequest.pattern, matchCtx._remaining, true]);
+        }
+      }
+      if (kernelStateIsObject && kernelState._subst_ctx !== undefined) {
+        const substCtx = kernelState._subst_ctx;
+        if (substCtx === null || typeof substCtx !== 'object' || Array.isArray(substCtx)) {
+          throw new Error('SECURITY: continuationState _subst_ctx must be a Mu object');
+        }
+        keys = Object.keys(substCtx).sort();
+        if (keys.length !== 2 || keys[0] !== '_input' || keys[1] !== '_remaining') {
+          throw new Error('SECURITY: continuationState _subst_ctx key set mismatch');
+        }
+        if (muHash(substCtx._input) !== normalizedInputHash) {
+          throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+        }
+        continuationCursors.push({
+          cursor: substCtx._remaining,
+          requirePrefixCleared: false,
+        });
+        if (Object.hasOwn(kernelState, 'subst')) {
+          const substRequest = kernelState.subst;
+          if (substRequest === null || typeof substRequest !== 'object' || Array.isArray(substRequest)) {
+            throw new Error('SECURITY: continuationState subst request must be a Mu object');
+          }
+          keys = Object.keys(substRequest).sort();
+          if (keys.length !== 2 || keys[0] !== 'bindings' || keys[1] !== 'body') {
+            throw new Error('SECURITY: continuationState subst request key set mismatch');
+          }
+          bodyRestPairs.push([substRequest.body, substCtx._remaining, 'success', substRequest.bindings]);
+        } else if (kernelState._mode === 'subst_done') {
+          substResultChecks.push([substCtx._remaining, kernelState._result, null, false]);
+        } else if (kernelState.mode === 'subst' &&
+            kernelState.phase === 'result' &&
+            kernelState.context === null) {
+          substResultChecks.push([substCtx._remaining, kernelState.focus, kernelState.bindings, true]);
+        } else if (kernelState.mode === 'subst') {
+          substStateChecks.push([substCtx._remaining, kernelState]);
+        }
+      }
+      for (const cursorBinding of continuationCursors) {
+        const cursorCandidate = cursorBinding.cursor;
+        if (cursorCandidate === null) {
+          continue;
+        }
+        if (typeof cursorCandidate !== 'object' || Array.isArray(cursorCandidate) ||
+            !Object.hasOwn(cursorCandidate, 'head') ||
+            !Object.hasOwn(cursorCandidate, 'tail') ||
+            Object.keys(cursorCandidate).length !== 2) {
+          throw new Error('SECURITY: continuationState kernel projection cursor must be a Mu head/tail list');
+        }
+        let cursorBound = false;
+        let cursorHash = null;
+        for (const context of projectionContexts) {
+          let cursorMatches = context.projectionCursor === cursorCandidate;
+          if (!cursorMatches) {
+            if (cursorHash === null) {
+              cursorHash = muHash(cursorCandidate);
+            }
+            cursorMatches = context.cursorHash === cursorHash;
+          }
+          if (!cursorMatches) {
+            continue;
+          }
+          if (cursorBinding.requirePrefixCleared && !context.prefixCleared) {
+            continue;
+          }
+          cursorBound = true;
+          break;
+        }
+        if (!cursorBound) {
+          throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+        }
+      }
+      for (const [bodyValue, restCursor, expectedMatchStatus, expectedBindings] of bodyRestPairs) {
+        let bodyBound = false;
+        const bodyHash = muHash(bodyValue);
+        const restHash = muHash(restCursor);
+        for (const context of projectionContexts) {
+          const bodyRestMatches =
+            (context.projection.body === bodyValue && context.projectionRest === restCursor) ||
+            (context.bodyHash === bodyHash && context.restHash === restHash);
+          if (!bodyRestMatches) {
+            continue;
+          }
+          if (!context.prefixCleared) {
+            continue;
+          }
+          if (expectedMatchStatus === 'success') {
+            if (!context.projectionMatches) {
+              continue;
+            }
+            let bindingsMatch = false;
+            if (context.matchBindings !== NO_MATCH &&
+                context.matchBindings !== null &&
+                typeof context.matchBindings === 'object' &&
+                !Array.isArray(context.matchBindings)) {
+              const expectedNames = new Set(Object.keys(context.matchBindings));
+              if (expectedBindings === null) {
+                bindingsMatch = expectedNames.size === 0;
+              } else {
+                if (expectedBindings === null || typeof expectedBindings !== 'object' || Array.isArray(expectedBindings)) {
+                  throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
+                }
+                const bindingKeys = Object.keys(expectedBindings).sort();
+                const linkedBinding =
+                  bindingKeys.length === 3 &&
+                  bindingKeys[0] === 'name' &&
+                  bindingKeys[1] === 'rest' &&
+                  bindingKeys[2] === 'value';
+                bindingsMatch = true;
+                if (linkedBinding) {
+                  const seenNames = new Set();
+                  let bindingCursor = expectedBindings;
+                  while (bindingCursor !== null) {
+                    if (bindingCursor === null || typeof bindingCursor !== 'object' || Array.isArray(bindingCursor)) {
+                      throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
+                    }
+                    keys = Object.keys(bindingCursor).sort();
+                    if (keys.length !== 3 || keys[0] !== 'name' || keys[1] !== 'rest' || keys[2] !== 'value') {
+                      throw new Error('SECURITY: continuationState binding cursor key set mismatch');
+                    }
+                    if (typeof bindingCursor.name !== 'string') {
+                      throw new Error('SECURITY: continuationState binding name must be string');
+                    }
+                    if (!Object.hasOwn(context.matchBindings, bindingCursor.name)) {
+                      bindingsMatch = false;
+                      break;
+                    }
+                    if (muHash(bindingCursor.value) !== muHash(context.matchBindings[bindingCursor.name])) {
+                      bindingsMatch = false;
+                      break;
+                    }
+                    seenNames.add(bindingCursor.name);
+                    bindingCursor = bindingCursor.rest;
+                  }
+                  for (const name of expectedNames) {
+                    if (!seenNames.has(name)) {
+                      bindingsMatch = false;
+                      break;
+                    }
+                  }
+                } else {
+                  for (const name of bindingKeys) {
+                    if (!Object.hasOwn(context.matchBindings, name)) {
+                      bindingsMatch = false;
+                      break;
+                    }
+                    if (muHash(expectedBindings[name]) !== muHash(context.matchBindings[name])) {
+                      bindingsMatch = false;
+                      break;
+                    }
+                  }
+                  if (bindingsMatch) {
+                    for (const name of expectedNames) {
+                      if (!Object.hasOwn(expectedBindings, name)) {
+                        bindingsMatch = false;
+                        break;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            if (!bindingsMatch) {
+              continue;
+            }
+          } else if (expectedMatchStatus === 'no_match' && context.projectionMatches) {
+            continue;
+          }
+          bodyBound = true;
+          break;
+        }
+        if (!bodyBound) {
+          throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+        }
+      }
+      for (const check of inProgressMatchChecks) {
+        let matchStateBound = false;
+        const bodyHash = muHash(check.body);
+        const restHash = muHash(check.rest);
+        const state = check.state;
+        const requireExactBindings =
+          state.pattern_focus === null &&
+          state.value_focus === null &&
+          state.stack === null;
+        let patternVarName = null;
+        if (state.pattern_focus !== null &&
+            typeof state.pattern_focus === 'object' &&
+            !Array.isArray(state.pattern_focus)) {
+          const patternFocusKeys = Object.keys(state.pattern_focus);
+          if (patternFocusKeys.length === 1 &&
+              patternFocusKeys[0] === 'var' &&
+              typeof state.pattern_focus.var === 'string') {
+            patternVarName = state.pattern_focus.var;
+          }
+        }
+        for (const context of projectionContexts) {
+          const bodyRestMatches =
+            (context.projection.body === check.body && context.projectionRest === check.rest) ||
+            (context.bodyHash === bodyHash && context.restHash === restHash);
+          if (!bodyRestMatches || !context.prefixCleared) {
+            continue;
+          }
+          if (!context.projectionMatches) {
+            matchStateBound = true;
+            break;
+          }
+          const expectedBindings = context.matchBindings;
+          if (expectedBindings === NO_MATCH ||
+              expectedBindings === null ||
+              typeof expectedBindings !== 'object' ||
+              Array.isArray(expectedBindings)) {
+            continue;
+          }
+          const expectedNames = new Set(Object.keys(expectedBindings));
+          let bindingsMatch = true;
+          if (state.bindings === null) {
+            bindingsMatch = !requireExactBindings || expectedNames.size === 0;
+          } else {
+            if (state.bindings === null || typeof state.bindings !== 'object' || Array.isArray(state.bindings)) {
+              throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
+            }
+            const bindingKeys = Object.keys(state.bindings).sort();
+            const linkedBinding =
+              bindingKeys.length === 3 &&
+              bindingKeys[0] === 'name' &&
+              bindingKeys[1] === 'rest' &&
+              bindingKeys[2] === 'value';
+            if (linkedBinding) {
+              const seenNames = new Set();
+              let bindingCursor = state.bindings;
+              while (bindingCursor !== null) {
+                if (bindingCursor === null || typeof bindingCursor !== 'object' || Array.isArray(bindingCursor)) {
+                  throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
+                }
+                keys = Object.keys(bindingCursor).sort();
+                if (keys.length !== 3 || keys[0] !== 'name' || keys[1] !== 'rest' || keys[2] !== 'value') {
+                  throw new Error('SECURITY: continuationState binding cursor key set mismatch');
+                }
+                if (typeof bindingCursor.name !== 'string') {
+                  throw new Error('SECURITY: continuationState binding name must be string');
+                }
+                if (!Object.hasOwn(expectedBindings, bindingCursor.name)) {
+                  bindingsMatch = false;
+                  break;
+                }
+                if (muHash(bindingCursor.value) !== muHash(expectedBindings[bindingCursor.name])) {
+                  bindingsMatch = false;
+                  break;
+                }
+                seenNames.add(bindingCursor.name);
+                bindingCursor = bindingCursor.rest;
+              }
+              if (bindingsMatch && requireExactBindings) {
+                for (const name of expectedNames) {
+                  if (!seenNames.has(name)) {
+                    bindingsMatch = false;
+                    break;
+                  }
+                }
+              }
+            } else {
+              for (const name of bindingKeys) {
+                if (!Object.hasOwn(expectedBindings, name)) {
+                  bindingsMatch = false;
+                  break;
+                }
+                if (muHash(state.bindings[name]) !== muHash(expectedBindings[name])) {
+                  bindingsMatch = false;
+                  break;
+                }
+              }
+              if (bindingsMatch && requireExactBindings) {
+                for (const name of expectedNames) {
+                  if (!Object.hasOwn(state.bindings, name)) {
+                    bindingsMatch = false;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          if (!bindingsMatch) {
+            continue;
+          }
+          if (patternVarName !== null) {
+            if (!Object.hasOwn(expectedBindings, patternVarName)) {
+              continue;
+            }
+            if (muHash(state.value_focus) !== muHash(expectedBindings[patternVarName])) {
+              continue;
+            }
+          }
+          matchStateBound = true;
+          break;
+        }
+        if (!matchStateBound) {
+          throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+        }
+      }
+      for (const [restCursor, actualResult, actualBindings, requireBindings] of substResultChecks) {
+        let resultBound = false;
+        const restHash = muHash(restCursor);
+        for (const context of projectionContexts) {
+          if (context.restHash !== restHash || !context.prefixCleared || !context.projectionMatches) {
+            continue;
+          }
+          if (requireBindings) {
+            const expectedBindings = context.matchBindings;
+            if (expectedBindings === NO_MATCH ||
+                expectedBindings === null ||
+                typeof expectedBindings !== 'object' ||
+                Array.isArray(expectedBindings)) {
+              continue;
+            }
+            const expectedNames = new Set(Object.keys(expectedBindings));
+            let bindingsMatch = false;
+            if (actualBindings === null) {
+              bindingsMatch = expectedNames.size === 0;
+            } else {
+              if (actualBindings === null || typeof actualBindings !== 'object' || Array.isArray(actualBindings)) {
+                throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
+              }
+              const bindingKeys = Object.keys(actualBindings).sort();
+              const linkedBinding =
+                bindingKeys.length === 3 &&
+                bindingKeys[0] === 'name' &&
+                bindingKeys[1] === 'rest' &&
+                bindingKeys[2] === 'value';
+              bindingsMatch = true;
+              if (linkedBinding) {
+                const seenNames = new Set();
+                let bindingCursor = actualBindings;
+                while (bindingCursor !== null) {
+                  if (bindingCursor === null || typeof bindingCursor !== 'object' || Array.isArray(bindingCursor)) {
+                    throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
+                  }
+                  keys = Object.keys(bindingCursor).sort();
+                  if (keys.length !== 3 || keys[0] !== 'name' || keys[1] !== 'rest' || keys[2] !== 'value') {
+                    throw new Error('SECURITY: continuationState binding cursor key set mismatch');
+                  }
+                  if (typeof bindingCursor.name !== 'string') {
+                    throw new Error('SECURITY: continuationState binding name must be string');
+                  }
+                  if (!Object.hasOwn(expectedBindings, bindingCursor.name)) {
+                    bindingsMatch = false;
+                    break;
+                  }
+                  if (muHash(bindingCursor.value) !== muHash(expectedBindings[bindingCursor.name])) {
+                    bindingsMatch = false;
+                    break;
+                  }
+                  seenNames.add(bindingCursor.name);
+                  bindingCursor = bindingCursor.rest;
+                }
+                for (const name of expectedNames) {
+                  if (!seenNames.has(name)) {
+                    bindingsMatch = false;
+                    break;
+                  }
+                }
+              } else {
+                for (const name of bindingKeys) {
+                  if (!Object.hasOwn(expectedBindings, name)) {
+                    bindingsMatch = false;
+                    break;
+                  }
+                  if (muHash(actualBindings[name]) !== muHash(expectedBindings[name])) {
+                    bindingsMatch = false;
+                    break;
+                  }
+                }
+                if (bindingsMatch) {
+                  for (const name of expectedNames) {
+                    if (!Object.hasOwn(actualBindings, name)) {
+                      bindingsMatch = false;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+            if (!bindingsMatch) {
+              continue;
+            }
+          }
+          let expectedResult = null;
+          try {
+            expectedResult = stage0Substitute(context.projection.body, context.matchBindings);
+          } catch (error) {
+            const prefix = 'Unbound variable: ';
+            if (!error || typeof error.message !== 'string' || !error.message.startsWith(prefix)) {
+              throw error;
+            }
+            expectedResult = muContainers.record([
+              ['_error', 'unbound_variable'],
+              ['_name', error.message.slice(prefix.length)],
+            ]);
+          }
+          if (muHash(actualResult) === muHash(expectedResult)) {
+            resultBound = true;
+            break;
+          }
+        }
+        if (!resultBound) {
+          throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+        }
+      }
+      for (const [restCursor, substState] of substStateChecks) {
+        let substStateBound = false;
+        const restHash = muHash(restCursor);
+        for (const context of projectionContexts) {
+          if (context.restHash !== restHash || !context.prefixCleared || !context.projectionMatches) {
+            continue;
+          }
+          const expectedBindings = context.matchBindings;
+          if (expectedBindings === NO_MATCH ||
+              expectedBindings === null ||
+              typeof expectedBindings !== 'object' ||
+              Array.isArray(expectedBindings)) {
+            continue;
+          }
+          const actualBindings = substState.bindings;
+          const expectedNames = new Set(Object.keys(expectedBindings));
+          let bindingsMatch = false;
+          if (actualBindings === null) {
+            bindingsMatch = expectedNames.size === 0;
+          } else {
+            if (actualBindings === null || typeof actualBindings !== 'object' || Array.isArray(actualBindings)) {
+              throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
+            }
+            const bindingKeys = Object.keys(actualBindings).sort();
+            const linkedBinding =
+              bindingKeys.length === 3 &&
+              bindingKeys[0] === 'name' &&
+              bindingKeys[1] === 'rest' &&
+              bindingKeys[2] === 'value';
+            bindingsMatch = true;
+            if (linkedBinding) {
+              const seenNames = new Set();
+              let bindingCursor = actualBindings;
+              while (bindingCursor !== null) {
+                if (bindingCursor === null || typeof bindingCursor !== 'object' || Array.isArray(bindingCursor)) {
+                  throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
+                }
+                keys = Object.keys(bindingCursor).sort();
+                if (keys.length !== 3 || keys[0] !== 'name' || keys[1] !== 'rest' || keys[2] !== 'value') {
+                  throw new Error('SECURITY: continuationState binding cursor key set mismatch');
+                }
+                if (typeof bindingCursor.name !== 'string') {
+                  throw new Error('SECURITY: continuationState binding name must be string');
+                }
+                if (!Object.hasOwn(expectedBindings, bindingCursor.name)) {
+                  bindingsMatch = false;
+                  break;
+                }
+                if (muHash(bindingCursor.value) !== muHash(expectedBindings[bindingCursor.name])) {
+                  bindingsMatch = false;
+                  break;
+                }
+                seenNames.add(bindingCursor.name);
+                bindingCursor = bindingCursor.rest;
+              }
+              for (const name of expectedNames) {
+                if (!seenNames.has(name)) {
+                  bindingsMatch = false;
+                  break;
+                }
+              }
+            } else {
+              for (const name of bindingKeys) {
+                if (!Object.hasOwn(expectedBindings, name)) {
+                  bindingsMatch = false;
+                  break;
+                }
+                if (muHash(actualBindings[name]) !== muHash(expectedBindings[name])) {
+                  bindingsMatch = false;
+                  break;
+                }
+              }
+              if (bindingsMatch) {
+                for (const name of expectedNames) {
+                  if (!Object.hasOwn(actualBindings, name)) {
+                    bindingsMatch = false;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          if (!bindingsMatch) {
+            continue;
+          }
+          let expectedResult = null;
+          try {
+            expectedResult = stage0Substitute(context.projection.body, expectedBindings);
+          } catch (error) {
+            const prefix = 'Unbound variable: ';
+            if (!error || typeof error.message !== 'string' || !error.message.startsWith(prefix)) {
+              throw error;
+            }
+            expectedResult = muContainers.record([
+              ['_error', 'unbound_variable'],
+              ['_name', error.message.slice(prefix.length)],
+            ]);
+          }
+          let actualCompletion = null;
+          if (substState.phase === 'traverse') {
+            if (substState.context === null &&
+                muHash(substState.focus) !== muHash(context.projection.body)) {
+              continue;
+            }
+            try {
+              actualCompletion = stage0Substitute(substState.focus, expectedBindings);
+            } catch (error) {
+              const prefix = 'Unbound variable: ';
+              if (!error || typeof error.message !== 'string' || !error.message.startsWith(prefix)) {
+                throw error;
+              }
+              actualCompletion = muContainers.record([
+                ['_error', 'unbound_variable'],
+                ['_name', error.message.slice(prefix.length)],
+              ]);
+            }
+          } else if (substState.phase === 'lookup') {
+            if (typeof substState.lookup_name !== 'string') {
+              throw new Error('SECURITY: continuationState lookup_name must be string');
+            }
+            const lookupVar = muContainers.record([['var', substState.lookup_name]]);
+            if (substState.context === null &&
+                muHash(lookupVar) !== muHash(context.projection.body)) {
+              continue;
+            }
+            let lookupSuffixBound = substState.lookup_bindings === null;
+            const lookupBindingHash = substState.lookup_bindings === null ? null : muHash(substState.lookup_bindings);
+            let suffixProbe = actualBindings;
+            while (suffixProbe !== null) {
+              if (suffixProbe === null || typeof suffixProbe !== 'object' || Array.isArray(suffixProbe)) {
+                throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
+              }
+              keys = Object.keys(suffixProbe).sort();
+              if (keys.length !== 3 || keys[0] !== 'name' || keys[1] !== 'rest' || keys[2] !== 'value') {
+                throw new Error('SECURITY: continuationState binding cursor key set mismatch');
+              }
+              if (lookupBindingHash !== null && muHash(suffixProbe) === lookupBindingHash) {
+                lookupSuffixBound = true;
+                break;
+              }
+              suffixProbe = suffixProbe.rest;
+            }
+            if (!lookupSuffixBound) {
+              continue;
+            }
+            let lookupCursor = substState.lookup_bindings;
+            let lookupFound = false;
+            while (lookupCursor !== null) {
+              if (lookupCursor === null || typeof lookupCursor !== 'object' || Array.isArray(lookupCursor)) {
+                throw new Error('SECURITY: continuationState binding cursor must be a Mu object or null');
+              }
+              keys = Object.keys(lookupCursor).sort();
+              if (keys.length !== 3 || keys[0] !== 'name' || keys[1] !== 'rest' || keys[2] !== 'value') {
+                throw new Error('SECURITY: continuationState binding cursor key set mismatch');
+              }
+              if (typeof lookupCursor.name !== 'string') {
+                throw new Error('SECURITY: continuationState binding name must be string');
+              }
+              if (lookupCursor.name === substState.lookup_name) {
+                actualCompletion = lookupCursor.value;
+                lookupFound = true;
+                break;
+              }
+              lookupCursor = lookupCursor.rest;
+            }
+            if (!lookupFound) {
+              actualCompletion = muContainers.record([
+                ['_error', 'unbound_variable'],
+                ['_name', substState.lookup_name],
+              ]);
+            }
+          } else if (substState.phase === 'result') {
+            actualCompletion = substState.focus;
+          } else {
+            throw new Error('SECURITY: continuationState kernel_state phase mismatch');
+          }
+          let substContextCursor = substState.context;
+          while (substContextCursor !== null) {
+            if (substContextCursor === null ||
+                typeof substContextCursor !== 'object' ||
+                Array.isArray(substContextCursor)) {
+              throw new Error('SECURITY: continuationState subst context must be a Mu object or null');
+            }
+            keys = Object.keys(substContextCursor).sort();
+            if (keys.length !== 2 || keys[0] !== 'head' || keys[1] !== 'tail') {
+              throw new Error('SECURITY: continuationState subst context key set mismatch');
+            }
+            const substFrame = substContextCursor.head;
+            if (substFrame === null || typeof substFrame !== 'object' || Array.isArray(substFrame)) {
+              throw new Error('SECURITY: continuationState subst context frame must be a Mu object');
+            }
+            const frameType = substFrame.type;
+            if (frameType === 'head_done') {
+              keys = Object.keys(substFrame).sort();
+              if (keys.length !== 2 || keys[0] !== 'tail' || keys[1] !== 'type') {
+                throw new Error('SECURITY: continuationState subst context frame key set mismatch');
+              }
+              let tailCompletion = null;
+              try {
+                tailCompletion = stage0Substitute(substFrame.tail, expectedBindings);
+              } catch (error) {
+                const prefix = 'Unbound variable: ';
+                if (!error || typeof error.message !== 'string' || !error.message.startsWith(prefix)) {
+                  throw error;
+                }
+                tailCompletion = muContainers.record([
+                  ['_error', 'unbound_variable'],
+                  ['_name', error.message.slice(prefix.length)],
+                ]);
+              }
+              actualCompletion = muContainers.record([
+                ['head', actualCompletion],
+                ['tail', tailCompletion],
+              ]);
+            } else if (frameType === 'tail_done') {
+              keys = Object.keys(substFrame).sort();
+              if (keys.length !== 2 || keys[0] !== 'head_result' || keys[1] !== 'type') {
+                throw new Error('SECURITY: continuationState subst context frame key set mismatch');
+              }
+              actualCompletion = muContainers.record([
+                ['head', substFrame.head_result],
+                ['tail', actualCompletion],
+              ]);
+            } else if (frameType === 'typed_head_done') {
+              keys = Object.keys(substFrame).sort();
+              if (keys.length !== 3 || keys[0] !== '_type' || keys[1] !== 'tail' || keys[2] !== 'type') {
+                throw new Error('SECURITY: continuationState subst context frame key set mismatch');
+              }
+              let tailCompletion = null;
+              try {
+                tailCompletion = stage0Substitute(substFrame.tail, expectedBindings);
+              } catch (error) {
+                const prefix = 'Unbound variable: ';
+                if (!error || typeof error.message !== 'string' || !error.message.startsWith(prefix)) {
+                  throw error;
+                }
+                tailCompletion = muContainers.record([
+                  ['_error', 'unbound_variable'],
+                  ['_name', error.message.slice(prefix.length)],
+                ]);
+              }
+              actualCompletion = muContainers.record([
+                ['_type', substFrame._type],
+                ['head', actualCompletion],
+                ['tail', tailCompletion],
+              ]);
+            } else if (frameType === 'typed_tail_done') {
+              keys = Object.keys(substFrame).sort();
+              if (keys.length !== 3 || keys[0] !== '_type' || keys[1] !== 'head_result' || keys[2] !== 'type') {
+                throw new Error('SECURITY: continuationState subst context frame key set mismatch');
+              }
+              actualCompletion = muContainers.record([
+                ['_type', substFrame._type],
+                ['head', substFrame.head_result],
+                ['tail', actualCompletion],
+              ]);
+            } else {
+              throw new Error('SECURITY: continuationState subst context frame type mismatch');
+            }
+            substContextCursor = substContextCursor.tail;
+          }
+          if (muHash(actualCompletion) === muHash(expectedResult)) {
+            substStateBound = true;
+            break;
+          }
+        }
+        if (!substStateBound) {
+          throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+        }
+      }
+      for (const [patternValue, restCursor, requirePrefixCleared] of patternRestPairs) {
+        let patternBound = false;
+        const patternHash = muHash(patternValue);
+        const restHash = muHash(restCursor);
+        for (const context of projectionContexts) {
+          const patternRestMatches =
+            (context.projection.pattern === patternValue && context.projectionRest === restCursor) ||
+            (context.patternHash === patternHash && context.restHash === restHash);
+          if (!patternRestMatches) {
+            continue;
+          }
+          if (requirePrefixCleared && !context.prefixCleared) {
+            continue;
+          }
+          patternBound = true;
+          break;
+        }
+        if (!patternBound) {
+          throw new Error('SECURITY: continuationState kernel_state is not bound to supplied projections/input');
+        }
+      }
+    } else {
+      const projectionHashes = new Set();
+      const bodyHashes = new Set();
+      const projectionContexts = [];
+      const useVmMatchValidation = Boolean(vmConfig && vmConfig.matchBundle);
+      let prefixHasMatch = false;
+      let projectionAuthorityCursor = kernelInput._projs;
+      while (projectionAuthorityCursor !== null) {
+        if (typeof projectionAuthorityCursor !== 'object' || Array.isArray(projectionAuthorityCursor) ||
+            !Object.hasOwn(projectionAuthorityCursor, 'head') ||
+            !Object.hasOwn(projectionAuthorityCursor, 'tail') ||
+            Object.keys(projectionAuthorityCursor).length !== 2) {
+          throw new Error('SECURITY: kernel projection cursor must be a Mu head/tail linked list');
+        }
+        const projectionAuthority = projectionAuthorityCursor.head;
+        if (projectionAuthority === null || typeof projectionAuthority !== 'object' ||
+            Array.isArray(projectionAuthority) ||
+            !Object.hasOwn(projectionAuthority, 'pattern') ||
+            !Object.hasOwn(projectionAuthority, 'body') ||
+            Object.keys(projectionAuthority).length !== 2) {
+          throw new Error('SECURITY: kernel projection cursor head must be a normalized projection');
+        }
+        projectionHashes.add(muHash(projectionAuthority));
+        bodyHashes.add(muHash(projectionAuthority.body));
+        let matchResult = null;
+        let legacyMatchBindings = NO_MATCH;
+        if (useVmMatchValidation) {
+          const matchOutcome = stage0VmRun(vmConfig.matchBundle, muContainers.record([
+            ['match', muContainers.record([
+              ['pattern', projectionAuthority.pattern],
+              ['value', kernelInput._step],
+            ])],
+            ['_match_ctx', muContainers.record([
+              ['_input', kernelInput._step],
+              ['_body', projectionAuthority.body],
+              ['_remaining', projectionAuthorityCursor.tail],
+            ])],
+          ]), 100);
+          matchResult = matchOutcome.root;
+        } else {
+          legacyMatchBindings = stage0Match(projectionAuthority.pattern, kernelInput._step, null);
+        }
+        projectionContexts.push({
+          projection: projectionAuthority,
+          projectionRest: projectionAuthorityCursor.tail,
+          bodyHash: muHash(projectionAuthority.body),
+          restHash: muHash(projectionAuthorityCursor.tail),
+          cursorHash: muHash(projectionAuthorityCursor),
+          prefixCleared: !prefixHasMatch,
+          matchResult,
+          legacyMatchBindings,
+        });
+        const projectionMatches = useVmMatchValidation
+          ? matchResult !== null && typeof matchResult === 'object' && !Array.isArray(matchResult) &&
+              matchResult._mode === 'match_done' && matchResult._status === 'success'
+          : legacyMatchBindings !== NO_MATCH;
+        if (projectionMatches) {
+          prefixHasMatch = true;
+        }
+        projectionAuthorityCursor = projectionAuthorityCursor.tail;
+      }
+      const exhaustedPrefixCleared = !prefixHasMatch;
+      const enforcePrefixCleared = true;
     if (!kernelStateIsObject) {
       // Scalar Mu states can only come from the defensive hash-stall path:
       // they carry no projection authority and must resume as cursorless,
@@ -854,6 +1747,7 @@ function _stepKernelCore(kernelProjections, kernelInput, domainInput, validator,
           stateNodes.push(value);
         }
       }
+    }
     }
     if (kernelStateIsObject) {
       const kernelStateKeys = Object.keys(kernelState).sort();
